@@ -13,10 +13,10 @@ interface SetupScreenProps {
   onBack: () => void;
 }
 
-const INSTALL_SCRIPT = `curl -sL https://raw.githubusercontent.com/your-repo/claude-companion/main/daemon/scripts/install.sh | bash`;
+const INSTALL_SCRIPT = `curl -sL https://raw.githubusercontent.com/Hexidecibel/claude-companion/main/daemon/scripts/install.sh | bash`;
 
 const MANUAL_STEPS = `# 1. Clone the repository
-git clone https://github.com/your-repo/claude-companion.git
+git clone https://github.com/Hexidecibel/claude-companion.git
 cd claude-companion/daemon
 
 # 2. Install dependencies
@@ -25,8 +25,9 @@ npm install
 # 3. Build the daemon
 npm run build
 
-# 4. Create config file
-cat > config.json << 'EOF'
+# 4. Create config directory and file
+mkdir -p ~/.claude-companion
+cat > ~/.claude-companion/config.json << 'EOF'
 {
   "port": 9877,
   "token": "YOUR_SECRET_TOKEN",
@@ -39,10 +40,10 @@ cat > config.json << 'EOF'
 EOF
 
 # 5. Start the daemon
-node dist/index.js
+CONFIG_PATH=~/.claude-companion/config.json node dist/index.js
 
 # Or run with nohup for background:
-nohup node dist/index.js > daemon.log 2>&1 &`;
+CONFIG_PATH=~/.claude-companion/config.json nohup node dist/index.js > daemon.log 2>&1 &`;
 
 export function SetupScreen({ onBack }: SetupScreenProps) {
   const copyToClipboard = (text: string) => {
