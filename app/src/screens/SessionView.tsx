@@ -47,6 +47,7 @@ export function SessionView({ server, onBack }: SessionViewProps) {
   const [isAtBottom, setIsAtBottom] = useState(true);
   const [showSettings, setShowSettings] = useState(false);
   const [sessionSettings, setSessionSettings] = useState<SessionSettings>({ instantNotify: false });
+  const [activityExpanded, setActivityExpanded] = useState(false);
 
   // Load session settings
   useEffect(() => {
@@ -248,17 +249,26 @@ export function SessionView({ server, onBack }: SessionViewProps) {
         onReconnect={reconnect}
       />
 
-      {/* Activity status bar with cancel button */}
+      {/* Activity status bar with cancel button - tappable to expand */}
       {isConnected && status?.currentActivity && (
-        <View style={styles.activityBar}>
-          <ActivityIndicator size="small" color="#60a5fa" style={styles.activitySpinner} />
-          <Text style={styles.activityText} numberOfLines={1}>
-            {status.currentActivity}
-          </Text>
+        <TouchableOpacity
+          style={[styles.activityBar, activityExpanded && styles.activityBarExpanded]}
+          onPress={() => setActivityExpanded(!activityExpanded)}
+          activeOpacity={0.8}
+        >
+          <View style={styles.activityContent}>
+            <ActivityIndicator size="small" color="#60a5fa" style={styles.activitySpinner} />
+            <Text
+              style={styles.activityText}
+              numberOfLines={activityExpanded ? undefined : 1}
+            >
+              {status.currentActivity}
+            </Text>
+          </View>
           <TouchableOpacity style={styles.activityCancelButton} onPress={handleCancel}>
             <Text style={styles.activityCancelText}>Cancel</Text>
           </TouchableOpacity>
-        </View>
+        </TouchableOpacity>
       )}
 
       {error && (
@@ -447,13 +457,23 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#2563eb',
   },
+  activityBarExpanded: {
+    paddingVertical: 12,
+  },
+  activityContent: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+  },
   activitySpinner: {
     marginRight: 8,
+    marginTop: 2,
   },
   activityText: {
     flex: 1,
     color: '#93c5fd',
     fontSize: 13,
+    lineHeight: 18,
   },
   activityCancelButton: {
     marginLeft: 8,
