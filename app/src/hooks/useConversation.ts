@@ -7,6 +7,10 @@ const highlightsEqual = (a: ConversationHighlight[], b: ConversationHighlight[])
   if (a.length !== b.length) return false;
   for (let i = 0; i < a.length; i++) {
     if (a[i].id !== b[i].id || a[i].content !== b[i].content) return false;
+    // Also check if options changed (important for AskUserQuestion)
+    const aOpts = a[i].options?.length || 0;
+    const bOpts = b[i].options?.length || 0;
+    if (aOpts !== bOpts) return false;
   }
   return true;
 };

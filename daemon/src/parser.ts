@@ -78,6 +78,7 @@ function parseEntry(entry: JsonlEntry): ConversationMessage | null {
         // Extract options from AskUserQuestion tool
         if (block.name === 'AskUserQuestion') {
           const input = block.input as AskUserQuestionInput;
+          console.log(`Parser: Found AskUserQuestion tool, questions count: ${input.questions?.length || 0}`);
           if (input.questions && input.questions.length > 0) {
             const question = input.questions[0];
             content = question.question;
@@ -86,6 +87,7 @@ function parseEntry(entry: JsonlEntry): ConversationMessage | null {
               description: opt.description,
             }));
             isWaitingForChoice = true;
+            console.log(`Parser: Extracted ${options.length} options for question: "${content.substring(0, 50)}..."`);
           }
         }
       } else if (block.type === 'tool_result') {
@@ -109,13 +111,15 @@ function parseEntry(entry: JsonlEntry): ConversationMessage | null {
 }
 
 export function extractHighlights(messages: ConversationMessage[]): ConversationHighlight[] {
-  return messages
+  const highlights = messages
     .filter(msg => {
-      // Only include messages with actual content
+      // Always include messages with options (e.g., AskUserQuestion)
+      if (msg.options && msg.options.length > 0) return true;
+      // Otherwise require actual content
       if (!msg.content || !msg.content.trim()) return false;
       // Include user messages with content
       if (msg.type === 'user') return true;
-      // Include assistant messages with content or options
+      // Include assistant messages with content
       if (msg.type === 'assistant') return true;
       return false;
     })
@@ -127,6 +131,14 @@ export function extractHighlights(messages: ConversationMessage[]): Conversation
       options: msg.options,
       isWaitingForChoice: msg.isWaitingForChoice,
     }));
+
+  // Log if any highlights have options
+  const withOptions = highlights.filter(h => h.options && h.options.length > 0);
+  if (withOptions.length > 0) {
+    console.log(`Parser: ${withOptions.length} highlight(s) with options found`);
+  }
+
+  return highlights;
 }
 
 export function detectWaitingForInput(messages: ConversationMessage[]): boolean {
