@@ -869,10 +869,27 @@ export class WebSocketHandler {
         // Absolute path
         resolvedPath = filePath;
       } else {
-        // Relative path - resolve against active session's project path
-        const activeConv = this.watcher.getActiveConversation();
-        const projectPath = activeConv?.projectPath || homeDir;
-        resolvedPath = path.resolve(projectPath, filePath);
+        // Relative path - resolve against active tmux session's working directory
+        // (more reliable than decoded project path which can mangle hyphenated names)
+        const sessions = await this.tmux.listSessions();
+        const activeSessionId = this.watcher.getActiveSessionId();
+
+        // Try to find matching tmux session by encoded path
+        let workingDir = homeDir;
+        if (activeSessionId) {
+          // The session ID is the encoded path like -Users-foo-project
+          // Match it against tmux session working directories
+          const matchingSession = sessions.find(s => {
+            if (!s.workingDir) return false;
+            const encoded = s.workingDir.replace(/\//g, '-');
+            return encoded === activeSessionId || s.name === activeSessionId;
+          });
+          if (matchingSession?.workingDir) {
+            workingDir = matchingSession.workingDir;
+          }
+        }
+
+        resolvedPath = path.resolve(workingDir, filePath);
       }
 
       // Normalize the path
