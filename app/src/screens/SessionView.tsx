@@ -20,7 +20,6 @@ import { useConversation } from '../hooks/useConversation';
 import { StatusIndicator } from '../components/StatusIndicator';
 import { ConversationItem } from '../components/ConversationItem';
 import { InputBar } from '../components/InputBar';
-import { QuickReplies } from '../components/QuickReplies';
 import { SessionPicker } from '../components/SessionPicker';
 import { FileViewer } from '../components/FileViewer';
 import { getSessionSettings, saveSessionSettings, SessionSettings } from '../services/storage';
@@ -50,6 +49,9 @@ export function SessionView({ server, onBack }: SessionViewProps) {
   const listRef = useRef<FlatList>(null);
   const data = highlights;
   const [isAtBottom, setIsAtBottom] = useState(true);
+  const [hasNewMessages, setHasNewMessages] = useState(false);
+  const prevMessageCount = useRef(0);
+  const initialScrollDone = useRef(false);
   const [showSettings, setShowSettings] = useState(false);
   const [sessionSettings, setSessionSettings] = useState<SessionSettings>({ instantNotify: false });
   const [showActivityModal, setShowActivityModal] = useState(false);
@@ -85,10 +87,31 @@ export function SessionView({ server, onBack }: SessionViewProps) {
           wsService.sendRequest('set_instant_notify', { enabled: true });
         }
       });
+      // Scroll to bottom on initial connection
+      initialScrollDone.current = false;
     }
   }, [isConnected, refresh, server.id]);
 
+  // Scroll to bottom on initial load and track new messages
+  useEffect(() => {
+    if (data.length > 0) {
+      // Scroll to bottom on first load
+      if (!initialScrollDone.current) {
+        initialScrollDone.current = true;
+        setTimeout(() => {
+          listRef.current?.scrollToEnd({ animated: false });
+        }, 200);
+      }
+      // Track new messages when not at bottom
+      if (data.length > prevMessageCount.current && !isAtBottom) {
+        setHasNewMessages(true);
+      }
+      prevMessageCount.current = data.length;
+    }
+  }, [data.length, isAtBottom]);
+
   const scrollToBottom = () => {
+    setHasNewMessages(false);
     setTimeout(() => {
       listRef.current?.scrollToEnd({ animated: true });
     }, 100);
@@ -136,6 +159,9 @@ export function SessionView({ server, onBack }: SessionViewProps) {
     const paddingToBottom = 50;
     const atBottom = layoutMeasurement.height + contentOffset.y >= contentSize.height - paddingToBottom;
     setIsAtBottom(atBottom);
+    if (atBottom) {
+      setHasNewMessages(false);
+    }
   };
 
   const handleCancel = () => {
@@ -448,16 +474,13 @@ export function SessionView({ server, onBack }: SessionViewProps) {
         <TouchableOpacity
           style={[
             styles.scrollButton,
-            status?.isWaitingForInput && styles.scrollButtonAboveQuickReplies,
+            hasNewMessages && styles.scrollButtonNew,
           ]}
           onPress={scrollToBottom}
         >
           <Text style={styles.scrollButtonText}>↓</Text>
+          {hasNewMessages && <View style={styles.newMessageBadge} />}
         </TouchableOpacity>
-      )}
-
-      {status?.isWaitingForInput && isConnected && (
-        <QuickReplies onSelect={handleSendInput} disabled={!isConnected} />
       )}
 
       <InputBar
@@ -804,13 +827,24 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 5,
   },
-  scrollButtonAboveQuickReplies: {
-    bottom: 130,
+  scrollButtonNew: {
+    backgroundColor: '#10b981',
   },
   scrollButtonText: {
     color: '#ffffff',
     fontSize: 20,
     fontWeight: 'bold',
+  },
+  newMessageBadge: {
+    position: 'absolute',
+    top: -2,
+    right: -2,
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: '#ef4444',
+    borderWidth: 2,
+    borderColor: '#111827',
   },
   cancelButton: {
     position: 'absolute',
