@@ -12,6 +12,7 @@ import {
   ActivityIndicator,
   Modal,
   Switch,
+  ScrollView,
 } from 'react-native';
 import { Server, ConversationHighlight } from '../types';
 import { useConnection } from '../hooks/useConnection';
@@ -47,7 +48,7 @@ export function SessionView({ server, onBack }: SessionViewProps) {
   const [isAtBottom, setIsAtBottom] = useState(true);
   const [showSettings, setShowSettings] = useState(false);
   const [sessionSettings, setSessionSettings] = useState<SessionSettings>({ instantNotify: false });
-  const [activityExpanded, setActivityExpanded] = useState(false);
+  const [showActivityModal, setShowActivityModal] = useState(false);
 
   // Load session settings
   useEffect(() => {
@@ -249,19 +250,16 @@ export function SessionView({ server, onBack }: SessionViewProps) {
         onReconnect={reconnect}
       />
 
-      {/* Activity status bar with cancel button - tappable to expand */}
+      {/* Activity status bar with cancel button - tappable for full output modal */}
       {isConnected && status?.currentActivity && (
         <TouchableOpacity
-          style={[styles.activityBar, activityExpanded && styles.activityBarExpanded]}
-          onPress={() => setActivityExpanded(!activityExpanded)}
+          style={styles.activityBar}
+          onPress={() => setShowActivityModal(true)}
           activeOpacity={0.8}
         >
           <View style={styles.activityContent}>
             <ActivityIndicator size="small" color="#60a5fa" style={styles.activitySpinner} />
-            <Text
-              style={styles.activityText}
-              numberOfLines={activityExpanded ? undefined : 1}
-            >
+            <Text style={styles.activityText} numberOfLines={1}>
               {status.currentActivity}
             </Text>
           </View>
@@ -270,6 +268,42 @@ export function SessionView({ server, onBack }: SessionViewProps) {
           </TouchableOpacity>
         </TouchableOpacity>
       )}
+
+      {/* Activity Output Modal */}
+      <Modal
+        visible={showActivityModal}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowActivityModal(false)}
+      >
+        <View style={styles.activityModalOverlay}>
+          <View style={styles.activityModalContent}>
+            <View style={styles.activityModalHeader}>
+              <Text style={styles.activityModalTitle}>Current Activity</Text>
+              <TouchableOpacity
+                style={styles.activityModalClose}
+                onPress={() => setShowActivityModal(false)}
+              >
+                <Text style={styles.activityModalCloseText}>×</Text>
+              </TouchableOpacity>
+            </View>
+            <ScrollView style={styles.activityModalScroll}>
+              <Text style={styles.activityModalText}>
+                {status?.currentActivity || 'No activity'}
+              </Text>
+            </ScrollView>
+            <TouchableOpacity
+              style={styles.activityModalCancelButton}
+              onPress={() => {
+                handleCancel();
+                setShowActivityModal(false);
+              }}
+            >
+              <Text style={styles.activityModalCancelText}>Cancel Process</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
 
       {error && (
         <View style={styles.errorBanner}>
@@ -457,23 +491,77 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#2563eb',
   },
-  activityBarExpanded: {
-    paddingVertical: 12,
-  },
   activityContent: {
     flex: 1,
     flexDirection: 'row',
-    alignItems: 'flex-start',
+    alignItems: 'center',
   },
   activitySpinner: {
     marginRight: 8,
-    marginTop: 2,
   },
   activityText: {
     flex: 1,
     color: '#93c5fd',
     fontSize: 13,
-    lineHeight: 18,
+  },
+  activityModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+    justifyContent: 'flex-end',
+  },
+  activityModalContent: {
+    backgroundColor: '#1f2937',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    maxHeight: '70%',
+  },
+  activityModalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#374151',
+  },
+  activityModalTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#f3f4f6',
+  },
+  activityModalClose: {
+    width: 32,
+    height: 32,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  activityModalCloseText: {
+    fontSize: 28,
+    color: '#9ca3af',
+    lineHeight: 28,
+  },
+  activityModalScroll: {
+    padding: 20,
+    maxHeight: 400,
+  },
+  activityModalText: {
+    fontSize: 14,
+    color: '#e5e7eb',
+    fontFamily: 'monospace',
+    lineHeight: 22,
+  },
+  activityModalCancelButton: {
+    margin: 20,
+    marginTop: 0,
+    backgroundColor: '#ef4444',
+    paddingVertical: 14,
+    borderRadius: 10,
+    alignItems: 'center',
+  },
+  activityModalCancelText: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: '600',
   },
   activityCancelButton: {
     marginLeft: 8,

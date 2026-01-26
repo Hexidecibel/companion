@@ -11,6 +11,8 @@ export function useConversation() {
   const [error, setError] = useState<string | null>(null);
   const [isConnected, setIsConnected] = useState(wsService.isConnected());
   const hasSubscribed = useRef(false);
+  const lastSentTime = useRef<number>(0);
+  const pendingMessages = useRef<Set<string>>(new Set());
 
   // Track connection state
   useEffect(() => {
@@ -109,7 +111,20 @@ export function useConversation() {
             if (response.success && response.payload) {
               if (viewMode === 'highlights') {
                 const payload = response.payload as { highlights: ConversationHighlight[] };
-                setHighlights(payload.highlights || []);
+                const serverHighlights = payload.highlights || [];
+
+                // Merge with any pending optimistic messages
+                setHighlights(prev => {
+                  const pending = prev.filter(m => m.id.startsWith('pending-'));
+                  // If server has our message content, remove the pending version
+                  const stillPending = pending.filter(p => {
+                    return !serverHighlights.some(s =>
+                      s.type === 'user' && s.content === p.content
+                    );
+                  });
+                  // Append pending messages to server results
+                  return [...serverHighlights, ...stillPending];
+                });
               } else {
                 const payload = response.payload as { messages: ConversationMessage[] };
                 setMessages(payload.messages || []);
