@@ -116,8 +116,15 @@ export function useConversation() {
                 // Merge with any pending optimistic messages
                 setHighlights(prev => {
                   const pending = prev.filter(m => m.id.startsWith('pending-'));
-                  // If server has our message content, remove the pending version
+                  // Keep pending messages for at least 10 seconds, or until server confirms
+                  const now = Date.now();
                   const stillPending = pending.filter(p => {
+                    // Extract timestamp from id (pending-TIMESTAMP)
+                    const pendingTime = parseInt(p.id.replace('pending-', ''), 10);
+                    const age = now - pendingTime;
+                    // Keep if less than 10 seconds old OR not yet in server results
+                    if (age < 10000) return true;
+                    // After 10 seconds, only keep if not in server results
                     return !serverHighlights.some(s =>
                       s.type === 'user' && s.content === p.content
                     );
