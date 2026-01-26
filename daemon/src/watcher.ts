@@ -86,23 +86,31 @@ export class ClaudeWatcher extends EventEmitter {
     };
     this.conversations.set(sessionId, tracked);
 
-    // Auto-switch to most recently active conversation
-    let mostRecent: { id: string; time: number } | null = null;
-    for (const [id, conv] of this.conversations) {
-      if (!mostRecent || conv.lastModified > mostRecent.time) {
-        mostRecent = { id, time: conv.lastModified };
+    // Only auto-select if no active session is set yet
+    // Don't auto-switch when user has manually selected a session
+    if (!this.activeSessionId || !this.conversations.has(this.activeSessionId)) {
+      // Find most recently active conversation
+      let mostRecent: { id: string; time: number } | null = null;
+      for (const [id, conv] of this.conversations) {
+        if (!mostRecent || conv.lastModified > mostRecent.time) {
+          mostRecent = { id, time: conv.lastModified };
+        }
+      }
+
+      if (mostRecent) {
+        this.activeSessionId = mostRecent.id;
       }
     }
 
-    if (mostRecent) {
-      this.activeSessionId = mostRecent.id;
-      const activeConv = this.conversations.get(mostRecent.id);
-      if (activeConv) {
+    // Update waiting status for the active session
+    if (this.activeSessionId) {
+      const activeConv = this.conversations.get(this.activeSessionId);
+      if (activeConv && sessionId === this.activeSessionId) {
         this.isWaitingForInput = activeConv.isWaitingForInput;
       }
     }
 
-    // Only emit for the active session or if this is now active
+    // Emit for the active session
     if (sessionId === this.activeSessionId) {
       // Emit events
       const hasNewMessages = messages.length !== this.lastMessageCount;
@@ -126,6 +134,21 @@ export class ClaudeWatcher extends EventEmitter {
           isWaitingForInput: this.isWaitingForInput,
           currentActivity,
           lastMessage,
+        });
+      }
+    } else {
+      // Emit activity notification for non-active sessions
+      const prevTracked = this.conversations.get(sessionId);
+      const hadMessages = prevTracked?.messageCount || 0;
+      if (messages.length > hadMessages) {
+        const lastMessage = messages[messages.length - 1];
+        this.emit('other-session-activity', {
+          sessionId,
+          projectPath,
+          sessionName: projectPath.split('/').pop() || sessionId,
+          isWaitingForInput: conversationWaiting,
+          lastMessage,
+          newMessageCount: messages.length - hadMessages,
         });
       }
     }

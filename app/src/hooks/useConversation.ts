@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { ConversationMessage, ConversationHighlight, SessionStatus, ViewMode } from '../types';
+import { ConversationMessage, ConversationHighlight, SessionStatus, ViewMode, OtherSessionActivity } from '../types';
 import { wsService } from '../services/websocket';
 
 // Helper to check if highlights have actually changed
@@ -19,6 +19,7 @@ export function useConversation() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isConnected, setIsConnected] = useState(wsService.isConnected());
+  const [otherSessionActivity, setOtherSessionActivity] = useState<OtherSessionActivity | null>(null);
   const hasSubscribed = useRef(false);
   const lastSentTime = useRef<number>(0);
   const pendingMessages = useRef<Set<string>>(new Set());
@@ -63,6 +64,12 @@ export function useConversation() {
         case 'status_change': {
           const statusPayload = message.payload as SessionStatus;
           setStatus(statusPayload);
+          break;
+        }
+
+        case 'other_session_activity': {
+          const activityPayload = message.payload as OtherSessionActivity;
+          setOtherSessionActivity(activityPayload);
           break;
         }
       }
@@ -295,6 +302,10 @@ export function useConversation() {
     setViewMode((prev) => (prev === 'highlights' ? 'full' : 'highlights'));
   }, []);
 
+  const dismissOtherSessionActivity = useCallback(() => {
+    setOtherSessionActivity(null);
+  }, []);
+
   return {
     messages,
     highlights,
@@ -310,5 +321,7 @@ export function useConversation() {
     toggleViewMode,
     setViewMode,
     currentData: viewMode === 'highlights' ? highlights : messages,
+    otherSessionActivity,
+    dismissOtherSessionActivity,
   };
 }

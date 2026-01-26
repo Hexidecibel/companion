@@ -103,3 +103,12 @@ export interface DirectoryEntry {
   path: string;
   isDirectory: boolean;
 }
+
+export interface OtherSessionActivity {
+  sessionId: string;
+  sessionName: string;
+  projectPath: string;
+  isWaitingForInput: boolean;
+  newMessageCount: number;
+  lastMessage?: ConversationMessage;
+}

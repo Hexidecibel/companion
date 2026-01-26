@@ -42,6 +42,8 @@ export function SessionView({ server, onBack }: SessionViewProps) {
     sendImage,
     uploadImage,
     sendWithImages,
+    otherSessionActivity,
+    dismissOtherSessionActivity,
   } = useConversation();
 
   const listRef = useRef<FlatList>(null);
@@ -106,6 +108,22 @@ export function SessionView({ server, onBack }: SessionViewProps) {
         break;
     }
   }, [refresh]);
+
+  const handleSwitchToOtherSession = useCallback(async () => {
+    if (!otherSessionActivity) return;
+
+    try {
+      const response = await wsService.sendRequest('switch_tmux_session', {
+        sessionName: otherSessionActivity.sessionId,
+      });
+      if (response.success) {
+        dismissOtherSessionActivity();
+        refresh(true);
+      }
+    } catch (err) {
+      console.error('Failed to switch session:', err);
+    }
+  }, [otherSessionActivity, dismissOtherSessionActivity, refresh]);
 
   const handleSelectOption = async (option: string) => {
     await handleSendInput(option);
@@ -273,6 +291,40 @@ export function SessionView({ server, onBack }: SessionViewProps) {
         isWaitingForInput={status?.isWaitingForInput}
         onReconnect={reconnect}
       />
+
+      {/* Other session activity notification */}
+      {otherSessionActivity && (
+        <TouchableOpacity
+          style={styles.otherSessionBanner}
+          onPress={handleSwitchToOtherSession}
+          activeOpacity={0.8}
+        >
+          <View style={styles.otherSessionContent}>
+            <Text style={styles.otherSessionBadge}>
+              {otherSessionActivity.isWaitingForInput ? '⏳' : '💬'}
+            </Text>
+            <View style={styles.otherSessionInfo}>
+              <Text style={styles.otherSessionName}>
+                {otherSessionActivity.sessionName}
+              </Text>
+              <Text style={styles.otherSessionMessage} numberOfLines={1}>
+                {otherSessionActivity.isWaitingForInput
+                  ? 'Waiting for input'
+                  : `${otherSessionActivity.newMessageCount} new message${otherSessionActivity.newMessageCount > 1 ? 's' : ''}`}
+              </Text>
+            </View>
+          </View>
+          <TouchableOpacity
+            style={styles.otherSessionDismiss}
+            onPress={(e) => {
+              e.stopPropagation();
+              dismissOtherSessionActivity();
+            }}
+          >
+            <Text style={styles.otherSessionDismissText}>×</Text>
+          </TouchableOpacity>
+        </TouchableOpacity>
+      )}
 
       {/* Activity status bar with cancel button - tappable for full output modal */}
       {isConnected && status?.currentActivity && (
@@ -770,5 +822,48 @@ const styles = StyleSheet.create({
     color: '#ffffff',
     fontSize: 14,
     fontWeight: '600',
+  },
+  otherSessionBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#065f46',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#047857',
+  },
+  otherSessionContent: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  otherSessionBadge: {
+    fontSize: 18,
+    marginRight: 10,
+  },
+  otherSessionInfo: {
+    flex: 1,
+  },
+  otherSessionName: {
+    color: '#ecfdf5',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  otherSessionMessage: {
+    color: '#a7f3d0',
+    fontSize: 12,
+    marginTop: 2,
+  },
+  otherSessionDismiss: {
+    width: 28,
+    height: 28,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginLeft: 8,
+  },
+  otherSessionDismissText: {
+    fontSize: 22,
+    color: '#a7f3d0',
+    lineHeight: 22,
   },
 });

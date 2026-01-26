@@ -100,6 +100,7 @@ describe('SessionPicker', () => {
     const onSessionChange = jest.fn();
     mockWsService.sendRequest
       .mockResolvedValueOnce({
+        type: 'tmux_sessions',
         success: true,
         payload: {
           sessions: mockSessions,
@@ -108,6 +109,7 @@ describe('SessionPicker', () => {
         },
       })
       .mockResolvedValueOnce({
+        type: 'switch_session',
         success: true,
         payload: { sessionName: 'claude-sitehound' },
       });
@@ -201,6 +203,7 @@ describe('SessionPicker', () => {
 
   it('displays empty state when no sessions exist', async () => {
     mockWsService.sendRequest.mockResolvedValue({
+      type: 'tmux_sessions',
       success: true,
       payload: {
         sessions: [],

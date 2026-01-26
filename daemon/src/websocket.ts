@@ -64,6 +64,11 @@ export class WebSocketHandler {
       }
     });
 
+    // Notify about activity in other (non-active) sessions
+    this.watcher.on('other-session-activity', (data) => {
+      this.broadcast('other_session_activity', data);
+    });
+
     console.log('WebSocket: Server initialized');
   }
 
