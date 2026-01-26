@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useCallback } from 'react';
 import {
   View,
   TextInput,
@@ -10,6 +10,7 @@ import {
   Alert,
   Image,
   ScrollView,
+  FlatList,
 } from 'react-native';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system';
@@ -20,11 +21,31 @@ interface AttachedImage {
   mimeType: string;
 }
 
+interface SlashCommand {
+  command: string;
+  label: string;
+  description: string;
+  action: 'send' | 'callback';
+}
+
+const SLASH_COMMANDS: SlashCommand[] = [
+  { command: '/yes', label: 'yes', description: 'Send "yes"', action: 'send' },
+  { command: '/no', label: 'no', description: 'Send "no"', action: 'send' },
+  { command: '/continue', label: 'continue', description: 'Send "continue"', action: 'send' },
+  { command: '/approve', label: 'approve', description: 'Send "approve"', action: 'send' },
+  { command: '/reject', label: 'reject', description: 'Send "reject"', action: 'send' },
+  { command: '/skip', label: 'skip', description: 'Send "skip"', action: 'send' },
+  { command: '/cancel', label: 'cancel', description: 'Send interrupt (Ctrl+C)', action: 'send' },
+  { command: '/switch', label: 'switch', description: 'Switch session', action: 'callback' },
+  { command: '/refresh', label: 'refresh', description: 'Refresh conversation', action: 'callback' },
+];
+
 interface InputBarProps {
   onSend: (text: string) => Promise<boolean>;
   onSendImage?: (base64: string, mimeType: string) => Promise<boolean>;
   onUploadImage?: (base64: string, mimeType: string) => Promise<string | null>;
   onSendWithImages?: (imagePaths: string[], message: string) => Promise<boolean>;
+  onSlashCommand?: (command: string) => void;
   disabled?: boolean;
   placeholder?: string;
 }
@@ -34,18 +55,58 @@ export function InputBar({
   onSendImage,
   onUploadImage,
   onSendWithImages,
+  onSlashCommand,
   disabled,
   placeholder,
 }: InputBarProps) {
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
   const [attachedImages, setAttachedImages] = useState<AttachedImage[]>([]);
+  const [showSlashMenu, setShowSlashMenu] = useState(false);
+  const [filteredCommands, setFilteredCommands] = useState<SlashCommand[]>(SLASH_COMMANDS);
+  const sendingRef = useRef(false); // Ref to prevent double-sends
+
+  const handleTextChange = useCallback((newText: string) => {
+    setText(newText);
+
+    // Show slash menu when typing "/" at start
+    if (newText.startsWith('/')) {
+      const query = newText.toLowerCase();
+      const filtered = SLASH_COMMANDS.filter(cmd =>
+        cmd.command.toLowerCase().startsWith(query) ||
+        cmd.label.toLowerCase().includes(query.slice(1))
+      );
+      setFilteredCommands(filtered);
+      setShowSlashMenu(filtered.length > 0);
+    } else {
+      setShowSlashMenu(false);
+    }
+  }, []);
+
+  const handleSelectCommand = useCallback(async (cmd: SlashCommand) => {
+    setShowSlashMenu(false);
+    setText('');
+
+    if (cmd.action === 'send') {
+      const message = cmd.command === '/cancel' ? '\x03' : cmd.label;
+      await onSend(message);
+    } else if (cmd.action === 'callback' && onSlashCommand) {
+      onSlashCommand(cmd.command);
+    }
+  }, [onSend, onSlashCommand]);
 
   const handleSend = async () => {
-    if (sending || disabled) return;
+    // Use ref for synchronous check to prevent double-sends
+    if (sendingRef.current || sending || disabled) return;
     if (!text.trim() && attachedImages.length === 0) return;
 
+    sendingRef.current = true;
     setSending(true);
+
+    const textToSend = text.trim();
+    // Clear text immediately to prevent double-send UI issues
+    setText('');
+
     try {
       if (attachedImages.length > 0 && onUploadImage && onSendWithImages) {
         const imagePaths: string[] = [];
@@ -56,32 +117,28 @@ export function InputBar({
           }
         }
 
-        const success = await onSendWithImages(imagePaths, text.trim());
-        if (success) {
-          setText('');
-          setAttachedImages([]);
-        }
+        await onSendWithImages(imagePaths, textToSend);
+        setAttachedImages([]);
       } else if (attachedImages.length > 0 && onSendImage) {
         for (const img of attachedImages) {
           await onSendImage(img.base64, img.mimeType);
         }
-        if (text.trim()) {
-          await onSend(text.trim());
-          setText('');
+        if (textToSend) {
+          await onSend(textToSend);
         }
         setAttachedImages([]);
-      } else if (text.trim()) {
-        const success = await onSend(text.trim());
-        if (success) {
-          setText('');
-        }
+      } else if (textToSend) {
+        await onSend(textToSend);
       }
 
       Keyboard.dismiss();
     } catch (e) {
       console.error('Send failed:', e);
+      // Restore text on error
+      setText(textToSend);
       Alert.alert('Error', 'Failed to send message');
     } finally {
+      sendingRef.current = false;
       setSending(false);
     }
   };
@@ -125,8 +182,31 @@ export function InputBar({
 
   const canSend = text.trim() || attachedImages.length > 0;
 
+  const renderCommandItem = ({ item }: { item: SlashCommand }) => (
+    <TouchableOpacity
+      style={styles.commandItem}
+      onPress={() => handleSelectCommand(item)}
+    >
+      <Text style={styles.commandName}>{item.command}</Text>
+      <Text style={styles.commandDesc}>{item.description}</Text>
+    </TouchableOpacity>
+  );
+
   return (
     <View style={styles.container}>
+      {/* Slash command menu */}
+      {showSlashMenu && (
+        <View style={styles.slashMenu}>
+          <FlatList
+            data={filteredCommands}
+            keyExtractor={(item) => item.command}
+            renderItem={renderCommandItem}
+            keyboardShouldPersistTaps="handled"
+            style={styles.commandList}
+          />
+        </View>
+      )}
+
       {attachedImages.length > 0 && (
         <ScrollView
           horizontal
@@ -160,7 +240,7 @@ export function InputBar({
         <TextInput
           style={styles.input}
           value={text}
-          onChangeText={setText}
+          onChangeText={handleTextChange}
           placeholder={placeholder || 'Type a message...'}
           placeholderTextColor="#6b7280"
           multiline
@@ -191,6 +271,31 @@ const styles = StyleSheet.create({
     backgroundColor: '#1f2937',
     borderTopWidth: 1,
     borderTopColor: '#374151',
+  },
+  slashMenu: {
+    backgroundColor: '#111827',
+    borderBottomWidth: 1,
+    borderBottomColor: '#374151',
+    maxHeight: 200,
+  },
+  commandList: {
+    flexGrow: 0,
+  },
+  commandItem: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#1f2937',
+  },
+  commandName: {
+    color: '#60a5fa',
+    fontSize: 15,
+    fontWeight: '600',
+    marginBottom: 2,
+  },
+  commandDesc: {
+    color: '#9ca3af',
+    fontSize: 13,
   },
   attachmentsRow: {
     paddingHorizontal: 8,

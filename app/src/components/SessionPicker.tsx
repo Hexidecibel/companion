@@ -15,10 +15,19 @@ import { TmuxSessionInfo, DirectoryEntry } from '../types';
 interface SessionPickerProps {
   currentSessionId?: string;
   onSessionChange?: (sessionId: string) => void;
+  isOpen?: boolean;
+  onClose?: () => void;
 }
 
-export function SessionPicker({ currentSessionId, onSessionChange }: SessionPickerProps) {
+export function SessionPicker({ currentSessionId, onSessionChange, isOpen, onClose }: SessionPickerProps) {
   const [visible, setVisible] = useState(false);
+
+  // Sync with external isOpen prop
+  React.useEffect(() => {
+    if (isOpen !== undefined) {
+      setVisible(isOpen);
+    }
+  }, [isOpen]);
   const [sessions, setSessions] = useState<TmuxSessionInfo[]>([]);
   const [activeSession, setActiveSession] = useState<string | undefined>(currentSessionId);
   const [loading, setLoading] = useState(false);
@@ -84,12 +93,17 @@ export function SessionPicker({ currentSessionId, onSessionChange }: SessionPick
       return;
     }
 
+    setLoading(true);
     try {
       const response = await wsService.sendRequest('switch_tmux_session', {
         sessionName: session.name,
       });
       if (response.success) {
         setActiveSession(session.name);
+        setVisible(false);
+        onClose?.();
+        // Small delay to let daemon finish switching before refresh
+        await new Promise(resolve => setTimeout(resolve, 300));
         onSessionChange?.(session.name);
       } else {
         Alert.alert('Error', response.error || 'Failed to switch session');
@@ -97,9 +111,9 @@ export function SessionPicker({ currentSessionId, onSessionChange }: SessionPick
     } catch (err) {
       console.error('Failed to switch session:', err);
       Alert.alert('Error', 'Failed to switch session');
+    } finally {
+      setLoading(false);
     }
-
-    setVisible(false);
   };
 
   const handleCreateSession = async (dirPath: string) => {
@@ -232,6 +246,7 @@ export function SessionPicker({ currentSessionId, onSessionChange }: SessionPick
             setShowBrowser(false);
           } else {
             setVisible(false);
+            onClose?.();
           }
         }}
       >
@@ -248,6 +263,7 @@ export function SessionPicker({ currentSessionId, onSessionChange }: SessionPick
                     setShowBrowser(false);
                   } else {
                     setVisible(false);
+                    onClose?.();
                   }
                 }}
               >

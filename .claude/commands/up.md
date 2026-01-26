@@ -1,17 +1,22 @@
 # Start Claude Companion Services
 
-Start the daemon and Expo dev server.
+Start the daemon and Expo dev server with cache cleared.
 
 ## Steps
 
-1. Build and start the daemon:
+1. Kill any existing processes:
 ```bash
-cd daemon && npm run build && npm run start &
+pkill -f "node.*dist/index" 2>/dev/null; pkill -f "expo start" 2>/dev/null; pkill -f "metro" 2>/dev/null; sleep 1
 ```
 
-2. Start Expo in the app directory:
+2. Build and start the daemon:
 ```bash
-cd app && npx expo start
+cd /Users/chriscushman/local/src/claude-companion/daemon && npm run build && CONFIG_PATH=/Users/chriscushman/.claude-companion/config.json nohup node dist/index.js > /tmp/daemon.log 2>&1 &
 ```
 
-Run both commands. The daemon runs in the background, Expo runs in foreground.
+3. Start Expo with cache cleared:
+```bash
+cd /Users/chriscushman/local/src/claude-companion/app && npx expo start --clear
+```
+
+Run all commands in sequence. The daemon runs in the background, Expo runs in foreground with cache cleared.

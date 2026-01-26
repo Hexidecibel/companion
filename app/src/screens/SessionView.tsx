@@ -50,6 +50,7 @@ export function SessionView({ server, onBack }: SessionViewProps) {
   const [showSettings, setShowSettings] = useState(false);
   const [sessionSettings, setSessionSettings] = useState<SessionSettings>({ instantNotify: false });
   const [showActivityModal, setShowActivityModal] = useState(false);
+  const [showSessionPicker, setShowSessionPicker] = useState(false);
 
   // Load session settings
   useEffect(() => {
@@ -89,10 +90,22 @@ export function SessionView({ server, onBack }: SessionViewProps) {
     }, 100);
   };
 
-  const handleSendInput = async (text: string) => {
-    await sendInput(text);
+  const handleSendInput = async (text: string): Promise<boolean> => {
+    const success = await sendInput(text);
     scrollToBottom();
+    return success;
   };
+
+  const handleSlashCommand = useCallback((command: string) => {
+    switch (command) {
+      case '/switch':
+        setShowSessionPicker(true);
+        break;
+      case '/refresh':
+        refresh(true);
+        break;
+    }
+  }, [refresh]);
 
   const handleSelectOption = async (option: string) => {
     await handleSendInput(option);
@@ -185,7 +198,13 @@ export function SessionView({ server, onBack }: SessionViewProps) {
             <Text style={styles.headerTitle} numberOfLines={1}>
               {server.name}
             </Text>
-            {isConnected && <SessionPicker onSessionChange={() => refresh()} />}
+            {isConnected && (
+              <SessionPicker
+                onSessionChange={() => refresh(true)}
+                isOpen={showSessionPicker}
+                onClose={() => setShowSessionPicker(false)}
+              />
+            )}
           </View>
           {status?.projectPath && (
             <Text style={styles.headerSubtitle} numberOfLines={1}>
@@ -195,7 +214,7 @@ export function SessionView({ server, onBack }: SessionViewProps) {
         </View>
         <TouchableOpacity
           style={styles.refreshButton}
-          onPress={refresh}
+          onPress={() => refresh()}
           disabled={loading}
         >
           <Text style={[styles.refreshIconText, loading && styles.refreshIconDisabled]}>↻</Text>
@@ -391,6 +410,7 @@ export function SessionView({ server, onBack }: SessionViewProps) {
         onSendImage={sendImage}
         onUploadImage={uploadImage}
         onSendWithImages={sendWithImages}
+        onSlashCommand={handleSlashCommand}
         disabled={!isConnected}
         placeholder={
           !isConnected

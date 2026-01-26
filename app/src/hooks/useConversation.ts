@@ -2,6 +2,15 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { ConversationMessage, ConversationHighlight, SessionStatus, ViewMode } from '../types';
 import { wsService } from '../services/websocket';
 
+// Helper to check if highlights have actually changed
+const highlightsEqual = (a: ConversationHighlight[], b: ConversationHighlight[]): boolean => {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i].id !== b[i].id || a[i].content !== b[i].content) return false;
+  }
+  return true;
+};
+
 export function useConversation() {
   const [messages, setMessages] = useState<ConversationMessage[]>([]);
   const [highlights, setHighlights] = useState<ConversationHighlight[]>([]);
@@ -13,6 +22,7 @@ export function useConversation() {
   const hasSubscribed = useRef(false);
   const lastSentTime = useRef<number>(0);
   const pendingMessages = useRef<Set<string>>(new Set());
+  const sessionSwitching = useRef(false); // Flag to pause polling during switch
 
   // Track connection state
   useEffect(() => {
@@ -62,9 +72,18 @@ export function useConversation() {
   }, []);
 
   // Fetch initial data when connected
-  const refresh = useCallback(async () => {
+  // clearFirst: if true, clears existing data before fetching (useful for session switch)
+  const refresh = useCallback(async (clearFirst: boolean = false) => {
     if (!wsService.isConnected()) {
       return;
+    }
+
+    // Clear old data first to prevent showing stale content during switch
+    if (clearFirst) {
+      sessionSwitching.current = true;
+      setHighlights([]);
+      setMessages([]);
+      setStatus(null);
     }
 
     setLoading(true);
@@ -98,6 +117,7 @@ export function useConversation() {
       setError(err instanceof Error ? err.message : 'Failed to load conversation');
     } finally {
       setLoading(false);
+      sessionSwitching.current = false;
     }
   }, [viewMode]);
 
@@ -109,65 +129,67 @@ export function useConversation() {
     }
   }, [isConnected, viewMode, refresh]);
 
-  // Poll for updates every second when connected (faster real-time feel)
+  // Poll for updates every 2 seconds when connected
   useEffect(() => {
     if (!isConnected) return;
 
     const pollInterval = setInterval(() => {
-      if (wsService.isConnected()) {
-        // Poll conversation data
-        wsService.sendRequest(viewMode === 'highlights' ? 'get_highlights' : 'get_full')
-          .then(response => {
-            if (response.success && response.payload) {
-              if (viewMode === 'highlights') {
-                const payload = response.payload as { highlights: ConversationHighlight[] };
-                const serverHighlights = payload.highlights || [];
+      // Skip polling during session switch to prevent stale data
+      if (sessionSwitching.current || !wsService.isConnected()) return;
 
-                // Merge with any pending optimistic messages
-                setHighlights(prev => {
-                  const pending = prev.filter(m => m.id.startsWith('pending-'));
-                  // Keep pending messages for at least 30 seconds, or until server confirms
-                  const now = Date.now();
-                  const stillPending = pending.filter(p => {
-                    // Extract timestamp from id (pending-TIMESTAMP)
-                    const pendingTime = parseInt(p.id.replace('pending-', ''), 10);
-                    const age = now - pendingTime;
-                    // Keep if less than 30 seconds old
-                    if (age < 30000) {
-                      console.log(`[Optimistic] Keeping pending message (age: ${age}ms): ${p.content.substring(0, 30)}...`);
-                      return true;
-                    }
-                    // After 30 seconds, only keep if not in server results
-                    const inServer = serverHighlights.some(s =>
-                      s.type === 'user' && s.content === p.content
-                    );
-                    console.log(`[Optimistic] Message ${inServer ? 'found in server' : 'expired'}: ${p.content.substring(0, 30)}...`);
-                    return !inServer;
-                  });
-                  // Append pending messages to server results
-                  if (stillPending.length > 0) {
-                    console.log(`[Optimistic] Appending ${stillPending.length} pending messages`);
-                  }
-                  return [...serverHighlights, ...stillPending];
+      // Poll conversation data
+      wsService.sendRequest(viewMode === 'highlights' ? 'get_highlights' : 'get_full')
+        .then(response => {
+          // Skip if session switch started during request
+          if (sessionSwitching.current) return;
+
+          if (response.success && response.payload) {
+            if (viewMode === 'highlights') {
+              const payload = response.payload as { highlights: ConversationHighlight[] };
+              const serverHighlights = payload.highlights || [];
+
+              // Only update if data actually changed (prevents scroll jumping)
+              setHighlights(prev => {
+                const pending = prev.filter(m => m.id.startsWith('pending-'));
+                const nonPending = prev.filter(m => !m.id.startsWith('pending-'));
+
+                // Check if server data changed
+                if (highlightsEqual(nonPending, serverHighlights) && pending.length === 0) {
+                  return prev; // No change, keep same reference
+                }
+
+                // Keep pending messages for at least 30 seconds
+                const now = Date.now();
+                const stillPending = pending.filter(p => {
+                  const pendingTime = parseInt(p.id.replace('pending-', ''), 10);
+                  const age = now - pendingTime;
+                  if (age < 30000) return true;
+                  const inServer = serverHighlights.some(s =>
+                    s.type === 'user' && s.content === p.content
+                  );
+                  return !inServer;
                 });
-              } else {
-                const payload = response.payload as { messages: ConversationMessage[] };
-                setMessages(payload.messages || []);
-              }
-            }
-          })
-          .catch(() => { /* silent fail on poll */ });
 
-        // Also poll status for real-time activity updates
-        wsService.sendRequest('get_status')
-          .then(response => {
-            if (response.success && response.payload) {
-              setStatus(response.payload as SessionStatus);
+                return [...serverHighlights, ...stillPending];
+              });
+            } else {
+              const payload = response.payload as { messages: ConversationMessage[] };
+              setMessages(payload.messages || []);
             }
-          })
-          .catch(() => { /* silent fail on poll */ });
-      }
-    }, 1000);
+          }
+        })
+        .catch(() => { /* silent fail on poll */ });
+
+      // Also poll status for real-time activity updates
+      wsService.sendRequest('get_status')
+        .then(response => {
+          if (sessionSwitching.current) return;
+          if (response.success && response.payload) {
+            setStatus(response.payload as SessionStatus);
+          }
+        })
+        .catch(() => { /* silent fail on poll */ });
+    }, 2000); // Reduced to 2 seconds to reduce scroll interference
 
     return () => clearInterval(pollInterval);
   }, [isConnected, viewMode]);
