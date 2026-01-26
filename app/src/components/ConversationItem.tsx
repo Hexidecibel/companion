@@ -30,8 +30,8 @@ export function ConversationItem({ item, showToolCalls, onSelectOption, onFileTa
     return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   };
 
-  // Regex to detect file paths
-  const filePathRegex = /(?:^|\s)((?:\/[\w.-]+)+(?:\.\w+)?|~\/[\w./-]+)/g;
+  // Regex to detect file paths (absolute, home, or relative with extension)
+  const filePathRegex = /(?:^|\s)(\/[\w./-]+|~\/[\w./-]+|[\w.-]+\/[\w./-]*\.\w+)/g;
 
   // Helper to render text with clickable file paths
   const renderTextWithFilePaths = (text: string, baseStyle: object) => {
@@ -119,7 +119,12 @@ export function ConversationItem({ item, showToolCalls, onSelectOption, onFileTa
           return null;
         }
 
-        const isFilePath = /^(\/[\w.-]+)+(\.\w+)?$/.test(content) || content.startsWith('~/');
+        // Match absolute paths (/path/to/file), home paths (~/path), or relative paths with extension (dir/file.ext)
+        const isFilePath =
+          /^\/[\w./-]+$/.test(content) ||  // Absolute path
+          content.startsWith('~/') ||       // Home path
+          /^[\w.-]+\/[\w./-]*\.\w+$/.test(content) ||  // Relative path with extension (docs/file.md)
+          /^[\w.-]+\.\w{1,5}$/.test(content);  // Just filename with extension (file.md)
 
         if (isFilePath && onFileTap) {
           return (
