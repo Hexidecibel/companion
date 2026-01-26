@@ -246,6 +246,8 @@ export class WebSocketHandler {
         if (pushPayload?.fcmToken && pushPayload?.deviceId) {
           const isExpoToken = pushPayload.fcmToken.startsWith('ExponentPushToken');
           console.log(`Push registration: device=${pushPayload.deviceId}, type=${isExpoToken ? 'expo' : 'fcm'}, token=${pushPayload.fcmToken.substring(0, 30)}...`);
+          // Link deviceId to this client for instant notify
+          client.deviceId = pushPayload.deviceId;
           this.push.registerDevice(pushPayload.deviceId, pushPayload.fcmToken);
           this.send(client.ws, {
             type: 'push_registered',

@@ -87,9 +87,6 @@ export class PushNotificationService {
       return;
     }
 
-    // Cancel any pending notification
-    this.cancelPendingNotification();
-
     // Send instant notifications immediately to devices that want them
     const instantDevices = Array.from(this.devices.entries())
       .filter(([deviceId]) => this.instantNotifyDevices.has(deviceId));
@@ -102,6 +99,12 @@ export class PushNotificationService {
       );
     }
 
+    // Only schedule if not already scheduled - don't reset the timer
+    if (this.pendingPush) {
+      console.log('Push notifications: Notification already scheduled, keeping existing timer');
+      return;
+    }
+
     // Schedule delayed notifications for other devices
     const delayedDevices = Array.from(this.devices.entries())
       .filter(([deviceId]) => !this.instantNotifyDevices.has(deviceId));
@@ -109,6 +112,7 @@ export class PushNotificationService {
     if (delayedDevices.length > 0) {
       console.log(`Push notifications: Scheduling notification for ${delayedDevices.length} device(s) in ${this.pushDelayMs}ms`);
       this.pendingPush = setTimeout(() => {
+        console.log('Push notifications: Timer fired, sending notification now');
         this.sendNotifications(
           preview,
           delayedDevices.map(([_, d]) => d.token)
