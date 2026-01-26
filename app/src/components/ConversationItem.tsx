@@ -35,8 +35,8 @@ export function ConversationItem({ item, showToolCalls, onSelectOption, onFileTa
 
   // Helper to render text with clickable file paths
   const renderTextWithFilePaths = (text: string, baseStyle: object) => {
-    if (!onFileTap) {
-      return <Text style={baseStyle}>{text}</Text>;
+    if (!text || !onFileTap) {
+      return <Text style={baseStyle}>{text || ''}</Text>;
     }
 
     const parts: React.ReactNode[] = [];
@@ -87,37 +87,44 @@ export function ConversationItem({ item, showToolCalls, onSelectOption, onFileTa
   const rules = useMemo(
     () => ({
       fence: (node: { content: string; sourceInfo: string }, _children: React.ReactNode, _parent: unknown, _styles: Record<string, unknown>) => {
+        const content = node?.content || '';
+        const sourceInfo = node?.sourceInfo || '';
         return (
-          <View key={node.content} style={codeBlockStyles.container}>
-            {node.sourceInfo && (
+          <View key={`fence-${content.slice(0, 20)}`} style={codeBlockStyles.container}>
+            {sourceInfo ? (
               <View style={codeBlockStyles.languageTag}>
-                <Text style={codeBlockStyles.languageText}>{node.sourceInfo}</Text>
+                <Text style={codeBlockStyles.languageText}>{sourceInfo}</Text>
               </View>
-            )}
+            ) : null}
             <ScrollView style={codeBlockStyles.scrollView} nestedScrollEnabled>
-              <Text style={codeBlockStyles.codeText}>{node.content.trim()}</Text>
+              <Text style={codeBlockStyles.codeText}>{content.trim()}</Text>
             </ScrollView>
           </View>
         );
       },
       code_block: (node: { content: string }, _children: React.ReactNode, _parent: unknown, _styles: Record<string, unknown>) => {
+        const content = node?.content || '';
         return (
-          <View key={node.content} style={codeBlockStyles.container}>
+          <View key={`codeblock-${content.slice(0, 20)}`} style={codeBlockStyles.container}>
             <ScrollView style={codeBlockStyles.scrollView} nestedScrollEnabled>
-              <Text style={codeBlockStyles.codeText}>{node.content.trim()}</Text>
+              <Text style={codeBlockStyles.codeText}>{content.trim()}</Text>
             </ScrollView>
           </View>
         );
       },
       // Make inline code with file paths clickable
       code_inline: (node: { content: string }, _children: React.ReactNode, _parent: unknown, styles: Record<string, unknown>) => {
-        const content = node.content;
+        const content = node?.content || '';
+        if (!content) {
+          return null;
+        }
+
         const isFilePath = /^(\/[\w.-]+)+(\.\w+)?$/.test(content) || content.startsWith('~/');
 
         if (isFilePath && onFileTap) {
           return (
             <Text
-              key={content}
+              key={`code-${content}`}
               style={[styles.code_inline as object, filePathStyles.filePath]}
               onPress={() => onFileTap(content)}
             >
@@ -127,7 +134,7 @@ export function ConversationItem({ item, showToolCalls, onSelectOption, onFileTa
         }
 
         return (
-          <Text key={content} style={styles.code_inline as object}>
+          <Text key={`code-${content}`} style={styles.code_inline as object}>
             {content}
           </Text>
         );
