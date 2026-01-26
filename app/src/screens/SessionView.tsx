@@ -513,7 +513,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#1f2937',
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
-    maxHeight: '70%',
+    maxHeight: '85%',
   },
   activityModalHeader: {
     flexDirection: 'row',
@@ -542,7 +542,7 @@ const styles = StyleSheet.create({
   },
   activityModalScroll: {
     padding: 20,
-    maxHeight: 400,
+    flexGrow: 1,
   },
   activityModalText: {
     fontSize: 14,
