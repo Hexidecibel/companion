@@ -38,10 +38,12 @@ export class ClaudeWatcher extends EventEmitter {
       persistent: true,
       ignoreInitial: false,
       awaitWriteFinish: {
-        stabilityThreshold: 500,
-        pollInterval: 100,
+        stabilityThreshold: 100,
+        pollInterval: 50,
       },
       depth: 2,
+      usePolling: true,
+      interval: 100,
     });
 
     this.watcher.on('add', (filePath) => this.handleFileChange(filePath));

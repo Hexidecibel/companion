@@ -97,6 +97,32 @@ export function useConversation() {
     }
   }, [isConnected, viewMode, refresh]);
 
+  // Poll for updates every 2 seconds when connected
+  useEffect(() => {
+    if (!isConnected) return;
+
+    const pollInterval = setInterval(() => {
+      if (wsService.isConnected()) {
+        // Silent refresh - don't set loading state
+        wsService.sendRequest(viewMode === 'highlights' ? 'get_highlights' : 'get_full')
+          .then(response => {
+            if (response.success && response.payload) {
+              if (viewMode === 'highlights') {
+                const payload = response.payload as { highlights: ConversationHighlight[] };
+                setHighlights(payload.highlights || []);
+              } else {
+                const payload = response.payload as { messages: ConversationMessage[] };
+                setMessages(payload.messages || []);
+              }
+            }
+          })
+          .catch(() => { /* silent fail on poll */ });
+      }
+    }, 2000);
+
+    return () => clearInterval(pollInterval);
+  }, [isConnected, viewMode]);
+
   const sendInput = useCallback(async (input: string): Promise<boolean> => {
     if (!wsService.isConnected()) {
       setError('Not connected');

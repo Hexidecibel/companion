@@ -1,37 +1,12 @@
 import React, { useMemo } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
 import Markdown from '@ronradtke/react-native-markdown-display';
-import SyntaxHighlighter from 'react-native-syntax-highlighter';
-import { atomOneDark } from 'react-syntax-highlighter/dist/esm/styles/hljs';
 import { ConversationMessage, ConversationHighlight } from '../types';
 
 interface ConversationItemProps {
   item: ConversationMessage | ConversationHighlight;
   showToolCalls?: boolean;
   onSelectOption?: (option: string) => void;
-}
-
-// Map common language aliases to their canonical names
-const languageMap: Record<string, string> = {
-  js: 'javascript',
-  ts: 'typescript',
-  tsx: 'typescript',
-  jsx: 'javascript',
-  py: 'python',
-  rb: 'ruby',
-  sh: 'bash',
-  shell: 'bash',
-  zsh: 'bash',
-  yml: 'yaml',
-  md: 'markdown',
-  json5: 'json',
-  dockerfile: 'docker',
-};
-
-function normalizeLanguage(lang: string | undefined): string {
-  if (!lang) return 'text';
-  const normalized = lang.toLowerCase().trim();
-  return languageMap[normalized] || normalized;
 }
 
 export function ConversationItem({ item, showToolCalls, onSelectOption }: ConversationItemProps) {
@@ -45,11 +20,10 @@ export function ConversationItem({ item, showToolCalls, onSelectOption }: Conver
     return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   };
 
-  // Custom rules for syntax highlighting code blocks
+  // Custom rules for code blocks (simple text rendering for reliability)
   const rules = useMemo(
     () => ({
       fence: (node: { content: string; sourceInfo: string }, _children: React.ReactNode, _parent: unknown, _styles: Record<string, unknown>) => {
-        const language = normalizeLanguage(node.sourceInfo);
         return (
           <View key={node.content} style={codeBlockStyles.container}>
             {node.sourceInfo && (
@@ -57,16 +31,8 @@ export function ConversationItem({ item, showToolCalls, onSelectOption }: Conver
                 <Text style={codeBlockStyles.languageText}>{node.sourceInfo}</Text>
               </View>
             )}
-            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-              <SyntaxHighlighter
-                language={language}
-                style={atomOneDark}
-                customStyle={codeBlockStyles.highlighter}
-                fontSize={13}
-                fontFamily="monospace"
-              >
-                {node.content.trim()}
-              </SyntaxHighlighter>
+            <ScrollView style={codeBlockStyles.scrollView} nestedScrollEnabled>
+              <Text style={codeBlockStyles.codeText}>{node.content.trim()}</Text>
             </ScrollView>
           </View>
         );
@@ -74,16 +40,8 @@ export function ConversationItem({ item, showToolCalls, onSelectOption }: Conver
       code_block: (node: { content: string }, _children: React.ReactNode, _parent: unknown, _styles: Record<string, unknown>) => {
         return (
           <View key={node.content} style={codeBlockStyles.container}>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-              <SyntaxHighlighter
-                language="text"
-                style={atomOneDark}
-                customStyle={codeBlockStyles.highlighter}
-                fontSize={13}
-                fontFamily="monospace"
-              >
-                {node.content.trim()}
-              </SyntaxHighlighter>
+            <ScrollView style={codeBlockStyles.scrollView} nestedScrollEnabled>
+              <Text style={codeBlockStyles.codeText}>{node.content.trim()}</Text>
             </ScrollView>
           </View>
         );
@@ -148,6 +106,7 @@ const codeBlockStyles = StyleSheet.create({
     borderRadius: 8,
     marginVertical: 8,
     overflow: 'hidden',
+    maxHeight: 200,
   },
   languageTag: {
     backgroundColor: '#374151',
@@ -162,10 +121,14 @@ const codeBlockStyles = StyleSheet.create({
     fontWeight: '600',
     textTransform: 'uppercase',
   },
-  highlighter: {
-    backgroundColor: 'transparent',
+  scrollView: {
     padding: 12,
-    margin: 0,
+  },
+  codeText: {
+    color: '#e5e7eb',
+    fontFamily: 'monospace',
+    fontSize: 12,
+    lineHeight: 18,
   },
 });
 
