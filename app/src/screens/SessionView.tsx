@@ -123,6 +123,11 @@ export function SessionView({ server, onBack }: SessionViewProps) {
     return success;
   };
 
+  const handleSessionChange = useCallback(() => {
+    initialScrollDone.current = false;
+    refresh(true);
+  }, [refresh]);
+
   const handleSlashCommand = useCallback((command: string) => {
     switch (command) {
       case '/switch':
@@ -143,6 +148,7 @@ export function SessionView({ server, onBack }: SessionViewProps) {
       });
       if (response.success) {
         dismissOtherSessionActivity();
+        initialScrollDone.current = false;
         refresh(true);
       }
     } catch (err) {
@@ -247,7 +253,7 @@ export function SessionView({ server, onBack }: SessionViewProps) {
             </Text>
             {isConnected && (
               <SessionPicker
-                onSessionChange={() => refresh(true)}
+                onSessionChange={handleSessionChange}
                 isOpen={showSessionPicker}
                 onClose={() => setShowSessionPicker(false)}
               />
