@@ -97,13 +97,13 @@ export function useConversation() {
     }
   }, [isConnected, viewMode, refresh]);
 
-  // Poll for updates every 2 seconds when connected
+  // Poll for updates every second when connected (faster real-time feel)
   useEffect(() => {
     if (!isConnected) return;
 
     const pollInterval = setInterval(() => {
       if (wsService.isConnected()) {
-        // Silent refresh - don't set loading state
+        // Poll conversation data
         wsService.sendRequest(viewMode === 'highlights' ? 'get_highlights' : 'get_full')
           .then(response => {
             if (response.success && response.payload) {
@@ -117,8 +117,17 @@ export function useConversation() {
             }
           })
           .catch(() => { /* silent fail on poll */ });
+
+        // Also poll status for real-time activity updates
+        wsService.sendRequest('get_status')
+          .then(response => {
+            if (response.success && response.payload) {
+              setStatus(response.payload as SessionStatus);
+            }
+          })
+          .catch(() => { /* silent fail on poll */ });
       }
-    }, 2000);
+    }, 1000);
 
     return () => clearInterval(pollInterval);
   }, [isConnected, viewMode]);
@@ -129,14 +138,28 @@ export function useConversation() {
       return false;
     }
 
+    // Optimistic update - show message immediately
+    const optimisticMessage: ConversationHighlight = {
+      id: `pending-${Date.now()}`,
+      type: 'user',
+      content: input,
+      timestamp: Date.now(),
+    };
+    setHighlights(prev => [...prev, optimisticMessage]);
+
     try {
       const response = await wsService.sendRequest('send_input', { input });
       if (!response.success) {
+        // Remove optimistic message on failure
+        setHighlights(prev => prev.filter(m => m.id !== optimisticMessage.id));
         setError(response.error || 'Failed to send input');
         return false;
       }
+      // Keep optimistic message - it will be replaced by real update from server
       return true;
     } catch (err) {
+      // Remove optimistic message on failure
+      setHighlights(prev => prev.filter(m => m.id !== optimisticMessage.id));
       setError(err instanceof Error ? err.message : 'Failed to send input');
       return false;
     }
