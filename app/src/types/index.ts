@@ -47,6 +47,14 @@ export interface ConversationHighlight {
   isWaitingForChoice?: boolean;
 }
 
+export interface ActivityDetail {
+  summary: string;
+  toolName?: string;
+  input?: string;
+  output?: string;
+  timestamp: number;
+}
+
 export interface SessionStatus {
   isRunning: boolean;
   isWaitingForInput: boolean;
@@ -54,6 +62,7 @@ export interface SessionStatus {
   conversationId?: string;
   projectPath?: string;
   currentActivity?: string;
+  recentActivity?: ActivityDetail[];
 }
 
 export interface WebSocketMessage {

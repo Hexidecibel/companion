@@ -162,6 +162,14 @@ export function detectWaitingForInput(messages: ConversationMessage[]): boolean 
   return false;
 }
 
+export interface ActivityDetail {
+  summary: string;
+  toolName?: string;
+  input?: string;
+  output?: string;
+  timestamp: number;
+}
+
 export function detectCurrentActivity(messages: ConversationMessage[]): string | undefined {
   if (messages.length === 0) return undefined;
 
@@ -211,6 +219,46 @@ export function detectCurrentActivity(messages: ConversationMessage[]): string |
 
   // Don't show "waiting for input" - there's already a separate indicator for that
   return undefined;
+}
+
+export function getRecentActivity(messages: ConversationMessage[], limit: number = 5): ActivityDetail[] {
+  const activities: ActivityDetail[] = [];
+
+  // Go through messages in reverse to get recent activity
+  for (let i = messages.length - 1; i >= 0 && activities.length < limit; i--) {
+    const msg = messages[i];
+
+    if (msg.type === 'assistant' && msg.toolCalls) {
+      for (const tool of msg.toolCalls) {
+        if (activities.length >= limit) break;
+
+        const input = tool.input as Record<string, unknown>;
+        let inputStr = '';
+        let outputStr = tool.output || '';
+
+        // Format input based on tool type
+        if (input.file_path) {
+          inputStr = input.file_path as string;
+        } else if (input.command) {
+          inputStr = input.command as string;
+        } else if (input.pattern) {
+          inputStr = `Pattern: ${input.pattern}`;
+        } else if (input.query) {
+          inputStr = input.query as string;
+        }
+
+        activities.push({
+          summary: `${tool.name}${inputStr ? `: ${inputStr.substring(0, 100)}` : ''}`,
+          toolName: tool.name,
+          input: inputStr,
+          output: outputStr.substring(0, 2000), // Limit output size
+          timestamp: msg.timestamp,
+        });
+      }
+    }
+  }
+
+  return activities.reverse(); // Return in chronological order
 }
 
 export function getSessionStatus(

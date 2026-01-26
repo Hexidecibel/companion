@@ -179,14 +179,17 @@ export class PushNotificationService {
       const response = await admin.messaging().sendEachForMulticast(message);
       console.log(`Push notifications (FCM): Sent to ${response.successCount}/${tokens.length} devices`);
 
-      // Handle failed tokens
+      // Log detailed errors for failed tokens
       response.responses.forEach((resp, idx) => {
-        if (!resp.success && resp.error?.code === 'messaging/registration-token-not-registered') {
-          const deviceId = Array.from(this.devices.entries()).find(
-            ([_, d]) => d.token === tokens[idx]
-          )?.[0];
-          if (deviceId) {
-            this.unregisterDevice(deviceId);
+        if (!resp.success) {
+          console.error(`Push notifications (FCM): Failed for token ${tokens[idx].substring(0, 20)}...: ${resp.error?.code} - ${resp.error?.message}`);
+          if (resp.error?.code === 'messaging/registration-token-not-registered') {
+            const deviceId = Array.from(this.devices.entries()).find(
+              ([_, d]) => d.token === tokens[idx]
+            )?.[0];
+            if (deviceId) {
+              this.unregisterDevice(deviceId);
+            }
           }
         }
       });

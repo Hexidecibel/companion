@@ -3,7 +3,7 @@ import * as path from 'path';
 import * as chokidar from 'chokidar';
 import { EventEmitter } from 'events';
 import { ConversationFile, ConversationMessage, SessionStatus, TmuxSession } from './types';
-import { parseConversationFile, extractHighlights, detectWaitingForInput, detectCurrentActivity } from './parser';
+import { parseConversationFile, extractHighlights, detectWaitingForInput, detectCurrentActivity, getRecentActivity } from './parser';
 
 interface TrackedConversation {
   path: string;
@@ -207,6 +207,7 @@ export class ClaudeWatcher extends EventEmitter {
       conversationId: tracked.path,
       projectPath: tracked.projectPath,
       currentActivity: detectCurrentActivity(messages),
+      recentActivity: getRecentActivity(messages, 10),
     };
   }
 

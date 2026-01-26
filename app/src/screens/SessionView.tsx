@@ -279,7 +279,7 @@ export function SessionView({ server, onBack }: SessionViewProps) {
         <View style={styles.activityModalOverlay}>
           <View style={styles.activityModalContent}>
             <View style={styles.activityModalHeader}>
-              <Text style={styles.activityModalTitle}>Current Activity</Text>
+              <Text style={styles.activityModalTitle}>Recent Activity</Text>
               <TouchableOpacity
                 style={styles.activityModalClose}
                 onPress={() => setShowActivityModal(false)}
@@ -288,9 +288,41 @@ export function SessionView({ server, onBack }: SessionViewProps) {
               </TouchableOpacity>
             </View>
             <ScrollView style={styles.activityModalScroll}>
-              <Text style={styles.activityModalText}>
-                {status?.currentActivity || 'No activity'}
-              </Text>
+              {/* Current activity */}
+              {status?.currentActivity && (
+                <View style={styles.activityItem}>
+                  <View style={styles.activityItemHeader}>
+                    <ActivityIndicator size="small" color="#60a5fa" />
+                    <Text style={styles.activityItemTitle}>Now</Text>
+                  </View>
+                  <Text style={styles.activityItemSummary}>{status.currentActivity}</Text>
+                </View>
+              )}
+
+              {/* Recent activity history */}
+              {status?.recentActivity && status.recentActivity.length > 0 ? (
+                status.recentActivity.map((activity, idx) => (
+                  <View key={idx} style={styles.activityItem}>
+                    <View style={styles.activityItemHeader}>
+                      <Text style={styles.activityItemTool}>{activity.toolName || 'Action'}</Text>
+                    </View>
+                    {activity.input && (
+                      <Text style={styles.activityItemInput} numberOfLines={2}>
+                        {activity.input}
+                      </Text>
+                    )}
+                    {activity.output && (
+                      <View style={styles.activityOutputBox}>
+                        <Text style={styles.activityOutputText}>
+                          {activity.output}
+                        </Text>
+                      </View>
+                    )}
+                  </View>
+                ))
+              ) : (
+                <Text style={styles.activityModalText}>No recent activity</Text>
+              )}
             </ScrollView>
             <TouchableOpacity
               style={styles.activityModalCancelButton}
@@ -546,9 +578,58 @@ const styles = StyleSheet.create({
   },
   activityModalText: {
     fontSize: 14,
-    color: '#e5e7eb',
-    fontFamily: 'monospace',
+    color: '#9ca3af',
     lineHeight: 22,
+  },
+  activityItem: {
+    marginBottom: 16,
+    paddingBottom: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#374151',
+  },
+  activityItemHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  activityItemTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#60a5fa',
+    marginLeft: 8,
+  },
+  activityItemTool: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#a78bfa',
+    backgroundColor: '#374151',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  activityItemSummary: {
+    fontSize: 14,
+    color: '#e5e7eb',
+    lineHeight: 20,
+  },
+  activityItemInput: {
+    fontSize: 13,
+    color: '#9ca3af',
+    fontFamily: 'monospace',
+    marginTop: 4,
+  },
+  activityOutputBox: {
+    backgroundColor: '#111827',
+    borderRadius: 8,
+    padding: 12,
+    marginTop: 8,
+    maxHeight: 200,
+  },
+  activityOutputText: {
+    fontSize: 12,
+    color: '#d1d5db',
+    fontFamily: 'monospace',
+    lineHeight: 18,
   },
   activityModalCancelButton: {
     margin: 20,
