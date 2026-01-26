@@ -75,7 +75,7 @@ export function SetupScreen({ onBack }: SetupScreenProps) {
 
         <Text style={styles.sectionTitle}>Manual Installation</Text>
         <Text style={styles.description}>
-          If the quick install doesn't work, follow these steps:
+          If the quick install doesn&apos;t work, follow these steps:
         </Text>
         <TouchableOpacity
           style={styles.codeBlock}
@@ -102,7 +102,7 @@ export function SetupScreen({ onBack }: SetupScreenProps) {
         <Text style={styles.sectionTitle}>Connecting from the App</Text>
         <View style={styles.listItem}>
           <Text style={styles.bullet}>1.</Text>
-          <Text style={styles.listText}>Get your server's IP address or hostname</Text>
+          <Text style={styles.listText}>Get your server&apos;s IP address or hostname</Text>
         </View>
         <View style={styles.listItem}>
           <Text style={styles.bullet}>2.</Text>

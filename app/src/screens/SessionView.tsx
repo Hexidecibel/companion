@@ -19,6 +19,7 @@ import { useConversation } from '../hooks/useConversation';
 import { StatusIndicator } from '../components/StatusIndicator';
 import { ConversationItem } from '../components/ConversationItem';
 import { InputBar } from '../components/InputBar';
+import { QuickReplies } from '../components/QuickReplies';
 import { getSessionSettings, saveSessionSettings, SessionSettings } from '../services/storage';
 import { wsService } from '../services/websocket';
 
@@ -303,6 +304,10 @@ export function SessionView({ server, onBack }: SessionViewProps) {
         <TouchableOpacity style={styles.cancelButton} onPress={handleCancel}>
           <Text style={styles.cancelButtonText}>Cancel</Text>
         </TouchableOpacity>
+      )}
+
+      {status?.isWaitingForInput && isConnected && (
+        <QuickReplies onSelect={sendInput} disabled={!isConnected} />
       )}
 
       <InputBar

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { ConversationMessage, ConversationHighlight, SessionStatus, ViewMode } from '../types';
 import { wsService } from '../services/websocket';
 
@@ -9,12 +9,26 @@ export function useConversation() {
   const [viewMode, setViewMode] = useState<ViewMode>('highlights');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [isConnected, setIsConnected] = useState(wsService.isConnected());
+  const hasSubscribed = useRef(false);
+
+  // Track connection state
+  useEffect(() => {
+    const unsubscribe = wsService.onStateChange((state) => {
+      const connected = state.status === 'connected';
+      setIsConnected(connected);
+      if (!connected) {
+        hasSubscribed.current = false;
+      }
+    });
+    return unsubscribe;
+  }, []);
 
   // Subscribe to real-time updates
   useEffect(() => {
     const unsubscribe = wsService.onMessage((message) => {
       switch (message.type) {
-        case 'conversation_update':
+        case 'conversation_update': {
           const updatePayload = message.payload as {
             messages: ConversationMessage[];
             highlights: ConversationHighlight[];
@@ -22,11 +36,13 @@ export function useConversation() {
           setMessages(updatePayload.messages || []);
           setHighlights(updatePayload.highlights || []);
           break;
+        }
 
-        case 'status_change':
+        case 'status_change': {
           const statusPayload = message.payload as SessionStatus;
           setStatus(statusPayload);
           break;
+        }
       }
     });
 
@@ -73,10 +89,13 @@ export function useConversation() {
     }
   }, [viewMode]);
 
-  // Refresh when view mode changes
+  // Subscribe and refresh when connected or view mode changes
   useEffect(() => {
-    refresh();
-  }, [viewMode]);
+    if (isConnected && !hasSubscribed.current) {
+      hasSubscribed.current = true;
+      refresh();
+    }
+  }, [isConnected, viewMode, refresh]);
 
   const sendInput = useCallback(async (input: string): Promise<boolean> => {
     if (!wsService.isConnected()) {

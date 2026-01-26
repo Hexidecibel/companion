@@ -5,7 +5,9 @@ import { DaemonConfig } from './types';
 const DEFAULT_CONFIG: DaemonConfig = {
   port: 9877,
   token: '',
-  tls: false,
+  tls: true,
+  certPath: '/etc/claude-companion/certs/cert.pem',
+  keyPath: '/etc/claude-companion/certs/key.pem',
   tmuxSession: 'claude',
   claudeHome: path.join(process.env.HOME || '/root', '.claude'),
   mdnsEnabled: true,

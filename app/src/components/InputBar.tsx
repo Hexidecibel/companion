@@ -23,13 +23,20 @@ interface AttachedImage {
 interface InputBarProps {
   onSend: (text: string) => Promise<boolean>;
   onSendImage?: (base64: string, mimeType: string) => Promise<boolean>;
-  onUploadImage?: (base64: string, mimeType: string) => Promise<string | null>; // returns filepath
+  onUploadImage?: (base64: string, mimeType: string) => Promise<string | null>;
   onSendWithImages?: (imagePaths: string[], message: string) => Promise<boolean>;
   disabled?: boolean;
   placeholder?: string;
 }
 
-export function InputBar({ onSend, onSendImage, onUploadImage, onSendWithImages, disabled, placeholder }: InputBarProps) {
+export function InputBar({
+  onSend,
+  onSendImage,
+  onUploadImage,
+  onSendWithImages,
+  disabled,
+  placeholder,
+}: InputBarProps) {
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
   const [attachedImages, setAttachedImages] = useState<AttachedImage[]>([]);
@@ -40,9 +47,7 @@ export function InputBar({ onSend, onSendImage, onUploadImage, onSendWithImages,
 
     setSending(true);
     try {
-      // If we have images AND the new combined endpoint
       if (attachedImages.length > 0 && onUploadImage && onSendWithImages) {
-        // Upload all images first (no submit)
         const imagePaths: string[] = [];
         for (const img of attachedImages) {
           const filepath = await onUploadImage(img.base64, img.mimeType);
@@ -51,14 +56,12 @@ export function InputBar({ onSend, onSendImage, onUploadImage, onSendWithImages,
           }
         }
 
-        // Send combined message (images + text) in one submit
         const success = await onSendWithImages(imagePaths, text.trim());
         if (success) {
           setText('');
           setAttachedImages([]);
         }
       } else if (attachedImages.length > 0 && onSendImage) {
-        // Fallback: old behavior
         for (const img of attachedImages) {
           await onSendImage(img.base64, img.mimeType);
         }
@@ -68,7 +71,6 @@ export function InputBar({ onSend, onSendImage, onUploadImage, onSendWithImages,
         }
         setAttachedImages([]);
       } else if (text.trim()) {
-        // Text only
         const success = await onSend(text.trim());
         if (success) {
           setText('');
@@ -111,7 +113,7 @@ export function InputBar({ onSend, onSendImage, onUploadImage, onSendWithImages,
 
         setAttachedImages([...attachedImages, ...newImages]);
       }
-    } catch (e: any) {
+    } catch (e: unknown) {
       console.error('Image pick failed:', e);
       Alert.alert('Error', 'Failed to pick image');
     }
@@ -125,9 +127,12 @@ export function InputBar({ onSend, onSendImage, onUploadImage, onSendWithImages,
 
   return (
     <View style={styles.container}>
-      {/* Attached images preview */}
       {attachedImages.length > 0 && (
-        <ScrollView horizontal style={styles.attachmentsRow} showsHorizontalScrollIndicator={false}>
+        <ScrollView
+          horizontal
+          style={styles.attachmentsRow}
+          showsHorizontalScrollIndicator={false}
+        >
           {attachedImages.map((img, index) => (
             <View key={index} style={styles.attachmentContainer}>
               <Image source={{ uri: img.uri }} style={styles.attachmentThumb} />
@@ -135,7 +140,7 @@ export function InputBar({ onSend, onSendImage, onUploadImage, onSendWithImages,
                 style={styles.removeButton}
                 onPress={() => removeImage(index)}
               >
-                <Text style={styles.removeButtonText}>×</Text>
+                <Text style={styles.removeButtonText}>x</Text>
               </TouchableOpacity>
             </View>
           ))}
@@ -145,11 +150,11 @@ export function InputBar({ onSend, onSendImage, onUploadImage, onSendWithImages,
       <View style={styles.inputRow}>
         {onSendImage && (
           <TouchableOpacity
-            style={[styles.imageButton, (disabled || sending) && styles.imageButtonDisabled]}
+            style={[styles.iconButton, (disabled || sending) && styles.iconButtonDisabled]}
             onPress={handlePickImage}
             disabled={disabled || sending}
           >
-            <Text style={styles.imageButtonText}>+</Text>
+            <Text style={styles.iconButtonText}>+</Text>
           </TouchableOpacity>
         )}
         <TextInput
@@ -215,30 +220,29 @@ const styles = StyleSheet.create({
   },
   removeButtonText: {
     color: '#ffffff',
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: 'bold',
-    marginTop: -2,
   },
   inputRow: {
     flexDirection: 'row',
     alignItems: 'flex-end',
     padding: 8,
   },
-  imageButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+  iconButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     backgroundColor: '#374151',
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 8,
+    marginRight: 6,
   },
-  imageButtonDisabled: {
+  iconButtonDisabled: {
     opacity: 0.5,
   },
-  imageButtonText: {
+  iconButtonText: {
     color: '#9ca3af',
-    fontSize: 24,
+    fontSize: 22,
     fontWeight: '300',
     marginTop: -2,
   },

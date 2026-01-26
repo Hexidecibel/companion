@@ -11,6 +11,7 @@ import {
   Platform,
 } from 'react-native';
 import { getSettings, saveSettings, AppSettings, clearAll, getServers } from '../services/storage';
+import { historyService } from '../services/history';
 import { registerWithDaemon, unregisterWithDaemon, getToken } from '../services/push';
 import { wsService } from '../services/websocket';
 
@@ -24,7 +25,7 @@ export function Settings({ onBack }: SettingsProps) {
     pushEnabled: false,
   });
   const [loading, setLoading] = useState(true);
-  const [pushAvailable, setPushAvailable] = useState(true);
+  const [pushAvailable] = useState(true);
 
   useEffect(() => {
     loadSettings();
@@ -54,7 +55,7 @@ export function Settings({ onBack }: SettingsProps) {
 
     // Actually register/unregister with daemon
     const servers = await getServers();
-    const connectedServer = servers.find(s => wsService.isConnected());
+    const connectedServer = servers.find(() => wsService.isConnected());
     const deviceId = `${Platform.OS}-${connectedServer?.id || 'default'}`;
 
     if (value) {
@@ -82,6 +83,42 @@ export function Settings({ onBack }: SettingsProps) {
             await clearAll();
             setSettings({ stayConnected: false, pushEnabled: false });
             Alert.alert('Done', 'All data has been cleared');
+          },
+        },
+      ]
+    );
+  };
+
+  const handleRotateToken = () => {
+    if (!wsService.isConnected()) {
+      Alert.alert('Not Connected', 'You must be connected to a server to rotate the token.');
+      return;
+    }
+
+    Alert.alert(
+      'Rotate Token',
+      'This will generate a new authentication token. You will need to update the token in all connected apps. Continue?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Rotate',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const response = await wsService.sendRequest('rotate_token');
+              if (response.success && response.payload) {
+                const { newToken } = response.payload as { newToken: string };
+                Alert.alert(
+                  'Token Rotated',
+                  `New token: ${newToken}\n\nMake sure to update this token in your server configuration and reconnect.`,
+                  [{ text: 'OK' }]
+                );
+              } else {
+                Alert.alert('Error', response.error || 'Failed to rotate token');
+              }
+            } catch (err) {
+              Alert.alert('Error', 'Failed to rotate token. Please try again.');
+            }
           },
         },
       ]
@@ -162,13 +199,56 @@ export function Settings({ onBack }: SettingsProps) {
           <View style={styles.hintBox}>
             <Text style={styles.hintText}>
               For full terminal access, install Termux and Mosh. You can then
-              connect directly to your server's tmux session.
+              connect directly to your server&apos;s tmux session.
             </Text>
           </View>
         </View>
 
         <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Security</Text>
+
+          <TouchableOpacity style={styles.actionRow} onPress={handleRotateToken}>
+            <View style={styles.settingInfo}>
+              <Text style={styles.settingLabel}>Regenerate Token</Text>
+              <Text style={styles.settingDescription}>
+                Generate a new authentication token (disconnects other clients)
+              </Text>
+            </View>
+            <Text style={styles.linkArrow}>›</Text>
+          </TouchableOpacity>
+        </View>
+
+        <View style={styles.section}>
           <Text style={styles.sectionTitle}>Data</Text>
+
+          <TouchableOpacity
+            style={styles.actionRow}
+            onPress={() => {
+              Alert.alert(
+                'Clear History',
+                'This will delete all saved session history. Are you sure?',
+                [
+                  { text: 'Cancel', style: 'cancel' },
+                  {
+                    text: 'Clear',
+                    style: 'destructive',
+                    onPress: async () => {
+                      await historyService.clearAll();
+                      Alert.alert('Done', 'Session history has been cleared');
+                    },
+                  },
+                ]
+              );
+            }}
+          >
+            <View style={styles.settingInfo}>
+              <Text style={styles.settingLabel}>Clear History</Text>
+              <Text style={styles.settingDescription}>
+                Delete all saved session history
+              </Text>
+            </View>
+            <Text style={styles.linkArrow}>›</Text>
+          </TouchableOpacity>
 
           <TouchableOpacity style={styles.dangerRow} onPress={handleClearData}>
             <Text style={styles.dangerText}>Clear All Data</Text>
@@ -268,6 +348,15 @@ const styles = StyleSheet.create({
     color: '#9ca3af',
   },
   linkRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#1f2937',
+    padding: 16,
+    borderRadius: 12,
+    marginBottom: 8,
+  },
+  actionRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',

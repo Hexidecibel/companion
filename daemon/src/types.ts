@@ -52,6 +52,16 @@ export interface SessionStatus {
   currentActivity?: string;
 }
 
+export interface TmuxSession {
+  id: string;
+  name: string;
+  projectPath?: string;
+  conversationPath?: string;
+  lastActivity: number;
+  isWaitingForInput: boolean;
+  messageCount: number;
+}
+
 export interface WebSocketMessage {
   type: string;
   token?: string;

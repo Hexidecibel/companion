@@ -4,11 +4,13 @@ import { v4 as uuidv4 } from 'uuid';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import * as crypto from 'crypto';
 import { ClaudeWatcher } from './watcher';
 import { InputInjector } from './input-injector';
 import { PushNotificationService } from './push';
 import { extractHighlights } from './parser';
-import { WebSocketMessage, WebSocketResponse } from './types';
+import { WebSocketMessage, WebSocketResponse, DaemonConfig } from './types';
+import { loadConfig, saveConfig } from './config';
 
 interface AuthenticatedClient {
   id: string;
@@ -141,6 +143,7 @@ export class WebSocketHandler {
     switch (type) {
       case 'subscribe':
         client.subscribed = true;
+        console.log(`WebSocket: Client subscribed (${client.id})`);
         this.send(client.ws, {
           type: 'subscribed',
           success: true,
@@ -186,6 +189,38 @@ export class WebSocketHandler {
           payload: status,
           requestId,
         });
+        break;
+
+      case 'get_sessions':
+        const sessions = this.watcher.getSessions();
+        const activeSessionId = this.watcher.getActiveSessionId();
+        this.send(client.ws, {
+          type: 'sessions',
+          success: true,
+          payload: { sessions, activeSessionId },
+          requestId,
+        });
+        break;
+
+      case 'switch_session':
+        const switchPayload = payload as { sessionId: string };
+        if (switchPayload?.sessionId) {
+          const switched = this.watcher.setActiveSession(switchPayload.sessionId);
+          this.send(client.ws, {
+            type: 'session_switched',
+            success: switched,
+            payload: { sessionId: switchPayload.sessionId },
+            error: switched ? undefined : 'Session not found',
+            requestId,
+          });
+        } else {
+          this.send(client.ws, {
+            type: 'session_switched',
+            success: false,
+            error: 'Missing sessionId',
+            requestId,
+          });
+        }
         break;
 
       case 'send_input':
@@ -266,6 +301,10 @@ export class WebSocketHandler {
           success: true,
           requestId,
         });
+        break;
+
+      case 'rotate_token':
+        this.handleRotateToken(client, requestId);
         break;
 
       default:
@@ -448,6 +487,52 @@ export class WebSocketHandler {
       error: success ? undefined : 'Failed to send message',
       requestId,
     });
+  }
+
+  private handleRotateToken(client: AuthenticatedClient, requestId?: string): void {
+    try {
+      // Generate new token
+      const newToken = crypto.randomBytes(32).toString('hex');
+
+      // Update config file
+      const config = loadConfig();
+      config.token = newToken;
+      saveConfig(config);
+
+      // Update in-memory token
+      this.token = newToken;
+
+      // Notify the requesting client of the new token
+      this.send(client.ws, {
+        type: 'token_rotated',
+        success: true,
+        payload: { newToken },
+        requestId,
+      });
+
+      console.log('WebSocket: Token rotated successfully');
+
+      // Disconnect all other clients (they need to re-authenticate)
+      for (const [id, c] of this.clients) {
+        if (id !== client.id && c.authenticated) {
+          this.send(c.ws, {
+            type: 'token_invalidated',
+            success: true,
+            payload: { reason: 'Token has been rotated' },
+          });
+          c.authenticated = false;
+          c.subscribed = false;
+        }
+      }
+    } catch (err) {
+      console.error('Failed to rotate token:', err);
+      this.send(client.ws, {
+        type: 'token_rotated',
+        success: false,
+        error: 'Failed to rotate token',
+        requestId,
+      });
+    }
   }
 
   private send(ws: WebSocket, response: WebSocketResponse): void {

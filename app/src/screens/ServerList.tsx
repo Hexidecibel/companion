@@ -54,7 +54,7 @@ export function ServerList({ onSelectServer, onOpenSetup }: ServerListProps) {
       setConnectionStates((prev) => {
         const newMap = new Map(prev);
         const connectedServer = servers.find(
-          (s) => wsService.getState().status !== 'disconnected'
+          () => wsService.getState().status !== 'disconnected'
         );
         if (connectedServer) {
           newMap.set(connectedServer.id, state);

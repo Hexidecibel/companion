@@ -1,12 +1,37 @@
-import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
-import Markdown from 'react-native-markdown-display';
-import { ConversationMessage, ConversationHighlight, QuestionOption } from '../types';
+import React, { useMemo } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
+import Markdown from '@ronradtke/react-native-markdown-display';
+import SyntaxHighlighter from 'react-native-syntax-highlighter';
+import { atomOneDark } from 'react-syntax-highlighter/dist/esm/styles/hljs';
+import { ConversationMessage, ConversationHighlight } from '../types';
 
 interface ConversationItemProps {
   item: ConversationMessage | ConversationHighlight;
   showToolCalls?: boolean;
   onSelectOption?: (option: string) => void;
+}
+
+// Map common language aliases to their canonical names
+const languageMap: Record<string, string> = {
+  js: 'javascript',
+  ts: 'typescript',
+  tsx: 'typescript',
+  jsx: 'javascript',
+  py: 'python',
+  rb: 'ruby',
+  sh: 'bash',
+  shell: 'bash',
+  zsh: 'bash',
+  yml: 'yaml',
+  md: 'markdown',
+  json5: 'json',
+  dockerfile: 'docker',
+};
+
+function normalizeLanguage(lang: string | undefined): string {
+  if (!lang) return 'text';
+  const normalized = lang.toLowerCase().trim();
+  return languageMap[normalized] || normalized;
 }
 
 export function ConversationItem({ item, showToolCalls, onSelectOption }: ConversationItemProps) {
@@ -20,6 +45,53 @@ export function ConversationItem({ item, showToolCalls, onSelectOption }: Conver
     return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   };
 
+  // Custom rules for syntax highlighting code blocks
+  const rules = useMemo(
+    () => ({
+      fence: (node: { content: string; sourceInfo: string }, _children: React.ReactNode, _parent: unknown, _styles: Record<string, unknown>) => {
+        const language = normalizeLanguage(node.sourceInfo);
+        return (
+          <View key={node.content} style={codeBlockStyles.container}>
+            {node.sourceInfo && (
+              <View style={codeBlockStyles.languageTag}>
+                <Text style={codeBlockStyles.languageText}>{node.sourceInfo}</Text>
+              </View>
+            )}
+            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+              <SyntaxHighlighter
+                language={language}
+                style={atomOneDark}
+                customStyle={codeBlockStyles.highlighter}
+                fontSize={13}
+                fontFamily="monospace"
+              >
+                {node.content.trim()}
+              </SyntaxHighlighter>
+            </ScrollView>
+          </View>
+        );
+      },
+      code_block: (node: { content: string }, _children: React.ReactNode, _parent: unknown, _styles: Record<string, unknown>) => {
+        return (
+          <View key={node.content} style={codeBlockStyles.container}>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+              <SyntaxHighlighter
+                language="text"
+                style={atomOneDark}
+                customStyle={codeBlockStyles.highlighter}
+                fontSize={13}
+                fontFamily="monospace"
+              >
+                {node.content.trim()}
+              </SyntaxHighlighter>
+            </ScrollView>
+          </View>
+        );
+      },
+    }),
+    []
+  );
+
   return (
     <View style={[styles.container, isUser ? styles.userContainer : styles.assistantContainer]}>
       <View style={[styles.bubble, isUser ? styles.userBubble : styles.assistantBubble]}>
@@ -27,11 +99,9 @@ export function ConversationItem({ item, showToolCalls, onSelectOption }: Conver
           {isUser ? 'You' : 'Claude'}
         </Text>
         {isUser ? (
-          <Text style={[styles.content, styles.userContent]}>
-            {item.content}
-          </Text>
+          <Text style={[styles.content, styles.userContent]}>{item.content}</Text>
         ) : (
-          <Markdown style={markdownStyles}>
+          <Markdown style={markdownStyles} rules={rules}>
             {item.content}
           </Markdown>
         )}
@@ -71,6 +141,33 @@ export function ConversationItem({ item, showToolCalls, onSelectOption }: Conver
     </View>
   );
 }
+
+const codeBlockStyles = StyleSheet.create({
+  container: {
+    backgroundColor: '#1f2937',
+    borderRadius: 8,
+    marginVertical: 8,
+    overflow: 'hidden',
+  },
+  languageTag: {
+    backgroundColor: '#374151',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    alignSelf: 'flex-start',
+    borderBottomRightRadius: 4,
+  },
+  languageText: {
+    color: '#9ca3af',
+    fontSize: 10,
+    fontWeight: '600',
+    textTransform: 'uppercase',
+  },
+  highlighter: {
+    backgroundColor: 'transparent',
+    padding: 12,
+    margin: 0,
+  },
+});
 
 const markdownStyles = StyleSheet.create({
   body: {

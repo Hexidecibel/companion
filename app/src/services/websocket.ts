@@ -1,7 +1,9 @@
 import { Server, ConnectionState, WebSocketMessage, WebSocketResponse } from '../types';
+import { messageQueue, QueuedMessage } from './messageQueue';
 
 type MessageHandler = (message: WebSocketResponse) => void;
 type StateChangeHandler = (state: ConnectionState) => void;
+type QueueFlushHandler = (message: QueuedMessage, success: boolean) => void;
 
 const MAX_RECONNECT_ATTEMPTS = 3;
 const INITIAL_RECONNECT_DELAY = 2000;
@@ -19,7 +21,9 @@ export class WebSocketService {
 
   private messageHandlers: Set<MessageHandler> = new Set();
   private stateChangeHandlers: Set<StateChangeHandler> = new Set();
+  private queueFlushHandlers: Set<QueueFlushHandler> = new Set();
   private pendingRequests: Map<string, { resolve: (r: WebSocketResponse) => void; reject: (e: Error) => void }> = new Map();
+  private isFlushingQueue: boolean = false;
 
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private pingTimer: ReturnType<typeof setInterval> | null = null;
@@ -103,6 +107,9 @@ export class WebSocketService {
           reconnectAttempts: 0,
         });
         this.startPingInterval();
+
+        // Flush queued messages
+        this.flushMessageQueue();
       } else {
         console.error('Authentication failed:', response.error);
         this.updateState({
@@ -318,6 +325,76 @@ export class WebSocketService {
       this.disconnect();
       this.connect(this.server);
     }
+  }
+
+  // Get current server ID
+  getServerId(): string | null {
+    return this.server?.id || null;
+  }
+
+  // Flush queued messages when connected
+  private async flushMessageQueue(): Promise<void> {
+    if (this.isFlushingQueue || !this.server) return;
+
+    this.isFlushingQueue = true;
+    const serverId = this.server.id;
+
+    try {
+      const queued = await messageQueue.getMessagesForServer(serverId);
+      console.log(`Flushing ${queued.length} queued messages`);
+
+      for (const msg of queued) {
+        if (!this.isConnected()) {
+          console.log('Connection lost during queue flush');
+          break;
+        }
+
+        let success = false;
+        try {
+          switch (msg.type) {
+            case 'text': {
+              const textResponse = await this.sendRequest('send_input', { input: msg.content });
+              success = textResponse.success;
+              break;
+            }
+            case 'combined': {
+              const combinedResponse = await this.sendRequest('send_with_images', {
+                imagePaths: msg.imagePaths || [],
+                message: msg.content,
+              });
+              success = combinedResponse.success;
+              break;
+            }
+            default:
+              success = false;
+          }
+        } catch (err) {
+          console.error('Failed to send queued message:', err);
+          success = false;
+        }
+
+        // Notify listeners
+        this.queueFlushHandlers.forEach((handler) => {
+          try {
+            handler(msg, success);
+          } catch (err) {
+            console.error('Queue flush handler error:', err);
+          }
+        });
+
+        if (success) {
+          await messageQueue.dequeue(msg.id);
+        }
+      }
+    } finally {
+      this.isFlushingQueue = false;
+    }
+  }
+
+  // Subscribe to queue flush events
+  onQueueFlush(handler: QueueFlushHandler): () => void {
+    this.queueFlushHandlers.add(handler);
+    return () => this.queueFlushHandlers.delete(handler);
   }
 }
 

@@ -5,6 +5,7 @@ import { MdnsAdvertiser } from './mdns';
 import { PushNotificationService } from './push';
 import { WebSocketHandler } from './websocket';
 import { createServer, validateTlsConfig } from './tls';
+import { certsExist, generateAndSaveCerts, getDefaultCertPaths } from './cert-generator';
 
 async function main(): Promise<void> {
   console.log('Claude Companion Daemon v1.0.0');
@@ -14,17 +15,38 @@ async function main(): Promise<void> {
   const config = loadConfig();
   console.log(`Config: Port ${config.port}, TLS: ${config.tls}, mDNS: ${config.mdnsEnabled}`);
 
-  // Validate TLS config if enabled
+  // Auto-generate TLS certificates if enabled and missing
   if (config.tls) {
-    const tlsErrors = validateTlsConfig({
-      enabled: config.tls,
-      certPath: config.certPath,
-      keyPath: config.keyPath,
-    });
-    if (tlsErrors.length > 0) {
-      console.error('TLS configuration errors:');
-      tlsErrors.forEach((e) => console.error(`  - ${e}`));
-      process.exit(1);
+    const certPath = config.certPath || getDefaultCertPaths().certPath;
+    const keyPath = config.keyPath || getDefaultCertPaths().keyPath;
+
+    if (!certsExist(certPath, keyPath)) {
+      console.log('TLS certificates not found, generating self-signed certificates...');
+      try {
+        const paths = generateAndSaveCerts(certPath, keyPath);
+        config.certPath = paths.certPath;
+        config.keyPath = paths.keyPath;
+        console.log('Self-signed certificates generated successfully');
+        console.log('Note: Clients may need to accept the self-signed certificate');
+      } catch (err) {
+        console.error('Failed to generate TLS certificates:', err);
+        console.error('Falling back to non-TLS mode');
+        config.tls = false;
+      }
+    }
+
+    // Validate TLS config
+    if (config.tls) {
+      const tlsErrors = validateTlsConfig({
+        enabled: config.tls,
+        certPath: config.certPath,
+        keyPath: config.keyPath,
+      });
+      if (tlsErrors.length > 0) {
+        console.error('TLS configuration errors:');
+        tlsErrors.forEach((e) => console.error(`  - ${e}`));
+        process.exit(1);
+      }
     }
   }
 

@@ -24,6 +24,8 @@ echo ""
 echo "Creating directories..."
 mkdir -p /opt/claude-companion
 mkdir -p /etc/claude-companion
+mkdir -p /etc/claude-companion/certs
+chmod 700 /etc/claude-companion/certs
 
 # Check if Node.js is installed (for source install)
 if command -v node &> /dev/null; then
@@ -59,7 +61,9 @@ if [ ! -f /etc/claude-companion/config.json ]; then
 {
   "port": 9877,
   "token": "$TOKEN",
-  "tls": false,
+  "tls": true,
+  "cert_path": "/etc/claude-companion/certs/cert.pem",
+  "key_path": "/etc/claude-companion/certs/key.pem",
   "tmux_session": "claude",
   "claude_home": "$ACTUAL_HOME/.claude",
   "mdns_enabled": true,
@@ -69,6 +73,8 @@ EOF
   echo "Generated authentication token: $TOKEN"
   echo ""
   echo "IMPORTANT: Save this token! You'll need it to connect from the mobile app."
+  echo ""
+  echo "TLS is enabled by default. Certificates will be auto-generated on first start."
   echo ""
 else
   echo "Config file already exists, keeping existing settings."
