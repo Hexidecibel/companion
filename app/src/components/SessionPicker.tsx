@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -7,17 +7,10 @@ import {
   Modal,
   FlatList,
   ActivityIndicator,
+  Alert,
 } from 'react-native';
 import { wsService } from '../services/websocket';
-
-interface Session {
-  id: string;
-  name: string;
-  projectPath?: string;
-  lastActivity: number;
-  isWaitingForInput: boolean;
-  messageCount: number;
-}
+import { TmuxSessionInfo, DirectoryEntry } from '../types';
 
 interface SessionPickerProps {
   currentSessionId?: string;
@@ -26,70 +19,200 @@ interface SessionPickerProps {
 
 export function SessionPicker({ currentSessionId, onSessionChange }: SessionPickerProps) {
   const [visible, setVisible] = useState(false);
-  const [sessions, setSessions] = useState<Session[]>([]);
-  const [activeSessionId, setActiveSessionId] = useState<string | undefined>(currentSessionId);
+  const [sessions, setSessions] = useState<TmuxSessionInfo[]>([]);
+  const [activeSession, setActiveSession] = useState<string | undefined>(currentSessionId);
   const [loading, setLoading] = useState(false);
+  const [homeDir, setHomeDir] = useState<string>('');
 
-  const loadSessions = async () => {
+  // Directory browser state
+  const [showBrowser, setShowBrowser] = useState(false);
+  const [browsePath, setBrowsePath] = useState<string>('');
+  const [directories, setDirectories] = useState<DirectoryEntry[]>([]);
+  const [browseLoading, setBrowseLoading] = useState(false);
+
+  const loadSessions = useCallback(async () => {
     if (!wsService.isConnected()) return;
 
     setLoading(true);
     try {
-      const response = await wsService.sendRequest('get_sessions');
+      const response = await wsService.sendRequest('list_tmux_sessions', {});
       if (response.success && response.payload) {
-        const payload = response.payload as { sessions: Session[]; activeSessionId: string };
+        const payload = response.payload as {
+          sessions: TmuxSessionInfo[];
+          activeSession: string;
+          homeDir: string;
+        };
         setSessions(payload.sessions);
-        setActiveSessionId(payload.activeSessionId);
+        setActiveSession(payload.activeSession);
+        setHomeDir(payload.homeDir);
       }
     } catch (err) {
       console.error('Failed to load sessions:', err);
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
+
+  const browseDirectory = useCallback(async (path: string) => {
+    setBrowseLoading(true);
+    try {
+      const response = await wsService.sendRequest('browse_directories', { path });
+      if (response.success && response.payload) {
+        const payload = response.payload as {
+          currentPath: string;
+          entries: DirectoryEntry[];
+        };
+        setBrowsePath(payload.currentPath);
+        setDirectories(payload.entries);
+      }
+    } catch (err) {
+      console.error('Failed to browse directory:', err);
+    } finally {
+      setBrowseLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
     if (visible) {
       loadSessions();
     }
-  }, [visible]);
+  }, [visible, loadSessions]);
 
-  const handleSelectSession = async (sessionId: string) => {
-    if (sessionId === activeSessionId) {
+  const handleSelectSession = async (session: TmuxSessionInfo) => {
+    if (session.name === activeSession) {
       setVisible(false);
       return;
     }
 
     try {
-      const response = await wsService.sendRequest('switch_session', { sessionId });
+      const response = await wsService.sendRequest('switch_tmux_session', {
+        sessionName: session.name,
+      });
       if (response.success) {
-        setActiveSessionId(sessionId);
-        onSessionChange?.(sessionId);
+        setActiveSession(session.name);
+        onSessionChange?.(session.name);
+      } else {
+        Alert.alert('Error', response.error || 'Failed to switch session');
       }
     } catch (err) {
       console.error('Failed to switch session:', err);
+      Alert.alert('Error', 'Failed to switch session');
     }
 
     setVisible(false);
   };
 
+  const handleCreateSession = async (dirPath: string) => {
+    try {
+      setLoading(true);
+      const response = await wsService.sendRequest('create_tmux_session', {
+        workingDir: dirPath,
+        startClaude: true,
+      });
+      if (response.success && response.payload) {
+        const payload = response.payload as { sessionName: string };
+        setActiveSession(payload.sessionName);
+        onSessionChange?.(payload.sessionName);
+        setShowBrowser(false);
+        setVisible(false);
+        Alert.alert('Success', `Created session in ${dirPath.split('/').pop()}`);
+      } else {
+        Alert.alert('Error', response.error || 'Failed to create session');
+      }
+    } catch (err) {
+      console.error('Failed to create session:', err);
+      Alert.alert('Error', 'Failed to create session');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleKillSession = (session: TmuxSessionInfo) => {
+    Alert.alert(
+      'Kill Session',
+      `Kill "${session.workingDir?.split('/').pop() || session.name}"?\nThis will terminate Claude in this session.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Kill',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const response = await wsService.sendRequest('kill_tmux_session', {
+                sessionName: session.name,
+              });
+              if (response.success) {
+                loadSessions();
+              } else {
+                Alert.alert('Error', response.error || 'Failed to kill session');
+              }
+            } catch (err) {
+              Alert.alert('Error', 'Failed to kill session');
+            }
+          },
+        },
+      ]
+    );
+  };
+
   const formatTime = (timestamp: number) => {
-    const date = new Date(timestamp);
-    const now = new Date();
-    const diff = now.getTime() - timestamp;
+    const now = Date.now();
+    const diff = now - timestamp;
 
     if (diff < 60000) return 'Just now';
     if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`;
     if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`;
-    return date.toLocaleDateString();
+    return new Date(timestamp).toLocaleDateString();
   };
 
-  const currentSession = sessions.find((s) => s.id === activeSessionId);
-  const displayName = currentSession?.name || 'Select Session';
+  const currentSession = sessions.find((s) => s.name === activeSession);
+  const displayName = currentSession?.workingDir?.split('/').pop() || activeSession || 'Sessions';
 
-  if (sessions.length <= 1) {
-    return null; // Don't show picker if only one session
-  }
+  const renderSessionItem = ({ item }: { item: TmuxSessionInfo }) => {
+    const isActive = item.name === activeSession;
+    const dirName = item.workingDir?.split('/').pop() || item.name;
+
+    return (
+      <TouchableOpacity
+        style={[styles.sessionItem, isActive && styles.sessionItemActive]}
+        onPress={() => handleSelectSession(item)}
+        onLongPress={() => handleKillSession(item)}
+      >
+        <View style={styles.sessionInfo}>
+          <Text style={[styles.sessionName, isActive && styles.sessionNameActive]}>
+            {dirName}
+          </Text>
+          <Text style={styles.sessionPath} numberOfLines={1}>
+            {item.workingDir || item.name}
+          </Text>
+        </View>
+        <View style={styles.sessionMeta}>
+          {item.attached && (
+            <View style={styles.attachedBadge}>
+              <Text style={styles.attachedText}>•</Text>
+            </View>
+          )}
+          <Text style={styles.sessionTime}>{formatTime(item.created)}</Text>
+        </View>
+      </TouchableOpacity>
+    );
+  };
+
+  const renderDirectoryItem = ({ item }: { item: DirectoryEntry }) => (
+    <TouchableOpacity
+      style={styles.directoryItem}
+      onPress={() => {
+        if (item.isDirectory) {
+          browseDirectory(item.path);
+        }
+      }}
+    >
+      <Text style={styles.directoryIcon}>{item.name === '..' ? '↑' : '📁'}</Text>
+      <Text style={styles.directoryName} numberOfLines={1}>
+        {item.name}
+      </Text>
+    </TouchableOpacity>
+  );
 
   return (
     <>
@@ -97,67 +220,123 @@ export function SessionPicker({ currentSessionId, onSessionChange }: SessionPick
         <Text style={styles.pickerButtonText} numberOfLines={1}>
           {displayName}
         </Text>
-        <Text style={styles.pickerArrow}>v</Text>
+        <Text style={styles.pickerArrow}>▼</Text>
       </TouchableOpacity>
 
       <Modal
         visible={visible}
         transparent
-        animationType="fade"
-        onRequestClose={() => setVisible(false)}
+        animationType="slide"
+        onRequestClose={() => {
+          if (showBrowser) {
+            setShowBrowser(false);
+          } else {
+            setVisible(false);
+          }
+        }}
       >
-        <TouchableOpacity
-          style={styles.modalOverlay}
-          activeOpacity={1}
-          onPress={() => setVisible(false)}
-        >
-          <View style={styles.modalContent} onStartShouldSetResponder={() => true}>
-            <Text style={styles.modalTitle}>Switch Session</Text>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>
+                {showBrowser ? 'Select Directory' : 'Claude Sessions'}
+              </Text>
+              <TouchableOpacity
+                style={styles.closeButton}
+                onPress={() => {
+                  if (showBrowser) {
+                    setShowBrowser(false);
+                  } else {
+                    setVisible(false);
+                  }
+                }}
+              >
+                <Text style={styles.closeText}>×</Text>
+              </TouchableOpacity>
+            </View>
 
-            {loading ? (
-              <ActivityIndicator size="small" color="#3b82f6" style={styles.loading} />
-            ) : (
-              <FlatList
-                data={sessions}
-                keyExtractor={(item) => item.id}
-                renderItem={({ item }) => (
-                  <TouchableOpacity
-                    style={[
-                      styles.sessionItem,
-                      item.id === activeSessionId && styles.sessionItemActive,
-                    ]}
-                    onPress={() => handleSelectSession(item.id)}
-                  >
-                    <View style={styles.sessionInfo}>
-                      <Text style={styles.sessionName}>{item.name}</Text>
-                      {item.projectPath && (
-                        <Text style={styles.sessionPath} numberOfLines={1}>
-                          {item.projectPath}
-                        </Text>
-                      )}
-                    </View>
-                    <View style={styles.sessionMeta}>
-                      {item.isWaitingForInput && (
-                        <View style={styles.waitingBadge}>
-                          <Text style={styles.waitingText}>!</Text>
-                        </View>
-                      )}
-                      <Text style={styles.sessionTime}>{formatTime(item.lastActivity)}</Text>
-                    </View>
-                  </TouchableOpacity>
+            {showBrowser ? (
+              <>
+                <View style={styles.pathBar}>
+                  <Text style={styles.pathText} numberOfLines={1}>
+                    {browsePath}
+                  </Text>
+                </View>
+
+                {browseLoading ? (
+                  <View style={styles.loadingContainer}>
+                    <ActivityIndicator size="large" color="#3b82f6" />
+                  </View>
+                ) : (
+                  <FlatList
+                    data={directories}
+                    keyExtractor={(item) => item.path}
+                    renderItem={renderDirectoryItem}
+                    style={styles.list}
+                  />
                 )}
-                style={styles.sessionList}
-              />
-            )}
 
-            <TouchableOpacity
-              style={styles.closeButton}
-              onPress={() => setVisible(false)}
-            >
-              <Text style={styles.closeButtonText}>Cancel</Text>
-            </TouchableOpacity>
+                <View style={styles.footer}>
+                  <TouchableOpacity
+                    style={styles.cancelButton}
+                    onPress={() => setShowBrowser(false)}
+                  >
+                    <Text style={styles.cancelButtonText}>Back</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.createButton, loading && styles.createButtonDisabled]}
+                    onPress={() => handleCreateSession(browsePath)}
+                    disabled={loading}
+                  >
+                    {loading ? (
+                      <ActivityIndicator size="small" color="#fff" />
+                    ) : (
+                      <Text style={styles.createButtonText}>Start Claude Here</Text>
+                    )}
+                  </TouchableOpacity>
+                </View>
+              </>
+            ) : (
+              <>
+                {loading ? (
+                  <View style={styles.loadingContainer}>
+                    <ActivityIndicator size="large" color="#3b82f6" />
+                  </View>
+                ) : sessions.length === 0 ? (
+                  <View style={styles.emptyContainer}>
+                    <Text style={styles.emptyText}>No active sessions</Text>
+                    <Text style={styles.emptySubtext}>
+                      Create a new session to start Claude in a directory
+                    </Text>
+                  </View>
+                ) : (
+                  <FlatList
+                    data={sessions}
+                    keyExtractor={(item) => item.name}
+                    renderItem={renderSessionItem}
+                    style={styles.list}
+                  />
+                )}
+
+                <View style={styles.footer}>
+                  <TouchableOpacity
+                    style={styles.newSessionButton}
+                    onPress={() => {
+                      setShowBrowser(true);
+                      browseDirectory(homeDir || '/');
+                    }}
+                  >
+                    <Text style={styles.newSessionButtonText}>+ New Session</Text>
+                  </TouchableOpacity>
+                </View>
+
+                {sessions.length > 0 && (
+                  <Text style={styles.hint}>Long press a session to kill it</Text>
+                )}
+              </>
+            )}
           </View>
-        </TouchableOpacity>
+        </View>
       </Modal>
     </>
   );
@@ -171,7 +350,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 8,
-    maxWidth: 160,
+    maxWidth: 150,
+    marginLeft: 10,
   },
   pickerButtonText: {
     color: '#f3f4f6',
@@ -181,92 +361,191 @@ const styles = StyleSheet.create({
   },
   pickerArrow: {
     color: '#9ca3af',
-    fontSize: 10,
-    marginLeft: 4,
+    fontSize: 8,
+    marginLeft: 6,
   },
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.6)',
-    justifyContent: 'center',
-    alignItems: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+    justifyContent: 'flex-end',
   },
   modalContent: {
     backgroundColor: '#1f2937',
-    borderRadius: 16,
-    padding: 20,
-    width: '85%',
-    maxWidth: 360,
-    maxHeight: '70%',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    maxHeight: '80%',
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#374151',
   },
   modalTitle: {
     fontSize: 18,
     fontWeight: '600',
     color: '#f3f4f6',
-    marginBottom: 16,
-    textAlign: 'center',
   },
-  loading: {
-    marginVertical: 20,
+  closeButton: {
+    width: 32,
+    height: 32,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
-  sessionList: {
-    maxHeight: 300,
+  closeText: {
+    fontSize: 28,
+    color: '#9ca3af',
+    lineHeight: 28,
+  },
+  list: {
+    maxHeight: 350,
   },
   sessionItem: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: '#374151',
-    padding: 12,
-    borderRadius: 8,
-    marginBottom: 8,
+    paddingHorizontal: 20,
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: '#374151',
   },
   sessionItemActive: {
-    borderWidth: 1,
-    borderColor: '#3b82f6',
+    backgroundColor: '#1e3a5f',
   },
   sessionInfo: {
     flex: 1,
-    marginRight: 8,
+    marginRight: 12,
   },
   sessionName: {
-    color: '#f3f4f6',
-    fontSize: 14,
+    fontSize: 16,
     fontWeight: '500',
+    color: '#f3f4f6',
+    marginBottom: 4,
+  },
+  sessionNameActive: {
+    color: '#60a5fa',
   },
   sessionPath: {
+    fontSize: 12,
     color: '#9ca3af',
-    fontSize: 11,
-    marginTop: 2,
   },
   sessionMeta: {
     flexDirection: 'row',
     alignItems: 'center',
   },
-  waitingBadge: {
-    width: 18,
-    height: 18,
-    borderRadius: 9,
-    backgroundColor: '#f59e0b',
-    justifyContent: 'center',
-    alignItems: 'center',
+  attachedBadge: {
     marginRight: 8,
   },
-  waitingText: {
-    color: '#000',
-    fontSize: 12,
-    fontWeight: 'bold',
+  attachedText: {
+    color: '#10b981',
+    fontSize: 20,
   },
   sessionTime: {
     color: '#6b7280',
     fontSize: 11,
   },
-  closeButton: {
-    marginTop: 12,
+  directoryItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 20,
     paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#374151',
+  },
+  directoryIcon: {
+    fontSize: 18,
+    marginRight: 12,
+  },
+  directoryName: {
+    flex: 1,
+    fontSize: 15,
+    color: '#f3f4f6',
+  },
+  pathBar: {
+    backgroundColor: '#111827',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#374151',
+  },
+  pathText: {
+    fontSize: 12,
+    color: '#9ca3af',
+    fontFamily: 'monospace',
+  },
+  loadingContainer: {
+    paddingVertical: 40,
     alignItems: 'center',
   },
-  closeButtonText: {
-    color: '#9ca3af',
+  emptyContainer: {
+    paddingVertical: 40,
+    alignItems: 'center',
+  },
+  emptyText: {
     fontSize: 16,
+    color: '#9ca3af',
+    marginBottom: 8,
+  },
+  emptySubtext: {
+    fontSize: 13,
+    color: '#6b7280',
+    textAlign: 'center',
+    paddingHorizontal: 40,
+  },
+  footer: {
+    flexDirection: 'row',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#374151',
+  },
+  newSessionButton: {
+    flex: 1,
+    backgroundColor: '#3b82f6',
+    paddingVertical: 14,
+    borderRadius: 10,
+    alignItems: 'center',
+  },
+  newSessionButtonText: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  cancelButton: {
+    flex: 1,
+    backgroundColor: '#374151',
+    paddingVertical: 14,
+    borderRadius: 10,
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  cancelButtonText: {
+    color: '#f3f4f6',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  createButton: {
+    flex: 2,
+    backgroundColor: '#10b981',
+    paddingVertical: 14,
+    borderRadius: 10,
+    alignItems: 'center',
+  },
+  createButtonDisabled: {
+    opacity: 0.6,
+  },
+  createButtonText: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  hint: {
+    fontSize: 11,
+    color: '#6b7280',
+    textAlign: 'center',
+    paddingBottom: 16,
   },
 });

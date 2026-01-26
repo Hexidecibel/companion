@@ -5,6 +5,7 @@ import {
   detectWaitingForInput,
   detectCurrentActivity,
   getSessionStatus,
+  getRecentActivity,
 } from '../src/parser';
 import { ConversationMessage } from '../src/types';
 
@@ -354,6 +355,141 @@ describe('detectCurrentActivity', () => {
     expect(activity).toContain('Running command:');
     expect(activity).toContain('...');
     expect(activity!.length).toBeLessThan(longCommand.length + 20);
+  });
+});
+
+describe('getRecentActivity', () => {
+  it('should return empty array for empty messages', () => {
+    expect(getRecentActivity([])).toEqual([]);
+  });
+
+  it('should return empty array for messages without tool calls', () => {
+    const messages: ConversationMessage[] = [
+      { id: '1', type: 'user', content: 'Hello', timestamp: 1 },
+      { id: '2', type: 'assistant', content: 'Hi there!', timestamp: 2 },
+    ];
+
+    expect(getRecentActivity(messages)).toEqual([]);
+  });
+
+  it('should extract tool activity details', () => {
+    const messages: ConversationMessage[] = [
+      {
+        id: '1',
+        type: 'assistant',
+        content: '',
+        timestamp: 1000,
+        toolCalls: [
+          {
+            id: 't1',
+            name: 'Read',
+            input: { file_path: '/test/file.ts' },
+            output: 'file contents here',
+            status: 'completed',
+          },
+        ],
+      },
+    ];
+
+    const activity = getRecentActivity(messages);
+
+    expect(activity).toHaveLength(1);
+    expect(activity[0].toolName).toBe('Read');
+    expect(activity[0].input).toBe('/test/file.ts');
+    expect(activity[0].output).toBe('file contents here');
+    expect(activity[0].timestamp).toBe(1000);
+  });
+
+  it('should limit to specified number of activities', () => {
+    const messages: ConversationMessage[] = [
+      {
+        id: '1',
+        type: 'assistant',
+        content: '',
+        timestamp: 1,
+        toolCalls: Array.from({ length: 10 }, (_, i) => ({
+          id: `t${i}`,
+          name: 'Read',
+          input: { file_path: `/file${i}.ts` },
+          status: 'completed' as const,
+        })),
+      },
+    ];
+
+    const activity = getRecentActivity(messages, 3);
+
+    expect(activity).toHaveLength(3);
+  });
+
+  it('should truncate long outputs', () => {
+    const longOutput = 'x'.repeat(3000);
+    const messages: ConversationMessage[] = [
+      {
+        id: '1',
+        type: 'assistant',
+        content: '',
+        timestamp: 1,
+        toolCalls: [
+          {
+            id: 't1',
+            name: 'Bash',
+            input: { command: 'ls -la' },
+            output: longOutput,
+            status: 'completed',
+          },
+        ],
+      },
+    ];
+
+    const activity = getRecentActivity(messages);
+
+    expect(activity[0].output!.length).toBeLessThanOrEqual(2000);
+  });
+
+  it('should handle commands in input', () => {
+    const messages: ConversationMessage[] = [
+      {
+        id: '1',
+        type: 'assistant',
+        content: '',
+        timestamp: 1,
+        toolCalls: [
+          {
+            id: 't1',
+            name: 'Bash',
+            input: { command: 'npm run build' },
+            status: 'completed',
+          },
+        ],
+      },
+    ];
+
+    const activity = getRecentActivity(messages);
+
+    expect(activity[0].input).toBe('npm run build');
+  });
+
+  it('should handle search patterns in input', () => {
+    const messages: ConversationMessage[] = [
+      {
+        id: '1',
+        type: 'assistant',
+        content: '',
+        timestamp: 1,
+        toolCalls: [
+          {
+            id: 't1',
+            name: 'Grep',
+            input: { pattern: 'function.*test' },
+            status: 'completed',
+          },
+        ],
+      },
+    ];
+
+    const activity = getRecentActivity(messages);
+
+    expect(activity[0].input).toBe('Pattern: function.*test');
   });
 });
 

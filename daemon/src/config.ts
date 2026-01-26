@@ -2,20 +2,23 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { DaemonConfig } from './types';
 
+const HOME_DIR = process.env.HOME || '/root';
+const CONFIG_DIR = path.join(HOME_DIR, '.claude-companion');
+
 const DEFAULT_CONFIG: DaemonConfig = {
   port: 9877,
   token: '',
-  tls: true,
-  certPath: '/etc/claude-companion/certs/cert.pem',
-  keyPath: '/etc/claude-companion/certs/key.pem',
+  tls: false,
+  certPath: path.join(CONFIG_DIR, 'certs', 'cert.pem'),
+  keyPath: path.join(CONFIG_DIR, 'certs', 'key.pem'),
   tmuxSession: 'claude',
-  claudeHome: path.join(process.env.HOME || '/root', '.claude'),
+  claudeHome: path.join(HOME_DIR, '.claude'),
   mdnsEnabled: true,
   pushDelayMs: 60000, // 1 minute
 };
 
 export function loadConfig(): DaemonConfig {
-  const configPath = process.env.CONFIG_PATH || '/etc/claude-companion/config.json';
+  const configPath = process.env.CONFIG_PATH || path.join(CONFIG_DIR, 'config.json');
 
   let fileConfig: Partial<DaemonConfig> = {};
 
@@ -63,7 +66,7 @@ export function loadConfig(): DaemonConfig {
 }
 
 export function saveConfig(config: DaemonConfig): void {
-  const configPath = process.env.CONFIG_PATH || '/etc/claude-companion/config.json';
+  const configPath = process.env.CONFIG_PATH || path.join(CONFIG_DIR, 'config.json');
 
   // Convert to snake_case for file
   const fileConfig = {

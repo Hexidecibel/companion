@@ -1,34 +1,40 @@
 import { spawn, execSync } from 'child_process';
 
 export class InputInjector {
-  private tmuxSession: string;
+  private defaultSession: string;
+  private activeSession: string;
 
   constructor(tmuxSession: string) {
-    this.tmuxSession = tmuxSession;
+    this.defaultSession = tmuxSession;
+    this.activeSession = tmuxSession;
   }
 
-  async sendInput(input: string): Promise<boolean> {
+  /**
+   * Send input to the active session (or a specific session if provided)
+   */
+  async sendInput(input: string, targetSession?: string): Promise<boolean> {
+    const session = targetSession || this.activeSession;
     const { spawnSync } = require('child_process');
 
     // First, check if the tmux session exists
-    const checkResult = spawnSync('tmux', ['has-session', '-t', this.tmuxSession], { timeout: 5000 });
+    const checkResult = spawnSync('tmux', ['has-session', '-t', session], { timeout: 5000 });
     if (checkResult.status !== 0) {
-      console.error(`Tmux session '${this.tmuxSession}' not found`);
+      console.error(`Tmux session '${session}' not found`);
       return false;
     }
 
     // Session exists, send the input
-    return this.doSendInput(input);
+    return this.doSendInput(input, session);
   }
 
-  private async doSendInput(input: string): Promise<boolean> {
+  private async doSendInput(input: string, session: string): Promise<boolean> {
     try {
-      console.log(`Sending input to tmux session '${this.tmuxSession}': ${input.substring(0, 80)}...`);
+      console.log(`Sending input to tmux session '${session}': ${input.substring(0, 80)}...`);
 
       const { spawnSync } = require('child_process');
 
       // Send the text using spawnSync (avoids shell interpretation)
-      const textResult = spawnSync('tmux', ['send-keys', '-t', this.tmuxSession, '-l', '--', input], { timeout: 5000 });
+      const textResult = spawnSync('tmux', ['send-keys', '-t', session, '-l', '--', input], { timeout: 5000 });
       if (textResult.status !== 0) {
         console.error('Failed to send text:', textResult.stderr?.toString());
         return false;
@@ -39,14 +45,14 @@ export class InputInjector {
       spawnSync('sleep', ['0.1']);
 
       // Send Enter
-      const enterResult = spawnSync('tmux', ['send-keys', '-t', this.tmuxSession, 'Enter'], { timeout: 5000 });
+      const enterResult = spawnSync('tmux', ['send-keys', '-t', session, 'Enter'], { timeout: 5000 });
       if (enterResult.status !== 0) {
         console.error('Failed to send Enter:', enterResult.stderr?.toString());
         return false;
       }
       console.log('Enter sent to tmux');
 
-      console.log(`Input sent successfully to tmux session '${this.tmuxSession}'`);
+      console.log(`Input sent successfully to tmux session '${session}'`);
       return true;
     } catch (err) {
       console.error('Error sending input to tmux:', err);
@@ -65,9 +71,10 @@ export class InputInjector {
       .replace(/`/g, '\\`');
   }
 
-  async checkSessionExists(): Promise<boolean> {
+  async checkSessionExists(sessionName?: string): Promise<boolean> {
+    const session = sessionName || this.activeSession;
     return new Promise((resolve) => {
-      const check = spawn('tmux', ['has-session', '-t', this.tmuxSession]);
+      const check = spawn('tmux', ['has-session', '-t', session]);
       check.on('close', (code) => resolve(code === 0));
       check.on('error', () => resolve(false));
     });
@@ -94,11 +101,25 @@ export class InputInjector {
     });
   }
 
-  setSession(sessionName: string): void {
-    this.tmuxSession = sessionName;
+  setActiveSession(sessionName: string): void {
+    this.activeSession = sessionName;
   }
 
+  getActiveSession(): string {
+    return this.activeSession;
+  }
+
+  getDefaultSession(): string {
+    return this.defaultSession;
+  }
+
+  // Deprecated - use setActiveSession
+  setSession(sessionName: string): void {
+    this.activeSession = sessionName;
+  }
+
+  // Deprecated - use getActiveSession
   getSession(): string {
-    return this.tmuxSession;
+    return this.activeSession;
   }
 }

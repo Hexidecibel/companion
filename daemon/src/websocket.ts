@@ -8,6 +8,7 @@ import * as crypto from 'crypto';
 import { ClaudeWatcher } from './watcher';
 import { InputInjector } from './input-injector';
 import { PushNotificationService } from './push';
+import { TmuxManager } from './tmux-manager';
 import { extractHighlights } from './parser';
 import { WebSocketMessage, WebSocketResponse, DaemonConfig } from './types';
 import { loadConfig, saveConfig } from './config';
@@ -27,18 +28,21 @@ export class WebSocketHandler {
   private watcher: ClaudeWatcher;
   private injector: InputInjector;
   private push: PushNotificationService;
+  private tmux: TmuxManager;
 
   constructor(
     server: Server,
     token: string,
     watcher: ClaudeWatcher,
     injector: InputInjector,
-    push: PushNotificationService
+    push: PushNotificationService,
+    tmux?: TmuxManager
   ) {
     this.token = token;
     this.watcher = watcher;
     this.injector = injector;
     this.push = push;
+    this.tmux = tmux || new TmuxManager('claude');
 
     this.wss = new WebSocketServer({ server });
 
@@ -311,6 +315,31 @@ export class WebSocketHandler {
         this.handleRotateToken(client, requestId);
         break;
 
+      // Tmux session management
+      case 'list_tmux_sessions':
+        this.handleListTmuxSessions(client, requestId);
+        break;
+
+      case 'create_tmux_session':
+        this.handleCreateTmuxSession(
+          client,
+          payload as { name?: string; workingDir: string; startClaude?: boolean },
+          requestId
+        );
+        break;
+
+      case 'kill_tmux_session':
+        this.handleKillTmuxSession(client, payload as { sessionName: string }, requestId);
+        break;
+
+      case 'switch_tmux_session':
+        this.handleSwitchTmuxSession(client, payload as { sessionName: string }, requestId);
+        break;
+
+      case 'browse_directories':
+        this.handleBrowseDirectories(client, payload as { path?: string }, requestId);
+        break;
+
       default:
         this.send(client.ws, {
           type: 'error',
@@ -534,6 +563,269 @@ export class WebSocketHandler {
         type: 'token_rotated',
         success: false,
         error: 'Failed to rotate token',
+        requestId,
+      });
+    }
+  }
+
+  // Tmux session management handlers
+
+  private async handleListTmuxSessions(
+    client: AuthenticatedClient,
+    requestId?: string
+  ): Promise<void> {
+    try {
+      const sessions = await this.tmux.listSessions();
+      const activeSession = this.injector.getActiveSession();
+
+      this.send(client.ws, {
+        type: 'tmux_sessions',
+        success: true,
+        payload: {
+          sessions,
+          activeSession,
+          homeDir: this.tmux.getHomeDir(),
+        },
+        requestId,
+      });
+    } catch (err) {
+      this.send(client.ws, {
+        type: 'tmux_sessions',
+        success: false,
+        error: 'Failed to list sessions',
+        requestId,
+      });
+    }
+  }
+
+  private async handleCreateTmuxSession(
+    client: AuthenticatedClient,
+    payload: { name?: string; workingDir: string; startClaude?: boolean } | undefined,
+    requestId?: string
+  ): Promise<void> {
+    if (!payload?.workingDir) {
+      this.send(client.ws, {
+        type: 'tmux_session_created',
+        success: false,
+        error: 'Missing workingDir',
+        requestId,
+      });
+      return;
+    }
+
+    // Validate directory exists
+    if (!fs.existsSync(payload.workingDir)) {
+      this.send(client.ws, {
+        type: 'tmux_session_created',
+        success: false,
+        error: `Directory does not exist: ${payload.workingDir}`,
+        requestId,
+      });
+      return;
+    }
+
+    const sessionName = payload.name || this.tmux.generateSessionName(payload.workingDir);
+    const startClaude = payload.startClaude !== false; // Default true
+
+    console.log(`WebSocket: Creating tmux session "${sessionName}" in ${payload.workingDir}`);
+
+    const result = await this.tmux.createSession(sessionName, payload.workingDir, startClaude);
+
+    if (result.success) {
+      // Switch to the new session
+      this.injector.setActiveSession(sessionName);
+
+      this.send(client.ws, {
+        type: 'tmux_session_created',
+        success: true,
+        payload: {
+          sessionName,
+          workingDir: payload.workingDir,
+        },
+        requestId,
+      });
+
+      // Broadcast to all clients that sessions changed
+      this.broadcast('tmux_sessions_changed', { action: 'created', sessionName });
+    } else {
+      this.send(client.ws, {
+        type: 'tmux_session_created',
+        success: false,
+        error: result.error,
+        requestId,
+      });
+    }
+  }
+
+  private async handleKillTmuxSession(
+    client: AuthenticatedClient,
+    payload: { sessionName: string } | undefined,
+    requestId?: string
+  ): Promise<void> {
+    if (!payload?.sessionName) {
+      this.send(client.ws, {
+        type: 'tmux_session_killed',
+        success: false,
+        error: 'Missing sessionName',
+        requestId,
+      });
+      return;
+    }
+
+    console.log(`WebSocket: Killing tmux session "${payload.sessionName}"`);
+
+    const result = await this.tmux.killSession(payload.sessionName);
+
+    if (result.success) {
+      // If we killed the active session, switch to another
+      if (this.injector.getActiveSession() === payload.sessionName) {
+        const remaining = await this.tmux.listSessions();
+        if (remaining.length > 0) {
+          this.injector.setActiveSession(remaining[0].name);
+        }
+      }
+
+      this.send(client.ws, {
+        type: 'tmux_session_killed',
+        success: true,
+        payload: { sessionName: payload.sessionName },
+        requestId,
+      });
+
+      // Broadcast to all clients
+      this.broadcast('tmux_sessions_changed', { action: 'killed', sessionName: payload.sessionName });
+    } else {
+      this.send(client.ws, {
+        type: 'tmux_session_killed',
+        success: false,
+        error: result.error,
+        requestId,
+      });
+    }
+  }
+
+  private async handleSwitchTmuxSession(
+    client: AuthenticatedClient,
+    payload: { sessionName: string } | undefined,
+    requestId?: string
+  ): Promise<void> {
+    if (!payload?.sessionName) {
+      this.send(client.ws, {
+        type: 'tmux_session_switched',
+        success: false,
+        error: 'Missing sessionName',
+        requestId,
+      });
+      return;
+    }
+
+    // Verify session exists
+    const exists = await this.tmux.sessionExists(payload.sessionName);
+    if (!exists) {
+      this.send(client.ws, {
+        type: 'tmux_session_switched',
+        success: false,
+        error: `Session "${payload.sessionName}" does not exist`,
+        requestId,
+      });
+      return;
+    }
+
+    // Switch input target to this tmux session
+    this.injector.setActiveSession(payload.sessionName);
+    console.log(`WebSocket: Switched to tmux session "${payload.sessionName}"`);
+
+    // Try to find and switch to the corresponding conversation session
+    // Get the tmux session's working directory
+    const sessions = await this.tmux.listSessions();
+    const tmuxSession = sessions.find(s => s.name === payload.sessionName);
+    let conversationSessionId: string | undefined;
+
+    if (tmuxSession?.workingDir) {
+      // Encode the working directory the same way Claude does: /a/b/c -> -a-b-c
+      const encodedPath = tmuxSession.workingDir.replace(/\//g, '-');
+
+      // Find conversation session whose ID matches or starts with this encoded path
+      const convSessions = this.watcher.getSessions();
+      const matchingConv = convSessions.find(cs => cs.id === encodedPath);
+
+      if (matchingConv) {
+        this.watcher.setActiveSession(matchingConv.id);
+        conversationSessionId = matchingConv.id;
+        console.log(`WebSocket: Switched conversation to "${matchingConv.id}" for project ${tmuxSession.workingDir}`);
+      } else {
+        console.log(`WebSocket: No conversation found for ${encodedPath}, available: ${convSessions.map(c => c.id).join(', ')}`);
+      }
+    }
+
+    this.send(client.ws, {
+      type: 'tmux_session_switched',
+      success: true,
+      payload: {
+        sessionName: payload.sessionName,
+        conversationSessionId,
+      },
+      requestId,
+    });
+  }
+
+  private async handleBrowseDirectories(
+    client: AuthenticatedClient,
+    payload: { path?: string } | undefined,
+    requestId?: string
+  ): Promise<void> {
+    const basePath = payload?.path || this.tmux.getHomeDir();
+
+    try {
+      // Get directory contents
+      const entries: Array<{ name: string; path: string; isDirectory: boolean }> = [];
+
+      // Add parent directory option if not at root
+      if (basePath !== '/') {
+        entries.push({
+          name: '..',
+          path: path.dirname(basePath),
+          isDirectory: true,
+        });
+      }
+
+      const items = fs.readdirSync(basePath, { withFileTypes: true });
+
+      for (const item of items) {
+        // Skip hidden files and common non-project directories
+        if (item.name.startsWith('.') && item.name !== '..') continue;
+        if (['node_modules', '__pycache__', 'venv', '.git'].includes(item.name)) continue;
+
+        if (item.isDirectory()) {
+          entries.push({
+            name: item.name,
+            path: path.join(basePath, item.name),
+            isDirectory: true,
+          });
+        }
+      }
+
+      // Sort: directories first, then alphabetically
+      entries.sort((a, b) => {
+        if (a.name === '..') return -1;
+        if (b.name === '..') return 1;
+        return a.name.localeCompare(b.name);
+      });
+
+      this.send(client.ws, {
+        type: 'directory_listing',
+        success: true,
+        payload: {
+          currentPath: basePath,
+          entries: entries.slice(0, 100), // Limit to 100 entries
+        },
+        requestId,
+      });
+    } catch (err) {
+      this.send(client.ws, {
+        type: 'directory_listing',
+        success: false,
+        error: `Cannot read directory: ${basePath}`,
         requestId,
       });
     }

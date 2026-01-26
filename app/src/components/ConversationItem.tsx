@@ -305,17 +305,15 @@ const styles = StyleSheet.create({
   collapsedContent: {
     maxHeight: 250,
     overflow: 'hidden',
+    position: 'relative',
   },
   fadeOverlay: {
     position: 'absolute',
     bottom: 0,
     left: 0,
     right: 0,
-    height: 60,
-    backgroundColor: 'transparent',
-    // Gradient-like fade effect using multiple layers
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(55, 65, 81, 0.3)',
+    height: 40,
+    backgroundColor: 'rgba(55, 65, 81, 0.95)',
   },
   userBubble: {
     backgroundColor: '#3b82f6',

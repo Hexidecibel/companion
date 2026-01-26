@@ -88,3 +88,18 @@ export interface DiscoveredServer {
 }
 
 export type ViewMode = 'highlights' | 'full';
+
+// Tmux session management types
+export interface TmuxSessionInfo {
+  name: string;
+  created: number;
+  attached: boolean;
+  windows: number;
+  workingDir?: string;
+}
+
+export interface DirectoryEntry {
+  name: string;
+  path: string;
+  isDirectory: boolean;
+}

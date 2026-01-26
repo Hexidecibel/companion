@@ -22,12 +22,22 @@ interface ExpoPushResponse {
   }>;
 }
 
+interface BatchedNotification {
+  preview: string;
+  timestamp: number;
+}
+
 export class PushNotificationService {
   private devices: Map<string, RegisteredDevice> = new Map();
   private instantNotifyDevices: Set<string> = new Set();
   private pendingPush: NodeJS.Timeout | null = null;
   private pushDelayMs: number;
   private firebaseInitialized: boolean = false;
+
+  // Batched notifications for non-instant devices
+  private batchedNotifications: BatchedNotification[] = [];
+  private batchTimer: NodeJS.Timeout | null = null;
+  private readonly BATCH_INTERVAL_MS = 4 * 60 * 60 * 1000; // 4 hours
 
   constructor(credentialsPath: string | undefined, pushDelayMs: number) {
     this.pushDelayMs = pushDelayMs;
@@ -99,27 +109,55 @@ export class PushNotificationService {
       );
     }
 
-    // Only schedule if not already scheduled - don't reset the timer
-    if (this.pendingPush) {
-      console.log('Push notifications: Notification already scheduled, keeping existing timer');
+    // For non-instant devices, batch notifications
+    const batchedDevices = Array.from(this.devices.entries())
+      .filter(([deviceId]) => !this.instantNotifyDevices.has(deviceId));
+
+    if (batchedDevices.length > 0) {
+      // Add to batch queue
+      this.batchedNotifications.push({
+        preview,
+        timestamp: Date.now(),
+      });
+      console.log(`Push notifications: Added to batch queue (${this.batchedNotifications.length} pending)`);
+
+      // Start batch timer if not already running
+      if (!this.batchTimer) {
+        console.log(`Push notifications: Starting batch timer (${this.BATCH_INTERVAL_MS / 1000 / 60} minutes)`);
+        this.batchTimer = setTimeout(() => {
+          this.sendBatchedNotifications();
+        }, this.BATCH_INTERVAL_MS);
+      }
+    }
+  }
+
+  private sendBatchedNotifications(): void {
+    const batchedDevices = Array.from(this.devices.entries())
+      .filter(([deviceId]) => !this.instantNotifyDevices.has(deviceId));
+
+    if (batchedDevices.length === 0 || this.batchedNotifications.length === 0) {
+      this.batchedNotifications = [];
+      this.batchTimer = null;
       return;
     }
 
-    // Schedule delayed notifications for other devices
-    const delayedDevices = Array.from(this.devices.entries())
-      .filter(([deviceId]) => !this.instantNotifyDevices.has(deviceId));
+    // Create summary message
+    const count = this.batchedNotifications.length;
+    const lastPreview = this.batchedNotifications[this.batchedNotifications.length - 1].preview;
+    const summary = count === 1
+      ? lastPreview
+      : `${count} messages waiting - Latest: ${lastPreview.substring(0, 100)}`;
 
-    if (delayedDevices.length > 0) {
-      console.log(`Push notifications: Scheduling notification for ${delayedDevices.length} device(s) in ${this.pushDelayMs}ms`);
-      this.pendingPush = setTimeout(() => {
-        console.log('Push notifications: Timer fired, sending notification now');
-        this.sendNotifications(
-          preview,
-          delayedDevices.map(([_, d]) => d.token)
-        );
-        this.pendingPush = null;
-      }, this.pushDelayMs);
-    }
+    console.log(`Push notifications: Sending batched notification (${count} messages) to ${batchedDevices.length} device(s)`);
+
+    this.sendNotifications(
+      summary,
+      batchedDevices.map(([_, d]) => d.token)
+    );
+
+    // Clear batch
+    this.batchedNotifications = [];
+    this.batchTimer = null;
   }
 
   cancelPendingNotification(): void {
@@ -127,6 +165,16 @@ export class PushNotificationService {
       clearTimeout(this.pendingPush);
       this.pendingPush = null;
       console.log('Push notifications: Cancelled pending notification');
+    }
+
+    // Also clear batched notifications when user responds
+    if (this.batchedNotifications.length > 0) {
+      this.batchedNotifications = [];
+      console.log('Push notifications: Cleared batched notifications');
+    }
+    if (this.batchTimer) {
+      clearTimeout(this.batchTimer);
+      this.batchTimer = null;
     }
   }
 

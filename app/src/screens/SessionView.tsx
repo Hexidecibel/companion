@@ -21,6 +21,7 @@ import { StatusIndicator } from '../components/StatusIndicator';
 import { ConversationItem } from '../components/ConversationItem';
 import { InputBar } from '../components/InputBar';
 import { QuickReplies } from '../components/QuickReplies';
+import { SessionPicker } from '../components/SessionPicker';
 import { getSessionSettings, saveSessionSettings, SessionSettings } from '../services/storage';
 import { wsService } from '../services/websocket';
 
@@ -66,14 +67,8 @@ export function SessionView({ server, onBack }: SessionViewProps) {
     }
   }, [server.id, sessionSettings]);
 
-  // Auto-scroll to bottom whenever data changes
-  useEffect(() => {
-    if (data.length > 0 && listRef.current) {
-      setTimeout(() => {
-        listRef.current?.scrollToEnd({ animated: true });
-      }, 150);
-    }
-  }, [data, data.length]);
+  // Auto-scroll disabled - was too aggressive and prevented reading history
+  // User can tap the scroll-to-bottom button when needed
 
   // Refresh when connection is established and sync settings
   useEffect(() => {
@@ -88,12 +83,19 @@ export function SessionView({ server, onBack }: SessionViewProps) {
     }
   }, [isConnected, refresh, server.id]);
 
-  const handleSelectOption = async (option: string) => {
-    await sendInput(option);
+  const scrollToBottom = () => {
+    setTimeout(() => {
+      listRef.current?.scrollToEnd({ animated: true });
+    }, 100);
   };
 
-  const scrollToBottom = () => {
-    listRef.current?.scrollToEnd({ animated: true });
+  const handleSendInput = async (text: string) => {
+    await sendInput(text);
+    scrollToBottom();
+  };
+
+  const handleSelectOption = async (option: string) => {
+    await handleSendInput(option);
   };
 
   const handleScroll = (event: any) => {
@@ -179,9 +181,12 @@ export function SessionView({ server, onBack }: SessionViewProps) {
           <Text style={styles.backButtonText}>‹ Back</Text>
         </TouchableOpacity>
         <View style={styles.headerCenter}>
-          <Text style={styles.headerTitle} numberOfLines={1}>
-            {server.name}
-          </Text>
+          <View style={styles.headerTitleRow}>
+            <Text style={styles.headerTitle} numberOfLines={1}>
+              {server.name}
+            </Text>
+            {isConnected && <SessionPicker onSessionChange={() => refresh()} />}
+          </View>
           {status?.projectPath && (
             <Text style={styles.headerSubtitle} numberOfLines={1}>
               {status.projectPath}
@@ -360,31 +365,29 @@ export function SessionView({ server, onBack }: SessionViewProps) {
           />
         }
         ListEmptyComponent={renderEmptyContent}
-        onContentSizeChange={() => {
-          if (isAtBottom) {
-            listRef.current?.scrollToEnd({ animated: false });
-          }
-        }}
-        onLayout={() => {
-          listRef.current?.scrollToEnd({ animated: false });
-        }}
         onScroll={handleScroll}
         scrollEventThrottle={100}
       />
 
       {/* Floating action buttons */}
       {!isAtBottom && (
-        <TouchableOpacity style={styles.scrollButton} onPress={scrollToBottom}>
+        <TouchableOpacity
+          style={[
+            styles.scrollButton,
+            status?.isWaitingForInput && styles.scrollButtonAboveQuickReplies,
+          ]}
+          onPress={scrollToBottom}
+        >
           <Text style={styles.scrollButtonText}>↓</Text>
         </TouchableOpacity>
       )}
 
       {status?.isWaitingForInput && isConnected && (
-        <QuickReplies onSelect={sendInput} disabled={!isConnected} />
+        <QuickReplies onSelect={handleSendInput} disabled={!isConnected} />
       )}
 
       <InputBar
-        onSend={sendInput}
+        onSend={handleSendInput}
         onSendImage={sendImage}
         onUploadImage={uploadImage}
         onSendWithImages={sendWithImages}
@@ -426,6 +429,10 @@ const styles = StyleSheet.create({
   headerCenter: {
     flex: 1,
     marginHorizontal: 12,
+  },
+  headerTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
   },
   headerTitle: {
     color: '#f3f4f6',
@@ -716,6 +723,9 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.25,
     shadowRadius: 4,
     elevation: 5,
+  },
+  scrollButtonAboveQuickReplies: {
+    bottom: 130,
   },
   scrollButtonText: {
     color: '#ffffff',
