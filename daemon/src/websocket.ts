@@ -858,11 +858,27 @@ export class WebSocketHandler {
     }
 
     try {
-      // Security: only allow reading files in certain directories
       const homeDir = this.tmux.getHomeDir();
-      const resolvedPath = path.resolve(filePath);
+      let resolvedPath: string;
 
-      // Allow reading from home directory, /tmp, and common project paths
+      // Handle different path formats
+      if (filePath.startsWith('~/')) {
+        // Expand ~ to home directory
+        resolvedPath = path.join(homeDir, filePath.slice(2));
+      } else if (filePath.startsWith('/')) {
+        // Absolute path
+        resolvedPath = filePath;
+      } else {
+        // Relative path - resolve against active session's project path
+        const activeConv = this.watcher.getActiveConversation();
+        const projectPath = activeConv?.projectPath || homeDir;
+        resolvedPath = path.resolve(projectPath, filePath);
+      }
+
+      // Normalize the path
+      resolvedPath = path.normalize(resolvedPath);
+
+      // Security: only allow reading files in certain directories
       const allowedPaths = [
         homeDir,
         '/tmp',
@@ -875,7 +891,7 @@ export class WebSocketHandler {
         this.send(client.ws, {
           type: 'file_content',
           success: false,
-          error: 'Access denied: file outside allowed directories',
+          error: `Access denied: file outside allowed directories (resolved: ${resolvedPath})`,
           requestId,
         });
         return;
