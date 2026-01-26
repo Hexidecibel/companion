@@ -1,0 +1,325 @@
+import { Server, ConnectionState, WebSocketMessage, WebSocketResponse } from '../types';
+
+type MessageHandler = (message: WebSocketResponse) => void;
+type StateChangeHandler = (state: ConnectionState) => void;
+
+const MAX_RECONNECT_ATTEMPTS = 3;
+const INITIAL_RECONNECT_DELAY = 2000;
+const MAX_RECONNECT_DELAY = 10000;
+const PING_INTERVAL = 30000;
+const CONNECTION_TIMEOUT = 10000;
+
+export class WebSocketService {
+  private ws: WebSocket | null = null;
+  private server: Server | null = null;
+  private connectionState: ConnectionState = {
+    status: 'disconnected',
+    reconnectAttempts: 0,
+  };
+
+  private messageHandlers: Set<MessageHandler> = new Set();
+  private stateChangeHandlers: Set<StateChangeHandler> = new Set();
+  private pendingRequests: Map<string, { resolve: (r: WebSocketResponse) => void; reject: (e: Error) => void }> = new Map();
+
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private pingTimer: ReturnType<typeof setInterval> | null = null;
+  private connectionTimer: ReturnType<typeof setTimeout> | null = null;
+  private requestCounter = 0;
+
+  connect(server: Server): void {
+    this.server = server;
+    this.doConnect();
+  }
+
+  private doConnect(): void {
+    if (!this.server) return;
+
+    // Clear any existing timers
+    this.clearTimers();
+
+    // Update state
+    this.updateState({
+      status: this.connectionState.reconnectAttempts > 0 ? 'reconnecting' : 'connecting',
+    });
+
+    const protocol = this.server.useTls ? 'wss' : 'ws';
+    const url = `${protocol}://${this.server.host}:${this.server.port}`;
+
+    console.log(`Connecting to ${url}...`);
+
+    try {
+      this.ws = new WebSocket(url);
+
+      // Set connection timeout
+      this.connectionTimer = setTimeout(() => {
+        if (this.connectionState.status === 'connecting' || this.connectionState.status === 'reconnecting') {
+          console.log('Connection timeout');
+          this.ws?.close();
+          this.handleDisconnect('Connection timeout');
+        }
+      }, CONNECTION_TIMEOUT);
+
+      this.ws.onopen = () => this.handleOpen();
+      this.ws.onmessage = (event) => this.handleMessage(event);
+      this.ws.onclose = (event) => this.handleClose(event);
+      this.ws.onerror = (event) => this.handleError(event);
+    } catch (error) {
+      console.error('Failed to create WebSocket:', error);
+      this.handleDisconnect('Failed to create connection');
+    }
+  }
+
+  private handleOpen(): void {
+    console.log('WebSocket connected');
+    this.clearConnectionTimer();
+
+    // Authenticate immediately
+    if (this.server) {
+      this.authenticate(this.server.token);
+    }
+  }
+
+  private async authenticate(token: string): Promise<void> {
+    try {
+      // Send token at top level, not in payload
+      const requestId = `req_${++this.requestCounter}`;
+      const response = await new Promise<WebSocketResponse>((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          this.pendingRequests.delete(requestId);
+          reject(new Error('Auth timeout'));
+        }, 10000);
+        this.pendingRequests.set(requestId, {
+          resolve: (r) => { clearTimeout(timeout); resolve(r); },
+          reject: (e) => { clearTimeout(timeout); reject(e); },
+        });
+        this.send({ type: 'authenticate', token, requestId } as any).catch(reject);
+      });
+      if (response.success) {
+        console.log('Authenticated successfully');
+        this.updateState({
+          status: 'connected',
+          error: undefined,
+          lastConnected: Date.now(),
+          reconnectAttempts: 0,
+        });
+        this.startPingInterval();
+      } else {
+        console.error('Authentication failed:', response.error);
+        this.updateState({
+          status: 'error',
+          error: 'Authentication failed: ' + (response.error || 'Invalid token'),
+        });
+        this.ws?.close();
+      }
+    } catch (error) {
+      console.error('Authentication error:', error);
+      this.handleDisconnect('Authentication failed');
+    }
+  }
+
+  private handleMessage(event: MessageEvent): void {
+    try {
+      const message: WebSocketResponse = JSON.parse(event.data);
+
+      // Handle request responses
+      if (message.requestId && this.pendingRequests.has(message.requestId)) {
+        const { resolve } = this.pendingRequests.get(message.requestId)!;
+        this.pendingRequests.delete(message.requestId);
+        resolve(message);
+        return;
+      }
+
+      // Notify message handlers
+      this.messageHandlers.forEach((handler) => {
+        try {
+          handler(message);
+        } catch (error) {
+          console.error('Message handler error:', error);
+        }
+      });
+    } catch (error) {
+      console.error('Failed to parse message:', error);
+    }
+  }
+
+  private handleClose(event: CloseEvent): void {
+    console.log(`WebSocket closed: ${event.code} ${event.reason}`);
+    this.clearTimers();
+    this.handleDisconnect(event.reason || 'Connection closed');
+  }
+
+  private handleError(event: Event): void {
+    console.error('WebSocket error:', event);
+    // The close event will follow, so we don't need to do much here
+  }
+
+  private handleDisconnect(reason: string): void {
+    this.ws = null;
+    this.clearTimers();
+
+    // Reject all pending requests
+    this.pendingRequests.forEach(({ reject }) => {
+      reject(new Error('Connection lost'));
+    });
+    this.pendingRequests.clear();
+
+    // Attempt reconnection if we have a server and haven't exceeded attempts
+    if (this.server && this.connectionState.reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+      const attempts = this.connectionState.reconnectAttempts + 1;
+      const delay = Math.min(
+        INITIAL_RECONNECT_DELAY * Math.pow(2, attempts - 1),
+        MAX_RECONNECT_DELAY
+      );
+
+      console.log(`Reconnecting in ${delay}ms (attempt ${attempts}/${MAX_RECONNECT_ATTEMPTS})`);
+
+      this.updateState({
+        status: 'reconnecting',
+        error: reason,
+        reconnectAttempts: attempts,
+      });
+
+      this.reconnectTimer = setTimeout(() => this.doConnect(), delay);
+    } else {
+      this.updateState({
+        status: 'error',
+        error: reason || 'Connection failed',
+      });
+    }
+  }
+
+  disconnect(): void {
+    this.server = null;
+    this.clearTimers();
+
+    if (this.ws) {
+      this.ws.close();
+      this.ws = null;
+    }
+
+    this.updateState({
+      status: 'disconnected',
+      error: undefined,
+      reconnectAttempts: 0,
+    });
+  }
+
+  private clearTimers(): void {
+    this.clearConnectionTimer();
+    this.clearReconnectTimer();
+    this.clearPingInterval();
+  }
+
+  private clearConnectionTimer(): void {
+    if (this.connectionTimer) {
+      clearTimeout(this.connectionTimer);
+      this.connectionTimer = null;
+    }
+  }
+
+  private clearReconnectTimer(): void {
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+  }
+
+  private clearPingInterval(): void {
+    if (this.pingTimer) {
+      clearInterval(this.pingTimer);
+      this.pingTimer = null;
+    }
+  }
+
+  private startPingInterval(): void {
+    this.clearPingInterval();
+    this.pingTimer = setInterval(() => {
+      if (this.isConnected()) {
+        this.send({ type: 'ping' }).catch(() => {
+          // Ping failed, connection may be dead
+          console.log('Ping failed, connection may be dead');
+        });
+      }
+    }, PING_INTERVAL);
+  }
+
+  private updateState(updates: Partial<ConnectionState>): void {
+    this.connectionState = { ...this.connectionState, ...updates };
+    this.stateChangeHandlers.forEach((handler) => {
+      try {
+        handler(this.connectionState);
+      } catch (error) {
+        console.error('State change handler error:', error);
+      }
+    });
+  }
+
+  async sendRequest(type: string, payload?: unknown): Promise<WebSocketResponse> {
+    const requestId = `req_${++this.requestCounter}`;
+
+    return new Promise((resolve, reject) => {
+      // Set timeout for request
+      const timeout = setTimeout(() => {
+        this.pendingRequests.delete(requestId);
+        reject(new Error('Request timeout'));
+      }, 10000);
+
+      this.pendingRequests.set(requestId, {
+        resolve: (response) => {
+          clearTimeout(timeout);
+          resolve(response);
+        },
+        reject: (error) => {
+          clearTimeout(timeout);
+          reject(error);
+        },
+      });
+
+      this.send({ type, payload, requestId }).catch((error) => {
+        this.pendingRequests.delete(requestId);
+        clearTimeout(timeout);
+        reject(error);
+      });
+    });
+  }
+
+  async send(message: WebSocketMessage): Promise<void> {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      throw new Error('WebSocket is not connected');
+    }
+
+    this.ws.send(JSON.stringify(message));
+  }
+
+  isConnected(): boolean {
+    return this.connectionState.status === 'connected' && this.ws?.readyState === WebSocket.OPEN;
+  }
+
+  getState(): ConnectionState {
+    return this.connectionState;
+  }
+
+  onMessage(handler: MessageHandler): () => void {
+    this.messageHandlers.add(handler);
+    return () => this.messageHandlers.delete(handler);
+  }
+
+  onStateChange(handler: StateChangeHandler): () => void {
+    this.stateChangeHandlers.add(handler);
+    // Immediately call with current state
+    handler(this.connectionState);
+    return () => this.stateChangeHandlers.delete(handler);
+  }
+
+  // Force a reconnection attempt
+  reconnect(): void {
+    if (this.server) {
+      this.connectionState.reconnectAttempts = 0;
+      this.disconnect();
+      this.connect(this.server);
+    }
+  }
+}
+
+// Singleton instance
+export const wsService = new WebSocketService();
