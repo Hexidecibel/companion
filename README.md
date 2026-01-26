@@ -9,13 +9,24 @@ Claude Companion consists of two components:
 1. **Daemon** (`daemon/`) - A Node.js service that runs on your Linux server, watches Claude Code sessions, and serves data over WebSocket
 2. **Mobile App** (`app/`) - A React Native app for iOS/Android that connects to your daemons and lets you monitor and respond to Claude
 
+## Quick Start
+
+1. **Get the app:** Download APK from [EAS Builds](https://expo.dev/accounts/xludax/projects/claude-companion/builds)
+2. **Install daemon:** See [Daemon Installation](#daemon-installation-linuxubuntu) below
+3. **Connect:** Add your server in the app using the token from installation
+
 ## Features
 
 - **Real-time session monitoring** - See Claude's prompts and responses as they happen
 - **Mobile input** - Respond to Claude directly from your phone
-- **Push notifications** - Get alerted when Claude is waiting for input (after 60s delay)
+- **Push notifications** - Get alerted when Claude is waiting for input
+- **Multi-session support** - Switch between multiple tmux sessions on the same server
+- **Slash commands** - Quick actions like `/yes`, `/no`, `/cancel`, `/switch`
+- **Quick reply chips** - One-tap responses when Claude is waiting
+- **File viewer** - Tap file paths to view content in full-screen
+- **Session activity alerts** - Get notified when other sessions need attention
 - **Multi-server support** - Connect to Claude Code sessions on multiple machines
-- **Highlights mode** - View just prompts/responses, or full details with tool calls
+- **Image support** - Send screenshots and images to Claude
 - **Auto-reconnection** - Handles network changes gracefully (great for VPN/Wireguard)
 - **mDNS discovery** - Automatically find daemons on your local network
 
@@ -116,6 +127,14 @@ sudo systemctl stop claude-companion
 
 ## Mobile App Setup
 
+### Download Pre-built APK (Android)
+
+Download the latest APK directly:
+
+**Latest Build:** https://expo.dev/accounts/xludax/projects/claude-companion/builds
+
+Or scan this QR code from the Expo build page to install on your Android device.
+
 ### Development
 
 ```bash
@@ -132,8 +151,8 @@ Scan the QR code with Expo Go on your phone, or run on a simulator.
 # Install EAS CLI
 npm install -g eas-cli
 
-# Build for Android
-eas build --platform android
+# Build for Android (APK for direct install)
+eas build --platform android --profile preview
 
 # Build for iOS
 eas build --platform ios
