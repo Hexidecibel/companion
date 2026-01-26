@@ -345,6 +345,10 @@ export class WebSocketHandler {
         this.handleBrowseDirectories(client, payload as { path?: string }, requestId);
         break;
 
+      case 'read_file':
+        this.handleReadFile(client, payload as { path: string }, requestId);
+        break;
+
       default:
         this.send(client.ws, {
           type: 'error',
@@ -831,6 +835,89 @@ export class WebSocketHandler {
         type: 'directory_listing',
         success: false,
         error: `Cannot read directory: ${basePath}`,
+        requestId,
+      });
+    }
+  }
+
+  private async handleReadFile(
+    client: AuthenticatedClient,
+    payload: { path: string } | undefined,
+    requestId?: string
+  ): Promise<void> {
+    const filePath = payload?.path;
+
+    if (!filePath) {
+      this.send(client.ws, {
+        type: 'file_content',
+        success: false,
+        error: 'No file path provided',
+        requestId,
+      });
+      return;
+    }
+
+    try {
+      // Security: only allow reading files in certain directories
+      const homeDir = this.tmux.getHomeDir();
+      const resolvedPath = path.resolve(filePath);
+
+      // Allow reading from home directory, /tmp, and common project paths
+      const allowedPaths = [
+        homeDir,
+        '/tmp',
+        '/var/tmp',
+      ];
+
+      const isAllowed = allowedPaths.some(allowed => resolvedPath.startsWith(allowed));
+
+      if (!isAllowed) {
+        this.send(client.ws, {
+          type: 'file_content',
+          success: false,
+          error: 'Access denied: file outside allowed directories',
+          requestId,
+        });
+        return;
+      }
+
+      // Check file exists and is readable
+      const stats = fs.statSync(resolvedPath);
+
+      if (stats.isDirectory()) {
+        this.send(client.ws, {
+          type: 'file_content',
+          success: false,
+          error: 'Path is a directory, not a file',
+          requestId,
+        });
+        return;
+      }
+
+      // Limit file size to 1MB
+      if (stats.size > 1024 * 1024) {
+        this.send(client.ws, {
+          type: 'file_content',
+          success: false,
+          error: 'File too large (max 1MB)',
+          requestId,
+        });
+        return;
+      }
+
+      const content = fs.readFileSync(resolvedPath, 'utf-8');
+
+      this.send(client.ws, {
+        type: 'file_content',
+        success: true,
+        payload: { content, path: resolvedPath },
+        requestId,
+      });
+    } catch (err) {
+      this.send(client.ws, {
+        type: 'file_content',
+        success: false,
+        error: `Cannot read file: ${err instanceof Error ? err.message : 'Unknown error'}`,
         requestId,
       });
     }

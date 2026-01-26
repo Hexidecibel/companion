@@ -22,6 +22,7 @@ import { ConversationItem } from '../components/ConversationItem';
 import { InputBar } from '../components/InputBar';
 import { QuickReplies } from '../components/QuickReplies';
 import { SessionPicker } from '../components/SessionPicker';
+import { FileViewer } from '../components/FileViewer';
 import { getSessionSettings, saveSessionSettings, SessionSettings } from '../services/storage';
 import { wsService } from '../services/websocket';
 
@@ -53,6 +54,7 @@ export function SessionView({ server, onBack }: SessionViewProps) {
   const [sessionSettings, setSessionSettings] = useState<SessionSettings>({ instantNotify: false });
   const [showActivityModal, setShowActivityModal] = useState(false);
   const [showSessionPicker, setShowSessionPicker] = useState(false);
+  const [viewingFile, setViewingFile] = useState<string | null>(null);
 
   // Load session settings
   useEffect(() => {
@@ -151,6 +153,7 @@ export function SessionView({ server, onBack }: SessionViewProps) {
     <ConversationItem
       item={item}
       onSelectOption={handleSelectOption}
+      onFileTap={setViewingFile}
     />
   );
 
@@ -471,6 +474,11 @@ export function SessionView({ server, onBack }: SessionViewProps) {
             ? 'Type a response...'
             : 'Type to queue message...'
         }
+      />
+
+      <FileViewer
+        filePath={viewingFile}
+        onClose={() => setViewingFile(null)}
       />
     </KeyboardAvoidingView>
   );

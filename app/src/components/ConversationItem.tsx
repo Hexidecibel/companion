@@ -7,12 +7,13 @@ interface ConversationItemProps {
   item: ConversationMessage | ConversationHighlight;
   showToolCalls?: boolean;
   onSelectOption?: (option: string) => void;
+  onFileTap?: (filePath: string) => void;
 }
 
 const COLLAPSED_LINES = 12;
 const COLLAPSED_HEIGHT = 250;
 
-export function ConversationItem({ item, showToolCalls, onSelectOption }: ConversationItemProps) {
+export function ConversationItem({ item, showToolCalls, onSelectOption, onFileTap }: ConversationItemProps) {
   const [expanded, setExpanded] = useState(false);
   const isUser = item.type === 'user';
   const message = item as ConversationMessage;
@@ -27,6 +28,59 @@ export function ConversationItem({ item, showToolCalls, onSelectOption }: Conver
   const formatTime = (timestamp: number) => {
     const date = new Date(timestamp);
     return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  };
+
+  // Regex to detect file paths
+  const filePathRegex = /(?:^|\s)((?:\/[\w.-]+)+(?:\.\w+)?|~\/[\w./-]+)/g;
+
+  // Helper to render text with clickable file paths
+  const renderTextWithFilePaths = (text: string, baseStyle: object) => {
+    if (!onFileTap) {
+      return <Text style={baseStyle}>{text}</Text>;
+    }
+
+    const parts: React.ReactNode[] = [];
+    let lastIndex = 0;
+    let match;
+
+    filePathRegex.lastIndex = 0;
+    while ((match = filePathRegex.exec(text)) !== null) {
+      const filePath = match[1];
+      const matchStart = match.index + (match[0].length - filePath.length);
+
+      // Add text before the match
+      if (matchStart > lastIndex) {
+        parts.push(
+          <Text key={`text-${lastIndex}`} style={baseStyle}>
+            {text.slice(lastIndex, matchStart)}
+          </Text>
+        );
+      }
+
+      // Add the clickable file path
+      parts.push(
+        <Text
+          key={`path-${matchStart}`}
+          style={[baseStyle, filePathStyles.filePath]}
+          onPress={() => onFileTap(filePath)}
+        >
+          {filePath}
+        </Text>
+      );
+
+      lastIndex = matchStart + filePath.length;
+    }
+
+    // Add remaining text
+    if (lastIndex < text.length) {
+      parts.push(
+        <Text key={`text-${lastIndex}`} style={baseStyle}>
+          {text.slice(lastIndex)}
+        </Text>
+      );
+    }
+
+    return parts.length > 0 ? <Text>{parts}</Text> : <Text style={baseStyle}>{text}</Text>;
   };
 
   // Custom rules for code blocks (simple text rendering for reliability)
@@ -55,8 +109,31 @@ export function ConversationItem({ item, showToolCalls, onSelectOption }: Conver
           </View>
         );
       },
+      // Make inline code with file paths clickable
+      code_inline: (node: { content: string }, _children: React.ReactNode, _parent: unknown, styles: Record<string, unknown>) => {
+        const content = node.content;
+        const isFilePath = /^(\/[\w.-]+)+(\.\w+)?$/.test(content) || content.startsWith('~/');
+
+        if (isFilePath && onFileTap) {
+          return (
+            <Text
+              key={content}
+              style={[styles.code_inline as object, filePathStyles.filePath]}
+              onPress={() => onFileTap(content)}
+            >
+              {content}
+            </Text>
+          );
+        }
+
+        return (
+          <Text key={content} style={styles.code_inline as object}>
+            {content}
+          </Text>
+        );
+      },
     }),
-    []
+    [onFileTap]
   );
 
   const toggleExpanded = () => {
@@ -128,6 +205,13 @@ export function ConversationItem({ item, showToolCalls, onSelectOption }: Conver
     </View>
   );
 }
+
+const filePathStyles = StyleSheet.create({
+  filePath: {
+    color: '#60a5fa',
+    textDecorationLine: 'underline',
+  },
+});
 
 const codeBlockStyles = StyleSheet.create({
   container: {
