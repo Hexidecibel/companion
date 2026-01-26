@@ -4,7 +4,8 @@ import Constants from 'expo-constants';
 import { Platform } from 'react-native';
 import { wsService } from './websocket';
 
-let fcmToken: string | null = null;
+let pushToken: string | null = null;
+let tokenType: 'fcm' | 'expo' = 'expo';
 
 // Configure how notifications are handled when app is in foreground
 Notifications.setNotificationHandler({
@@ -40,16 +41,30 @@ export async function registerForPushNotifications(): Promise<string | null> {
       return null;
     }
 
-    // Get the token
+    // Try to get native FCM token first (works in standalone builds)
+    try {
+      const deviceToken = await Notifications.getDevicePushTokenAsync();
+      if (deviceToken.type === 'android' || deviceToken.type === 'ios') {
+        pushToken = deviceToken.data;
+        tokenType = 'fcm';
+        console.log('Push notifications: Got native FCM token');
+        return pushToken;
+      }
+    } catch (fcmError) {
+      console.log('Push notifications: Native FCM not available, falling back to Expo Push');
+    }
+
+    // Fall back to Expo Push Token (works in Expo Go)
     const projectId = Constants.expoConfig?.extra?.eas?.projectId;
     const tokenData = await Notifications.getExpoPushTokenAsync({
       projectId,
     });
 
-    fcmToken = tokenData.data;
-    console.log('Push notifications: Token obtained');
+    pushToken = tokenData.data;
+    tokenType = 'expo';
+    console.log('Push notifications: Got Expo Push token');
 
-    return fcmToken;
+    return pushToken;
   } catch (error) {
     console.error('Push notifications: Error getting token:', error);
     return null;
@@ -82,7 +97,7 @@ export function addNotificationResponseReceivedListener(
 }
 
 export async function registerWithDaemon(deviceId: string): Promise<boolean> {
-  if (!fcmToken) {
+  if (!pushToken) {
     console.log('Push notifications: No token to register');
     return false;
   }
@@ -95,7 +110,8 @@ export async function registerWithDaemon(deviceId: string): Promise<boolean> {
   try {
     const response = await wsService.sendRequest('register_push', {
       deviceId,
-      fcmToken,
+      fcmToken: pushToken, // daemon expects 'fcmToken' field
+      tokenType,
     });
 
     if (response.success) {
@@ -136,5 +152,9 @@ export async function clearBadge(): Promise<void> {
 }
 
 export function getToken(): string | null {
-  return fcmToken;
+  return pushToken;
+}
+
+export function getTokenType(): 'fcm' | 'expo' {
+  return tokenType;
 }

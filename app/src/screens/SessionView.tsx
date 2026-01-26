@@ -248,13 +248,16 @@ export function SessionView({ server, onBack }: SessionViewProps) {
         onReconnect={reconnect}
       />
 
-      {/* Activity status bar */}
+      {/* Activity status bar with cancel button */}
       {isConnected && status?.currentActivity && (
         <View style={styles.activityBar}>
           <ActivityIndicator size="small" color="#60a5fa" style={styles.activitySpinner} />
           <Text style={styles.activityText} numberOfLines={1}>
             {status.currentActivity}
           </Text>
+          <TouchableOpacity style={styles.activityCancelButton} onPress={handleCancel}>
+            <Text style={styles.activityCancelText}>Cancel</Text>
+          </TouchableOpacity>
         </View>
       )}
 
@@ -297,12 +300,6 @@ export function SessionView({ server, onBack }: SessionViewProps) {
       {!isAtBottom && (
         <TouchableOpacity style={styles.scrollButton} onPress={scrollToBottom}>
           <Text style={styles.scrollButtonText}>↓</Text>
-        </TouchableOpacity>
-      )}
-
-      {status?.isWaitingForInput === false && isConnected && (
-        <TouchableOpacity style={styles.cancelButton} onPress={handleCancel}>
-          <Text style={styles.cancelButtonText}>Cancel</Text>
         </TouchableOpacity>
       )}
 
@@ -457,6 +454,18 @@ const styles = StyleSheet.create({
     flex: 1,
     color: '#93c5fd',
     fontSize: 13,
+  },
+  activityCancelButton: {
+    marginLeft: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    backgroundColor: '#ef4444',
+    borderRadius: 12,
+  },
+  activityCancelText: {
+    color: '#ffffff',
+    fontSize: 12,
+    fontWeight: '600',
   },
   errorBanner: {
     backgroundColor: '#7f1d1d',

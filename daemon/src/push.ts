@@ -1,3 +1,5 @@
+import * as admin from 'firebase-admin';
+import * as fs from 'fs';
 import { RegisteredDevice } from './types';
 
 interface ExpoPushMessage {
@@ -25,10 +27,27 @@ export class PushNotificationService {
   private instantNotifyDevices: Set<string> = new Set();
   private pendingPush: NodeJS.Timeout | null = null;
   private pushDelayMs: number;
+  private firebaseInitialized: boolean = false;
 
-  constructor(_credentialsPath: string | undefined, pushDelayMs: number) {
+  constructor(credentialsPath: string | undefined, pushDelayMs: number) {
     this.pushDelayMs = pushDelayMs;
-    console.log('Push notifications: Expo Push service ready');
+
+    // Initialize Firebase if credentials provided
+    if (credentialsPath && fs.existsSync(credentialsPath)) {
+      try {
+        const serviceAccount = JSON.parse(fs.readFileSync(credentialsPath, 'utf-8'));
+        admin.initializeApp({
+          credential: admin.credential.cert(serviceAccount),
+        });
+        this.firebaseInitialized = true;
+        console.log('Push notifications: Firebase Admin SDK initialized');
+      } catch (err) {
+        console.error('Push notifications: Failed to initialize Firebase:', err);
+        console.log('Push notifications: Falling back to Expo Push');
+      }
+    } else {
+      console.log('Push notifications: No Firebase credentials, using Expo Push');
+    }
   }
 
   setInstantNotify(deviceId: string, enabled: boolean): void {
@@ -41,9 +60,9 @@ export class PushNotificationService {
     }
   }
 
-  registerDevice(deviceId: string, expoPushToken: string): void {
+  registerDevice(deviceId: string, pushToken: string): void {
     this.devices.set(deviceId, {
-      token: expoPushToken,
+      token: pushToken,
       deviceId,
       registeredAt: Date.now(),
       lastSeen: Date.now(),
@@ -77,7 +96,7 @@ export class PushNotificationService {
 
     if (instantDevices.length > 0) {
       console.log(`Push notifications: Sending instant notification to ${instantDevices.length} device(s)`);
-      this.sendWaitingNotificationToDevices(
+      this.sendNotifications(
         preview,
         instantDevices.map(([_, d]) => d.token)
       );
@@ -90,7 +109,7 @@ export class PushNotificationService {
     if (delayedDevices.length > 0) {
       console.log(`Push notifications: Scheduling notification for ${delayedDevices.length} device(s) in ${this.pushDelayMs}ms`);
       this.pendingPush = setTimeout(() => {
-        this.sendWaitingNotificationToDevices(
+        this.sendNotifications(
           preview,
           delayedDevices.map(([_, d]) => d.token)
         );
@@ -107,7 +126,7 @@ export class PushNotificationService {
     }
   }
 
-  private async sendWaitingNotificationToDevices(preview: string, tokens: string[]): Promise<void> {
+  private async sendNotifications(preview: string, tokens: string[]): Promise<void> {
     if (tokens.length === 0) {
       return;
     }
@@ -116,13 +135,70 @@ export class PushNotificationService {
     const truncatedPreview =
       preview.length > 200 ? preview.substring(0, 197) + '...' : preview;
 
+    // Determine if tokens are FCM (no ExponentPushToken prefix) or Expo
+    const fcmTokens = tokens.filter(t => !t.startsWith('ExponentPushToken'));
+    const expoTokens = tokens.filter(t => t.startsWith('ExponentPushToken'));
+
+    // Send via Firebase if we have FCM tokens and Firebase is initialized
+    if (fcmTokens.length > 0 && this.firebaseInitialized) {
+      await this.sendViaFirebase(truncatedPreview, fcmTokens);
+    }
+
+    // Send via Expo Push if we have Expo tokens
+    if (expoTokens.length > 0) {
+      await this.sendViaExpo(truncatedPreview, expoTokens);
+    }
+  }
+
+  private async sendViaFirebase(preview: string, tokens: string[]): Promise<void> {
+    const message: admin.messaging.MulticastMessage = {
+      tokens,
+      notification: {
+        title: 'Claude is waiting',
+        body: preview,
+      },
+      data: {
+        type: 'waiting_for_input',
+        preview,
+        timestamp: Date.now().toString(),
+      },
+      android: {
+        priority: 'high',
+        notification: {
+          channelId: 'claude_waiting',
+          sound: 'default',
+        },
+      },
+    };
+
+    try {
+      const response = await admin.messaging().sendEachForMulticast(message);
+      console.log(`Push notifications (FCM): Sent to ${response.successCount}/${tokens.length} devices`);
+
+      // Handle failed tokens
+      response.responses.forEach((resp, idx) => {
+        if (!resp.success && resp.error?.code === 'messaging/registration-token-not-registered') {
+          const deviceId = Array.from(this.devices.entries()).find(
+            ([_, d]) => d.token === tokens[idx]
+          )?.[0];
+          if (deviceId) {
+            this.unregisterDevice(deviceId);
+          }
+        }
+      });
+    } catch (err) {
+      console.error('Push notifications (FCM): Error sending:', err);
+    }
+  }
+
+  private async sendViaExpo(preview: string, tokens: string[]): Promise<void> {
     const messages: ExpoPushMessage[] = tokens.map((token) => ({
       to: token,
       title: 'Claude is waiting',
-      body: truncatedPreview,
+      body: preview,
       data: {
         type: 'waiting_for_input',
-        preview: truncatedPreview,
+        preview,
         timestamp: Date.now().toString(),
       },
       sound: 'default',
@@ -149,7 +225,6 @@ export class PushNotificationService {
         if (ticket.status === 'ok') {
           successCount++;
         } else if (ticket.details?.error === 'DeviceNotRegistered') {
-          // Remove invalid token
           const deviceId = Array.from(this.devices.entries()).find(
             ([_, d]) => d.token === tokens[idx]
           )?.[0];
@@ -159,14 +234,14 @@ export class PushNotificationService {
         }
       });
 
-      console.log(`Push notifications: Sent to ${successCount}/${tokens.length} devices`);
+      console.log(`Push notifications (Expo): Sent to ${successCount}/${tokens.length} devices`);
     } catch (err) {
-      console.error('Push notifications: Error sending notification:', err);
+      console.error('Push notifications (Expo): Error sending:', err);
     }
   }
 
   isEnabled(): boolean {
-    return true; // Always enabled with Expo Push
+    return true;
   }
 
   getRegisteredDeviceCount(): number {

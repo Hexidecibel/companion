@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
 import Markdown from '@ronradtke/react-native-markdown-display';
 import { ConversationMessage, ConversationHighlight } from '../types';
@@ -9,11 +9,20 @@ interface ConversationItemProps {
   onSelectOption?: (option: string) => void;
 }
 
+const COLLAPSED_LINES = 12;
+const COLLAPSED_HEIGHT = 250;
+
 export function ConversationItem({ item, showToolCalls, onSelectOption }: ConversationItemProps) {
+  const [expanded, setExpanded] = useState(false);
   const isUser = item.type === 'user';
   const message = item as ConversationMessage;
   const hasToolCalls = showToolCalls && 'toolCalls' in message && message.toolCalls?.length;
   const hasOptions = 'options' in message && message.options && message.options.length > 0;
+
+  // Check if content is long enough to need expansion
+  const lineCount = item.content.split('\n').length;
+  const charCount = item.content.length;
+  const needsExpansion = !isUser && (lineCount > COLLAPSED_LINES || charCount > 800);
 
   const formatTime = (timestamp: number) => {
     const date = new Date(timestamp);
@@ -50,18 +59,38 @@ export function ConversationItem({ item, showToolCalls, onSelectOption }: Conver
     []
   );
 
+  const toggleExpanded = () => {
+    if (needsExpansion) {
+      setExpanded(!expanded);
+    }
+  };
+
   return (
     <View style={[styles.container, isUser ? styles.userContainer : styles.assistantContainer]}>
-      <View style={[styles.bubble, isUser ? styles.userBubble : styles.assistantBubble]}>
-        <Text style={[styles.role, isUser ? styles.userRole : styles.assistantRole]}>
-          {isUser ? 'You' : 'Claude'}
-        </Text>
+      <TouchableOpacity
+        style={[styles.bubble, isUser ? styles.userBubble : styles.assistantBubble]}
+        onPress={toggleExpanded}
+        activeOpacity={needsExpansion ? 0.8 : 1}
+      >
+        <View style={styles.headerRow}>
+          <Text style={[styles.role, isUser ? styles.userRole : styles.assistantRole]}>
+            {isUser ? 'You' : 'Claude'}
+          </Text>
+          {needsExpansion && (
+            <Text style={styles.expandHint}>
+              {expanded ? '▼ tap to collapse' : '▶ tap to expand'}
+            </Text>
+          )}
+        </View>
         {isUser ? (
           <Text style={[styles.content, styles.userContent]}>{item.content}</Text>
         ) : (
-          <Markdown style={markdownStyles} rules={rules}>
-            {item.content}
-          </Markdown>
+          <View style={!expanded && needsExpansion ? styles.collapsedContent : undefined}>
+            <Markdown style={markdownStyles} rules={rules}>
+              {item.content}
+            </Markdown>
+            {!expanded && needsExpansion && <View style={styles.fadeOverlay} />}
+          </View>
         )}
         {hasOptions && (
           <View style={styles.optionsContainer}>
@@ -95,7 +124,7 @@ export function ConversationItem({ item, showToolCalls, onSelectOption }: Conver
           </View>
         )}
         <Text style={styles.time}>{formatTime(item.timestamp)}</Text>
-      </View>
+      </TouchableOpacity>
     </View>
   );
 }
@@ -263,6 +292,31 @@ const styles = StyleSheet.create({
     padding: 12,
     borderRadius: 16,
   },
+  headerRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  expandHint: {
+    fontSize: 10,
+    color: '#6b7280',
+  },
+  collapsedContent: {
+    maxHeight: 250,
+    overflow: 'hidden',
+  },
+  fadeOverlay: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: 60,
+    backgroundColor: 'transparent',
+    // Gradient-like fade effect using multiple layers
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(55, 65, 81, 0.3)',
+  },
   userBubble: {
     backgroundColor: '#3b82f6',
     borderBottomRightRadius: 4,
@@ -274,7 +328,6 @@ const styles = StyleSheet.create({
   role: {
     fontSize: 11,
     fontWeight: '600',
-    marginBottom: 4,
   },
   userRole: {
     color: '#bfdbfe',
