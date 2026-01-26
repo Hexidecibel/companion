@@ -36,7 +36,17 @@ export function useConversation() {
             highlights: ConversationHighlight[];
           };
           setMessages(updatePayload.messages || []);
-          setHighlights(updatePayload.highlights || []);
+          // Preserve pending messages on real-time updates too
+          const serverHighlights = updatePayload.highlights || [];
+          setHighlights(prev => {
+            const pending = prev.filter(m => m.id.startsWith('pending-'));
+            const now = Date.now();
+            const stillPending = pending.filter(p => {
+              const pendingTime = parseInt(p.id.replace('pending-', ''), 10);
+              return (now - pendingTime) < 30000;
+            });
+            return [...serverHighlights, ...stillPending];
+          });
           break;
         }
 
@@ -116,20 +126,28 @@ export function useConversation() {
                 // Merge with any pending optimistic messages
                 setHighlights(prev => {
                   const pending = prev.filter(m => m.id.startsWith('pending-'));
-                  // Keep pending messages for at least 10 seconds, or until server confirms
+                  // Keep pending messages for at least 30 seconds, or until server confirms
                   const now = Date.now();
                   const stillPending = pending.filter(p => {
                     // Extract timestamp from id (pending-TIMESTAMP)
                     const pendingTime = parseInt(p.id.replace('pending-', ''), 10);
                     const age = now - pendingTime;
-                    // Keep if less than 10 seconds old OR not yet in server results
-                    if (age < 10000) return true;
-                    // After 10 seconds, only keep if not in server results
-                    return !serverHighlights.some(s =>
+                    // Keep if less than 30 seconds old
+                    if (age < 30000) {
+                      console.log(`[Optimistic] Keeping pending message (age: ${age}ms): ${p.content.substring(0, 30)}...`);
+                      return true;
+                    }
+                    // After 30 seconds, only keep if not in server results
+                    const inServer = serverHighlights.some(s =>
                       s.type === 'user' && s.content === p.content
                     );
+                    console.log(`[Optimistic] Message ${inServer ? 'found in server' : 'expired'}: ${p.content.substring(0, 30)}...`);
+                    return !inServer;
                   });
                   // Append pending messages to server results
+                  if (stillPending.length > 0) {
+                    console.log(`[Optimistic] Appending ${stillPending.length} pending messages`);
+                  }
                   return [...serverHighlights, ...stillPending];
                 });
               } else {
@@ -167,7 +185,11 @@ export function useConversation() {
       content: input,
       timestamp: Date.now(),
     };
-    setHighlights(prev => [...prev, optimisticMessage]);
+    console.log(`[Optimistic] Adding pending message: ${input.substring(0, 30)}...`);
+    setHighlights(prev => {
+      console.log(`[Optimistic] Previous count: ${prev.length}, adding message`);
+      return [...prev, optimisticMessage];
+    });
 
     try {
       const response = await wsService.sendRequest('send_input', { input });
