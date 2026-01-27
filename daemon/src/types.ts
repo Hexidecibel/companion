@@ -125,3 +125,36 @@ export interface ServerSummary {
   waitingCount: number;
   workingCount: number;
 }
+
+// Usage tracking types
+export interface UsageEntry {
+  timestamp: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheCreationTokens: number;
+  cacheReadTokens: number;
+  model: string;
+  sessionId: string;
+}
+
+export interface SessionUsage {
+  sessionId: string;
+  sessionName: string;
+  totalInputTokens: number;
+  totalOutputTokens: number;
+  totalCacheCreationTokens: number;
+  totalCacheReadTokens: number;
+  messageCount: number;
+  estimatedCost: number;
+}
+
+export interface UsageStats {
+  sessions: SessionUsage[];
+  totalInputTokens: number;
+  totalOutputTokens: number;
+  totalCacheCreationTokens: number;
+  totalCacheReadTokens: number;
+  totalEstimatedCost: number;
+  periodStart: number;
+  periodEnd: number;
+}

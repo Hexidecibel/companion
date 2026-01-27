@@ -18,9 +18,10 @@ import { wsService } from '../services/websocket';
 interface SettingsProps {
   onBack: () => void;
   onOpenNotificationSettings: () => void;
+  onOpenUsage: () => void;
 }
 
-export function Settings({ onBack, onOpenNotificationSettings }: SettingsProps) {
+export function Settings({ onBack, onOpenNotificationSettings, onOpenUsage }: SettingsProps) {
   const [settings, setSettings] = useState<AppSettings>({
     stayConnected: false,
     pushEnabled: false,
@@ -182,6 +183,16 @@ export function Settings({ onBack, onOpenNotificationSettings }: SettingsProps) 
               <Text style={styles.settingLabel}>Push Notifications</Text>
               <Text style={styles.settingDescription}>
                 Configure alerts and quiet hours
+              </Text>
+            </View>
+            <Text style={styles.linkArrow}>›</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.linkRow} onPress={onOpenUsage}>
+            <View style={styles.settingInfo}>
+              <Text style={styles.settingLabel}>Usage Statistics</Text>
+              <Text style={styles.settingDescription}>
+                View token usage and estimated costs
               </Text>
             </View>
             <Text style={styles.linkArrow}>›</Text>

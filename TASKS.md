@@ -52,9 +52,9 @@
 - [x] Update docs and in-app setup guide
 
 #### Usage/Stats Page
-- [ ] Show Claude API token usage
-- [ ] Display cost breakdown by session/server
-- [ ] Historical usage graphs
+- [x] Show Claude API token usage
+- [x] Display cost breakdown by session/server
+- [ ] Historical usage graphs (future enhancement)
 
 #### Dashboard Refinement
 - [ ] Fix dashboard connection validation (validate before showing connected)
@@ -112,17 +112,7 @@ See `docs/ROADMAP-V2.md` Section 4 for full details.
 
 Tasks suitable for longer autonomous work sessions:
 
-### 1. Usage Statistics Page
-```
-Add a page showing Claude API usage:
-1. Research how to get usage data (may need to track locally or fetch from API)
-2. Create UsageScreen.tsx
-3. Add navigation to usage page from settings or dashboard
-4. Display token counts, costs, and usage over time
-5. Consider caching/storing historical data
-```
-
-### 2. Sub-Agent Tree View
+### 1. Sub-Agent Tree View
 ```
 Show sub-agents in a tree view:
 1. Update watcher.ts to watch subagents/ directory
@@ -133,7 +123,7 @@ Show sub-agents in a tree view:
 6. Test with actual sub-agent spawning
 ```
 
-### 3. Enhanced Tool Card Details
+### 2. Enhanced Tool Card Details
 ```
 Improve tool card information display:
 1. Add syntax highlighting for code in tool outputs

@@ -9,7 +9,7 @@ import { ClaudeWatcher } from './watcher';
 import { InputInjector } from './input-injector';
 import { PushNotificationService } from './push';
 import { TmuxManager } from './tmux-manager';
-import { extractHighlights } from './parser';
+import { extractHighlights, extractUsageFromFile } from './parser';
 import { WebSocketMessage, WebSocketResponse, DaemonConfig, TmuxSessionConfig } from './types';
 import { loadConfig, saveConfig } from './config';
 
@@ -467,6 +467,10 @@ export class WebSocketHandler {
 
       case 'read_file':
         this.handleReadFile(client, payload as { path: string }, requestId);
+        break;
+
+      case 'get_usage':
+        this.handleGetUsage(client, requestId);
         break;
 
       default:
@@ -1185,6 +1189,56 @@ export class WebSocketHandler {
         type: 'file_content',
         success: false,
         error: `Cannot read file: ${err instanceof Error ? err.message : 'Unknown error'}`,
+        requestId,
+      });
+    }
+  }
+
+  private handleGetUsage(client: AuthenticatedClient, requestId?: string): void {
+    try {
+      const sessions = this.watcher.getSessions();
+      const sessionUsages = [];
+
+      let totalInputTokens = 0;
+      let totalOutputTokens = 0;
+      let totalCacheCreationTokens = 0;
+      let totalCacheReadTokens = 0;
+      let totalEstimatedCost = 0;
+
+      for (const session of sessions) {
+        if (session.conversationPath) {
+          const usage = extractUsageFromFile(session.conversationPath, session.name);
+          sessionUsages.push(usage);
+
+          totalInputTokens += usage.totalInputTokens;
+          totalOutputTokens += usage.totalOutputTokens;
+          totalCacheCreationTokens += usage.totalCacheCreationTokens;
+          totalCacheReadTokens += usage.totalCacheReadTokens;
+          totalEstimatedCost += usage.estimatedCost;
+        }
+      }
+
+      this.send(client.ws, {
+        type: 'usage',
+        success: true,
+        payload: {
+          sessions: sessionUsages,
+          totalInputTokens,
+          totalOutputTokens,
+          totalCacheCreationTokens,
+          totalCacheReadTokens,
+          totalEstimatedCost,
+          periodStart: Date.now() - 24 * 60 * 60 * 1000, // Last 24h
+          periodEnd: Date.now(),
+        },
+        requestId,
+      });
+    } catch (err) {
+      console.error('Failed to get usage:', err);
+      this.send(client.ws, {
+        type: 'usage',
+        success: false,
+        error: 'Failed to get usage statistics',
         requestId,
       });
     }

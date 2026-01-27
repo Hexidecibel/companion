@@ -1,5 +1,5 @@
 import * as fs from 'fs';
-import { ConversationMessage, ConversationHighlight, ToolCall, SessionStatus, QuestionOption } from './types';
+import { ConversationMessage, ConversationHighlight, ToolCall, SessionStatus, QuestionOption, UsageEntry, SessionUsage } from './types';
 
 interface ContentBlock {
   type: string;
@@ -411,4 +411,104 @@ export function getPendingApprovalTools(messages: ConversationMessage[]): string
   return lastMessage.toolCalls
     .filter(tc => tc.status === 'pending')
     .map(tc => tc.name);
+}
+
+// Pricing per million tokens (as of Jan 2025)
+const PRICING = {
+  'claude-opus-4-5-20251101': { input: 15.00, output: 75.00, cacheWrite: 18.75, cacheRead: 1.875 },
+  'claude-sonnet-4-20250514': { input: 3.00, output: 15.00, cacheWrite: 3.75, cacheRead: 0.30 },
+  'claude-3-5-sonnet-20241022': { input: 3.00, output: 15.00, cacheWrite: 3.75, cacheRead: 0.30 },
+  'claude-3-5-haiku-20241022': { input: 0.80, output: 4.00, cacheWrite: 1.00, cacheRead: 0.08 },
+  'default': { input: 3.00, output: 15.00, cacheWrite: 3.75, cacheRead: 0.30 },
+};
+
+interface UsageData {
+  input_tokens?: number;
+  output_tokens?: number;
+  cache_creation_input_tokens?: number;
+  cache_read_input_tokens?: number;
+}
+
+interface UsageJsonlEntry {
+  type: string;
+  timestamp?: string;
+  sessionId?: string;
+  message?: {
+    model?: string;
+    usage?: UsageData;
+  };
+}
+
+/**
+ * Extract usage data from a conversation JSONL file
+ */
+export function extractUsageFromFile(filePath: string, sessionName: string): SessionUsage {
+  const result: SessionUsage = {
+    sessionId: filePath,
+    sessionName,
+    totalInputTokens: 0,
+    totalOutputTokens: 0,
+    totalCacheCreationTokens: 0,
+    totalCacheReadTokens: 0,
+    messageCount: 0,
+    estimatedCost: 0,
+  };
+
+  if (!fs.existsSync(filePath)) {
+    return result;
+  }
+
+  const content = fs.readFileSync(filePath, 'utf-8');
+  const lines = content.split('\n').filter(line => line.trim());
+  const seenMessageIds = new Set<string>();
+
+  for (const line of lines) {
+    try {
+      const entry: UsageJsonlEntry = JSON.parse(line);
+
+      // Only count assistant messages with usage data
+      if (entry.type === 'assistant' && entry.message?.usage) {
+        const msgId = (entry as { message?: { id?: string } }).message?.id;
+
+        // Skip duplicate message IDs (same message can appear multiple times as it streams)
+        if (msgId && seenMessageIds.has(msgId)) {
+          continue;
+        }
+        if (msgId) {
+          seenMessageIds.add(msgId);
+        }
+
+        const usage = entry.message.usage;
+        const model = entry.message.model || 'default';
+        const pricing = PRICING[model as keyof typeof PRICING] || PRICING.default;
+
+        // Only add non-zero usage (final message has the totals)
+        if (usage.input_tokens && usage.input_tokens > 0) {
+          result.totalInputTokens += usage.input_tokens;
+          result.messageCount++;
+        }
+        if (usage.output_tokens && usage.output_tokens > 0) {
+          result.totalOutputTokens += usage.output_tokens;
+        }
+        if (usage.cache_creation_input_tokens && usage.cache_creation_input_tokens > 0) {
+          result.totalCacheCreationTokens += usage.cache_creation_input_tokens;
+        }
+        if (usage.cache_read_input_tokens && usage.cache_read_input_tokens > 0) {
+          result.totalCacheReadTokens += usage.cache_read_input_tokens;
+        }
+
+        // Calculate cost for this entry
+        const inputCost = ((usage.input_tokens || 0) / 1_000_000) * pricing.input;
+        const outputCost = ((usage.output_tokens || 0) / 1_000_000) * pricing.output;
+        const cacheWriteCost = ((usage.cache_creation_input_tokens || 0) / 1_000_000) * pricing.cacheWrite;
+        const cacheReadCost = ((usage.cache_read_input_tokens || 0) / 1_000_000) * pricing.cacheRead;
+
+        result.estimatedCost += inputCost + outputCost + cacheWriteCost + cacheReadCost;
+      }
+    } catch {
+      // Skip malformed lines
+    }
+  }
+
+  return result;
 }
