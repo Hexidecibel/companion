@@ -11,6 +11,7 @@
     ],
     "orientation": "portrait",
     "userInterfaceStyle": "automatic",
+    "icon": "./assets/icon.png",
     "ios": {
       "bundleIdentifier": "com.claudecompanion.app",
       "infoPlist": {
@@ -23,7 +24,11 @@
     },
     "android": {
       "package": "com.claudecompanion.app",
-      "softwareKeyboardLayoutMode": "pan"
+      "softwareKeyboardLayoutMode": "pan",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#111827"
+      }
     },
     "plugins": [
       [
