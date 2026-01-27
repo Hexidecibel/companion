@@ -49,6 +49,9 @@ class ClaudeCompanion {
     this.sessionsModal = document.getElementById('sessions-modal');
     this.closeSessionsBtn = document.getElementById('close-sessions-btn');
     this.sessionsList = document.getElementById('sessions-list');
+
+    // Refresh button
+    this.refreshBtn = document.getElementById('refresh-btn');
   }
 
   bindEvents() {
@@ -60,6 +63,7 @@ class ClaudeCompanion {
     this.sessionsModal.addEventListener('click', (e) => {
       if (e.target === this.sessionsModal) this.hideSessionsModal();
     });
+    this.refreshBtn.addEventListener('click', () => this.refreshConversation());
   }
 
   checkAutoConnect() {
@@ -211,7 +215,12 @@ class ClaudeCompanion {
         break;
 
       case 'update':
+      case 'conversation_update':
         this.handleUpdate(message.payload || message);
+        break;
+
+      case 'status_change':
+        this.handleStatusChange(message.payload || message);
         break;
 
       case 'subscribed':
@@ -276,6 +285,18 @@ class ClaudeCompanion {
     });
   }
 
+  refreshConversation() {
+    if (!this.currentSession) return;
+    // Visual feedback
+    this.refreshBtn.classList.add('spinning');
+    setTimeout(() => this.refreshBtn.classList.remove('spinning'), 500);
+    // Fetch fresh highlights
+    this.send({
+      type: 'get_highlights',
+      sessionId: this.currentSession.id,
+    });
+  }
+
   renderConversation(payload) {
     const messages = payload.highlights || payload.messages || [];
     const isWaiting = payload.isWaiting;
@@ -332,8 +353,14 @@ class ClaudeCompanion {
       msg.options.forEach(option => {
         const btn = document.createElement('button');
         btn.className = 'option-btn';
-        btn.textContent = option;
-        btn.addEventListener('click', () => this.sendOption(option));
+        // Options can be objects with label/description or plain strings
+        const optionLabel = typeof option === 'object' ? (option.label || option.text || JSON.stringify(option)) : option;
+        const optionDesc = typeof option === 'object' ? option.description : null;
+        btn.textContent = optionLabel;
+        if (optionDesc) {
+          btn.title = optionDesc;
+        }
+        btn.addEventListener('click', () => this.sendOption(optionLabel));
         optionsContainer.appendChild(btn);
       });
 
@@ -463,6 +490,24 @@ class ClaudeCompanion {
 
     if (payload.isWaiting !== undefined) {
       this.updateWaitingIndicator(payload.isWaiting);
+    }
+
+    // If we get a full conversation update, refresh
+    if (payload.messages || payload.highlights) {
+      this.renderConversation(payload);
+    }
+  }
+
+  handleStatusChange(payload) {
+    // Update waiting indicator based on status change
+    if (payload.isWaitingForInput !== undefined) {
+      this.updateWaitingIndicator(payload.isWaitingForInput);
+    }
+
+    // If there's a new last message, we should refresh
+    if (payload.lastMessage) {
+      // Refresh to get the latest messages
+      this.refreshConversation();
     }
   }
 

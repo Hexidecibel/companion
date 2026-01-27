@@ -253,6 +253,10 @@ header h2 {
   background-color: var(--bg-hover);
 }
 
+.icon-btn.spinning {
+  animation: spin 0.5s linear;
+}
+
 /* Messages */
 .messages-container {
   flex: 1;
