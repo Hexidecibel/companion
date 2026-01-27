@@ -14,9 +14,9 @@ pkill -f "node.*dist/index" 2>/dev/null; pkill -f "expo start" 2>/dev/null; pkil
 cd /Users/chriscushman/local/src/claude-companion/daemon && npm run build && CONFIG_PATH=/Users/chriscushman/.claude-companion/config.json nohup node dist/index.js > /tmp/daemon.log 2>&1 &
 ```
 
-3. Start Expo with cache cleared:
+3. Start Expo with cache cleared on port 9009:
 ```bash
-cd /Users/chriscushman/local/src/claude-companion/app && npx expo start --clear
+cd /Users/chriscushman/local/src/claude-companion/app && npx expo start --clear --port 9009
 ```
 
-Run all commands in sequence. The daemon runs in the background, Expo runs in foreground with cache cleared.
+Run all commands in sequence. The daemon runs in the background, Expo runs in foreground on port 9009 with cache cleared.
