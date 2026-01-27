@@ -99,8 +99,8 @@ function parseEntry(entry: JsonlEntry, completedToolIds: Set<string>): Conversat
           status: isPending ? 'pending' : 'completed',
         });
 
-        // Extract options from AskUserQuestion tool
-        if (block.name === 'AskUserQuestion') {
+        // Extract options from AskUserQuestion tool (only if still pending)
+        if (block.name === 'AskUserQuestion' && isPending) {
           const input = block.input as AskUserQuestionInput;
           console.log(`Parser: Found AskUserQuestion tool, questions count: ${input.questions?.length || 0}`);
           if (input.questions && input.questions.length > 0) {
@@ -112,6 +112,12 @@ function parseEntry(entry: JsonlEntry, completedToolIds: Set<string>): Conversat
             }));
             isWaitingForChoice = true;
             console.log(`Parser: Extracted ${options.length} options for question: "${content.substring(0, 50)}..."`);
+          }
+        } else if (block.name === 'AskUserQuestion' && !isPending) {
+          // Show the question content but no options (already answered)
+          const input = block.input as AskUserQuestionInput;
+          if (input.questions && input.questions.length > 0) {
+            content = input.questions[0].question;
           }
         }
         // Add Yes/No options for pending approval tools
