@@ -77,10 +77,12 @@ export class WebSocketService {
     console.log('WebSocket connected');
     this.clearConnectionTimer();
 
-    // Authenticate immediately
-    if (this.server) {
-      this.authenticate(this.server.token);
-    }
+    // Wait a tick for connection to stabilize, then authenticate
+    setTimeout(() => {
+      if (this.server && this.ws?.readyState === WebSocket.OPEN) {
+        this.authenticate(this.server.token);
+      }
+    }, 50);
   }
 
   private async authenticate(token: string): Promise<void> {

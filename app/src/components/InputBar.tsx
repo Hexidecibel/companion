@@ -13,7 +13,7 @@ import {
   FlatList,
 } from 'react-native';
 import * as DocumentPicker from 'expo-document-picker';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 
 interface AttachedImage {
   uri: string;
@@ -158,7 +158,7 @@ export function InputBar({
 
         for (const asset of result.assets) {
           const base64 = await FileSystem.readAsStringAsync(asset.uri, {
-            encoding: FileSystem.EncodingType.Base64,
+            encoding: 'base64',
           });
 
           newImages.push({

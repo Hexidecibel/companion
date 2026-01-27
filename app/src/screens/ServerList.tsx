@@ -20,9 +20,10 @@ import { wsService } from '../services/websocket';
 interface ServerListProps {
   onSelectServer: (server: Server) => void;
   onOpenSetup?: () => void;
+  onBack?: () => void;
 }
 
-export function ServerList({ onSelectServer, onOpenSetup }: ServerListProps) {
+export function ServerList({ onSelectServer, onOpenSetup, onBack }: ServerListProps) {
   const [servers, setServers] = useState<Server[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -176,6 +177,15 @@ export function ServerList({ onSelectServer, onOpenSetup }: ServerListProps) {
 
   return (
     <View style={styles.container}>
+      {onBack && (
+        <View style={styles.header}>
+          <TouchableOpacity onPress={onBack} style={styles.backButton}>
+            <Text style={styles.backButtonText}>‹ Back</Text>
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>Manage Servers</Text>
+          <View style={styles.backButton} />
+        </View>
+      )}
       <FlatList
         data={servers}
         keyExtractor={(item) => item.id}
@@ -312,6 +322,28 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#111827',
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    backgroundColor: '#1f2937',
+    borderBottomWidth: 1,
+    borderBottomColor: '#374151',
+  },
+  backButton: {
+    width: 60,
+  },
+  backButtonText: {
+    color: '#3b82f6',
+    fontSize: 16,
+  },
+  headerTitle: {
+    color: '#f3f4f6',
+    fontSize: 18,
+    fontWeight: '600',
   },
   centered: {
     flex: 1,

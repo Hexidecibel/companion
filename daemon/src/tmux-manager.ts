@@ -122,19 +122,34 @@ export class TmuxManager {
    */
   async killSession(name: string): Promise<{ success: boolean; error?: string }> {
     try {
-      // First try to gracefully exit Claude with Ctrl+C then exit
+      // First try to gracefully exit Claude Code
       try {
+        // Send Ctrl+C to interrupt any running operation
         await execAsync(`tmux send-keys -t "${name}" C-c`);
-        await new Promise(resolve => setTimeout(resolve, 100));
-        await execAsync(`tmux send-keys -t "${name}" "exit" Enter`);
-        await new Promise(resolve => setTimeout(resolve, 500));
+        await new Promise(resolve => setTimeout(resolve, 300));
+
+        // Send Ctrl+D to exit Claude gracefully (preferred over "exit")
+        await execAsync(`tmux send-keys -t "${name}" C-d`);
+        await new Promise(resolve => setTimeout(resolve, 1000));
+
+        // If still alive, try "exit" command
+        const stillAlive = await this.sessionExists(name);
+        if (stillAlive) {
+          await execAsync(`tmux send-keys -t "${name}" "exit" Enter`);
+          await new Promise(resolve => setTimeout(resolve, 500));
+        }
       } catch {
         // Ignore errors during graceful shutdown
       }
 
-      // Force kill the session
-      await execAsync(`tmux kill-session -t "${name}"`);
-      console.log(`TmuxManager: Killed session "${name}"`);
+      // Check if session still exists before force killing
+      if (await this.sessionExists(name)) {
+        await execAsync(`tmux kill-session -t "${name}"`);
+        console.log(`TmuxManager: Force killed session "${name}"`);
+      } else {
+        console.log(`TmuxManager: Session "${name}" exited gracefully`);
+      }
+
       return { success: true };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

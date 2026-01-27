@@ -66,6 +66,11 @@ export class ClaudeWatcher extends EventEmitter {
   }
 
   private handleFileChange(filePath: string): void {
+    // Skip subagent files - they're not main conversation sessions
+    if (filePath.includes('/subagents/') || filePath.includes('\\subagents\\')) {
+      return;
+    }
+
     const stats = fs.statSync(filePath);
     const projectPath = this.extractProjectPath(filePath);
     const sessionId = this.generateSessionId(filePath);
@@ -292,5 +297,77 @@ export class ClaudeWatcher extends EventEmitter {
 
   isWaiting(): boolean {
     return this.isWaitingForInput;
+  }
+
+  async getServerSummary(tmuxSessions?: Array<{ name: string; workingDir?: string }>): Promise<{
+    sessions: Array<{
+      id: string;
+      name: string;
+      projectPath: string;
+      status: 'idle' | 'working' | 'waiting' | 'error';
+      lastActivity: number;
+      currentActivity?: string;
+    }>;
+    totalSessions: number;
+    waitingCount: number;
+    workingCount: number;
+  }> {
+    // Get tmux sessions to filter - only show conversations with active tmux sessions
+    // Encode the tmux paths the same way Claude does: /a/b/c -> -a-b-c
+    const activeTmuxEncodedPaths = new Set(
+      tmuxSessions?.map(s => s.workingDir?.replace(/\//g, '-')).filter((p): p is string => !!p) || []
+    );
+
+    const sessions: Array<{
+      id: string;
+      name: string;
+      projectPath: string;
+      status: 'idle' | 'working' | 'waiting' | 'error';
+      lastActivity: number;
+      currentActivity?: string;
+    }> = [];
+
+    let waitingCount = 0;
+    let workingCount = 0;
+
+    for (const [id, conv] of this.conversations) {
+      // Skip if no matching tmux session (unless tmuxSessions wasn't provided)
+      // Compare using the session ID which is the encoded path (e.g., -Users-foo-bar)
+      if (tmuxSessions && !activeTmuxEncodedPaths.has(id)) {
+        continue;
+      }
+
+      const messages = parseConversationFile(conv.path);
+      const currentActivity = detectCurrentActivity(messages);
+
+      // Determine status
+      let status: 'idle' | 'working' | 'waiting' | 'error' = 'idle';
+      if (conv.isWaitingForInput) {
+        status = 'waiting';
+        waitingCount++;
+      } else if (currentActivity) {
+        status = 'working';
+        workingCount++;
+      }
+
+      sessions.push({
+        id,
+        name: conv.projectPath.split('/').pop() || id,
+        projectPath: conv.projectPath,
+        status,
+        lastActivity: conv.lastModified,
+        currentActivity,
+      });
+    }
+
+    // Sort by last activity (most recent first)
+    sessions.sort((a, b) => b.lastActivity - a.lastActivity);
+
+    return {
+      sessions,
+      totalSessions: sessions.length,
+      waitingCount,
+      workingCount,
+    };
   }
 }

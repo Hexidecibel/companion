@@ -28,9 +28,10 @@ import { wsService } from '../services/websocket';
 interface SessionViewProps {
   server: Server;
   onBack: () => void;
+  initialSessionId?: string | null;
 }
 
-export function SessionView({ server, onBack }: SessionViewProps) {
+export function SessionView({ server, onBack, initialSessionId }: SessionViewProps) {
   const { connectionState, isConnected, isConnecting, reconnect } = useConnection(server);
   const {
     highlights,
@@ -44,6 +45,9 @@ export function SessionView({ server, onBack }: SessionViewProps) {
     sendWithImages,
     otherSessionActivity,
     dismissOtherSessionActivity,
+    tmuxSessionMissing,
+    dismissTmuxSessionMissing,
+    recreateTmuxSession,
   } = useConversation();
 
   const listRef = useRef<FlatList>(null);
@@ -63,6 +67,42 @@ export function SessionView({ server, onBack }: SessionViewProps) {
     getSessionSettings(server.id).then(setSessionSettings);
   }, [server.id]);
 
+  // Show alert when tmux session is missing
+  useEffect(() => {
+    if (tmuxSessionMissing) {
+      const { sessionName, canRecreate, savedConfig } = tmuxSessionMissing;
+
+      if (canRecreate && savedConfig) {
+        Alert.alert(
+          'Tmux Session Missing',
+          `The tmux session "${sessionName}" was deleted.\n\nRecreate it in:\n${savedConfig.workingDir}?`,
+          [
+            {
+              text: 'Cancel',
+              style: 'cancel',
+              onPress: dismissTmuxSessionMissing,
+            },
+            {
+              text: 'Recreate',
+              onPress: async () => {
+                const success = await recreateTmuxSession();
+                if (!success) {
+                  Alert.alert('Error', 'Failed to recreate the tmux session');
+                }
+              },
+            },
+          ]
+        );
+      } else {
+        Alert.alert(
+          'Tmux Session Missing',
+          `The tmux session "${sessionName}" does not exist and cannot be automatically recreated.\n\nPlease create a new tmux session on the server.`,
+          [{ text: 'OK', onPress: dismissTmuxSessionMissing }]
+        );
+      }
+    }
+  }, [tmuxSessionMissing, dismissTmuxSessionMissing, recreateTmuxSession]);
+
   const handleInstantNotifyChange = useCallback(async (value: boolean) => {
     const newSettings = { ...sessionSettings, instantNotify: value };
     setSessionSettings(newSettings);
@@ -77,20 +117,37 @@ export function SessionView({ server, onBack }: SessionViewProps) {
   // Auto-scroll disabled - was too aggressive and prevented reading history
   // User can tap the scroll-to-bottom button when needed
 
+  const lastSwitchedSessionId = useRef<string | null>(null);
+
   // Refresh when connection is established and sync settings
   useEffect(() => {
-    if (isConnected) {
-      refresh();
-      // Sync instant notify preference with daemon
-      getSessionSettings(server.id).then(settings => {
+    if (isConnected && wsService.isConnected()) {
+      const init = async () => {
+        // Switch to initial session if specified and different from last switched
+        const isSwitching = initialSessionId && initialSessionId !== lastSwitchedSessionId.current;
+        if (isSwitching) {
+          lastSwitchedSessionId.current = initialSessionId;
+          try {
+            await wsService.sendRequest('switch_session', { sessionId: initialSessionId });
+          } catch (e) {
+            console.error('Failed to switch session:', e);
+          }
+        }
+
+        // Clear first if switching sessions to avoid showing stale content
+        refresh(!!isSwitching);
+        // Sync instant notify preference with daemon
+        const settings = await getSessionSettings(server.id);
         if (settings.instantNotify) {
           wsService.sendRequest('set_instant_notify', { enabled: true });
         }
-      });
-      // Scroll to bottom on initial connection
-      initialScrollDone.current = false;
+        // Scroll to bottom on initial connection
+        initialScrollDone.current = false;
+      };
+
+      init();
     }
-  }, [isConnected, refresh, server.id]);
+  }, [isConnected, refresh, server.id, initialSessionId]);
 
   // Scroll to bottom on initial load and track new messages
   useEffect(() => {
@@ -239,8 +296,8 @@ export function SessionView({ server, onBack }: SessionViewProps) {
   return (
     <KeyboardAvoidingView
       style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 24}
     >
       <View style={styles.header}>
         <TouchableOpacity onPress={onBack} style={styles.backButton}>
@@ -459,6 +516,7 @@ export function SessionView({ server, onBack }: SessionViewProps) {
         data={data}
         keyExtractor={(item) => item.id}
         renderItem={renderItem}
+        style={styles.list}
         contentContainerStyle={[
           styles.listContent,
           data.length === 0 && styles.listContentEmpty,
@@ -780,6 +838,9 @@ const styles = StyleSheet.create({
   errorText: {
     color: '#fecaca',
     fontSize: 13,
+  },
+  list: {
+    flex: 1,
   },
   listContent: {
     paddingVertical: 12,

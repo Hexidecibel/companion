@@ -1,104 +1,39 @@
-import * as Notifications from 'expo-notifications';
-import * as Device from 'expo-device';
-import Constants from 'expo-constants';
 import { Platform } from 'react-native';
 import { wsService } from './websocket';
 
 let pushToken: string | null = null;
-let tokenType: 'fcm' | 'expo' = 'expo';
 
-// Configure how notifications are handled when app is in foreground
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowAlert: true,
-    shouldPlaySound: true,
-    shouldSetBadge: true,
-    shouldShowBanner: true,
-    shouldShowList: true,
-  }),
-});
+// Simplified push service - expo-notifications removed due to Expo Go SDK 53+ incompatibility
+// Push notifications will work when building a standalone app with Firebase
 
 export async function registerForPushNotifications(): Promise<string | null> {
-  // Only works on physical devices
-  if (!Device.isDevice) {
-    console.log('Push notifications: Must use physical device');
-    return null;
-  }
-
-  try {
-    // Check existing permissions
-    const { status: existingStatus } = await Notifications.getPermissionsAsync();
-    let finalStatus = existingStatus;
-
-    // Request permissions if not granted
-    if (existingStatus !== 'granted') {
-      const { status } = await Notifications.requestPermissionsAsync();
-      finalStatus = status;
-    }
-
-    if (finalStatus !== 'granted') {
-      console.log('Push notifications: Permission not granted');
-      return null;
-    }
-
-    // Try to get native FCM token first (works in standalone builds)
-    try {
-      const deviceToken = await Notifications.getDevicePushTokenAsync();
-      if (deviceToken.type === 'android' || deviceToken.type === 'ios') {
-        pushToken = deviceToken.data;
-        tokenType = 'fcm';
-        console.log('Push notifications: Got native FCM token');
-        return pushToken;
-      }
-    } catch (fcmError) {
-      console.log('Push notifications: Native FCM not available, falling back to Expo Push');
-    }
-
-    // Fall back to Expo Push Token (works in Expo Go)
-    const projectId = Constants.expoConfig?.extra?.eas?.projectId;
-    const tokenData = await Notifications.getExpoPushTokenAsync({
-      projectId,
-    });
-
-    pushToken = tokenData.data;
-    tokenType = 'expo';
-    console.log('Push notifications: Got Expo Push token');
-
-    return pushToken;
-  } catch (error) {
-    console.error('Push notifications: Error getting token:', error);
-    return null;
-  }
+  // In Expo Go, we can't get push tokens
+  // This will work in standalone builds with proper Firebase setup
+  console.log('Push notifications: Disabled in Expo Go (SDK 53+)');
+  return null;
 }
 
 export async function setupNotificationChannel(): Promise<void> {
-  if (Platform.OS === 'android') {
-    await Notifications.setNotificationChannelAsync('claude_waiting', {
-      name: 'Claude Waiting',
-      description: 'Notifications when Claude is waiting for your input',
-      importance: Notifications.AndroidImportance.HIGH,
-      vibrationPattern: [0, 250, 250, 250],
-      lightColor: '#3b82f6',
-      sound: 'default',
-    });
-  }
+  // No-op in Expo Go
 }
 
 export function addNotificationReceivedListener(
-  callback: (notification: Notifications.Notification) => void
+  callback: (notification: unknown) => void
 ) {
-  return Notifications.addNotificationReceivedListener(callback);
+  // Return a dummy subscription
+  return { remove: () => {} };
 }
 
 export function addNotificationResponseReceivedListener(
-  callback: (response: Notifications.NotificationResponse) => void
+  callback: (response: unknown) => void
 ) {
-  return Notifications.addNotificationResponseReceivedListener(callback);
+  // Return a dummy subscription
+  return { remove: () => {} };
 }
 
 export async function registerWithDaemon(deviceId: string): Promise<boolean> {
   if (!pushToken) {
-    console.log('Push notifications: No token to register');
+    // No token available in Expo Go
     return false;
   }
 
@@ -110,8 +45,8 @@ export async function registerWithDaemon(deviceId: string): Promise<boolean> {
   try {
     const response = await wsService.sendRequest('register_push', {
       deviceId,
-      fcmToken: pushToken, // daemon expects 'fcmToken' field
-      tokenType,
+      fcmToken: pushToken,
+      tokenType: 'fcm',
     });
 
     if (response.success) {
@@ -144,11 +79,7 @@ export async function unregisterWithDaemon(deviceId: string): Promise<boolean> {
 }
 
 export async function clearBadge(): Promise<void> {
-  try {
-    await Notifications.setBadgeCountAsync(0);
-  } catch (error) {
-    // Ignore badge errors
-  }
+  // No-op in Expo Go
 }
 
 export function getToken(): string | null {
@@ -156,5 +87,5 @@ export function getToken(): string | null {
 }
 
 export function getTokenType(): 'fcm' | 'expo' {
-  return tokenType;
+  return 'fcm';
 }

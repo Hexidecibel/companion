@@ -10,8 +10,11 @@ import { InputInjector } from './input-injector';
 import { PushNotificationService } from './push';
 import { TmuxManager } from './tmux-manager';
 import { extractHighlights } from './parser';
-import { WebSocketMessage, WebSocketResponse, DaemonConfig } from './types';
+import { WebSocketMessage, WebSocketResponse, DaemonConfig, TmuxSessionConfig } from './types';
 import { loadConfig, saveConfig } from './config';
+
+// File for persisting tmux session configs
+const TMUX_CONFIGS_FILE = path.join(os.homedir(), '.claude-companion', 'tmux-sessions.json');
 
 interface AuthenticatedClient {
   id: string;
@@ -29,16 +32,19 @@ export class WebSocketHandler {
   private injector: InputInjector;
   private push: PushNotificationService;
   private tmux: TmuxManager;
+  private tmuxSessionConfigs: Map<string, TmuxSessionConfig> = new Map();
+  private config: DaemonConfig;
 
   constructor(
     server: Server,
-    token: string,
+    config: DaemonConfig,
     watcher: ClaudeWatcher,
     injector: InputInjector,
     push: PushNotificationService,
     tmux?: TmuxManager
   ) {
-    this.token = token;
+    this.config = config;
+    this.token = config.token;
     this.watcher = watcher;
     this.injector = injector;
     this.push = push;
@@ -69,7 +75,49 @@ export class WebSocketHandler {
       this.broadcast('other_session_activity', data);
     });
 
+    // Load saved tmux session configs
+    this.loadTmuxSessionConfigs();
+
     console.log('WebSocket: Server initialized');
+  }
+
+  private loadTmuxSessionConfigs(): void {
+    try {
+      if (fs.existsSync(TMUX_CONFIGS_FILE)) {
+        const content = fs.readFileSync(TMUX_CONFIGS_FILE, 'utf-8');
+        const configs = JSON.parse(content) as TmuxSessionConfig[];
+        for (const config of configs) {
+          this.tmuxSessionConfigs.set(config.name, config);
+        }
+        console.log(`WebSocket: Loaded ${configs.length} saved tmux session configs`);
+      }
+    } catch (err) {
+      console.error('Failed to load tmux session configs:', err);
+    }
+  }
+
+  private saveTmuxSessionConfigs(): void {
+    try {
+      const dir = path.dirname(TMUX_CONFIGS_FILE);
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+      const configs = Array.from(this.tmuxSessionConfigs.values());
+      fs.writeFileSync(TMUX_CONFIGS_FILE, JSON.stringify(configs, null, 2));
+    } catch (err) {
+      console.error('Failed to save tmux session configs:', err);
+    }
+  }
+
+  private storeTmuxSessionConfig(name: string, workingDir: string, startClaude: boolean = true): void {
+    this.tmuxSessionConfigs.set(name, {
+      name,
+      workingDir,
+      startClaude,
+      lastUsed: Date.now(),
+    });
+    this.saveTmuxSessionConfigs();
+    console.log(`WebSocket: Stored tmux session config for "${name}" (${workingDir})`);
   }
 
   private handleConnection(ws: WebSocket, req: IncomingMessage): void {
@@ -200,6 +248,27 @@ export class WebSocketHandler {
         });
         break;
 
+      case 'get_server_summary':
+        // Get tmux sessions to filter - only show conversations with active tmux sessions
+        this.tmux.listSessions().then(async (tmuxSessions) => {
+          const summary = await this.watcher.getServerSummary(tmuxSessions);
+          this.send(client.ws, {
+            type: 'server_summary',
+            success: true,
+            payload: summary,
+            requestId,
+          });
+        }).catch((err) => {
+          console.error('Failed to get server summary:', err);
+          this.send(client.ws, {
+            type: 'server_summary',
+            success: false,
+            error: 'Failed to get server summary',
+            requestId,
+          });
+        });
+        break;
+
       case 'get_sessions':
         const sessions = this.watcher.getSessions();
         const activeSessionId = this.watcher.getActiveSessionId();
@@ -215,6 +284,24 @@ export class WebSocketHandler {
         const switchPayload = payload as { sessionId: string };
         if (switchPayload?.sessionId) {
           const switched = this.watcher.setActiveSession(switchPayload.sessionId);
+
+          // Also switch the input target to the corresponding tmux session
+          if (switched) {
+            const convSession = this.watcher.getSessions().find(s => s.id === switchPayload.sessionId);
+            if (convSession?.projectPath) {
+              // Find tmux session with matching working directory
+              this.tmux.listSessions().then(tmuxSessions => {
+                const matchingTmux = tmuxSessions.find(ts => ts.workingDir === convSession.projectPath);
+                if (matchingTmux) {
+                  this.injector.setActiveSession(matchingTmux.name);
+                  console.log(`WebSocket: Switched input target to tmux session "${matchingTmux.name}"`);
+                }
+              }).catch(err => {
+                console.error('Failed to find matching tmux session:', err);
+              });
+            }
+          }
+
           this.send(client.ws, {
             type: 'session_switched',
             success: switched,
@@ -341,6 +428,10 @@ export class WebSocketHandler {
         this.handleSwitchTmuxSession(client, payload as { sessionName: string }, requestId);
         break;
 
+      case 'recreate_tmux_session':
+        this.handleRecreateTmuxSession(client, payload as { sessionName?: string }, requestId);
+        break;
+
       case 'browse_directories':
         this.handleBrowseDirectories(client, payload as { path?: string }, requestId);
         break;
@@ -376,6 +467,31 @@ export class WebSocketHandler {
 
     // Cancel any pending push notification since user is responding
     this.push.cancelPendingNotification();
+
+    // Check if the target session exists before trying to send
+    const activeSession = this.injector.getActiveSession();
+    const sessionExists = await this.injector.checkSessionExists(activeSession);
+
+    if (!sessionExists) {
+      // Check if we have a stored config for this session
+      const savedConfig = this.tmuxSessionConfigs.get(activeSession);
+
+      this.send(client.ws, {
+        type: 'input_sent',
+        success: false,
+        error: 'tmux_session_not_found',
+        payload: {
+          sessionName: activeSession,
+          canRecreate: !!savedConfig,
+          savedConfig: savedConfig ? {
+            name: savedConfig.name,
+            workingDir: savedConfig.workingDir,
+          } : undefined,
+        },
+        requestId,
+      });
+      return;
+    }
 
     const success = await this.injector.sendInput(payload.input);
     this.send(client.ws, {
@@ -641,6 +757,9 @@ export class WebSocketHandler {
     const result = await this.tmux.createSession(sessionName, payload.workingDir, startClaude);
 
     if (result.success) {
+      // Store the session config for potential recreation later
+      this.storeTmuxSessionConfig(sessionName, payload.workingDir, startClaude);
+
       // Switch to the new session
       this.injector.setActiveSession(sessionName);
 
@@ -751,6 +870,9 @@ export class WebSocketHandler {
     let conversationSessionId: string | undefined;
 
     if (tmuxSession?.workingDir) {
+      // Store the session config for potential recreation later
+      this.storeTmuxSessionConfig(payload.sessionName, tmuxSession.workingDir, true);
+
       // Encode the working directory the same way Claude does: /a/b/c -> -a-b-c
       const encodedPath = tmuxSession.workingDir.replace(/\//g, '-');
 
@@ -776,6 +898,89 @@ export class WebSocketHandler {
       },
       requestId,
     });
+  }
+
+  private async handleRecreateTmuxSession(
+    client: AuthenticatedClient,
+    payload: { sessionName?: string } | undefined,
+    requestId?: string
+  ): Promise<void> {
+    // Use provided session name or the currently active one
+    const sessionName = payload?.sessionName || this.injector.getActiveSession();
+    const savedConfig = this.tmuxSessionConfigs.get(sessionName);
+
+    if (!savedConfig) {
+      this.send(client.ws, {
+        type: 'tmux_session_recreated',
+        success: false,
+        error: `No saved configuration for session "${sessionName}"`,
+        requestId,
+      });
+      return;
+    }
+
+    // Check if directory still exists
+    if (!fs.existsSync(savedConfig.workingDir)) {
+      this.send(client.ws, {
+        type: 'tmux_session_recreated',
+        success: false,
+        error: `Working directory no longer exists: ${savedConfig.workingDir}`,
+        requestId,
+      });
+      return;
+    }
+
+    // Check if session already exists (maybe it was recreated manually)
+    const exists = await this.tmux.sessionExists(sessionName);
+    if (exists) {
+      this.send(client.ws, {
+        type: 'tmux_session_recreated',
+        success: true,
+        payload: {
+          sessionName,
+          workingDir: savedConfig.workingDir,
+          alreadyExisted: true,
+        },
+        requestId,
+      });
+      return;
+    }
+
+    console.log(`WebSocket: Recreating tmux session "${sessionName}" in ${savedConfig.workingDir}`);
+
+    const result = await this.tmux.createSession(
+      savedConfig.name,
+      savedConfig.workingDir,
+      savedConfig.startClaude
+    );
+
+    if (result.success) {
+      // Update the last used timestamp
+      this.storeTmuxSessionConfig(savedConfig.name, savedConfig.workingDir, savedConfig.startClaude);
+
+      // Ensure we're targeting this session
+      this.injector.setActiveSession(sessionName);
+
+      this.send(client.ws, {
+        type: 'tmux_session_recreated',
+        success: true,
+        payload: {
+          sessionName,
+          workingDir: savedConfig.workingDir,
+        },
+        requestId,
+      });
+
+      // Broadcast to all clients
+      this.broadcast('tmux_sessions_changed', { action: 'recreated', sessionName });
+    } else {
+      this.send(client.ws, {
+        type: 'tmux_session_recreated',
+        success: false,
+        error: result.error,
+        requestId,
+      });
+    }
   }
 
   private async handleBrowseDirectories(

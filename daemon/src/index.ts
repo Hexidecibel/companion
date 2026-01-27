@@ -63,7 +63,7 @@ async function main(): Promise<void> {
   });
 
   // Initialize WebSocket handler
-  const wsHandler = new WebSocketHandler(server, config.token, watcher, injector, push);
+  const wsHandler = new WebSocketHandler(server, config, watcher, injector, push);
 
   // Start mDNS advertisement
   let mdns: MdnsAdvertiser | null = null;

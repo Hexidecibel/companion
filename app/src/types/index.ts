@@ -112,3 +112,40 @@ export interface OtherSessionActivity {
   newMessageCount: number;
   lastMessage?: ConversationMessage;
 }
+
+// Dashboard types
+export interface SessionSummary {
+  id: string;
+  name: string;
+  projectPath: string;
+  status: 'idle' | 'working' | 'waiting' | 'error';
+  lastActivity: number;
+  currentActivity?: string;
+}
+
+export interface ServerSummary {
+  sessions: SessionSummary[];
+  totalSessions: number;
+  waitingCount: number;
+  workingCount: number;
+}
+
+export interface ServerStatus {
+  serverId: string;
+  serverName: string;
+  connected: boolean;
+  connecting: boolean;
+  error?: string;
+  summary?: ServerSummary;
+  lastUpdated: number;
+}
+
+// Tmux session missing state (for recreation)
+export interface TmuxSessionMissing {
+  sessionName: string;
+  canRecreate: boolean;
+  savedConfig?: {
+    name: string;
+    workingDir: string;
+  };
+}

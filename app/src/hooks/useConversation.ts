@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { ConversationMessage, ConversationHighlight, SessionStatus, ViewMode, OtherSessionActivity } from '../types';
+import { ConversationMessage, ConversationHighlight, SessionStatus, ViewMode, OtherSessionActivity, TmuxSessionMissing } from '../types';
 import { wsService } from '../services/websocket';
 
 // Helper to check if highlights have actually changed
@@ -24,6 +24,7 @@ export function useConversation() {
   const [error, setError] = useState<string | null>(null);
   const [isConnected, setIsConnected] = useState(wsService.isConnected());
   const [otherSessionActivity, setOtherSessionActivity] = useState<OtherSessionActivity | null>(null);
+  const [tmuxSessionMissing, setTmuxSessionMissing] = useState<TmuxSessionMissing | null>(null);
   const hasSubscribed = useRef(false);
   const lastSentTime = useRef<number>(0);
   const pendingMessages = useRef<Set<string>>(new Set());
@@ -229,6 +230,14 @@ export function useConversation() {
       if (!response.success) {
         // Remove optimistic message on failure
         setHighlights(prev => prev.filter(m => m.id !== optimisticMessage.id));
+
+        // Check if this is a tmux session not found error
+        if (response.error === 'tmux_session_not_found') {
+          const payload = response.payload as TmuxSessionMissing;
+          setTmuxSessionMissing(payload);
+          return false;
+        }
+
         setError(response.error || 'Failed to send input');
         return false;
       }
@@ -310,6 +319,34 @@ export function useConversation() {
     setOtherSessionActivity(null);
   }, []);
 
+  const dismissTmuxSessionMissing = useCallback(() => {
+    setTmuxSessionMissing(null);
+  }, []);
+
+  const recreateTmuxSession = useCallback(async (): Promise<boolean> => {
+    if (!tmuxSessionMissing || !wsService.isConnected()) {
+      return false;
+    }
+
+    try {
+      const response = await wsService.sendRequest('recreate_tmux_session', {
+        sessionName: tmuxSessionMissing.sessionName,
+      });
+      if (response.success) {
+        setTmuxSessionMissing(null);
+        // Refresh to get the new session state
+        refresh(true);
+        return true;
+      } else {
+        setError(response.error || 'Failed to recreate session');
+        return false;
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to recreate session');
+      return false;
+    }
+  }, [tmuxSessionMissing, refresh]);
+
   return {
     messages,
     highlights,
@@ -327,5 +364,8 @@ export function useConversation() {
     currentData: viewMode === 'highlights' ? highlights : messages,
     otherSessionActivity,
     dismissOtherSessionActivity,
+    tmuxSessionMissing,
+    dismissTmuxSessionMissing,
+    recreateTmuxSession,
   };
 }

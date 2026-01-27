@@ -98,3 +98,28 @@ export interface ConversationFile {
   projectPath: string;
   lastModified: number;
 }
+
+// Stored tmux session config for recreation
+export interface TmuxSessionConfig {
+  name: string;
+  workingDir: string;
+  startClaude: boolean;
+  lastUsed: number;
+}
+
+// Dashboard types
+export interface SessionSummary {
+  id: string;
+  name: string;
+  projectPath: string;
+  status: 'idle' | 'working' | 'waiting' | 'error';
+  lastActivity: number;
+  currentActivity?: string;
+}
+
+export interface ServerSummary {
+  sessions: SessionSummary[];
+  totalSessions: number;
+  waitingCount: number;
+  workingCount: number;
+}

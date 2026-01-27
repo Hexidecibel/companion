@@ -1,12 +1,14 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { View, StyleSheet, StatusBar, AppState } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { Server } from './src/types';
 import { getServers, getSettings } from './src/services/storage';
+import { DashboardScreen } from './src/screens/DashboardScreen';
 import { ServerList } from './src/screens/ServerList';
 import { SessionView } from './src/screens/SessionView';
 import { Settings } from './src/screens/Settings';
 import { SetupScreen } from './src/screens/SetupScreen';
+import { wsService } from './src/services/websocket';
 import {
   registerForPushNotifications,
   setupNotificationChannel,
@@ -14,14 +16,14 @@ import {
   clearBadge,
 } from './src/services/push';
 
-type Screen = 'servers' | 'session' | 'settings' | 'setup';
+type Screen = 'dashboard' | 'servers' | 'session' | 'settings' | 'setup';
 
 export default function App() {
-  const [currentScreen, setCurrentScreen] = useState<Screen>('servers');
+  const [currentScreen, setCurrentScreen] = useState<Screen>('dashboard');
   const [selectedServer, setSelectedServer] = useState<Server | null>(null);
+  const pendingSessionId = useRef<string | null>(null);
 
   useEffect(() => {
-    loadDefaultServer();
     initializePushNotifications();
 
     // Clear badge when app becomes active
@@ -51,29 +53,48 @@ export default function App() {
     await registerForPushNotifications();
   };
 
-  const loadDefaultServer = async () => {
-    const servers = await getServers();
-    const settings = await getSettings();
-    const defaultServer =
-      servers.find((s) => s.id === settings.defaultServerId) ||
-      servers.find((s) => s.isDefault) ||
-      (servers.length === 1 ? servers[0] : null);
-    if (defaultServer) {
-      setSelectedServer(defaultServer);
-    }
-  };
+  // Handle selecting a server from dashboard (with optional session ID)
+  const handleSelectServerFromDashboard = useCallback((server: Server, sessionId?: string) => {
+    setSelectedServer(server);
+    pendingSessionId.current = sessionId || null;
 
+    // Only reconnect if switching to a different server
+    const currentServerId = wsService.getServerId();
+    if (currentServerId !== server.id) {
+      // Disconnect from old server if connected to a different one
+      if (currentServerId) {
+        wsService.disconnect();
+      }
+      wsService.connect(server);
+    }
+
+    // SessionView will handle switching to the session via initialSessionId prop
+    setCurrentScreen('session');
+  }, []);
+
+  // Handle selecting a server from manage servers screen
   const handleSelectServer = useCallback((server: Server) => {
     setSelectedServer(server);
+
+    // Only reconnect if switching to a different server
+    const currentServerId = wsService.getServerId();
+    if (currentServerId !== server.id) {
+      if (currentServerId) {
+        wsService.disconnect();
+      }
+      wsService.connect(server);
+    }
+
     setCurrentScreen('session');
   }, []);
 
   const handleBackFromSession = useCallback(() => {
-    setCurrentScreen('servers');
+    // Don't disconnect - keep connection alive for quick return
+    setCurrentScreen('dashboard');
   }, []);
 
   const handleBackFromSettings = useCallback(() => {
-    setCurrentScreen('servers');
+    setCurrentScreen('dashboard');
   }, []);
 
   const handleOpenSettings = useCallback(() => {
@@ -85,23 +106,59 @@ export default function App() {
   }, []);
 
   const handleBackFromSetup = useCallback(() => {
+    setCurrentScreen('dashboard');
+  }, []);
+
+  const handleManageServers = useCallback(() => {
     setCurrentScreen('servers');
+  }, []);
+
+  const handleBackFromServers = useCallback(() => {
+    setCurrentScreen('dashboard');
   }, []);
 
   const renderScreen = () => {
     switch (currentScreen) {
+      case 'dashboard':
+        return (
+          <DashboardScreen
+            onSelectServer={handleSelectServerFromDashboard}
+            onManageServers={handleManageServers}
+            onOpenSetup={handleOpenSetup}
+          />
+        );
+      case 'servers':
+        return (
+          <ServerList
+            onSelectServer={handleSelectServer}
+            onOpenSetup={handleOpenSetup}
+            onBack={handleBackFromServers}
+          />
+        );
       case 'session':
         if (!selectedServer) {
-          setCurrentScreen('servers');
+          setCurrentScreen('dashboard');
           return null;
         }
-        return <SessionView server={selectedServer} onBack={handleBackFromSession} />;
+        return (
+          <SessionView
+            server={selectedServer}
+            onBack={handleBackFromSession}
+            initialSessionId={pendingSessionId.current}
+          />
+        );
       case 'settings':
         return <Settings onBack={handleBackFromSettings} />;
       case 'setup':
         return <SetupScreen onBack={handleBackFromSetup} />;
       default:
-        return <ServerList onSelectServer={handleSelectServer} onOpenSetup={handleOpenSetup} />;
+        return (
+          <DashboardScreen
+            onSelectServer={handleSelectServerFromDashboard}
+            onManageServers={handleManageServers}
+            onOpenSetup={handleOpenSetup}
+          />
+        );
     }
   };
 
@@ -111,7 +168,7 @@ export default function App() {
       <SafeAreaView style={styles.container} edges={['top']}>
         {renderScreen()}
       </SafeAreaView>
-      {currentScreen === 'servers' && (
+      {currentScreen === 'dashboard' && (
         <View style={styles.settingsButton}>
           <SafeAreaView edges={['bottom']}>
             <View style={styles.settingsButtonInner}>
