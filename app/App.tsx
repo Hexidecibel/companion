@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { View, StyleSheet, StatusBar, AppState } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
+import * as Sentry from '@sentry/react-native';
 import { Server } from './src/types';
 import { getServers, getSettings } from './src/services/storage';
 import { DashboardScreen } from './src/screens/DashboardScreen';
@@ -16,9 +17,19 @@ import {
   clearBadge,
 } from './src/services/push';
 
+// Initialize Sentry error tracking
+Sentry.init({
+  dsn: 'https://97dc37204e0bf64f9c9d3563af636146@o4510780700622848.ingest.us.sentry.io/4510780702261248',
+  debug: __DEV__, // Show debug logs in development
+  enableAutoSessionTracking: true,
+  attachScreenshot: true,
+  attachViewHierarchy: true,
+});
+
+
 type Screen = 'dashboard' | 'servers' | 'session' | 'settings' | 'setup';
 
-export default function App() {
+function App() {
   const [currentScreen, setCurrentScreen] = useState<Screen>('dashboard');
   const [selectedServer, setSelectedServer] = useState<Server | null>(null);
   const pendingSessionId = useRef<string | null>(null);
@@ -216,3 +227,5 @@ const styles = StyleSheet.create({
     borderColor: '#9ca3af',
   },
 });
+
+export default Sentry.wrap(App);

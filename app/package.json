@@ -22,6 +22,7 @@
     "@react-native-firebase/app": "^23.8.4",
     "@react-native-firebase/messaging": "^23.8.4",
     "@ronradtke/react-native-markdown-display": "^8.1.0",
+    "@sentry/react-native": "~7.2.0",
     "@types/react": "~19.1.10",
     "expo": "^54.0.32",
     "expo-build-properties": "^1.0.10",
