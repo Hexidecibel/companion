@@ -12,6 +12,7 @@ import {
   ScrollView,
   RefreshControl,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Server, ConnectionState } from '../types';
 import { getServers, addServer, updateServer, deleteServer } from '../services/storage';
 import { ServerCard } from '../components/ServerCard';
@@ -233,7 +234,7 @@ export function ServerList({ onSelectServer, onOpenSetup, onBack }: ServerListPr
         presentationStyle="pageSheet"
         onRequestClose={() => setModalVisible(false)}
       >
-        <View style={styles.modalContainer}>
+        <SafeAreaView style={styles.modalContainer} edges={['top']}>
           <View style={styles.modalHeader}>
             <TouchableOpacity onPress={() => setModalVisible(false)}>
               <Text style={styles.cancelButton}>Cancel</Text>
@@ -312,7 +313,7 @@ export function ServerList({ onSelectServer, onOpenSetup, onBack }: ServerListPr
               You can also find it in /etc/claude-companion/config.json
             </Text>
           </ScrollView>
-        </View>
+        </SafeAreaView>
       </Modal>
     </View>
   );
