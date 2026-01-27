@@ -3,7 +3,7 @@ import * as path from 'path';
 import * as chokidar from 'chokidar';
 import { EventEmitter } from 'events';
 import { ConversationFile, ConversationMessage, SessionStatus, TmuxSession } from './types';
-import { parseConversationFile, extractHighlights, detectWaitingForInput, detectCurrentActivity, getRecentActivity } from './parser';
+import { parseConversationFile, extractHighlights, detectWaitingForInput, detectCurrentActivity, getRecentActivity, getPendingApprovalTools } from './parser';
 
 interface TrackedConversation {
   path: string;
@@ -140,6 +140,15 @@ export class ClaudeWatcher extends EventEmitter {
           currentActivity,
           lastMessage,
         });
+
+        // Check for pending tools that might need auto-approval
+        const pendingTools = getPendingApprovalTools(messages);
+        if (pendingTools.length > 0) {
+          this.emit('pending-approval', {
+            sessionId,
+            tools: pendingTools,
+          });
+        }
       }
     } else {
       // Emit activity notification for non-active sessions

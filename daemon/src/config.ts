@@ -5,6 +5,15 @@ import { DaemonConfig } from './types';
 const HOME_DIR = process.env.HOME || '/root';
 const CONFIG_DIR = path.join(HOME_DIR, '.claude-companion');
 
+// Safe tools that can be auto-approved without user confirmation
+const DEFAULT_AUTO_APPROVE_TOOLS = [
+  'Read',
+  'Glob',
+  'Grep',
+  'WebFetch',
+  'WebSearch',
+];
+
 const DEFAULT_CONFIG: DaemonConfig = {
   port: 9877,
   token: '',
@@ -15,6 +24,7 @@ const DEFAULT_CONFIG: DaemonConfig = {
   claudeHome: path.join(HOME_DIR, '.claude'),
   mdnsEnabled: true,
   pushDelayMs: 60000, // 1 minute
+  autoApproveTools: DEFAULT_AUTO_APPROVE_TOOLS,
 };
 
 export function loadConfig(): DaemonConfig {
@@ -39,6 +49,7 @@ export function loadConfig(): DaemonConfig {
         mdnsEnabled: parsed.mdns_enabled,
         fcmCredentialsPath: parsed.fcm_credentials_path,
         pushDelayMs: parsed.push_delay_ms,
+        autoApproveTools: parsed.auto_approve_tools,
       };
     } catch (err) {
       console.error(`Error loading config from ${configPath}:`, err);

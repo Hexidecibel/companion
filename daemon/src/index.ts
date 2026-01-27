@@ -75,6 +75,23 @@ async function main(): Promise<void> {
   // Start file watcher
   watcher.start();
 
+  // Auto-approve safe tools
+  if (config.autoApproveTools.length > 0) {
+    console.log(`Auto-approve enabled for: ${config.autoApproveTools.join(', ')}`);
+
+    watcher.on('pending-approval', async ({ sessionId, tools }) => {
+      // Check if any pending tool should be auto-approved
+      const autoApprovable = tools.filter((tool: string) => config.autoApproveTools.includes(tool));
+
+      if (autoApprovable.length > 0) {
+        console.log(`Auto-approving tools: ${autoApprovable.join(', ')}`);
+        // Small delay to avoid race conditions with file writes
+        await new Promise(resolve => setTimeout(resolve, 200));
+        await injector.sendInput('yes');
+      }
+    });
+  }
+
   // Start HTTP server
   server.listen(config.port, () => {
     console.log(`Server listening on port ${config.port}`);

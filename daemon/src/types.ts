@@ -9,6 +9,7 @@ export interface DaemonConfig {
   mdnsEnabled: boolean;
   fcmCredentialsPath?: string;
   pushDelayMs: number;
+  autoApproveTools: string[];
 }
 
 export interface QuestionOption {

@@ -362,3 +362,17 @@ export function getSessionStatus(
     currentActivity: isProcessRunning ? detectCurrentActivity(messages) : undefined,
   };
 }
+
+/**
+ * Get list of pending tools that need approval from the last message
+ */
+export function getPendingApprovalTools(messages: ConversationMessage[]): string[] {
+  if (messages.length === 0) return [];
+
+  const lastMessage = messages[messages.length - 1];
+  if (lastMessage.type !== 'assistant' || !lastMessage.toolCalls) return [];
+
+  return lastMessage.toolCalls
+    .filter(tc => tc.status === 'pending')
+    .map(tc => tc.name);
+}
