@@ -1,4 +1,6 @@
 import * as http from 'http';
+import * as fs from 'fs';
+import * as path from 'path';
 import * as os from 'os';
 import QRCode from 'qrcode';
 import { DaemonConfig } from './types';
@@ -32,9 +34,57 @@ function getLocalIP(): string {
 }
 
 /**
- * Create an HTTP request handler that serves QR code at /qr
+ * Get content type for file extension
+ */
+function getContentType(filePath: string): string {
+  const ext = path.extname(filePath).toLowerCase();
+  const types: Record<string, string> = {
+    '.html': 'text/html',
+    '.css': 'text/css',
+    '.js': 'application/javascript',
+    '.json': 'application/json',
+    '.png': 'image/png',
+    '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
+    '.gif': 'image/gif',
+    '.svg': 'image/svg+xml',
+    '.ico': 'image/x-icon',
+  };
+  return types[ext] || 'text/plain';
+}
+
+/**
+ * Find the web directory (handles both dev and installed paths)
+ */
+function findWebDir(): string | null {
+  // Try relative to daemon dist (installed or dev)
+  const candidates = [
+    path.join(__dirname, '../../web'),           // From dist/
+    path.join(__dirname, '../../../web'),        // From dist/ in installed location
+    path.join(process.cwd(), '../web'),          // From daemon directory
+    path.join(process.cwd(), 'web'),             // From project root
+  ];
+
+  for (const dir of candidates) {
+    if (fs.existsSync(path.join(dir, 'index.html'))) {
+      return dir;
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Create an HTTP request handler that serves QR code at /qr and web client at /web
  */
 export function createQRRequestHandler(config: DaemonConfig): http.RequestListener {
+  const webDir = findWebDir();
+  if (webDir) {
+    console.log(`Web client: Serving from ${webDir}`);
+  } else {
+    console.log('Web client: Not found (web/ directory missing)');
+  }
+
   return async (req: http.IncomingMessage, res: http.ServerResponse) => {
     // Handle CORS preflight
     res.setHeader('Access-Control-Allow-Origin', '*');
@@ -47,9 +97,58 @@ export function createQRRequestHandler(config: DaemonConfig): http.RequestListen
       return;
     }
 
-    const url = req.url || '/';
+    const fullUrl = req.url || '/';
+    const [urlPath, queryString] = fullUrl.split('?');
+    const params = new URLSearchParams(queryString || '');
 
-    if (url === '/qr' || url === '/qr.png') {
+    // Web client routes - public access, security via WebSocket token
+    if (urlPath.startsWith('/web')) {
+      if (!webDir) {
+        res.writeHead(404, { 'Content-Type': 'text/plain' });
+        res.end('Web client not found. Make sure web/ directory exists.');
+        return;
+      }
+
+      // Determine file to serve
+      let filePath = urlPath.replace('/web', '') || '/index.html';
+      if (filePath === '/' || filePath === '') {
+        filePath = '/index.html';
+      }
+
+      const fullPath = path.join(webDir, filePath);
+
+      // Security: prevent directory traversal
+      if (!fullPath.startsWith(webDir)) {
+        res.writeHead(403, { 'Content-Type': 'text/plain' });
+        res.end('Forbidden');
+        return;
+      }
+
+      try {
+        if (!fs.existsSync(fullPath)) {
+          res.writeHead(404, { 'Content-Type': 'text/plain' });
+          res.end('Not Found');
+          return;
+        }
+
+        const content = fs.readFileSync(fullPath);
+        const contentType = getContentType(fullPath);
+
+        res.writeHead(200, {
+          'Content-Type': contentType,
+          'Content-Length': content.length,
+          'Cache-Control': 'no-cache',
+        });
+        res.end(content);
+      } catch (err) {
+        console.error('Error serving web file:', err);
+        res.writeHead(500, { 'Content-Type': 'text/plain' });
+        res.end('Internal Server Error');
+      }
+      return;
+    }
+
+    if (urlPath === '/qr' || urlPath === '/qr.png') {
       try {
         const qrConfig: QRConfig = {
           host: getLocalIP(),
@@ -83,7 +182,7 @@ export function createQRRequestHandler(config: DaemonConfig): http.RequestListen
       return;
     }
 
-    if (url === '/qr.json') {
+    if (urlPath === '/qr.json') {
       // Return raw config as JSON (for debugging/testing)
       const qrConfig: QRConfig = {
         host: getLocalIP(),
@@ -97,8 +196,12 @@ export function createQRRequestHandler(config: DaemonConfig): http.RequestListen
       return;
     }
 
-    if (url === '/') {
+    if (urlPath === '/') {
       // Simple HTML page showing QR code
+      const webClientLink = webDir
+        ? `<a href="/web" class="web-link">Open Web Client</a>`
+        : '';
+
       const html = `<!DOCTYPE html>
 <html>
 <head>
@@ -131,8 +234,23 @@ export function createQRRequestHandler(config: DaemonConfig): http.RequestListen
       border-radius: 12px;
       font-size: 14px;
     }
+    .info p { margin-bottom: 8px; }
     .info code {
       color: #3b82f6;
+    }
+    .web-link {
+      display: inline-block;
+      margin-top: 24px;
+      padding: 14px 28px;
+      background: #3b82f6;
+      color: white;
+      text-decoration: none;
+      border-radius: 10px;
+      font-weight: 600;
+      transition: background 0.2s;
+    }
+    .web-link:hover {
+      background: #2563eb;
     }
   </style>
 </head>
@@ -144,6 +262,7 @@ export function createQRRequestHandler(config: DaemonConfig): http.RequestListen
     <p>Server: <code>${getLocalIP()}:${config.port}</code></p>
     <p>TLS: <code>${config.tls ? 'Enabled' : 'Disabled'}</code></p>
   </div>
+  ${webClientLink}
 </body>
 </html>`;
 

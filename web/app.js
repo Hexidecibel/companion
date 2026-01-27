@@ -16,7 +16,7 @@ class ClaudeCompanion {
 
     this.initElements();
     this.bindEvents();
-    this.loadSavedConfig();
+    this.checkAutoConnect();
   }
 
   initElements() {
@@ -62,6 +62,17 @@ class ClaudeCompanion {
     });
   }
 
+  checkAutoConnect() {
+    // Pre-fill host/port from current URL (user is already on the server)
+    // But require manual token entry for security
+    this.hostInput.value = window.location.hostname;
+    this.portInput.value = window.location.port || (window.location.protocol === 'https:' ? 443 : 80);
+    this.useTlsCheckbox.checked = window.location.protocol === 'https:';
+
+    // Focus on token input for quick entry
+    this.tokenInput.focus();
+  }
+
   loadSavedConfig() {
     try {
       const saved = localStorage.getItem('claude-companion-config');
@@ -95,7 +106,6 @@ class ClaudeCompanion {
       useTls: this.useTlsCheckbox.checked,
     };
 
-    this.saveConfig();
     this.connect();
   }
 
@@ -111,6 +121,7 @@ class ClaudeCompanion {
       this.ws = new WebSocket(url);
 
       this.ws.onopen = () => {
+        console.log('WebSocket connected');
         this.connected = true;
         this.connectStatus.textContent = 'Authenticating...';
         this.authenticate();
@@ -119,6 +130,7 @@ class ClaudeCompanion {
       this.ws.onmessage = (event) => {
         try {
           const message = JSON.parse(event.data);
+          console.log('Received message:', message.type, message);
           this.handleMessage(message);
         } catch (e) {
           console.error('Failed to parse message:', e);
@@ -141,6 +153,7 @@ class ClaudeCompanion {
 
       this.ws.onerror = (error) => {
         console.error('WebSocket error:', error);
+        console.log('Attempted URL was:', url);
         this.connectError.textContent = 'Connection failed. Check host and port.';
         this.connectBtn.disabled = false;
         this.connectStatus.textContent = '';
@@ -155,7 +168,7 @@ class ClaudeCompanion {
   authenticate() {
     this.send({
       type: 'authenticate',
-      payload: { token: this.config.token },
+      token: this.config.token,
     });
   }
 
@@ -167,38 +180,50 @@ class ClaudeCompanion {
 
   handleMessage(message) {
     switch (message.type) {
-      case 'auth_success':
-        this.authenticated = true;
-        this.connectStatus.textContent = 'Fetching sessions...';
-        this.send({ type: 'list_sessions' });
+      case 'connected':
+        // Server acknowledged connection, now authenticate
+        this.authenticate();
         break;
 
-      case 'auth_error':
-        this.connectError.textContent = message.payload?.error || 'Authentication failed';
-        this.connectBtn.disabled = false;
-        this.connectStatus.textContent = '';
-        this.ws.close();
+      case 'authenticated':
+        if (message.success) {
+          this.authenticated = true;
+          this.connectStatus.textContent = 'Fetching sessions...';
+          this.send({ type: 'get_sessions' });
+        } else {
+          this.connectError.textContent = message.error || 'Authentication failed';
+          this.connectBtn.disabled = false;
+          this.connectStatus.textContent = '';
+          this.ws.close();
+        }
         break;
 
       case 'sessions':
         this.sessions = message.payload?.sessions || [];
+        console.log('Sessions received:', this.sessions);
         this.handleSessionsList();
         break;
 
-      case 'conversation':
+      case 'highlights':
+        console.log('Highlights received:', message.payload);
+        this.hideWorkingIndicator();
         this.renderConversation(message.payload);
         break;
 
       case 'update':
-        this.handleUpdate(message.payload);
+        this.handleUpdate(message.payload || message);
+        break;
+
+      case 'subscribed':
+        console.log('Subscribed to session');
         break;
 
       case 'error':
-        console.error('Server error:', message.payload);
+        console.error('Server error:', message);
         break;
 
       default:
-        console.log('Unknown message type:', message.type);
+        console.log('Unknown message type:', message.type, message);
     }
   }
 
@@ -216,7 +241,6 @@ class ClaudeCompanion {
 
     this.showSessionScreen();
     this.subscribe(this.currentSession.id);
-    this.fetchConversation(this.currentSession.id);
   }
 
   showSessionScreen() {
@@ -243,19 +267,18 @@ class ClaudeCompanion {
   subscribe(sessionId) {
     this.send({
       type: 'subscribe',
-      payload: { sessionId },
+      sessionId,
     });
-  }
-
-  fetchConversation(sessionId) {
+    // Also fetch the conversation
     this.send({
       type: 'get_highlights',
-      payload: { sessionId },
+      sessionId,
     });
   }
 
   renderConversation(payload) {
-    const { messages, isWaiting } = payload;
+    const messages = payload.highlights || payload.messages || [];
+    const isWaiting = payload.isWaiting;
     this.messagesContainer.innerHTML = '';
 
     if (!messages || messages.length === 0) {
@@ -272,18 +295,23 @@ class ClaudeCompanion {
   }
 
   renderMessage(msg) {
+    // Support both formats: {role, text} and {type, content}
+    const role = msg.role || msg.type;
+    const text = msg.text || msg.content || '';
+
     const div = document.createElement('div');
-    div.className = `message ${msg.role}`;
+    div.className = `message ${role}`;
 
     // Main content
     const content = document.createElement('div');
     content.className = 'message-content';
 
-    if (msg.role === 'assistant' && msg.toolCalls && msg.toolCalls.length > 0) {
+    if (role === 'assistant' && msg.toolCalls && msg.toolCalls.length > 0) {
       // Render text content first
-      if (msg.text) {
+      if (text) {
         const textDiv = document.createElement('div');
-        textDiv.textContent = msg.text;
+        textDiv.className = 'message-text';
+        textDiv.textContent = text;
         content.appendChild(textDiv);
       }
 
@@ -293,7 +321,23 @@ class ClaudeCompanion {
         content.appendChild(toolCard);
       });
     } else {
-      content.textContent = msg.text || '';
+      content.textContent = text;
+    }
+
+    // Render options/choices if available
+    if (msg.options && msg.options.length > 0) {
+      const optionsContainer = document.createElement('div');
+      optionsContainer.className = 'message-options';
+
+      msg.options.forEach(option => {
+        const btn = document.createElement('button');
+        btn.className = 'option-btn';
+        btn.textContent = option;
+        btn.addEventListener('click', () => this.sendOption(option));
+        optionsContainer.appendChild(btn);
+      });
+
+      content.appendChild(optionsContainer);
     }
 
     div.appendChild(content);
@@ -328,17 +372,61 @@ class ClaudeCompanion {
     status.className = `tool-status ${tool.status || 'pending'}`;
     status.textContent = tool.status || 'pending';
 
+    const chevron = document.createElement('span');
+    chevron.className = 'tool-chevron';
+    chevron.textContent = '▶';
+
     header.appendChild(icon);
     header.appendChild(name);
     header.appendChild(status);
+    header.appendChild(chevron);
     card.appendChild(header);
+
+    // Create expandable details section
+    const details = document.createElement('div');
+    details.className = 'tool-details';
 
     if (tool.summary) {
       const summary = document.createElement('div');
       summary.className = 'tool-summary';
       summary.textContent = tool.summary;
-      card.appendChild(summary);
+      details.appendChild(summary);
     }
+
+    if (tool.input) {
+      const input = document.createElement('div');
+      input.className = 'tool-input';
+      const inputLabel = document.createElement('div');
+      inputLabel.className = 'tool-label';
+      inputLabel.textContent = 'Input:';
+      const inputContent = document.createElement('pre');
+      inputContent.className = 'tool-content';
+      inputContent.textContent = typeof tool.input === 'string' ? tool.input : JSON.stringify(tool.input, null, 2);
+      input.appendChild(inputLabel);
+      input.appendChild(inputContent);
+      details.appendChild(input);
+    }
+
+    if (tool.output) {
+      const output = document.createElement('div');
+      output.className = 'tool-output';
+      const outputLabel = document.createElement('div');
+      outputLabel.className = 'tool-label';
+      outputLabel.textContent = 'Output:';
+      const outputContent = document.createElement('pre');
+      outputContent.className = 'tool-content';
+      outputContent.textContent = typeof tool.output === 'string' ? tool.output : JSON.stringify(tool.output, null, 2);
+      output.appendChild(outputLabel);
+      output.appendChild(outputContent);
+      details.appendChild(output);
+    }
+
+    card.appendChild(details);
+
+    // Click to expand/collapse
+    header.addEventListener('click', () => {
+      card.classList.toggle('expanded');
+    });
 
     return card;
   }
@@ -365,10 +453,8 @@ class ClaudeCompanion {
   }
 
   handleUpdate(payload) {
-    if (payload.sessionId !== this.currentSession?.id) {
-      // Update from different session - could show notification
-      return;
-    }
+    // Hide working indicator on any update
+    this.hideWorkingIndicator();
 
     if (payload.newMessages) {
       payload.newMessages.forEach(msg => this.renderMessage(msg));
@@ -383,7 +469,8 @@ class ClaudeCompanion {
   updateWaitingIndicator(isWaiting) {
     if (isWaiting) {
       this.waitingIndicator.classList.remove('hidden');
-      this.messageInput.placeholder = 'Claude is waiting for input...';
+      this.messageInput.placeholder = 'Claude is waiting for your input...';
+      this.messageInput.focus();
     } else {
       this.waitingIndicator.classList.add('hidden');
       this.messageInput.placeholder = 'Type a message...';
@@ -400,25 +487,51 @@ class ClaudeCompanion {
     const text = this.messageInput.value.trim();
     if (!text) return;
 
-    // Clear input immediately
+    this.sendInput(text);
+  }
+
+  sendOption(option) {
+    this.sendInput(option);
+    // Remove option buttons after selection
+    const optionBtns = this.messagesContainer.querySelectorAll('.message-options');
+    optionBtns.forEach(btn => btn.remove());
+  }
+
+  sendInput(text) {
+    // Clear input
     this.messageInput.value = '';
 
     // Send to daemon
     this.send({
       type: 'send_input',
-      payload: {
-        sessionId: this.currentSession.id,
-        text,
-      },
+      payload: { input: text },
     });
 
     // Optimistically add user message
     this.renderMessage({
-      role: 'user',
-      text,
+      type: 'user',
+      content: text,
       timestamp: new Date().toISOString(),
     });
     this.scrollToBottom();
+
+    // Show working indicator
+    this.showWorkingIndicator();
+  }
+
+  showWorkingIndicator() {
+    this.hideWorkingIndicator();
+    const indicator = document.createElement('div');
+    indicator.className = 'working-indicator';
+    indicator.id = 'working-indicator';
+    indicator.innerHTML = '<span class="working-spinner"></span> Claude is working...';
+    this.messagesContainer.appendChild(indicator);
+    this.scrollToBottom();
+  }
+
+  hideWorkingIndicator() {
+    const existing = document.getElementById('working-indicator');
+    if (existing) existing.remove();
   }
 
   disconnect() {
@@ -482,7 +595,6 @@ class ClaudeCompanion {
     this.messagesContainer.innerHTML = '';
 
     this.subscribe(session.id);
-    this.fetchConversation(session.id);
     this.hideSessionsModal();
   }
 }
