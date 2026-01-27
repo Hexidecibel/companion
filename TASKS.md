@@ -49,6 +49,7 @@
 - [ ] App has "Scan QR" button on Add Server screen
 - [ ] Camera permission handling
 - [ ] Auto-fill server config from scanned QR
+- [ ] Update docs and in-app setup guide
 
 #### Usage/Stats Page
 - [ ] Show Claude API token usage
@@ -92,10 +93,10 @@ See `docs/ROADMAP-V2.md` Section 4 for full details.
 - [ ] Push notifications for agent events
 
 ### Nice to Have - Web Interface
-- [ ] Web client for browser-based access
-- [ ] Same functionality as mobile app
-- [ ] Real-time WebSocket connection
-- [ ] Responsive design for desktop/tablet
+- [x] Web client for browser-based access
+- [x] Same functionality as mobile app
+- [x] Real-time WebSocket connection
+- [x] Responsive design for desktop/tablet
 
 ### Nice to Have
 - [ ] iOS build and TestFlight distribution
@@ -111,17 +112,7 @@ See `docs/ROADMAP-V2.md` Section 4 for full details.
 
 Tasks suitable for longer autonomous work sessions:
 
-### 1. Web Interface Client
-```
-Build a browser-based client:
-1. Create new web/ directory with React or vanilla JS
-2. WebSocket connection to daemon
-3. Same functionality as mobile: view conversation, send input
-4. Responsive design for desktop/mobile browser
-5. Deploy as static files served by daemon or separate
-```
-
-### 2. Usage Statistics Page
+### 1. Usage Statistics Page
 ```
 Add a page showing Claude API usage:
 1. Research how to get usage data (may need to track locally or fetch from API)
@@ -131,7 +122,7 @@ Add a page showing Claude API usage:
 5. Consider caching/storing historical data
 ```
 
-### 3. Sub-Agent Tree View
+### 2. Sub-Agent Tree View
 ```
 Show sub-agents in a tree view:
 1. Update watcher.ts to watch subagents/ directory
@@ -142,7 +133,7 @@ Show sub-agents in a tree view:
 6. Test with actual sub-agent spawning
 ```
 
-### 4. QR Code Server Setup
+### 3. QR Code Server Setup
 ```
 Easy server configuration via QR code:
 1. Add HTTP endpoint to daemon (express or native http)
@@ -153,9 +144,11 @@ Easy server configuration via QR code:
 6. Add "Scan QR Code" button on ServerForm
 7. Parse scanned data and auto-fill form
 8. Handle camera permissions gracefully
+9. Update docs/TECHNICAL.md with QR setup instructions
+10. Update in-app setup guide/help text
 ```
 
-### 5. Enhanced Tool Card Details
+### 4. Enhanced Tool Card Details
 ```
 Improve tool card information display:
 1. Add syntax highlighting for code in tool outputs

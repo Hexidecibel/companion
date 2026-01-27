@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Claude Companion</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="app">
+    <!-- Connection Screen -->
+    <div id="connect-screen" class="screen">
+      <div class="connect-container">
+        <h1>Claude Companion</h1>
+        <p class="subtitle">Connect to your daemon</p>
+
+        <form id="connect-form">
+          <div class="form-group">
+            <label for="host">Host</label>
+            <input type="text" id="host" placeholder="192.168.1.100" required>
+          </div>
+
+          <div class="form-group">
+            <label for="port">Port</label>
+            <input type="number" id="port" value="9877" required>
+          </div>
+
+          <div class="form-group">
+            <label for="token">Token</label>
+            <input type="password" id="token" placeholder="Your auth token" required>
+          </div>
+
+          <div class="form-group checkbox">
+            <input type="checkbox" id="use-tls">
+            <label for="use-tls">Use TLS (wss://)</label>
+          </div>
+
+          <button type="submit" id="connect-btn">Connect</button>
+        </form>
+
+        <p id="connect-error" class="error"></p>
+        <p id="connect-status" class="status"></p>
+      </div>
+    </div>
+
+    <!-- Session Screen -->
+    <div id="session-screen" class="screen hidden">
+      <header>
+        <button id="back-btn" class="icon-btn">←</button>
+        <div class="header-info">
+          <h2 id="session-name">Session</h2>
+          <span id="connection-status" class="status-badge">Connected</span>
+        </div>
+        <button id="sessions-btn" class="icon-btn">≡</button>
+      </header>
+
+      <div id="messages" class="messages-container">
+        <!-- Messages will be rendered here -->
+      </div>
+
+      <div id="waiting-indicator" class="waiting-indicator hidden">
+        <span>Claude is waiting for input</span>
+      </div>
+
+      <form id="input-form" class="input-bar">
+        <input type="text" id="message-input" placeholder="Type a message..." autocomplete="off">
+        <button type="submit" id="send-btn">Send</button>
+      </form>
+    </div>
+
+    <!-- Sessions Modal -->
+    <div id="sessions-modal" class="modal hidden">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h3>Sessions</h3>
+          <button id="close-sessions-btn" class="icon-btn">×</button>
+        </div>
+        <div id="sessions-list" class="sessions-list">
+          <!-- Sessions will be rendered here -->
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
