@@ -14,6 +14,7 @@ import {
   Switch,
   ScrollView,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Server, ConversationHighlight } from '../types';
 import { useConnection } from '../hooks/useConnection';
 import { useConversation } from '../hooks/useConversation';
@@ -294,12 +295,13 @@ export function SessionView({ server, onBack, initialSessionId }: SessionViewPro
   };
 
   return (
-    <KeyboardAvoidingView
-      style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 24}
-    >
-      <View style={styles.header}>
+    <SafeAreaView style={styles.container} edges={['top']}>
+      <KeyboardAvoidingView
+        style={styles.keyboardView}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 24}
+      >
+        <View style={styles.header}>
         <TouchableOpacity onPress={onBack} style={styles.backButton}>
           <Text style={styles.backButtonText}>‹ Back</Text>
         </TouchableOpacity>
@@ -547,33 +549,42 @@ export function SessionView({ server, onBack, initialSessionId }: SessionViewPro
         </TouchableOpacity>
       )}
 
-      <InputBar
-        onSend={handleSendInput}
-        onSendImage={sendImage}
-        onUploadImage={uploadImage}
-        onSendWithImages={sendWithImages}
-        onSlashCommand={handleSlashCommand}
-        disabled={!isConnected}
-        placeholder={
-          !isConnected
-            ? 'Not connected'
-            : status?.isWaitingForInput
-            ? 'Type a response...'
-            : 'Type to queue message...'
-        }
-      />
+        <SafeAreaView edges={['bottom']} style={styles.inputBarContainer}>
+          <InputBar
+            onSend={handleSendInput}
+            onSendImage={sendImage}
+            onUploadImage={uploadImage}
+            onSendWithImages={sendWithImages}
+            onSlashCommand={handleSlashCommand}
+            disabled={!isConnected}
+            placeholder={
+              !isConnected
+                ? 'Not connected'
+                : status?.isWaitingForInput
+                ? 'Type a response...'
+                : 'Type to queue message...'
+            }
+          />
+        </SafeAreaView>
 
-      <FileViewer
-        filePath={viewingFile}
-        onClose={() => setViewingFile(null)}
-      />
-    </KeyboardAvoidingView>
+        <FileViewer
+          filePath={viewingFile}
+          onClose={() => setViewingFile(null)}
+        />
+      </KeyboardAvoidingView>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    backgroundColor: '#111827',
+  },
+  keyboardView: {
+    flex: 1,
+  },
+  inputBarContainer: {
     backgroundColor: '#111827',
   },
   header: {

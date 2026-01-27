@@ -166,8 +166,6 @@ function parseEntry(entry: JsonlEntry, completedToolIds: Set<string>): Conversat
 export function extractHighlights(messages: ConversationMessage[]): ConversationHighlight[] {
   const highlights = messages
     .filter(msg => {
-      // Always include messages with options (e.g., AskUserQuestion)
-      if (msg.options && msg.options.length > 0) return true;
       // Otherwise require actual content
       if (!msg.content || !msg.content.trim()) return false;
       // Include user messages with content
@@ -176,19 +174,25 @@ export function extractHighlights(messages: ConversationMessage[]): Conversation
       if (msg.type === 'assistant') return true;
       return false;
     })
-    .map(msg => ({
-      id: msg.id,
-      type: msg.type as 'user' | 'assistant',
-      content: msg.content,
-      timestamp: msg.timestamp,
-      options: msg.options,
-      isWaitingForChoice: msg.isWaitingForChoice,
-    }));
+    .map((msg, index, arr) => {
+      // Only show options on the LAST message
+      const isLastMessage = index === arr.length - 1;
+      const showOptions = isLastMessage && msg.options && msg.options.length > 0;
 
-  // Log if any highlights have options
-  const withOptions = highlights.filter(h => h.options && h.options.length > 0);
-  if (withOptions.length > 0) {
-    console.log(`Parser: ${withOptions.length} highlight(s) with options found`);
+      return {
+        id: msg.id,
+        type: msg.type as 'user' | 'assistant',
+        content: msg.content,
+        timestamp: msg.timestamp,
+        options: showOptions ? msg.options : undefined,
+        isWaitingForChoice: showOptions ? msg.isWaitingForChoice : false,
+      };
+    });
+
+  // Log if the last highlight has options
+  const lastHighlight = highlights[highlights.length - 1];
+  if (lastHighlight?.options && lastHighlight.options.length > 0) {
+    console.log(`Parser: Last message has ${lastHighlight.options.length} options`);
   }
 
   return highlights;
