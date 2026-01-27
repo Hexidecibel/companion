@@ -22,7 +22,8 @@
       }
     },
     "android": {
-      "package": "com.claudecompanion.app"
+      "package": "com.claudecompanion.app",
+      "softwareKeyboardLayoutMode": "pan"
     },
     "plugins": [
       [

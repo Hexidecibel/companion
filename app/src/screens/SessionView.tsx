@@ -13,8 +13,8 @@ import {
   Modal,
   Switch,
   ScrollView,
+  Keyboard,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import { Server, ConversationHighlight } from '../types';
 import { useConnection } from '../hooks/useConnection';
 import { useConversation } from '../hooks/useConversation';
@@ -62,6 +62,24 @@ export function SessionView({ server, onBack, initialSessionId }: SessionViewPro
   const [showActivityModal, setShowActivityModal] = useState(false);
   const [showSessionPicker, setShowSessionPicker] = useState(false);
   const [viewingFile, setViewingFile] = useState<string | null>(null);
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+
+  // Handle keyboard on Android
+  useEffect(() => {
+    if (Platform.OS !== 'android') return;
+
+    const showSub = Keyboard.addListener('keyboardDidShow', (e) => {
+      setKeyboardHeight(e.endCoordinates.height);
+    });
+    const hideSub = Keyboard.addListener('keyboardDidHide', () => {
+      setKeyboardHeight(0);
+    });
+
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
 
   // Load session settings
   useEffect(() => {
@@ -294,14 +312,19 @@ export function SessionView({ server, onBack, initialSessionId }: SessionViewPro
     );
   };
 
+  // On Android, use manual keyboard padding
+  const androidPadding = Platform.OS === 'android'
+    ? keyboardHeight > 0
+      ? keyboardHeight + 30  // When keyboard open
+      : 20                    // When keyboard closed
+    : 0;
+  const containerStyle = Platform.OS === 'android'
+    ? [styles.container, { paddingBottom: androidPadding }]
+    : styles.container;
+
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
-      <KeyboardAvoidingView
-        style={styles.keyboardView}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 24}
-      >
-        <View style={styles.header}>
+    <View style={containerStyle}>
+      <View style={styles.header}>
         <TouchableOpacity onPress={onBack} style={styles.backButton}>
           <Text style={styles.backButtonText}>‹ Back</Text>
         </TouchableOpacity>
@@ -549,42 +572,33 @@ export function SessionView({ server, onBack, initialSessionId }: SessionViewPro
         </TouchableOpacity>
       )}
 
-        <SafeAreaView edges={['bottom']} style={styles.inputBarContainer}>
-          <InputBar
-            onSend={handleSendInput}
-            onSendImage={sendImage}
-            onUploadImage={uploadImage}
-            onSendWithImages={sendWithImages}
-            onSlashCommand={handleSlashCommand}
-            disabled={!isConnected}
-            placeholder={
-              !isConnected
-                ? 'Not connected'
-                : status?.isWaitingForInput
-                ? 'Type a response...'
-                : 'Type to queue message...'
-            }
-          />
-        </SafeAreaView>
+      <InputBar
+        onSend={handleSendInput}
+        onSendImage={sendImage}
+        onUploadImage={uploadImage}
+        onSendWithImages={sendWithImages}
+        onSlashCommand={handleSlashCommand}
+        disabled={!isConnected}
+        placeholder={
+          !isConnected
+            ? 'Not connected'
+            : status?.isWaitingForInput
+            ? 'Type a response...'
+            : 'Type to queue message...'
+        }
+      />
 
-        <FileViewer
-          filePath={viewingFile}
-          onClose={() => setViewingFile(null)}
-        />
-      </KeyboardAvoidingView>
-    </SafeAreaView>
+      <FileViewer
+        filePath={viewingFile}
+        onClose={() => setViewingFile(null)}
+      />
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#111827',
-  },
-  keyboardView: {
-    flex: 1,
-  },
-  inputBarContainer: {
     backgroundColor: '#111827',
   },
   header: {
