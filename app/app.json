@@ -22,9 +22,18 @@
       }
     },
     "android": {
-      "package": "com.claudecompanion.app",
-      "usesCleartextTraffic": true
+      "package": "com.claudecompanion.app"
     },
+    "plugins": [
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "usesCleartextTraffic": true
+          }
+        }
+      ]
+    ],
     "web": {
       "bundler": "metro"
     },

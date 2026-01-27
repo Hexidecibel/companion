@@ -24,6 +24,7 @@
     "@ronradtke/react-native-markdown-display": "^8.1.0",
     "@types/react": "~19.1.10",
     "expo": "^54.0.32",
+    "expo-build-properties": "^1.0.10",
     "expo-constants": "~18.0.13",
     "expo-device": "~8.0.10",
     "expo-document-picker": "~14.0.8",
