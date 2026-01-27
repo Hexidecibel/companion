@@ -43,6 +43,13 @@
 
 ### High Priority
 
+#### QR Code Server Setup
+- [ ] Daemon serves QR code at `http://<host>:<port>/qr`
+- [ ] QR encodes JSON with host, port, token, TLS setting
+- [ ] App has "Scan QR" button on Add Server screen
+- [ ] Camera permission handling
+- [ ] Auto-fill server config from scanned QR
+
 #### Usage/Stats Page
 - [ ] Show Claude API token usage
 - [ ] Display cost breakdown by session/server
@@ -130,7 +137,20 @@ Show sub-agents in a tree view:
 6. Test with actual sub-agent spawning
 ```
 
-### 4. Enhanced Tool Card Details
+### 4. QR Code Server Setup
+```
+Easy server configuration via QR code:
+1. Add HTTP endpoint to daemon (express or native http)
+2. Generate QR code with qrcode npm package
+3. QR contains: { host, port, token, tls }
+4. Serve QR as PNG at /qr endpoint
+5. Add expo-camera or expo-barcode-scanner to app
+6. Add "Scan QR Code" button on ServerForm
+7. Parse scanned data and auto-fill form
+8. Handle camera permissions gracefully
+```
+
+### 5. Enhanced Tool Card Details
 ```
 Improve tool card information display:
 1. Add syntax highlighting for code in tool outputs
