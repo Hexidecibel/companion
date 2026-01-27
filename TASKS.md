@@ -61,8 +61,8 @@
 - [ ] Add last activity timestamp display
 
 ### Medium Priority - Notification Preferences
-- [ ] Configurable notification settings per server
-- [ ] Notification delay setting (instant vs batched)
+- [x] Configurable notification settings per server
+- [x] Notification delay setting (instant vs batched)
 - [ ] Quiet hours / Do Not Disturb schedule
 - [ ] Notification sound/vibration preferences
 - [ ] Filter notifications by session or project
@@ -104,16 +104,13 @@ See `docs/ROADMAP-V2.md` Section 4 for full details.
 
 Tasks suitable for longer autonomous work sessions:
 
-### 1. Notification Preferences Screen
+### 1. Notification Preferences - Quiet Hours (Remaining)
 ```
-Add configurable notification settings:
-1. Create NotificationSettingsScreen.tsx
-2. Add per-server notification toggle
-3. Add instant vs batched notification mode
-4. Add quiet hours picker (start/end time)
-5. Store preferences in AsyncStorage
-6. Update daemon to respect notification preferences
-7. Add navigation from Settings screen
+Add quiet hours to notification settings:
+1. Add time picker component for start/end time
+2. Store quiet hours in notificationPrefs.ts
+3. Add daemon endpoint to receive quiet hours
+4. Update daemon push.ts to check quiet hours before sending
 ```
 
 ### 2. Usage Statistics Page
