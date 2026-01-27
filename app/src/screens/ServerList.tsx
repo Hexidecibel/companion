@@ -17,6 +17,7 @@ import { Server, ConnectionState } from '../types';
 import { getServers, addServer, updateServer, deleteServer } from '../services/storage';
 import { ServerCard } from '../components/ServerCard';
 import { wsService } from '../services/websocket';
+import { QRScanner, QRConfig } from '../components/QRScanner';
 
 interface ServerListProps {
   onSelectServer: (server: Server) => void;
@@ -39,6 +40,7 @@ export function ServerList({ onSelectServer, onOpenSetup, onBack }: ServerListPr
   const [formToken, setFormToken] = useState('');
   const [formUseTls, setFormUseTls] = useState(false);
   const [formIsDefault, setFormIsDefault] = useState(false);
+  const [showQRScanner, setShowQRScanner] = useState(false);
 
   const loadServers = useCallback(async () => {
     const loaded = await getServers();
@@ -236,6 +238,19 @@ export function ServerList({ onSelectServer, onOpenSetup, onBack }: ServerListPr
     onSelectServer(server);
   };
 
+  const handleQRScan = (config: QRConfig) => {
+    setShowQRScanner(false);
+    // Auto-fill the form with scanned data
+    setFormHost(config.host);
+    setFormPort(String(config.port));
+    setFormToken(config.token);
+    setFormUseTls(config.tls);
+    // Suggest a name based on host
+    if (!formName) {
+      setFormName(config.host.includes('.local') ? config.host.replace('.local', '') : `Server ${config.host}`);
+    }
+  };
+
   if (loading) {
     return (
       <View style={styles.centered}>
@@ -319,6 +334,19 @@ export function ServerList({ onSelectServer, onOpenSetup, onBack }: ServerListPr
           </View>
 
           <ScrollView style={styles.form}>
+            <TouchableOpacity
+              style={styles.qrButton}
+              onPress={() => setShowQRScanner(true)}
+            >
+              <Text style={styles.qrButtonText}>Scan QR Code</Text>
+            </TouchableOpacity>
+
+            <View style={styles.divider}>
+              <View style={styles.dividerLine} />
+              <Text style={styles.dividerText}>or enter manually</Text>
+              <View style={styles.dividerLine} />
+            </View>
+
             <Text style={styles.label}>Name *</Text>
             <TextInput
               style={styles.input}
@@ -380,11 +408,23 @@ export function ServerList({ onSelectServer, onOpenSetup, onBack }: ServerListPr
             </View>
 
             <Text style={styles.hint}>
-              The token is displayed when you install the daemon on your server.
-              You can also find it in /etc/claude-companion/config.json
+              Tip: Visit http://your-server:9877 in a browser to see a QR code for easy setup.
+              The token can also be found in /etc/claude-companion/config.json
             </Text>
           </ScrollView>
         </SafeAreaView>
+      </Modal>
+
+      <Modal
+        visible={showQRScanner}
+        animationType="slide"
+        presentationStyle="fullScreen"
+        onRequestClose={() => setShowQRScanner(false)}
+      >
+        <QRScanner
+          onScan={handleQRScan}
+          onClose={() => setShowQRScanner(false)}
+        />
       </Modal>
     </View>
   );
@@ -546,5 +586,35 @@ const styles = StyleSheet.create({
     color: '#6b7280',
     fontSize: 13,
     textAlign: 'center',
+  },
+  qrButton: {
+    backgroundColor: '#374151',
+    padding: 16,
+    borderRadius: 12,
+    alignItems: 'center',
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#4b5563',
+    borderStyle: 'dashed',
+  },
+  qrButtonText: {
+    color: '#60a5fa',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  divider: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginVertical: 8,
+  },
+  dividerLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: '#374151',
+  },
+  dividerText: {
+    color: '#6b7280',
+    fontSize: 13,
+    marginHorizontal: 12,
   },
 });

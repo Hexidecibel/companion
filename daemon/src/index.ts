@@ -6,6 +6,7 @@ import { PushNotificationService } from './push';
 import { WebSocketHandler } from './websocket';
 import { createServer, validateTlsConfig } from './tls';
 import { certsExist, generateAndSaveCerts, getDefaultCertPaths } from './cert-generator';
+import { createQRRequestHandler } from './qr-server';
 
 async function main(): Promise<void> {
   console.log('Claude Companion Daemon v1.0.0');
@@ -55,12 +56,16 @@ async function main(): Promise<void> {
   const injector = new InputInjector(config.tmuxSession);
   const push = new PushNotificationService(config.fcmCredentialsPath, config.pushDelayMs);
 
-  // Create HTTP/HTTPS server
-  const server = createServer({
-    enabled: config.tls,
-    certPath: config.certPath,
-    keyPath: config.keyPath,
-  });
+  // Create HTTP/HTTPS server with QR code endpoint
+  const qrHandler = createQRRequestHandler(config);
+  const server = createServer(
+    {
+      enabled: config.tls,
+      certPath: config.certPath,
+      keyPath: config.keyPath,
+    },
+    qrHandler
+  );
 
   // Initialize WebSocket handler
   const wsHandler = new WebSocketHandler(server, config, watcher, injector, push);
@@ -96,6 +101,7 @@ async function main(): Promise<void> {
   server.listen(config.port, () => {
     console.log(`Server listening on port ${config.port}`);
     console.log(`WebSocket endpoint: ws${config.tls ? 's' : ''}://localhost:${config.port}`);
+    console.log(`QR code setup: http${config.tls ? 's' : ''}://localhost:${config.port}/qr`);
   });
 
   // Graceful shutdown

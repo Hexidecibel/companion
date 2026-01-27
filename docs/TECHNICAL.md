@@ -30,6 +30,20 @@ Detailed technical information for Claude Companion.
 2. **Mobile App** (`app/`) - React Native/Expo app for iOS/Android
 3. **Web Client** (`web/`) - Browser-based interface (vanilla JS)
 
+## QR Code Setup
+
+The daemon serves a QR code for easy mobile app configuration:
+
+1. Open a browser to `http://your-server:9877`
+2. A QR code is displayed containing your server configuration
+3. In the mobile app, tap "Add Server" then "Scan QR Code"
+4. Point the camera at the QR code to auto-fill all settings
+
+**Endpoints:**
+- `/` - HTML page with QR code
+- `/qr` or `/qr.png` - QR code as PNG image
+- `/qr.json` - Raw configuration as JSON
+
 ## Daemon Configuration
 
 Config file: `/etc/claude-companion/config.json`
