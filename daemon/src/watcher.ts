@@ -2,8 +2,12 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as chokidar from 'chokidar';
 import { EventEmitter } from 'events';
+import { exec } from 'child_process';
+import { promisify } from 'util';
 import { ConversationFile, ConversationMessage, SessionStatus, TmuxSession } from './types';
 import { parseConversationFile, extractHighlights, detectWaitingForInput, detectCurrentActivity, getRecentActivity, getPendingApprovalTools } from './parser';
+
+const execAsync = promisify(exec);
 
 interface TrackedConversation {
   path: string;
@@ -22,10 +26,53 @@ export class ClaudeWatcher extends EventEmitter {
   private isWaitingForInput: boolean = false;
   private initialLoadComplete: boolean = false;
   private startTime: number = Date.now();
+  private tmuxProjectPaths: Set<string> = new Set();
+  private tmuxFilterEnabled: boolean = true;
 
   constructor(claudeHome: string) {
     super();
     this.claudeHome = claudeHome;
+    // Refresh tmux paths periodically
+    this.refreshTmuxPaths();
+    setInterval(() => this.refreshTmuxPaths(), 5000);
+  }
+
+  private async refreshTmuxPaths(): Promise<void> {
+    try {
+      // Get list of tmux sessions with their working directories
+      const { stdout } = await execAsync(
+        'tmux list-panes -a -F "#{pane_current_path}" 2>/dev/null'
+      );
+      const paths = stdout.trim().split('\n').filter(p => p);
+
+      // Convert to project path format (e.g., /Users/foo/bar -> -Users-foo-bar)
+      this.tmuxProjectPaths.clear();
+      for (const p of paths) {
+        const projectPath = p.replace(/\//g, '-').replace(/^-/, '-');
+        this.tmuxProjectPaths.add(projectPath);
+      }
+
+      if (this.tmuxProjectPaths.size > 0) {
+        console.log(`Watcher: Tracking ${this.tmuxProjectPaths.size} tmux project paths`);
+      }
+    } catch {
+      // tmux not running or no sessions
+      this.tmuxProjectPaths.clear();
+    }
+  }
+
+  private isFromTmuxSession(filePath: string): boolean {
+    if (!this.tmuxFilterEnabled || this.tmuxProjectPaths.size === 0) {
+      return true; // No filtering if disabled or no tmux sessions
+    }
+
+    // Extract project path from file path
+    // e.g., ~/.claude/projects/-Users-foo-bar/uuid.jsonl -> -Users-foo-bar
+    const projectsDir = path.join(this.claudeHome, 'projects');
+    const relativePath = path.relative(projectsDir, filePath);
+    const projectDir = relativePath.split(path.sep)[0];
+
+    return this.tmuxProjectPaths.has(projectDir);
   }
 
   start(): void {
@@ -70,6 +117,11 @@ export class ClaudeWatcher extends EventEmitter {
   private handleFileChange(filePath: string): void {
     // Skip subagent files - they're not main conversation sessions
     if (filePath.includes('/subagents/') || filePath.includes('\\subagents\\')) {
+      return;
+    }
+
+    // Skip conversations not from tmux sessions
+    if (!this.isFromTmuxSession(filePath)) {
       return;
     }
 

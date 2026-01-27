@@ -12,7 +12,7 @@ import {
 } from 'react-native';
 import { getSettings, saveSettings, AppSettings, clearAll, getServers } from '../services/storage';
 import { historyService } from '../services/history';
-import { registerWithDaemon, unregisterWithDaemon, getToken } from '../services/push';
+import { registerWithDaemon, unregisterWithDaemon } from '../services/push';
 import { wsService } from '../services/websocket';
 
 interface SettingsProps {
@@ -59,11 +59,10 @@ export function Settings({ onBack }: SettingsProps) {
     const deviceId = `${Platform.OS}-${connectedServer?.id || 'default'}`;
 
     if (value) {
-      if (getToken()) {
-        const success = await registerWithDaemon(deviceId);
-        if (!success) {
-          Alert.alert('Push Registration', 'Could not register for push notifications. Make sure you are connected to a server.');
-        }
+      // registerWithDaemon will request permission and get token if needed
+      const success = await registerWithDaemon(deviceId);
+      if (!success) {
+        Alert.alert('Push Registration', 'Could not register for push notifications. Make sure you are connected to a server and grant notification permission.');
       }
     } else {
       await unregisterWithDaemon(deviceId);

@@ -25,6 +25,7 @@ import { SessionPicker } from '../components/SessionPicker';
 import { FileViewer } from '../components/FileViewer';
 import { getSessionSettings, saveSessionSettings, SessionSettings } from '../services/storage';
 import { wsService } from '../services/websocket';
+import { messageQueue, QueuedMessage } from '../services/messageQueue';
 
 interface SessionViewProps {
   server: Server;
@@ -63,6 +64,20 @@ export function SessionView({ server, onBack, initialSessionId }: SessionViewPro
   const [showSessionPicker, setShowSessionPicker] = useState(false);
   const [viewingFile, setViewingFile] = useState<string | null>(null);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
+  const [queuedMessages, setQueuedMessages] = useState<QueuedMessage[]>([]);
+
+  // Subscribe to message queue updates
+  useEffect(() => {
+    const unsubscribe = messageQueue.subscribe((queue) => {
+      const forThisServer = queue.filter((m) => m.serverId === server.id);
+      setQueuedMessages(forThisServer);
+    });
+    return unsubscribe;
+  }, [server.id]);
+
+  const cancelQueuedMessage = useCallback(async (id: string) => {
+    await messageQueue.dequeue(id);
+  }, []);
 
   // Handle keyboard on Android
   useEffect(() => {
@@ -260,6 +275,7 @@ export function SessionView({ server, onBack, initialSessionId }: SessionViewPro
   const renderItem = ({ item }: { item: ConversationHighlight }) => (
     <ConversationItem
       item={item}
+      showToolCalls={true}
       onSelectOption={handleSelectOption}
       onFileTap={setViewingFile}
     />
@@ -572,6 +588,21 @@ export function SessionView({ server, onBack, initialSessionId }: SessionViewPro
         </TouchableOpacity>
       )}
 
+      {queuedMessages.length > 0 && (
+        <View style={styles.queuedBanner}>
+          <Text style={styles.queuedText}>
+            📤 {queuedMessages.length} queued: {queuedMessages[0].content.substring(0, 30)}
+            {queuedMessages[0].content.length > 30 ? '...' : ''}
+          </Text>
+          <TouchableOpacity
+            style={styles.queuedCancel}
+            onPress={() => cancelQueuedMessage(queuedMessages[0].id)}
+          >
+            <Text style={styles.queuedCancelText}>✕</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
       <InputBar
         onSend={handleSendInput}
         onSendImage={sendImage}
@@ -868,7 +899,8 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   listContent: {
-    paddingVertical: 12,
+    paddingTop: 12,
+    paddingBottom: 100,  // Extra space for InputBar
   },
   listContentEmpty: {
     flex: 1,
@@ -906,11 +938,11 @@ const styles = StyleSheet.create({
   scrollButton: {
     position: 'absolute',
     right: 16,
-    bottom: 80,
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: '#3b82f6',
+    bottom: 120,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#374151',
     justifyContent: 'center',
     alignItems: 'center',
     shadowColor: '#000',
@@ -999,5 +1031,33 @@ const styles = StyleSheet.create({
     fontSize: 22,
     color: '#a7f3d0',
     lineHeight: 22,
+  },
+  queuedBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#1e3a5f',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#3b82f6',
+  },
+  queuedText: {
+    flex: 1,
+    color: '#93c5fd',
+    fontSize: 13,
+  },
+  queuedCancel: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: '#374151',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginLeft: 8,
+  },
+  queuedCancelText: {
+    color: '#9ca3af',
+    fontSize: 14,
+    fontWeight: '600',
   },
 });

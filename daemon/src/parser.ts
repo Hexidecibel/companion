@@ -4,7 +4,8 @@ import { ConversationMessage, ConversationHighlight, ToolCall, SessionStatus, Qu
 interface ContentBlock {
   type: string;
   text?: string;
-  tool_use_id?: string;
+  id?: string;  // For tool_use blocks
+  tool_use_id?: string;  // For tool_result blocks
   name?: string;
   input?: unknown;
   content?: string | Array<{ type: string; text?: string }>;  // For tool_result blocks
@@ -109,7 +110,7 @@ function parseEntry(entry: JsonlEntry, toolResults: Map<string, string>): Conver
       if (block.type === 'text' && block.text) {
         content += block.text;
       } else if (block.type === 'tool_use' && block.name) {
-        const toolId = block.tool_use_id || entry.uuid || '';
+        const toolId = block.id || entry.uuid || '';
         const output = toolResults.get(toolId);
         const isPending = !output && output !== '';
 
@@ -188,12 +189,14 @@ function parseEntry(entry: JsonlEntry, toolResults: Map<string, string>): Conver
 export function extractHighlights(messages: ConversationMessage[]): ConversationHighlight[] {
   const highlights = messages
     .filter(msg => {
-      // Otherwise require actual content
-      if (!msg.content || !msg.content.trim()) return false;
       // Include user messages with content
-      if (msg.type === 'user') return true;
-      // Include assistant messages with content
-      if (msg.type === 'assistant') return true;
+      if (msg.type === 'user' && msg.content && msg.content.trim()) return true;
+      // Include assistant messages with content OR toolCalls
+      if (msg.type === 'assistant') {
+        const hasContent = msg.content && msg.content.trim();
+        const hasToolCalls = msg.toolCalls && msg.toolCalls.length > 0;
+        return hasContent || hasToolCalls;
+      }
       return false;
     })
     .map((msg, index, arr) => {
@@ -208,6 +211,7 @@ export function extractHighlights(messages: ConversationMessage[]): Conversation
         timestamp: msg.timestamp,
         options: showOptions ? msg.options : undefined,
         isWaitingForChoice: showOptions ? msg.isWaitingForChoice : false,
+        toolCalls: msg.toolCalls,
       };
     });
 

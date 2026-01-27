@@ -26,19 +26,30 @@ export default {
       adaptiveIcon: {
         foregroundImage: "./assets/adaptive-icon.png",
         backgroundColor: "#111827"
-      }
+      },
+      googleServicesFile: "./google-services.json"
     },
     plugins: [
       [
         "expo-build-properties",
         {
           android: {
-            usesCleartextTraffic: true,
-            ndkVersion: "26.1.10909125"
+            usesCleartextTraffic: true
           }
         }
       ],
-      "@sentry/react-native"
+      "@react-native-firebase/app",
+      "@react-native-firebase/messaging",
+      [
+        "@sentry/react-native",
+        {
+          organization: "xludax",
+          project: "claude-companion",
+          // Disable source map upload for now
+          uploadNativeSymbols: false,
+          uploadSourceMaps: false
+        }
+      ]
     ],
     web: {
       bundler: "metro"

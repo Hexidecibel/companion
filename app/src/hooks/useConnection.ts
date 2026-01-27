@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { Platform } from 'react-native';
 import { Server, ConnectionState } from '../types';
 import { wsService } from '../services/websocket';
-import { registerWithDaemon, getToken } from '../services/push';
+import { registerWithDaemon } from '../services/push';
 import { getSettings } from '../services/storage';
 
 export function useConnection(server: Server | null) {
@@ -32,10 +32,11 @@ export function useConnection(server: Server | null) {
   // Register for push notifications when connected (if enabled)
   useEffect(() => {
     const registerPushIfEnabled = async () => {
-      if (connectionState.status === 'connected' && getToken()) {
+      if (connectionState.status === 'connected') {
         const settings = await getSettings();
         if (settings.pushEnabled) {
           const deviceId = `${Platform.OS}-${server?.id || 'unknown'}`;
+          // registerWithDaemon will request permission and get token if needed
           registerWithDaemon(deviceId);
         }
       }

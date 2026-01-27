@@ -1,18 +1,31 @@
-import { Platform } from 'react-native';
-import messaging from '@react-native-firebase/messaging';
+import { Platform, PermissionsAndroid } from 'react-native';
 import { wsService } from './websocket';
 
 let pushToken: string | null = null;
 let tokenType: 'fcm' | 'expo' = 'fcm';
+let messagingModule: any = null;
+
+// Try to load Firebase messaging (only works in standalone builds, not Expo Go)
+try {
+  messagingModule = require('@react-native-firebase/messaging').default;
+  console.log('Push notifications: Firebase messaging loaded');
+} catch (e) {
+  console.log('Push notifications: Firebase not available (Expo Go), push disabled');
+}
 
 export async function registerForPushNotifications(): Promise<string | null> {
+  if (!messagingModule) {
+    console.log('Push notifications: Disabled (no Firebase)');
+    return null;
+  }
+
   try {
     // Request permission on iOS
     if (Platform.OS === 'ios') {
-      const authStatus = await messaging().requestPermission();
+      const authStatus = await messagingModule().requestPermission();
       const enabled =
-        authStatus === messaging.AuthorizationStatus.AUTHORIZED ||
-        authStatus === messaging.AuthorizationStatus.PROVISIONAL;
+        authStatus === messagingModule.AuthorizationStatus.AUTHORIZED ||
+        authStatus === messagingModule.AuthorizationStatus.PROVISIONAL;
 
       if (!enabled) {
         console.log('Push notifications: Permission denied');
@@ -20,8 +33,20 @@ export async function registerForPushNotifications(): Promise<string | null> {
       }
     }
 
+    // Request permission on Android 13+
+    if (Platform.OS === 'android' && Platform.Version >= 33) {
+      const granted = await PermissionsAndroid.request(
+        PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS
+      );
+      if (granted !== PermissionsAndroid.RESULTS.GRANTED) {
+        console.log('Push notifications: Android permission denied');
+        return null;
+      }
+      console.log('Push notifications: Android permission granted');
+    }
+
     // Get FCM token
-    const token = await messaging().getToken();
+    const token = await messagingModule().getToken();
     if (token) {
       pushToken = token;
       tokenType = 'fcm';
@@ -45,8 +70,12 @@ export async function setupNotificationChannel(): Promise<void> {
 export function addNotificationReceivedListener(
   callback: (notification: unknown) => void
 ) {
+  if (!messagingModule) {
+    return { remove: () => {} };
+  }
+
   // Handle foreground messages
-  const unsubscribe = messaging().onMessage(async (remoteMessage) => {
+  const unsubscribe = messagingModule().onMessage(async (remoteMessage: unknown) => {
     console.log('Push: Foreground message received:', remoteMessage);
     callback(remoteMessage);
   });
@@ -57,16 +86,20 @@ export function addNotificationReceivedListener(
 export function addNotificationResponseReceivedListener(
   callback: (response: unknown) => void
 ) {
+  if (!messagingModule) {
+    return { remove: () => {} };
+  }
+
   // Handle notification tap when app is in background
-  messaging().onNotificationOpenedApp((remoteMessage) => {
+  messagingModule().onNotificationOpenedApp((remoteMessage: unknown) => {
     console.log('Push: Notification opened app:', remoteMessage);
     callback(remoteMessage);
   });
 
   // Check if app was opened from a notification when it was quit
-  messaging()
+  messagingModule()
     .getInitialNotification()
-    .then((remoteMessage) => {
+    .then((remoteMessage: unknown) => {
       if (remoteMessage) {
         console.log('Push: App opened from quit state:', remoteMessage);
         callback(remoteMessage);
@@ -142,10 +175,14 @@ export function getTokenType(): 'fcm' | 'expo' {
   return tokenType;
 }
 
-// Listen for token refresh
-messaging().onTokenRefresh((token) => {
-  console.log('Push notifications: Token refreshed');
-  pushToken = token;
-  // Re-register with daemon if connected
-  // This will be handled by the app's connection logic
-});
+// Listen for token refresh (only if Firebase is available)
+if (messagingModule) {
+  try {
+    messagingModule().onTokenRefresh((token: string) => {
+      console.log('Push notifications: Token refreshed');
+      pushToken = token;
+    });
+  } catch (e) {
+    // Ignore if listener fails
+  }
+}

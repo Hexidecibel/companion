@@ -42,6 +42,7 @@ export interface ConversationHighlight {
   timestamp: number;
   options?: QuestionOption[];
   isWaitingForChoice?: boolean;
+  toolCalls?: ToolCall[];
 }
 
 export interface ActivityDetail {

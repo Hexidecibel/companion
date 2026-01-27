@@ -15,7 +15,7 @@ const COLLAPSED_HEIGHT = 250;
 
 // Helper to get a summary of tool input for display
 function getToolSummary(tool: ToolCall): string {
-  const input = tool.input;
+  const input = tool.input || {};
   switch (tool.name) {
     case 'Bash':
       return input.command ? String(input.command).substring(0, 80) : 'Execute command';
@@ -63,12 +63,19 @@ function ToolCard({ tool }: { tool: ToolCall }) {
   const icon = getToolIcon(tool.name);
   const hasOutput = tool.output && tool.output.length > 0;
   const statusColor = tool.status === 'pending' ? '#f59e0b' : '#10b981';
+  const statusText = tool.status === 'pending' ? 'running' : 'done';
 
   // Extract input values safely
-  const command = tool.input.command ? String(tool.input.command) : '';
-  const filePath = tool.input.file_path ? String(tool.input.file_path) : '';
-  const oldString = tool.input.old_string ? String(tool.input.old_string) : '';
-  const newString = tool.input.new_string ? String(tool.input.new_string) : '';
+  const input = tool.input || {};
+  const command = input.command ? String(input.command) : '';
+  const filePath = input.file_path ? String(input.file_path) : '';
+  const oldString = input.old_string ? String(input.old_string) : '';
+  const newString = input.new_string ? String(input.new_string) : '';
+
+  // Get preview of output (first 2 lines)
+  const outputPreview = hasOutput
+    ? tool.output!.split('\n').slice(0, 2).join('\n').substring(0, 150)
+    : '';
 
   return (
     <TouchableOpacity
@@ -77,18 +84,21 @@ function ToolCard({ tool }: { tool: ToolCall }) {
       activeOpacity={0.7}
     >
       <View style={toolCardStyles.header}>
-        <Text style={toolCardStyles.icon}>{icon}</Text>
-        <View style={toolCardStyles.headerText}>
-          <View style={toolCardStyles.nameRow}>
-            <Text style={toolCardStyles.name}>{tool.name}</Text>
-            <View style={[toolCardStyles.statusDot, { backgroundColor: statusColor }]} />
+        <View style={toolCardStyles.headerLeft}>
+          <Text style={toolCardStyles.icon}>{icon}</Text>
+          <Text style={toolCardStyles.name}>{tool.name}</Text>
+          <View style={[toolCardStyles.statusBadge, { backgroundColor: statusColor }]}>
+            <Text style={toolCardStyles.statusText}>{statusText}</Text>
           </View>
-          <Text style={toolCardStyles.summary} numberOfLines={expanded ? undefined : 1}>
-            {summary}
-          </Text>
         </View>
         <Text style={toolCardStyles.expandIcon}>{expanded ? '▼' : '▶'}</Text>
       </View>
+      <Text style={toolCardStyles.summaryLine} numberOfLines={1}>{summary}</Text>
+      {!expanded && outputPreview ? (
+        <View style={toolCardStyles.preview}>
+          <Text style={toolCardStyles.previewText} numberOfLines={2}>{outputPreview}</Text>
+        </View>
+      ) : null}
 
       {expanded && (
         <View style={toolCardStyles.details}>
@@ -357,46 +367,68 @@ const filePathStyles = StyleSheet.create({
 const toolCardStyles = StyleSheet.create({
   container: {
     backgroundColor: '#1f2937',
-    borderRadius: 8,
-    marginTop: 6,
+    borderRadius: 6,
+    marginTop: 8,
+    paddingBottom: 2,
+    borderLeftWidth: 3,
+    borderLeftColor: '#3b82f6',
     overflow: 'hidden',
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 10,
+    justifyContent: 'space-between',
+    paddingVertical: 8,
+    paddingHorizontal: 10,
   },
-  icon: {
-    fontSize: 16,
-    marginRight: 8,
-  },
-  headerText: {
-    flex: 1,
-  },
-  nameRow: {
+  headerLeft: {
     flexDirection: 'row',
     alignItems: 'center',
   },
+  icon: {
+    fontSize: 14,
+    marginRight: 6,
+  },
   name: {
-    color: '#a78bfa',
-    fontSize: 12,
+    color: '#e5e7eb',
+    fontSize: 13,
     fontWeight: '600',
+    marginRight: 8,
   },
-  statusDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    marginLeft: 6,
+  statusBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
   },
-  summary: {
+  statusText: {
+    color: '#fff',
+    fontSize: 9,
+    fontWeight: '600',
+    textTransform: 'uppercase',
+  },
+  summaryLine: {
+    color: '#9ca3af',
+    fontSize: 12,
+    paddingHorizontal: 10,
+    paddingBottom: 6,
+  },
+  preview: {
+    backgroundColor: '#111827',
+    marginHorizontal: 10,
+    marginBottom: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderRadius: 4,
+  },
+  previewText: {
     color: '#9ca3af',
     fontSize: 11,
-    marginTop: 2,
+    fontFamily: 'monospace',
+    lineHeight: 16,
   },
   expandIcon: {
     color: '#6b7280',
     fontSize: 10,
-    marginLeft: 8,
   },
   details: {
     borderTopWidth: 1,
