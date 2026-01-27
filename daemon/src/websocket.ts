@@ -1203,7 +1203,6 @@ export class WebSocketHandler {
       let totalOutputTokens = 0;
       let totalCacheCreationTokens = 0;
       let totalCacheReadTokens = 0;
-      let totalEstimatedCost = 0;
 
       for (const session of sessions) {
         if (session.conversationPath) {
@@ -1214,7 +1213,6 @@ export class WebSocketHandler {
           totalOutputTokens += usage.totalOutputTokens;
           totalCacheCreationTokens += usage.totalCacheCreationTokens;
           totalCacheReadTokens += usage.totalCacheReadTokens;
-          totalEstimatedCost += usage.estimatedCost;
         }
       }
 
@@ -1227,7 +1225,6 @@ export class WebSocketHandler {
           totalOutputTokens,
           totalCacheCreationTokens,
           totalCacheReadTokens,
-          totalEstimatedCost,
           periodStart: Date.now() - 24 * 60 * 60 * 1000, // Last 24h
           periodEnd: Date.now(),
         },

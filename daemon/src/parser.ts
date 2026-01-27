@@ -1,5 +1,5 @@
 import * as fs from 'fs';
-import { ConversationMessage, ConversationHighlight, ToolCall, SessionStatus, QuestionOption, UsageEntry, SessionUsage } from './types';
+import { ConversationMessage, ConversationHighlight, ToolCall, SessionStatus, QuestionOption, SessionUsage } from './types';
 
 interface ContentBlock {
   type: string;
@@ -413,15 +413,6 @@ export function getPendingApprovalTools(messages: ConversationMessage[]): string
     .map(tc => tc.name);
 }
 
-// Pricing per million tokens (as of Jan 2025)
-const PRICING = {
-  'claude-opus-4-5-20251101': { input: 15.00, output: 75.00, cacheWrite: 18.75, cacheRead: 1.875 },
-  'claude-sonnet-4-20250514': { input: 3.00, output: 15.00, cacheWrite: 3.75, cacheRead: 0.30 },
-  'claude-3-5-sonnet-20241022': { input: 3.00, output: 15.00, cacheWrite: 3.75, cacheRead: 0.30 },
-  'claude-3-5-haiku-20241022': { input: 0.80, output: 4.00, cacheWrite: 1.00, cacheRead: 0.08 },
-  'default': { input: 3.00, output: 15.00, cacheWrite: 3.75, cacheRead: 0.30 },
-};
-
 interface UsageData {
   input_tokens?: number;
   output_tokens?: number;
@@ -451,7 +442,6 @@ export function extractUsageFromFile(filePath: string, sessionName: string): Ses
     totalCacheCreationTokens: 0,
     totalCacheReadTokens: 0,
     messageCount: 0,
-    estimatedCost: 0,
   };
 
   if (!fs.existsSync(filePath)) {
@@ -479,8 +469,6 @@ export function extractUsageFromFile(filePath: string, sessionName: string): Ses
         }
 
         const usage = entry.message.usage;
-        const model = entry.message.model || 'default';
-        const pricing = PRICING[model as keyof typeof PRICING] || PRICING.default;
 
         // Only add non-zero usage (final message has the totals)
         if (usage.input_tokens && usage.input_tokens > 0) {
@@ -496,14 +484,6 @@ export function extractUsageFromFile(filePath: string, sessionName: string): Ses
         if (usage.cache_read_input_tokens && usage.cache_read_input_tokens > 0) {
           result.totalCacheReadTokens += usage.cache_read_input_tokens;
         }
-
-        // Calculate cost for this entry
-        const inputCost = ((usage.input_tokens || 0) / 1_000_000) * pricing.input;
-        const outputCost = ((usage.output_tokens || 0) / 1_000_000) * pricing.output;
-        const cacheWriteCost = ((usage.cache_creation_input_tokens || 0) / 1_000_000) * pricing.cacheWrite;
-        const cacheReadCost = ((usage.cache_read_input_tokens || 0) / 1_000_000) * pricing.cacheRead;
-
-        result.estimatedCost += inputCost + outputCost + cacheWriteCost + cacheReadCost;
       }
     } catch {
       // Skip malformed lines

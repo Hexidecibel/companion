@@ -127,16 +127,6 @@ export interface ServerSummary {
 }
 
 // Usage tracking types
-export interface UsageEntry {
-  timestamp: number;
-  inputTokens: number;
-  outputTokens: number;
-  cacheCreationTokens: number;
-  cacheReadTokens: number;
-  model: string;
-  sessionId: string;
-}
-
 export interface SessionUsage {
   sessionId: string;
   sessionName: string;
@@ -145,7 +135,6 @@ export interface SessionUsage {
   totalCacheCreationTokens: number;
   totalCacheReadTokens: number;
   messageCount: number;
-  estimatedCost: number;
 }
 
 export interface UsageStats {
@@ -154,7 +143,6 @@ export interface UsageStats {
   totalOutputTokens: number;
   totalCacheCreationTokens: number;
   totalCacheReadTokens: number;
-  totalEstimatedCost: number;
   periodStart: number;
   periodEnd: number;
 }

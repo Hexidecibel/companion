@@ -18,7 +18,6 @@ interface SessionUsage {
   totalCacheCreationTokens: number;
   totalCacheReadTokens: number;
   messageCount: number;
-  estimatedCost: number;
 }
 
 interface UsageStats {
@@ -27,7 +26,6 @@ interface UsageStats {
   totalOutputTokens: number;
   totalCacheCreationTokens: number;
   totalCacheReadTokens: number;
-  totalEstimatedCost: number;
   periodStart: number;
   periodEnd: number;
 }
@@ -35,6 +33,10 @@ interface UsageStats {
 interface UsageScreenProps {
   onBack: () => void;
 }
+
+// Approximate limits (these can be configured)
+const SESSION_TOKEN_LIMIT = 200_000; // ~200k context window
+const WEEKLY_TOKEN_LIMIT = 5_000_000; // 5M weekly (adjustable)
 
 export function UsageScreen({ onBack }: UsageScreenProps) {
   const [loading, setLoading] = useState(true);
@@ -84,8 +86,16 @@ export function UsageScreen({ onBack }: UsageScreenProps) {
     return num.toLocaleString();
   };
 
-  const formatCost = (cost: number): string => {
-    return '$' + cost.toFixed(4);
+  const getBarColor = (percentage: number): string => {
+    if (percentage >= 90) return '#ef4444'; // red
+    if (percentage >= 75) return '#f59e0b'; // amber
+    return '#22c55e'; // green
+  };
+
+  const getWarningLevel = (percentage: number): 'none' | 'warning' | 'critical' => {
+    if (percentage >= 90) return 'critical';
+    if (percentage >= 75) return 'warning';
+    return 'none';
   };
 
   if (loading) {
@@ -97,13 +107,17 @@ export function UsageScreen({ onBack }: UsageScreenProps) {
     );
   }
 
+  const totalTokens = usage ? usage.totalInputTokens + usage.totalOutputTokens : 0;
+  const weeklyPercentage = Math.min((totalTokens / WEEKLY_TOKEN_LIMIT) * 100, 100);
+  const weeklyWarning = getWarningLevel(weeklyPercentage);
+
   return (
     <View style={styles.container}>
       <View style={styles.header}>
         <TouchableOpacity onPress={onBack} style={styles.backButton}>
           <Text style={styles.backButtonText}>‹ Back</Text>
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Usage Statistics</Text>
+        <Text style={styles.headerTitle}>Usage</Text>
         <View style={styles.placeholder} />
       </View>
 
@@ -126,37 +140,68 @@ export function UsageScreen({ onBack }: UsageScreenProps) {
           </View>
         ) : usage ? (
           <>
-            {/* Total Summary Card */}
+            {/* Weekly Warning */}
+            {weeklyWarning !== 'none' && (
+              <View style={[
+                styles.warningBanner,
+                weeklyWarning === 'critical' ? styles.warningCritical : styles.warningAmber
+              ]}>
+                <Text style={styles.warningIcon}>
+                  {weeklyWarning === 'critical' ? '⚠️' : '⏳'}
+                </Text>
+                <Text style={styles.warningText}>
+                  {weeklyWarning === 'critical'
+                    ? `Approaching weekly limit (${weeklyPercentage.toFixed(0)}%)`
+                    : `${weeklyPercentage.toFixed(0)}% of weekly limit used`
+                  }
+                </Text>
+              </View>
+            )}
+
+            {/* Weekly Usage */}
             <View style={styles.section}>
               <Text style={styles.sectionTitle}>Total Usage</Text>
-              <View style={styles.summaryCard}>
-                <View style={styles.costRow}>
-                  <Text style={styles.costLabel}>Estimated Cost</Text>
-                  <Text style={styles.costValue}>{formatCost(usage.totalEstimatedCost)}</Text>
+              <View style={styles.usageCard}>
+                <View style={styles.usageHeader}>
+                  <Text style={styles.usageLabel}>Total Tokens</Text>
+                  <Text style={styles.usageValue}>{formatNumber(totalTokens)}</Text>
                 </View>
-                <View style={styles.divider} />
-                <View style={styles.statsGrid}>
-                  <View style={styles.statItem}>
-                    <Text style={styles.statValue}>{formatNumber(usage.totalInputTokens)}</Text>
-                    <Text style={styles.statLabel}>Input Tokens</Text>
+                <View style={styles.progressBarContainer}>
+                  <View
+                    style={[
+                      styles.progressBar,
+                      {
+                        width: `${weeklyPercentage}%`,
+                        backgroundColor: getBarColor(weeklyPercentage)
+                      }
+                    ]}
+                  />
+                </View>
+                <Text style={styles.limitText}>
+                  {formatNumber(totalTokens)} / {formatNumber(WEEKLY_TOKEN_LIMIT)} weekly limit
+                </Text>
+
+                <View style={styles.tokenBreakdown}>
+                  <View style={styles.tokenRow}>
+                    <View style={[styles.tokenDot, { backgroundColor: '#3b82f6' }]} />
+                    <Text style={styles.tokenLabel}>Input</Text>
+                    <Text style={styles.tokenValue}>{formatNumber(usage.totalInputTokens)}</Text>
                   </View>
-                  <View style={styles.statItem}>
-                    <Text style={styles.statValue}>{formatNumber(usage.totalOutputTokens)}</Text>
-                    <Text style={styles.statLabel}>Output Tokens</Text>
+                  <View style={styles.tokenRow}>
+                    <View style={[styles.tokenDot, { backgroundColor: '#8b5cf6' }]} />
+                    <Text style={styles.tokenLabel}>Output</Text>
+                    <Text style={styles.tokenValue}>{formatNumber(usage.totalOutputTokens)}</Text>
                   </View>
-                  <View style={styles.statItem}>
-                    <Text style={styles.statValue}>{formatNumber(usage.totalCacheReadTokens)}</Text>
-                    <Text style={styles.statLabel}>Cache Read</Text>
-                  </View>
-                  <View style={styles.statItem}>
-                    <Text style={styles.statValue}>{formatNumber(usage.totalCacheCreationTokens)}</Text>
-                    <Text style={styles.statLabel}>Cache Write</Text>
+                  <View style={styles.tokenRow}>
+                    <View style={[styles.tokenDot, { backgroundColor: '#06b6d4' }]} />
+                    <Text style={styles.tokenLabel}>Cache Read</Text>
+                    <Text style={styles.tokenValue}>{formatNumber(usage.totalCacheReadTokens)}</Text>
                   </View>
                 </View>
               </View>
             </View>
 
-            {/* Per-Session Breakdown */}
+            {/* Per-Session Usage */}
             <View style={styles.section}>
               <Text style={styles.sectionTitle}>By Session</Text>
               {usage.sessions.length === 0 ? (
@@ -165,28 +210,45 @@ export function UsageScreen({ onBack }: UsageScreenProps) {
                 </View>
               ) : (
                 usage.sessions
-                  .sort((a, b) => b.estimatedCost - a.estimatedCost)
-                  .map((session, index) => (
-                    <View key={session.sessionId || index} style={styles.sessionCard}>
-                      <View style={styles.sessionHeader}>
-                        <Text style={styles.sessionName}>{session.sessionName}</Text>
-                        <Text style={styles.sessionCost}>{formatCost(session.estimatedCost)}</Text>
+                  .sort((a, b) => (b.totalInputTokens + b.totalOutputTokens) - (a.totalInputTokens + a.totalOutputTokens))
+                  .map((session, index) => {
+                    const sessionTotal = session.totalInputTokens + session.totalOutputTokens;
+                    const sessionPercentage = Math.min((sessionTotal / SESSION_TOKEN_LIMIT) * 100, 100);
+                    const sessionWarning = getWarningLevel(sessionPercentage);
+
+                    return (
+                      <View key={session.sessionId || index} style={styles.sessionCard}>
+                        <View style={styles.sessionHeader}>
+                          <Text style={styles.sessionName} numberOfLines={1}>{session.sessionName}</Text>
+                          {sessionWarning !== 'none' && (
+                            <Text style={styles.sessionWarningBadge}>
+                              {sessionWarning === 'critical' ? '⚠️' : '⏳'}
+                            </Text>
+                          )}
+                        </View>
+                        <View style={styles.sessionBarContainer}>
+                          <View
+                            style={[
+                              styles.sessionBar,
+                              {
+                                width: `${sessionPercentage}%`,
+                                backgroundColor: getBarColor(sessionPercentage)
+                              }
+                            ]}
+                          />
+                        </View>
+                        <View style={styles.sessionStats}>
+                          <Text style={styles.sessionStat}>
+                            {formatNumber(sessionTotal)} tokens
+                          </Text>
+                          <Text style={styles.sessionStatDivider}>•</Text>
+                          <Text style={styles.sessionStat}>
+                            {sessionPercentage.toFixed(0)}% of session limit
+                          </Text>
+                        </View>
                       </View>
-                      <View style={styles.sessionStats}>
-                        <Text style={styles.sessionStat}>
-                          {formatNumber(session.totalInputTokens)} in
-                        </Text>
-                        <Text style={styles.sessionStatDivider}>•</Text>
-                        <Text style={styles.sessionStat}>
-                          {formatNumber(session.totalOutputTokens)} out
-                        </Text>
-                        <Text style={styles.sessionStatDivider}>•</Text>
-                        <Text style={styles.sessionStat}>
-                          {session.messageCount} msgs
-                        </Text>
-                      </View>
-                    </View>
-                  ))
+                    );
+                  })
               )}
             </View>
 
@@ -194,9 +256,8 @@ export function UsageScreen({ onBack }: UsageScreenProps) {
             <View style={styles.section}>
               <View style={styles.infoBox}>
                 <Text style={styles.infoText}>
-                  Usage is calculated from conversation files on the server. Costs are
-                  estimates based on current Claude API pricing and may not reflect
-                  actual billing.
+                  Token counts are from conversation files. Limits are approximate
+                  and may vary based on your plan.
                 </Text>
               </View>
             </View>
@@ -257,6 +318,34 @@ const styles = StyleSheet.create({
   content: {
     flex: 1,
   },
+  warningBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 14,
+    marginHorizontal: 16,
+    marginTop: 16,
+    borderRadius: 12,
+  },
+  warningAmber: {
+    backgroundColor: 'rgba(245, 158, 11, 0.15)',
+    borderWidth: 1,
+    borderColor: '#f59e0b',
+  },
+  warningCritical: {
+    backgroundColor: 'rgba(239, 68, 68, 0.15)',
+    borderWidth: 1,
+    borderColor: '#ef4444',
+  },
+  warningIcon: {
+    fontSize: 18,
+    marginRight: 10,
+  },
+  warningText: {
+    color: '#f3f4f6',
+    fontSize: 14,
+    fontWeight: '500',
+    flex: 1,
+  },
   section: {
     paddingHorizontal: 16,
     paddingTop: 24,
@@ -269,49 +358,68 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     marginBottom: 12,
   },
-  summaryCard: {
+  usageCard: {
     backgroundColor: '#1f2937',
     borderRadius: 16,
     padding: 20,
   },
-  costRow: {
+  usageHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-  },
-  costLabel: {
-    fontSize: 16,
-    color: '#9ca3af',
-  },
-  costValue: {
-    fontSize: 28,
-    fontWeight: '700',
-    color: '#22c55e',
-  },
-  divider: {
-    height: 1,
-    backgroundColor: '#374151',
-    marginVertical: 16,
-  },
-  statsGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    marginHorizontal: -8,
-  },
-  statItem: {
-    width: '50%',
-    paddingHorizontal: 8,
     marginBottom: 12,
   },
-  statValue: {
-    fontSize: 20,
-    fontWeight: '600',
-    color: '#f3f4f6',
-    marginBottom: 2,
+  usageLabel: {
+    fontSize: 14,
+    color: '#9ca3af',
   },
-  statLabel: {
+  usageValue: {
+    fontSize: 24,
+    fontWeight: '700',
+    color: '#f3f4f6',
+  },
+  progressBarContainer: {
+    height: 12,
+    backgroundColor: '#374151',
+    borderRadius: 6,
+    overflow: 'hidden',
+  },
+  progressBar: {
+    height: '100%',
+    borderRadius: 6,
+  },
+  limitText: {
     fontSize: 12,
     color: '#6b7280',
+    marginTop: 8,
+    textAlign: 'right',
+  },
+  tokenBreakdown: {
+    marginTop: 16,
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#374151',
+  },
+  tokenRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  tokenDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    marginRight: 10,
+  },
+  tokenLabel: {
+    flex: 1,
+    fontSize: 14,
+    color: '#9ca3af',
+  },
+  tokenValue: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#f3f4f6',
   },
   sessionCard: {
     backgroundColor: '#1f2937',
@@ -321,32 +429,40 @@ const styles = StyleSheet.create({
   },
   sessionHeader: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 8,
+    marginBottom: 10,
   },
   sessionName: {
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '600',
     color: '#f3f4f6',
     flex: 1,
-    marginRight: 12,
+    marginRight: 8,
   },
-  sessionCost: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#22c55e',
+  sessionWarningBadge: {
+    fontSize: 14,
+  },
+  sessionBarContainer: {
+    height: 8,
+    backgroundColor: '#374151',
+    borderRadius: 4,
+    overflow: 'hidden',
+  },
+  sessionBar: {
+    height: '100%',
+    borderRadius: 4,
   },
   sessionStats: {
     flexDirection: 'row',
     alignItems: 'center',
+    marginTop: 8,
   },
   sessionStat: {
-    fontSize: 13,
+    fontSize: 12,
     color: '#6b7280',
   },
   sessionStatDivider: {
-    fontSize: 13,
+    fontSize: 12,
     color: '#4b5563',
     marginHorizontal: 8,
   },

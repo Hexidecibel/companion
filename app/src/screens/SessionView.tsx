@@ -651,16 +651,20 @@ const styles = StyleSheet.create({
   },
   headerCenter: {
     flex: 1,
-    marginHorizontal: 12,
+    marginHorizontal: 8,
+    minWidth: 0,
   },
   headerTitleRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 6,
   },
   headerTitle: {
     color: '#f3f4f6',
-    fontSize: 17,
+    fontSize: 16,
     fontWeight: '600',
+    flexShrink: 1,
   },
   headerSubtitle: {
     color: '#9ca3af',
