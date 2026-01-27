@@ -392,6 +392,35 @@ export class WebSocketHandler {
         }
         break;
 
+      case 'set_notification_prefs':
+        const notifPrefs = payload as {
+          quietHoursEnabled?: boolean;
+          quietHoursStart?: string;
+          quietHoursEnd?: string;
+          throttleMinutes?: number;
+        };
+        if (client.deviceId) {
+          this.push.setNotificationPrefs(client.deviceId, {
+            quietHoursEnabled: notifPrefs?.quietHoursEnabled ?? false,
+            quietHoursStart: notifPrefs?.quietHoursStart ?? '22:00',
+            quietHoursEnd: notifPrefs?.quietHoursEnd ?? '08:00',
+            throttleMinutes: notifPrefs?.throttleMinutes ?? 0,
+          });
+          this.send(client.ws, {
+            type: 'notification_prefs_set',
+            success: true,
+            requestId,
+          });
+        } else {
+          this.send(client.ws, {
+            type: 'notification_prefs_set',
+            success: false,
+            error: 'Device not registered for push',
+            requestId,
+          });
+        }
+        break;
+
       case 'ping':
         if (client.deviceId) {
           this.push.updateDeviceLastSeen(client.deviceId);

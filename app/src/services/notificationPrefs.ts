@@ -5,12 +5,19 @@ const NOTIFICATION_PREFS_KEY = '@claude_companion_notification_prefs';
 export interface NotificationPreferences {
   enabled: boolean;
   instantNotify: boolean;
-  // Future: quietHoursStart, quietHoursEnd, soundEnabled, etc.
+  quietHoursEnabled: boolean;
+  quietHoursStart: string; // "HH:MM" format, e.g., "22:00"
+  quietHoursEnd: string;   // "HH:MM" format, e.g., "08:00"
+  throttleMinutes: number; // Minimum minutes between notifications (0 = no throttle)
 }
 
 export const DEFAULT_NOTIFICATION_PREFERENCES: NotificationPreferences = {
   enabled: true,
   instantNotify: false,
+  quietHoursEnabled: false,
+  quietHoursStart: '22:00',
+  quietHoursEnd: '08:00',
+  throttleMinutes: 0,
 };
 
 export async function getNotificationPreferences(

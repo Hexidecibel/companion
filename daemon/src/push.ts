@@ -27,9 +27,25 @@ interface BatchedNotification {
   timestamp: number;
 }
 
+interface DeviceNotificationPrefs {
+  quietHoursEnabled: boolean;
+  quietHoursStart: string; // "HH:MM"
+  quietHoursEnd: string;   // "HH:MM"
+  throttleMinutes: number;
+}
+
+const DEFAULT_DEVICE_PREFS: DeviceNotificationPrefs = {
+  quietHoursEnabled: false,
+  quietHoursStart: '22:00',
+  quietHoursEnd: '08:00',
+  throttleMinutes: 0,
+};
+
 export class PushNotificationService {
   private devices: Map<string, RegisteredDevice> = new Map();
   private instantNotifyDevices: Set<string> = new Set();
+  private devicePrefs: Map<string, DeviceNotificationPrefs> = new Map();
+  private lastNotificationTime: Map<string, number> = new Map();
   private pendingPush: NodeJS.Timeout | null = null;
   private pushDelayMs: number;
   private firebaseInitialized: boolean = false;
@@ -70,6 +86,55 @@ export class PushNotificationService {
     }
   }
 
+  setNotificationPrefs(deviceId: string, prefs: DeviceNotificationPrefs): void {
+    this.devicePrefs.set(deviceId, prefs);
+    console.log(`Push notifications: Updated prefs for ${deviceId}:`, prefs);
+  }
+
+  private isInQuietHours(deviceId: string): boolean {
+    const prefs = this.devicePrefs.get(deviceId) || DEFAULT_DEVICE_PREFS;
+    if (!prefs.quietHoursEnabled) {
+      return false;
+    }
+
+    const now = new Date();
+    const currentMinutes = now.getHours() * 60 + now.getMinutes();
+
+    const [startH, startM] = prefs.quietHoursStart.split(':').map(Number);
+    const [endH, endM] = prefs.quietHoursEnd.split(':').map(Number);
+    const startMinutes = startH * 60 + startM;
+    const endMinutes = endH * 60 + endM;
+
+    // Handle overnight quiet hours (e.g., 22:00 - 08:00)
+    if (startMinutes > endMinutes) {
+      // Quiet hours span midnight
+      return currentMinutes >= startMinutes || currentMinutes < endMinutes;
+    } else {
+      // Same-day quiet hours
+      return currentMinutes >= startMinutes && currentMinutes < endMinutes;
+    }
+  }
+
+  private isThrottled(deviceId: string): boolean {
+    const prefs = this.devicePrefs.get(deviceId) || DEFAULT_DEVICE_PREFS;
+    if (prefs.throttleMinutes <= 0) {
+      return false;
+    }
+
+    const lastTime = this.lastNotificationTime.get(deviceId);
+    if (!lastTime) {
+      return false;
+    }
+
+    const elapsed = Date.now() - lastTime;
+    const throttleMs = prefs.throttleMinutes * 60 * 1000;
+    return elapsed < throttleMs;
+  }
+
+  private recordNotificationSent(deviceId: string): void {
+    this.lastNotificationTime.set(deviceId, Date.now());
+  }
+
   registerDevice(deviceId: string, pushToken: string): void {
     this.devices.set(deviceId, {
       token: pushToken,
@@ -98,15 +163,31 @@ export class PushNotificationService {
     }
 
     // Send instant notifications immediately to devices that want them
+    // But filter out devices in quiet hours or throttled
     const instantDevices = Array.from(this.devices.entries())
-      .filter(([deviceId]) => this.instantNotifyDevices.has(deviceId));
+      .filter(([deviceId]) => this.instantNotifyDevices.has(deviceId))
+      .filter(([deviceId]) => !this.isInQuietHours(deviceId))
+      .filter(([deviceId]) => !this.isThrottled(deviceId));
 
     if (instantDevices.length > 0) {
       console.log(`Push notifications: Sending instant notification to ${instantDevices.length} device(s)`);
-      this.sendNotifications(
-        preview,
-        instantDevices.map(([_, d]) => d.token)
-      );
+      this.sendNotificationsToDevices(preview, instantDevices);
+    }
+
+    // Log skipped devices
+    const skippedQuiet = Array.from(this.devices.entries())
+      .filter(([deviceId]) => this.instantNotifyDevices.has(deviceId))
+      .filter(([deviceId]) => this.isInQuietHours(deviceId));
+    if (skippedQuiet.length > 0) {
+      console.log(`Push notifications: Skipped ${skippedQuiet.length} device(s) in quiet hours`);
+    }
+
+    const skippedThrottled = Array.from(this.devices.entries())
+      .filter(([deviceId]) => this.instantNotifyDevices.has(deviceId))
+      .filter(([deviceId]) => !this.isInQuietHours(deviceId))
+      .filter(([deviceId]) => this.isThrottled(deviceId));
+    if (skippedThrottled.length > 0) {
+      console.log(`Push notifications: Skipped ${skippedThrottled.length} device(s) due to throttle`);
     }
 
     // For non-instant devices, batch notifications
@@ -176,6 +257,18 @@ export class PushNotificationService {
       clearTimeout(this.batchTimer);
       this.batchTimer = null;
     }
+  }
+
+  private async sendNotificationsToDevices(
+    preview: string,
+    devices: [string, RegisteredDevice][]
+  ): Promise<void> {
+    // Record notification time for throttling
+    for (const [deviceId] of devices) {
+      this.recordNotificationSent(deviceId);
+    }
+    // Send using existing method
+    await this.sendNotifications(preview, devices.map(([_, d]) => d.token));
   }
 
   private async sendNotifications(preview: string, tokens: string[]): Promise<void> {
