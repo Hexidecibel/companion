@@ -17,9 +17,10 @@ import { wsService } from '../services/websocket';
 
 interface SettingsProps {
   onBack: () => void;
+  onOpenNotificationSettings: () => void;
 }
 
-export function Settings({ onBack }: SettingsProps) {
+export function Settings({ onBack, onOpenNotificationSettings }: SettingsProps) {
   const [settings, setSettings] = useState<AppSettings>({
     stayConnected: false,
     pushEnabled: false,
@@ -192,6 +193,18 @@ export function Settings({ onBack }: SettingsProps) {
               trackColor={{ false: '#374151', true: '#3b82f6' }}
             />
           </View>
+
+          {settings.pushEnabled && (
+            <TouchableOpacity style={styles.linkRow} onPress={onOpenNotificationSettings}>
+              <View style={styles.settingInfo}>
+                <Text style={styles.settingLabel}>Notification Settings</Text>
+                <Text style={styles.settingDescription}>
+                  Configure per-server notification preferences
+                </Text>
+              </View>
+              <Text style={styles.linkArrow}>›</Text>
+            </TouchableOpacity>
+          )}
         </View>
 
         <View style={styles.section}>

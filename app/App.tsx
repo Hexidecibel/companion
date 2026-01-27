@@ -10,6 +10,7 @@ import { ServerList } from './src/screens/ServerList';
 import { SessionView } from './src/screens/SessionView';
 import { Settings } from './src/screens/Settings';
 import { SetupScreen } from './src/screens/SetupScreen';
+import { NotificationSettings } from './src/screens/NotificationSettings';
 import { wsService } from './src/services/websocket';
 import {
   registerForPushNotifications,
@@ -31,7 +32,7 @@ if (sentryDsn) {
 }
 
 
-type Screen = 'dashboard' | 'servers' | 'session' | 'settings' | 'setup';
+type Screen = 'dashboard' | 'servers' | 'session' | 'settings' | 'setup' | 'notificationSettings';
 
 function App() {
   const [currentScreen, setCurrentScreen] = useState<Screen>('dashboard');
@@ -112,6 +113,14 @@ function App() {
     setCurrentScreen('dashboard');
   }, []);
 
+  const handleOpenNotificationSettings = useCallback(() => {
+    setCurrentScreen('notificationSettings');
+  }, []);
+
+  const handleBackFromNotificationSettings = useCallback(() => {
+    setCurrentScreen('settings');
+  }, []);
+
   const handleOpenSettings = useCallback(() => {
     setCurrentScreen('settings');
   }, []);
@@ -163,7 +172,14 @@ function App() {
           />
         );
       case 'settings':
-        return <Settings onBack={handleBackFromSettings} />;
+        return (
+          <Settings
+            onBack={handleBackFromSettings}
+            onOpenNotificationSettings={handleOpenNotificationSettings}
+          />
+        );
+      case 'notificationSettings':
+        return <NotificationSettings onBack={handleBackFromNotificationSettings} />;
       case 'setup':
         return <SetupScreen onBack={handleBackFromSetup} />;
       default:
