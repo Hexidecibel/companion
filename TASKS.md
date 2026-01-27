@@ -63,7 +63,8 @@
 ### Medium Priority - Notification Preferences
 - [x] Configurable notification settings per server
 - [x] Notification delay setting (instant vs batched)
-- [ ] Quiet hours / Do Not Disturb schedule
+- [x] Quiet hours / Do Not Disturb schedule
+- [x] Rate limiting (throttle notifications)
 - [ ] Notification sound/vibration preferences
 - [ ] Filter notifications by session or project
 
@@ -110,13 +111,14 @@ See `docs/ROADMAP-V2.md` Section 4 for full details.
 
 Tasks suitable for longer autonomous work sessions:
 
-### 1. Notification Preferences - Quiet Hours (Remaining)
+### 1. Web Interface Client
 ```
-Add quiet hours to notification settings:
-1. Add time picker component for start/end time
-2. Store quiet hours in notificationPrefs.ts
-3. Add daemon endpoint to receive quiet hours
-4. Update daemon push.ts to check quiet hours before sending
+Build a browser-based client:
+1. Create new web/ directory with React or vanilla JS
+2. WebSocket connection to daemon
+3. Same functionality as mobile: view conversation, send input
+4. Responsive design for desktop/mobile browser
+5. Deploy as static files served by daemon or separate
 ```
 
 ### 2. Usage Statistics Page
