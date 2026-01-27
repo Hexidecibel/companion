@@ -2,29 +2,39 @@
 
 Fetch and investigate recent Sentry errors for Claude Companion.
 
+## Setup
+Secrets are stored in `.claude/secrets.env`. Source it first:
+```bash
+source /Users/chriscushman/local/src/claude-companion/.claude/secrets.env
+```
+
 ## Steps
 
 1. List unresolved issues:
 ```bash
-curl -s -H "Authorization: Bearer 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" \
-  "https://sentry.io/api/0/projects/hexi-ts/react-native/issues/?query=is:unresolved" | jq '.[] | {id, title, culprit, count, lastSeen}'
+source /Users/chriscushman/local/src/claude-companion/.claude/secrets.env && \
+curl -s -H "Authorization: Bearer $SENTRY_API_TOKEN" \
+  "https://sentry.io/api/0/projects/$SENTRY_ORG/$SENTRY_PROJECT/issues/?query=is:unresolved" | jq '.[] | {id, title, culprit, count, lastSeen}'
 ```
 
 2. Get details for a specific issue (replace ISSUE_ID with the id from step 1):
 ```bash
-curl -s -H "Authorization: Bearer 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" \
+source /Users/chriscushman/local/src/claude-companion/.claude/secrets.env && \
+curl -s -H "Authorization: Bearer $SENTRY_API_TOKEN" \
   "https://sentry.io/api/0/issues/ISSUE_ID/events/latest/" | jq '{message, culprit, tags, contexts, exception}'
 ```
 
 3. Get full stack trace:
 ```bash
-curl -s -H "Authorization: Bearer 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" \
+source /Users/chriscushman/local/src/claude-companion/.claude/secrets.env && \
+curl -s -H "Authorization: Bearer $SENTRY_API_TOKEN" \
   "https://sentry.io/api/0/issues/ISSUE_ID/events/latest/" | jq '.exception.values[] | {type, value, stacktrace: .stacktrace.frames[-5:] | map({filename, function, lineno, context_line})}'
 ```
 
 4. Mark issue as resolved (after fix is confirmed):
 ```bash
-curl -s -X PUT -H "Authorization: Bearer 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" \
+source /Users/chriscushman/local/src/claude-companion/.claude/secrets.env && \
+curl -s -X PUT -H "Authorization: Bearer $SENTRY_API_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"status": "resolved"}' \
   "https://sentry.io/api/0/issues/ISSUE_ID/"

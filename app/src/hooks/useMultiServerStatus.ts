@@ -65,20 +65,21 @@ export function useMultiServerStatus(servers: Server[]) {
 
       ws.onopen = () => {
         clearTimeout(timeout);
-        // Wait a tick for connection to stabilize, then authenticate
-        setTimeout(() => {
-          if (ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({
-              type: 'authenticate',
-              token: server.token,
-            }));
-          }
-        }, 50);
+        // Server will send 'connected' message, then we authenticate
       };
 
       ws.onmessage = (event) => {
         try {
           const message = JSON.parse(event.data);
+
+          // Wait for 'connected' message before authenticating
+          if (message.type === 'connected') {
+            ws.send(JSON.stringify({
+              type: 'authenticate',
+              token: server.token,
+            }));
+            return;
+          }
 
           if (message.type === 'authenticated' && message.success) {
             connections.current.set(server.id, {

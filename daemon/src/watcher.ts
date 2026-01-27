@@ -20,6 +20,8 @@ export class ClaudeWatcher extends EventEmitter {
   private activeSessionId: string | null = null;
   private lastMessageCount: number = 0;
   private isWaitingForInput: boolean = false;
+  private initialLoadComplete: boolean = false;
+  private startTime: number = Date.now();
 
   constructor(claudeHome: string) {
     super();
@@ -71,9 +73,14 @@ export class ClaudeWatcher extends EventEmitter {
       return;
     }
 
+    const sessionId = this.generateSessionId(filePath);
+    // Skip files outside projects directory (like root history.jsonl)
+    if (!sessionId) {
+      return;
+    }
+
     const stats = fs.statSync(filePath);
     const projectPath = this.extractProjectPath(filePath);
-    const sessionId = this.generateSessionId(filePath);
 
     // Parse the conversation
     const messages = parseConversationFile(filePath);
@@ -91,9 +98,10 @@ export class ClaudeWatcher extends EventEmitter {
     };
     this.conversations.set(sessionId, tracked);
 
-    // Only auto-select if no active session is set yet
-    // Don't auto-switch when user has manually selected a session
-    if (!this.activeSessionId || !this.conversations.has(this.activeSessionId)) {
+    // During initial load (first 3 seconds), always pick the most recent session
+    // After that, only auto-select if no active session exists
+    const isInitialLoad = Date.now() - this.startTime < 3000;
+    if (isInitialLoad || !this.activeSessionId || !this.conversations.has(this.activeSessionId)) {
       // Find most recently active conversation
       let mostRecent: { id: string; time: number } | null = null;
       for (const [id, conv] of this.conversations) {
@@ -190,7 +198,12 @@ export class ClaudeWatcher extends EventEmitter {
     const projectsDir = path.join(this.claudeHome, 'projects');
     const relative = path.relative(projectsDir, filePath);
     const parts = relative.split(path.sep);
-    return parts[0] || 'default';
+    const sessionId = parts[0] || 'default';
+    // Skip files outside the projects directory (like history.jsonl in root .claude)
+    if (sessionId === '..' || sessionId.startsWith('..')) {
+      return '';
+    }
+    return sessionId;
   }
 
   getActiveConversation(): ConversationFile | null {

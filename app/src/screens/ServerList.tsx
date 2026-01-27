@@ -96,6 +96,72 @@ export function ServerList({ onSelectServer, onOpenSetup, onBack }: ServerListPr
     setModalVisible(true);
   };
 
+  const [saving, setSaving] = useState(false);
+
+  const validateConnection = async (server: Server): Promise<{ success: boolean; error?: string }> => {
+    return new Promise((resolve) => {
+      const protocol = server.useTls ? 'wss' : 'ws';
+      const url = `${protocol}://${server.host}:${server.port}`;
+      let authSent = false;
+
+      const timeout = setTimeout(() => {
+        ws.close();
+        resolve({ success: false, error: 'Connection timed out' });
+      }, 5000);
+
+      const ws = new WebSocket(url);
+
+      ws.onopen = () => {
+        // Wait for 'connected' message before sending auth
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+
+          // First message is 'connected', then we send auth
+          if (data.type === 'connected' && !authSent) {
+            authSent = true;
+            ws.send(JSON.stringify({ type: 'authenticate', token: server.token }));
+            return;
+          }
+
+          // After auth, expect 'authenticated' response
+          if (data.type === 'authenticated') {
+            clearTimeout(timeout);
+            ws.close();
+            if (data.success) {
+              resolve({ success: true });
+            } else {
+              resolve({ success: false, error: data.error || 'Invalid token' });
+            }
+            return;
+          }
+
+          if (data.type === 'error') {
+            clearTimeout(timeout);
+            ws.close();
+            resolve({ success: false, error: data.error || 'Authentication failed' });
+            return;
+          }
+        } catch {
+          clearTimeout(timeout);
+          ws.close();
+          resolve({ success: false, error: 'Invalid response from server' });
+        }
+      };
+
+      ws.onerror = () => {
+        clearTimeout(timeout);
+        resolve({ success: false, error: 'Could not connect to server' });
+      };
+
+      ws.onclose = () => {
+        clearTimeout(timeout);
+      };
+    });
+  };
+
   const handleSave = async () => {
     if (!formName.trim() || !formHost.trim() || !formToken.trim()) {
       Alert.alert('Error', 'Please fill in all required fields');
@@ -117,6 +183,16 @@ export function ServerList({ onSelectServer, onOpenSetup, onBack }: ServerListPr
       useTls: formUseTls,
       isDefault: formIsDefault,
     };
+
+    // Validate connection before saving
+    setSaving(true);
+    const validation = await validateConnection(serverData);
+    setSaving(false);
+
+    if (!validation.success) {
+      Alert.alert('Connection Failed', validation.error || 'Could not connect to server. Please check your settings.');
+      return;
+    }
 
     if (editingServer) {
       await updateServer(serverData);
@@ -160,14 +236,6 @@ export function ServerList({ onSelectServer, onOpenSetup, onBack }: ServerListPr
     onSelectServer(server);
   };
 
-  const handleServerLongPress = (server: Server) => {
-    Alert.alert(server.name, 'Choose an action', [
-      { text: 'Edit', onPress: () => openEditModal(server) },
-      { text: 'Delete', style: 'destructive', onPress: () => handleDelete(server) },
-      { text: 'Cancel', style: 'cancel' },
-    ]);
-  };
-
   if (loading) {
     return (
       <View style={styles.centered}>
@@ -195,7 +263,8 @@ export function ServerList({ onSelectServer, onOpenSetup, onBack }: ServerListPr
             server={item}
             connectionState={connectionStates.get(item.id)}
             onPress={() => handleServerPress(item)}
-            onLongPress={() => handleServerLongPress(item)}
+            onEdit={() => openEditModal(item)}
+            onDelete={() => handleDelete(item)}
           />
         )}
         contentContainerStyle={styles.listContent}
@@ -242,8 +311,10 @@ export function ServerList({ onSelectServer, onOpenSetup, onBack }: ServerListPr
             <Text style={styles.modalTitle}>
               {editingServer ? 'Edit Server' : 'Add Server'}
             </Text>
-            <TouchableOpacity onPress={handleSave}>
-              <Text style={styles.saveButton}>Save</Text>
+            <TouchableOpacity onPress={handleSave} disabled={saving}>
+              <Text style={[styles.saveButton, saving && styles.saveButtonDisabled]}>
+                {saving ? 'Validating...' : 'Save'}
+              </Text>
             </TouchableOpacity>
           </View>
 
@@ -414,6 +485,9 @@ const styles = StyleSheet.create({
     color: '#3b82f6',
     fontSize: 16,
     fontWeight: '600',
+  },
+  saveButtonDisabled: {
+    color: '#6b7280',
   },
   form: {
     padding: 16,

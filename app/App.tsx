@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { View, StyleSheet, StatusBar, AppState } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import * as Sentry from '@sentry/react-native';
+import Constants from 'expo-constants';
 import { Server } from './src/types';
 import { getServers, getSettings } from './src/services/storage';
 import { DashboardScreen } from './src/screens/DashboardScreen';
@@ -18,13 +19,16 @@ import {
 } from './src/services/push';
 
 // Initialize Sentry error tracking
-Sentry.init({
-  dsn: 'https://97dc37204e0bf64f9c9d3563af636146@o4510780700622848.ingest.us.sentry.io/4510780702261248',
-  debug: __DEV__, // Show debug logs in development
-  enableAutoSessionTracking: true,
-  attachScreenshot: true,
-  attachViewHierarchy: true,
-});
+const sentryDsn = Constants.expoConfig?.extra?.sentryDsn;
+if (sentryDsn) {
+  Sentry.init({
+    dsn: sentryDsn,
+    debug: __DEV__,
+    enableAutoSessionTracking: true,
+    attachScreenshot: true,
+    attachViewHierarchy: true,
+  });
+}
 
 
 type Screen = 'dashboard' | 'servers' | 'session' | 'settings' | 'setup';
@@ -45,10 +49,10 @@ function App() {
     });
 
     // Handle notification taps
-    const responseListener = addNotificationResponseReceivedListener((response) => {
+    const responseListener = addNotificationResponseReceivedListener((response: unknown) => {
       // Navigate to session when notification tapped
-      const data = response.notification.request.content.data;
-      if (data?.type === 'waiting_for_input') {
+      const msg = response as { data?: { type?: string } };
+      if (msg.data?.type === 'waiting_for_input') {
         setCurrentScreen('session');
       }
     });

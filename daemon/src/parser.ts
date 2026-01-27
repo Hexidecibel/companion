@@ -1,11 +1,20 @@
 import * as fs from 'fs';
 import { ConversationMessage, ConversationHighlight, ToolCall, SessionStatus, QuestionOption } from './types';
 
+interface ContentBlock {
+  type: string;
+  text?: string;
+  tool_use_id?: string;
+  name?: string;
+  input?: unknown;
+  content?: string | Array<{ type: string; text?: string }>;  // For tool_result blocks
+}
+
 interface JsonlEntry {
   type: string;
   message?: {
     role?: string;
-    content?: string | Array<{ type: string; text?: string; tool_use_id?: string; name?: string; input?: unknown }>;
+    content?: string | ContentBlock[];
   };
   timestamp?: string;
   parentUuid?: string;
@@ -34,15 +43,25 @@ export function parseConversationFile(filePath: string, limit: number = MAX_MESS
   const content = fs.readFileSync(filePath, 'utf-8');
   const lines = content.split('\n').filter(line => line.trim());
 
-  // First pass: collect all tool_result IDs to know which tools completed
-  const completedToolIds = new Set<string>();
+  // First pass: collect all tool_result IDs and their outputs
+  const toolResults = new Map<string, string>();
   for (const line of lines) {
     try {
       const entry: JsonlEntry = JSON.parse(line);
       if (entry.message?.content && Array.isArray(entry.message.content)) {
         for (const block of entry.message.content) {
           if (block.type === 'tool_result' && block.tool_use_id) {
-            completedToolIds.add(block.tool_use_id);
+            // Extract output content - can be string or array of content blocks
+            let output = '';
+            if (typeof block.content === 'string') {
+              output = block.content;
+            } else if (Array.isArray(block.content)) {
+              output = block.content
+                .filter(c => c.type === 'text' && c.text)
+                .map(c => c.text || '')
+                .join('\n');
+            }
+            toolResults.set(block.tool_use_id, output);
           }
         }
       }
@@ -50,6 +69,7 @@ export function parseConversationFile(filePath: string, limit: number = MAX_MESS
       // Skip malformed lines
     }
   }
+  const completedToolIds = new Set(toolResults.keys());
 
   const messages: ConversationMessage[] = [];
 
@@ -59,7 +79,7 @@ export function parseConversationFile(filePath: string, limit: number = MAX_MESS
       const entry: JsonlEntry = JSON.parse(lines[i]);
 
       if (entry.type === 'user' || entry.type === 'assistant') {
-        const message = parseEntry(entry, completedToolIds);
+        const message = parseEntry(entry, toolResults);
         if (message) {
           messages.unshift(message); // Add to beginning to maintain order
         }
@@ -73,7 +93,7 @@ export function parseConversationFile(filePath: string, limit: number = MAX_MESS
   return messages.slice(-limit);
 }
 
-function parseEntry(entry: JsonlEntry, completedToolIds: Set<string>): ConversationMessage | null {
+function parseEntry(entry: JsonlEntry, toolResults: Map<string, string>): ConversationMessage | null {
   const message = entry.message;
   if (!message) return null;
 
@@ -90,12 +110,14 @@ function parseEntry(entry: JsonlEntry, completedToolIds: Set<string>): Conversat
         content += block.text;
       } else if (block.type === 'tool_use' && block.name) {
         const toolId = block.tool_use_id || entry.uuid || '';
-        const isPending = !completedToolIds.has(toolId);
+        const output = toolResults.get(toolId);
+        const isPending = !output && output !== '';
 
         toolCalls.push({
           id: toolId,
           name: block.name,
           input: (block.input as Record<string, unknown>) || {},
+          output: output,
           status: isPending ? 'pending' : 'completed',
         });
 

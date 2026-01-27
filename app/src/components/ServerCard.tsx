@@ -6,10 +6,11 @@ interface ServerCardProps {
   server: Server;
   connectionState?: ConnectionState;
   onPress: () => void;
-  onLongPress?: () => void;
+  onEdit: () => void;
+  onDelete: () => void;
 }
 
-export function ServerCard({ server, connectionState, onPress, onLongPress }: ServerCardProps) {
+export function ServerCard({ server, connectionState, onPress, onEdit, onDelete }: ServerCardProps) {
   const getStatusColor = () => {
     if (!connectionState) return '#6b7280';
 
@@ -44,13 +45,12 @@ export function ServerCard({ server, connectionState, onPress, onLongPress }: Se
   };
 
   return (
-    <TouchableOpacity
-      style={styles.container}
-      onPress={onPress}
-      onLongPress={onLongPress}
-      activeOpacity={0.7}
-    >
-      <View style={styles.content}>
+    <View style={styles.container}>
+      <TouchableOpacity
+        style={styles.content}
+        onPress={onPress}
+        activeOpacity={0.7}
+      >
         <View style={styles.header}>
           <Text style={styles.name} numberOfLines={1}>
             {server.name}
@@ -70,11 +70,16 @@ export function ServerCard({ server, connectionState, onPress, onLongPress }: Se
             {getStatusText()}
           </Text>
         </View>
+      </TouchableOpacity>
+      <View style={styles.actions}>
+        <TouchableOpacity style={styles.actionButton} onPress={onEdit}>
+          <Text style={styles.editIcon}>✎</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.actionButton} onPress={onDelete}>
+          <Text style={styles.deleteIcon}>✕</Text>
+        </TouchableOpacity>
       </View>
-      <View style={styles.arrow}>
-        <Text style={styles.arrowText}>›</Text>
-      </View>
-    </TouchableOpacity>
+    </View>
   );
 }
 
@@ -133,11 +138,21 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: '#d1d5db',
   },
-  arrow: {
-    marginLeft: 12,
+  actions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginLeft: 8,
   },
-  arrowText: {
-    fontSize: 24,
-    color: '#6b7280',
+  actionButton: {
+    padding: 8,
+    marginLeft: 4,
+  },
+  editIcon: {
+    fontSize: 18,
+    color: '#9ca3af',
+  },
+  deleteIcon: {
+    fontSize: 18,
+    color: '#ef4444',
   },
 });

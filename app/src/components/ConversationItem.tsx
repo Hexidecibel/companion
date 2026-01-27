@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
 import Markdown from '@ronradtke/react-native-markdown-display';
-import { ConversationMessage, ConversationHighlight } from '../types';
+import { ConversationMessage, ConversationHighlight, ToolCall } from '../types';
 
 interface ConversationItemProps {
   item: ConversationMessage | ConversationHighlight;
@@ -12,6 +12,142 @@ interface ConversationItemProps {
 
 const COLLAPSED_LINES = 12;
 const COLLAPSED_HEIGHT = 250;
+
+// Helper to get a summary of tool input for display
+function getToolSummary(tool: ToolCall): string {
+  const input = tool.input;
+  switch (tool.name) {
+    case 'Bash':
+      return input.command ? String(input.command).substring(0, 80) : 'Execute command';
+    case 'Read':
+      return input.file_path ? String(input.file_path) : 'Read file';
+    case 'Edit':
+      return input.file_path ? `Edit ${input.file_path}` : 'Edit file';
+    case 'Write':
+      return input.file_path ? `Write ${input.file_path}` : 'Write file';
+    case 'Glob':
+      return input.pattern ? `Find ${input.pattern}` : 'Find files';
+    case 'Grep':
+      return input.pattern ? `Search: ${input.pattern}` : 'Search files';
+    case 'Task':
+      return input.description ? String(input.description) : 'Run task';
+    case 'WebFetch':
+      return input.url ? String(input.url) : 'Fetch URL';
+    case 'WebSearch':
+      return input.query ? `Search: ${input.query}` : 'Web search';
+    default:
+      return tool.name;
+  }
+}
+
+// Get tool icon based on type
+function getToolIcon(toolName: string): string {
+  switch (toolName) {
+    case 'Bash': return '⌨️';
+    case 'Read': return '📖';
+    case 'Edit': return '✏️';
+    case 'Write': return '📝';
+    case 'Glob': return '🔍';
+    case 'Grep': return '🔎';
+    case 'Task': return '🤖';
+    case 'WebFetch': return '🌐';
+    case 'WebSearch': return '🔍';
+    default: return '⚙️';
+  }
+}
+
+// Expandable tool card component
+function ToolCard({ tool }: { tool: ToolCall }) {
+  const [expanded, setExpanded] = useState(false);
+  const summary = getToolSummary(tool);
+  const icon = getToolIcon(tool.name);
+  const hasOutput = tool.output && tool.output.length > 0;
+  const statusColor = tool.status === 'pending' ? '#f59e0b' : '#10b981';
+
+  // Extract input values safely
+  const command = tool.input.command ? String(tool.input.command) : '';
+  const filePath = tool.input.file_path ? String(tool.input.file_path) : '';
+  const oldString = tool.input.old_string ? String(tool.input.old_string) : '';
+  const newString = tool.input.new_string ? String(tool.input.new_string) : '';
+
+  return (
+    <TouchableOpacity
+      style={toolCardStyles.container}
+      onPress={() => setExpanded(!expanded)}
+      activeOpacity={0.7}
+    >
+      <View style={toolCardStyles.header}>
+        <Text style={toolCardStyles.icon}>{icon}</Text>
+        <View style={toolCardStyles.headerText}>
+          <View style={toolCardStyles.nameRow}>
+            <Text style={toolCardStyles.name}>{tool.name}</Text>
+            <View style={[toolCardStyles.statusDot, { backgroundColor: statusColor }]} />
+          </View>
+          <Text style={toolCardStyles.summary} numberOfLines={expanded ? undefined : 1}>
+            {summary}
+          </Text>
+        </View>
+        <Text style={toolCardStyles.expandIcon}>{expanded ? '▼' : '▶'}</Text>
+      </View>
+
+      {expanded && (
+        <View style={toolCardStyles.details}>
+          {/* Show input details */}
+          {tool.name === 'Bash' && command ? (
+            <View style={toolCardStyles.section}>
+              <Text style={toolCardStyles.sectionLabel}>Command:</Text>
+              <ScrollView style={toolCardStyles.codeScroll} nestedScrollEnabled>
+                <Text style={toolCardStyles.codeText}>{command}</Text>
+              </ScrollView>
+            </View>
+          ) : null}
+
+          {(tool.name === 'Edit' || tool.name === 'Write') && filePath ? (
+            <View style={toolCardStyles.section}>
+              <Text style={toolCardStyles.sectionLabel}>File:</Text>
+              <Text style={toolCardStyles.filePath}>{filePath}</Text>
+              {oldString ? (
+                <>
+                  <Text style={[toolCardStyles.sectionLabel, { marginTop: 8 }]}>Replace:</Text>
+                  <ScrollView style={toolCardStyles.codeScroll} nestedScrollEnabled>
+                    <Text style={[toolCardStyles.codeText, { color: '#ef4444' }]}>
+                      {oldString.substring(0, 500)}
+                    </Text>
+                  </ScrollView>
+                  <Text style={[toolCardStyles.sectionLabel, { marginTop: 8 }]}>With:</Text>
+                  <ScrollView style={toolCardStyles.codeScroll} nestedScrollEnabled>
+                    <Text style={[toolCardStyles.codeText, { color: '#10b981' }]}>
+                      {newString.substring(0, 500)}
+                    </Text>
+                  </ScrollView>
+                </>
+              ) : null}
+            </View>
+          ) : null}
+
+          {/* Show output */}
+          {hasOutput ? (
+            <View style={toolCardStyles.section}>
+              <Text style={toolCardStyles.sectionLabel}>Output:</Text>
+              <ScrollView style={toolCardStyles.outputScroll} nestedScrollEnabled>
+                <Text style={toolCardStyles.outputText}>
+                  {tool.output!.substring(0, 2000)}
+                  {tool.output!.length > 2000 ? '\n... (truncated)' : ''}
+                </Text>
+              </ScrollView>
+            </View>
+          ) : null}
+
+          {tool.status === 'pending' ? (
+            <View style={toolCardStyles.pendingBadge}>
+              <Text style={toolCardStyles.pendingText}>Waiting for approval</Text>
+            </View>
+          ) : null}
+        </View>
+      )}
+    </TouchableOpacity>
+  );
+}
 
 export function ConversationItem({ item, showToolCalls, onSelectOption, onFileTap }: ConversationItemProps) {
   const [expanded, setExpanded] = useState(false);
@@ -201,14 +337,7 @@ export function ConversationItem({ item, showToolCalls, onSelectOption, onFileTa
         {hasToolCalls && (
           <View style={styles.toolCallsContainer}>
             {message.toolCalls!.map((tool) => (
-              <View key={tool.id} style={styles.toolCall}>
-                <Text style={styles.toolName}>{tool.name}</Text>
-                {tool.output && (
-                  <Text style={styles.toolOutput} numberOfLines={3}>
-                    {tool.output}
-                  </Text>
-                )}
-              </View>
+              <ToolCard key={tool.id} tool={tool} />
             ))}
           </View>
         )}
@@ -222,6 +351,105 @@ const filePathStyles = StyleSheet.create({
   filePath: {
     color: '#60a5fa',
     textDecorationLine: 'underline',
+  },
+});
+
+const toolCardStyles = StyleSheet.create({
+  container: {
+    backgroundColor: '#1f2937',
+    borderRadius: 8,
+    marginTop: 6,
+    overflow: 'hidden',
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 10,
+  },
+  icon: {
+    fontSize: 16,
+    marginRight: 8,
+  },
+  headerText: {
+    flex: 1,
+  },
+  nameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  name: {
+    color: '#a78bfa',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  statusDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    marginLeft: 6,
+  },
+  summary: {
+    color: '#9ca3af',
+    fontSize: 11,
+    marginTop: 2,
+  },
+  expandIcon: {
+    color: '#6b7280',
+    fontSize: 10,
+    marginLeft: 8,
+  },
+  details: {
+    borderTopWidth: 1,
+    borderTopColor: '#374151',
+    padding: 10,
+  },
+  section: {
+    marginBottom: 10,
+  },
+  sectionLabel: {
+    color: '#6b7280',
+    fontSize: 10,
+    fontWeight: '600',
+    marginBottom: 4,
+    textTransform: 'uppercase',
+  },
+  codeScroll: {
+    backgroundColor: '#111827',
+    borderRadius: 4,
+    padding: 8,
+    maxHeight: 120,
+  },
+  codeText: {
+    color: '#e5e7eb',
+    fontFamily: 'monospace',
+    fontSize: 11,
+  },
+  filePath: {
+    color: '#60a5fa',
+    fontSize: 12,
+  },
+  outputScroll: {
+    backgroundColor: '#111827',
+    borderRadius: 4,
+    padding: 8,
+    maxHeight: 200,
+  },
+  outputText: {
+    color: '#9ca3af',
+    fontFamily: 'monospace',
+    fontSize: 10,
+  },
+  pendingBadge: {
+    backgroundColor: '#78350f',
+    borderRadius: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    alignSelf: 'flex-start',
+  },
+  pendingText: {
+    color: '#fbbf24',
+    fontSize: 11,
+    fontWeight: '500',
   },
 });
 
@@ -473,21 +701,5 @@ const styles = StyleSheet.create({
     paddingTop: 8,
     borderTopWidth: 1,
     borderTopColor: '#4b5563',
-  },
-  toolCall: {
-    backgroundColor: '#1f2937',
-    padding: 8,
-    borderRadius: 8,
-    marginTop: 4,
-  },
-  toolName: {
-    color: '#a78bfa',
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  toolOutput: {
-    color: '#9ca3af',
-    fontSize: 11,
-    marginTop: 4,
   },
 });

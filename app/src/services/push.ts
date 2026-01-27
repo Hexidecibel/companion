@@ -1,39 +1,90 @@
 import { Platform } from 'react-native';
+import messaging from '@react-native-firebase/messaging';
 import { wsService } from './websocket';
 
 let pushToken: string | null = null;
-
-// Simplified push service - expo-notifications removed due to Expo Go SDK 53+ incompatibility
-// Push notifications will work when building a standalone app with Firebase
+let tokenType: 'fcm' | 'expo' = 'fcm';
 
 export async function registerForPushNotifications(): Promise<string | null> {
-  // In Expo Go, we can't get push tokens
-  // This will work in standalone builds with proper Firebase setup
-  console.log('Push notifications: Disabled in Expo Go (SDK 53+)');
-  return null;
+  try {
+    // Request permission on iOS
+    if (Platform.OS === 'ios') {
+      const authStatus = await messaging().requestPermission();
+      const enabled =
+        authStatus === messaging.AuthorizationStatus.AUTHORIZED ||
+        authStatus === messaging.AuthorizationStatus.PROVISIONAL;
+
+      if (!enabled) {
+        console.log('Push notifications: Permission denied');
+        return null;
+      }
+    }
+
+    // Get FCM token
+    const token = await messaging().getToken();
+    if (token) {
+      pushToken = token;
+      tokenType = 'fcm';
+      console.log('Push notifications: Got FCM token:', token.substring(0, 20) + '...');
+      return token;
+    }
+
+    console.log('Push notifications: No token received');
+    return null;
+  } catch (error) {
+    console.error('Push notifications: Error getting token:', error);
+    return null;
+  }
 }
 
 export async function setupNotificationChannel(): Promise<void> {
-  // No-op in Expo Go
+  // Android notification channels are configured in app.json/app.config.js
+  // Firebase handles this automatically
 }
 
 export function addNotificationReceivedListener(
   callback: (notification: unknown) => void
 ) {
-  // Return a dummy subscription
-  return { remove: () => {} };
+  // Handle foreground messages
+  const unsubscribe = messaging().onMessage(async (remoteMessage) => {
+    console.log('Push: Foreground message received:', remoteMessage);
+    callback(remoteMessage);
+  });
+
+  return { remove: unsubscribe };
 }
 
 export function addNotificationResponseReceivedListener(
   callback: (response: unknown) => void
 ) {
-  // Return a dummy subscription
+  // Handle notification tap when app is in background
+  messaging().onNotificationOpenedApp((remoteMessage) => {
+    console.log('Push: Notification opened app:', remoteMessage);
+    callback(remoteMessage);
+  });
+
+  // Check if app was opened from a notification when it was quit
+  messaging()
+    .getInitialNotification()
+    .then((remoteMessage) => {
+      if (remoteMessage) {
+        console.log('Push: App opened from quit state:', remoteMessage);
+        callback(remoteMessage);
+      }
+    });
+
+  // Return a dummy remove function (messaging listeners are global)
   return { remove: () => {} };
 }
 
 export async function registerWithDaemon(deviceId: string): Promise<boolean> {
+  // Try to get token if we don't have one
   if (!pushToken) {
-    // No token available in Expo Go
+    await registerForPushNotifications();
+  }
+
+  if (!pushToken) {
+    console.log('Push notifications: No token available');
     return false;
   }
 
@@ -46,7 +97,7 @@ export async function registerWithDaemon(deviceId: string): Promise<boolean> {
     const response = await wsService.sendRequest('register_push', {
       deviceId,
       fcmToken: pushToken,
-      tokenType: 'fcm',
+      tokenType,
     });
 
     if (response.success) {
@@ -79,7 +130,8 @@ export async function unregisterWithDaemon(deviceId: string): Promise<boolean> {
 }
 
 export async function clearBadge(): Promise<void> {
-  // No-op in Expo Go
+  // Firebase doesn't have a direct badge API on Android
+  // iOS badge is managed by the system
 }
 
 export function getToken(): string | null {
@@ -87,5 +139,13 @@ export function getToken(): string | null {
 }
 
 export function getTokenType(): 'fcm' | 'expo' {
-  return 'fcm';
+  return tokenType;
 }
+
+// Listen for token refresh
+messaging().onTokenRefresh((token) => {
+  console.log('Push notifications: Token refreshed');
+  pushToken = token;
+  // Re-register with daemon if connected
+  // This will be handled by the app's connection logic
+});

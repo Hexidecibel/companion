@@ -23,6 +23,7 @@ dist/
 *.pem
 firebase-credentials.json
 config.json
+.claude/secrets.env
 
 # OS files
 .DS_Store

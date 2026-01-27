@@ -3,3 +3,8 @@ node_modules/
 dist/
 android/
 ios/
+
+# Environment variables (contain secrets)
+.env
+.env.local
+.env.*.local

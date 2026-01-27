@@ -276,6 +276,22 @@ npm install
 npx expo start  # Start Expo development server
 ```
 
+### Environment Variables
+
+**App (app/.env):**
+```bash
+# Copy from app/.env.example
+SENTRY_DSN=your-sentry-dsn  # Optional: for error tracking
+```
+
+**Claude Skills (.claude/secrets.env):**
+```bash
+# Copy from .claude/secrets.env.example
+SENTRY_API_TOKEN=your-sentry-api-token  # For /sentry skill
+SENTRY_ORG=your-sentry-org
+SENTRY_PROJECT=your-sentry-project
+```
+
 ## License
 
 MIT
