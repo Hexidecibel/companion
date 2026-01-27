@@ -53,19 +53,31 @@ export function Settings({ onBack }: SettingsProps) {
   const handlePushEnabledChange = async (value: boolean) => {
     updateSetting('pushEnabled', value);
 
-    // Actually register/unregister with daemon
-    const servers = await getServers();
-    const connectedServer = servers.find(() => wsService.isConnected());
-    const deviceId = `${Platform.OS}-${connectedServer?.id || 'default'}`;
-
     if (value) {
-      // registerWithDaemon will request permission and get token if needed
-      const success = await registerWithDaemon(deviceId);
-      if (!success) {
-        Alert.alert('Push Registration', 'Could not register for push notifications. Make sure you are connected to a server and grant notification permission.');
+      // Registration happens automatically when connected to a server
+      // Just save the setting - useConnection will register when connected
+      if (!wsService.isConnected()) {
+        Alert.alert(
+          'Push Enabled',
+          'Push notifications are enabled. You will be registered when you connect to a server.'
+        );
+      } else {
+        const servers = await getServers();
+        const connectedServer = servers.find(s => wsService.getServerId() === s.id);
+        const deviceId = `${Platform.OS}-${connectedServer?.id || 'default'}`;
+        const success = await registerWithDaemon(deviceId);
+        if (success) {
+          Alert.alert('Push Enabled', 'Push notifications registered successfully.');
+        }
       }
     } else {
-      await unregisterWithDaemon(deviceId);
+      // Unregister if connected
+      if (wsService.isConnected()) {
+        const servers = await getServers();
+        const connectedServer = servers.find(s => wsService.getServerId() === s.id);
+        const deviceId = `${Platform.OS}-${connectedServer?.id || 'default'}`;
+        await unregisterWithDaemon(deviceId);
+      }
     }
   };
 

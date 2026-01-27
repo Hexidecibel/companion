@@ -53,18 +53,12 @@
 - [ ] Add session sorting (waiting first, then working, then idle)
 - [ ] Add last activity timestamp display
 
-### Medium Priority - Approval Queue (ROADMAP Phase 2)
-See `docs/ROADMAP-V2.md` Section 2 for full details.
-
-- [ ] Parse pending approvals from conversation (tool_use without tool_result)
-- [ ] Add `get_pending_approvals` daemon endpoint
-- [ ] Create `ApprovalsScreen` with list of pending approvals
-- [ ] `ApprovalCard` component with tool-specific rendering
-- [ ] Diff viewer for Edit tool approvals
-- [ ] Command preview for Bash tool approvals
-- [ ] Batch approve/reject functionality
-- [ ] Auto-approve rules management screen
-- [ ] Push notification for new pending approvals
+### Medium Priority - Notification Preferences
+- [ ] Configurable notification settings per server
+- [ ] Notification delay setting (instant vs batched)
+- [ ] Quiet hours / Do Not Disturb schedule
+- [ ] Notification sound/vibration preferences
+- [ ] Filter notifications by session or project
 
 ### Medium Priority - Sub-Agent Visibility (ROADMAP Phase 3)
 See `docs/ROADMAP-V2.md` Section 3 for full details.
@@ -103,15 +97,16 @@ See `docs/ROADMAP-V2.md` Section 4 for full details.
 
 Tasks suitable for longer autonomous work sessions:
 
-### 1. Approval Queue MVP
+### 1. Notification Preferences Screen
 ```
-Implement the basic approval queue feature:
-1. Add extractPendingApprovals() to daemon/src/parser.ts
-2. Add get_pending_approvals endpoint to daemon/src/websocket.ts
-3. Create ApprovalsScreen.tsx in app/src/screens/
-4. Create ApprovalCard.tsx component
-5. Wire up approve/reject actions to send input to tmux
-6. Test with actual pending tool approvals
+Add configurable notification settings:
+1. Create NotificationSettingsScreen.tsx
+2. Add per-server notification toggle
+3. Add instant vs batched notification mode
+4. Add quiet hours picker (start/end time)
+5. Store preferences in AsyncStorage
+6. Update daemon to respect notification preferences
+7. Add navigation from Settings screen
 ```
 
 ### 2. Usage Statistics Page
@@ -149,10 +144,11 @@ Improve tool card information display:
 
 ## Build Status
 
-**Latest EAS Build:** 3c6e9529-12df-45e7-88cf-423610f74ab6 (in progress)
+**Latest EAS Build:** b8ff3326-1334-4b65-a3e5-dd8791fd0271 (in progress)
 - Platform: Android
 - Profile: preview
-- Includes: Android 13+ notification permission prompt
+- Includes: Push notification registration fix, all recent changes
 
-**Previous Build:** f2ceb2ce-6e72-4b44-ab75-5c9225de85ee (finished)
-- Includes: Tool cards, dashboard fixes, connection validation
+**Previous Builds:**
+- `3c6e9529` - Android 13+ notification permission prompt
+- `f2ceb2ce` - Tool cards, dashboard fixes, connection validation
