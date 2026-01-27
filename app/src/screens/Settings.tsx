@@ -177,34 +177,15 @@ export function Settings({ onBack, onOpenNotificationSettings }: SettingsProps) 
             />
           </View>
 
-          <View style={styles.settingRow}>
+          <TouchableOpacity style={styles.linkRow} onPress={onOpenNotificationSettings}>
             <View style={styles.settingInfo}>
               <Text style={styles.settingLabel}>Push Notifications</Text>
               <Text style={styles.settingDescription}>
-                {pushAvailable
-                  ? 'Receive alerts when Claude needs input'
-                  : 'Only available on physical devices'}
+                Configure alerts and quiet hours
               </Text>
             </View>
-            <Switch
-              value={settings.pushEnabled}
-              onValueChange={handlePushEnabledChange}
-              disabled={!pushAvailable}
-              trackColor={{ false: '#374151', true: '#3b82f6' }}
-            />
-          </View>
-
-          {settings.pushEnabled && (
-            <TouchableOpacity style={styles.linkRow} onPress={onOpenNotificationSettings}>
-              <View style={styles.settingInfo}>
-                <Text style={styles.settingLabel}>Notification Settings</Text>
-                <Text style={styles.settingDescription}>
-                  Configure per-server notification preferences
-                </Text>
-              </View>
-              <Text style={styles.linkArrow}>›</Text>
-            </TouchableOpacity>
-          )}
+            <Text style={styles.linkArrow}>›</Text>
+          </TouchableOpacity>
         </View>
 
         <View style={styles.section}>

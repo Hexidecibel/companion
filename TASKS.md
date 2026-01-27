@@ -90,6 +90,12 @@ See `docs/ROADMAP-V2.md` Section 4 for full details.
 - [ ] File watcher trigger support
 - [ ] Push notifications for agent events
 
+### Nice to Have - Web Interface
+- [ ] Web client for browser-based access
+- [ ] Same functionality as mobile app
+- [ ] Real-time WebSocket connection
+- [ ] Responsive design for desktop/tablet
+
 ### Nice to Have
 - [ ] iOS build and TestFlight distribution
 - [ ] Team collaboration - share agents, approval workflows

@@ -157,7 +157,7 @@ function ThrottlePicker({
             ))}
           </View>
 
-          <TouchableOpacity style={pickerStyles.cancelButton} onPress={onCancel}>
+          <TouchableOpacity style={pickerStyles.fullCancelButton} onPress={onCancel}>
             <Text style={pickerStyles.cancelText}>Cancel</Text>
           </TouchableOpacity>
         </View>
@@ -572,6 +572,12 @@ const pickerStyles = StyleSheet.create({
   },
   cancelButton: {
     flex: 1,
+    paddingVertical: 14,
+    borderRadius: 8,
+    backgroundColor: '#374151',
+    alignItems: 'center',
+  },
+  fullCancelButton: {
     paddingVertical: 14,
     borderRadius: 8,
     backgroundColor: '#374151',
