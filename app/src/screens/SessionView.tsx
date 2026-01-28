@@ -229,6 +229,7 @@ export function SessionView({ server, onBack, initialSessionId, onNewProject }: 
   // User can tap the scroll-to-bottom button when needed
 
   const lastSwitchedSessionId = useRef<string | null>(null);
+  const [currentSessionId, setCurrentSessionId] = useState<string | undefined>(initialSessionId || undefined);
 
   // Refresh when connection is established and sync settings
   useEffect(() => {
@@ -238,6 +239,7 @@ export function SessionView({ server, onBack, initialSessionId, onNewProject }: 
         const isSwitching = initialSessionId && initialSessionId !== lastSwitchedSessionId.current;
         if (isSwitching) {
           lastSwitchedSessionId.current = initialSessionId;
+          setCurrentSessionId(initialSessionId);
 
           // CRITICAL: Begin switch in sessionGuard BEFORE sending request
           // This invalidates any in-flight requests from previous session
@@ -259,6 +261,7 @@ export function SessionView({ server, onBack, initialSessionId, onNewProject }: 
         } else if (initialSessionId && !sessionGuard.getCurrentSessionId()) {
           // First load - set session in guard without incrementing epoch
           sessionGuard.beginSwitch(initialSessionId);
+          setCurrentSessionId(initialSessionId);
         }
 
         // Clear first if switching sessions to avoid showing stale content
@@ -292,6 +295,7 @@ export function SessionView({ server, onBack, initialSessionId, onNewProject }: 
       const epoch = sessionGuard.beginSwitch(newSessionId);
       console.log(`SessionView: Session changed to ${newSessionId} (epoch ${epoch})`);
       lastSwitchedSessionId.current = newSessionId;
+      setCurrentSessionId(newSessionId);
     }
     lastDataLength.current = 0;
     setShowScrollButton(false);
@@ -326,6 +330,7 @@ export function SessionView({ server, onBack, initialSessionId, onNewProject }: 
       });
       if (response.success) {
         lastSwitchedSessionId.current = newSessionId;
+        setCurrentSessionId(newSessionId);
         dismissOtherSessionActivity();
         lastDataLength.current = 0;
         setShowScrollButton(false);
@@ -431,6 +436,7 @@ export function SessionView({ server, onBack, initialSessionId, onNewProject }: 
           </Text>
           {isConnected && (
             <SessionPicker
+              currentSessionId={currentSessionId}
               onSessionChange={handleSessionChange}
               isOpen={showSessionPicker}
               onClose={() => setShowSessionPicker(false)}

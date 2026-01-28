@@ -54,7 +54,11 @@ export function SessionPicker({ currentSessionId, onSessionChange, isOpen, onClo
           homeDir: string;
         };
         setSessions(payload.sessions);
-        setActiveSession(payload.activeSession);
+        // Only use daemon's activeSession if we don't have a currentSessionId from parent
+        // This prevents overwriting the session that user clicked on from dashboard
+        if (!currentSessionId) {
+          setActiveSession(payload.activeSession);
+        }
         setHomeDir(payload.homeDir);
       }
     } catch (err) {
@@ -62,7 +66,7 @@ export function SessionPicker({ currentSessionId, onSessionChange, isOpen, onClo
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [currentSessionId]);
 
   const browseDirectory = useCallback(async (path: string) => {
     setBrowseLoading(true);
@@ -204,11 +208,29 @@ export function SessionPicker({ currentSessionId, onSessionChange, isOpen, onClo
     return new Date(timestamp).toLocaleDateString();
   };
 
-  const currentSession = sessions.find((s) => s.name === activeSession);
+  // Find current session by matching conversation session ID (encoded path) or tmux name
+  const currentSession = sessions.find((s) => {
+    // Match by encoded working dir (conversation session ID format)
+    if (currentSessionId && s.workingDir) {
+      const encodedPath = s.workingDir.replace(/\//g, '-');
+      if (encodedPath === currentSessionId || `-${encodedPath}` === currentSessionId) {
+        return true;
+      }
+    }
+    // Fallback to tmux session name match
+    return s.name === activeSession;
+  });
   const displayName = currentSession?.workingDir?.split('/').pop() || activeSession || 'Sessions';
 
   const renderSessionItem = ({ item }: { item: TmuxSessionInfo }) => {
-    const isActive = item.name === activeSession;
+    // Check if this is the active session by name or by encoded working dir
+    let isActive = item.name === activeSession;
+    if (currentSessionId && item.workingDir) {
+      const encodedPath = item.workingDir.replace(/\//g, '-');
+      if (encodedPath === currentSessionId || `-${encodedPath}` === currentSessionId) {
+        isActive = true;
+      }
+    }
     const dirName = item.workingDir?.split('/').pop() || item.name;
 
     return (
