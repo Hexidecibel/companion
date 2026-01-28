@@ -56,12 +56,11 @@ export function SessionView({ server, onBack, initialSessionId }: SessionViewPro
   const data = highlights;
   const [hasNewMessages, setHasNewMessages] = useState(false);
   const [showScrollButton, setShowScrollButton] = useState(false);
-  const prevMessageCount = useRef(0);
   const initialScrollDone = useRef(false);
   // Simple flag: true = auto-scroll to new messages, false = user is reading history
   const autoScrollEnabled = useRef(true);
-  const lastScrollY = useRef(0);
-  const lastContentHeight = useRef(0);
+  // Track if we're near bottom to decide whether to auto-scroll
+  const isNearBottom = useRef(true);
   const [showSettings, setShowSettings] = useState(false);
   const [sessionSettings, setSessionSettings] = useState<SessionSettings>({ instantNotify: false });
   const [showActivityModal, setShowActivityModal] = useState(false);
@@ -187,50 +186,39 @@ export function SessionView({ server, onBack, initialSessionId }: SessionViewPro
     }
   }, [isConnected, refresh, server.id, initialSessionId]);
 
-  // Scroll to bottom on initial load and track new messages
-  useEffect(() => {
-    if (data.length > 0) {
-      // Scroll to bottom on first load
-      if (!initialScrollDone.current) {
-        initialScrollDone.current = true;
-        autoScrollEnabled.current = true;
-        setTimeout(() => {
-          listRef.current?.scrollToEnd({ animated: false });
-        }, 200);
-      }
-      // Track new messages
-      if (data.length > prevMessageCount.current) {
-        if (autoScrollEnabled.current) {
-          // Auto-scroll is on - scroll to new content
-          setTimeout(() => {
-            listRef.current?.scrollToEnd({ animated: true });
-          }, 100);
-        } else {
-          // User is reading history - show indicator
-          setHasNewMessages(true);
-        }
-      }
-      prevMessageCount.current = data.length;
+  // Handle content size changes - this is when we should auto-scroll
+  const handleContentSizeChange = useCallback((_width: number, height: number) => {
+    if (!initialScrollDone.current && height > 0) {
+      // First load - scroll to bottom immediately
+      initialScrollDone.current = true;
+      listRef.current?.scrollToEnd({ animated: false });
+      return;
     }
-  }, [data.length]);
 
-  const scrollToBottom = () => {
+    // Auto-scroll if enabled and we were near bottom
+    if (autoScrollEnabled.current && isNearBottom.current) {
+      listRef.current?.scrollToEnd({ animated: true });
+    } else if (!autoScrollEnabled.current) {
+      // User is reading history - show new message indicator
+      setHasNewMessages(true);
+    }
+  }, []);
+
+  const scrollToBottom = useCallback(() => {
     setHasNewMessages(false);
     setShowScrollButton(false);
     autoScrollEnabled.current = true;
+    isNearBottom.current = true;
     listRef.current?.scrollToEnd({ animated: true });
-  };
+  }, []);
 
   const handleSendInput = async (text: string): Promise<boolean> => {
     // Enable auto-scroll when user sends a message
     autoScrollEnabled.current = true;
+    isNearBottom.current = true;
     setHasNewMessages(false);
-    const success = await sendInput(text);
-    // Scroll after sending
-    setTimeout(() => {
-      listRef.current?.scrollToEnd({ animated: true });
-    }, 150);
-    return success;
+    return sendInput(text);
+    // Note: scrollToEnd will be called by onContentSizeChange when new message appears
   };
 
   const handleSessionChange = useCallback(() => {
@@ -276,38 +264,26 @@ export function SessionView({ server, onBack, initialSessionId }: SessionViewPro
     await handleSendInput(option);
   };
 
-  const handleScroll = (event: any) => {
+  const handleScroll = useCallback((event: any) => {
     const { layoutMeasurement, contentOffset, contentSize } = event.nativeEvent;
-    const currentY = contentOffset.y;
-    const currentContentHeight = contentSize.height;
+    const distanceFromBottom = contentSize.height - layoutMeasurement.height - contentOffset.y;
 
-    // Detect if user scrolled UP (intentionally reading history)
-    // This happens when scroll position decreases while content stays same size
-    const scrolledUp = currentY < lastScrollY.current - 10 &&
-                       Math.abs(currentContentHeight - lastContentHeight.current) < 50;
+    // Track if we're near the bottom (within 150px)
+    const nearBottom = distanceFromBottom < 150;
+    isNearBottom.current = nearBottom;
 
-    if (scrolledUp) {
-      // User is scrolling up to read history - disable auto-scroll
-      autoScrollEnabled.current = false;
-    }
+    // Show/hide scroll button based on distance from bottom
+    setShowScrollButton(distanceFromBottom > 200);
 
-    // Check if we're at the bottom
-    const paddingToBottom = 100;
-    const atBottom = layoutMeasurement.height + currentY >= currentContentHeight - paddingToBottom;
-
-    // Show scroll button when not at bottom
-    setShowScrollButton(!atBottom);
-
-    // If user scrolled to bottom manually, re-enable auto-scroll
-    if (atBottom && !autoScrollEnabled.current) {
+    // If user scrolled to bottom, re-enable auto-scroll
+    if (nearBottom) {
       autoScrollEnabled.current = true;
       setHasNewMessages(false);
+    } else {
+      // User scrolled up - disable auto-scroll
+      autoScrollEnabled.current = false;
     }
-
-    // Track values for next comparison
-    lastScrollY.current = currentY;
-    lastContentHeight.current = currentContentHeight;
-  };
+  }, []);
 
   const handleCancel = () => {
     Alert.alert(
@@ -619,7 +595,8 @@ export function SessionView({ server, onBack, initialSessionId }: SessionViewPro
         }
         ListEmptyComponent={renderEmptyContent}
         onScroll={handleScroll}
-        scrollEventThrottle={16}
+        onContentSizeChange={handleContentSizeChange}
+        scrollEventThrottle={100}
         // Optimize re-renders
         removeClippedSubviews={Platform.OS === 'android'}
         maxToRenderPerBatch={10}
