@@ -168,11 +168,21 @@ export function useConversation() {
         .then(response => {
           if (sessionSwitching.current) return;
           if (response.success && response.payload) {
-            setStatus(response.payload as SessionStatus);
+            const newStatus = response.payload as SessionStatus;
+            // Only update if status actually changed
+            setStatus(prev => {
+              if (prev &&
+                  prev.isWaitingForInput === newStatus.isWaitingForInput &&
+                  prev.currentActivity === newStatus.currentActivity &&
+                  prev.lastActivity === newStatus.lastActivity) {
+                return prev; // No change
+              }
+              return newStatus;
+            });
           }
         })
         .catch(() => { /* silent fail on poll */ });
-    }, 2000); // Reduced to 2 seconds to reduce scroll interference
+    }, 5000); // 5 seconds to reduce re-renders
 
     return () => clearInterval(pollInterval);
   }, [isConnected, viewMode]);
