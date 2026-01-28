@@ -37,5 +37,6 @@ Quick capture for ideas and tasks. Run `/plan` to process into detailed plans.
 - Collapse multiple tool windows into one expandable card (to make reading easier, span less pages)
 - Finish rich session task expansion card (with task detail page)
 - Installable actions/skills - introspect codebase and create custom skills like /todo, /up, /down, /work
-- New project setup wizard - skill setup, git setup, language choice. Discuss project at high level and scaffold starting dir via Claude
+- [done] New project setup wizard - skill setup, git setup, language choice. Discuss project at high level and scaffold starting dir via Claude
 - Populate features file with all current features (big highlights, not granular) - work command will keep it updated
+- Scroll to bottom of conversation on session switch

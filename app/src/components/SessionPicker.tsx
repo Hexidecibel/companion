@@ -220,7 +220,13 @@ export function SessionPicker({ currentSessionId, onSessionChange, isOpen, onClo
     // Fallback to tmux session name match
     return s.name === activeSession;
   });
-  const displayName = currentSession?.workingDir?.split('/').pop() || activeSession || 'Sessions';
+
+  // Display the folder name from workingDir, or fallback to tmux session name
+  // Don't show the encoded path (currentSessionId) - it's not user-friendly
+  const displayName = currentSession?.workingDir?.split('/').pop()
+    || currentSession?.name
+    || (sessions.length > 0 ? activeSession : null)
+    || 'Sessions';
 
   const renderSessionItem = ({ item }: { item: TmuxSessionInfo }) => {
     // Check if this is the active session by name or by encoded working dir
