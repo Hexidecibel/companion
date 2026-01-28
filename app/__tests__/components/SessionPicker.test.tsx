@@ -111,7 +111,8 @@ describe('SessionPicker', () => {
       .mockResolvedValueOnce({
         type: 'switch_session',
         success: true,
-        payload: { sessionName: 'claude-sitehound' },
+        // Include conversationSessionId which the component prefers
+        payload: { sessionName: 'claude-sitehound', conversationSessionId: '-Users-test-sitehound' },
       });
 
     const { getByText } = render(<SessionPicker onSessionChange={onSessionChange} />);
@@ -130,8 +131,9 @@ describe('SessionPicker', () => {
       });
     });
 
+    // Session ID is now the encoded workingDir path
     await waitFor(() => {
-      expect(onSessionChange).toHaveBeenCalledWith('claude-sitehound');
+      expect(onSessionChange).toHaveBeenCalledWith('-Users-test-sitehound');
     }, { timeout: 500 });
   });
 
