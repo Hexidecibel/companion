@@ -26,8 +26,6 @@ export function useConversation() {
   const [otherSessionActivity, setOtherSessionActivity] = useState<OtherSessionActivity | null>(null);
   const [tmuxSessionMissing, setTmuxSessionMissing] = useState<TmuxSessionMissing | null>(null);
   const hasSubscribed = useRef(false);
-  const lastSentTime = useRef<number>(0);
-  const pendingMessages = useRef<Set<string>>(new Set());
   const sessionSwitching = useRef(false); // Flag to pause polling during switch
 
   // Track connection state
@@ -52,27 +50,7 @@ export function useConversation() {
             highlights: ConversationHighlight[];
           };
           setMessages(updatePayload.messages || []);
-          // Preserve pending messages on real-time updates, but deduplicate
-          const serverHighlights = updatePayload.highlights || [];
-          setHighlights(prev => {
-            const pending = prev.filter(m => m.id.startsWith('pending-'));
-            const now = Date.now();
-            // Filter out pending messages that are either:
-            // 1. Too old (> 30 seconds)
-            // 2. Already in server data (content match)
-            const stillPending = pending.filter(p => {
-              const pendingTime = parseInt(p.id.replace('pending-', ''), 10);
-              const age = now - pendingTime;
-              if (age >= 30000) return false; // Too old
-              // Check if server already has this message (trim to handle whitespace)
-              const pendingContent = p.content.trim();
-              const inServer = serverHighlights.some(s =>
-                s.type === 'user' && s.content.trim() === pendingContent
-              );
-              return !inServer; // Keep only if NOT in server
-            });
-            return [...serverHighlights, ...stillPending];
-          });
+          setHighlights(updatePayload.highlights || []);
           break;
         }
 
@@ -172,30 +150,10 @@ export function useConversation() {
 
               // Only update if data actually changed (prevents scroll jumping)
               setHighlights(prev => {
-                const pending = prev.filter(m => m.id.startsWith('pending-'));
-                const nonPending = prev.filter(m => !m.id.startsWith('pending-'));
-
-                // Check if server data changed
-                if (highlightsEqual(nonPending, serverHighlights) && pending.length === 0) {
+                if (highlightsEqual(prev, serverHighlights)) {
                   return prev; // No change, keep same reference
                 }
-
-                // Keep pending messages for at least 30 seconds
-                const now = Date.now();
-                const stillPending = pending.filter(p => {
-                  const pendingTime = parseInt(p.id.replace('pending-', ''), 10);
-                  const age = now - pendingTime;
-                  // Check if server already has this message (trim for whitespace)
-                  const pendingContent = p.content.trim();
-                  const inServer = serverHighlights.some(s =>
-                    s.type === 'user' && s.content.trim() === pendingContent
-                  );
-                  if (inServer) return false; // Server has it, remove pending
-                  if (age >= 30000) return false; // Too old
-                  return true; // Keep pending
-                });
-
-                return [...serverHighlights, ...stillPending];
+                return serverHighlights;
               });
             } else {
               const payload = response.payload as { messages: ConversationMessage[] };
@@ -225,25 +183,11 @@ export function useConversation() {
       return false;
     }
 
-    // Optimistic update - show message immediately
-    const optimisticMessage: ConversationHighlight = {
-      id: `pending-${Date.now()}`,
-      type: 'user',
-      content: input,
-      timestamp: Date.now(),
-    };
-    console.log(`[Optimistic] Adding pending message: ${input.substring(0, 30)}...`);
-    setHighlights(prev => {
-      console.log(`[Optimistic] Previous count: ${prev.length}, adding message`);
-      return [...prev, optimisticMessage];
-    });
-
+    // No optimistic update - wait for server confirmation
+    // This avoids duplicate/flicker issues from deduplication race conditions
     try {
       const response = await wsService.sendRequest('send_input', { input });
       if (!response.success) {
-        // Remove optimistic message on failure
-        setHighlights(prev => prev.filter(m => m.id !== optimisticMessage.id));
-
         // Check if this is a tmux session not found error
         if (response.error === 'tmux_session_not_found') {
           const payload = response.payload as TmuxSessionMissing;
@@ -254,11 +198,8 @@ export function useConversation() {
         setError(response.error || 'Failed to send input');
         return false;
       }
-      // Keep optimistic message - it will be replaced by real update from server
       return true;
     } catch (err) {
-      // Remove optimistic message on failure
-      setHighlights(prev => prev.filter(m => m.id !== optimisticMessage.id));
       setError(err instanceof Error ? err.message : 'Failed to send input');
       return false;
     }
