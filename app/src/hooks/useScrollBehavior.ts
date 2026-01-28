@@ -124,7 +124,7 @@ export function useScrollBehavior(config: ScrollBehaviorConfig = {}): ScrollBeha
     lastContentHeight.current = height;
     const now = Date.now();
 
-    // Initial load - scroll to bottom immediately
+    // Initial load - scroll to bottom immediately (once)
     if (!initialScrollDone.current && height > 0) {
       initialScrollDone.current = true;
       // Mark as programmatic scroll
@@ -133,25 +133,16 @@ export function useScrollBehavior(config: ScrollBehaviorConfig = {}): ScrollBeha
       return;
     }
 
-    // Content grew - show new message indicator if auto-scroll is disabled
+    // Content grew - show new message indicator if not at bottom
     const contentGrew = height > prevHeight + 50;
-    if (contentGrew && !autoScrollEnabled.current) {
+    if (contentGrew && !isNearBottom.current) {
       setHasNewMessages(true);
     }
 
-    // Check if user is actively scrolling (cooldown period)
-    const userIsScrolling = now < userScrollCooldownUntil.current;
-
-    // Only auto-scroll if user explicitly enabled it (via button press or message send)
-    // AND they're not actively scrolling
-    if (contentGrew && autoScrollEnabled.current && !userIsScrolling) {
-      log('Auto-scrolling: user explicitly enabled, content grew');
-      // Use non-animated scroll during streaming to avoid stutter
-      programmaticScrollUntil.current = now + 300;
-      listRef.current?.scrollToEnd({ animated: false });
-    } else if (contentGrew) {
-      log('NOT scrolling:', { autoScrollEnabled: autoScrollEnabled.current, userIsScrolling });
-    }
+    // DISABLED: Auto-scroll on content change causes too much jumping
+    // User must explicitly tap scroll button or send a message to scroll
+    // The prepareForSend() function handles scrolling after user sends
+    log('Content changed:', { contentGrew, isNearBottom: isNearBottom.current });
   }, [log]);
 
   const scrollToBottom = useCallback((animated = true) => {

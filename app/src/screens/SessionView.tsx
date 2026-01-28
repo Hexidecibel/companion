@@ -3,10 +3,8 @@ import {
   View,
   Text,
   StyleSheet,
-  FlatList,
   TouchableOpacity,
   RefreshControl,
-  KeyboardAvoidingView,
   Platform,
   Alert,
   ActivityIndicator,
@@ -14,11 +12,12 @@ import {
   Switch,
   ScrollView,
   Keyboard,
+  NativeSyntheticEvent,
+  NativeScrollEvent,
 } from 'react-native';
-import { Server, ConversationHighlight, SubAgent, AgentTree } from '../types';
+import { Server, ConversationHighlight, AgentTree } from '../types';
 import { useConnection } from '../hooks/useConnection';
 import { useConversation } from '../hooks/useConversation';
-import { useScrollBehavior } from '../hooks/useScrollBehavior';
 import { StatusIndicator } from '../components/StatusIndicator';
 import { ConversationItem } from '../components/ConversationItem';
 import { InputBar } from '../components/InputBar';
@@ -56,16 +55,47 @@ export function SessionView({ server, onBack, initialSessionId }: SessionViewPro
 
   const data = highlights;
 
-  // Use the scroll behavior hook for all scroll-related logic
-  const {
-    state: scrollState,
-    listRef,
-    handleScroll,
-    handleContentSizeChange,
-    scrollToBottom,
-    prepareForSend,
-    resetForSessionSwitch,
-  } = useScrollBehavior();
+  // Simple scroll state - no complex auto-scroll logic
+  const scrollViewRef = useRef<ScrollView>(null);
+  const [showScrollButton, setShowScrollButton] = useState(false);
+  const [hasNewMessages, setHasNewMessages] = useState(false);
+  const isNearBottom = useRef(true);
+  const contentHeight = useRef(0);
+  const scrollViewHeight = useRef(0);
+  const lastDataLength = useRef(0);
+
+  // Track scroll position to show/hide scroll button
+  const handleScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const { layoutMeasurement, contentOffset, contentSize } = event.nativeEvent;
+    const distanceFromBottom = contentSize.height - layoutMeasurement.height - contentOffset.y;
+    isNearBottom.current = distanceFromBottom < 100;
+    setShowScrollButton(distanceFromBottom > 150);
+    if (isNearBottom.current) {
+      setHasNewMessages(false);
+    }
+  }, []);
+
+  // Scroll to bottom helper
+  const scrollToBottom = useCallback((animated = true) => {
+    scrollViewRef.current?.scrollToEnd({ animated });
+    setHasNewMessages(false);
+    setShowScrollButton(false);
+  }, []);
+
+  // When data changes, mark new messages if not at bottom
+  useEffect(() => {
+    if (data.length > lastDataLength.current && !isNearBottom.current) {
+      setHasNewMessages(true);
+    }
+    lastDataLength.current = data.length;
+  }, [data.length]);
+
+  // Scroll to bottom on initial load
+  useEffect(() => {
+    if (data.length > 0 && lastDataLength.current === 0) {
+      setTimeout(() => scrollToBottom(false), 100);
+    }
+  }, [data.length, scrollToBottom]);
 
   const [showSettings, setShowSettings] = useState(false);
   const [sessionSettings, setSessionSettings] = useState<SessionSettings>({ instantNotify: false });
@@ -237,18 +267,19 @@ export function SessionView({ server, onBack, initialSessionId }: SessionViewPro
         }
         // Only reset scroll state when switching sessions, not on every reconnect
         if (isSwitching) {
-          resetForSessionSwitch();
+          lastDataLength.current = 0;
+          setShowScrollButton(false);
+          setHasNewMessages(false);
         }
       };
 
       init();
     }
-  }, [isConnected, refresh, server.id, initialSessionId, resetForSessionSwitch]);
+  }, [isConnected, refresh, server.id, initialSessionId]);
 
   const handleSendInput = async (text: string): Promise<boolean> => {
-    // Prepare for scrolling to show sent message
-    prepareForSend();
-
+    // Don't auto-scroll - let user control scroll position
+    // They can tap the scroll button if they want to go to bottom
     return sendInput(text);
   };
 
@@ -259,9 +290,11 @@ export function SessionView({ server, onBack, initialSessionId }: SessionViewPro
       console.log(`SessionView: Session changed to ${newSessionId} (epoch ${epoch})`);
       lastSwitchedSessionId.current = newSessionId;
     }
-    resetForSessionSwitch();
+    lastDataLength.current = 0;
+    setShowScrollButton(false);
+    setHasNewMessages(false);
     refresh(true);
-  }, [refresh, resetForSessionSwitch]);
+  }, [refresh]);
 
   const handleSlashCommand = useCallback((command: string) => {
     switch (command) {
@@ -291,13 +324,15 @@ export function SessionView({ server, onBack, initialSessionId }: SessionViewPro
       if (response.success) {
         lastSwitchedSessionId.current = newSessionId;
         dismissOtherSessionActivity();
-        resetForSessionSwitch();
+        lastDataLength.current = 0;
+        setShowScrollButton(false);
+        setHasNewMessages(false);
         refresh(true);
       }
     } catch (err) {
       console.error('Failed to switch session:', err);
     }
-  }, [otherSessionActivity, dismissOtherSessionActivity, refresh, resetForSessionSwitch]);
+  }, [otherSessionActivity, dismissOtherSessionActivity, refresh]);
 
   const handleSelectOption = async (option: string) => {
     await handleSendInput(option);
@@ -323,15 +358,6 @@ export function SessionView({ server, onBack, initialSessionId }: SessionViewPro
     const hours = Math.floor(minutes / 60);
     return `${hours}h ${minutes % 60}m`;
   };
-
-  const renderItem = ({ item }: { item: ConversationHighlight }) => (
-    <ConversationItem
-      item={item}
-      showToolCalls={true}
-      onSelectOption={handleSelectOption}
-      onFileTap={setViewingFile}
-    />
-  );
 
   const renderEmptyContent = () => {
     if (isConnecting) {
@@ -712,11 +738,8 @@ export function SessionView({ server, onBack, initialSessionId }: SessionViewPro
         </View>
       )}
 
-      <FlatList
-        ref={listRef}
-        data={data}
-        keyExtractor={(item) => item.id}
-        renderItem={renderItem}
+      <ScrollView
+        ref={scrollViewRef}
         style={styles.list}
         contentContainerStyle={[
           styles.listContent,
@@ -729,33 +752,36 @@ export function SessionView({ server, onBack, initialSessionId }: SessionViewPro
             tintColor="#ffffff"
           />
         }
-        ListEmptyComponent={renderEmptyContent}
         onScroll={handleScroll}
-        onContentSizeChange={handleContentSizeChange}
-        scrollEventThrottle={200}
+        scrollEventThrottle={16}
         keyboardShouldPersistTaps="handled"
-        // Maintain scroll position when content changes (e.g., compaction)
-        maintainVisibleContentPosition={{
-          minIndexForVisible: 0,
-          autoscrollToTopThreshold: 10,
-        }}
-        // Optimize re-renders
-        removeClippedSubviews={Platform.OS === 'android'}
-        maxToRenderPerBatch={10}
-        windowSize={10}
-      />
+      >
+        {data.length === 0 ? (
+          renderEmptyContent()
+        ) : (
+          data.map((item) => (
+            <ConversationItem
+              key={item.id}
+              item={item}
+              showToolCalls={true}
+              onSelectOption={handleSelectOption}
+              onFileTap={setViewingFile}
+            />
+          ))
+        )}
+      </ScrollView>
 
       {/* Floating action buttons */}
-      {scrollState.showScrollButton && (
+      {showScrollButton && (
         <TouchableOpacity
           style={[
             styles.scrollButton,
-            scrollState.hasNewMessages && styles.scrollButtonNew,
+            hasNewMessages && styles.scrollButtonNew,
           ]}
           onPress={() => scrollToBottom()}
         >
           <Text style={styles.scrollButtonText}>↓</Text>
-          {scrollState.hasNewMessages && <View style={styles.newMessageBadge} />}
+          {hasNewMessages && <View style={styles.newMessageBadge} />}
         </TouchableOpacity>
       )}
 
