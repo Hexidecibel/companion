@@ -202,10 +202,12 @@ export function SessionView({ server, onBack, initialSessionId }: SessionViewPro
 
   // Handle content size changes - this is when we should auto-scroll
   const handleContentSizeChange = useCallback((_width: number, height: number) => {
-    // Only act if content actually grew (not on shrink or same size)
-    const contentGrew = height > lastContentHeight.current + 10;
+    // Only act if content actually grew significantly (not on shrink or minor fluctuations)
     const prevHeight = lastContentHeight.current;
+    // Always update lastContentHeight to track the latest
     lastContentHeight.current = height;
+    // But only consider it "grew" if it's a significant increase (>50px)
+    const contentGrew = height > prevHeight + 50;
 
     logScroll('contentSizeChange', {
       height,
@@ -224,9 +226,12 @@ export function SessionView({ server, onBack, initialSessionId }: SessionViewPro
       return;
     }
 
-    // Only scroll if content grew AND auto-scroll is enabled AND we were near bottom
-    if (contentGrew && autoScrollEnabled.current && isNearBottom.current) {
+    // Only scroll if content grew significantly AND auto-scroll is enabled AND we were near bottom
+    // Use larger threshold (50px) to ignore minor layout fluctuations
+    const significantGrowth = height > lastContentHeight.current + 50;
+    if (significantGrowth && autoScrollEnabled.current && isNearBottom.current) {
       // Debounce: cancel pending scroll and schedule new one
+      // Use longer delay (250ms) to let content settle after re-renders
       if (scrollTimeout.current) {
         clearTimeout(scrollTimeout.current);
       }
@@ -234,8 +239,8 @@ export function SessionView({ server, onBack, initialSessionId }: SessionViewPro
         logScroll('autoScrollToEnd', { height });
         listRef.current?.scrollToEnd({ animated: false });
         scrollTimeout.current = null;
-      }, 100);
-    } else if (contentGrew && !autoScrollEnabled.current) {
+      }, 250);
+    } else if (significantGrowth && !autoScrollEnabled.current) {
       // User is reading history - show new message indicator
       logScroll('showNewMessageIndicator', { height });
       setHasNewMessages(true);
