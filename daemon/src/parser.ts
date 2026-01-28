@@ -44,14 +44,27 @@ export function parseConversationFile(filePath: string, limit: number = MAX_MESS
   const content = fs.readFileSync(filePath, 'utf-8');
   const lines = content.split('\n').filter(line => line.trim());
 
-  // First pass: collect all tool_result IDs and their outputs
+  // First pass: collect all tool results, start times, and completion times
   const toolResults = new Map<string, string>();
+  const toolStartTimes = new Map<string, number>();
+  const toolCompleteTimes = new Map<string, number>();
+
   for (const line of lines) {
     try {
       const entry: JsonlEntry = JSON.parse(line);
+      const timestamp = entry.timestamp ? new Date(entry.timestamp).getTime() : Date.now();
+
       if (entry.message?.content && Array.isArray(entry.message.content)) {
         for (const block of entry.message.content) {
+          // Track tool_use start times
+          if (block.type === 'tool_use' && block.id) {
+            toolStartTimes.set(block.id, timestamp);
+          }
+
+          // Track tool_result completion times and outputs
           if (block.type === 'tool_result' && block.tool_use_id) {
+            toolCompleteTimes.set(block.tool_use_id, timestamp);
+
             // Extract output content - can be string or array of content blocks
             let output = '';
             if (typeof block.content === 'string') {
@@ -80,7 +93,7 @@ export function parseConversationFile(filePath: string, limit: number = MAX_MESS
       const entry: JsonlEntry = JSON.parse(lines[i]);
 
       if (entry.type === 'user' || entry.type === 'assistant') {
-        const message = parseEntry(entry, toolResults);
+        const message = parseEntry(entry, toolResults, toolStartTimes, toolCompleteTimes);
         if (message) {
           messages.unshift(message); // Add to beginning to maintain order
         }
@@ -94,7 +107,12 @@ export function parseConversationFile(filePath: string, limit: number = MAX_MESS
   return messages.slice(-limit);
 }
 
-function parseEntry(entry: JsonlEntry, toolResults: Map<string, string>): ConversationMessage | null {
+function parseEntry(
+  entry: JsonlEntry,
+  toolResults: Map<string, string>,
+  toolStartTimes: Map<string, number>,
+  toolCompleteTimes: Map<string, number>
+): ConversationMessage | null {
   const message = entry.message;
   if (!message) return null;
 
@@ -113,6 +131,8 @@ function parseEntry(entry: JsonlEntry, toolResults: Map<string, string>): Conver
         const toolId = block.id || entry.uuid || '';
         const output = toolResults.get(toolId);
         const isPending = !output && output !== '';
+        const startedAt = toolStartTimes.get(toolId);
+        const completedAt = toolCompleteTimes.get(toolId);
 
         toolCalls.push({
           id: toolId,
@@ -120,6 +140,8 @@ function parseEntry(entry: JsonlEntry, toolResults: Map<string, string>): Conver
           input: (block.input as Record<string, unknown>) || {},
           output: output,
           status: isPending ? 'pending' : 'completed',
+          startedAt,
+          completedAt,
         });
 
         // Extract options from AskUserQuestion tool (only if still pending)

@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert } from 'react-native';
+import * as Clipboard from 'expo-clipboard';
 import Markdown from '@ronradtke/react-native-markdown-display';
 import { ConversationMessage, ConversationHighlight, ToolCall } from '../types';
 
@@ -56,6 +57,68 @@ function getToolIcon(toolName: string): string {
   }
 }
 
+// Format duration in human-readable form
+function formatDuration(startMs: number, endMs?: number): string {
+  const end = endMs || Date.now();
+  const durationMs = end - startMs;
+  if (durationMs < 1000) return `${durationMs}ms`;
+  const seconds = Math.floor(durationMs / 1000);
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  return `${minutes}m ${seconds % 60}s`;
+}
+
+// Copy text to clipboard with feedback
+async function copyToClipboard(text: string, label: string) {
+  try {
+    await Clipboard.setStringAsync(text);
+    Alert.alert('Copied', `${label} copied to clipboard`);
+  } catch {
+    Alert.alert('Error', 'Failed to copy to clipboard');
+  }
+}
+
+// Render a unified diff view
+function DiffView({ oldText, newText }: { oldText: string; newText: string }) {
+  const oldLines = oldText.split('\n');
+  const newLines = newText.split('\n');
+
+  return (
+    <View style={diffStyles.container}>
+      <View style={diffStyles.section}>
+        <View style={diffStyles.header}>
+          <Text style={diffStyles.headerText}>- Remove</Text>
+        </View>
+        <ScrollView style={diffStyles.scroll} nestedScrollEnabled>
+          {oldLines.slice(0, 20).map((line, i) => (
+            <Text key={`old-${i}`} style={diffStyles.removeLine}>
+              {line}
+            </Text>
+          ))}
+          {oldLines.length > 20 && (
+            <Text style={diffStyles.truncated}>... {oldLines.length - 20} more lines</Text>
+          )}
+        </ScrollView>
+      </View>
+      <View style={diffStyles.section}>
+        <View style={[diffStyles.header, diffStyles.addHeader]}>
+          <Text style={diffStyles.headerText}>+ Add</Text>
+        </View>
+        <ScrollView style={diffStyles.scroll} nestedScrollEnabled>
+          {newLines.slice(0, 20).map((line, i) => (
+            <Text key={`new-${i}`} style={diffStyles.addLine}>
+              {line}
+            </Text>
+          ))}
+          {newLines.length > 20 && (
+            <Text style={diffStyles.truncated}>... {newLines.length - 20} more lines</Text>
+          )}
+        </ScrollView>
+      </View>
+    </View>
+  );
+}
+
 // Expandable tool card component
 function ToolCard({ tool }: { tool: ToolCall }) {
   const [expanded, setExpanded] = useState(false);
@@ -71,6 +134,11 @@ function ToolCard({ tool }: { tool: ToolCall }) {
   const filePath = input.file_path ? String(input.file_path) : '';
   const oldString = input.old_string ? String(input.old_string) : '';
   const newString = input.new_string ? String(input.new_string) : '';
+
+  // Calculate duration if timestamps available
+  const duration = tool.startedAt
+    ? formatDuration(tool.startedAt, tool.completedAt)
+    : null;
 
   // Get preview of output (first 2 lines)
   const outputPreview = hasOutput
@@ -90,6 +158,9 @@ function ToolCard({ tool }: { tool: ToolCall }) {
           <View style={[toolCardStyles.statusBadge, { backgroundColor: statusColor }]}>
             <Text style={toolCardStyles.statusText}>{statusText}</Text>
           </View>
+          {duration && tool.status === 'completed' && (
+            <Text style={toolCardStyles.duration}>{duration}</Text>
+          )}
         </View>
         <Text style={toolCardStyles.expandIcon}>{expanded ? '▼' : '▶'}</Text>
       </View>
@@ -105,40 +176,65 @@ function ToolCard({ tool }: { tool: ToolCall }) {
           {/* Show input details */}
           {tool.name === 'Bash' && command ? (
             <View style={toolCardStyles.section}>
-              <Text style={toolCardStyles.sectionLabel}>Command:</Text>
+              <View style={toolCardStyles.sectionHeader}>
+                <Text style={toolCardStyles.sectionLabel}>Command:</Text>
+                <TouchableOpacity
+                  style={toolCardStyles.copyButton}
+                  onPress={() => copyToClipboard(command, 'Command')}
+                >
+                  <Text style={toolCardStyles.copyButtonText}>Copy</Text>
+                </TouchableOpacity>
+              </View>
               <ScrollView style={toolCardStyles.codeScroll} nestedScrollEnabled>
                 <Text style={toolCardStyles.codeText}>{command}</Text>
               </ScrollView>
             </View>
           ) : null}
 
-          {(tool.name === 'Edit' || tool.name === 'Write') && filePath ? (
+          {(tool.name === 'Edit') && filePath && oldString ? (
             <View style={toolCardStyles.section}>
               <Text style={toolCardStyles.sectionLabel}>File:</Text>
               <Text style={toolCardStyles.filePath}>{filePath}</Text>
-              {oldString ? (
-                <>
-                  <Text style={[toolCardStyles.sectionLabel, { marginTop: 8 }]}>Replace:</Text>
-                  <ScrollView style={toolCardStyles.codeScroll} nestedScrollEnabled>
-                    <Text style={[toolCardStyles.codeText, { color: '#ef4444' }]}>
-                      {oldString.substring(0, 500)}
-                    </Text>
-                  </ScrollView>
-                  <Text style={[toolCardStyles.sectionLabel, { marginTop: 8 }]}>With:</Text>
-                  <ScrollView style={toolCardStyles.codeScroll} nestedScrollEnabled>
-                    <Text style={[toolCardStyles.codeText, { color: '#10b981' }]}>
-                      {newString.substring(0, 500)}
-                    </Text>
-                  </ScrollView>
-                </>
-              ) : null}
+              <DiffView oldText={oldString} newText={newString} />
+            </View>
+          ) : null}
+
+          {(tool.name === 'Write') && filePath ? (
+            <View style={toolCardStyles.section}>
+              <View style={toolCardStyles.sectionHeader}>
+                <Text style={toolCardStyles.sectionLabel}>File: {filePath}</Text>
+                {newString && (
+                  <TouchableOpacity
+                    style={toolCardStyles.copyButton}
+                    onPress={() => copyToClipboard(newString, 'Content')}
+                  >
+                    <Text style={toolCardStyles.copyButtonText}>Copy</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+              {newString && (
+                <ScrollView style={toolCardStyles.codeScroll} nestedScrollEnabled>
+                  <Text style={toolCardStyles.codeText}>
+                    {newString.substring(0, 1000)}
+                    {newString.length > 1000 ? '\n... (truncated)' : ''}
+                  </Text>
+                </ScrollView>
+              )}
             </View>
           ) : null}
 
           {/* Show output */}
           {hasOutput ? (
             <View style={toolCardStyles.section}>
-              <Text style={toolCardStyles.sectionLabel}>Output:</Text>
+              <View style={toolCardStyles.sectionHeader}>
+                <Text style={toolCardStyles.sectionLabel}>Output:</Text>
+                <TouchableOpacity
+                  style={toolCardStyles.copyButton}
+                  onPress={() => copyToClipboard(tool.output!, 'Output')}
+                >
+                  <Text style={toolCardStyles.copyButtonText}>Copy</Text>
+                </TouchableOpacity>
+              </View>
               <ScrollView style={toolCardStyles.outputScroll} nestedScrollEnabled>
                 <Text style={toolCardStyles.outputText}>
                   {tool.output!.substring(0, 2000)}
@@ -364,6 +460,53 @@ const filePathStyles = StyleSheet.create({
   },
 });
 
+const diffStyles = StyleSheet.create({
+  container: {
+    marginTop: 8,
+    borderRadius: 6,
+    overflow: 'hidden',
+    backgroundColor: '#111827',
+  },
+  section: {
+    marginBottom: 1,
+  },
+  header: {
+    backgroundColor: '#7f1d1d',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  addHeader: {
+    backgroundColor: '#14532d',
+  },
+  headerText: {
+    color: '#fff',
+    fontSize: 10,
+    fontWeight: '600',
+  },
+  scroll: {
+    maxHeight: 100,
+    padding: 8,
+  },
+  removeLine: {
+    color: '#fca5a5',
+    fontFamily: 'monospace',
+    fontSize: 11,
+    lineHeight: 16,
+  },
+  addLine: {
+    color: '#86efac',
+    fontFamily: 'monospace',
+    fontSize: 11,
+    lineHeight: 16,
+  },
+  truncated: {
+    color: '#6b7280',
+    fontSize: 10,
+    fontStyle: 'italic',
+    marginTop: 4,
+  },
+});
+
 const toolCardStyles = StyleSheet.create({
   container: {
     backgroundColor: '#1f2937',
@@ -384,6 +527,8 @@ const toolCardStyles = StyleSheet.create({
   headerLeft: {
     flexDirection: 'row',
     alignItems: 'center',
+    flexWrap: 'wrap',
+    flex: 1,
   },
   icon: {
     fontSize: 14,
@@ -405,6 +550,11 @@ const toolCardStyles = StyleSheet.create({
     fontSize: 9,
     fontWeight: '600',
     textTransform: 'uppercase',
+  },
+  duration: {
+    color: '#6b7280',
+    fontSize: 10,
+    marginLeft: 8,
   },
   summaryLine: {
     color: '#9ca3af',
@@ -438,12 +588,28 @@ const toolCardStyles = StyleSheet.create({
   section: {
     marginBottom: 10,
   },
+  sectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
   sectionLabel: {
     color: '#6b7280',
     fontSize: 10,
     fontWeight: '600',
-    marginBottom: 4,
     textTransform: 'uppercase',
+  },
+  copyButton: {
+    backgroundColor: '#374151',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 4,
+  },
+  copyButtonText: {
+    color: '#9ca3af',
+    fontSize: 10,
+    fontWeight: '600',
   },
   codeScroll: {
     backgroundColor: '#111827',
@@ -459,6 +625,7 @@ const toolCardStyles = StyleSheet.create({
   filePath: {
     color: '#60a5fa',
     fontSize: 12,
+    marginBottom: 8,
   },
   outputScroll: {
     backgroundColor: '#111827',

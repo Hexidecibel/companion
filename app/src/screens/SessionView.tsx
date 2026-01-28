@@ -54,13 +54,14 @@ export function SessionView({ server, onBack, initialSessionId }: SessionViewPro
 
   const listRef = useRef<FlatList>(null);
   const data = highlights;
-  const [isAtBottom, setIsAtBottom] = useState(true);
   const [hasNewMessages, setHasNewMessages] = useState(false);
+  const [showScrollButton, setShowScrollButton] = useState(false);
   const prevMessageCount = useRef(0);
   const initialScrollDone = useRef(false);
-  const userHasScrolledUp = useRef(false);
-  const contentHeight = useRef(0);
-  const scrollViewHeight = useRef(0);
+  // Simple flag: true = auto-scroll to new messages, false = user is reading history
+  const autoScrollEnabled = useRef(true);
+  const lastScrollY = useRef(0);
+  const lastContentHeight = useRef(0);
   const [showSettings, setShowSettings] = useState(false);
   const [sessionSettings, setSessionSettings] = useState<SessionSettings>({ instantNotify: false });
   const [showActivityModal, setShowActivityModal] = useState(false);
@@ -192,21 +193,21 @@ export function SessionView({ server, onBack, initialSessionId }: SessionViewPro
       // Scroll to bottom on first load
       if (!initialScrollDone.current) {
         initialScrollDone.current = true;
-        userHasScrolledUp.current = false;
+        autoScrollEnabled.current = true;
         setTimeout(() => {
           listRef.current?.scrollToEnd({ animated: false });
         }, 200);
       }
-      // Track new messages when not at bottom
+      // Track new messages
       if (data.length > prevMessageCount.current) {
-        if (userHasScrolledUp.current) {
-          // User is reading history - show indicator but don't auto-scroll
-          setHasNewMessages(true);
-        } else {
-          // User is at bottom - auto-scroll to new content
+        if (autoScrollEnabled.current) {
+          // Auto-scroll is on - scroll to new content
           setTimeout(() => {
             listRef.current?.scrollToEnd({ animated: true });
           }, 100);
+        } else {
+          // User is reading history - show indicator
+          setHasNewMessages(true);
         }
       }
       prevMessageCount.current = data.length;
@@ -215,22 +216,28 @@ export function SessionView({ server, onBack, initialSessionId }: SessionViewPro
 
   const scrollToBottom = () => {
     setHasNewMessages(false);
-    userHasScrolledUp.current = false;
-    setTimeout(() => {
-      listRef.current?.scrollToEnd({ animated: true });
-    }, 100);
+    setShowScrollButton(false);
+    autoScrollEnabled.current = true;
+    listRef.current?.scrollToEnd({ animated: true });
   };
 
   const handleSendInput = async (text: string): Promise<boolean> => {
+    // Enable auto-scroll when user sends a message
+    autoScrollEnabled.current = true;
+    setHasNewMessages(false);
     const success = await sendInput(text);
-    scrollToBottom();
+    // Scroll after sending
+    setTimeout(() => {
+      listRef.current?.scrollToEnd({ animated: true });
+    }, 150);
     return success;
   };
 
   const handleSessionChange = useCallback(() => {
     initialScrollDone.current = false;
-    userHasScrolledUp.current = false;
+    autoScrollEnabled.current = true;
     setHasNewMessages(false);
+    setShowScrollButton(false);
     refresh(true);
   }, [refresh]);
 
@@ -255,8 +262,9 @@ export function SessionView({ server, onBack, initialSessionId }: SessionViewPro
       if (response.success) {
         dismissOtherSessionActivity();
         initialScrollDone.current = false;
-        userHasScrolledUp.current = false;
+        autoScrollEnabled.current = true;
         setHasNewMessages(false);
+        setShowScrollButton(false);
         refresh(true);
       }
     } catch (err) {
@@ -270,23 +278,35 @@ export function SessionView({ server, onBack, initialSessionId }: SessionViewPro
 
   const handleScroll = (event: any) => {
     const { layoutMeasurement, contentOffset, contentSize } = event.nativeEvent;
-    const paddingToBottom = 100; // More generous threshold
-    const atBottom = layoutMeasurement.height + contentOffset.y >= contentSize.height - paddingToBottom;
+    const currentY = contentOffset.y;
+    const currentContentHeight = contentSize.height;
 
-    // Track layout dimensions for content position maintenance
-    scrollViewHeight.current = layoutMeasurement.height;
-    contentHeight.current = contentSize.height;
+    // Detect if user scrolled UP (intentionally reading history)
+    // This happens when scroll position decreases while content stays same size
+    const scrolledUp = currentY < lastScrollY.current - 10 &&
+                       Math.abs(currentContentHeight - lastContentHeight.current) < 50;
 
-    setIsAtBottom(atBottom);
-
-    if (atBottom) {
-      // User scrolled to bottom - resume auto-scroll
-      userHasScrolledUp.current = false;
-      setHasNewMessages(false);
-    } else {
-      // User scrolled up - stop auto-scrolling
-      userHasScrolledUp.current = true;
+    if (scrolledUp) {
+      // User is scrolling up to read history - disable auto-scroll
+      autoScrollEnabled.current = false;
     }
+
+    // Check if we're at the bottom
+    const paddingToBottom = 100;
+    const atBottom = layoutMeasurement.height + currentY >= currentContentHeight - paddingToBottom;
+
+    // Show scroll button when not at bottom
+    setShowScrollButton(!atBottom);
+
+    // If user scrolled to bottom manually, re-enable auto-scroll
+    if (atBottom && !autoScrollEnabled.current) {
+      autoScrollEnabled.current = true;
+      setHasNewMessages(false);
+    }
+
+    // Track values for next comparison
+    lastScrollY.current = currentY;
+    lastContentHeight.current = currentContentHeight;
   };
 
   const handleCancel = () => {
@@ -612,7 +632,7 @@ export function SessionView({ server, onBack, initialSessionId }: SessionViewPro
       />
 
       {/* Floating action buttons */}
-      {!isAtBottom && (
+      {showScrollButton && (
         <TouchableOpacity
           style={[
             styles.scrollButton,

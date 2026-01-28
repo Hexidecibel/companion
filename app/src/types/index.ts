@@ -36,6 +36,8 @@ export interface ToolCall {
   input: Record<string, unknown>;
   output?: string;
   status: 'pending' | 'completed' | 'error';
+  startedAt?: number;
+  completedAt?: number;
 }
 
 export interface ConversationHighlight {
