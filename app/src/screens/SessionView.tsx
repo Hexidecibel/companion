@@ -63,6 +63,8 @@ export function SessionView({ server, onBack, initialSessionId }: SessionViewPro
   const isNearBottom = useRef(true);
   // Debounce scroll to avoid interrupting animations
   const scrollTimeout = useRef<NodeJS.Timeout | null>(null);
+  // Track last content height to only scroll when content grows
+  const lastContentHeight = useRef(0);
   const [showSettings, setShowSettings] = useState(false);
   const [sessionSettings, setSessionSettings] = useState<SessionSettings>({ instantNotify: false });
   const [showActivityModal, setShowActivityModal] = useState(false);
@@ -190,6 +192,10 @@ export function SessionView({ server, onBack, initialSessionId }: SessionViewPro
 
   // Handle content size changes - this is when we should auto-scroll
   const handleContentSizeChange = useCallback((_width: number, height: number) => {
+    // Only act if content actually grew (not on shrink or same size)
+    const contentGrew = height > lastContentHeight.current + 10;
+    lastContentHeight.current = height;
+
     if (!initialScrollDone.current && height > 0) {
       // First load - scroll to bottom immediately
       initialScrollDone.current = true;
@@ -197,10 +203,9 @@ export function SessionView({ server, onBack, initialSessionId }: SessionViewPro
       return;
     }
 
-    // Auto-scroll if enabled and we were near bottom
-    if (autoScrollEnabled.current && isNearBottom.current) {
+    // Only scroll if content grew AND auto-scroll is enabled AND we were near bottom
+    if (contentGrew && autoScrollEnabled.current && isNearBottom.current) {
       // Debounce: cancel pending scroll and schedule new one
-      // Use animated: false to prevent animation fighting with rapid content changes
       if (scrollTimeout.current) {
         clearTimeout(scrollTimeout.current);
       }
@@ -208,7 +213,7 @@ export function SessionView({ server, onBack, initialSessionId }: SessionViewPro
         listRef.current?.scrollToEnd({ animated: false });
         scrollTimeout.current = null;
       }, 100);
-    } else if (!autoScrollEnabled.current) {
+    } else if (contentGrew && !autoScrollEnabled.current) {
       // User is reading history - show new message indicator
       setHasNewMessages(true);
     }
@@ -282,13 +287,15 @@ export function SessionView({ server, onBack, initialSessionId }: SessionViewPro
     const nearBottom = distanceFromBottom < 150;
     isNearBottom.current = nearBottom;
 
-    // Show/hide scroll button based on distance from bottom
-    setShowScrollButton(distanceFromBottom > 200);
+    // Show/hide scroll button - only update state if value changed to avoid re-render loop
+    const shouldShowButton = distanceFromBottom > 200;
+    setShowScrollButton(prev => prev === shouldShowButton ? prev : shouldShowButton);
 
     // If user scrolled to bottom, re-enable auto-scroll
     if (nearBottom) {
       autoScrollEnabled.current = true;
-      setHasNewMessages(false);
+      // Only clear if there were new messages
+      setHasNewMessages(prev => prev ? false : prev);
     } else {
       // User scrolled up - disable auto-scroll
       autoScrollEnabled.current = false;
