@@ -2,14 +2,25 @@ import { renderHook, act } from '@testing-library/react-native';
 import { useScrollBehavior } from '../../src/hooks/useScrollBehavior';
 
 describe('useScrollBehavior', () => {
+  let mockTime = 1000;
+  const originalDateNow = Date.now;
+
   beforeEach(() => {
     jest.clearAllMocks();
     jest.useFakeTimers();
+    mockTime = 1000;
+    Date.now = jest.fn(() => mockTime);
   });
 
   afterEach(() => {
     jest.useRealTimers();
+    Date.now = originalDateNow;
   });
+
+  // Helper to advance mock time
+  const advanceTime = (ms: number) => {
+    mockTime += ms;
+  };
 
   const createScrollEvent = (contentHeight: number, offset: number, viewportHeight = 600) => ({
     nativeEvent: {
@@ -102,10 +113,16 @@ describe('useScrollBehavior', () => {
         result.current.handleContentSizeChange(0, 1000);
       });
 
-      // Simulate user scrolling up
+      // Advance past programmatic scroll window (500ms)
+      advanceTime(600);
+
+      // Simulate user scrolling up (scroll far from bottom to disable auto-scroll)
       act(() => {
         result.current.handleScroll(createScrollEvent(1000, 100, 600));
       });
+
+      // Advance past user scroll cooldown (1000ms)
+      advanceTime(1100);
 
       // New content arrives (> 50px growth)
       act(() => {
@@ -123,10 +140,16 @@ describe('useScrollBehavior', () => {
         result.current.handleContentSizeChange(0, 1000);
       });
 
+      // Advance past programmatic scroll window
+      advanceTime(600);
+
       // User stays near bottom
       act(() => {
         result.current.handleScroll(createScrollEvent(1000, 350, 600));
       });
+
+      // Advance past user scroll cooldown
+      advanceTime(1100);
 
       // New content arrives
       act(() => {
@@ -143,9 +166,11 @@ describe('useScrollBehavior', () => {
       act(() => {
         result.current.handleContentSizeChange(0, 1000);
       });
+      advanceTime(600);
       act(() => {
         result.current.handleScroll(createScrollEvent(1000, 100, 600));
       });
+      advanceTime(1100);
       act(() => {
         result.current.handleContentSizeChange(0, 1200);
       });
@@ -168,9 +193,11 @@ describe('useScrollBehavior', () => {
       act(() => {
         result.current.handleContentSizeChange(0, 1000);
       });
+      advanceTime(600);
       act(() => {
         result.current.handleScroll(createScrollEvent(1000, 100, 600));
       });
+      advanceTime(1100);
       act(() => {
         result.current.handleContentSizeChange(0, 1200);
       });
@@ -224,9 +251,11 @@ describe('useScrollBehavior', () => {
       act(() => {
         result.current.handleContentSizeChange(0, 1000);
       });
+      advanceTime(600);
       act(() => {
         result.current.handleScroll(createScrollEvent(1000, 100, 600));
       });
+      advanceTime(1100);
       act(() => {
         result.current.handleContentSizeChange(0, 1200);
       });
@@ -244,7 +273,13 @@ describe('useScrollBehavior', () => {
     it('should re-enable auto-scroll', () => {
       const { result } = renderHook(() => useScrollBehavior());
 
-      // Disable auto-scroll by scrolling up
+      // Initial load
+      act(() => {
+        result.current.handleContentSizeChange(0, 1000);
+      });
+      advanceTime(600);
+
+      // Disable auto-scroll by scrolling far from bottom
       act(() => {
         result.current.handleScroll(createScrollEvent(1000, 100, 600));
       });
@@ -266,9 +301,11 @@ describe('useScrollBehavior', () => {
       act(() => {
         result.current.handleContentSizeChange(0, 1000);
       });
+      advanceTime(600);
       act(() => {
         result.current.handleScroll(createScrollEvent(1000, 100, 600));
       });
+      advanceTime(1100);
       act(() => {
         result.current.handleContentSizeChange(0, 1200);
       });
@@ -414,6 +451,7 @@ describe('useScrollBehavior', () => {
       act(() => {
         result.current.handleContentSizeChange(0, 1000);
       });
+      advanceTime(600);
 
       // User is at bottom reading
       act(() => {
@@ -450,6 +488,7 @@ describe('useScrollBehavior', () => {
       act(() => {
         result.current.handleContentSizeChange(0, 1500);
       });
+      advanceTime(600);
 
       // User at bottom initially
       act(() => {
@@ -463,6 +502,9 @@ describe('useScrollBehavior', () => {
       });
       expect(result.current.state.autoScrollEnabled).toBe(false);
       expect(result.current.state.showScrollButton).toBe(true);
+
+      // Advance past user scroll cooldown
+      advanceTime(1100);
 
       // Claude keeps responding (content grows)
       act(() => {
@@ -490,9 +532,11 @@ describe('useScrollBehavior', () => {
       act(() => {
         result.current.handleContentSizeChange(0, 1000);
       });
+      advanceTime(600);
       act(() => {
         result.current.handleScroll(createScrollEvent(1000, 100, 600));
       });
+      advanceTime(1100);
       act(() => {
         result.current.handleContentSizeChange(0, 1200);
       });
@@ -519,6 +563,7 @@ describe('useScrollBehavior', () => {
       act(() => {
         result.current.handleContentSizeChange(0, 1000);
       });
+      advanceTime(600);
       act(() => {
         result.current.handleScroll(createScrollEvent(1000, 350, 600));
       });
@@ -540,10 +585,14 @@ describe('useScrollBehavior', () => {
       act(() => {
         result.current.handleContentSizeChange(0, 1000);
       });
+      advanceTime(600);
       act(() => {
         result.current.handleScroll(createScrollEvent(1000, 0, 600));
       });
       expect(result.current.state.autoScrollEnabled).toBe(false);
+
+      // Advance past user scroll cooldown
+      advanceTime(1100);
 
       // Large tool output appears
       act(() => {
@@ -562,6 +611,7 @@ describe('useScrollBehavior', () => {
       act(() => {
         result.current.handleContentSizeChange(0, 1000);
       });
+      advanceTime(600);
       act(() => {
         result.current.handleScroll(createScrollEvent(1000, 350, 600));
       });
@@ -589,9 +639,11 @@ describe('useScrollBehavior', () => {
       act(() => {
         result.current.handleContentSizeChange(0, 1500);
       });
+      advanceTime(600);
       act(() => {
         result.current.handleScroll(createScrollEvent(1500, 100, 600));
       });
+      advanceTime(1100);
 
       // Claude finishes and shows input request
       act(() => {
@@ -609,6 +661,7 @@ describe('useScrollBehavior', () => {
       act(() => {
         result.current.handleContentSizeChange(0, 1500);
       });
+      advanceTime(600);
       act(() => {
         result.current.handleScroll(createScrollEvent(1500, 850, 600));
       });
@@ -631,6 +684,7 @@ describe('useScrollBehavior', () => {
       act(() => {
         result.current.handleContentSizeChange(0, 1000);
       });
+      advanceTime(600);
       act(() => {
         result.current.handleScroll(createScrollEvent(1000, 350, 600));
       });
@@ -656,6 +710,7 @@ describe('useScrollBehavior', () => {
       act(() => {
         result.current.handleContentSizeChange(0, 1000);
       });
+      advanceTime(600);
       act(() => {
         result.current.handleScroll(createScrollEvent(1000, 350, 600));
       });
@@ -685,11 +740,15 @@ describe('useScrollBehavior', () => {
       act(() => {
         result.current.handleContentSizeChange(0, 2000);
       });
+      advanceTime(600);
       act(() => {
         result.current.handleScroll(createScrollEvent(2000, 0, 600));
       });
 
       expect(result.current.state.autoScrollEnabled).toBe(false);
+
+      // Advance past cooldown
+      advanceTime(1100);
 
       // Content updates shouldn't re-enable auto-scroll
       act(() => {
@@ -710,6 +769,7 @@ describe('useScrollBehavior', () => {
       act(() => {
         result.current.handleContentSizeChange(0, 2000);
       });
+      advanceTime(600);
       act(() => {
         result.current.handleScroll(createScrollEvent(2000, 0, 600));
       });
@@ -732,9 +792,11 @@ describe('useScrollBehavior', () => {
       act(() => {
         result.current.handleContentSizeChange(0, 2000);
       });
+      advanceTime(600);
       act(() => {
         result.current.handleScroll(createScrollEvent(2000, 0, 600));
       });
+      advanceTime(1100);
       act(() => {
         result.current.handleContentSizeChange(0, 2500);
       });
@@ -762,9 +824,11 @@ describe('useScrollBehavior', () => {
       act(() => {
         result.current.handleContentSizeChange(0, 3000);
       });
+      advanceTime(600);
       act(() => {
         result.current.handleScroll(createScrollEvent(3000, 100, 600));
       });
+      advanceTime(1100);
       act(() => {
         result.current.handleContentSizeChange(0, 3500);
       });
@@ -795,9 +859,11 @@ describe('useScrollBehavior', () => {
       act(() => {
         result.current.handleContentSizeChange(0, 2000);
       });
+      advanceTime(600);
       act(() => {
         result.current.handleScroll(createScrollEvent(2000, 0, 600));
       });
+      advanceTime(1100);
       act(() => {
         result.current.handleContentSizeChange(0, 2500);
       });
@@ -812,6 +878,7 @@ describe('useScrollBehavior', () => {
       act(() => {
         result.current.handleContentSizeChange(0, 1500);
       });
+      advanceTime(600);
 
       // After initial load, subsequent content growth should not show badge
       // (because user is conceptually at bottom of new session)
@@ -936,41 +1003,35 @@ describe('useScrollBehavior', () => {
     // behavior by checking what happens when content grows, not the ref value directly
 
     it('should disable auto-scroll immediately when user scrolls UP', () => {
-      // Mock Date.now to control programmatic scroll window
-      let mockTime = 1000;
-      const originalDateNow = Date.now;
-      Date.now = jest.fn(() => mockTime);
+      const { result } = renderHook(() => useScrollBehavior());
 
-      try {
-        const { result } = renderHook(() => useScrollBehavior());
+      // Start at bottom with auto-scroll enabled (initial load)
+      act(() => {
+        result.current.handleContentSizeChange(0, 1000);
+      });
 
-        // Start at bottom with auto-scroll enabled (initial load)
-        act(() => {
-          result.current.handleContentSizeChange(0, 1000);
-        });
+      // Advance past initial programmatic scroll window
+      advanceTime(600);
 
-        // Advance past initial programmatic scroll window
-        mockTime += 400;
+      act(() => {
+        result.current.handleScroll(createScrollEvent(1000, 350, 600)); // at bottom
+      });
 
-        act(() => {
-          result.current.handleScroll(createScrollEvent(1000, 350, 600)); // at bottom
-        });
+      // User scrolls UP by just 20px (still "near bottom" by threshold)
+      act(() => {
+        result.current.handleScroll(createScrollEvent(1000, 330, 600));
+      });
 
-        // User scrolls UP by just 20px (still "near bottom" by threshold)
-        act(() => {
-          result.current.handleScroll(createScrollEvent(1000, 330, 600));
-        });
+      // Advance past user scroll cooldown
+      advanceTime(1100);
 
-        // Verify by checking behavior: content grows, should show badge (not auto-scroll)
-        act(() => {
-          result.current.handleContentSizeChange(0, 1200);
-        });
+      // Verify by checking behavior: content grows, should show badge (not auto-scroll)
+      act(() => {
+        result.current.handleContentSizeChange(0, 1200);
+      });
 
-        // If auto-scroll was disabled, we should see new messages badge
-        expect(result.current.state.hasNewMessages).toBe(true);
-      } finally {
-        Date.now = originalDateNow;
-      }
+      // If auto-scroll was disabled, we should see new messages badge
+      expect(result.current.state.hasNewMessages).toBe(true);
     });
 
     it('should re-enable auto-scroll when user scrolls DOWN to bottom', () => {
@@ -980,9 +1041,11 @@ describe('useScrollBehavior', () => {
       act(() => {
         result.current.handleContentSizeChange(0, 1000);
       });
+      advanceTime(600);
       act(() => {
         result.current.handleScroll(createScrollEvent(1000, 200, 600)); // scrolled up
       });
+      advanceTime(1100);
 
       // Content grows - badge should appear
       act(() => {
@@ -1006,50 +1069,45 @@ describe('useScrollBehavior', () => {
     });
 
     it('should handle tap-scroll-bottom then immediate scroll up (the exact bug scenario)', () => {
-      // Mock Date.now to control time
-      let mockTime = 1000;
-      const originalDateNow = Date.now;
-      Date.now = jest.fn(() => mockTime);
+      const { result } = renderHook(() => useScrollBehavior());
 
-      try {
-        const { result } = renderHook(() => useScrollBehavior());
+      // Setup: conversation with content, user scrolled up
+      act(() => {
+        result.current.handleContentSizeChange(0, 2000);
+      });
+      advanceTime(600);
+      act(() => {
+        result.current.handleScroll(createScrollEvent(2000, 100, 600)); // scrolled up
+      });
 
-        // Setup: conversation with content, user scrolled up
-        act(() => {
-          result.current.handleContentSizeChange(0, 2000);
-        });
-        act(() => {
-          result.current.handleScroll(createScrollEvent(2000, 100, 600)); // scrolled up
-        });
+      // User taps scroll-to-bottom button
+      act(() => {
+        result.current.scrollToBottom();
+      });
 
-        // User taps scroll-to-bottom button
-        act(() => {
-          result.current.scrollToBottom();
-        });
+      // Simulate scroll event as list scrolls to bottom (during programmatic scroll)
+      act(() => {
+        result.current.handleScroll(createScrollEvent(2000, 1350, 600)); // at bottom
+      });
 
-        // Simulate scroll event as list scrolls to bottom (during programmatic scroll)
-        act(() => {
-          result.current.handleScroll(createScrollEvent(2000, 1350, 600)); // at bottom
-        });
+      // Advance past programmatic scroll window (500ms)
+      advanceTime(600);
 
-        // Advance past programmatic scroll window (500ms)
-        mockTime += 600;
+      // User scrolls up "a bit" - even small scroll should disable
+      act(() => {
+        result.current.handleScroll(createScrollEvent(2000, 1340, 600)); // 10px up
+      });
 
-        // User scrolls up "a bit" - even small scroll should disable
-        act(() => {
-          result.current.handleScroll(createScrollEvent(2000, 1340, 600)); // 10px up
-        });
+      // Advance past user scroll cooldown
+      advanceTime(1100);
 
-        // Content grows (tool output arrives)
-        act(() => {
-          result.current.handleContentSizeChange(0, 2200);
-        });
+      // Content grows (tool output arrives)
+      act(() => {
+        result.current.handleContentSizeChange(0, 2200);
+      });
 
-        // Should show new messages badge (proving auto-scroll was disabled)
-        expect(result.current.state.hasNewMessages).toBe(true);
-      } finally {
-        Date.now = originalDateNow;
-      }
+      // Should show new messages badge (proving auto-scroll was disabled)
+      expect(result.current.state.hasNewMessages).toBe(true);
     });
   });
 });

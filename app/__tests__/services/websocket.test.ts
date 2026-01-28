@@ -37,10 +37,17 @@ class MockWebSocket {
 // Store instance for test access
 let mockWebSocketInstance: MockWebSocket;
 
-(global as any).WebSocket = jest.fn().mockImplementation(() => {
+const MockWebSocketConstructor = jest.fn().mockImplementation(() => {
   mockWebSocketInstance = new MockWebSocket();
   return mockWebSocketInstance;
-});
+}) as jest.Mock & { OPEN: number; CLOSED: number; CONNECTING: number; CLOSING: number };
+// Add static constants to match real WebSocket
+MockWebSocketConstructor.OPEN = 1;
+MockWebSocketConstructor.CLOSED = 3;
+MockWebSocketConstructor.CONNECTING = 0;
+MockWebSocketConstructor.CLOSING = 2;
+
+(global as any).WebSocket = MockWebSocketConstructor;
 
 describe('WebSocketService', () => {
   let service: WebSocketService;
@@ -94,6 +101,8 @@ describe('WebSocketService', () => {
     it('authenticates on connection open', () => {
       service.connect(mockServer);
       mockWebSocketInstance.simulateOpen();
+      // Auth is delayed by 50ms in handleOpen
+      jest.advanceTimersByTime(100);
 
       expect(mockWebSocketInstance.send).toHaveBeenCalledWith(
         expect.stringContaining('"type":"authenticate"')
@@ -103,19 +112,14 @@ describe('WebSocketService', () => {
       );
     });
 
-    it('updates state to connected on successful auth', () => {
+    it('updates state to connected on successful auth', async () => {
       const stateHandler = jest.fn();
       service.onStateChange(stateHandler);
 
       service.connect(mockServer);
       mockWebSocketInstance.simulateOpen();
-
-      // Simulate auth response
-      mockWebSocketInstance.simulateMessage({
-        type: 'authenticate',
-        success: true,
-        requestId: expect.any(String),
-      });
+      // Auth is delayed by 50ms in handleOpen
+      jest.advanceTimersByTime(100);
 
       // Get the requestId from the sent message
       const sentMessage = JSON.parse(mockWebSocketInstance.send.mock.calls[0][0]);
@@ -125,17 +129,22 @@ describe('WebSocketService', () => {
         requestId: sentMessage.requestId,
       });
 
+      // Wait for async authenticate() to complete
+      await Promise.resolve();
+
       expect(stateHandler).toHaveBeenCalledWith(
         expect.objectContaining({ status: 'connected' })
       );
     });
 
-    it('updates state to error on auth failure', () => {
+    it('updates state to error on auth failure', async () => {
       const stateHandler = jest.fn();
       service.onStateChange(stateHandler);
 
       service.connect(mockServer);
       mockWebSocketInstance.simulateOpen();
+      // Auth is delayed by 50ms in handleOpen
+      jest.advanceTimersByTime(100);
 
       const sentMessage = JSON.parse(mockWebSocketInstance.send.mock.calls[0][0]);
       mockWebSocketInstance.simulateMessage({
@@ -144,6 +153,9 @@ describe('WebSocketService', () => {
         error: 'Invalid token',
         requestId: sentMessage.requestId,
       });
+
+      // Wait for async authenticate() to complete
+      await Promise.resolve();
 
       expect(stateHandler).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -218,6 +230,8 @@ describe('WebSocketService', () => {
     it('attempts reconnection on disconnect', () => {
       service.connect(mockServer);
       mockWebSocketInstance.simulateOpen();
+      // Auth is delayed by 50ms in handleOpen
+      jest.advanceTimersByTime(100);
 
       const sentMessage = JSON.parse(mockWebSocketInstance.send.mock.calls[0][0]);
       mockWebSocketInstance.simulateMessage({
@@ -254,6 +268,8 @@ describe('WebSocketService', () => {
     it('sends message and resolves on response', async () => {
       service.connect(mockServer);
       mockWebSocketInstance.simulateOpen();
+      // Auth is delayed by 50ms in handleOpen
+      jest.advanceTimersByTime(100);
 
       // Complete auth first
       const authMessage = JSON.parse(mockWebSocketInstance.send.mock.calls[0][0]);
@@ -285,6 +301,8 @@ describe('WebSocketService', () => {
     it('rejects on timeout', async () => {
       service.connect(mockServer);
       mockWebSocketInstance.simulateOpen();
+      // Auth is delayed by 50ms in handleOpen
+      jest.advanceTimersByTime(100);
 
       // Complete auth first
       const authMessage = JSON.parse(mockWebSocketInstance.send.mock.calls[0][0]);
@@ -302,15 +320,20 @@ describe('WebSocketService', () => {
   });
 
   describe('isConnected', () => {
-    it('returns true when connected and WebSocket is open', () => {
+    it('returns true when connected and WebSocket is open', async () => {
       service.connect(mockServer);
       mockWebSocketInstance.simulateOpen();
+      // Auth is delayed by 50ms in handleOpen
+      jest.advanceTimersByTime(100);
 
       const authMessage = JSON.parse(mockWebSocketInstance.send.mock.calls[0][0]);
       mockWebSocketInstance.simulateMessage({
         success: true,
         requestId: authMessage.requestId,
       });
+
+      // Wait for async authenticate() to complete
+      await Promise.resolve();
 
       expect(service.isConnected()).toBe(true);
     });

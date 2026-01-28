@@ -7,6 +7,8 @@ import { Server, ConnectionState } from '../../src/types';
 jest.mock('../../src/services/websocket', () => ({
   wsService: {
     getState: jest.fn(),
+    getServerId: jest.fn(),
+    isConnected: jest.fn(),
     connect: jest.fn(),
     disconnect: jest.fn(),
     reconnect: jest.fn(),
@@ -49,6 +51,8 @@ describe('useConnection', () => {
     stateChangeCallback = null;
 
     mockWsService.getState.mockReturnValue(initialState);
+    mockWsService.getServerId.mockReturnValue(null);
+    mockWsService.isConnected.mockReturnValue(false);
     mockWsService.onStateChange.mockImplementation((callback) => {
       stateChangeCallback = callback;
       callback(initialState);
