@@ -182,8 +182,11 @@ export function SessionView({ server, onBack, initialSessionId }: SessionViewPro
         if (settings.instantNotify) {
           wsService.sendRequest('set_instant_notify', { enabled: true });
         }
-        // Scroll to bottom on initial connection
-        initialScrollDone.current = false;
+        // Only reset scroll state when switching sessions, not on every reconnect
+        if (isSwitching) {
+          initialScrollDone.current = false;
+          lastContentHeight.current = 0;
+        }
       };
 
       init();
