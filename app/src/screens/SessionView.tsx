@@ -61,6 +61,8 @@ export function SessionView({ server, onBack, initialSessionId }: SessionViewPro
   const autoScrollEnabled = useRef(true);
   // Track if we're near bottom to decide whether to auto-scroll
   const isNearBottom = useRef(true);
+  // Debounce scroll to avoid interrupting animations
+  const scrollTimeout = useRef<NodeJS.Timeout | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [sessionSettings, setSessionSettings] = useState<SessionSettings>({ instantNotify: false });
   const [showActivityModal, setShowActivityModal] = useState(false);
@@ -197,7 +199,15 @@ export function SessionView({ server, onBack, initialSessionId }: SessionViewPro
 
     // Auto-scroll if enabled and we were near bottom
     if (autoScrollEnabled.current && isNearBottom.current) {
-      listRef.current?.scrollToEnd({ animated: true });
+      // Debounce: cancel pending scroll and schedule new one
+      // This prevents animation interruption when content changes rapidly
+      if (scrollTimeout.current) {
+        clearTimeout(scrollTimeout.current);
+      }
+      scrollTimeout.current = setTimeout(() => {
+        listRef.current?.scrollToEnd({ animated: true });
+        scrollTimeout.current = null;
+      }, 50);
     } else if (!autoScrollEnabled.current) {
       // User is reading history - show new message indicator
       setHasNewMessages(true);
