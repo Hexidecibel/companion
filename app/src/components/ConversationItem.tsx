@@ -284,10 +284,38 @@ function ToolCard({ tool, forceExpanded }: { tool: ToolCall; forceExpanded?: boo
 
 export function ConversationItem({ item, showToolCalls, onSelectOption, onFileTap }: ConversationItemProps) {
   const [expanded, setExpanded] = useState(false);
+  const [selectedOptions, setSelectedOptions] = useState<Set<string>>(new Set());
   const isUser = item.type === 'user';
   const message = item as ConversationMessage;
   const hasToolCalls = showToolCalls && 'toolCalls' in message && message.toolCalls?.length;
   const hasOptions = 'options' in message && message.options && message.options.length > 0;
+  const isMultiSelect = 'multiSelect' in message && message.multiSelect === true;
+
+  // Handle option selection - toggle for multi-select, immediate send for single-select
+  const handleOptionPress = (label: string) => {
+    if (isMultiSelect) {
+      setSelectedOptions(prev => {
+        const newSet = new Set(prev);
+        if (newSet.has(label)) {
+          newSet.delete(label);
+        } else {
+          newSet.add(label);
+        }
+        return newSet;
+      });
+    } else {
+      onSelectOption?.(label);
+    }
+  };
+
+  // Submit all selected options for multi-select
+  const handleMultiSelectSubmit = () => {
+    if (selectedOptions.size > 0) {
+      const selectedLabels = Array.from(selectedOptions).join(', ');
+      onSelectOption?.(selectedLabels);
+      setSelectedOptions(new Set());
+    }
+  };
 
   // Check if content is long enough to need expansion
   const lineCount = item.content.split('\n').length;
@@ -456,19 +484,56 @@ export function ConversationItem({ item, showToolCalls, onSelectOption, onFileTa
         )}
         {hasOptions && (
           <View style={styles.optionsContainer}>
-            {message.options!.map((option, index) => (
+            {isMultiSelect && (
+              <Text style={styles.multiSelectHint}>Select one or more options:</Text>
+            )}
+            {message.options!.map((option, index) => {
+              const isSelected = selectedOptions.has(option.label);
+              return (
+                <TouchableOpacity
+                  key={index}
+                  style={[
+                    styles.optionButton,
+                    index > 0 && styles.optionButtonSpacing,
+                    isMultiSelect && isSelected && styles.optionButtonSelected,
+                  ]}
+                  onPress={() => handleOptionPress(option.label)}
+                  activeOpacity={0.7}
+                >
+                  <View style={styles.optionLabelRow}>
+                    {isMultiSelect && (
+                      <View style={[styles.checkbox, isSelected && styles.checkboxSelected]}>
+                        {isSelected && <Text style={styles.checkmark}>✓</Text>}
+                      </View>
+                    )}
+                    <Text style={[styles.optionLabel, isSelected && styles.optionLabelSelected]}>
+                      {option.label}
+                    </Text>
+                  </View>
+                  {option.description && (
+                    <Text style={styles.optionDescription}>{option.description}</Text>
+                  )}
+                </TouchableOpacity>
+              );
+            })}
+            {isMultiSelect && (
               <TouchableOpacity
-                key={index}
-                style={[styles.optionButton, index > 0 && styles.optionButtonSpacing]}
-                onPress={() => onSelectOption?.(option.label)}
+                style={[
+                  styles.submitButton,
+                  selectedOptions.size === 0 && styles.submitButtonDisabled,
+                ]}
+                onPress={handleMultiSelectSubmit}
+                disabled={selectedOptions.size === 0}
                 activeOpacity={0.7}
               >
-                <Text style={styles.optionLabel}>{option.label}</Text>
-                {option.description && (
-                  <Text style={styles.optionDescription}>{option.description}</Text>
-                )}
+                <Text style={[
+                  styles.submitButtonText,
+                  selectedOptions.size === 0 && styles.submitButtonTextDisabled,
+                ]}>
+                  Submit ({selectedOptions.size} selected)
+                </Text>
               </TouchableOpacity>
-            ))}
+            )}
           </View>
         )}
         {hasToolCalls && (
@@ -904,6 +969,12 @@ const styles = StyleSheet.create({
   optionsContainer: {
     marginTop: 12,
   },
+  multiSelectHint: {
+    color: '#9ca3af',
+    fontSize: 12,
+    marginBottom: 8,
+    fontStyle: 'italic',
+  },
   optionButtonSpacing: {
     marginTop: 8,
   },
@@ -914,15 +985,62 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     padding: 12,
   },
+  optionButtonSelected: {
+    backgroundColor: '#1e3a5f',
+    borderColor: '#60a5fa',
+  },
+  optionLabelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  checkbox: {
+    width: 18,
+    height: 18,
+    borderRadius: 4,
+    borderWidth: 2,
+    borderColor: '#3b82f6',
+    marginRight: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  checkboxSelected: {
+    backgroundColor: '#3b82f6',
+  },
+  checkmark: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
   optionLabel: {
     color: '#60a5fa',
     fontSize: 14,
     fontWeight: '600',
   },
+  optionLabelSelected: {
+    color: '#93c5fd',
+  },
   optionDescription: {
     color: '#9ca3af',
     fontSize: 12,
     marginTop: 4,
+  },
+  submitButton: {
+    backgroundColor: '#3b82f6',
+    borderRadius: 8,
+    padding: 14,
+    marginTop: 12,
+    alignItems: 'center',
+  },
+  submitButtonDisabled: {
+    backgroundColor: '#374151',
+  },
+  submitButtonText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  submitButtonTextDisabled: {
+    color: '#6b7280',
   },
   toolCallsContainer: {
     marginTop: 8,

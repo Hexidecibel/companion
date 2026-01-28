@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import { wsService } from '../services/websocket';
 import { TmuxSessionInfo, DirectoryEntry } from '../types';
+import { sessionGuard } from '../services/sessionGuard';
 
 interface SessionPickerProps {
   currentSessionId?: string;
@@ -95,16 +96,32 @@ export function SessionPicker({ currentSessionId, onSessionChange, isOpen, onClo
 
     setLoading(true);
     try {
+      // Begin switch in sessionGuard BEFORE sending request
+      // Use the encoded working dir as session ID (daemon format)
+      const expectedSessionId = session.workingDir
+        ? session.workingDir.replace(/\//g, '-')
+        : session.name;
+      const epoch = sessionGuard.beginSwitch(expectedSessionId);
+      console.log(`SessionPicker: Switching to ${session.name} (session: ${expectedSessionId}, epoch: ${epoch})`);
+
       const response = await wsService.sendRequest('switch_tmux_session', {
         sessionName: session.name,
       });
       if (response.success) {
+        const payload = response.payload as { conversationSessionId?: string };
+        // Use conversationSessionId from response if available (more accurate)
+        const actualSessionId = payload?.conversationSessionId || expectedSessionId;
+
+        // If daemon returned a different session ID, update the guard
+        if (actualSessionId !== expectedSessionId) {
+          sessionGuard.beginSwitch(actualSessionId);
+        }
+
         setActiveSession(session.name);
         setVisible(false);
         onClose?.();
-        // Small delay to let daemon finish switching before refresh
-        await new Promise(resolve => setTimeout(resolve, 300));
-        onSessionChange?.(session.name);
+        // Pass the conversation session ID, not tmux name
+        onSessionChange?.(actualSessionId);
       } else {
         Alert.alert('Error', response.error || 'Failed to switch session');
       }
@@ -119,14 +136,21 @@ export function SessionPicker({ currentSessionId, onSessionChange, isOpen, onClo
   const handleCreateSession = async (dirPath: string) => {
     try {
       setLoading(true);
+
+      // Begin switch in sessionGuard - use encoded path as session ID
+      const expectedSessionId = dirPath.replace(/\//g, '-');
+      const epoch = sessionGuard.beginSwitch(expectedSessionId);
+      console.log(`SessionPicker: Creating session for ${dirPath} (session: ${expectedSessionId}, epoch: ${epoch})`);
+
       const response = await wsService.sendRequest('create_tmux_session', {
         workingDir: dirPath,
         startClaude: true,
       });
       if (response.success && response.payload) {
-        const payload = response.payload as { sessionName: string };
+        const payload = response.payload as { sessionName: string; workingDir?: string };
         setActiveSession(payload.sessionName);
-        onSessionChange?.(payload.sessionName);
+        // Pass the conversation session ID (encoded path)
+        onSessionChange?.(expectedSessionId);
         setShowBrowser(false);
         setVisible(false);
         Alert.alert('Success', `Created session in ${dirPath.split('/').pop()}`);
@@ -362,16 +386,16 @@ const styles = StyleSheet.create({
   pickerButton: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'space-between',
     backgroundColor: '#374151',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
     borderRadius: 6,
-    maxWidth: 120,
-    marginLeft: 6,
+    marginTop: 6,
   },
   pickerButtonText: {
     color: '#f3f4f6',
-    fontSize: 12,
+    fontSize: 13,
     fontWeight: '500',
     flex: 1,
   },

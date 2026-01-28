@@ -120,6 +120,7 @@ function parseEntry(
   const toolCalls: ToolCall[] = [];
   let options: QuestionOption[] | undefined;
   let isWaitingForChoice = false;
+  let multiSelect = false;
 
   if (typeof message.content === 'string') {
     content = message.content;
@@ -156,7 +157,8 @@ function parseEntry(
               description: opt.description,
             }));
             isWaitingForChoice = true;
-            console.log(`Parser: Extracted ${options.length} options for question: "${content.substring(0, 50)}..."`);
+            multiSelect = question.multiSelect || false;
+            console.log(`Parser: Extracted ${options.length} options for question: "${content.substring(0, 50)}..." (multiSelect: ${multiSelect})`);
           }
         } else if (block.name === 'AskUserQuestion' && !isPending) {
           // Show the question content but no options (already answered)
@@ -206,6 +208,7 @@ function parseEntry(
     toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
     options,
     isWaitingForChoice,
+    multiSelect: multiSelect || undefined,
   };
 }
 
@@ -247,6 +250,7 @@ export function extractHighlights(messages: ConversationMessage[]): Conversation
         timestamp: msg.timestamp,
         options: showOptions ? msg.options : undefined,
         isWaitingForChoice: showOptions ? msg.isWaitingForChoice : false,
+        multiSelect: showOptions ? msg.multiSelect : undefined,
         toolCalls: msg.toolCalls,
       };
     });

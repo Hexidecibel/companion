@@ -27,6 +27,7 @@ export interface ConversationMessage {
   toolCalls?: ToolCall[];
   options?: QuestionOption[];
   isWaitingForChoice?: boolean;
+  multiSelect?: boolean;
 }
 
 export interface ToolCall {
@@ -46,6 +47,7 @@ export interface ConversationHighlight {
   timestamp: number;
   options?: QuestionOption[];
   isWaitingForChoice?: boolean;
+  multiSelect?: boolean;
   toolCalls?: ToolCall[];
 }
 
@@ -90,6 +92,7 @@ export interface WebSocketResponse {
   payload?: unknown;
   error?: string;
   requestId?: string;
+  sessionId?: string; // Session context for validation
 }
 
 export interface RegisteredDevice {

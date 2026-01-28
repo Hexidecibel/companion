@@ -24,6 +24,7 @@ interface AuthenticatedClient {
   authenticated: boolean;
   deviceId?: string;
   subscribed: boolean;
+  subscribedSessionId?: string; // Track which session client is subscribed to
 }
 
 interface ClientError {
@@ -216,13 +217,22 @@ export class WebSocketHandler {
     // Handle authenticated messages
     switch (type) {
       case 'subscribe':
+        const subscribePayload = payload as { sessionId?: string } | undefined;
         client.subscribed = true;
-        console.log(`WebSocket: Client subscribed (${client.id})`);
+        // Track which session the client is subscribed to
+        if (subscribePayload?.sessionId) {
+          client.subscribedSessionId = subscribePayload.sessionId;
+        } else {
+          // Default to current active session
+          client.subscribedSessionId = this.watcher.getActiveSessionId() || undefined;
+        }
+        console.log(`WebSocket: Client subscribed (${client.id}) to session ${client.subscribedSessionId}`);
         this.send(client.ws, {
           type: 'subscribed',
           success: true,
+          sessionId: client.subscribedSessionId,
           requestId,
-        });
+        } as WebSocketResponse);
         break;
 
       case 'unsubscribe':
@@ -237,32 +247,38 @@ export class WebSocketHandler {
       case 'get_highlights':
         const messages = this.watcher.getMessages();
         const highlights = extractHighlights(messages);
+        const hlSessionId = this.watcher.getActiveSessionId();
         this.send(client.ws, {
           type: 'highlights',
           success: true,
           payload: { highlights },
+          sessionId: hlSessionId,
           requestId,
-        });
+        } as WebSocketResponse);
         break;
 
       case 'get_full':
         const fullMessages = this.watcher.getMessages();
+        const fullSessionId = this.watcher.getActiveSessionId();
         this.send(client.ws, {
           type: 'full',
           success: true,
           payload: { messages: fullMessages },
+          sessionId: fullSessionId,
           requestId,
-        });
+        } as WebSocketResponse);
         break;
 
       case 'get_status':
         const status = this.watcher.getStatus();
+        const statusSessionId = this.watcher.getActiveSessionId();
         this.send(client.ws, {
           type: 'status',
           success: true,
           payload: status,
+          sessionId: statusSessionId,
           requestId,
-        });
+        } as WebSocketResponse);
         break;
 
       case 'get_server_summary':
@@ -298,42 +314,8 @@ export class WebSocketHandler {
         break;
 
       case 'switch_session':
-        const switchPayload = payload as { sessionId: string };
-        if (switchPayload?.sessionId) {
-          const switched = this.watcher.setActiveSession(switchPayload.sessionId);
-
-          // Also switch the input target to the corresponding tmux session
-          if (switched) {
-            const convSession = this.watcher.getSessions().find(s => s.id === switchPayload.sessionId);
-            if (convSession?.projectPath) {
-              // Find tmux session with matching working directory
-              this.tmux.listSessions().then(tmuxSessions => {
-                const matchingTmux = tmuxSessions.find(ts => ts.workingDir === convSession.projectPath);
-                if (matchingTmux) {
-                  this.injector.setActiveSession(matchingTmux.name);
-                  console.log(`WebSocket: Switched input target to tmux session "${matchingTmux.name}"`);
-                }
-              }).catch(err => {
-                console.error('Failed to find matching tmux session:', err);
-              });
-            }
-          }
-
-          this.send(client.ws, {
-            type: 'session_switched',
-            success: switched,
-            payload: { sessionId: switchPayload.sessionId },
-            error: switched ? undefined : 'Session not found',
-            requestId,
-          });
-        } else {
-          this.send(client.ws, {
-            type: 'session_switched',
-            success: false,
-            error: 'Missing sessionId',
-            requestId,
-          });
-        }
+        // Handle switch_session asynchronously but await completion
+        this.handleSwitchSession(client, payload as { sessionId: string; epoch?: number }, requestId);
         break;
 
       case 'send_input':
@@ -727,6 +709,76 @@ export class WebSocketHandler {
     });
   }
 
+  /**
+   * Handle session switch synchronously - waits for tmux switch to complete
+   * before returning success. This prevents race conditions.
+   */
+  private async handleSwitchSession(
+    client: AuthenticatedClient,
+    payload: { sessionId: string; epoch?: number } | undefined,
+    requestId?: string
+  ): Promise<void> {
+    if (!payload?.sessionId) {
+      this.send(client.ws, {
+        type: 'session_switched',
+        success: false,
+        error: 'Missing sessionId',
+        requestId,
+      });
+      return;
+    }
+
+    const { sessionId, epoch } = payload;
+    console.log(`WebSocket: Switching to session ${sessionId} (epoch: ${epoch})`);
+
+    // 1. Switch the watcher's active session
+    const switched = this.watcher.setActiveSession(sessionId);
+    if (!switched) {
+      this.send(client.ws, {
+        type: 'session_switched',
+        success: false,
+        error: 'Session not found',
+        sessionId,
+        requestId,
+      } as WebSocketResponse);
+      return;
+    }
+
+    // 2. Update client's subscription to this session
+    client.subscribedSessionId = sessionId;
+
+    // 3. Find and switch to corresponding tmux session (SYNCHRONOUSLY)
+    let tmuxSessionName: string | undefined;
+    try {
+      const convSession = this.watcher.getSessions().find(s => s.id === sessionId);
+      if (convSession?.projectPath) {
+        const tmuxSessions = await this.tmux.listSessions();
+        const matchingTmux = tmuxSessions.find(ts => ts.workingDir === convSession.projectPath);
+        if (matchingTmux) {
+          this.injector.setActiveSession(matchingTmux.name);
+          tmuxSessionName = matchingTmux.name;
+          console.log(`WebSocket: Switched input target to tmux session "${matchingTmux.name}"`);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to switch tmux session:', err);
+      // Continue anyway - watcher switch succeeded
+    }
+
+    // 4. Return success with session context
+    this.send(client.ws, {
+      type: 'session_switched',
+      success: true,
+      payload: {
+        sessionId,
+        tmuxSession: tmuxSessionName,
+        epoch, // Echo back epoch for client validation
+      },
+      sessionId, // Include at top level for validation
+      requestId,
+    } as WebSocketResponse);
+  }
+
   private handleRotateToken(client: AuthenticatedClient, requestId?: string): void {
     try {
       // Generate new token
@@ -840,8 +892,13 @@ export class WebSocketHandler {
       // Store the session config for potential recreation later
       this.storeTmuxSessionConfig(sessionName, payload.workingDir, startClaude);
 
-      // Switch to the new session
+      // Switch input target to the new session
       this.injector.setActiveSession(sessionName);
+
+      // Clear the watcher's active session - no conversation exists yet
+      // This prevents returning old session data until the new conversation is created
+      this.watcher.clearActiveSession();
+      console.log(`WebSocket: Cleared active session after creating tmux session "${sessionName}"`);
 
       this.send(client.ws, {
         type: 'tmux_session_created',
@@ -1465,16 +1522,23 @@ export class WebSocketHandler {
     });
   }
 
-  private broadcast(type: string, payload: unknown): void {
+  private broadcast(type: string, payload: unknown, sessionId?: string): void {
+    // Get the session ID to include in the message
+    const activeSessionId = sessionId || this.watcher.getActiveSessionId();
+
     const message = JSON.stringify({
       type,
       success: true,
       payload,
+      sessionId: activeSessionId, // Always include session context
     });
 
     for (const client of this.clients.values()) {
       if (client.authenticated && client.subscribed && client.ws.readyState === WebSocket.OPEN) {
-        client.ws.send(message);
+        // Only send to clients subscribed to this session (or all if no session filter)
+        if (!client.subscribedSessionId || client.subscribedSessionId === activeSessionId) {
+          client.ws.send(message);
+        }
       }
     }
   }

@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { ConversationMessage, ConversationHighlight, SessionStatus, ViewMode, OtherSessionActivity, TmuxSessionMissing } from '../types';
 import { wsService } from '../services/websocket';
+import { sessionGuard } from '../services/sessionGuard';
 
 // Helper to check if highlights have actually changed
 const highlightsEqual = (a: ConversationHighlight[], b: ConversationHighlight[]): boolean => {
@@ -40,11 +41,19 @@ export function useConversation() {
     return unsubscribe;
   }, []);
 
-  // Subscribe to real-time updates
+  // Subscribe to real-time updates with session validation
   useEffect(() => {
     const unsubscribe = wsService.onMessage((message) => {
+      // Validate session context for data messages
+      const messageSessionId = message.sessionId;
+
       switch (message.type) {
         case 'conversation_update': {
+          // CRITICAL: Reject updates for wrong session
+          if (!sessionGuard.isValid(messageSessionId)) {
+            console.log(`useConversation: Rejecting conversation_update for session ${messageSessionId}`);
+            return;
+          }
           const updatePayload = message.payload as {
             messages: ConversationMessage[];
             highlights: ConversationHighlight[];
@@ -55,12 +64,18 @@ export function useConversation() {
         }
 
         case 'status_change': {
+          // CRITICAL: Reject status for wrong session
+          if (!sessionGuard.isValid(messageSessionId)) {
+            console.log(`useConversation: Rejecting status_change for session ${messageSessionId}`);
+            return;
+          }
           const statusPayload = message.payload as SessionStatus;
           setStatus(statusPayload);
           break;
         }
 
         case 'other_session_activity': {
+          // This is intentionally for OTHER sessions, so don't filter by current
           const activityPayload = message.payload as OtherSessionActivity;
           setOtherSessionActivity(activityPayload);
           break;
@@ -89,28 +104,36 @@ export function useConversation() {
     setLoading(true);
     setError(null);
 
+    // Get current session context for validation
+    const { sessionId: expectedSessionId } = sessionGuard.getContext();
+
     try {
-      // Subscribe to updates
-      await wsService.sendRequest('subscribe');
+      // Subscribe to updates for this session
+      await wsService.sendRequest('subscribe', { sessionId: expectedSessionId });
 
       // Fetch current data based on view mode
       if (viewMode === 'highlights') {
         const response = await wsService.sendRequest('get_highlights');
-        if (response.success && response.payload) {
+        // Validate response is for current session
+        if (response.success && response.payload && sessionGuard.isValid(response.sessionId)) {
           const payload = response.payload as { highlights: ConversationHighlight[] };
           setHighlights(payload.highlights || []);
+        } else if (response.sessionId && !sessionGuard.isValid(response.sessionId)) {
+          console.log(`useConversation: Discarding highlights response for wrong session ${response.sessionId}`);
         }
       } else {
         const response = await wsService.sendRequest('get_full');
-        if (response.success && response.payload) {
+        if (response.success && response.payload && sessionGuard.isValid(response.sessionId)) {
           const payload = response.payload as { messages: ConversationMessage[] };
           setMessages(payload.messages || []);
+        } else if (response.sessionId && !sessionGuard.isValid(response.sessionId)) {
+          console.log(`useConversation: Discarding full response for wrong session ${response.sessionId}`);
         }
       }
 
       // Get status
       const statusResponse = await wsService.sendRequest('get_status');
-      if (statusResponse.success && statusResponse.payload) {
+      if (statusResponse.success && statusResponse.payload && sessionGuard.isValid(statusResponse.sessionId)) {
         setStatus(statusResponse.payload as SessionStatus);
       }
     } catch (err) {
@@ -129,7 +152,7 @@ export function useConversation() {
     }
   }, [isConnected, viewMode, refresh]);
 
-  // Poll for updates every 2 seconds when connected
+  // Poll for updates every 5 seconds when connected
   useEffect(() => {
     if (!isConnected) return;
 
@@ -142,6 +165,12 @@ export function useConversation() {
         .then(response => {
           // Skip if session switch started during request
           if (sessionSwitching.current) return;
+
+          // CRITICAL: Validate response is for current session
+          if (!sessionGuard.isValid(response.sessionId)) {
+            console.log(`useConversation: Discarding poll response for wrong session ${response.sessionId}`);
+            return;
+          }
 
           if (response.success && response.payload) {
             if (viewMode === 'highlights') {
@@ -167,6 +196,12 @@ export function useConversation() {
       wsService.sendRequest('get_status')
         .then(response => {
           if (sessionSwitching.current) return;
+
+          // CRITICAL: Validate response is for current session
+          if (!sessionGuard.isValid(response.sessionId)) {
+            return;
+          }
+
           if (response.success && response.payload) {
             const newStatus = response.payload as SessionStatus;
             // Only update if status actually changed

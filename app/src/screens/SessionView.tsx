@@ -18,6 +18,7 @@ import {
 import { Server, ConversationHighlight, SubAgent, AgentTree } from '../types';
 import { useConnection } from '../hooks/useConnection';
 import { useConversation } from '../hooks/useConversation';
+import { useScrollBehavior } from '../hooks/useScrollBehavior';
 import { StatusIndicator } from '../components/StatusIndicator';
 import { ConversationItem } from '../components/ConversationItem';
 import { InputBar } from '../components/InputBar';
@@ -26,6 +27,7 @@ import { FileViewer } from '../components/FileViewer';
 import { getSessionSettings, saveSessionSettings, SessionSettings } from '../services/storage';
 import { wsService } from '../services/websocket';
 import { messageQueue, QueuedMessage } from '../services/messageQueue';
+import { sessionGuard } from '../services/sessionGuard';
 
 interface SessionViewProps {
   server: Server;
@@ -52,19 +54,19 @@ export function SessionView({ server, onBack, initialSessionId }: SessionViewPro
     recreateTmuxSession,
   } = useConversation();
 
-  const listRef = useRef<FlatList>(null);
   const data = highlights;
-  const [hasNewMessages, setHasNewMessages] = useState(false);
-  const [showScrollButton, setShowScrollButton] = useState(false);
-  const initialScrollDone = useRef(false);
-  // Simple flag: true = auto-scroll to new messages, false = user is reading history
-  const autoScrollEnabled = useRef(true);
-  // Track if we're near bottom to decide whether to auto-scroll
-  const isNearBottom = useRef(true);
-  // Debounce scroll to avoid interrupting animations
-  const scrollTimeout = useRef<NodeJS.Timeout | null>(null);
-  // Track last content height to only scroll when content grows
-  const lastContentHeight = useRef(0);
+
+  // Use the scroll behavior hook for all scroll-related logic
+  const {
+    state: scrollState,
+    listRef,
+    handleScroll,
+    handleContentSizeChange,
+    scrollToBottom,
+    prepareForSend,
+    resetForSessionSwitch,
+  } = useScrollBehavior();
+
   const [showSettings, setShowSettings] = useState(false);
   const [sessionSettings, setSessionSettings] = useState<SessionSettings>({ instantNotify: false });
   const [showActivityModal, setShowActivityModal] = useState(false);
@@ -203,11 +205,27 @@ export function SessionView({ server, onBack, initialSessionId }: SessionViewPro
         const isSwitching = initialSessionId && initialSessionId !== lastSwitchedSessionId.current;
         if (isSwitching) {
           lastSwitchedSessionId.current = initialSessionId;
+
+          // CRITICAL: Begin switch in sessionGuard BEFORE sending request
+          // This invalidates any in-flight requests from previous session
+          const epoch = sessionGuard.beginSwitch(initialSessionId);
+          console.log(`SessionView: Beginning switch to ${initialSessionId} (epoch ${epoch})`);
+
           try {
-            await wsService.sendRequest('switch_session', { sessionId: initialSessionId });
+            // Send switch request with epoch for server-side tracking
+            const response = await wsService.sendRequest('switch_session', {
+              sessionId: initialSessionId,
+              epoch,
+            });
+            if (!response.success) {
+              console.error('Failed to switch session:', response.error);
+            }
           } catch (e) {
             console.error('Failed to switch session:', e);
           }
+        } else if (initialSessionId && !sessionGuard.getCurrentSessionId()) {
+          // First load - set session in guard without incrementing epoch
+          sessionGuard.beginSwitch(initialSessionId);
         }
 
         // Clear first if switching sessions to avoid showing stale content
@@ -219,66 +237,31 @@ export function SessionView({ server, onBack, initialSessionId }: SessionViewPro
         }
         // Only reset scroll state when switching sessions, not on every reconnect
         if (isSwitching) {
-          initialScrollDone.current = false;
-          lastContentHeight.current = 0;
+          resetForSessionSwitch();
         }
       };
 
       init();
     }
-  }, [isConnected, refresh, server.id, initialSessionId]);
-
-  
-  // Handle content size changes - only scroll on initial load
-  // Auto-scroll on new content is disabled to prevent jumping
-  // User can tap scroll button or send a message to scroll to bottom
-  const handleContentSizeChange = useCallback((_width: number, height: number) => {
-    const prevHeight = lastContentHeight.current;
-    lastContentHeight.current = height;
-
-    // Initial load - scroll to bottom
-    if (!initialScrollDone.current && height > 0) {
-      initialScrollDone.current = true;
-      listRef.current?.scrollToEnd({ animated: false });
-      return;
-    }
-
-    // Show new message indicator if content grew and user is not at bottom
-    const contentGrew = height > prevHeight + 50;
-    if (contentGrew && !isNearBottom.current) {
-      setHasNewMessages(true);
-    }
-  }, []);
-
-  const scrollToBottom = useCallback(() => {
-    setHasNewMessages(false);
-    setShowScrollButton(false);
-    autoScrollEnabled.current = true;
-    isNearBottom.current = true;
-    listRef.current?.scrollToEnd({ animated: true });
-  }, []);
+  }, [isConnected, refresh, server.id, initialSessionId, resetForSessionSwitch]);
 
   const handleSendInput = async (text: string): Promise<boolean> => {
-    // Scroll to bottom when user sends a message
-    isNearBottom.current = true;
-    setHasNewMessages(false);
-    setShowScrollButton(false);
-
-    // Scroll to bottom after a brief delay to let the message appear
-    setTimeout(() => {
-      listRef.current?.scrollToEnd({ animated: true });
-    }, 100);
+    // Prepare for scrolling to show sent message
+    prepareForSend();
 
     return sendInput(text);
   };
 
-  const handleSessionChange = useCallback(() => {
-    initialScrollDone.current = false;
-    autoScrollEnabled.current = true;
-    setHasNewMessages(false);
-    setShowScrollButton(false);
+  const handleSessionChange = useCallback((newSessionId?: string) => {
+    // If a new session ID is provided, update the guard
+    if (newSessionId) {
+      const epoch = sessionGuard.beginSwitch(newSessionId);
+      console.log(`SessionView: Session changed to ${newSessionId} (epoch ${epoch})`);
+      lastSwitchedSessionId.current = newSessionId;
+    }
+    resetForSessionSwitch();
     refresh(true);
-  }, [refresh]);
+  }, [refresh, resetForSessionSwitch]);
 
   const handleSlashCommand = useCallback((command: string) => {
     switch (command) {
@@ -294,47 +277,31 @@ export function SessionView({ server, onBack, initialSessionId }: SessionViewPro
   const handleSwitchToOtherSession = useCallback(async () => {
     if (!otherSessionActivity) return;
 
+    // Get the conversation session ID from the activity
+    const newSessionId = otherSessionActivity.sessionId;
+
+    // Begin switch in guard BEFORE sending request
+    const epoch = sessionGuard.beginSwitch(newSessionId);
+    console.log(`SessionView: Switching to other session ${newSessionId} (epoch ${epoch})`);
+
     try {
       const response = await wsService.sendRequest('switch_tmux_session', {
-        sessionName: otherSessionActivity.sessionId,
+        sessionName: newSessionId,
       });
       if (response.success) {
+        lastSwitchedSessionId.current = newSessionId;
         dismissOtherSessionActivity();
-        initialScrollDone.current = false;
-        autoScrollEnabled.current = true;
-        setHasNewMessages(false);
-        setShowScrollButton(false);
+        resetForSessionSwitch();
         refresh(true);
       }
     } catch (err) {
       console.error('Failed to switch session:', err);
     }
-  }, [otherSessionActivity, dismissOtherSessionActivity, refresh]);
+  }, [otherSessionActivity, dismissOtherSessionActivity, refresh, resetForSessionSwitch]);
 
   const handleSelectOption = async (option: string) => {
     await handleSendInput(option);
   };
-
-  const handleScroll = useCallback((event: any) => {
-    const { layoutMeasurement, contentOffset, contentSize } = event.nativeEvent;
-    const distanceFromBottom = contentSize.height - layoutMeasurement.height - contentOffset.y;
-
-    const nearBottom = distanceFromBottom < 100;
-    isNearBottom.current = nearBottom;
-
-    // Show/hide scroll button
-    const shouldShowButton = distanceFromBottom > 150;
-    setShowScrollButton(prev => prev === shouldShowButton ? prev : shouldShowButton);
-
-    // Lock to bottom when within 100px, unlock when scrolled up more than 150px
-    if (nearBottom) {
-      autoScrollEnabled.current = true;
-      setHasNewMessages(prev => prev ? false : prev);
-    } else if (distanceFromBottom > 150) {
-      autoScrollEnabled.current = false;
-    }
-    // Between 100-150px: keep current state (hysteresis to prevent flapping)
-  }, []);
 
   const handleCancel = () => {
     Alert.alert(
@@ -430,22 +397,15 @@ export function SessionView({ server, onBack, initialSessionId }: SessionViewPro
           <Text style={styles.backButtonText}>‹ Back</Text>
         </TouchableOpacity>
         <View style={styles.headerCenter}>
-          <View style={styles.headerTitleRow}>
-            <Text style={styles.headerTitle} numberOfLines={1}>
-              {server.name}
-            </Text>
-            {isConnected && (
-              <SessionPicker
-                onSessionChange={handleSessionChange}
-                isOpen={showSessionPicker}
-                onClose={() => setShowSessionPicker(false)}
-              />
-            )}
-          </View>
-          {status?.projectPath && (
-            <Text style={styles.headerSubtitle} numberOfLines={1}>
-              {status.projectPath}
-            </Text>
+          <Text style={styles.headerTitle} numberOfLines={1}>
+            {server.name}
+          </Text>
+          {isConnected && (
+            <SessionPicker
+              onSessionChange={handleSessionChange}
+              isOpen={showSessionPicker}
+              onClose={() => setShowSessionPicker(false)}
+            />
           )}
         </View>
         <TouchableOpacity
@@ -781,16 +741,16 @@ export function SessionView({ server, onBack, initialSessionId }: SessionViewPro
       />
 
       {/* Floating action buttons */}
-      {showScrollButton && (
+      {scrollState.showScrollButton && (
         <TouchableOpacity
           style={[
             styles.scrollButton,
-            hasNewMessages && styles.scrollButtonNew,
+            scrollState.hasNewMessages && styles.scrollButtonNew,
           ]}
-          onPress={scrollToBottom}
+          onPress={() => scrollToBottom()}
         >
           <Text style={styles.scrollButtonText}>↓</Text>
-          {hasNewMessages && <View style={styles.newMessageBadge} />}
+          {scrollState.hasNewMessages && <View style={styles.newMessageBadge} />}
         </TouchableOpacity>
       )}
 
@@ -860,22 +820,11 @@ const styles = StyleSheet.create({
     marginHorizontal: 8,
     minWidth: 0,
   },
-  headerTitleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flexWrap: 'wrap',
-    gap: 6,
-  },
   headerTitle: {
     color: '#f3f4f6',
     fontSize: 16,
     fontWeight: '600',
     flexShrink: 1,
-  },
-  headerSubtitle: {
-    color: '#9ca3af',
-    fontSize: 12,
-    marginTop: 2,
   },
   refreshButton: {
     padding: 8,
