@@ -146,6 +146,7 @@ export function AgentTreeScreen({ onBack, sessionId }: AgentTreeScreenProps) {
 
       <ScrollView
         style={styles.content}
+        contentContainerStyle={styles.contentContainer}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -336,6 +337,9 @@ const styles = StyleSheet.create({
   },
   content: {
     flex: 1,
+  },
+  contentContainer: {
+    paddingBottom: 40,
   },
   summaryBar: {
     flexDirection: 'row',

@@ -123,6 +123,7 @@ export function UsageScreen({ onBack }: UsageScreenProps) {
 
       <ScrollView
         style={styles.content}
+        contentContainerStyle={styles.contentContainer}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -317,6 +318,9 @@ const styles = StyleSheet.create({
   },
   content: {
     flex: 1,
+  },
+  contentContainer: {
+    paddingBottom: 40,
   },
   warningBanner: {
     flexDirection: 'row',

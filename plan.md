@@ -71,7 +71,7 @@ Settings safe area, permissions bypass toggle, server connection toggle, convers
 ---
 
 ## Item 7: Safe Padding on All Screens
-**Status:** planned
+**Status:** complete
 
 ### Requirements
 - All screens should have proper safe area padding
@@ -98,7 +98,7 @@ Settings safe area, permissions bypass toggle, server connection toggle, convers
 ---
 
 ## Item 8: Text Overflowing Bubble
-**Status:** planned
+**Status:** complete
 
 ### Requirements
 - Long text without word breaks should wrap or truncate properly

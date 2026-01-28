@@ -399,6 +399,7 @@ const styles = StyleSheet.create({
   },
   contentContainer: {
     padding: 16,
+    paddingBottom: 40,
     gap: 12,
   },
   serverCard: {

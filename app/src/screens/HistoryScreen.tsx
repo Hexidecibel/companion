@@ -211,6 +211,7 @@ const styles = StyleSheet.create({
   },
   sessionList: {
     padding: 12,
+    paddingBottom: 40,
   },
   sessionItem: {
     backgroundColor: '#1f2937',
@@ -256,6 +257,7 @@ const styles = StyleSheet.create({
   },
   messageList: {
     paddingVertical: 12,
+    paddingBottom: 40,
   },
   emptyContainer: {
     flex: 1,

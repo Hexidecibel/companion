@@ -648,6 +648,7 @@ const styles = StyleSheet.create({
   },
   contentContainer: {
     padding: 16,
+    paddingBottom: 40,
   },
   sectionTitle: {
     fontSize: 13,

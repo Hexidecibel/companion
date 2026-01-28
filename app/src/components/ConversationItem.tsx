@@ -784,6 +784,7 @@ const markdownStyles = StyleSheet.create({
     fontSize: 15,
     lineHeight: 22,
     flexShrink: 1,
+    flexWrap: 'wrap',
   },
   heading1: {
     color: '#f3f4f6',
@@ -845,11 +846,13 @@ const markdownStyles = StyleSheet.create({
     padding: 12,
     borderRadius: 8,
     marginVertical: 8,
+    overflow: 'hidden',
   },
   code_block: {
     color: '#e5e7eb',
     fontFamily: 'monospace',
     fontSize: 13,
+    flexWrap: 'wrap',
   },
   blockquote: {
     backgroundColor: '#1f2937',
@@ -891,6 +894,12 @@ const markdownStyles = StyleSheet.create({
   },
   paragraph: {
     marginVertical: 4,
+    flexShrink: 1,
+    flexWrap: 'wrap',
+  },
+  text: {
+    flexShrink: 1,
+    flexWrap: 'wrap',
   },
 });
 
@@ -955,6 +964,8 @@ const styles = StyleSheet.create({
   content: {
     fontSize: 15,
     lineHeight: 22,
+    flexShrink: 1,
+    flexWrap: 'wrap',
   },
   userContent: {
     color: '#ffffff',

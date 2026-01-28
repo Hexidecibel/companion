@@ -179,6 +179,7 @@ const styles = StyleSheet.create({
   },
   contentContainer: {
     padding: 16,
+    paddingBottom: 40,
   },
   sectionTitle: {
     color: '#f3f4f6',
