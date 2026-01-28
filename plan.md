@@ -41,7 +41,7 @@ Settings safe area, permissions bypass toggle, server connection toggle, convers
 ---
 
 ## Item 6: Scrolling/Chat Stability
-**Status:** planned
+**Status:** complete
 
 ### Requirements
 - Chat window should be stable when many messages arrive quickly

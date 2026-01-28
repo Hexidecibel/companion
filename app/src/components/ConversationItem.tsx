@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useRef } from 'react';
+import React, { useMemo, useState, useRef, memo } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import Markdown from '@ronradtke/react-native-markdown-display';
@@ -282,7 +282,7 @@ function ToolCard({ tool, forceExpanded }: { tool: ToolCall; forceExpanded?: boo
   );
 }
 
-export function ConversationItem({ item, showToolCalls, onSelectOption, onFileTap }: ConversationItemProps) {
+function ConversationItemInner({ item, showToolCalls, onSelectOption, onFileTap }: ConversationItemProps) {
   const [expanded, setExpanded] = useState(false);
   const [selectedOptions, setSelectedOptions] = useState<Set<string>>(new Set());
   const isUser = item.type === 'user';
@@ -1072,4 +1072,21 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '500',
   },
+});
+
+// Memoize to prevent re-renders when parent re-renders but props unchanged
+// This is important for FlatList performance during rapid message updates
+export const ConversationItem = memo(ConversationItemInner, (prevProps, nextProps) => {
+  // Only re-render if these key props change
+  return (
+    prevProps.item.id === nextProps.item.id &&
+    prevProps.item.content === nextProps.item.content &&
+    prevProps.item.timestamp === nextProps.item.timestamp &&
+    prevProps.showToolCalls === nextProps.showToolCalls &&
+    // For messages with options, check if options changed
+    ('options' in prevProps.item ? prevProps.item.options : undefined) ===
+    ('options' in nextProps.item ? nextProps.item.options : undefined) &&
+    ('isWaitingForChoice' in prevProps.item ? prevProps.item.isWaitingForChoice : undefined) ===
+    ('isWaitingForChoice' in nextProps.item ? nextProps.item.isWaitingForChoice : undefined)
+  );
 });

@@ -16,14 +16,18 @@ Quick capture for ideas and tasks. Run `/plan` to process into detailed plans.
 - [skipped] CLI for daemon management - current /up /down skills work fine
 
 ## Dashboard
-- [planned] Expandable session on dashboard to show running tasks beneath. With ability to click into task to see its current output in a new task screen
+- [in-progress] Expandable session on dashboard to show running tasks beneath. With ability to click into task to see its current output in a new task screen
+  - Backend done: task parser, types, WebSocket endpoint
+  - TODO: Dashboard UI to show tasks
 
 ## Stability
-- [planned] More scrolling/chat window stability and tests. It is hard to use sometimes when lots of messages come through
+- [done] More scrolling/chat window stability and tests. It is hard to use sometimes when lots of messages come through
+  - Added React.memo to ConversationItem with custom comparison
+  - useScrollBehavior hook already had good scroll position management
 
 ## UI Fixes (New)
-- [planned] Safe padding on edit server screen (and all screens)
-- [planned] Intermittent error with text overflowing bubble (long text escapes container bounds)
+- [done] Safe padding on edit server screen (and all screens)
+- [done] Intermittent error with text overflowing bubble (long text escapes container bounds)
 
 ## Platform
 - [deferred] iOS build (need Apple Developer account first)
