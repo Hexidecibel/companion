@@ -229,7 +229,9 @@ export function SessionView({ server, onBack, initialSessionId }: SessionViewPro
   }, [isConnected, refresh, server.id, initialSessionId]);
 
   
-  // Handle content size changes - auto-scroll when locked to bottom
+  // Handle content size changes - only scroll on initial load
+  // Auto-scroll on new content is disabled to prevent jumping
+  // User can tap scroll button or send a message to scroll to bottom
   const handleContentSizeChange = useCallback((_width: number, height: number) => {
     const prevHeight = lastContentHeight.current;
     lastContentHeight.current = height;
@@ -241,17 +243,9 @@ export function SessionView({ server, onBack, initialSessionId }: SessionViewPro
       return;
     }
 
-    const contentGrew = height > prevHeight + 20;
-    if (!contentGrew) return;
-
-    // If locked to bottom (autoScrollEnabled), stay at bottom
-    if (autoScrollEnabled.current) {
-      // Use requestAnimationFrame to avoid fighting with React Native's layout
-      requestAnimationFrame(() => {
-        listRef.current?.scrollToEnd({ animated: false });
-      });
-    } else {
-      // User is reading history - show indicator
+    // Show new message indicator if content grew and user is not at bottom
+    const contentGrew = height > prevHeight + 50;
+    if (contentGrew && !isNearBottom.current) {
       setHasNewMessages(true);
     }
   }, []);
@@ -265,12 +259,17 @@ export function SessionView({ server, onBack, initialSessionId }: SessionViewPro
   }, []);
 
   const handleSendInput = async (text: string): Promise<boolean> => {
-    // Enable auto-scroll when user sends a message
-    autoScrollEnabled.current = true;
+    // Scroll to bottom when user sends a message
     isNearBottom.current = true;
     setHasNewMessages(false);
+    setShowScrollButton(false);
+
+    // Scroll to bottom after a brief delay to let the message appear
+    setTimeout(() => {
+      listRef.current?.scrollToEnd({ animated: true });
+    }, 100);
+
     return sendInput(text);
-    // Note: scrollToEnd will be called by onContentSizeChange when new message appears
   };
 
   const handleSessionChange = useCallback(() => {
