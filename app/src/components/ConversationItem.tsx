@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useRef } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import Markdown from '@ronradtke/react-native-markdown-display';
@@ -325,6 +325,10 @@ export function ConversationItem({ item, showToolCalls, onSelectOption, onFileTa
     return parts.length > 0 ? <Text>{parts}</Text> : <Text style={baseStyle}>{text}</Text>;
   };
 
+  // Counter for unique keys in markdown rules
+  const keyCounter = useRef(0);
+  const getUniqueKey = (prefix: string) => `${prefix}-${keyCounter.current++}`;
+
   // Custom rules for code blocks (simple text rendering for reliability)
   const rules = useMemo(
     () => ({
@@ -332,7 +336,7 @@ export function ConversationItem({ item, showToolCalls, onSelectOption, onFileTa
         const content = node?.content || '';
         const sourceInfo = node?.sourceInfo || '';
         return (
-          <View key={`fence-${content.slice(0, 20)}`} style={codeBlockStyles.container}>
+          <View key={getUniqueKey('fence')} style={codeBlockStyles.container}>
             {sourceInfo ? (
               <View style={codeBlockStyles.languageTag}>
                 <Text style={codeBlockStyles.languageText}>{sourceInfo}</Text>
@@ -347,7 +351,7 @@ export function ConversationItem({ item, showToolCalls, onSelectOption, onFileTa
       code_block: (node: { content: string }, _children: React.ReactNode, _parent: unknown, _styles: Record<string, unknown>) => {
         const content = node?.content || '';
         return (
-          <View key={`codeblock-${content.slice(0, 20)}`} style={codeBlockStyles.container}>
+          <View key={getUniqueKey('codeblock')} style={codeBlockStyles.container}>
             <ScrollView style={codeBlockStyles.scrollView} nestedScrollEnabled>
               <Text style={codeBlockStyles.codeText}>{content.trim()}</Text>
             </ScrollView>
@@ -371,7 +375,7 @@ export function ConversationItem({ item, showToolCalls, onSelectOption, onFileTa
         if (isFilePath && onFileTap) {
           return (
             <Text
-              key={`code-${content}`}
+              key={getUniqueKey('code-path')}
               style={[styles.code_inline as object, filePathStyles.filePath]}
               onPress={() => onFileTap(content)}
             >
@@ -381,7 +385,7 @@ export function ConversationItem({ item, showToolCalls, onSelectOption, onFileTa
         }
 
         return (
-          <Text key={`code-${content}`} style={styles.code_inline as object}>
+          <Text key={getUniqueKey('code')} style={styles.code_inline as object}>
             {content}
           </Text>
         );
