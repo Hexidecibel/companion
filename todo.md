@@ -5,12 +5,25 @@ Quick capture for ideas and tasks. Run `/plan` to process into detailed plans.
 ---
 
 ## UI Fixes
-- [planned] Settings page: about area at bottom needs padding, spilling over into safe area
+- [done] Settings page: about area at bottom needs padding, spilling over into safe area
 
 ## Features
-- [planned] Permissions bypass toggle - per-server setting to match Claude's auto-approve mode
-- [planned] Server connection on/off toggle on dashboard - quick enable/disable per server
-- [planned] Conversation archive & search - save compacted convos, full-text search (MVP: no search yet)
+- [done] Permissions bypass toggle - per-server setting to match Claude's auto-approve mode
+- [done] Server connection on/off toggle on dashboard - quick enable/disable per server
+- [done] Conversation archive & search - save compacted convos, full-text search (MVP: no search yet)
 
 ## Daemon
 - [skipped] CLI for daemon management - current /up /down skills work fine
+
+## Dashboard
+- [planned] Expandable session on dashboard to show running tasks beneath. With ability to click into task to see its current output in a new task screen
+
+## Stability
+- [planned] More scrolling/chat window stability and tests. It is hard to use sometimes when lots of messages come through
+
+## UI Fixes (New)
+- [planned] Safe padding on edit server screen (and all screens)
+- [planned] Intermittent error with text overflowing bubble (long text escapes container bounds)
+
+## Platform
+- [deferred] iOS build (need Apple Developer account first)

@@ -1,5 +1,8 @@
 import * as fs from 'fs';
-import { ConversationMessage, ConversationHighlight, ToolCall, SessionStatus, QuestionOption, SessionUsage, CompactionEvent } from './types';
+import { ConversationMessage, ConversationHighlight, ToolCall, SessionStatus, QuestionOption, SessionUsage, CompactionEvent, TaskItem } from './types';
+
+// Re-export TaskItem for tests
+export { TaskItem } from './types';
 
 interface ContentBlock {
   type: string;
@@ -603,4 +606,170 @@ export function extractUsageFromFile(filePath: string, sessionName: string): Ses
   }
 
   return result;
+}
+
+// Input types for TaskCreate/TaskUpdate tools
+interface TaskCreateInput {
+  subject: string;
+  description: string;
+  activeForm?: string;
+  metadata?: Record<string, unknown>;
+}
+
+interface TaskUpdateInput {
+  taskId: string;
+  status?: 'pending' | 'in_progress' | 'completed' | 'deleted';
+  subject?: string;
+  description?: string;
+  activeForm?: string;
+  owner?: string;
+  addBlockedBy?: string[];
+  addBlocks?: string[];
+  metadata?: Record<string, unknown>;
+}
+
+/**
+ * Extract tasks from JSONL content (from TaskCreate/TaskUpdate tool calls)
+ */
+export function extractTasks(content: string): TaskItem[] {
+  const lines = content.split('\n').filter(line => line.trim());
+
+  // Track tasks by temporary ID (toolu_xxx) until we get real ID from result
+  const pendingTasks = new Map<string, { task: Partial<TaskItem>; timestamp: number }>();
+  // Map toolu_xxx to real task ID
+  const toolIdToTaskId = new Map<string, string>();
+  // Final tasks by real ID
+  const tasks = new Map<string, TaskItem>();
+
+  for (const line of lines) {
+    try {
+      const entry = JSON.parse(line);
+
+      if (entry.message?.content && Array.isArray(entry.message.content)) {
+        const timestamp = entry.timestamp ? new Date(entry.timestamp).getTime() : Date.now();
+
+        for (const block of entry.message.content) {
+          // Handle TaskCreate
+          if (block.type === 'tool_use' && block.name === 'TaskCreate') {
+            const input = block.input as TaskCreateInput;
+            const toolId = block.id as string;
+
+            pendingTasks.set(toolId, {
+              task: {
+                subject: input.subject,
+                description: input.description,
+                activeForm: input.activeForm,
+                status: 'pending',
+                blockedBy: [],
+                blocks: [],
+                createdAt: timestamp,
+                updatedAt: timestamp,
+              },
+              timestamp,
+            });
+          }
+
+          // Handle TaskUpdate
+          if (block.type === 'tool_use' && block.name === 'TaskUpdate') {
+            const input = block.input as TaskUpdateInput;
+            const taskId = input.taskId;
+
+            // Find existing task
+            const existingTask = tasks.get(taskId);
+            if (existingTask) {
+              // Handle deletion
+              if (input.status === 'deleted') {
+                tasks.delete(taskId);
+                continue;
+              }
+
+              // Apply updates
+              if (input.status) {
+                existingTask.status = input.status as TaskItem['status'];
+              }
+              if (input.subject) {
+                existingTask.subject = input.subject;
+              }
+              if (input.description) {
+                existingTask.description = input.description;
+              }
+              if (input.activeForm) {
+                existingTask.activeForm = input.activeForm;
+              } else if (input.status === 'completed') {
+                // Clear activeForm when completed
+                existingTask.activeForm = undefined;
+              }
+              if (input.owner) {
+                existingTask.owner = input.owner;
+              }
+              if (input.addBlockedBy) {
+                existingTask.blockedBy = [
+                  ...(existingTask.blockedBy || []),
+                  ...input.addBlockedBy,
+                ];
+              }
+              if (input.addBlocks) {
+                existingTask.blocks = [
+                  ...(existingTask.blocks || []),
+                  ...input.addBlocks,
+                ];
+              }
+              existingTask.updatedAt = timestamp;
+            }
+          }
+
+          // Handle tool_result to get real task IDs
+          if (block.type === 'tool_result' && block.tool_use_id) {
+            const toolId = block.tool_use_id as string;
+            const pending = pendingTasks.get(toolId);
+
+            if (pending) {
+              // Extract task ID from result content
+              let resultContent = '';
+              if (typeof block.content === 'string') {
+                resultContent = block.content;
+              } else if (Array.isArray(block.content)) {
+                resultContent = block.content
+                  .filter((c: { type: string; text?: string }) => c.type === 'text' && c.text)
+                  .map((c: { text?: string }) => c.text || '')
+                  .join('\n');
+              }
+
+              // Try to extract task ID from "Task created with ID: X"
+              const idMatch = resultContent.match(/(?:Task created with ID:|id[:\s]+)(\d+)/i);
+              if (idMatch) {
+                const realId = idMatch[1];
+                toolIdToTaskId.set(toolId, realId);
+
+                // Create the task with real ID
+                tasks.set(realId, {
+                  id: realId,
+                  subject: pending.task.subject || '',
+                  description: pending.task.description || '',
+                  status: pending.task.status || 'pending',
+                  activeForm: pending.task.activeForm,
+                  owner: pending.task.owner,
+                  blockedBy: pending.task.blockedBy,
+                  blocks: pending.task.blocks,
+                  createdAt: pending.task.createdAt || timestamp,
+                  updatedAt: pending.task.updatedAt || timestamp,
+                });
+              }
+
+              pendingTasks.delete(toolId);
+            }
+          }
+        }
+      }
+    } catch {
+      // Skip malformed lines
+    }
+  }
+
+  // Return tasks sorted by ID (numeric order)
+  return Array.from(tasks.values()).sort((a, b) => {
+    const aNum = parseInt(a.id, 10);
+    const bNum = parseInt(b.id, 10);
+    return aNum - bNum;
+  });
 }

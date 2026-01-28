@@ -9,7 +9,7 @@ import { ClaudeWatcher } from './watcher';
 import { InputInjector } from './input-injector';
 import { PushNotificationService } from './push';
 import { TmuxManager } from './tmux-manager';
-import { extractHighlights, extractUsageFromFile } from './parser';
+import { extractHighlights, extractUsageFromFile, extractTasks } from './parser';
 import { WebSocketMessage, WebSocketResponse, DaemonConfig, TmuxSessionConfig } from './types';
 import { loadConfig, saveConfig } from './config';
 import { fetchTodayUsage, fetchMonthUsage, fetchAnthropicUsage } from './anthropic-usage';
@@ -316,6 +316,50 @@ export class WebSocketHandler {
           payload: { sessions, activeSessionId },
           requestId,
         });
+        break;
+
+      case 'get_tasks':
+        // Get tasks for a specific session
+        const tasksPayload = payload as { sessionId?: string } | undefined;
+        const tasksSessionId = tasksPayload?.sessionId || this.watcher.getActiveSessionId();
+        if (tasksSessionId) {
+          const sessionSessions = this.watcher.getSessions();
+          const session = sessionSessions.find(s => s.id === tasksSessionId);
+          if (session?.conversationPath) {
+            try {
+              const fs = require('fs');
+              const content = fs.readFileSync(session.conversationPath, 'utf-8');
+              const tasks = extractTasks(content);
+              this.send(client.ws, {
+                type: 'tasks',
+                success: true,
+                payload: { tasks, sessionId: tasksSessionId },
+                requestId,
+              });
+            } catch (err) {
+              this.send(client.ws, {
+                type: 'tasks',
+                success: false,
+                error: 'Failed to read session file',
+                requestId,
+              });
+            }
+          } else {
+            this.send(client.ws, {
+              type: 'tasks',
+              success: true,
+              payload: { tasks: [], sessionId: tasksSessionId },
+              requestId,
+            });
+          }
+        } else {
+          this.send(client.ws, {
+            type: 'tasks',
+            success: false,
+            error: 'No session specified',
+            requestId,
+          });
+        }
         break;
 
       case 'switch_session':

@@ -192,3 +192,17 @@ export interface ArchivedConversation {
   serverId: string;
   serverName: string;
 }
+
+// Task tracking types (from TaskCreate/TaskUpdate tools)
+export interface TaskItem {
+  id: string;
+  subject: string;
+  description: string;
+  status: 'pending' | 'in_progress' | 'completed';
+  activeForm?: string;
+  owner?: string;
+  blockedBy?: string[];
+  blocks?: string[];
+  createdAt: number;
+  updatedAt: number;
+}
