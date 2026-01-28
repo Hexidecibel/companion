@@ -51,6 +51,7 @@ export function useScrollBehavior(config: ScrollBehaviorConfig = {}): ScrollBeha
   const lastContentHeight = useRef(0);
   const lastScrollOffset = useRef(0);
   const programmaticScrollUntil = useRef(0); // Timestamp when programmatic scroll ends
+  const userScrollCooldownUntil = useRef(0); // Cooldown after user scroll to prevent fighting
 
   // State that triggers re-renders
   const [hasNewMessages, setHasNewMessages] = useState(false);
@@ -74,6 +75,7 @@ export function useScrollBehavior(config: ScrollBehaviorConfig = {}): ScrollBeha
     // Detect manual scroll direction (negative = scrolling up toward top)
     const scrollDelta = currentOffset - prevOffset;
     const isScrollingUp = scrollDelta < -5; // Small threshold to ignore noise
+    const isUserScrolling = Math.abs(scrollDelta) > 2; // Any significant scroll
 
     const nearBottom = distanceFromBottom < nearBottomThreshold;
     isNearBottom.current = nearBottom;
@@ -82,13 +84,18 @@ export function useScrollBehavior(config: ScrollBehaviorConfig = {}): ScrollBeha
     const shouldShowButton = distanceFromBottom > showButtonThreshold;
     setShowScrollButton(prev => prev !== shouldShowButton ? shouldShowButton : prev);
 
+    // Set cooldown on ANY user scroll to prevent fighting with auto-scroll
+    if (!isProgrammaticScroll && isUserScrolling) {
+      userScrollCooldownUntil.current = Date.now() + 500; // 500ms cooldown
+    }
+
     // Update auto-scroll state
     // IMPORTANT: Check scroll direction FIRST - if user scrolls up, disable immediately
     if (!isProgrammaticScroll && isScrollingUp) {
       // User manually scrolled UP - immediately disable auto-scroll
       autoScrollEnabled.current = false;
     } else if (nearBottom && !isScrollingUp) {
-      // At bottom and not actively scrolling up - re-enable auto-scroll
+      // At bottom and not scrolling up - re-enable auto-scroll
       autoScrollEnabled.current = true;
       setHasNewMessages(false);
     } else if (distanceFromBottom > showButtonThreshold) {
@@ -118,8 +125,14 @@ export function useScrollBehavior(config: ScrollBehaviorConfig = {}): ScrollBeha
       setHasNewMessages(true);
     }
 
-    // Auto-scroll only if enabled (user hasn't scrolled up)
-    if (contentGrew && autoScrollEnabled.current) {
+    // Check if user is actively scrolling (cooldown period)
+    const userIsScrolling = Date.now() < userScrollCooldownUntil.current;
+
+    // Auto-scroll only if:
+    // 1. Auto-scroll is enabled (user hasn't scrolled up)
+    // 2. User isn't actively scrolling (respect their scroll intent)
+    // 3. We're actually near the bottom (don't jump from far away)
+    if (contentGrew && autoScrollEnabled.current && !userIsScrolling && isNearBottom.current) {
       // Mark as programmatic scroll
       programmaticScrollUntil.current = Date.now() + 300;
       listRef.current?.scrollToEnd({ animated: true });
@@ -156,6 +169,7 @@ export function useScrollBehavior(config: ScrollBehaviorConfig = {}): ScrollBeha
     lastContentHeight.current = 0;
     lastScrollOffset.current = 0;
     programmaticScrollUntil.current = 0;
+    userScrollCooldownUntil.current = 0;
     autoScrollEnabled.current = true;
     isNearBottom.current = true;
     setHasNewMessages(false);
