@@ -58,6 +58,9 @@ export function SessionView({ server, onBack, initialSessionId }: SessionViewPro
   const [hasNewMessages, setHasNewMessages] = useState(false);
   const prevMessageCount = useRef(0);
   const initialScrollDone = useRef(false);
+  const userHasScrolledUp = useRef(false);
+  const contentHeight = useRef(0);
+  const scrollViewHeight = useRef(0);
   const [showSettings, setShowSettings] = useState(false);
   const [sessionSettings, setSessionSettings] = useState<SessionSettings>({ instantNotify: false });
   const [showActivityModal, setShowActivityModal] = useState(false);
@@ -189,20 +192,30 @@ export function SessionView({ server, onBack, initialSessionId }: SessionViewPro
       // Scroll to bottom on first load
       if (!initialScrollDone.current) {
         initialScrollDone.current = true;
+        userHasScrolledUp.current = false;
         setTimeout(() => {
           listRef.current?.scrollToEnd({ animated: false });
         }, 200);
       }
       // Track new messages when not at bottom
-      if (data.length > prevMessageCount.current && !isAtBottom) {
-        setHasNewMessages(true);
+      if (data.length > prevMessageCount.current) {
+        if (userHasScrolledUp.current) {
+          // User is reading history - show indicator but don't auto-scroll
+          setHasNewMessages(true);
+        } else {
+          // User is at bottom - auto-scroll to new content
+          setTimeout(() => {
+            listRef.current?.scrollToEnd({ animated: true });
+          }, 100);
+        }
       }
       prevMessageCount.current = data.length;
     }
-  }, [data.length, isAtBottom]);
+  }, [data.length]);
 
   const scrollToBottom = () => {
     setHasNewMessages(false);
+    userHasScrolledUp.current = false;
     setTimeout(() => {
       listRef.current?.scrollToEnd({ animated: true });
     }, 100);
@@ -216,6 +229,8 @@ export function SessionView({ server, onBack, initialSessionId }: SessionViewPro
 
   const handleSessionChange = useCallback(() => {
     initialScrollDone.current = false;
+    userHasScrolledUp.current = false;
+    setHasNewMessages(false);
     refresh(true);
   }, [refresh]);
 
@@ -240,6 +255,8 @@ export function SessionView({ server, onBack, initialSessionId }: SessionViewPro
       if (response.success) {
         dismissOtherSessionActivity();
         initialScrollDone.current = false;
+        userHasScrolledUp.current = false;
+        setHasNewMessages(false);
         refresh(true);
       }
     } catch (err) {
@@ -253,11 +270,22 @@ export function SessionView({ server, onBack, initialSessionId }: SessionViewPro
 
   const handleScroll = (event: any) => {
     const { layoutMeasurement, contentOffset, contentSize } = event.nativeEvent;
-    const paddingToBottom = 50;
+    const paddingToBottom = 100; // More generous threshold
     const atBottom = layoutMeasurement.height + contentOffset.y >= contentSize.height - paddingToBottom;
+
+    // Track layout dimensions for content position maintenance
+    scrollViewHeight.current = layoutMeasurement.height;
+    contentHeight.current = contentSize.height;
+
     setIsAtBottom(atBottom);
+
     if (atBottom) {
+      // User scrolled to bottom - resume auto-scroll
+      userHasScrolledUp.current = false;
       setHasNewMessages(false);
+    } else {
+      // User scrolled up - stop auto-scrolling
+      userHasScrolledUp.current = true;
     }
   };
 
@@ -571,7 +599,16 @@ export function SessionView({ server, onBack, initialSessionId }: SessionViewPro
         }
         ListEmptyComponent={renderEmptyContent}
         onScroll={handleScroll}
-        scrollEventThrottle={100}
+        scrollEventThrottle={16}
+        // Keep visible content position stable when new items are added
+        maintainVisibleContentPosition={{
+          minIndexForVisible: 0,
+          autoscrollToTopThreshold: 10,
+        }}
+        // Optimize re-renders
+        removeClippedSubviews={Platform.OS === 'android'}
+        maxToRenderPerBatch={10}
+        windowSize={10}
       />
 
       {/* Floating action buttons */}

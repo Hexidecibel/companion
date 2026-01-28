@@ -442,6 +442,7 @@ export function extractUsageFromFile(filePath: string, sessionName: string): Ses
     totalCacheCreationTokens: 0,
     totalCacheReadTokens: 0,
     messageCount: 0,
+    currentContextTokens: 0,
   };
 
   if (!fs.existsSync(filePath)) {
@@ -483,6 +484,10 @@ export function extractUsageFromFile(filePath: string, sessionName: string): Ses
         }
         if (usage.cache_read_input_tokens && usage.cache_read_input_tokens > 0) {
           result.totalCacheReadTokens += usage.cache_read_input_tokens;
+        }
+        // Track current context size from the most recent message
+        if (usage.input_tokens) {
+          result.currentContextTokens = usage.input_tokens;
         }
       }
     } catch {

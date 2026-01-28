@@ -12,6 +12,8 @@ import { TmuxManager } from './tmux-manager';
 import { extractHighlights, extractUsageFromFile } from './parser';
 import { WebSocketMessage, WebSocketResponse, DaemonConfig, TmuxSessionConfig } from './types';
 import { loadConfig, saveConfig } from './config';
+import { fetchTodayUsage, fetchMonthUsage, fetchAnthropicUsage } from './anthropic-usage';
+import { SubAgentWatcher } from './subagent-watcher';
 
 // File for persisting tmux session configs
 const TMUX_CONFIGS_FILE = path.join(os.homedir(), '.claude-companion', 'tmux-sessions.json');
@@ -29,6 +31,7 @@ export class WebSocketHandler {
   private clients: Map<string, AuthenticatedClient> = new Map();
   private token: string;
   private watcher: ClaudeWatcher;
+  private subAgentWatcher: SubAgentWatcher | null;
   private injector: InputInjector;
   private push: PushNotificationService;
   private tmux: TmuxManager;
@@ -41,11 +44,13 @@ export class WebSocketHandler {
     watcher: ClaudeWatcher,
     injector: InputInjector,
     push: PushNotificationService,
-    tmux?: TmuxManager
+    tmux?: TmuxManager,
+    subAgentWatcher?: SubAgentWatcher
   ) {
     this.config = config;
     this.token = config.token;
     this.watcher = watcher;
+    this.subAgentWatcher = subAgentWatcher || null;
     this.injector = injector;
     this.push = push;
     this.tmux = tmux || new TmuxManager('claude');
@@ -471,6 +476,14 @@ export class WebSocketHandler {
 
       case 'get_usage':
         this.handleGetUsage(client, requestId);
+        break;
+
+      case 'get_api_usage':
+        this.handleGetApiUsage(client, payload as { period?: 'today' | 'month' | 'custom'; startDate?: string; endDate?: string }, requestId);
+        break;
+
+      case 'get_agent_tree':
+        this.handleGetAgentTree(client, payload as { sessionId?: string } | undefined, requestId);
         break;
 
       default:
@@ -918,8 +931,14 @@ export class WebSocketHandler {
         conversationSessionId = matchingConv.id;
         console.log(`WebSocket: Switched conversation to "${matchingConv.id}" for project ${tmuxSession.workingDir}`);
       } else {
-        console.log(`WebSocket: No conversation found for ${encodedPath}, available: ${convSessions.map(c => c.id).join(', ')}`);
+        // No conversation yet for this project - clear active session so old data stops flowing
+        this.watcher.clearActiveSession();
+        console.log(`WebSocket: No conversation found for ${encodedPath}, cleared active session. Available: ${convSessions.map(c => c.id).join(', ')}`);
       }
+    } else {
+      // No working directory - clear active session
+      this.watcher.clearActiveSession();
+      console.log(`WebSocket: No working directory for tmux session, cleared active session`);
     }
 
     this.send(client.ws, {
@@ -1189,6 +1208,92 @@ export class WebSocketHandler {
         type: 'file_content',
         success: false,
         error: `Cannot read file: ${err instanceof Error ? err.message : 'Unknown error'}`,
+        requestId,
+      });
+    }
+  }
+
+  private async handleGetApiUsage(
+    client: AuthenticatedClient,
+    payload: { period?: 'today' | 'month' | 'custom'; startDate?: string; endDate?: string } | undefined,
+    requestId?: string
+  ): Promise<void> {
+    const adminApiKey = this.config.anthropicAdminApiKey;
+
+    if (!adminApiKey) {
+      this.send(client.ws, {
+        type: 'api_usage',
+        success: false,
+        error: 'No Anthropic Admin API key configured. Add "anthropicAdminApiKey" to your config.json (key starts with sk-ant-admin-...)',
+        requestId,
+      });
+      return;
+    }
+
+    try {
+      const period = payload?.period || 'today';
+      let stats;
+
+      if (period === 'today') {
+        stats = await fetchTodayUsage(adminApiKey);
+      } else if (period === 'month') {
+        stats = await fetchMonthUsage(adminApiKey);
+      } else if (period === 'custom' && payload?.startDate && payload?.endDate) {
+        stats = await fetchAnthropicUsage(
+          adminApiKey,
+          new Date(payload.startDate),
+          new Date(payload.endDate)
+        );
+      } else {
+        stats = await fetchTodayUsage(adminApiKey);
+      }
+
+      this.send(client.ws, {
+        type: 'api_usage',
+        success: true,
+        payload: stats,
+        requestId,
+      });
+    } catch (err) {
+      console.error('Failed to get API usage:', err);
+      this.send(client.ws, {
+        type: 'api_usage',
+        success: false,
+        error: `Failed to fetch API usage: ${err instanceof Error ? err.message : 'Unknown error'}`,
+        requestId,
+      });
+    }
+  }
+
+  private handleGetAgentTree(
+    client: AuthenticatedClient,
+    payload: { sessionId?: string } | undefined,
+    requestId?: string
+  ): void {
+    if (!this.subAgentWatcher) {
+      this.send(client.ws, {
+        type: 'agent_tree',
+        success: false,
+        error: 'Sub-agent watcher not initialized',
+        requestId,
+      });
+      return;
+    }
+
+    try {
+      const tree = this.subAgentWatcher.getAgentTree(payload?.sessionId);
+      this.send(client.ws, {
+        type: 'agent_tree',
+        success: true,
+        payload: tree,
+        requestId,
+      });
+    } catch (err) {
+      console.error('Failed to get agent tree:', err);
+      this.send(client.ws, {
+        type: 'agent_tree',
+        success: false,
+        error: 'Failed to get agent tree',
         requestId,
       });
     }

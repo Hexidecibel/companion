@@ -10,6 +10,8 @@ export interface DaemonConfig {
   fcmCredentialsPath?: string;
   pushDelayMs: number;
   autoApproveTools: string[];
+  // Anthropic Admin API key for fetching organization usage (sk-ant-admin-...)
+  anthropicAdminApiKey?: string;
 }
 
 export interface QuestionOption {
@@ -135,6 +137,8 @@ export interface SessionUsage {
   totalCacheCreationTokens: number;
   totalCacheReadTokens: number;
   messageCount: number;
+  // Current context window size (from most recent message)
+  currentContextTokens: number;
 }
 
 export interface UsageStats {
@@ -145,4 +149,66 @@ export interface UsageStats {
   totalCacheReadTokens: number;
   periodStart: number;
   periodEnd: number;
+}
+
+// Anthropic API Usage types
+export interface AnthropicUsageBucket {
+  started_at: string;
+  ended_at: string;
+  model?: string;
+  workspace_id?: string | null;
+  api_key_id?: string | null;
+  service_tier?: string;
+  context_window?: string;
+  uncached_input_tokens: number;
+  cache_creation_input_tokens: number;
+  cache_read_input_tokens: number;
+  output_tokens: number;
+  web_search_requests?: number;
+}
+
+export interface AnthropicUsageResponse {
+  data: AnthropicUsageBucket[];
+  has_more: boolean;
+  next_page?: string;
+}
+
+export interface ApiUsageStats {
+  periodStart: string;
+  periodEnd: string;
+  totalInputTokens: number;
+  totalOutputTokens: number;
+  totalCacheCreationTokens: number;
+  totalCacheReadTokens: number;
+  byModel: Record<string, {
+    inputTokens: number;
+    outputTokens: number;
+    cacheCreationTokens: number;
+    cacheReadTokens: number;
+  }>;
+  // Estimated cost in USD (rough calculation)
+  estimatedCostUsd: number;
+}
+
+// Sub-agent tracking types
+export interface SubAgent {
+  agentId: string;
+  slug: string;
+  sessionId: string;
+  status: 'running' | 'completed' | 'error';
+  startedAt: number;
+  completedAt?: number;
+  description?: string;
+  subagentType?: string;
+  messageCount: number;
+  lastActivity: number;
+  currentActivity?: string;
+}
+
+export interface AgentTree {
+  sessionId: string;
+  agents: SubAgent[];
+  totalAgents: number;
+  runningCount: number;
+  completedCount: number;
 }

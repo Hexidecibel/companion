@@ -1,5 +1,6 @@
 import { loadConfig } from './config';
 import { ClaudeWatcher } from './watcher';
+import { SubAgentWatcher } from './subagent-watcher';
 import { InputInjector } from './input-injector';
 import { MdnsAdvertiser } from './mdns';
 import { PushNotificationService } from './push';
@@ -53,6 +54,7 @@ async function main(): Promise<void> {
 
   // Initialize components
   const watcher = new ClaudeWatcher(config.claudeHome);
+  const subAgentWatcher = new SubAgentWatcher(config.claudeHome);
   const injector = new InputInjector(config.tmuxSession);
   const push = new PushNotificationService(config.fcmCredentialsPath, config.pushDelayMs);
 
@@ -68,7 +70,7 @@ async function main(): Promise<void> {
   );
 
   // Initialize WebSocket handler
-  const wsHandler = new WebSocketHandler(server, config, watcher, injector, push);
+  const wsHandler = new WebSocketHandler(server, config, watcher, injector, push, undefined, subAgentWatcher);
 
   // Start mDNS advertisement
   let mdns: MdnsAdvertiser | null = null;
@@ -77,8 +79,9 @@ async function main(): Promise<void> {
     mdns.start();
   }
 
-  // Start file watcher
+  // Start file watchers
   watcher.start();
+  subAgentWatcher.start();
 
   // Auto-approve safe tools
   if (config.autoApproveTools.length > 0) {
@@ -109,6 +112,7 @@ async function main(): Promise<void> {
     console.log('\nShutting down...');
 
     watcher.stop();
+    subAgentWatcher.stop();
     if (mdns) mdns.stop();
 
     server.close(() => {

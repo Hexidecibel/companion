@@ -19,9 +19,10 @@ interface SettingsProps {
   onBack: () => void;
   onOpenNotificationSettings: () => void;
   onOpenUsage: () => void;
+  onOpenAgents?: () => void;
 }
 
-export function Settings({ onBack, onOpenNotificationSettings, onOpenUsage }: SettingsProps) {
+export function Settings({ onBack, onOpenNotificationSettings, onOpenUsage, onOpenAgents }: SettingsProps) {
   const [settings, setSettings] = useState<AppSettings>({
     stayConnected: false,
     pushEnabled: false,
@@ -197,6 +198,18 @@ export function Settings({ onBack, onOpenNotificationSettings, onOpenUsage }: Se
             </View>
             <Text style={styles.linkArrow}>›</Text>
           </TouchableOpacity>
+
+          {onOpenAgents && (
+            <TouchableOpacity style={styles.linkRow} onPress={onOpenAgents}>
+              <View style={styles.settingInfo}>
+                <Text style={styles.settingLabel}>Sub-Agents</Text>
+                <Text style={styles.settingDescription}>
+                  View spawned background agents
+                </Text>
+              </View>
+              <Text style={styles.linkArrow}>›</Text>
+            </TouchableOpacity>
+          )}
         </View>
 
         <View style={styles.section}>

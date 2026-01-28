@@ -369,6 +369,27 @@ export class ClaudeWatcher extends EventEmitter {
     return false;
   }
 
+  clearActiveSession(): void {
+    this.activeSessionId = null;
+    this.isWaitingForInput = false;
+    this.lastMessageCount = 0;
+
+    // Emit empty update so clients clear their UI
+    this.emit('conversation-update', {
+      path: '',
+      sessionId: null,
+      messages: [],
+      highlights: [],
+    });
+
+    this.emit('status-change', {
+      sessionId: null,
+      isWaitingForInput: false,
+      currentActivity: undefined,
+      lastMessage: undefined,
+    });
+  }
+
   isWaiting(): boolean {
     return this.isWaitingForInput;
   }

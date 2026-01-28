@@ -50,6 +50,7 @@ export function loadConfig(): DaemonConfig {
         fcmCredentialsPath: parsed.fcm_credentials_path,
         pushDelayMs: parsed.push_delay_ms,
         autoApproveTools: parsed.auto_approve_tools,
+        anthropicAdminApiKey: parsed.anthropic_admin_api_key,
       };
     } catch (err) {
       console.error(`Error loading config from ${configPath}:`, err);

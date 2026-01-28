@@ -12,6 +12,7 @@ import { Settings } from './src/screens/Settings';
 import { SetupScreen } from './src/screens/SetupScreen';
 import { NotificationSettings } from './src/screens/NotificationSettings';
 import { UsageScreen } from './src/screens/UsageScreen';
+import { AgentTreeScreen } from './src/screens/AgentTreeScreen';
 import { wsService } from './src/services/websocket';
 import {
   registerForPushNotifications,
@@ -33,7 +34,7 @@ if (sentryDsn) {
 }
 
 
-type Screen = 'dashboard' | 'servers' | 'session' | 'settings' | 'setup' | 'notificationSettings' | 'usage';
+type Screen = 'dashboard' | 'servers' | 'session' | 'settings' | 'setup' | 'notificationSettings' | 'usage' | 'agents';
 
 function App() {
   const [currentScreen, setCurrentScreen] = useState<Screen>('dashboard');
@@ -130,6 +131,14 @@ function App() {
     setCurrentScreen('settings');
   }, []);
 
+  const handleOpenAgents = useCallback(() => {
+    setCurrentScreen('agents');
+  }, []);
+
+  const handleBackFromAgents = useCallback(() => {
+    setCurrentScreen('settings');
+  }, []);
+
   const handleOpenSettings = useCallback(() => {
     setCurrentScreen('settings');
   }, []);
@@ -186,10 +195,13 @@ function App() {
             onBack={handleBackFromSettings}
             onOpenNotificationSettings={handleOpenNotificationSettings}
             onOpenUsage={handleOpenUsage}
+            onOpenAgents={handleOpenAgents}
           />
         );
       case 'usage':
         return <UsageScreen onBack={handleBackFromUsage} />;
+      case 'agents':
+        return <AgentTreeScreen onBack={handleBackFromAgents} />;
       case 'notificationSettings':
         return <NotificationSettings onBack={handleBackFromNotificationSettings} />;
       case 'setup':
