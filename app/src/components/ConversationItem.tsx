@@ -78,6 +78,32 @@ async function copyToClipboard(text: string, label: string) {
   }
 }
 
+// Tool calls container with expand/collapse all
+function ToolCallsContainer({ toolCalls }: { toolCalls: ToolCall[] }) {
+  const [allExpanded, setAllExpanded] = useState<boolean | undefined>(undefined);
+
+  if (toolCalls.length === 0) return null;
+
+  const toggleAll = () => {
+    setAllExpanded(prev => prev === true ? false : true);
+  };
+
+  return (
+    <View style={styles.toolCallsContainer}>
+      {toolCalls.length > 1 && (
+        <TouchableOpacity style={styles.expandAllButton} onPress={toggleAll}>
+          <Text style={styles.expandAllText}>
+            {allExpanded === true ? 'Collapse All' : 'Expand All'}
+          </Text>
+        </TouchableOpacity>
+      )}
+      {toolCalls.map((tool) => (
+        <ToolCard key={tool.id} tool={tool} forceExpanded={allExpanded} />
+      ))}
+    </View>
+  );
+}
+
 // Render a unified diff view
 function DiffView({ oldText, newText }: { oldText: string; newText: string }) {
   const oldLines = oldText.split('\n');
@@ -120,8 +146,9 @@ function DiffView({ oldText, newText }: { oldText: string; newText: string }) {
 }
 
 // Expandable tool card component
-function ToolCard({ tool }: { tool: ToolCall }) {
+function ToolCard({ tool, forceExpanded }: { tool: ToolCall; forceExpanded?: boolean }) {
   const [expanded, setExpanded] = useState(false);
+  const isExpanded = forceExpanded !== undefined ? forceExpanded : expanded;
   const summary = getToolSummary(tool);
   const icon = getToolIcon(tool.name);
   const hasOutput = tool.output && tool.output.length > 0;
@@ -148,7 +175,7 @@ function ToolCard({ tool }: { tool: ToolCall }) {
   return (
     <TouchableOpacity
       style={toolCardStyles.container}
-      onPress={() => setExpanded(!expanded)}
+      onPress={() => forceExpanded === undefined && setExpanded(!expanded)}
       activeOpacity={0.7}
     >
       <View style={toolCardStyles.header}>
@@ -162,16 +189,16 @@ function ToolCard({ tool }: { tool: ToolCall }) {
             <Text style={toolCardStyles.duration}>{duration}</Text>
           )}
         </View>
-        <Text style={toolCardStyles.expandIcon}>{expanded ? '▼' : '▶'}</Text>
+        <Text style={toolCardStyles.expandIcon}>{isExpanded ? '▼' : '▶'}</Text>
       </View>
       <Text style={toolCardStyles.summaryLine} numberOfLines={1}>{summary}</Text>
-      {!expanded && outputPreview ? (
+      {!isExpanded && outputPreview ? (
         <View style={toolCardStyles.preview}>
           <Text style={toolCardStyles.previewText} numberOfLines={2}>{outputPreview}</Text>
         </View>
       ) : null}
 
-      {expanded && (
+      {isExpanded && (
         <View style={toolCardStyles.details}>
           {/* Show input details */}
           {tool.name === 'Bash' && command ? (
@@ -445,11 +472,7 @@ export function ConversationItem({ item, showToolCalls, onSelectOption, onFileTa
           </View>
         )}
         {hasToolCalls && (
-          <View style={styles.toolCallsContainer}>
-            {message.toolCalls!.map((tool) => (
-              <ToolCard key={tool.id} tool={tool} />
-            ))}
-          </View>
+          <ToolCallsContainer toolCalls={message.toolCalls!} />
         )}
         <Text style={styles.time}>{formatTime(item.timestamp)}</Text>
       </TouchableOpacity>
@@ -906,5 +929,16 @@ const styles = StyleSheet.create({
     paddingTop: 8,
     borderTopWidth: 1,
     borderTopColor: '#4b5563',
+  },
+  expandAllButton: {
+    alignSelf: 'flex-end',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    marginBottom: 4,
+  },
+  expandAllText: {
+    color: '#60a5fa',
+    fontSize: 12,
+    fontWeight: '500',
   },
 });

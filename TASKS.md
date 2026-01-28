@@ -115,14 +115,14 @@ See `docs/ROADMAP-V2.md` Section 4 for full details.
 
 Tasks suitable for longer autonomous work sessions:
 
-### 1. Enhanced Tool Card Details
+### 1. Enhanced Tool Card Details - COMPLETE
 ```
 Improve tool card information display:
-1. Add syntax highlighting for code in tool outputs
-2. Show file diffs for Edit tools more clearly
-3. Add copy-to-clipboard for tool outputs
-4. Show elapsed time for completed tools
-5. Add expand-all/collapse-all button
+1. Add syntax highlighting for code in tool outputs - SKIPPED (would need library)
+2. Show file diffs for Edit tools more clearly - ALREADY DONE (DiffView component)
+3. Add copy-to-clipboard for tool outputs - ALREADY DONE
+4. Show elapsed time for completed tools - ALREADY DONE
+5. Add expand-all/collapse-all button - DONE
 ```
 
 ---
