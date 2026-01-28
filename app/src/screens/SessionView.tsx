@@ -15,7 +15,7 @@ import {
   ScrollView,
   Keyboard,
 } from 'react-native';
-import { Server, ConversationHighlight } from '../types';
+import { Server, ConversationHighlight, SubAgent, AgentTree } from '../types';
 import { useConnection } from '../hooks/useConnection';
 import { useConversation } from '../hooks/useConversation';
 import { StatusIndicator } from '../components/StatusIndicator';
@@ -72,6 +72,8 @@ export function SessionView({ server, onBack, initialSessionId }: SessionViewPro
   const [viewingFile, setViewingFile] = useState<string | null>(null);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const [queuedMessages, setQueuedMessages] = useState<QueuedMessage[]>([]);
+  const [agentTree, setAgentTree] = useState<AgentTree | null>(null);
+  const [showAgentsModal, setShowAgentsModal] = useState(false);
 
   // Subscribe to message queue updates
   useEffect(() => {
@@ -81,6 +83,39 @@ export function SessionView({ server, onBack, initialSessionId }: SessionViewPro
     });
     return unsubscribe;
   }, [server.id]);
+
+  // Poll for sub-agent activity
+  useEffect(() => {
+    if (!isConnected) {
+      setAgentTree(null);
+      return;
+    }
+
+    const fetchAgentTree = async () => {
+      try {
+        // Extract session ID from conversation path (filename without .jsonl)
+        let sessionId: string | undefined;
+        if (status?.conversationId) {
+          const filename = status.conversationId.split('/').pop() || '';
+          sessionId = filename.replace('.jsonl', '');
+        }
+
+        const response = await wsService.sendRequest('get_agent_tree', { sessionId });
+        if (response.success && response.payload) {
+          setAgentTree(response.payload as AgentTree);
+        }
+      } catch {
+        // Silent fail on poll
+      }
+    };
+
+    // Initial fetch
+    fetchAgentTree();
+
+    // Poll every 5 seconds
+    const interval = setInterval(fetchAgentTree, 5000);
+    return () => clearInterval(interval);
+  }, [isConnected, status?.conversationId]);
 
   const cancelQueuedMessage = useCallback(async (id: string) => {
     await messageQueue.dequeue(id);
@@ -193,59 +228,33 @@ export function SessionView({ server, onBack, initialSessionId }: SessionViewPro
     }
   }, [isConnected, refresh, server.id, initialSessionId]);
 
-  // Debug logging helper
-  const logScroll = useCallback((event: string, data: Record<string, unknown>) => {
-    if (wsService.isConnected()) {
-      wsService.sendRequest('scroll_log', { event, ...data, ts: Date.now() }).catch(() => {});
-    }
-  }, []);
-
-  // Handle content size changes - this is when we should auto-scroll
+  
+  // Handle content size changes - auto-scroll when locked to bottom
   const handleContentSizeChange = useCallback((_width: number, height: number) => {
-    // Only act if content actually grew significantly (not on shrink or minor fluctuations)
     const prevHeight = lastContentHeight.current;
-    // Always update lastContentHeight to track the latest
     lastContentHeight.current = height;
-    // But only consider it "grew" if it's a significant increase (>50px)
-    const contentGrew = height > prevHeight + 50;
 
-    logScroll('contentSizeChange', {
-      height,
-      prevHeight,
-      contentGrew,
-      autoScroll: autoScrollEnabled.current,
-      nearBottom: isNearBottom.current,
-      initialDone: initialScrollDone.current
-    });
-
+    // Initial load - scroll to bottom
     if (!initialScrollDone.current && height > 0) {
-      // First load - scroll to bottom immediately
       initialScrollDone.current = true;
-      logScroll('initialScroll', { height });
       listRef.current?.scrollToEnd({ animated: false });
       return;
     }
 
-    // Only scroll if content grew significantly AND auto-scroll is enabled AND we were near bottom
-    // Use larger threshold (50px) to ignore minor layout fluctuations
-    const significantGrowth = height > lastContentHeight.current + 50;
-    if (significantGrowth && autoScrollEnabled.current && isNearBottom.current) {
-      // Debounce: cancel pending scroll and schedule new one
-      // Use longer delay (250ms) to let content settle after re-renders
-      if (scrollTimeout.current) {
-        clearTimeout(scrollTimeout.current);
-      }
-      scrollTimeout.current = setTimeout(() => {
-        logScroll('autoScrollToEnd', { height });
+    const contentGrew = height > prevHeight + 20;
+    if (!contentGrew) return;
+
+    // If locked to bottom (autoScrollEnabled), stay at bottom
+    if (autoScrollEnabled.current) {
+      // Use requestAnimationFrame to avoid fighting with React Native's layout
+      requestAnimationFrame(() => {
         listRef.current?.scrollToEnd({ animated: false });
-        scrollTimeout.current = null;
-      }, 250);
-    } else if (significantGrowth && !autoScrollEnabled.current) {
-      // User is reading history - show new message indicator
-      logScroll('showNewMessageIndicator', { height });
+      });
+    } else {
+      // User is reading history - show indicator
       setHasNewMessages(true);
     }
-  }, [logScroll]);
+  }, []);
 
   const scrollToBottom = useCallback(() => {
     setHasNewMessages(false);
@@ -311,36 +320,22 @@ export function SessionView({ server, onBack, initialSessionId }: SessionViewPro
     const { layoutMeasurement, contentOffset, contentSize } = event.nativeEvent;
     const distanceFromBottom = contentSize.height - layoutMeasurement.height - contentOffset.y;
 
-    // Track if we're near the bottom (within 150px)
-    const nearBottom = distanceFromBottom < 150;
-    const wasNearBottom = isNearBottom.current;
+    const nearBottom = distanceFromBottom < 100;
     isNearBottom.current = nearBottom;
 
-    // Log significant scroll events (state changes only to reduce noise)
-    if (nearBottom !== wasNearBottom) {
-      logScroll('scrollStateChange', {
-        distanceFromBottom: Math.round(distanceFromBottom),
-        nearBottom,
-        contentHeight: Math.round(contentSize.height),
-        scrollY: Math.round(contentOffset.y),
-        viewHeight: Math.round(layoutMeasurement.height)
-      });
-    }
-
-    // Show/hide scroll button - only update state if value changed to avoid re-render loop
-    const shouldShowButton = distanceFromBottom > 200;
+    // Show/hide scroll button
+    const shouldShowButton = distanceFromBottom > 150;
     setShowScrollButton(prev => prev === shouldShowButton ? prev : shouldShowButton);
 
-    // If user scrolled to bottom, re-enable auto-scroll
+    // Lock to bottom when within 100px, unlock when scrolled up more than 150px
     if (nearBottom) {
       autoScrollEnabled.current = true;
-      // Only clear if there were new messages
       setHasNewMessages(prev => prev ? false : prev);
-    } else {
-      // User scrolled up - disable auto-scroll
+    } else if (distanceFromBottom > 150) {
       autoScrollEnabled.current = false;
     }
-  }, [logScroll]);
+    // Between 100-150px: keep current state (hysteresis to prevent flapping)
+  }, []);
 
   const handleCancel = () => {
     Alert.alert(
@@ -351,6 +346,16 @@ export function SessionView({ server, onBack, initialSessionId }: SessionViewPro
         { text: 'Yes', onPress: () => sendInput('\x03') }, // Ctrl+C
       ]
     );
+  };
+
+  const formatDuration = (start: number, end?: number): string => {
+    const endTime = end || Date.now();
+    const seconds = Math.floor((endTime - start) / 1000);
+    if (seconds < 60) return `${seconds}s`;
+    const minutes = Math.floor(seconds / 60);
+    if (minutes < 60) return `${minutes}m ${seconds % 60}s`;
+    const hours = Math.floor(minutes / 60);
+    return `${hours}h ${minutes % 60}m`;
   };
 
   const renderItem = ({ item }: { item: ConversationHighlight }) => (
@@ -559,6 +564,27 @@ export function SessionView({ server, onBack, initialSessionId }: SessionViewPro
         </TouchableOpacity>
       )}
 
+      {/* Sub-agents bar - shows when background tasks are running */}
+      {(() => {
+        const runningAgents = agentTree?.agents.filter(a => a.status === 'running') || [];
+        if (!isConnected || runningAgents.length === 0) return null;
+        return (
+          <TouchableOpacity
+            style={styles.subAgentsBar}
+            onPress={() => setShowAgentsModal(true)}
+            activeOpacity={0.8}
+          >
+            <View style={styles.subAgentsContent}>
+              <View style={styles.subAgentsDot} />
+              <Text style={styles.subAgentsText}>
+                {runningAgents.length} sub-agent{runningAgents.length > 1 ? 's' : ''} running
+              </Text>
+            </View>
+            <Text style={styles.subAgentsArrow}>{'>'}</Text>
+          </TouchableOpacity>
+        );
+      })()}
+
       {/* Activity Output Modal */}
       <Modal
         visible={showActivityModal}
@@ -627,6 +653,100 @@ export function SessionView({ server, onBack, initialSessionId }: SessionViewPro
         </View>
       </Modal>
 
+      {/* Sub-Agents Modal */}
+      <Modal
+        visible={showAgentsModal}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowAgentsModal(false)}
+      >
+        <View style={styles.agentsModalOverlay}>
+          <View style={styles.agentsModalContent}>
+            <View style={styles.agentsModalHeader}>
+              <Text style={styles.agentsModalTitle}>Sub-Agents</Text>
+              <TouchableOpacity
+                style={styles.agentsModalClose}
+                onPress={() => setShowAgentsModal(false)}
+              >
+                <Text style={styles.agentsModalCloseText}>x</Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Summary */}
+            {agentTree && (
+              <View style={styles.agentsSummaryBar}>
+                <View style={styles.agentsSummaryItem}>
+                  <Text style={styles.agentsSummaryValue}>{agentTree.totalAgents}</Text>
+                  <Text style={styles.agentsSummaryLabel}>Total</Text>
+                </View>
+                <View style={styles.agentsSummaryDivider} />
+                <View style={styles.agentsSummaryItem}>
+                  <Text style={[styles.agentsSummaryValue, { color: '#22c55e' }]}>
+                    {agentTree.runningCount}
+                  </Text>
+                  <Text style={styles.agentsSummaryLabel}>Running</Text>
+                </View>
+                <View style={styles.agentsSummaryDivider} />
+                <View style={styles.agentsSummaryItem}>
+                  <Text style={[styles.agentsSummaryValue, { color: '#3b82f6' }]}>
+                    {agentTree.completedCount}
+                  </Text>
+                  <Text style={styles.agentsSummaryLabel}>Done</Text>
+                </View>
+              </View>
+            )}
+
+            <ScrollView style={styles.agentsModalScroll}>
+              {agentTree && agentTree.agents.length > 0 ? (
+                agentTree.agents.map((agent) => (
+                  <View key={agent.agentId} style={styles.agentCard}>
+                    <View style={styles.agentCardHeader}>
+                      <Text style={[
+                        styles.agentStatusDot,
+                        { color: agent.status === 'running' ? '#22c55e' : '#3b82f6' }
+                      ]}>
+                        {agent.status === 'running' ? '●' : '✓'}
+                      </Text>
+                      <View style={styles.agentCardInfo}>
+                        <Text style={styles.agentSlug} numberOfLines={1}>
+                          {agent.slug || agent.agentId.slice(0, 8)}
+                        </Text>
+                        <Text style={styles.agentMeta}>
+                          {agent.status === 'running'
+                            ? `Running for ${formatDuration(agent.startedAt)}`
+                            : `Completed in ${formatDuration(agent.startedAt, agent.completedAt)}`
+                          }
+                          {' '}{agent.messageCount} msgs
+                        </Text>
+                      </View>
+                    </View>
+                    {agent.description && (
+                      <Text style={styles.agentDescription} numberOfLines={2}>
+                        {agent.description}
+                      </Text>
+                    )}
+                    {agent.currentActivity && agent.status === 'running' && (
+                      <Text style={styles.agentActivity} numberOfLines={1}>
+                        {agent.currentActivity}
+                      </Text>
+                    )}
+                  </View>
+                ))
+              ) : (
+                <Text style={styles.agentsEmptyText}>No sub-agents found</Text>
+              )}
+            </ScrollView>
+
+            <TouchableOpacity
+              style={styles.agentsModalDoneButton}
+              onPress={() => setShowAgentsModal(false)}
+            >
+              <Text style={styles.agentsModalDoneText}>Done</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
       {error && (
         <View style={styles.errorBanner}>
           <Text style={styles.errorText}>{error}</Text>
@@ -653,7 +773,8 @@ export function SessionView({ server, onBack, initialSessionId }: SessionViewPro
         ListEmptyComponent={renderEmptyContent}
         onScroll={handleScroll}
         onContentSizeChange={handleContentSizeChange}
-        scrollEventThrottle={100}
+        scrollEventThrottle={200}
+        keyboardShouldPersistTaps="handled"
         // Optimize re-renders
         removeClippedSubviews={Platform.OS === 'android'}
         maxToRenderPerBatch={10}
@@ -1148,6 +1269,165 @@ const styles = StyleSheet.create({
   queuedCancelText: {
     color: '#9ca3af',
     fontSize: 14,
+    fontWeight: '600',
+  },
+  // Sub-agents bar styles
+  subAgentsBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#14532d',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#22c55e',
+  },
+  subAgentsContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  subAgentsDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#22c55e',
+    marginRight: 8,
+  },
+  subAgentsText: {
+    color: '#bbf7d0',
+    fontSize: 13,
+    fontWeight: '500',
+  },
+  subAgentsArrow: {
+    color: '#86efac',
+    fontSize: 14,
+  },
+  // Sub-agents modal styles
+  agentsModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+    justifyContent: 'flex-end',
+  },
+  agentsModalContent: {
+    backgroundColor: '#1f2937',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    maxHeight: '80%',
+  },
+  agentsModalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#374151',
+  },
+  agentsModalTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#f3f4f6',
+  },
+  agentsModalClose: {
+    width: 32,
+    height: 32,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  agentsModalCloseText: {
+    fontSize: 24,
+    color: '#9ca3af',
+    lineHeight: 24,
+  },
+  agentsSummaryBar: {
+    flexDirection: 'row',
+    backgroundColor: '#111827',
+    marginHorizontal: 16,
+    marginTop: 16,
+    borderRadius: 12,
+    padding: 12,
+  },
+  agentsSummaryItem: {
+    flex: 1,
+    alignItems: 'center',
+  },
+  agentsSummaryValue: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#f3f4f6',
+  },
+  agentsSummaryLabel: {
+    fontSize: 11,
+    color: '#6b7280',
+    marginTop: 2,
+  },
+  agentsSummaryDivider: {
+    width: 1,
+    backgroundColor: '#374151',
+  },
+  agentsModalScroll: {
+    padding: 16,
+    flexGrow: 1,
+  },
+  agentCard: {
+    backgroundColor: '#111827',
+    borderRadius: 10,
+    padding: 12,
+    marginBottom: 8,
+  },
+  agentCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  agentStatusDot: {
+    fontSize: 14,
+    marginRight: 10,
+    width: 16,
+    textAlign: 'center',
+  },
+  agentCardInfo: {
+    flex: 1,
+  },
+  agentSlug: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#f3f4f6',
+  },
+  agentMeta: {
+    fontSize: 11,
+    color: '#6b7280',
+    marginTop: 2,
+  },
+  agentDescription: {
+    fontSize: 12,
+    color: '#9ca3af',
+    marginTop: 8,
+    marginLeft: 26,
+  },
+  agentActivity: {
+    fontSize: 11,
+    color: '#60a5fa',
+    marginTop: 4,
+    marginLeft: 26,
+    fontStyle: 'italic',
+  },
+  agentsEmptyText: {
+    color: '#6b7280',
+    fontSize: 14,
+    textAlign: 'center',
+    paddingVertical: 20,
+  },
+  agentsModalDoneButton: {
+    margin: 16,
+    marginTop: 8,
+    backgroundColor: '#3b82f6',
+    paddingVertical: 14,
+    borderRadius: 10,
+    alignItems: 'center',
+  },
+  agentsModalDoneText: {
+    color: '#ffffff',
+    fontSize: 16,
     fontWeight: '600',
   },
 });

@@ -152,3 +152,26 @@ export interface TmuxSessionMissing {
     workingDir: string;
   };
 }
+
+// Sub-agent tracking types
+export interface SubAgent {
+  agentId: string;
+  slug: string;
+  sessionId: string;
+  status: 'running' | 'completed' | 'error';
+  startedAt: number;
+  completedAt?: number;
+  description?: string;
+  subagentType?: string;
+  messageCount: number;
+  lastActivity: number;
+  currentActivity?: string;
+}
+
+export interface AgentTree {
+  sessionId: string;
+  agents: SubAgent[];
+  totalAgents: number;
+  runningCount: number;
+  completedCount: number;
+}

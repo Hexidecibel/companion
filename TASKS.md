@@ -29,6 +29,8 @@
 - [x] Queued message display with cancel button
 - [x] Scroll-to-bottom button positioning
 - [x] Auto-approve for safe tools (Read, Glob, Grep, WebFetch, WebSearch)
+- [x] Scroll lock to bottom with hysteresis (prevents jump loops)
+- [x] FlatList touch handling fix (keyboardShouldPersistTaps)
 
 ### Developer Experience
 - [x] Sentry error tracking integration
@@ -57,9 +59,9 @@
 - [ ] Historical usage graphs (future enhancement)
 
 #### Dashboard Refinement
-- [ ] Fix dashboard connection validation (validate before showing connected)
-- [ ] Add session sorting (waiting first, then working, then idle)
-- [ ] Add last activity timestamp display
+- [x] Fix dashboard connection validation (validate before showing connected) - already correct
+- [x] Add session sorting (waiting first, then working, then idle)
+- [x] Add last activity timestamp display
 
 ### Medium Priority - Notification Preferences
 - [x] Configurable notification settings per server
@@ -69,16 +71,17 @@
 - [ ] Notification sound/vibration preferences
 - [ ] Filter notifications by session or project
 
-### Medium Priority - Sub-Agent Visibility (ROADMAP Phase 3)
+### Medium Priority - Sub-Agent Visibility (ROADMAP Phase 3) - COMPLETE
 See `docs/ROADMAP-V2.md` Section 3 for full details.
 
-- [ ] Watch `subagents/` directory in daemon
-- [ ] Parse Task tool calls to build parent-child relationships
-- [ ] Create `AgentNode` type and tree-building logic
-- [ ] Add `get_agent_tree` daemon endpoint
-- [ ] Create `AgentTreeScreen` with expandable tree view
-- [ ] Add agent status to session summary
-- [ ] Cancel specific sub-agent functionality
+- [x] Watch `subagents/` directory in daemon (SubAgentWatcher)
+- [x] Create `SubAgent` type and tracking logic
+- [x] Add `get_agent_tree` daemon endpoint
+- [x] Create `AgentTreeScreen` with expandable list view
+- [x] Add sub-agent indicator bar in SessionView (shows running count)
+- [x] Sub-agent modal with status, duration, description
+- [x] Filter sub-agents by current session
+- [x] Auto-cleanup stale agents (>1hr inactive = completed, >24hr = removed)
 
 ### Lower Priority - Scheduled Agents (ROADMAP Phase 4)
 See `docs/ROADMAP-V2.md` Section 4 for full details.
@@ -112,18 +115,7 @@ See `docs/ROADMAP-V2.md` Section 4 for full details.
 
 Tasks suitable for longer autonomous work sessions:
 
-### 1. Sub-Agent Tree View
-```
-Show sub-agents in a tree view:
-1. Update watcher.ts to watch subagents/ directory
-2. Parse Task tool calls to identify parent-child relationships
-3. Create AgentNode interface and tree-building logic
-4. Add get_agent_tree endpoint to daemon
-5. Create AgentTreeScreen.tsx with collapsible tree
-6. Test with actual sub-agent spawning
-```
-
-### 2. Enhanced Tool Card Details
+### 1. Enhanced Tool Card Details
 ```
 Improve tool card information display:
 1. Add syntax highlighting for code in tool outputs

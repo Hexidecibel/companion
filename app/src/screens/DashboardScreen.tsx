@@ -33,6 +33,40 @@ function SessionStatusIcon({ status }: { status: SessionSummary['status'] }) {
   }
 }
 
+// Sort sessions: waiting first, then working, then idle/error
+function sortSessions(sessions: SessionSummary[]): SessionSummary[] {
+  const priority: Record<SessionSummary['status'], number> = {
+    waiting: 0,
+    working: 1,
+    idle: 2,
+    error: 3,
+  };
+  return [...sessions].sort((a, b) => {
+    const priorityDiff = priority[a.status] - priority[b.status];
+    if (priorityDiff !== 0) return priorityDiff;
+    // Within same status, sort by most recent activity
+    return b.lastActivity - a.lastActivity;
+  });
+}
+
+// Format relative time
+function formatRelativeTime(timestamp: number): string {
+  const now = Date.now();
+  const diff = now - timestamp;
+
+  if (diff < 60000) return 'just now';
+  if (diff < 3600000) {
+    const mins = Math.floor(diff / 60000);
+    return `${mins}m ago`;
+  }
+  if (diff < 86400000) {
+    const hours = Math.floor(diff / 3600000);
+    return `${hours}h ago`;
+  }
+  const days = Math.floor(diff / 86400000);
+  return `${days}d ago`;
+}
+
 function ServerCard({
   server,
   status,
@@ -82,7 +116,7 @@ function ServerCard({
           {status.summary.sessions.length === 0 ? (
             <Text style={styles.noSessionsText}>No active sessions</Text>
           ) : (
-            status.summary.sessions.slice(0, 5).map((session) => (
+            sortSessions(status.summary.sessions).slice(0, 5).map((session) => (
               <TouchableOpacity
                 key={session.id}
                 style={styles.sessionRow}
@@ -91,9 +125,14 @@ function ServerCard({
               >
                 <SessionStatusIcon status={session.status} />
                 <View style={styles.sessionInfo}>
-                  <Text style={styles.sessionName} numberOfLines={1}>
-                    {session.name}
-                  </Text>
+                  <View style={styles.sessionHeader}>
+                    <Text style={styles.sessionName} numberOfLines={1}>
+                      {session.name}
+                    </Text>
+                    <Text style={styles.sessionTime}>
+                      {formatRelativeTime(session.lastActivity)}
+                    </Text>
+                  </View>
                   <Text style={styles.sessionPath} numberOfLines={1}>
                     {session.projectPath}
                   </Text>
@@ -416,10 +455,21 @@ const styles = StyleSheet.create({
   sessionInfo: {
     flex: 1,
   },
+  sessionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
   sessionName: {
     color: '#f3f4f6',
     fontSize: 14,
     fontWeight: '500',
+    flex: 1,
+  },
+  sessionTime: {
+    color: '#6b7280',
+    fontSize: 11,
+    marginLeft: 8,
   },
   sessionPath: {
     color: '#6b7280',

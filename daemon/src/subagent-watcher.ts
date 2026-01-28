@@ -36,10 +36,26 @@ export class SubAgentWatcher extends EventEmitter {
   private claudeHome: string;
   private watcher: chokidar.FSWatcher | null = null;
   private agents: Map<string, TrackedSubAgent> = new Map();
+  private cleanupInterval: NodeJS.Timeout | null = null;
 
   constructor(claudeHome: string) {
     super();
     this.claudeHome = claudeHome;
+  }
+
+  // Remove agents older than 24 hours from memory
+  private cleanup(): void {
+    const oneDayAgo = Date.now() - 24 * 60 * 60 * 1000;
+    let removed = 0;
+    for (const [key, agent] of this.agents.entries()) {
+      if (agent.lastActivity < oneDayAgo) {
+        this.agents.delete(key);
+        removed++;
+      }
+    }
+    if (removed > 0) {
+      console.log(`SubAgentWatcher: Cleaned up ${removed} old agents`);
+    }
   }
 
   start(): void {
@@ -65,12 +81,21 @@ export class SubAgentWatcher extends EventEmitter {
     this.watcher.on('error', (error) => {
       console.error('SubAgentWatcher error:', error);
     });
+
+    // Run cleanup every hour
+    this.cleanupInterval = setInterval(() => this.cleanup(), 60 * 60 * 1000);
+    // Also run cleanup on start to clear any stale data
+    this.cleanup();
   }
 
   stop(): void {
     if (this.watcher) {
       this.watcher.close();
       this.watcher = null;
+    }
+    if (this.cleanupInterval) {
+      clearInterval(this.cleanupInterval);
+      this.cleanupInterval = null;
     }
   }
 
@@ -197,11 +222,26 @@ export class SubAgentWatcher extends EventEmitter {
     let runningCount = 0;
     let completedCount = 0;
 
+    // Only show running agents + completed agents from last 2 hours
+    const now = Date.now();
+    const twoHoursAgo = now - 2 * 60 * 60 * 1000;
+    const oneHourAgo = now - 60 * 60 * 1000;
+
     for (const tracked of this.agents.values()) {
       // Filter by session if specified
       if (sessionId && tracked.sessionId !== sessionId) continue;
 
-      const status = tracked.isComplete ? 'completed' : 'running';
+      // Consider agent completed if explicitly marked OR no activity in 1 hour
+      const isStale = tracked.lastActivity < oneHourAgo;
+      const isActuallyComplete = tracked.isComplete || isStale;
+      const status = isActuallyComplete ? 'completed' : 'running';
+      const effectiveCompletedAt = tracked.completedAt || (isStale ? tracked.lastActivity : undefined);
+
+      // Skip old completed agents
+      if (status === 'completed' && effectiveCompletedAt && effectiveCompletedAt < twoHoursAgo) {
+        continue;
+      }
+
       if (status === 'running') runningCount++;
       else completedCount++;
 
@@ -211,7 +251,7 @@ export class SubAgentWatcher extends EventEmitter {
         sessionId: tracked.sessionId,
         status,
         startedAt: tracked.startedAt,
-        completedAt: tracked.completedAt,
+        completedAt: effectiveCompletedAt,
         description: tracked.description,
         subagentType: tracked.subagentType,
         messageCount: tracked.messageCount,
