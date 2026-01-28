@@ -13,37 +13,45 @@ interface SetupScreenProps {
   onBack: () => void;
 }
 
-const INSTALL_SCRIPT = `curl -sL https://raw.githubusercontent.com/Hexidecibel/claude-companion/main/daemon/scripts/install.sh | bash`;
+const INSTALL_SCRIPT = `git clone https://github.com/Hexidecibel/claude-companion.git
+cd claude-companion/daemon
+bash scripts/install.sh`;
 
-const MANUAL_STEPS = `# 1. Clone the repository
+const MANUAL_STEPS = `# The installer automatically:
+# - Detects your OS (macOS, Ubuntu, Fedora, Arch, etc.)
+# - Installs Node.js, tmux, and other dependencies
+# - Builds the daemon
+# - Generates a secure auth token
+# - Sets up auto-start service (systemd/launchd)
+
+# For macOS:
+#   Installs to ~/.claude-companion
+#   Uses launchd for auto-start
+
+# For Linux with sudo:
+#   Installs to /opt/claude-companion
+#   Uses systemd for auto-start
+
+# For Linux without sudo:
+#   Installs to ~/.claude-companion
+#   Uses user-level systemd
+
+# After install, save your token and use it in the app!
+
+# --- Alternative: Manual steps ---
+
+# 1. Install prerequisites
+# macOS: brew install node tmux
+# Ubuntu: sudo apt install nodejs npm tmux
+# Fedora: sudo dnf install nodejs tmux
+
+# 2. Clone and build
 git clone https://github.com/Hexidecibel/claude-companion.git
 cd claude-companion/daemon
+npm install && npm run build
 
-# 2. Install dependencies
-npm install
-
-# 3. Build the daemon
-npm run build
-
-# 4. Create config directory and file
-mkdir -p ~/.claude-companion
-cat > ~/.claude-companion/config.json << 'EOF'
-{
-  "port": 9877,
-  "token": "YOUR_SECRET_TOKEN",
-  "tls": false,
-  "tmuxSession": "main",
-  "claudeHome": "~/.claude",
-  "mdnsEnabled": true,
-  "pushDelayMs": 60000
-}
-EOF
-
-# 5. Start the daemon
-CONFIG_PATH=~/.claude-companion/config.json node dist/index.js
-
-# Or run with nohup for background:
-CONFIG_PATH=~/.claude-companion/config.json nohup node dist/index.js > daemon.log 2>&1 &`;
+# 3. Run the installer
+bash scripts/install.sh`;
 
 export function SetupScreen({ onBack }: SetupScreenProps) {
   const copyToClipboard = (text: string) => {
@@ -62,9 +70,9 @@ export function SetupScreen({ onBack }: SetupScreenProps) {
       </View>
 
       <ScrollView style={styles.content} contentContainerStyle={styles.contentContainer}>
-        <Text style={styles.sectionTitle}>Quick Install (Linux/macOS)</Text>
+        <Text style={styles.sectionTitle}>Quick Install</Text>
         <Text style={styles.description}>
-          Run this one-liner on your server to install the Claude Companion daemon:
+          Run these commands on your server (macOS, Ubuntu, Fedora, Arch, or Alpine):
         </Text>
         <TouchableOpacity
           style={styles.codeBlock}
@@ -86,18 +94,22 @@ export function SetupScreen({ onBack }: SetupScreenProps) {
           <Text style={styles.copyHint}>Tap to copy</Text>
         </TouchableOpacity>
 
-        <Text style={styles.sectionTitle}>Requirements</Text>
+        <Text style={styles.sectionTitle}>What Gets Installed</Text>
         <View style={styles.listItem}>
           <Text style={styles.bullet}>-</Text>
-          <Text style={styles.listText}>Node.js 18+ installed on the server</Text>
+          <Text style={styles.listText}>Node.js 20 (if not present)</Text>
         </View>
         <View style={styles.listItem}>
           <Text style={styles.bullet}>-</Text>
-          <Text style={styles.listText}>Claude Code running in a tmux session</Text>
+          <Text style={styles.listText}>tmux (for Claude Code sessions)</Text>
         </View>
         <View style={styles.listItem}>
           <Text style={styles.bullet}>-</Text>
-          <Text style={styles.listText}>Port 9877 accessible (or your chosen port)</Text>
+          <Text style={styles.listText}>Daemon with auto-start service</Text>
+        </View>
+        <View style={styles.listItem}>
+          <Text style={styles.bullet}>-</Text>
+          <Text style={styles.listText}>TLS certificates (auto-generated)</Text>
         </View>
 
         <Text style={styles.sectionTitle}>Connecting from the App</Text>
