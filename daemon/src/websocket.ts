@@ -26,6 +26,14 @@ interface AuthenticatedClient {
   subscribed: boolean;
 }
 
+interface ClientError {
+  message: string;
+  stack?: string;
+  componentStack?: string;
+  timestamp: number;
+  deviceId?: string;
+}
+
 export class WebSocketHandler {
   private wss: WebSocketServer;
   private clients: Map<string, AuthenticatedClient> = new Map();
@@ -37,6 +45,8 @@ export class WebSocketHandler {
   private tmux: TmuxManager;
   private tmuxSessionConfigs: Map<string, TmuxSessionConfig> = new Map();
   private config: DaemonConfig;
+  private clientErrors: ClientError[] = [];
+  private readonly MAX_CLIENT_ERRORS = 50;
 
   constructor(
     server: Server,
@@ -484,6 +494,14 @@ export class WebSocketHandler {
 
       case 'get_agent_tree':
         this.handleGetAgentTree(client, payload as { sessionId?: string } | undefined, requestId);
+        break;
+
+      case 'client_error':
+        this.handleClientError(client, payload as ClientError, requestId);
+        break;
+
+      case 'get_client_errors':
+        this.handleGetClientErrors(client, requestId);
         break;
 
       default:
@@ -1297,6 +1315,53 @@ export class WebSocketHandler {
         requestId,
       });
     }
+  }
+
+  private handleClientError(
+    client: AuthenticatedClient,
+    payload: ClientError,
+    requestId?: string
+  ): void {
+    // Log to console (goes to journalctl)
+    console.error('Client error:', payload.message);
+    if (payload.stack) {
+      console.error('Stack:', payload.stack);
+    }
+
+    // Store in memory for later retrieval
+    const error: ClientError = {
+      message: payload.message,
+      stack: payload.stack,
+      componentStack: payload.componentStack,
+      timestamp: payload.timestamp || Date.now(),
+      deviceId: client.deviceId,
+    };
+
+    this.clientErrors.unshift(error);
+    if (this.clientErrors.length > this.MAX_CLIENT_ERRORS) {
+      this.clientErrors = this.clientErrors.slice(0, this.MAX_CLIENT_ERRORS);
+    }
+
+    this.send(client.ws, {
+      type: 'client_error',
+      success: true,
+      requestId,
+    });
+  }
+
+  private handleGetClientErrors(
+    client: AuthenticatedClient,
+    requestId?: string
+  ): void {
+    this.send(client.ws, {
+      type: 'client_errors',
+      success: true,
+      payload: {
+        errors: this.clientErrors,
+        count: this.clientErrors.length,
+      },
+      requestId,
+    });
   }
 
   private handleGetUsage(client: AuthenticatedClient, requestId?: string): void {

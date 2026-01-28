@@ -13,6 +13,7 @@ import { SetupScreen } from './src/screens/SetupScreen';
 import { NotificationSettings } from './src/screens/NotificationSettings';
 import { UsageScreen } from './src/screens/UsageScreen';
 import { AgentTreeScreen } from './src/screens/AgentTreeScreen';
+import { ErrorBoundary } from './src/components/ErrorBoundary';
 import { wsService } from './src/services/websocket';
 import {
   registerForPushNotifications,
@@ -219,21 +220,23 @@ function App() {
 
   return (
     <SafeAreaProvider>
-      <StatusBar barStyle="light-content" backgroundColor="#111827" />
-      <SafeAreaView style={styles.container} edges={['top']}>
-        {renderScreen()}
-      </SafeAreaView>
-      {currentScreen === 'dashboard' && (
-        <View style={styles.settingsButton}>
-          <SafeAreaView edges={['bottom']}>
-            <View style={styles.settingsButtonInner}>
-              <View style={styles.settingsIcon} onTouchEnd={handleOpenSettings}>
-                <View style={styles.settingsGear} />
+      <ErrorBoundary>
+        <StatusBar barStyle="light-content" backgroundColor="#111827" />
+        <SafeAreaView style={styles.container} edges={['top']}>
+          {renderScreen()}
+        </SafeAreaView>
+        {currentScreen === 'dashboard' && (
+          <View style={styles.settingsButton}>
+            <SafeAreaView edges={['bottom']}>
+              <View style={styles.settingsButtonInner}>
+                <View style={styles.settingsIcon} onTouchEnd={handleOpenSettings}>
+                  <View style={styles.settingsGear} />
+                </View>
               </View>
-            </View>
-          </SafeAreaView>
-        </View>
-      )}
+            </SafeAreaView>
+          </View>
+        )}
+      </ErrorBoundary>
     </SafeAreaProvider>
   );
 }
