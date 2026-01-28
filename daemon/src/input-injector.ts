@@ -3,6 +3,7 @@ import { spawn, execSync } from 'child_process';
 export class InputInjector {
   private defaultSession: string;
   private activeSession: string;
+  private sendLock: Promise<void> = Promise.resolve();
 
   constructor(tmuxSession: string) {
     this.defaultSession = tmuxSession;
@@ -11,20 +12,34 @@ export class InputInjector {
 
   /**
    * Send input to the active session (or a specific session if provided)
+   * Uses a lock to prevent concurrent sends from interleaving
    */
   async sendInput(input: string, targetSession?: string): Promise<boolean> {
-    const session = targetSession || this.activeSession;
-    const { spawnSync } = require('child_process');
+    // Wait for any pending send to complete before starting this one
+    const previousLock = this.sendLock;
+    let releaseLock: () => void;
+    this.sendLock = new Promise<void>(resolve => {
+      releaseLock = resolve;
+    });
 
-    // First, check if the tmux session exists
-    const checkResult = spawnSync('tmux', ['has-session', '-t', session], { timeout: 5000 });
-    if (checkResult.status !== 0) {
-      console.error(`Tmux session '${session}' not found`);
-      return false;
+    try {
+      await previousLock;
+
+      const session = targetSession || this.activeSession;
+      const { spawnSync } = require('child_process');
+
+      // First, check if the tmux session exists
+      const checkResult = spawnSync('tmux', ['has-session', '-t', session], { timeout: 5000 });
+      if (checkResult.status !== 0) {
+        console.error(`Tmux session '${session}' not found`);
+        return false;
+      }
+
+      // Session exists, send the input
+      return await this.doSendInput(input, session);
+    } finally {
+      releaseLock!();
     }
-
-    // Session exists, send the input
-    return this.doSendInput(input, session);
   }
 
   private async doSendInput(input: string, session: string): Promise<boolean> {
@@ -41,8 +56,8 @@ export class InputInjector {
       }
       console.log('Text sent to tmux');
 
-      // Synchronous sleep
-      spawnSync('sleep', ['0.1']);
+      // Wait for tmux to process the text before sending Enter
+      await new Promise(resolve => setTimeout(resolve, 150));
 
       // Send Enter
       const enterResult = spawnSync('tmux', ['send-keys', '-t', session, 'Enter'], { timeout: 5000 });
@@ -51,6 +66,9 @@ export class InputInjector {
         return false;
       }
       console.log('Enter sent to tmux');
+
+      // Small delay after Enter to ensure tmux processes it before next message
+      await new Promise(resolve => setTimeout(resolve, 50));
 
       console.log(`Input sent successfully to tmux session '${session}'`);
       return true;
