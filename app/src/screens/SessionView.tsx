@@ -207,7 +207,7 @@ export function SessionView({ server, onBack, initialSessionId }: SessionViewPro
       scrollTimeout.current = setTimeout(() => {
         listRef.current?.scrollToEnd({ animated: false });
         scrollTimeout.current = null;
-      }, 50);
+      }, 100);
     } else if (!autoScrollEnabled.current) {
       // User is reading history - show new message indicator
       setHasNewMessages(true);
