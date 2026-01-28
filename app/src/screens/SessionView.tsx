@@ -200,12 +200,12 @@ export function SessionView({ server, onBack, initialSessionId }: SessionViewPro
     // Auto-scroll if enabled and we were near bottom
     if (autoScrollEnabled.current && isNearBottom.current) {
       // Debounce: cancel pending scroll and schedule new one
-      // This prevents animation interruption when content changes rapidly
+      // Use animated: false to prevent animation fighting with rapid content changes
       if (scrollTimeout.current) {
         clearTimeout(scrollTimeout.current);
       }
       scrollTimeout.current = setTimeout(() => {
-        listRef.current?.scrollToEnd({ animated: true });
+        listRef.current?.scrollToEnd({ animated: false });
         scrollTimeout.current = null;
       }, 50);
     } else if (!autoScrollEnabled.current) {
