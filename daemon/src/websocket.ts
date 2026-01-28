@@ -592,21 +592,34 @@ export class WebSocketHandler {
 
       case 'scaffold_create':
         (async () => {
-          const createConfig = payload as ProjectConfig;
-          const createResult = await scaffoldProject(createConfig, (progress) => {
-            // Send progress updates
-            this.send(client.ws, {
-              type: 'scaffold_progress',
-              success: true,
-              payload: progress,
+          try {
+            const createConfig = payload as ProjectConfig;
+            console.log('Scaffold: Creating project', createConfig.name, 'at', createConfig.location);
+            const createResult = await scaffoldProject(createConfig, (progress) => {
+              console.log('Scaffold progress:', progress.step, progress.detail || '');
+              // Send progress updates
+              this.send(client.ws, {
+                type: 'scaffold_progress',
+                success: true,
+                payload: progress,
+              });
             });
-          });
-          this.send(client.ws, {
-            type: 'scaffold_result',
-            success: createResult.success,
-            payload: createResult,
-            requestId,
-          });
+            console.log('Scaffold result:', createResult.success ? 'success' : createResult.error);
+            this.send(client.ws, {
+              type: 'scaffold_result',
+              success: createResult.success,
+              payload: createResult,
+              requestId,
+            });
+          } catch (err) {
+            console.error('Scaffold error:', err);
+            this.send(client.ws, {
+              type: 'scaffold_result',
+              success: false,
+              error: err instanceof Error ? err.message : String(err),
+              requestId,
+            });
+          }
         })();
         break;
 

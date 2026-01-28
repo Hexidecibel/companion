@@ -33,9 +33,10 @@ interface SessionViewProps {
   server: Server;
   onBack: () => void;
   initialSessionId?: string | null;
+  onNewProject?: () => void;
 }
 
-export function SessionView({ server, onBack, initialSessionId }: SessionViewProps) {
+export function SessionView({ server, onBack, initialSessionId, onNewProject }: SessionViewProps) {
   const { connectionState, isConnected, isConnecting, reconnect } = useConnection(server);
   const {
     highlights,
@@ -433,6 +434,7 @@ export function SessionView({ server, onBack, initialSessionId }: SessionViewPro
               onSessionChange={handleSessionChange}
               isOpen={showSessionPicker}
               onClose={() => setShowSessionPicker(false)}
+              onNewProject={onNewProject}
             />
           )}
         </View>

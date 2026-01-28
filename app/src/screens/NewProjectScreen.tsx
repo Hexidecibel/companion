@@ -32,6 +32,8 @@ export function NewProjectScreen({ onBack, onComplete }: NewProjectScreenProps) 
   const [selectedTemplate, setSelectedTemplate] = useState<string | null>(null);
   const [location, setLocation] = useState('~/projects');
   const [initGit, setInitGit] = useState(true);
+  const [createGitHubRepo, setCreateGitHubRepo] = useState(false);
+  const [privateRepo, setPrivateRepo] = useState(true);
 
   // Progress state
   const [progress, setProgress] = useState<ScaffoldProgress | null>(null);
@@ -73,10 +75,12 @@ export function NewProjectScreen({ onBack, onComplete }: NewProjectScreenProps) 
       const config: ProjectConfig = {
         name: projectName,
         description: projectDescription || `A ${templates.find(t => t.id === selectedTemplate)?.name} project`,
-        location: location.startsWith('~') ? location.replace('~', '/home/' + (process.env.USER || 'user')) : location,
+        location, // Server will expand ~ to home directory
         stackId: selectedTemplate,
         options: {
           initGit,
+          createGitHubRepo,
+          privateRepo,
           includeDocker: false,
           includeCI: false,
           includeLinter: true,
@@ -91,7 +95,7 @@ export function NewProjectScreen({ onBack, onComplete }: NewProjectScreenProps) 
       };
       const unsubscribe = wsService.onMessage(progressHandler);
 
-      const response = await wsService.sendRequest('scaffold_create', config);
+      const response = await wsService.sendRequest('scaffold_create', config, 120000); // 2 min for npm install
 
       unsubscribe();
 
@@ -117,7 +121,7 @@ export function NewProjectScreen({ onBack, onComplete }: NewProjectScreenProps) 
         error: err instanceof Error ? err.message : 'Unknown error',
       });
     }
-  }, [projectName, projectDescription, selectedTemplate, location, initGit, templates]);
+  }, [projectName, projectDescription, selectedTemplate, location, initGit, createGitHubRepo, privateRepo, templates]);
 
   const renderStepIndicator = () => {
     const steps = ['Details', 'Template', 'Options'];
@@ -283,6 +287,34 @@ export function NewProjectScreen({ onBack, onComplete }: NewProjectScreenProps) 
         />
       </View>
 
+      {initGit && (
+        <View style={styles.optionRow}>
+          <View style={styles.optionInfo}>
+            <Text style={styles.optionLabel}>Create GitHub Repository</Text>
+            <Text style={styles.optionDescription}>Push to GitHub (requires gh CLI)</Text>
+          </View>
+          <Switch
+            value={createGitHubRepo}
+            onValueChange={setCreateGitHubRepo}
+            trackColor={{ false: '#374151', true: '#3b82f6' }}
+          />
+        </View>
+      )}
+
+      {initGit && createGitHubRepo && (
+        <View style={styles.optionRow}>
+          <View style={styles.optionInfo}>
+            <Text style={styles.optionLabel}>Private Repository</Text>
+            <Text style={styles.optionDescription}>Make the GitHub repo private</Text>
+          </View>
+          <Switch
+            value={privateRepo}
+            onValueChange={setPrivateRepo}
+            trackColor={{ false: '#374151', true: '#3b82f6' }}
+          />
+        </View>
+      )}
+
       <View style={styles.summaryBox}>
         <Text style={styles.summaryTitle}>Summary</Text>
         <View style={styles.summaryRow}>
@@ -297,7 +329,13 @@ export function NewProjectScreen({ onBack, onComplete }: NewProjectScreenProps) 
         </View>
         <View style={styles.summaryRow}>
           <Text style={styles.summaryLabel}>Git:</Text>
-          <Text style={styles.summaryValue}>{initGit ? 'Yes' : 'No'}</Text>
+          <Text style={styles.summaryValue}>
+            {initGit
+              ? createGitHubRepo
+                ? `GitHub (${privateRepo ? 'private' : 'public'})`
+                : 'Local only'
+              : 'No'}
+          </Text>
         </View>
       </View>
 

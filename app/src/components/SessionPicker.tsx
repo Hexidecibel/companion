@@ -18,9 +18,10 @@ interface SessionPickerProps {
   onSessionChange?: (sessionId: string) => void;
   isOpen?: boolean;
   onClose?: () => void;
+  onNewProject?: () => void;
 }
 
-export function SessionPicker({ currentSessionId, onSessionChange, isOpen, onClose }: SessionPickerProps) {
+export function SessionPicker({ currentSessionId, onSessionChange, isOpen, onClose, onNewProject }: SessionPickerProps) {
   const [visible, setVisible] = useState(false);
 
   // Sync with external isOpen prop
@@ -359,6 +360,18 @@ export function SessionPicker({ currentSessionId, onSessionChange, isOpen, onClo
                 )}
 
                 <View style={styles.footer}>
+                  {onNewProject && (
+                    <TouchableOpacity
+                      style={[styles.newSessionButton, styles.newProjectButton]}
+                      onPress={() => {
+                        setVisible(false);
+                        onClose?.();
+                        onNewProject();
+                      }}
+                    >
+                      <Text style={styles.newSessionButtonText}>+ New Project</Text>
+                    </TouchableOpacity>
+                  )}
                   <TouchableOpacity
                     style={styles.newSessionButton}
                     onPress={() => {
@@ -548,6 +561,10 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     borderRadius: 10,
     alignItems: 'center',
+  },
+  newProjectButton: {
+    backgroundColor: '#10b981',
+    marginRight: 8,
   },
   newSessionButtonText: {
     color: '#ffffff',

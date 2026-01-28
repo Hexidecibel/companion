@@ -1,9 +1,21 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
+import * as os from 'os';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import { ProjectConfig, ScaffoldProgress, ScaffoldResult, StackTemplate } from './types';
 import { getTemplate } from './templates';
+
+// Expand ~ to home directory
+function expandPath(p: string): string {
+  if (p.startsWith('~/')) {
+    return path.join(os.homedir(), p.slice(2));
+  }
+  if (p === '~') {
+    return os.homedir();
+  }
+  return p;
+}
 
 const execAsync = promisify(exec);
 
@@ -41,7 +53,7 @@ export async function scaffoldProject(
     };
   }
 
-  const projectPath = path.join(config.location, toValidName(config.name));
+  const projectPath = path.join(expandPath(config.location), toValidName(config.name));
   const filesCreated: string[] = [];
 
   const variables: Record<string, string> = {
@@ -83,16 +95,41 @@ export async function scaffoldProject(
     if (config.options.initGit) {
       onProgress?.({
         step: 'Initializing git repository',
-        progress: 65,
+        progress: 60,
         complete: false,
       });
 
       try {
+        // Check if git is available
+        await execAsync('which git');
         await execAsync('git init', { cwd: projectPath });
         await execAsync('git add .', { cwd: projectPath });
         await execAsync('git commit -m "Initial commit from Claude Companion"', { cwd: projectPath });
+
+        // Step 3b: Create GitHub repo if requested
+        if (config.options.createGitHubRepo) {
+          onProgress?.({
+            step: 'Creating GitHub repository',
+            progress: 65,
+            complete: false,
+          });
+
+          try {
+            // Check if gh CLI is available
+            await execAsync('which gh');
+            const visibility = config.options.privateRepo ? '--private' : '--public';
+            const repoName = toValidName(config.name);
+            await execAsync(
+              `gh repo create ${repoName} ${visibility} --source=. --remote=origin --push`,
+              { cwd: projectPath, timeout: 30000 }
+            );
+          } catch (ghError) {
+            console.warn('GitHub repo creation failed (gh CLI may not be installed or authenticated):', ghError);
+            // Non-fatal, continue
+          }
+        }
       } catch (gitError) {
-        console.warn('Git init failed:', gitError);
+        console.warn('Git init failed (git may not be installed):', gitError);
         // Non-fatal, continue
       }
     }
@@ -155,7 +192,7 @@ export async function previewScaffold(
     return { error: `Unknown template: ${config.stackId}` };
   }
 
-  const projectPath = path.join(config.location, toValidName(config.name));
+  const projectPath = path.join(expandPath(config.location), toValidName(config.name));
   const files = template.files.map(f => f.path);
 
   return { files, projectPath };

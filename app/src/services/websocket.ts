@@ -263,7 +263,7 @@ export class WebSocketService {
     });
   }
 
-  async sendRequest(type: string, payload?: unknown): Promise<WebSocketResponse> {
+  async sendRequest(type: string, payload?: unknown, timeoutMs: number = 10000): Promise<WebSocketResponse> {
     const requestId = `req_${++this.requestCounter}`;
 
     return new Promise((resolve, reject) => {
@@ -271,7 +271,7 @@ export class WebSocketService {
       const timeout = setTimeout(() => {
         this.pendingRequests.delete(requestId);
         reject(new Error('Request timeout'));
-      }, 10000);
+      }, timeoutMs);
 
       this.pendingRequests.set(requestId, {
         resolve: (response) => {

@@ -14,6 +14,8 @@ import { NotificationSettings } from './src/screens/NotificationSettings';
 import { UsageScreen } from './src/screens/UsageScreen';
 import { AgentTreeScreen } from './src/screens/AgentTreeScreen';
 import { Archive } from './src/screens/Archive';
+import { NewProjectScreen } from './src/screens/NewProjectScreen';
+import { EditServerScreen } from './src/screens/EditServerScreen';
 import { ErrorBoundary } from './src/components/ErrorBoundary';
 import { wsService } from './src/services/websocket';
 import { archiveService } from './src/services/archive';
@@ -37,11 +39,12 @@ if (sentryDsn) {
 }
 
 
-type Screen = 'dashboard' | 'servers' | 'session' | 'settings' | 'setup' | 'notificationSettings' | 'usage' | 'agents' | 'archive';
+type Screen = 'dashboard' | 'servers' | 'session' | 'settings' | 'setup' | 'notificationSettings' | 'usage' | 'agents' | 'archive' | 'newProject' | 'editServer';
 
 function App() {
   const [currentScreen, setCurrentScreen] = useState<Screen>('dashboard');
   const [selectedServer, setSelectedServer] = useState<Server | null>(null);
+  const [serverToEdit, setServerToEdit] = useState<Server | null>(null);
   const pendingSessionId = useRef<string | null>(null);
 
   useEffect(() => {
@@ -176,6 +179,40 @@ function App() {
     setCurrentScreen('settings');
   }, []);
 
+  const handleOpenNewProject = useCallback(() => {
+    setCurrentScreen('newProject');
+  }, []);
+
+  const handleBackFromNewProject = useCallback(() => {
+    setCurrentScreen('dashboard');
+  }, []);
+
+  const handleProjectCreated = useCallback(async (projectPath: string) => {
+    console.log('Project created at:', projectPath);
+
+    // Create a tmux session for the new project
+    try {
+      const sessionName = projectPath.split('/').pop() || 'new-project';
+      const response = await wsService.sendRequest('create_tmux_session', {
+        name: sessionName,
+        workingDir: projectPath,
+        startClaude: true,
+      });
+
+      if (response.success) {
+        console.log('Created tmux session:', sessionName);
+        // Navigate to session view - the watcher will pick up the new session
+        setCurrentScreen('session');
+      } else {
+        console.error('Failed to create session:', response.error);
+        setCurrentScreen('dashboard');
+      }
+    } catch (err) {
+      console.error('Error creating session:', err);
+      setCurrentScreen('dashboard');
+    }
+  }, []);
+
   const handleOpenSettings = useCallback(() => {
     setCurrentScreen('settings');
   }, []);
@@ -192,6 +229,21 @@ function App() {
     setCurrentScreen('servers');
   }, []);
 
+  const handleAddServer = useCallback(() => {
+    setServerToEdit(null); // null means new server
+    setCurrentScreen('editServer');
+  }, []);
+
+  const handleEditServer = useCallback((server: Server) => {
+    setServerToEdit(server);
+    setCurrentScreen('editServer');
+  }, []);
+
+  const handleBackFromEditServer = useCallback(() => {
+    setServerToEdit(null);
+    setCurrentScreen('dashboard');
+  }, []);
+
   const handleBackFromServers = useCallback(() => {
     setCurrentScreen('dashboard');
   }, []);
@@ -202,8 +254,10 @@ function App() {
         return (
           <DashboardScreen
             onSelectServer={handleSelectServerFromDashboard}
-            onManageServers={handleManageServers}
+            onAddServer={handleAddServer}
+            onEditServer={handleEditServer}
             onOpenSetup={handleOpenSetup}
+            onOpenNewProject={handleOpenNewProject}
           />
         );
       case 'servers':
@@ -224,6 +278,7 @@ function App() {
             server={selectedServer}
             onBack={handleBackFromSession}
             initialSessionId={pendingSessionId.current}
+            onNewProject={handleOpenNewProject}
           />
         );
       case 'settings':
@@ -234,6 +289,7 @@ function App() {
             onOpenUsage={handleOpenUsage}
             onOpenAgents={handleOpenAgents}
             onOpenArchive={handleOpenArchive}
+            onOpenNewProject={handleOpenNewProject}
           />
         );
       case 'usage':
@@ -246,12 +302,29 @@ function App() {
         return <NotificationSettings onBack={handleBackFromNotificationSettings} />;
       case 'setup':
         return <SetupScreen onBack={handleBackFromSetup} />;
+      case 'newProject':
+        return (
+          <NewProjectScreen
+            onBack={handleBackFromNewProject}
+            onComplete={handleProjectCreated}
+          />
+        );
+      case 'editServer':
+        return (
+          <EditServerScreen
+            server={serverToEdit}
+            onBack={handleBackFromEditServer}
+            onSaved={handleBackFromEditServer}
+          />
+        );
       default:
         return (
           <DashboardScreen
             onSelectServer={handleSelectServerFromDashboard}
-            onManageServers={handleManageServers}
+            onAddServer={handleAddServer}
+            onEditServer={handleEditServer}
             onOpenSetup={handleOpenSetup}
+            onOpenNewProject={handleOpenNewProject}
           />
         );
     }

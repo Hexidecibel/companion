@@ -42,6 +42,8 @@ export interface ProjectConfig {
   stackId: string;
   options: {
     initGit: boolean;
+    createGitHubRepo: boolean;
+    privateRepo: boolean;
     includeDocker: boolean;
     includeCI: boolean;
     includeLinter: boolean;

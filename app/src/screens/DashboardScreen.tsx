@@ -15,8 +15,10 @@ import { useMultiServerStatus } from '../hooks/useMultiServerStatus';
 
 interface DashboardScreenProps {
   onSelectServer: (server: Server, sessionId?: string) => void;
-  onManageServers: () => void;
+  onAddServer: () => void;
+  onEditServer: (server: Server) => void;
   onOpenSetup: () => void;
+  onOpenNewProject?: () => void;
 }
 
 function SessionStatusIcon({ status }: { status: SessionSummary['status'] }) {
@@ -72,12 +74,14 @@ function ServerCard({
   server,
   status,
   onPress,
+  onLongPress,
   onSessionPress,
   onToggleEnabled,
 }: {
   server: Server;
   status: ServerStatus;
   onPress: () => void;
+  onLongPress: () => void;
   onSessionPress: (sessionId: string) => void;
   onToggleEnabled: (enabled: boolean) => void;
 }) {
@@ -94,8 +98,8 @@ function ServerCard({
     <TouchableOpacity
       style={[styles.serverCard, !isEnabled && styles.serverCardDisabled]}
       onPress={onPress}
+      onLongPress={onLongPress}
       activeOpacity={0.8}
-      disabled={!isEnabled}
     >
       <View style={styles.serverHeader}>
         <View style={[styles.connectionDot, { backgroundColor: connectionColor }]} />
@@ -175,8 +179,10 @@ function ServerCard({
 
 export function DashboardScreen({
   onSelectServer,
-  onManageServers,
+  onAddServer,
+  onEditServer,
   onOpenSetup,
+  onOpenNewProject,
 }: DashboardScreenProps) {
   const [servers, setServers] = useState<Server[]>([]);
   const [loading, setLoading] = useState(true);
@@ -239,7 +245,12 @@ export function DashboardScreen({
           <TouchableOpacity style={styles.headerButton} onPress={onOpenSetup}>
             <Text style={styles.headerButtonText}>?</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.headerButton} onPress={onManageServers}>
+          {onOpenNewProject && (
+            <TouchableOpacity style={styles.headerButton} onPress={onOpenNewProject}>
+              <Text style={styles.headerButtonIcon}>✦</Text>
+            </TouchableOpacity>
+          )}
+          <TouchableOpacity style={styles.headerButton} onPress={onAddServer}>
             <Text style={styles.headerButtonText}>+</Text>
           </TouchableOpacity>
         </View>
@@ -282,7 +293,7 @@ export function DashboardScreen({
             <Text style={styles.emptyText}>
               Add a server to get started monitoring your Claude sessions.
             </Text>
-            <TouchableOpacity style={styles.addButton} onPress={onManageServers}>
+            <TouchableOpacity style={styles.addButton} onPress={onAddServer}>
               <Text style={styles.addButtonText}>Add Server</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.setupLink} onPress={onOpenSetup}>
@@ -306,6 +317,7 @@ export function DashboardScreen({
                   server={server}
                   status={status}
                   onPress={() => handleServerPress(server)}
+                  onLongPress={() => onEditServer(server)}
                   onSessionPress={(sessionId) => handleSessionPress(server, sessionId)}
                   onToggleEnabled={async (enabled) => {
                     const updated = { ...server, enabled };
@@ -363,6 +375,10 @@ const styles = StyleSheet.create({
     color: '#f3f4f6',
     fontSize: 18,
     fontWeight: '600',
+  },
+  headerButtonIcon: {
+    color: '#10b981',
+    fontSize: 18,
   },
   summaryBar: {
     flexDirection: 'row',
