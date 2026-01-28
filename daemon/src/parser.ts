@@ -166,7 +166,8 @@ function parseEntry(
           }
         }
         // Add Yes/No options for pending approval tools
-        else if (isPending && APPROVAL_TOOLS.includes(block.name)) {
+        // But NOT for Task tools - they run in background and stay "pending" for a long time
+        else if (isPending && APPROVAL_TOOLS.includes(block.name) && block.name !== 'Task') {
           const input = block.input as Record<string, unknown>;
           let description = '';
 
