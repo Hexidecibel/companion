@@ -65,6 +65,7 @@ export function SessionView({ server, onBack, initialSessionId, onNewProject }: 
   const contentHeight = useRef(0);
   const scrollViewHeight = useRef(0);
   const lastDataLength = useRef(0);
+  const shouldScrollOnLoad = useRef(true); // Scroll to bottom on session enter
 
   // Track scroll position to show/hide scroll button
   const handleScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
@@ -92,9 +93,10 @@ export function SessionView({ server, onBack, initialSessionId, onNewProject }: 
     lastDataLength.current = data.length;
   }, [data.length]);
 
-  // Scroll to bottom on initial load
+  // Scroll to bottom on session enter/switch
   useEffect(() => {
-    if (data.length > 0 && lastDataLength.current === 0) {
+    if (data.length > 0 && shouldScrollOnLoad.current) {
+      shouldScrollOnLoad.current = false;
       setTimeout(() => scrollToBottom(false), 100);
     }
   }, [data.length, scrollToBottom]);
@@ -273,6 +275,7 @@ export function SessionView({ server, onBack, initialSessionId, onNewProject }: 
         // Only reset scroll state when switching sessions, not on every reconnect
         if (isSwitching) {
           lastDataLength.current = 0;
+          shouldScrollOnLoad.current = true;
           setShowScrollButton(false);
           setHasNewMessages(false);
         }
@@ -297,6 +300,7 @@ export function SessionView({ server, onBack, initialSessionId, onNewProject }: 
       setCurrentSessionId(newSessionId);
     }
     lastDataLength.current = 0;
+    shouldScrollOnLoad.current = true;
     setShowScrollButton(false);
     setHasNewMessages(false);
     refresh(true);
@@ -332,6 +336,7 @@ export function SessionView({ server, onBack, initialSessionId, onNewProject }: 
         setCurrentSessionId(newSessionId);
         dismissOtherSessionActivity();
         lastDataLength.current = 0;
+        shouldScrollOnLoad.current = true;
         setShowScrollButton(false);
         setHasNewMessages(false);
         refresh(true);
