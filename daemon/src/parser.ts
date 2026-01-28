@@ -1,5 +1,5 @@
 import * as fs from 'fs';
-import { ConversationMessage, ConversationHighlight, ToolCall, SessionStatus, QuestionOption, SessionUsage } from './types';
+import { ConversationMessage, ConversationHighlight, ToolCall, SessionStatus, QuestionOption, SessionUsage, CompactionEvent } from './types';
 
 interface ContentBlock {
   type: string;
@@ -241,7 +241,31 @@ export function extractHighlights(messages: ConversationMessage[]): Conversation
       // (means user already responded to any prompts)
       const originalIndex = messages.indexOf(msg);
       const userRespondedAfter = originalIndex < lastUserMessageIndex;
-      const showOptions = isLastMessage && msg.options && msg.options.length > 0 && !userRespondedAfter;
+
+      // Don't show tool approval options if the tool has already started running
+      // Check if any tool call in this message is no longer pending
+      const hasRunningOrCompletedTool = msg.toolCalls?.some(
+        tc => tc.status === 'completed' || tc.status === 'error' ||
+          // Also check if tool has output (means it ran)
+          (tc.output !== undefined && tc.output !== null)
+      ) ?? false;
+
+      // Also check if there's a running tool anywhere in the conversation after this message
+      // that might have been approved by a yes/no prompt in this message
+      let toolApprovedAndRunning = false;
+      if (msg.options && msg.options.some(o => o.label === 'yes' || o.label === 'no')) {
+        // This is a tool approval prompt - check if there are tools running after this
+        for (let i = originalIndex + 1; i < messages.length; i++) {
+          const laterMsg = messages[i];
+          if (laterMsg.toolCalls?.some(tc => tc.status === 'pending' || tc.status === 'completed' || tc.status === 'error')) {
+            toolApprovedAndRunning = true;
+            break;
+          }
+        }
+      }
+
+      const showOptions = isLastMessage && msg.options && msg.options.length > 0 &&
+        !userRespondedAfter && !hasRunningOrCompletedTool && !toolApprovedAndRunning;
 
       return {
         id: msg.id,
@@ -468,6 +492,49 @@ interface UsageJsonlEntry {
     model?: string;
     usage?: UsageData;
   };
+}
+
+/**
+ * Detect compaction events in a conversation file
+ * Returns the most recent compaction summary if found
+ */
+export function detectCompaction(
+  filePath: string,
+  sessionId: string,
+  sessionName: string,
+  projectPath: string,
+  lastCheckedLine: number = 0
+): { event: CompactionEvent | null; lastLine: number } {
+  if (!fs.existsSync(filePath)) {
+    return { event: null, lastLine: 0 };
+  }
+
+  const content = fs.readFileSync(filePath, 'utf-8');
+  const lines = content.split('\n').filter(line => line.trim());
+  let compactionEvent: CompactionEvent | null = null;
+
+  // Only check lines after lastCheckedLine to avoid re-detecting old compactions
+  for (let i = lastCheckedLine; i < lines.length; i++) {
+    try {
+      const entry = JSON.parse(lines[i]);
+
+      // Look for summary type entries (Claude compaction)
+      if (entry.type === 'summary' && entry.summary) {
+        const timestamp = entry.timestamp ? new Date(entry.timestamp).getTime() : Date.now();
+        compactionEvent = {
+          sessionId,
+          sessionName,
+          projectPath,
+          summary: entry.summary,
+          timestamp,
+        };
+      }
+    } catch {
+      // Skip malformed lines
+    }
+  }
+
+  return { event: compactionEvent, lastLine: lines.length };
 }
 
 /**

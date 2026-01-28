@@ -7,7 +7,11 @@ import {
   TouchableOpacity,
   ScrollView,
   ActivityIndicator,
+  Platform,
+  Alert,
 } from 'react-native';
+import * as FileSystem from 'expo-file-system/legacy';
+import * as IntentLauncher from 'expo-intent-launcher';
 import { wsService } from '../services/websocket';
 
 interface FileViewerProps {
@@ -15,15 +19,35 @@ interface FileViewerProps {
   onClose: () => void;
 }
 
+// File types that should be downloaded instead of viewed
+const DOWNLOADABLE_EXTENSIONS = ['apk', 'ipa', 'zip', 'tar.gz', 'tgz'];
+
 export function FileViewer({ filePath, onClose }: FileViewerProps) {
   const [content, setContent] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [downloading, setDownloading] = useState(false);
+  const [downloadProgress, setDownloadProgress] = useState<string | null>(null);
+
+  const fileName = filePath?.split('/').pop() || '';
+  const extension = fileName.split('.').pop()?.toLowerCase() || '';
+  const isDownloadable = DOWNLOADABLE_EXTENSIONS.some(ext =>
+    fileName.toLowerCase().endsWith(`.${ext}`) || extension === ext
+  );
+  const isApk = extension === 'apk';
 
   useEffect(() => {
     if (!filePath) {
       setContent(null);
       setError(null);
+      return;
+    }
+
+    // Don't auto-load downloadable files
+    if (isDownloadable) {
+      setContent(null);
+      setError(null);
+      setLoading(false);
       return;
     }
 
@@ -46,12 +70,78 @@ export function FileViewer({ filePath, onClose }: FileViewerProps) {
     };
 
     loadFile();
-  }, [filePath]);
+  }, [filePath, isDownloadable]);
+
+  const handleDownload = async () => {
+    if (!filePath) return;
+
+    setDownloading(true);
+    setDownloadProgress('Requesting file...');
+    setError(null);
+
+    try {
+      // Request file from daemon
+      const response = await wsService.sendRequest('download_file', { path: filePath });
+
+      if (!response.success || !response.payload) {
+        throw new Error(response.error || 'Failed to download file');
+      }
+
+      const payload = response.payload as {
+        fileName: string;
+        size: number;
+        mimeType: string;
+        data: string; // base64
+      };
+
+      setDownloadProgress(`Saving ${payload.fileName} (${Math.round(payload.size / 1024 / 1024)}MB)...`);
+
+      // Save to device
+      const localUri = `${FileSystem.cacheDirectory}${payload.fileName}`;
+      await FileSystem.writeAsStringAsync(localUri, payload.data, {
+        encoding: FileSystem.EncodingType.Base64,
+      });
+
+      setDownloadProgress(null);
+
+      if (isApk && Platform.OS === 'android') {
+        // Trigger install on Android
+        Alert.alert(
+          'Install APK',
+          `${payload.fileName} downloaded. Install now?`,
+          [
+            { text: 'Cancel', style: 'cancel' },
+            {
+              text: 'Install',
+              onPress: async () => {
+                try {
+                  // Get content URI for the file
+                  const contentUri = await FileSystem.getContentUriAsync(localUri);
+
+                  await IntentLauncher.startActivityAsync('android.intent.action.VIEW', {
+                    data: contentUri,
+                    flags: 1, // FLAG_GRANT_READ_URI_PERMISSION
+                    type: 'application/vnd.android.package-archive',
+                  });
+                } catch (installErr) {
+                  Alert.alert('Install Error', String(installErr));
+                }
+              },
+            },
+          ]
+        );
+      } else {
+        Alert.alert('Downloaded', `File saved to cache:\n${localUri}`);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Download failed');
+    } finally {
+      setDownloading(false);
+      setDownloadProgress(null);
+    }
+  };
 
   if (!filePath) return null;
-
-  const fileName = filePath.split('/').pop() || filePath;
-  const extension = fileName.split('.').pop()?.toLowerCase() || '';
 
   // Determine if it's a code file for syntax styling
   const isCode = ['ts', 'tsx', 'js', 'jsx', 'py', 'rb', 'go', 'rs', 'java', 'c', 'cpp', 'h', 'hpp', 'css', 'scss', 'json', 'yaml', 'yml', 'toml', 'sh', 'bash', 'zsh'].includes(extension);
@@ -80,7 +170,51 @@ export function FileViewer({ filePath, onClose }: FileViewerProps) {
             </TouchableOpacity>
           </View>
 
-          {loading ? (
+          {isDownloadable ? (
+            // Download UI for APK and other binary files
+            <View style={styles.downloadContainer}>
+              <View style={styles.fileIconContainer}>
+                <Text style={styles.fileIcon}>{isApk ? '📦' : '📁'}</Text>
+                <Text style={styles.fileTypeLabel}>
+                  {isApk ? 'Android Package' : extension.toUpperCase()}
+                </Text>
+              </View>
+
+              {error ? (
+                <View style={styles.downloadError}>
+                  <Text style={styles.errorText}>{error}</Text>
+                  <TouchableOpacity
+                    style={styles.retryButton}
+                    onPress={handleDownload}
+                  >
+                    <Text style={styles.retryButtonText}>Retry</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : downloading ? (
+                <View style={styles.downloadingState}>
+                  <ActivityIndicator size="large" color="#3b82f6" />
+                  <Text style={styles.downloadingText}>
+                    {downloadProgress || 'Downloading...'}
+                  </Text>
+                </View>
+              ) : (
+                <TouchableOpacity
+                  style={styles.downloadButton}
+                  onPress={handleDownload}
+                >
+                  <Text style={styles.downloadButtonText}>
+                    {isApk && Platform.OS === 'android' ? 'Download & Install' : 'Download'}
+                  </Text>
+                </TouchableOpacity>
+              )}
+
+              {isApk && Platform.OS === 'android' && (
+                <Text style={styles.installHint}>
+                  You may need to enable "Install from unknown sources" in settings
+                </Text>
+              )}
+            </View>
+          ) : loading ? (
             <View style={styles.loadingContainer}>
               <ActivityIndicator size="large" color="#3b82f6" />
               <Text style={styles.loadingText}>Loading file...</Text>
@@ -211,5 +345,69 @@ const styles = StyleSheet.create({
   markdownContent: {
     fontSize: 14,
     lineHeight: 24,
+  },
+  // Download UI styles
+  downloadContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 32,
+  },
+  fileIconContainer: {
+    alignItems: 'center',
+    marginBottom: 32,
+  },
+  fileIcon: {
+    fontSize: 64,
+    marginBottom: 12,
+  },
+  fileTypeLabel: {
+    color: '#9ca3af',
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  downloadButton: {
+    backgroundColor: '#3b82f6',
+    paddingHorizontal: 32,
+    paddingVertical: 16,
+    borderRadius: 12,
+    minWidth: 200,
+    alignItems: 'center',
+  },
+  downloadButtonText: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  downloadingState: {
+    alignItems: 'center',
+  },
+  downloadingText: {
+    color: '#9ca3af',
+    fontSize: 14,
+    marginTop: 16,
+    textAlign: 'center',
+  },
+  downloadError: {
+    alignItems: 'center',
+  },
+  retryButton: {
+    marginTop: 16,
+    backgroundColor: '#374151',
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 8,
+  },
+  retryButtonText: {
+    color: '#f3f4f6',
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  installHint: {
+    color: '#6b7280',
+    fontSize: 12,
+    marginTop: 24,
+    textAlign: 'center',
+    paddingHorizontal: 16,
   },
 });

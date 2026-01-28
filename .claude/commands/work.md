@@ -1,38 +1,56 @@
-# Work on Task from Queue
+# Work on Planned Items
 
-Interactive task picker for autonomous work sessions.
+Implement items from plan.md using TDD.
 
 ## Instructions
 
-1. Read `/Users/chriscushman/local/src/claude-companion/TASKS.md`
+1. Read `/Users/chriscushman/local/src/claude-companion/plan.md`
 
-2. Parse the "Work Queue (Async Tasks)" section and extract numbered tasks
+2. Find the next item with **Status: planned** or **Status: in-progress**
 
-3. Present tasks to user using AskUserQuestion:
-   - Show task number and title for each
-   - Let user pick which task to work on
+3. For each item, follow TDD:
 
-4. Once task is selected:
-   - Read CLAUDE.md for implementation patterns
-   - Follow the step-by-step instructions in the task
-   - Explore relevant existing code before writing new code
-   - Implement incrementally
-   - Test if possible (type check with `npx tsc --noEmit`)
+   a. **Write tests first**
+      - Create/update test files based on "Tests Needed" section
+      - Run tests - they should fail (red)
 
-5. When complete:
-   - Commit changes with descriptive message
-   - Do NOT push unless user approves
-   - Do NOT start EAS builds
+   b. **Implement the feature**
+      - Follow the "Implementation Steps" from plan
+      - Make tests pass (green)
+      - Run `npx tsc --noEmit` to type check
 
-6. Update TASKS.md:
-   - Move completed items from "Pending" to "Completed" section
-   - Remove the task from "Work Queue" or mark as done
+   c. **Refactor if needed**
+      - Clean up code while keeping tests green
 
-7. Report what was accomplished and what files were changed
+   d. **Commit**
+      - Commit with descriptive message
+      - Update plan.md status to "done"
 
-## Important Rules
+4. When ALL items in plan.md are done:
 
-- NO EAS builds without explicit approval
-- NO git push without approval
-- Ask user if unclear about requirements
-- Commit incrementally for large tasks
+   a. **Create feature branch** (if not already on one)
+      - `git checkout -b feature/<descriptive-name>`
+
+   b. **Update FEATURES.md**
+      - Compile completed features into `/Users/chriscushman/local/src/claude-companion/FEATURES.md`
+      - Format for GitHub README showcase
+      ```markdown
+      ## <Feature Name>
+      <Brief description>
+
+      - Key capability 1
+      - Key capability 2
+      ```
+
+   c. **Report completion**
+      - List all commits made
+      - Show updated FEATURES.md content
+      - Ask if ready to push
+
+## Rules
+
+- Tests first, always
+- Commit after each completed item
+- NO push without explicit approval
+- NO EAS builds without approval
+- Ask if stuck or unclear

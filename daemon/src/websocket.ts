@@ -93,6 +93,11 @@ export class WebSocketHandler {
       this.broadcast('other_session_activity', data);
     });
 
+    // Notify about conversation compaction (for archiving)
+    this.watcher.on('compaction', (data) => {
+      this.broadcast('compaction', data);
+    });
+
     // Load saved tmux session configs
     this.loadTmuxSessionConfigs();
 
@@ -466,6 +471,10 @@ export class WebSocketHandler {
 
       case 'read_file':
         this.handleReadFile(client, payload as { path: string }, requestId);
+        break;
+
+      case 'download_file':
+        this.handleDownloadFile(client, payload as { path: string }, requestId);
         break;
 
       case 'get_usage':
@@ -1299,6 +1308,120 @@ export class WebSocketHandler {
         type: 'file_content',
         success: false,
         error: `Cannot read file: ${err instanceof Error ? err.message : 'Unknown error'}`,
+        requestId,
+      });
+    }
+  }
+
+  private async handleDownloadFile(
+    client: AuthenticatedClient,
+    payload: { path: string } | undefined,
+    requestId?: string
+  ): Promise<void> {
+    const filePath = payload?.path;
+
+    if (!filePath) {
+      this.send(client.ws, {
+        type: 'file_download',
+        success: false,
+        error: 'No file path provided',
+        requestId,
+      });
+      return;
+    }
+
+    try {
+      const homeDir = this.tmux.getHomeDir();
+      let resolvedPath: string;
+
+      // Handle different path formats
+      if (filePath.startsWith('~/')) {
+        resolvedPath = path.join(homeDir, filePath.slice(2));
+      } else if (filePath.startsWith('/')) {
+        resolvedPath = filePath;
+      } else {
+        // Relative path - resolve against home
+        resolvedPath = path.resolve(homeDir, filePath);
+      }
+
+      resolvedPath = path.normalize(resolvedPath);
+
+      // Security: only allow downloading files in certain directories
+      const allowedPaths = [homeDir, '/tmp', '/var/tmp'];
+      const isAllowed = allowedPaths.some(allowed => resolvedPath.startsWith(allowed));
+
+      if (!isAllowed) {
+        this.send(client.ws, {
+          type: 'file_download',
+          success: false,
+          error: `Access denied: file outside allowed directories`,
+          requestId,
+        });
+        return;
+      }
+
+      // Only allow specific file types for download
+      const allowedExtensions = ['.apk', '.ipa', '.zip', '.tar.gz', '.tgz'];
+      const ext = path.extname(resolvedPath).toLowerCase();
+      const isApkOrZip = allowedExtensions.some(e => resolvedPath.toLowerCase().endsWith(e));
+
+      if (!isApkOrZip) {
+        this.send(client.ws, {
+          type: 'file_download',
+          success: false,
+          error: `File type not allowed for download. Allowed: ${allowedExtensions.join(', ')}`,
+          requestId,
+        });
+        return;
+      }
+
+      const stats = fs.statSync(resolvedPath);
+
+      if (stats.isDirectory()) {
+        this.send(client.ws, {
+          type: 'file_download',
+          success: false,
+          error: 'Path is a directory, not a file',
+          requestId,
+        });
+        return;
+      }
+
+      // Limit to 150MB for APKs
+      const maxSize = 150 * 1024 * 1024;
+      if (stats.size > maxSize) {
+        this.send(client.ws, {
+          type: 'file_download',
+          success: false,
+          error: `File too large (max 150MB, file is ${Math.round(stats.size / 1024 / 1024)}MB)`,
+          requestId,
+        });
+        return;
+      }
+
+      // Read file as binary and encode as base64
+      const content = fs.readFileSync(resolvedPath);
+      const base64 = content.toString('base64');
+      const fileName = path.basename(resolvedPath);
+
+      console.log(`WebSocket: Sending file download: ${fileName} (${Math.round(stats.size / 1024)}KB)`);
+
+      this.send(client.ws, {
+        type: 'file_download',
+        success: true,
+        payload: {
+          fileName,
+          size: stats.size,
+          mimeType: ext === '.apk' ? 'application/vnd.android.package-archive' : 'application/octet-stream',
+          data: base64,
+        },
+        requestId,
+      });
+    } catch (err) {
+      this.send(client.ws, {
+        type: 'file_download',
+        success: false,
+        error: `Cannot download file: ${err instanceof Error ? err.message : 'Unknown error'}`,
         requestId,
       });
     }

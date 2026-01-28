@@ -288,7 +288,9 @@ export function ConversationItem({ item, showToolCalls, onSelectOption, onFileTa
   const isUser = item.type === 'user';
   const message = item as ConversationMessage;
   const hasToolCalls = showToolCalls && 'toolCalls' in message && message.toolCalls?.length;
-  const hasOptions = 'options' in message && message.options && message.options.length > 0;
+  // Only show options if there are options AND we're actually waiting for a choice
+  // (auto-approved tools will have options but isWaitingForChoice will be false)
+  const hasOptions = 'options' in message && message.options && message.options.length > 0 && message.isWaitingForChoice;
   const isMultiSelect = 'multiSelect' in message && message.multiSelect === true;
 
   // Handle option selection - toggle for multi-select, immediate send for single-select

@@ -5,7 +5,7 @@ import { EventEmitter } from 'events';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import { ConversationFile, ConversationMessage, SessionStatus, TmuxSession } from './types';
-import { parseConversationFile, extractHighlights, detectWaitingForInput, detectCurrentActivity, getRecentActivity, getPendingApprovalTools } from './parser';
+import { parseConversationFile, extractHighlights, detectWaitingForInput, detectCurrentActivity, getRecentActivity, getPendingApprovalTools, detectCompaction } from './parser';
 
 const execAsync = promisify(exec);
 
@@ -15,6 +15,7 @@ interface TrackedConversation {
   lastModified: number;
   messageCount: number;
   isWaitingForInput: boolean;
+  lastCompactionLine: number;
 }
 
 export class ClaudeWatcher extends EventEmitter {
@@ -140,6 +141,25 @@ export class ClaudeWatcher extends EventEmitter {
     const wasWaiting = this.isWaitingForInput;
     const conversationWaiting = detectWaitingForInput(messages);
 
+    // Get previous tracking state for compaction detection
+    const prevTracked = this.conversations.get(sessionId);
+    const lastCompactionLine = prevTracked?.lastCompactionLine || 0;
+
+    // Check for compaction events
+    const sessionName = projectPath.split('/').pop() || sessionId;
+    const { event: compactionEvent, lastLine: newCompactionLine } = detectCompaction(
+      filePath,
+      sessionId,
+      sessionName,
+      projectPath,
+      lastCompactionLine
+    );
+
+    if (compactionEvent) {
+      console.log(`Watcher: Detected compaction in session ${sessionId}`);
+      this.emit('compaction', compactionEvent);
+    }
+
     // Track this conversation
     const tracked: TrackedConversation = {
       path: filePath,
@@ -147,6 +167,7 @@ export class ClaudeWatcher extends EventEmitter {
       lastModified: stats.mtimeMs,
       messageCount: messages.length,
       isWaitingForInput: conversationWaiting,
+      lastCompactionLine: newCompactionLine,
     };
     this.conversations.set(sessionId, tracked);
 

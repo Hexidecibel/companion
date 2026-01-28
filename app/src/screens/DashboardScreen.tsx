@@ -7,9 +7,10 @@ import {
   TouchableOpacity,
   RefreshControl,
   ActivityIndicator,
+  Switch,
 } from 'react-native';
 import { Server, ServerStatus, SessionSummary } from '../types';
-import { getServers } from '../services/storage';
+import { getServers, updateServer } from '../services/storage';
 import { useMultiServerStatus } from '../hooks/useMultiServerStatus';
 
 interface DashboardScreenProps {
@@ -72,13 +73,18 @@ function ServerCard({
   status,
   onPress,
   onSessionPress,
+  onToggleEnabled,
 }: {
   server: Server;
   status: ServerStatus;
   onPress: () => void;
   onSessionPress: (sessionId: string) => void;
+  onToggleEnabled: (enabled: boolean) => void;
 }) {
-  const connectionColor = status.connected
+  const isEnabled = server.enabled !== false;
+  const connectionColor = !isEnabled
+    ? '#6b7280'
+    : status.connected
     ? '#10b981'
     : status.connecting
     ? '#f59e0b'
@@ -86,18 +92,25 @@ function ServerCard({
 
   return (
     <TouchableOpacity
-      style={styles.serverCard}
+      style={[styles.serverCard, !isEnabled && styles.serverCardDisabled]}
       onPress={onPress}
       activeOpacity={0.8}
+      disabled={!isEnabled}
     >
       <View style={styles.serverHeader}>
         <View style={[styles.connectionDot, { backgroundColor: connectionColor }]} />
-        <Text style={styles.serverName}>{server.name}</Text>
+        <Text style={[styles.serverName, !isEnabled && styles.serverNameDisabled]}>{server.name}</Text>
         {status.summary && status.summary.waitingCount > 0 && (
           <View style={styles.badge}>
             <Text style={styles.badgeText}>{status.summary.waitingCount}</Text>
           </View>
         )}
+        <Switch
+          value={isEnabled}
+          onValueChange={onToggleEnabled}
+          trackColor={{ false: '#374151', true: '#10b981' }}
+          style={styles.enableSwitch}
+        />
       </View>
 
       {status.connecting && (
@@ -294,6 +307,11 @@ export function DashboardScreen({
                   status={status}
                   onPress={() => handleServerPress(server)}
                   onSessionPress={(sessionId) => handleSessionPress(server, sessionId)}
+                  onToggleEnabled={async (enabled) => {
+                    const updated = { ...server, enabled };
+                    await updateServer(updated);
+                    await loadServers();
+                  }}
                 />
               );
             })}
@@ -389,6 +407,9 @@ const styles = StyleSheet.create({
     padding: 16,
     marginBottom: 12,
   },
+  serverCardDisabled: {
+    opacity: 0.6,
+  },
   serverHeader: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -405,6 +426,12 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '600',
     flex: 1,
+  },
+  serverNameDisabled: {
+    color: '#6b7280',
+  },
+  enableSwitch: {
+    marginLeft: 8,
   },
   badge: {
     backgroundColor: '#f59e0b',

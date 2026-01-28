@@ -6,6 +6,8 @@ export interface Server {
   token: string;
   useTls: boolean;
   isDefault?: boolean;
+  enabled?: boolean; // Whether to connect to this server (default: true)
+  autoApproveEnabled?: boolean; // Whether Claude has auto-approve mode on this server
 }
 
 export interface ConnectionState {
@@ -177,4 +179,16 @@ export interface AgentTree {
   totalAgents: number;
   runningCount: number;
   completedCount: number;
+}
+
+// Archived conversation types
+export interface ArchivedConversation {
+  id: string;
+  sessionId: string;
+  sessionName: string;
+  projectPath: string;
+  summary: string;
+  timestamp: number;
+  serverId: string;
+  serverName: string;
 }

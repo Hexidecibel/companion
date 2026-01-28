@@ -40,6 +40,8 @@ export function ServerList({ onSelectServer, onOpenSetup, onBack }: ServerListPr
   const [formToken, setFormToken] = useState('');
   const [formUseTls, setFormUseTls] = useState(false);
   const [formIsDefault, setFormIsDefault] = useState(false);
+  const [formEnabled, setFormEnabled] = useState(true);
+  const [formAutoApproveEnabled, setFormAutoApproveEnabled] = useState(false);
   const [showQRScanner, setShowQRScanner] = useState(false);
 
   const loadServers = useCallback(async () => {
@@ -84,6 +86,8 @@ export function ServerList({ onSelectServer, onOpenSetup, onBack }: ServerListPr
     setFormToken('');
     setFormUseTls(false);
     setFormIsDefault(servers.length === 0);
+    setFormEnabled(true);
+    setFormAutoApproveEnabled(false);
     setModalVisible(true);
   };
 
@@ -95,6 +99,8 @@ export function ServerList({ onSelectServer, onOpenSetup, onBack }: ServerListPr
     setFormToken(server.token);
     setFormUseTls(server.useTls);
     setFormIsDefault(server.isDefault || false);
+    setFormEnabled(server.enabled !== false); // default true
+    setFormAutoApproveEnabled(server.autoApproveEnabled || false);
     setModalVisible(true);
   };
 
@@ -184,6 +190,8 @@ export function ServerList({ onSelectServer, onOpenSetup, onBack }: ServerListPr
       token: formToken.trim(),
       useTls: formUseTls,
       isDefault: formIsDefault,
+      enabled: formEnabled,
+      autoApproveEnabled: formAutoApproveEnabled,
     };
 
     // Validate connection before saving
@@ -407,6 +415,30 @@ export function ServerList({ onSelectServer, onOpenSetup, onBack }: ServerListPr
               />
             </View>
 
+            <View style={styles.switchRow}>
+              <View style={styles.switchInfo}>
+                <Text style={styles.switchLabel}>Connection Enabled</Text>
+                <Text style={styles.switchHint}>Disable to skip connecting to this server</Text>
+              </View>
+              <Switch
+                value={formEnabled}
+                onValueChange={setFormEnabled}
+                trackColor={{ false: '#374151', true: '#10b981' }}
+              />
+            </View>
+
+            <View style={styles.switchRow}>
+              <View style={styles.switchInfo}>
+                <Text style={styles.switchLabel}>Auto-Approve Mode</Text>
+                <Text style={styles.switchHint}>Enable if Claude has dangerously-skip-permissions</Text>
+              </View>
+              <Switch
+                value={formAutoApproveEnabled}
+                onValueChange={setFormAutoApproveEnabled}
+                trackColor={{ false: '#374151', true: '#f59e0b' }}
+              />
+            </View>
+
             <Text style={styles.hint}>
               Tip: Visit http://your-server:9877 in a browser to see a QR code for easy setup.
               The token can also be found in /etc/claude-companion/config.json
@@ -558,6 +590,14 @@ const styles = StyleSheet.create({
   switchLabel: {
     fontSize: 16,
     color: '#d1d5db',
+  },
+  switchInfo: {
+    flex: 1,
+  },
+  switchHint: {
+    fontSize: 12,
+    color: '#6b7280',
+    marginTop: 2,
   },
   hint: {
     fontSize: 13,

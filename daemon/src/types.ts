@@ -217,3 +217,12 @@ export interface AgentTree {
   runningCount: number;
   completedCount: number;
 }
+
+// Archive types for compacted conversations
+export interface CompactionEvent {
+  sessionId: string;
+  sessionName: string;
+  projectPath: string;
+  summary: string;
+  timestamp: number;
+}

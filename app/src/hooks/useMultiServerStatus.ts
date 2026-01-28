@@ -203,8 +203,9 @@ export function useMultiServerStatus(servers: Server[]) {
       return newMap;
     });
 
-    // Connect to servers (limit concurrent connections)
-    const toConnect = servers.slice(0, MAX_CONCURRENT);
+    // Connect to enabled servers only (limit concurrent connections)
+    const enabledServers = servers.filter(s => s.enabled !== false);
+    const toConnect = enabledServers.slice(0, MAX_CONCURRENT);
     toConnect.forEach(server => {
       connectToServer(server);
     });

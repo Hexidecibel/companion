@@ -60,15 +60,26 @@
 - [x] /apk skill for local builds
 - [x] EAS build configuration
 
+### Settings & Preferences
+- [x] Settings page safe area padding for bottom notch devices
+- [x] Per-server enabled toggle to disable connection without deleting
+- [x] Per-server autoApproveEnabled flag for permission bypass
+- [x] Conversation archive (MVP) - save compacted summaries, list view, delete
+
 ---
 
 ## Pending
 
-_Empty - ready for next feature round!_
+_Empty - all items from this round complete!_
 
 ---
 
 ## Future / V2 Ideas
+
+### Conversation Archive - V2 Enhancements
+- Full-text search across archived conversations
+- Ability to export/share conversation history
+- Filter by server/project
 
 ### Scheduled Agents (Phase 4)
 - SchedulerService with node-cron integration
@@ -79,6 +90,24 @@ _Empty - ready for next feature round!_
 
 ### Platform Expansion
 - iOS build and TestFlight distribution
+- Web interface feature parity with mobile
+  - File viewer with APK download support
+  - Sub-agent visibility and modal
+  - Session picker and multi-session support
+  - Tool cards with expand/collapse, diff view
+  - Quick reply chips for yes/no options
+  - Scroll behavior and new message indicator
+
+### Daemon CLI
+- Unified CLI for daemon management
+  - `claude-companion up` - Start daemon
+  - `claude-companion down` - Stop daemon
+  - `claude-companion status` - Show status, port, connected clients
+  - `claude-companion install` - Set up as system service (systemd on Linux, launchd on macOS)
+  - `claude-companion logs` - Tail daemon logs
+  - `claude-companion config` - Show/edit config
+- Could use commander.js or similar for CLI parsing
+- Auto-detect platform for service installation
 
 ### Advanced Features
 - Historical usage graphs

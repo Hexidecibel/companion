@@ -13,8 +13,10 @@ import { SetupScreen } from './src/screens/SetupScreen';
 import { NotificationSettings } from './src/screens/NotificationSettings';
 import { UsageScreen } from './src/screens/UsageScreen';
 import { AgentTreeScreen } from './src/screens/AgentTreeScreen';
+import { Archive } from './src/screens/Archive';
 import { ErrorBoundary } from './src/components/ErrorBoundary';
 import { wsService } from './src/services/websocket';
+import { archiveService } from './src/services/archive';
 import {
   registerForPushNotifications,
   setupNotificationChannel,
@@ -35,7 +37,7 @@ if (sentryDsn) {
 }
 
 
-type Screen = 'dashboard' | 'servers' | 'session' | 'settings' | 'setup' | 'notificationSettings' | 'usage' | 'agents';
+type Screen = 'dashboard' | 'servers' | 'session' | 'settings' | 'setup' | 'notificationSettings' | 'usage' | 'agents' | 'archive';
 
 function App() {
   const [currentScreen, setCurrentScreen] = useState<Screen>('dashboard');
@@ -61,11 +63,37 @@ function App() {
       }
     });
 
+    // Listen for compaction events to save archives
+    const unsubscribeCompaction = wsService.onMessage((message) => {
+      if (message.type === 'compaction' && message.payload) {
+        const event = message.payload as {
+          sessionId: string;
+          sessionName: string;
+          projectPath: string;
+          summary: string;
+          timestamp: number;
+        };
+        // Save to archive
+        const serverId = wsService.getServerId();
+        archiveService.addArchive({
+          sessionId: event.sessionId,
+          sessionName: event.sessionName,
+          projectPath: event.projectPath,
+          summary: event.summary,
+          timestamp: event.timestamp,
+          serverId: serverId || 'unknown',
+          serverName: selectedServer?.name || 'Unknown Server',
+        });
+        console.log('Saved compaction to archive:', event.sessionName);
+      }
+    });
+
     return () => {
       subscription.remove();
       responseListener.remove();
+      unsubscribeCompaction();
     };
-  }, []);
+  }, [selectedServer]);
 
   const initializePushNotifications = async () => {
     await setupNotificationChannel();
@@ -140,6 +168,14 @@ function App() {
     setCurrentScreen('settings');
   }, []);
 
+  const handleOpenArchive = useCallback(() => {
+    setCurrentScreen('archive');
+  }, []);
+
+  const handleBackFromArchive = useCallback(() => {
+    setCurrentScreen('settings');
+  }, []);
+
   const handleOpenSettings = useCallback(() => {
     setCurrentScreen('settings');
   }, []);
@@ -197,12 +233,15 @@ function App() {
             onOpenNotificationSettings={handleOpenNotificationSettings}
             onOpenUsage={handleOpenUsage}
             onOpenAgents={handleOpenAgents}
+            onOpenArchive={handleOpenArchive}
           />
         );
       case 'usage':
         return <UsageScreen onBack={handleBackFromUsage} />;
       case 'agents':
         return <AgentTreeScreen onBack={handleBackFromAgents} />;
+      case 'archive':
+        return <Archive onBack={handleBackFromArchive} />;
       case 'notificationSettings':
         return <NotificationSettings onBack={handleBackFromNotificationSettings} />;
       case 'setup':

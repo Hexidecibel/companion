@@ -27,7 +27,7 @@ export default {
         foregroundImage: "./assets/adaptive-icon.png",
         backgroundColor: "#111827"
       },
-      googleServicesFile: "./google-services.json"
+      googleServicesFile: process.env.GOOGLE_SERVICES_JSON || "./google-services.json"
     },
     plugins: [
       [
@@ -43,11 +43,8 @@ export default {
       [
         "@sentry/react-native",
         {
-          organization: "xludax",
-          project: "claude-companion",
-          // Disable source map upload for now
-          uploadNativeSymbols: false,
-          uploadSourceMaps: false
+          organization: "hexi-ts",
+          project: "react-native"
         }
       ]
     ],

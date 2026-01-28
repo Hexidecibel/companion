@@ -20,9 +20,10 @@ interface SettingsProps {
   onOpenNotificationSettings: () => void;
   onOpenUsage: () => void;
   onOpenAgents?: () => void;
+  onOpenArchive?: () => void;
 }
 
-export function Settings({ onBack, onOpenNotificationSettings, onOpenUsage, onOpenAgents }: SettingsProps) {
+export function Settings({ onBack, onOpenNotificationSettings, onOpenUsage, onOpenAgents, onOpenArchive }: SettingsProps) {
   const [settings, setSettings] = useState<AppSettings>({
     stayConnected: false,
     pushEnabled: false,
@@ -161,7 +162,7 @@ export function Settings({ onBack, onOpenNotificationSettings, onOpenUsage, onOp
         <View style={styles.placeholder} />
       </View>
 
-      <ScrollView style={styles.content}>
+      <ScrollView style={styles.content} contentContainerStyle={styles.contentContainer}>
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Connection</Text>
 
@@ -249,6 +250,18 @@ export function Settings({ onBack, onOpenNotificationSettings, onOpenUsage, onOp
 
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Data</Text>
+
+          {onOpenArchive && (
+            <TouchableOpacity style={styles.linkRow} onPress={onOpenArchive}>
+              <View style={styles.settingInfo}>
+                <Text style={styles.settingLabel}>Conversation Archive</Text>
+                <Text style={styles.settingDescription}>
+                  View saved conversation summaries
+                </Text>
+              </View>
+              <Text style={styles.linkArrow}>&gt;</Text>
+            </TouchableOpacity>
+          )}
 
           <TouchableOpacity
             style={styles.actionRow}
@@ -341,6 +354,9 @@ const styles = StyleSheet.create({
   },
   content: {
     flex: 1,
+  },
+  contentContainer: {
+    paddingBottom: 40,
   },
   section: {
     paddingHorizontal: 16,

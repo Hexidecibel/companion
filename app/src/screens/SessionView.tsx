@@ -734,6 +734,11 @@ export function SessionView({ server, onBack, initialSessionId }: SessionViewPro
         onContentSizeChange={handleContentSizeChange}
         scrollEventThrottle={200}
         keyboardShouldPersistTaps="handled"
+        // Maintain scroll position when content changes (e.g., compaction)
+        maintainVisibleContentPosition={{
+          minIndexForVisible: 0,
+          autoscrollToTopThreshold: 10,
+        }}
         // Optimize re-renders
         removeClippedSubviews={Platform.OS === 'android'}
         maxToRenderPerBatch={10}
