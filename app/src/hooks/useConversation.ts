@@ -64,9 +64,10 @@ export function useConversation() {
               const pendingTime = parseInt(p.id.replace('pending-', ''), 10);
               const age = now - pendingTime;
               if (age >= 30000) return false; // Too old
-              // Check if server already has this message
+              // Check if server already has this message (trim to handle whitespace)
+              const pendingContent = p.content.trim();
               const inServer = serverHighlights.some(s =>
-                s.type === 'user' && s.content === p.content
+                s.type === 'user' && s.content.trim() === pendingContent
               );
               return !inServer; // Keep only if NOT in server
             });
@@ -184,11 +185,14 @@ export function useConversation() {
                 const stillPending = pending.filter(p => {
                   const pendingTime = parseInt(p.id.replace('pending-', ''), 10);
                   const age = now - pendingTime;
-                  if (age < 30000) return true;
+                  // Check if server already has this message (trim for whitespace)
+                  const pendingContent = p.content.trim();
                   const inServer = serverHighlights.some(s =>
-                    s.type === 'user' && s.content === p.content
+                    s.type === 'user' && s.content.trim() === pendingContent
                   );
-                  return !inServer;
+                  if (inServer) return false; // Server has it, remove pending
+                  if (age >= 30000) return false; // Too old
+                  return true; // Keep pending
                 });
 
                 return [...serverHighlights, ...stillPending];
