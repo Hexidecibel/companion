@@ -620,11 +620,6 @@ export function SessionView({ server, onBack, initialSessionId }: SessionViewPro
         ListEmptyComponent={renderEmptyContent}
         onScroll={handleScroll}
         scrollEventThrottle={16}
-        // Keep visible content position stable when new items are added
-        maintainVisibleContentPosition={{
-          minIndexForVisible: 0,
-          autoscrollToTopThreshold: 10,
-        }}
         // Optimize re-renders
         removeClippedSubviews={Platform.OS === 'android'}
         maxToRenderPerBatch={10}
