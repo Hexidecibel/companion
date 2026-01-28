@@ -19,121 +19,87 @@
 
 ### UI/UX
 - [x] Multi-Server Dashboard with connection status, session counts, waiting/working indicators
-- [x] Expandable tool cards showing what Claude is doing
+- [x] Dashboard session sorting (waiting > working > idle)
+- [x] Dashboard last activity timestamps
+- [x] Expandable tool cards with copy-to-clipboard, elapsed time, diff view
+- [x] Expand-all/collapse-all for tool cards
 - [x] Tool status (pending/completed) display
 - [x] File viewer - tap file paths to view content full-screen
 - [x] Quick reply chips for yes/no options
 - [x] Slash commands (/yes, /no, /cancel, /switch)
-- [x] Auto-scroll to bottom on new messages
-- [x] New message indicator
+- [x] Scroll-to-bottom button with new message indicator
 - [x] Queued message display with cancel button
-- [x] Scroll-to-bottom button positioning
 - [x] Auto-approve for safe tools (Read, Glob, Grep, WebFetch, WebSearch)
-- [x] Scroll lock to bottom with hysteresis (prevents jump loops)
 - [x] FlatList touch handling fix (keyboardShouldPersistTaps)
+
+### Sub-Agent Visibility
+- [x] SubAgentWatcher watches subagents/ directory
+- [x] Sub-agent indicator bar in SessionView
+- [x] Sub-agent modal with status, duration, description
+- [x] Filter sub-agents by current session
+- [x] Auto-cleanup stale agents
+
+### Notification Preferences
+- [x] Configurable notification settings per server
+- [x] Instant vs delayed notifications
+- [x] Quiet hours / Do Not Disturb schedule
+- [x] Rate limiting (throttle notifications)
+
+### Server Setup
+- [x] QR code server setup (daemon serves QR, app scans)
+- [x] Usage/stats page with API token usage and cost breakdown
+
+### Web Interface
+- [x] Web client for browser-based access
+- [x] Real-time WebSocket connection
+- [x] Responsive design for desktop/tablet
 
 ### Developer Experience
 - [x] Sentry error tracking integration
 - [x] /sentry skill for error investigation
 - [x] /apk skill for local builds
-- [x] EAS build configuration (preview profile)
-- [x] Firebase setup for push notifications
+- [x] EAS build configuration
 
 ---
 
 ## Pending
 
-### High Priority
+_Empty - ready for next feature round!_
 
-#### QR Code Server Setup
-- [x] Daemon serves QR code at `http://<host>:<port>/qr`
-- [x] QR encodes JSON with host, port, token, TLS setting
-- [x] App has "Scan QR" button on Add Server screen
-- [x] Camera permission handling
-- [x] Auto-fill server config from scanned QR
-- [x] Update docs and in-app setup guide
+---
 
-#### Usage/Stats Page
-- [x] Show Claude API token usage
-- [x] Display cost breakdown by session/server
-- [ ] Historical usage graphs (future enhancement)
+## Future / V2 Ideas
 
-#### Dashboard Refinement
-- [x] Fix dashboard connection validation (validate before showing connected) - already correct
-- [x] Add session sorting (waiting first, then working, then idle)
-- [x] Add last activity timestamp display
+### Scheduled Agents (Phase 4)
+- SchedulerService with node-cron integration
+- AgentRunner for spawning and monitoring
+- CRUD endpoints for scheduled agents
+- Webhook endpoint support
+- File watcher trigger support
 
-### Medium Priority - Notification Preferences
-- [x] Configurable notification settings per server
-- [x] Notification delay setting (instant vs batched)
-- [x] Quiet hours / Do Not Disturb schedule
-- [x] Rate limiting (throttle notifications)
-- [ ] Notification sound/vibration preferences
-- [ ] Filter notifications by session or project
+### Platform Expansion
+- iOS build and TestFlight distribution
 
-### Medium Priority - Sub-Agent Visibility (ROADMAP Phase 3) - COMPLETE
-See `docs/ROADMAP-V2.md` Section 3 for full details.
-
-- [x] Watch `subagents/` directory in daemon (SubAgentWatcher)
-- [x] Create `SubAgent` type and tracking logic
-- [x] Add `get_agent_tree` daemon endpoint
-- [x] Create `AgentTreeScreen` with expandable list view
-- [x] Add sub-agent indicator bar in SessionView (shows running count)
-- [x] Sub-agent modal with status, duration, description
-- [x] Filter sub-agents by current session
-- [x] Auto-cleanup stale agents (>1hr inactive = completed, >24hr = removed)
-
-### Lower Priority - Scheduled Agents (ROADMAP Phase 4)
-See `docs/ROADMAP-V2.md` Section 4 for full details.
-
-- [ ] `SchedulerService` with node-cron integration
-- [ ] `AgentRunner` for spawning and monitoring
-- [ ] `AgentStore` for persistence
-- [ ] CRUD endpoints for scheduled agents
-- [ ] Webhook endpoint support
-- [ ] App screens for agent management
-- [ ] File watcher trigger support
-- [ ] Push notifications for agent events
-
-### Nice to Have - Web Interface
-- [x] Web client for browser-based access
-- [x] Same functionality as mobile app
-- [x] Real-time WebSocket connection
-- [x] Responsive design for desktop/tablet
-
-### Nice to Have
-- [ ] iOS build and TestFlight distribution
-- [ ] Team collaboration - share agents, approval workflows
-- [ ] Audit log for approvals and agent runs
-- [ ] Cost tracking - estimate token usage per agent
-- [ ] Pre-built agent templates (PR reviewer, test runner, etc.)
-- [ ] MCP integration for scheduled agents
+### Advanced Features
+- Historical usage graphs
+- Team collaboration - share agents, approval workflows
+- Audit log for approvals and agent runs
+- Cost tracking - estimate token usage per agent
+- Pre-built agent templates (PR reviewer, test runner, etc.)
+- MCP integration for scheduled agents
 
 ---
 
 ## Work Queue (Async Tasks)
 
-Tasks suitable for longer autonomous work sessions:
-
-### 1. Enhanced Tool Card Details - COMPLETE
-```
-Improve tool card information display:
-1. Add syntax highlighting for code in tool outputs - SKIPPED (would need library)
-2. Show file diffs for Edit tools more clearly - ALREADY DONE (DiffView component)
-3. Add copy-to-clipboard for tool outputs - ALREADY DONE
-4. Show elapsed time for completed tools - ALREADY DONE
-5. Add expand-all/collapse-all button - DONE
-```
+_Empty - ready for new tasks!_
 
 ---
 
 ## Build Status
 
-**Latest EAS Build:** b8ff3326-1334-4b65-a3e5-dd8791fd0271 (in progress)
-- Platform: Android
-- Profile: preview
-- Includes: Push notification registration fix, all recent changes
-
-**Previous Builds:**
-- `3c6e9529` - Android 13+ notification permission prompt
-- `f2ceb2ce` - Tool cards, dashboard fixes, connection validation
+**Latest Commit:** 0a70157
+- Sub-agent visibility
+- Dashboard refinements
+- Scroll fixes
+- Tool card expand-all/collapse-all
