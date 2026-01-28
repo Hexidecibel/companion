@@ -689,6 +689,7 @@ const markdownStyles = StyleSheet.create({
     color: '#f3f4f6',
     fontSize: 15,
     lineHeight: 22,
+    flexShrink: 1,
   },
   heading1: {
     color: '#f3f4f6',
@@ -814,6 +815,7 @@ const styles = StyleSheet.create({
     maxWidth: '85%',
     padding: 12,
     borderRadius: 16,
+    overflow: 'hidden',
   },
   headerRow: {
     flexDirection: 'row',
