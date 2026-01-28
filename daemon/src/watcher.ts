@@ -233,7 +233,7 @@ export class ClaudeWatcher extends EventEmitter {
       }
     } else {
       // Emit activity notification for non-active sessions
-      const prevTracked = this.conversations.get(sessionId);
+      // Use prevTracked from line 145, not the updated map
       const hadMessages = prevTracked?.messageCount || 0;
       if (messages.length > hadMessages) {
         const lastMessage = messages[messages.length - 1];

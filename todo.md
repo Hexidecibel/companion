@@ -40,3 +40,4 @@ Quick capture for ideas and tasks. Run `/plan` to process into detailed plans.
 - [done] New project setup wizard - skill setup, git setup, language choice. Discuss project at high level and scaffold starting dir via Claude
 - Populate features file with all current features (big highlights, not granular) - work command will keep it updated
 - [done] Scroll to bottom of conversation on session switch
+- [done] Fix in-app notifications - not seeing banner when other sessions have activity (bug: shadowed variable)
