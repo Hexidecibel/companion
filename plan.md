@@ -307,3 +307,277 @@ async function detectServiceType(projectPath: string): Promise<string | null> {
 - Edge cases: no detection match, invalid paths
 
 ---
+
+## Item 11: New Project Setup Wizard
+**Status:** planned
+
+### Vision
+A guided flow in the app that helps users start new projects from scratch. User describes what they want to build, picks a tech stack, and Claude scaffolds the entire project structure with best practices, then auto-installs relevant skills.
+
+### User Flow
+
+**Step 1: Project Description (Chat)**
+```
+App: "What do you want to build?"
+User: "A REST API for managing inventory with authentication"
+App: "Got it! Tell me more - who's the audience? Any specific requirements?"
+User: "Small business, needs to track products, quantities, suppliers. Mobile app will consume it later."
+```
+
+**Step 2: Tech Stack Selection**
+```
+Based on your description, I recommend:
+
+[Backend]
+○ Node.js + Express (Recommended) - Fast setup, huge ecosystem
+○ Python + FastAPI - Great for data-heavy APIs
+○ Go + Gin - High performance, simple deployment
+○ Other...
+
+[Database]
+○ PostgreSQL (Recommended) - Robust, great for relational data
+○ MongoDB - Flexible schema
+○ SQLite - Simple, file-based
+○ Other...
+
+[Auth]
+○ JWT tokens (Recommended)
+○ Session-based
+○ OAuth2 only
+```
+
+**Step 3: Project Details**
+```
+Project name: inventory-api
+Location: ~/projects/inventory-api
+Git: ○ Initialize repo  ○ Skip
+
+Include:
+☑ Docker setup
+☑ CI/CD (GitHub Actions)
+☑ API documentation (OpenAPI)
+☐ Frontend scaffold
+```
+
+**Step 4: Scaffold & Setup**
+```
+Creating your project...
+
+✓ Created directory structure
+✓ Initialized package.json
+✓ Added Express + TypeScript
+✓ Set up PostgreSQL with Prisma
+✓ Added JWT auth boilerplate
+✓ Created Dockerfile
+✓ Added GitHub Actions workflow
+✓ Generated CLAUDE.md with project context
+✓ Initialized git repo
+
+Installing skills for Node.js projects...
+✓ /test - Run Jest tests
+✓ /build - Build TypeScript
+✓ /dev - Start dev server
+✓ /db - Database migrations
+
+🎉 Project ready! Open in Claude Code?
+```
+
+### Architecture
+
+**Conversation Engine:**
+- Multi-turn chat to understand requirements
+- Claude extracts: project type, scale, features, constraints
+- Generates structured "project spec" from conversation
+
+**Stack Recommender:**
+- Maps project types to recommended stacks
+- Considers: user experience level, project complexity, deployment target
+- Allows override/customization
+
+**Scaffolder Templates:**
+Templates for common stacks, each includes:
+- Directory structure
+- Package files (package.json, requirements.txt, go.mod, etc.)
+- Boilerplate code (entry point, config, auth, etc.)
+- Docker/CI files
+- CLAUDE.md with project-specific context
+
+**Skill Auto-Install:**
+- Detects stack from scaffold
+- Auto-installs relevant skills from Item 10
+- Pre-configures variables based on scaffold
+
+### Stack Templates
+
+**Node.js + Express + TypeScript:**
+```
+project/
+├── src/
+│   ├── index.ts
+│   ├── routes/
+│   ├── middleware/
+│   ├── models/
+│   └── services/
+├── tests/
+├── prisma/
+│   └── schema.prisma
+├── docker/
+│   └── Dockerfile
+├── .github/
+│   └── workflows/ci.yml
+├── package.json
+├── tsconfig.json
+├── CLAUDE.md
+└── README.md
+```
+
+**Python + FastAPI:**
+```
+project/
+├── app/
+│   ├── __init__.py
+│   ├── main.py
+│   ├── routers/
+│   ├── models/
+│   └── services/
+├── tests/
+├── alembic/
+├── docker/
+│   └── Dockerfile
+├── .github/
+│   └── workflows/ci.yml
+├── pyproject.toml
+├── CLAUDE.md
+└── README.md
+```
+
+**React + TypeScript:**
+```
+project/
+├── src/
+│   ├── index.tsx
+│   ├── App.tsx
+│   ├── components/
+│   ├── hooks/
+│   ├── services/
+│   └── types/
+├── public/
+├── tests/
+├── docker/
+│   └── Dockerfile
+├── package.json
+├── tsconfig.json
+├── CLAUDE.md
+└── README.md
+```
+
+### Files to Create/Modify
+
+**Daemon:**
+- `daemon/src/scaffold/types.ts` - ProjectSpec, StackTemplate types
+- `daemon/src/scaffold/templates/` - Stack template definitions
+- `daemon/src/scaffold/generator.ts` - Generate files from templates
+- `daemon/src/scaffold/recommender.ts` - Stack recommendation logic
+- `daemon/src/websocket.ts` - Add scaffold endpoints
+
+**App:**
+- `app/src/screens/NewProjectScreen.tsx` - Main wizard screen
+- `app/src/screens/NewProjectChatScreen.tsx` - Conversational requirements gathering
+- `app/src/screens/NewProjectStackScreen.tsx` - Stack selection
+- `app/src/screens/NewProjectDetailsScreen.tsx` - Final details
+- `app/src/components/StackOption.tsx` - Stack selection card
+
+### API Endpoints
+```
+POST /scaffold/analyze     - Send chat transcript, get project spec
+GET  /scaffold/stacks      - List available stack templates
+POST /scaffold/recommend   - Get stack recommendations for spec
+POST /scaffold/preview     - Preview what will be created
+POST /scaffold/create      - Create the project
+GET  /scaffold/progress    - Stream creation progress
+```
+
+### Implementation Steps
+
+**Phase 1: Conversation & Spec**
+1. Create ProjectSpec type with all extracted fields
+2. Build chat UI for requirements gathering
+3. Add `/scaffold/analyze` that uses Claude to extract spec from chat
+4. Store conversation context for follow-ups
+
+**Phase 2: Stack System**
+5. Define StackTemplate format
+6. Create 3-4 starter templates (Node, Python, React, Go)
+7. Add `/scaffold/stacks` and `/scaffold/recommend`
+8. Build stack selection UI
+
+**Phase 3: Scaffolding**
+9. Implement template variable substitution
+10. Add file generation logic
+11. Add `/scaffold/create` with progress streaming
+12. Wire up skill auto-install from Item 10
+
+**Phase 4: Polish**
+13. Add `/scaffold/preview` for dry-run
+14. Git initialization option
+15. "Open in Claude Code" deep link
+16. Project history/recent projects
+
+### CLAUDE.md Generation
+
+Each scaffold generates a project-specific CLAUDE.md:
+```markdown
+# {{projectName}}
+
+{{description from chat}}
+
+## Tech Stack
+- Runtime: {{runtime}}
+- Framework: {{framework}}
+- Database: {{database}}
+- Auth: {{authMethod}}
+
+## Project Structure
+{{generated structure explanation}}
+
+## Commands
+- `npm run dev` - Start development server
+- `npm test` - Run tests
+- `npm run build` - Build for production
+
+## Key Files
+- `src/index.ts` - Entry point
+- `src/routes/` - API routes
+- `prisma/schema.prisma` - Database schema
+
+## Development Notes
+{{any specific notes from chat}}
+```
+
+### Integration with Item 10 (Skills)
+
+After scaffold completes:
+1. Detect stack from created files
+2. Query available skills that match stack
+3. Auto-install with pre-filled variables:
+   - `/test` → TEST_COMMAND = "npm test"
+   - `/build` → BUILD_COMMAND = "npm run build"
+   - `/dev` → DEV_COMMAND = "npm run dev"
+
+### Future Enhancements
+- Template marketplace (community templates)
+- Clone from existing project as template
+- Multi-service scaffolds (API + Frontend + DB)
+- Cloud deployment setup (Vercel, Railway, Fly.io)
+- Import from GitHub template repos
+
+### Tests Needed
+- Chat extracts correct project spec
+- Stack recommendations are sensible
+- All template files generate correctly
+- Git init works
+- Skill auto-install triggers
+- Progress streaming works
+- Error handling for disk/permission issues
+
+---

@@ -14,6 +14,9 @@ import { WebSocketMessage, WebSocketResponse, DaemonConfig, TmuxSessionConfig } 
 import { loadConfig, saveConfig } from './config';
 import { fetchTodayUsage, fetchMonthUsage, fetchAnthropicUsage } from './anthropic-usage';
 import { SubAgentWatcher } from './subagent-watcher';
+import { templates as scaffoldTemplates } from './scaffold/templates';
+import { scaffoldProject, previewScaffold } from './scaffold/generator';
+import { ProjectConfig } from './scaffold/types';
 
 // File for persisting tmux session configs
 const TMUX_CONFIGS_FILE = path.join(os.homedir(), '.claude-companion', 'tmux-sessions.json');
@@ -553,6 +556,58 @@ export class WebSocketHandler {
       case 'clear_scroll_logs':
         this.scrollLogs = [];
         this.send(client.ws, { type: 'scroll_logs_cleared', success: true, requestId });
+        break;
+
+      // Scaffold endpoints
+      case 'get_scaffold_templates':
+        this.send(client.ws, {
+          type: 'scaffold_templates',
+          success: true,
+          payload: {
+            templates: scaffoldTemplates.map(t => ({
+              id: t.id,
+              name: t.name,
+              description: t.description,
+              type: t.type,
+              icon: t.icon,
+              tags: t.tags,
+            })),
+          },
+          requestId,
+        });
+        break;
+
+      case 'scaffold_preview':
+        (async () => {
+          const previewConfig = payload as ProjectConfig;
+          const previewResult = await previewScaffold(previewConfig);
+          this.send(client.ws, {
+            type: 'scaffold_preview',
+            success: !('error' in previewResult),
+            payload: previewResult,
+            requestId,
+          });
+        })();
+        break;
+
+      case 'scaffold_create':
+        (async () => {
+          const createConfig = payload as ProjectConfig;
+          const createResult = await scaffoldProject(createConfig, (progress) => {
+            // Send progress updates
+            this.send(client.ws, {
+              type: 'scaffold_progress',
+              success: true,
+              payload: progress,
+            });
+          });
+          this.send(client.ws, {
+            type: 'scaffold_result',
+            success: createResult.success,
+            payload: createResult,
+            requestId,
+          });
+        })();
         break;
 
       default:

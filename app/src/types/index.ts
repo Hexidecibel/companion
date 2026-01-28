@@ -206,3 +206,41 @@ export interface TaskItem {
   createdAt: number;
   updatedAt: number;
 }
+
+// Scaffold/New Project types
+export interface StackTemplate {
+  id: string;
+  name: string;
+  description: string;
+  type: 'frontend' | 'backend' | 'fullstack' | 'library' | 'cli';
+  icon: string;
+  tags: string[];
+}
+
+export interface ProjectConfig {
+  name: string;
+  description: string;
+  location: string;
+  stackId: string;
+  options: {
+    initGit: boolean;
+    includeDocker: boolean;
+    includeCI: boolean;
+    includeLinter: boolean;
+  };
+}
+
+export interface ScaffoldProgress {
+  step: string;
+  detail?: string;
+  progress: number;
+  complete: boolean;
+  error?: string;
+}
+
+export interface ScaffoldResult {
+  success: boolean;
+  projectPath: string;
+  filesCreated: string[];
+  error?: string;
+}
