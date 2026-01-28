@@ -209,6 +209,15 @@ function parseEntry(
 }
 
 export function extractHighlights(messages: ConversationMessage[]): ConversationHighlight[] {
+  // Find the index of the last user message - anything before this has been "responded to"
+  let lastUserMessageIndex = -1;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].type === 'user') {
+      lastUserMessageIndex = i;
+      break;
+    }
+  }
+
   const highlights = messages
     .filter(msg => {
       // Include user messages with content
@@ -222,9 +231,13 @@ export function extractHighlights(messages: ConversationMessage[]): Conversation
       return false;
     })
     .map((msg, index, arr) => {
-      // Only show options on the LAST message
+      // Only show options on the LAST message AND if no user has responded since
       const isLastMessage = index === arr.length - 1;
-      const showOptions = isLastMessage && msg.options && msg.options.length > 0;
+      // Don't show options if there's a user message after this assistant message
+      // (means user already responded to any prompts)
+      const originalIndex = messages.indexOf(msg);
+      const userRespondedAfter = originalIndex < lastUserMessageIndex;
+      const showOptions = isLastMessage && msg.options && msg.options.length > 0 && !userRespondedAfter;
 
       return {
         id: msg.id,
