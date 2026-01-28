@@ -930,4 +930,126 @@ describe('useScrollBehavior', () => {
       expect(result.current.state.hasNewMessages).toBe(false);
     });
   });
+
+  describe('scroll direction detection', () => {
+    // Note: autoScrollEnabled is a ref (doesn't trigger re-renders), so we verify
+    // behavior by checking what happens when content grows, not the ref value directly
+
+    it('should disable auto-scroll immediately when user scrolls UP', () => {
+      // Mock Date.now to control programmatic scroll window
+      let mockTime = 1000;
+      const originalDateNow = Date.now;
+      Date.now = jest.fn(() => mockTime);
+
+      try {
+        const { result } = renderHook(() => useScrollBehavior());
+
+        // Start at bottom with auto-scroll enabled (initial load)
+        act(() => {
+          result.current.handleContentSizeChange(0, 1000);
+        });
+
+        // Advance past initial programmatic scroll window
+        mockTime += 400;
+
+        act(() => {
+          result.current.handleScroll(createScrollEvent(1000, 350, 600)); // at bottom
+        });
+
+        // User scrolls UP by just 20px (still "near bottom" by threshold)
+        act(() => {
+          result.current.handleScroll(createScrollEvent(1000, 330, 600));
+        });
+
+        // Verify by checking behavior: content grows, should show badge (not auto-scroll)
+        act(() => {
+          result.current.handleContentSizeChange(0, 1200);
+        });
+
+        // If auto-scroll was disabled, we should see new messages badge
+        expect(result.current.state.hasNewMessages).toBe(true);
+      } finally {
+        Date.now = originalDateNow;
+      }
+    });
+
+    it('should re-enable auto-scroll when user scrolls DOWN to bottom', () => {
+      const { result } = renderHook(() => useScrollBehavior());
+
+      // Setup: user was scrolled up
+      act(() => {
+        result.current.handleContentSizeChange(0, 1000);
+      });
+      act(() => {
+        result.current.handleScroll(createScrollEvent(1000, 200, 600)); // scrolled up
+      });
+
+      // Content grows - badge should appear
+      act(() => {
+        result.current.handleContentSizeChange(0, 1100);
+      });
+      expect(result.current.state.hasNewMessages).toBe(true);
+
+      // User scrolls DOWN to bottom
+      act(() => {
+        result.current.handleScroll(createScrollEvent(1100, 450, 600)); // at bottom
+      });
+
+      // Badge should clear when reaching bottom
+      expect(result.current.state.hasNewMessages).toBe(false);
+
+      // More content grows - should NOT show badge (auto-scroll re-enabled)
+      act(() => {
+        result.current.handleContentSizeChange(0, 1300);
+      });
+      expect(result.current.state.hasNewMessages).toBe(false);
+    });
+
+    it('should handle tap-scroll-bottom then immediate scroll up (the exact bug scenario)', () => {
+      // Mock Date.now to control time
+      let mockTime = 1000;
+      const originalDateNow = Date.now;
+      Date.now = jest.fn(() => mockTime);
+
+      try {
+        const { result } = renderHook(() => useScrollBehavior());
+
+        // Setup: conversation with content, user scrolled up
+        act(() => {
+          result.current.handleContentSizeChange(0, 2000);
+        });
+        act(() => {
+          result.current.handleScroll(createScrollEvent(2000, 100, 600)); // scrolled up
+        });
+
+        // User taps scroll-to-bottom button
+        act(() => {
+          result.current.scrollToBottom();
+        });
+
+        // Simulate scroll event as list scrolls to bottom (during programmatic scroll)
+        act(() => {
+          result.current.handleScroll(createScrollEvent(2000, 1350, 600)); // at bottom
+        });
+
+        // Advance past programmatic scroll window (500ms)
+        mockTime += 600;
+
+        // User scrolls up "a bit" - even small scroll should disable
+        act(() => {
+          result.current.handleScroll(createScrollEvent(2000, 1340, 600)); // 10px up
+        });
+
+        // Content grows (tool output arrives)
+        act(() => {
+          result.current.handleContentSizeChange(0, 2200);
+        });
+
+        // Should show new messages badge (proving auto-scroll was disabled)
+        expect(result.current.state.hasNewMessages).toBe(true);
+      } finally {
+        Date.now = originalDateNow;
+      }
+    });
+  });
 });

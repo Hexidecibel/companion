@@ -49,6 +49,8 @@ export function useScrollBehavior(config: ScrollBehaviorConfig = {}): ScrollBeha
 
   const listRef = useRef<FlatList>(null);
   const lastContentHeight = useRef(0);
+  const lastScrollOffset = useRef(0);
+  const programmaticScrollUntil = useRef(0); // Timestamp when programmatic scroll ends
 
   // State that triggers re-renders
   const [hasNewMessages, setHasNewMessages] = useState(false);
@@ -62,6 +64,16 @@ export function useScrollBehavior(config: ScrollBehaviorConfig = {}): ScrollBeha
   const handleScroll = useCallback((event: { nativeEvent: { layoutMeasurement: { height: number }; contentOffset: { y: number }; contentSize: { height: number } } }) => {
     const { layoutMeasurement, contentOffset, contentSize } = event.nativeEvent;
     const distanceFromBottom = contentSize.height - layoutMeasurement.height - contentOffset.y;
+    const currentOffset = contentOffset.y;
+    const prevOffset = lastScrollOffset.current;
+    lastScrollOffset.current = currentOffset;
+
+    // Check if we're in a programmatic scroll window (ignore user input detection)
+    const isProgrammaticScroll = Date.now() < programmaticScrollUntil.current;
+
+    // Detect manual scroll direction (negative = scrolling up toward top)
+    const scrollDelta = currentOffset - prevOffset;
+    const isScrollingUp = scrollDelta < -5; // Small threshold to ignore noise
 
     const nearBottom = distanceFromBottom < nearBottomThreshold;
     isNearBottom.current = nearBottom;
@@ -70,14 +82,20 @@ export function useScrollBehavior(config: ScrollBehaviorConfig = {}): ScrollBeha
     const shouldShowButton = distanceFromBottom > showButtonThreshold;
     setShowScrollButton(prev => prev !== shouldShowButton ? shouldShowButton : prev);
 
-    // Update auto-scroll state with hysteresis to prevent flapping
-    if (nearBottom) {
+    // Update auto-scroll state
+    // IMPORTANT: Check scroll direction FIRST - if user scrolls up, disable immediately
+    if (!isProgrammaticScroll && isScrollingUp) {
+      // User manually scrolled UP - immediately disable auto-scroll
+      autoScrollEnabled.current = false;
+    } else if (nearBottom && !isScrollingUp) {
+      // At bottom and not actively scrolling up - re-enable auto-scroll
       autoScrollEnabled.current = true;
       setHasNewMessages(false);
     } else if (distanceFromBottom > showButtonThreshold) {
+      // Far from bottom - disable auto-scroll
       autoScrollEnabled.current = false;
     }
-    // Between thresholds: keep current state (hysteresis)
+    // Between thresholds and not scrolling up: keep current state (hysteresis)
   }, [nearBottomThreshold, showButtonThreshold]);
 
   const handleContentSizeChange = useCallback((_width: number, height: number) => {
@@ -87,18 +105,23 @@ export function useScrollBehavior(config: ScrollBehaviorConfig = {}): ScrollBeha
     // Initial load - scroll to bottom immediately
     if (!initialScrollDone.current && height > 0) {
       initialScrollDone.current = true;
+      // Mark as programmatic scroll
+      programmaticScrollUntil.current = Date.now() + 300;
       listRef.current?.scrollToEnd({ animated: false });
       return;
     }
 
-    // Content grew - show new message indicator if user scrolled up
+    // Content grew - show new message indicator if auto-scroll is disabled
+    // (meaning user has scrolled up and is reading)
     const contentGrew = height > prevHeight + 50; // 50px threshold to avoid noise
-    if (contentGrew && !isNearBottom.current) {
+    if (contentGrew && !autoScrollEnabled.current) {
       setHasNewMessages(true);
     }
 
-    // Auto-scroll if enabled and near bottom
-    if (contentGrew && autoScrollEnabled.current && isNearBottom.current) {
+    // Auto-scroll only if enabled (user hasn't scrolled up)
+    if (contentGrew && autoScrollEnabled.current) {
+      // Mark as programmatic scroll
+      programmaticScrollUntil.current = Date.now() + 300;
       listRef.current?.scrollToEnd({ animated: true });
     }
   }, []);
@@ -108,6 +131,8 @@ export function useScrollBehavior(config: ScrollBehaviorConfig = {}): ScrollBeha
     setShowScrollButton(false);
     autoScrollEnabled.current = true;
     isNearBottom.current = true;
+    // Mark as programmatic scroll for 500ms to ignore scroll events during animation
+    programmaticScrollUntil.current = Date.now() + 500;
     listRef.current?.scrollToEnd({ animated });
   }, []);
 
@@ -117,6 +142,8 @@ export function useScrollBehavior(config: ScrollBehaviorConfig = {}): ScrollBeha
     autoScrollEnabled.current = true;
     setHasNewMessages(false);
     setShowScrollButton(false);
+    // Mark as programmatic scroll for 600ms (100ms delay + 500ms animation)
+    programmaticScrollUntil.current = Date.now() + 600;
 
     // Small delay to let the message render
     setTimeout(() => {
@@ -127,6 +154,8 @@ export function useScrollBehavior(config: ScrollBehaviorConfig = {}): ScrollBeha
   const resetForSessionSwitch = useCallback(() => {
     initialScrollDone.current = false;
     lastContentHeight.current = 0;
+    lastScrollOffset.current = 0;
+    programmaticScrollUntil.current = 0;
     autoScrollEnabled.current = true;
     isNearBottom.current = true;
     setHasNewMessages(false);
