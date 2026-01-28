@@ -31,3 +31,9 @@ Quick capture for ideas and tasks. Run `/plan` to process into detailed plans.
 
 ## Platform
 - [deferred] iOS build (need Apple Developer account first)
+
+## New
+- Build info/date for APK somewhere in about screen
+- Collapse multiple tool windows into one expandable card (to make reading easier, span less pages)
+- Finish rich session task expansion card (with task detail page)
+- Installable actions/skills - introspect codebase and create custom skills like /todo, /up, /down, /work

@@ -9,6 +9,7 @@ interface ConversationItemProps {
   showToolCalls?: boolean;
   onSelectOption?: (option: string) => void;
   onFileTap?: (filePath: string) => void;
+  onMessageTap?: () => void;
 }
 
 const COLLAPSED_LINES = 12;
@@ -282,7 +283,7 @@ function ToolCard({ tool, forceExpanded }: { tool: ToolCall; forceExpanded?: boo
   );
 }
 
-function ConversationItemInner({ item, showToolCalls, onSelectOption, onFileTap }: ConversationItemProps) {
+function ConversationItemInner({ item, showToolCalls, onSelectOption, onFileTap, onMessageTap }: ConversationItemProps) {
   const [expanded, setExpanded] = useState(false);
   const [selectedOptions, setSelectedOptions] = useState<Set<string>>(new Set());
   const isUser = item.type === 'user';
@@ -451,8 +452,12 @@ function ConversationItemInner({ item, showToolCalls, onSelectOption, onFileTap 
     [onFileTap]
   );
 
-  const toggleExpanded = () => {
-    if (needsExpansion) {
+  const handleBubbleTap = () => {
+    // If we have a message tap handler (for full viewer), use that
+    if (onMessageTap) {
+      onMessageTap();
+    } else if (needsExpansion) {
+      // Otherwise toggle expansion for backwards compatibility
       setExpanded(!expanded);
     }
   };
@@ -461,16 +466,16 @@ function ConversationItemInner({ item, showToolCalls, onSelectOption, onFileTap 
     <View style={[styles.container, isUser ? styles.userContainer : styles.assistantContainer]}>
       <TouchableOpacity
         style={[styles.bubble, isUser ? styles.userBubble : styles.assistantBubble]}
-        onPress={toggleExpanded}
-        activeOpacity={needsExpansion ? 0.8 : 1}
+        onPress={handleBubbleTap}
+        activeOpacity={onMessageTap || needsExpansion ? 0.8 : 1}
       >
         <View style={styles.headerRow}>
           <Text style={[styles.role, isUser ? styles.userRole : styles.assistantRole]}>
             {isUser ? 'You' : 'Claude'}
           </Text>
-          {needsExpansion && (
+          {(needsExpansion || onMessageTap) && !isUser && (
             <Text style={styles.expandHint}>
-              {expanded ? '▼ tap to collapse' : '▶ tap to expand'}
+              {onMessageTap ? 'tap to view full' : (expanded ? '▼ collapse' : '▶ expand')}
             </Text>
           )}
         </View>

@@ -149,3 +149,161 @@ Settings safe area, permissions bypass toggle, server connection toggle, convers
 5. Submit to TestFlight once build succeeds
 
 ---
+
+## Item 10: Installable Skills System
+**Status:** planned
+
+### Vision
+Allow users to install pre-built skill templates that auto-configure for their codebase. Take working skills (like /todo, /up, /down, /work) and make them generic shells that users can apply to their environment.
+
+### Skill Template Format
+```json
+{
+  "id": "todo",
+  "name": "Quick Todo Capture",
+  "description": "Add items to a todo file with /todo <text>",
+  "author": "claude-companion",
+  "version": "1.0.0",
+  "variables": {
+    "TODO_FILE": {
+      "detect": ["todo.md", "TODO.md", "tasks.md", "TASKS.md"],
+      "prompt": "Path to your todo file",
+      "default": "todo.md",
+      "required": true
+    }
+  },
+  "template": "# Add Todo Item\n\n1. Read {{TODO_FILE}}\n2. Add item as bullet point\n..."
+}
+```
+
+### Starter Skill Templates
+1. **todo** - Quick capture to todo file
+   - Variables: TODO_FILE
+   - Detects: todo.md, TODO.md, tasks.md
+
+2. **work** - Work on tasks from queue
+   - Variables: TASKS_FILE, CLAUDE_MD
+   - Detects: TASKS.md, tasks.md + CLAUDE.md
+
+3. **plan** - Process todos into plans
+   - Variables: TODO_FILE, PLAN_FILE
+   - Detects: todo.md + plan.md
+
+4. **up/down** - Start/stop services
+   - Variables: SERVICE_TYPE (docker-compose|systemd|pm2), SERVICE_NAME, CONFIG_FILE
+   - Detects: docker-compose.yml, systemd units, ecosystem.config.js
+
+5. **test** - Run project tests
+   - Variables: TEST_COMMAND
+   - Detects: package.json scripts, pytest.ini, Cargo.toml
+
+6. **build** - Build project
+   - Variables: BUILD_COMMAND
+   - Detects: package.json, Makefile, build.gradle
+
+### Files to Create/Modify
+
+**Daemon:**
+- `daemon/src/skills/types.ts` - SkillTemplate, InstalledSkill types
+- `daemon/src/skills/templates/` - JSON template files for each skill
+- `daemon/src/skills/detector.ts` - Auto-detect variable values from codebase
+- `daemon/src/skills/installer.ts` - Write skills to Claude Code settings
+- `daemon/src/websocket.ts` - Add skill endpoints
+
+**App:**
+- `app/src/screens/SkillsScreen.tsx` - Browse and manage skills
+- `app/src/screens/SkillInstallScreen.tsx` - Install wizard with variable preview
+- `app/src/components/SkillCard.tsx` - Skill display component
+- `app/src/services/skills.ts` - Skill service for API calls
+
+### API Endpoints
+```
+GET  /skills/available     - List all skill templates
+GET  /skills/installed     - List user's installed skills
+POST /skills/detect        - Detect variables for a skill template
+POST /skills/install       - Install skill with variable values
+POST /skills/uninstall     - Remove installed skill
+POST /skills/update        - Update skill variables
+```
+
+### Implementation Steps
+
+**Phase 1: Core Infrastructure**
+1. Define SkillTemplate and InstalledSkill types
+2. Create skill template JSON format
+3. Implement variable detection logic
+4. Add installer that writes to `.claude/settings.json`
+
+**Phase 2: Daemon Endpoints**
+5. Add `skills/available` endpoint
+6. Add `skills/detect` endpoint with codebase scanning
+7. Add `skills/install` endpoint
+8. Add `skills/installed` and `skills/uninstall` endpoints
+
+**Phase 3: App UI**
+9. Create SkillsScreen with available/installed tabs
+10. Create SkillCard component
+11. Create SkillInstallScreen wizard
+12. Add navigation from settings/dashboard
+
+**Phase 4: Starter Templates**
+13. Convert current /todo skill to template
+14. Convert /work and /plan skills
+15. Convert /up and /down skills
+16. Add /test and /build generic skills
+
+### Variable Detection Examples
+
+**TODO_FILE detection:**
+```typescript
+async function detectTodoFile(projectPath: string): Promise<string | null> {
+  const candidates = ['todo.md', 'TODO.md', 'tasks.md', 'TASKS.md'];
+  for (const file of candidates) {
+    if (await fileExists(path.join(projectPath, file))) {
+      return file;
+    }
+  }
+  return null;
+}
+```
+
+**SERVICE_TYPE detection:**
+```typescript
+async function detectServiceType(projectPath: string): Promise<string | null> {
+  if (await fileExists(path.join(projectPath, 'docker-compose.yml'))) {
+    return 'docker-compose';
+  }
+  if (await fileExists(path.join(projectPath, 'ecosystem.config.js'))) {
+    return 'pm2';
+  }
+  // Check for systemd in common locations...
+  return null;
+}
+```
+
+### User Flow
+1. User opens Skills screen in app
+2. Browses available skill templates
+3. Taps "Install" on desired skill
+4. App calls `/skills/detect` - daemon scans codebase
+5. Install wizard shows detected values with edit option
+6. User confirms, app calls `/skills/install`
+7. Daemon writes to `.claude/settings.json`
+8. Skill is now available as `/skill-name` in Claude Code
+
+### Future Enhancements
+- Skill sharing/marketplace
+- Custom user-created templates
+- Skill versioning and updates
+- Team/organization skill libraries
+- Skill dependencies (one skill requires another)
+
+### Tests Needed
+- Variable detection finds correct files
+- Install writes valid JSON to settings
+- Uninstall cleanly removes skill
+- App displays available vs installed correctly
+- Install wizard shows detected values
+- Edge cases: no detection match, invalid paths
+
+---

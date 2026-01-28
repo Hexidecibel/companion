@@ -23,6 +23,7 @@ import { ConversationItem } from '../components/ConversationItem';
 import { InputBar } from '../components/InputBar';
 import { SessionPicker } from '../components/SessionPicker';
 import { FileViewer } from '../components/FileViewer';
+import { MessageViewer } from '../components/MessageViewer';
 import { getSessionSettings, saveSessionSettings, SessionSettings } from '../services/storage';
 import { wsService } from '../services/websocket';
 import { messageQueue, QueuedMessage } from '../services/messageQueue';
@@ -102,6 +103,7 @@ export function SessionView({ server, onBack, initialSessionId }: SessionViewPro
   const [showActivityModal, setShowActivityModal] = useState(false);
   const [showSessionPicker, setShowSessionPicker] = useState(false);
   const [viewingFile, setViewingFile] = useState<string | null>(null);
+  const [viewingMessage, setViewingMessage] = useState<{ content: string; timestamp: number } | null>(null);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const [queuedMessages, setQueuedMessages] = useState<QueuedMessage[]>([]);
   const [agentTree, setAgentTree] = useState<AgentTree | null>(null);
@@ -766,6 +768,7 @@ export function SessionView({ server, onBack, initialSessionId }: SessionViewPro
               showToolCalls={true}
               onSelectOption={handleSelectOption}
               onFileTap={setViewingFile}
+              onMessageTap={item.type === 'assistant' ? () => setViewingMessage({ content: item.content, timestamp: item.timestamp }) : undefined}
             />
           ))
         )}
@@ -819,6 +822,12 @@ export function SessionView({ server, onBack, initialSessionId }: SessionViewPro
       <FileViewer
         filePath={viewingFile}
         onClose={() => setViewingFile(null)}
+      />
+
+      <MessageViewer
+        content={viewingMessage?.content || null}
+        timestamp={viewingMessage?.timestamp}
+        onClose={() => setViewingMessage(null)}
       />
     </View>
   );
