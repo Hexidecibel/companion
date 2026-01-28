@@ -52,14 +52,23 @@ export function useConversation() {
             highlights: ConversationHighlight[];
           };
           setMessages(updatePayload.messages || []);
-          // Preserve pending messages on real-time updates too
+          // Preserve pending messages on real-time updates, but deduplicate
           const serverHighlights = updatePayload.highlights || [];
           setHighlights(prev => {
             const pending = prev.filter(m => m.id.startsWith('pending-'));
             const now = Date.now();
+            // Filter out pending messages that are either:
+            // 1. Too old (> 30 seconds)
+            // 2. Already in server data (content match)
             const stillPending = pending.filter(p => {
               const pendingTime = parseInt(p.id.replace('pending-', ''), 10);
-              return (now - pendingTime) < 30000;
+              const age = now - pendingTime;
+              if (age >= 30000) return false; // Too old
+              // Check if server already has this message
+              const inServer = serverHighlights.some(s =>
+                s.type === 'user' && s.content === p.content
+              );
+              return !inServer; // Keep only if NOT in server
             });
             return [...serverHighlights, ...stillPending];
           });
