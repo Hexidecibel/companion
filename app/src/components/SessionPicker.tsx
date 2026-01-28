@@ -19,9 +19,10 @@ interface SessionPickerProps {
   isOpen?: boolean;
   onClose?: () => void;
   onNewProject?: () => void;
+  isConnected?: boolean;
 }
 
-export function SessionPicker({ currentSessionId, onSessionChange, isOpen, onClose, onNewProject }: SessionPickerProps) {
+export function SessionPicker({ currentSessionId, onSessionChange, isOpen, onClose, onNewProject, isConnected }: SessionPickerProps) {
   const [visible, setVisible] = useState(false);
 
   // Sync with external isOpen prop
@@ -87,11 +88,20 @@ export function SessionPicker({ currentSessionId, onSessionChange, isOpen, onClo
     }
   }, []);
 
+  // Load sessions when connected and when currentSessionId changes
+  // to show correct name in closed state
   useEffect(() => {
-    if (visible) {
+    if (isConnected) {
       loadSessions();
     }
-  }, [visible, loadSessions]);
+  }, [loadSessions, currentSessionId, isConnected]);
+
+  // Reload when modal opens
+  useEffect(() => {
+    if (visible && isConnected) {
+      loadSessions();
+    }
+  }, [visible, loadSessions, isConnected]);
 
   const handleSelectSession = async (session: TmuxSessionInfo) => {
     if (session.name === activeSession) {

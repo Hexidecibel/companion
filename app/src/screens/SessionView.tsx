@@ -233,12 +233,10 @@ export function SessionView({ server, onBack, initialSessionId, onNewProject }: 
 
   // Refresh when connection is established and sync settings
   useEffect(() => {
-    console.log(`SessionView effect: isConnected=${isConnected}, wsConnected=${wsService.isConnected()}, initialSessionId=${initialSessionId}, lastSwitched=${lastSwitchedSessionId.current}`);
     if (isConnected && wsService.isConnected()) {
       const init = async () => {
         // Switch to initial session if specified and different from last switched
         const isSwitching = initialSessionId && initialSessionId !== lastSwitchedSessionId.current;
-        console.log(`SessionView init: isSwitching=${isSwitching}`);
         if (isSwitching) {
           lastSwitchedSessionId.current = initialSessionId;
           setCurrentSessionId(initialSessionId);
@@ -246,7 +244,6 @@ export function SessionView({ server, onBack, initialSessionId, onNewProject }: 
           // CRITICAL: Begin switch in sessionGuard BEFORE sending request
           // This invalidates any in-flight requests from previous session
           const epoch = sessionGuard.beginSwitch(initialSessionId);
-          console.log(`SessionView: Beginning switch to ${initialSessionId} (epoch ${epoch})`);
 
           try {
             // Send switch request with epoch for server-side tracking
@@ -254,7 +251,6 @@ export function SessionView({ server, onBack, initialSessionId, onNewProject }: 
               sessionId: initialSessionId,
               epoch,
             });
-            console.log(`SessionView: switch_session response:`, response);
             if (!response.success) {
               console.error('Failed to switch session:', response.error);
             }
@@ -263,11 +259,8 @@ export function SessionView({ server, onBack, initialSessionId, onNewProject }: 
           }
         } else if (initialSessionId && !sessionGuard.getCurrentSessionId()) {
           // First load - set session in guard without incrementing epoch
-          console.log(`SessionView: First load, setting session to ${initialSessionId}`);
           sessionGuard.beginSwitch(initialSessionId);
           setCurrentSessionId(initialSessionId);
-        } else {
-          console.log(`SessionView: No switch needed, initialSessionId=${initialSessionId}, currentGuardSession=${sessionGuard.getCurrentSessionId()}`);
         }
 
         // Clear first if switching sessions to avoid showing stale content
@@ -447,6 +440,7 @@ export function SessionView({ server, onBack, initialSessionId, onNewProject }: 
               isOpen={showSessionPicker}
               onClose={() => setShowSessionPicker(false)}
               onNewProject={onNewProject}
+              isConnected={isConnected}
             />
           )}
         </View>

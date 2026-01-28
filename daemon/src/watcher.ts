@@ -257,13 +257,60 @@ export class ClaudeWatcher extends EventEmitter {
     const parts = relative.split(path.sep);
 
     if (parts.length >= 1) {
-      // Convert the encoded path back to real path
-      // -Users-foo-bar -> /Users/foo/bar
       const encoded = parts[0];
-      return encoded.replace(/-/g, '/');
+      // Smart decode: try to find which interpretation of dashes is correct
+      // by checking if the path exists on the filesystem
+      const decoded = this.smartDecodePath(encoded);
+      return decoded;
     }
 
     return '';
+  }
+
+  private smartDecodePath(encoded: string): string {
+    // Remove leading dash
+    const withoutLeading = encoded.replace(/^-/, '');
+    const parts = withoutLeading.split('-');
+
+    // Try to find the real path by progressively building it
+    // and checking which segments should be joined with / vs -
+    let currentPath = '';
+    let i = 0;
+
+    while (i < parts.length) {
+      const part = parts[i];
+      const testWithSlash = currentPath ? `${currentPath}/${part}` : `/${part}`;
+
+      // Look ahead to see if joining with dash creates a valid path
+      let foundWithDash = false;
+      if (currentPath && i < parts.length) {
+        // Check if path with dash exists
+        for (let j = i; j < parts.length; j++) {
+          const dashJoined = currentPath + '-' + parts.slice(i, j + 1).join('-');
+          if (fs.existsSync(dashJoined) && fs.statSync(dashJoined).isDirectory()) {
+            // Found a valid path with dashes
+            currentPath = dashJoined;
+            i = j + 1;
+            foundWithDash = true;
+            break;
+          }
+        }
+      }
+
+      if (!foundWithDash) {
+        // Use slash separator
+        currentPath = testWithSlash;
+        i++;
+      }
+    }
+
+    // If the smart decode didn't find a valid path, fall back to simple decode
+    if (!fs.existsSync(currentPath)) {
+      // Simple fallback: replace all dashes with slashes
+      return '/' + withoutLeading.replace(/-/g, '/');
+    }
+
+    return currentPath;
   }
 
   private generateSessionId(filePath: string): string {

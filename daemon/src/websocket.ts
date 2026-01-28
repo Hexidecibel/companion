@@ -868,7 +868,7 @@ export class WebSocketHandler {
     // 2. Update client's subscription to this session
     client.subscribedSessionId = sessionId;
 
-    // 3. Find and switch to corresponding tmux session (SYNCHRONOUSLY)
+    // 3. Find and switch to corresponding tmux session
     let tmuxSessionName: string | undefined;
     try {
       const convSession = this.watcher.getSessions().find(s => s.id === sessionId);
@@ -878,7 +878,6 @@ export class WebSocketHandler {
         if (matchingTmux) {
           this.injector.setActiveSession(matchingTmux.name);
           tmuxSessionName = matchingTmux.name;
-          console.log(`WebSocket: Switched input target to tmux session "${matchingTmux.name}"`);
         }
       }
     } catch (err) {
