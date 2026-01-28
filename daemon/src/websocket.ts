@@ -47,6 +47,8 @@ export class WebSocketHandler {
   private config: DaemonConfig;
   private clientErrors: ClientError[] = [];
   private readonly MAX_CLIENT_ERRORS = 50;
+  private scrollLogs: Array<{ event: string; ts: number; [key: string]: unknown }> = [];
+  private readonly MAX_SCROLL_LOGS = 200;
 
   constructor(
     server: Server,
@@ -502,6 +504,20 @@ export class WebSocketHandler {
 
       case 'get_client_errors':
         this.handleGetClientErrors(client, requestId);
+        break;
+
+      case 'scroll_log':
+        this.handleScrollLog(payload as { event: string; ts: number; [key: string]: unknown });
+        // No response needed - fire and forget
+        break;
+
+      case 'get_scroll_logs':
+        this.handleGetScrollLogs(client, requestId);
+        break;
+
+      case 'clear_scroll_logs':
+        this.scrollLogs = [];
+        this.send(client.ws, { type: 'scroll_logs_cleared', success: true, requestId });
         break;
 
       default:
@@ -1359,6 +1375,30 @@ export class WebSocketHandler {
       payload: {
         errors: this.clientErrors,
         count: this.clientErrors.length,
+      },
+      requestId,
+    });
+  }
+
+  private handleScrollLog(payload: { event: string; ts: number; [key: string]: unknown }): void {
+    this.scrollLogs.push(payload);
+    if (this.scrollLogs.length > this.MAX_SCROLL_LOGS) {
+      this.scrollLogs = this.scrollLogs.slice(-this.MAX_SCROLL_LOGS);
+    }
+    // Also log to console for real-time viewing via journalctl
+    console.log(`[SCROLL] ${payload.event}:`, JSON.stringify(payload));
+  }
+
+  private handleGetScrollLogs(
+    client: AuthenticatedClient,
+    requestId?: string
+  ): void {
+    this.send(client.ws, {
+      type: 'scroll_logs',
+      success: true,
+      payload: {
+        logs: this.scrollLogs,
+        count: this.scrollLogs.length,
       },
       requestId,
     });

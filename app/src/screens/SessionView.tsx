@@ -190,15 +190,33 @@ export function SessionView({ server, onBack, initialSessionId }: SessionViewPro
     }
   }, [isConnected, refresh, server.id, initialSessionId]);
 
+  // Debug logging helper
+  const logScroll = useCallback((event: string, data: Record<string, unknown>) => {
+    if (wsService.isConnected()) {
+      wsService.sendRequest('scroll_log', { event, ...data, ts: Date.now() }).catch(() => {});
+    }
+  }, []);
+
   // Handle content size changes - this is when we should auto-scroll
   const handleContentSizeChange = useCallback((_width: number, height: number) => {
     // Only act if content actually grew (not on shrink or same size)
     const contentGrew = height > lastContentHeight.current + 10;
+    const prevHeight = lastContentHeight.current;
     lastContentHeight.current = height;
+
+    logScroll('contentSizeChange', {
+      height,
+      prevHeight,
+      contentGrew,
+      autoScroll: autoScrollEnabled.current,
+      nearBottom: isNearBottom.current,
+      initialDone: initialScrollDone.current
+    });
 
     if (!initialScrollDone.current && height > 0) {
       // First load - scroll to bottom immediately
       initialScrollDone.current = true;
+      logScroll('initialScroll', { height });
       listRef.current?.scrollToEnd({ animated: false });
       return;
     }
@@ -210,14 +228,16 @@ export function SessionView({ server, onBack, initialSessionId }: SessionViewPro
         clearTimeout(scrollTimeout.current);
       }
       scrollTimeout.current = setTimeout(() => {
+        logScroll('autoScrollToEnd', { height });
         listRef.current?.scrollToEnd({ animated: false });
         scrollTimeout.current = null;
       }, 100);
     } else if (contentGrew && !autoScrollEnabled.current) {
       // User is reading history - show new message indicator
+      logScroll('showNewMessageIndicator', { height });
       setHasNewMessages(true);
     }
-  }, []);
+  }, [logScroll]);
 
   const scrollToBottom = useCallback(() => {
     setHasNewMessages(false);
@@ -285,7 +305,19 @@ export function SessionView({ server, onBack, initialSessionId }: SessionViewPro
 
     // Track if we're near the bottom (within 150px)
     const nearBottom = distanceFromBottom < 150;
+    const wasNearBottom = isNearBottom.current;
     isNearBottom.current = nearBottom;
+
+    // Log significant scroll events (state changes only to reduce noise)
+    if (nearBottom !== wasNearBottom) {
+      logScroll('scrollStateChange', {
+        distanceFromBottom: Math.round(distanceFromBottom),
+        nearBottom,
+        contentHeight: Math.round(contentSize.height),
+        scrollY: Math.round(contentOffset.y),
+        viewHeight: Math.round(layoutMeasurement.height)
+      });
+    }
 
     // Show/hide scroll button - only update state if value changed to avoid re-render loop
     const shouldShowButton = distanceFromBottom > 200;
@@ -300,7 +332,7 @@ export function SessionView({ server, onBack, initialSessionId }: SessionViewPro
       // User scrolled up - disable auto-scroll
       autoScrollEnabled.current = false;
     }
-  }, []);
+  }, [logScroll]);
 
   const handleCancel = () => {
     Alert.alert(
