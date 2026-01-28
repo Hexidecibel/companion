@@ -238,37 +238,25 @@ export function extractHighlights(messages: ConversationMessage[]): Conversation
       return false;
     })
     .map((msg, index, arr) => {
-      // Only show options on the LAST message AND if no user has responded since
       const isLastMessage = index === arr.length - 1;
-      // Don't show options if there's a user message after this assistant message
-      // (means user already responded to any prompts)
       const originalIndex = messages.indexOf(msg);
-      const userRespondedAfter = originalIndex < lastUserMessageIndex;
 
-      // Don't show tool approval options if the tool has already started running
-      // Check if any tool call in this message is no longer pending
-      const hasRunningOrCompletedTool = msg.toolCalls?.some(
-        tc => tc.status === 'completed' || tc.status === 'error' ||
-          // Also check if tool has output (means it ran)
-          (tc.output !== undefined && tc.output !== null)
+      // Check if this message has pending approval tools
+      const hasPendingApprovalTools = msg.toolCalls?.some(
+        tc => tc.status === 'pending' && APPROVAL_TOOLS.includes(tc.name) && tc.name !== 'Task'
       ) ?? false;
 
-      // Also check if there's a running tool anywhere in the conversation after this message
-      // that might have been approved by a yes/no prompt in this message
-      let toolApprovedAndRunning = false;
-      if (msg.options && msg.options.some(o => o.label === 'yes' || o.label === 'no')) {
-        // This is a tool approval prompt - check if there are tools running after this
-        for (let i = originalIndex + 1; i < messages.length; i++) {
-          const laterMsg = messages[i];
-          if (laterMsg.toolCalls?.some(tc => tc.status === 'pending' || tc.status === 'completed' || tc.status === 'error')) {
-            toolApprovedAndRunning = true;
-            break;
-          }
-        }
-      }
+      // Check if all tools in this message are already completed/errored
+      const allToolsCompleted = (msg.toolCalls?.length ?? 0) > 0 && msg.toolCalls?.every(
+        tc => tc.status === 'completed' || tc.status === 'error' || tc.output !== undefined
+      );
 
-      const showOptions = isLastMessage && msg.options && msg.options.length > 0 &&
-        !userRespondedAfter && !hasRunningOrCompletedTool && !toolApprovedAndRunning;
+      // Show options if:
+      // 1. This message has options AND
+      // 2. Either it's the last message OR it has pending approval tools AND
+      // 3. Tools haven't all completed
+      const showOptions = msg.options && msg.options.length > 0 &&
+        (isLastMessage || hasPendingApprovalTools) && !allToolsCompleted;
 
       return {
         id: msg.id,
