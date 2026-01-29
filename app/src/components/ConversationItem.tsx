@@ -1,5 +1,5 @@
 import React, { useMemo, useState, useRef, memo } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, LayoutAnimation, Platform, UIManager } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import Markdown from '@ronradtke/react-native-markdown-display';
 import { ConversationMessage, ConversationHighlight, ToolCall } from '../types';
@@ -104,6 +104,25 @@ async function copyToClipboard(text: string, label: string) {
 // Threshold for collapsing tool calls into a summary
 const TOOL_COLLAPSE_THRESHOLD = 3;
 
+// Group consecutive identical tool names (e.g., ["Read","Read","Read","Edit"] -> [{ name: "Read", count: 3 }, { name: "Edit", count: 1 }])
+function groupToolNames(tools: ToolCall[]): { name: string; count: number }[] {
+  const groups: { name: string; count: number }[] = [];
+  for (const tool of tools) {
+    const last = groups[groups.length - 1];
+    if (last && last.name === tool.name) {
+      last.count++;
+    } else {
+      groups.push({ name: tool.name, count: 1 });
+    }
+  }
+  return groups;
+}
+
+// Enable LayoutAnimation on Android
+if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
+  UIManager.setLayoutAnimationEnabledExperimental(true);
+}
+
 // Tool calls container with collapse/expand for many tools
 function ToolCallsContainer({ toolCalls }: { toolCalls: ToolCall[] }) {
   const [showAll, setShowAll] = useState(false);
@@ -114,19 +133,35 @@ function ToolCallsContainer({ toolCalls }: { toolCalls: ToolCall[] }) {
   const completedCount = toolCalls.filter(t => t.status === 'completed').length;
   const runningCount = toolCalls.filter(t => t.status === 'running' || t.status === 'pending').length;
   const errorCount = toolCalls.filter(t => t.status === 'error').length;
+  const toolGroups = groupToolNames(toolCalls);
 
-  // For many tools, show a collapsed summary with only the last tool visible
+  const animatedSetShowAll = (value: boolean) => {
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    setShowAll(value);
+  };
+
+  // For many tools, show a collapsed summary with first & last tool visible
   if (toolCalls.length >= TOOL_COLLAPSE_THRESHOLD && !showAll) {
+    const firstTool = toolCalls[0];
     const lastTool = toolCalls[toolCalls.length - 1];
     return (
       <View style={styles.toolCallsContainer}>
         <TouchableOpacity
           style={toolGroupStyles.summaryBar}
-          onPress={() => setShowAll(true)}
+          onPress={() => animatedSetShowAll(true)}
           activeOpacity={0.7}
         >
           <View style={toolGroupStyles.summaryLeft}>
             <Text style={toolGroupStyles.summaryCount}>{toolCalls.length} tools</Text>
+            <View style={toolGroupStyles.toolChips}>
+              {toolGroups.map((g, i) => (
+                <View key={i} style={toolGroupStyles.toolChip}>
+                  <Text style={toolGroupStyles.toolChipText}>
+                    {g.name}{g.count > 1 ? ` x${g.count}` : ''}
+                  </Text>
+                </View>
+              ))}
+            </View>
             <View style={toolGroupStyles.summaryStats}>
               {completedCount > 0 && (
                 <View style={[toolGroupStyles.statBadge, { backgroundColor: '#065f46' }]}>
@@ -147,13 +182,23 @@ function ToolCallsContainer({ toolCalls }: { toolCalls: ToolCall[] }) {
           </View>
           <Text style={toolGroupStyles.expandText}>Show all ▶</Text>
         </TouchableOpacity>
-        {/* Always show the last/most recent tool */}
-        <ToolCard key={lastTool.id} tool={lastTool} forceExpanded={undefined} />
+        {/* Show first tool */}
+        <ToolCard key={firstTool.id} tool={firstTool} forceExpanded={undefined} />
+        {/* Show last tool if different from first */}
+        {toolCalls.length > 1 && (
+          <>
+            {toolCalls.length > 2 && (
+              <Text style={toolGroupStyles.ellipsis}>... {toolCalls.length - 2} more tools ...</Text>
+            )}
+            <ToolCard key={lastTool.id} tool={lastTool} forceExpanded={undefined} />
+          </>
+        )}
       </View>
     );
   }
 
   const toggleAll = () => {
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
     setAllExpanded(prev => prev === true ? false : true);
   };
 
@@ -162,7 +207,7 @@ function ToolCallsContainer({ toolCalls }: { toolCalls: ToolCall[] }) {
       {toolCalls.length > 1 && (
         <View style={toolGroupStyles.toolbar}>
           {toolCalls.length >= TOOL_COLLAPSE_THRESHOLD && (
-            <TouchableOpacity onPress={() => setShowAll(false)}>
+            <TouchableOpacity onPress={() => animatedSetShowAll(false)}>
               <Text style={toolGroupStyles.collapseText}>◀ Collapse</Text>
             </TouchableOpacity>
           )}
@@ -738,6 +783,29 @@ const toolGroupStyles = StyleSheet.create({
   statText: {
     fontSize: 10,
     fontWeight: '600',
+  },
+  toolChips: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 4,
+  },
+  toolChip: {
+    backgroundColor: '#374151',
+    borderRadius: 4,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  toolChipText: {
+    color: '#9ca3af',
+    fontSize: 10,
+    fontWeight: '500',
+  },
+  ellipsis: {
+    color: '#6b7280',
+    fontSize: 11,
+    textAlign: 'center',
+    marginTop: 6,
+    fontStyle: 'italic',
   },
   expandText: {
     color: '#9ca3af',
