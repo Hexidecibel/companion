@@ -71,7 +71,7 @@ Already exists: `kill_tmux_session` endpoint in `daemon/src/websocket.ts` lines 
 ---
 
 ## 4. Create new session from server dashboard
-**Status:** planned
+**Status:** done
 
 ### Backend
 Already exists: `create_tmux_session` endpoint, `list_tmux_sessions` for recent data

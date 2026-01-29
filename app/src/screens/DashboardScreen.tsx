@@ -13,6 +13,7 @@ import {
 import { Server, ServerStatus, SessionSummary, TaskSummary, TaskItem } from '../types';
 import { getServers, updateServer } from '../services/storage';
 import { useMultiServerStatus } from '../hooks/useMultiServerStatus';
+import { NewSessionModal } from '../components/NewSessionModal';
 
 interface DashboardScreenProps {
   onSelectServer: (server: Server, sessionId?: string) => void;
@@ -107,6 +108,30 @@ function ServerCard({
   const [expandedSessions, setExpandedSessions] = useState<Set<string>>(new Set());
   const [tasksBySession, setTasksBySession] = useState<Map<string, TaskItem[]>>(new Map());
   const [loadingTasks, setLoadingTasks] = useState<Set<string>>(new Set());
+  const [showNewSession, setShowNewSession] = useState(false);
+
+  const handleCreateSession = useCallback(async (workingDir: string, startClaude: boolean) => {
+    if (!sendRequest) return;
+    const response = await sendRequest(server.id, 'create_tmux_session', { workingDir, startClaude });
+    if (!response.success) {
+      throw new Error(response.error || 'Failed to create session');
+    }
+    onRefresh?.();
+  }, [server.id, sendRequest, onRefresh]);
+
+  const fetchRecents = useCallback(async () => {
+    if (!sendRequest) return [];
+    try {
+      const response = await sendRequest(server.id, 'list_tmux_sessions');
+      if (response.success && response.payload) {
+        const payload = response.payload as { sessions: Array<{ name: string; workingDir?: string }> };
+        return (payload.sessions || [])
+          .filter((s: any) => s.workingDir)
+          .map((s: any) => ({ name: s.name, workingDir: s.workingDir }));
+      }
+    } catch {}
+    return [];
+  }, [server.id, sendRequest]);
 
   const fetchTasks = useCallback(async (sessionId: string) => {
     if (!sendRequest) return;
@@ -198,6 +223,14 @@ function ServerCard({
           <View style={styles.badge}>
             <Text style={styles.badgeText}>{status.summary.waitingCount}</Text>
           </View>
+        )}
+        {status.connected && sendRequest && (
+          <TouchableOpacity
+            style={styles.serverActionButton}
+            onPress={() => setShowNewSession(true)}
+          >
+            <Text style={styles.serverActionIcon}>+</Text>
+          </TouchableOpacity>
         )}
         {onNewProject && status.connected && (
           <TouchableOpacity style={styles.serverActionButton} onPress={onNewProject}>
@@ -337,6 +370,13 @@ function ServerCard({
       {!status.connected && !status.connecting && !status.error && (
         <Text style={styles.disconnectedText}>Tap to connect</Text>
       )}
+
+      <NewSessionModal
+        visible={showNewSession}
+        onClose={() => setShowNewSession(false)}
+        onCreate={handleCreateSession}
+        onFetchRecents={fetchRecents}
+      />
     </TouchableOpacity>
   );
 }
