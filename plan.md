@@ -23,7 +23,7 @@ After killing all sessions, the server card on the dashboard is still tappable a
 ---
 
 ## 2. Debug auto-approve hung prompts (Bug Fix)
-**Status:** planned
+**Status:** done
 
 ### Problem
 Auto-approve gets hung up at prompts when it should be auto-approving.

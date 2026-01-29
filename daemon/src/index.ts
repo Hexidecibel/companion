@@ -88,55 +88,98 @@ async function main(): Promise<void> {
   {
     console.log(`Auto-approve tools from config: ${config.autoApproveTools.length > 0 ? config.autoApproveTools.join(', ') : '(none - client toggle only)'}`);
     const tmux = new TmuxManager('claude');
-    // Track in-flight approvals to prevent double-firing
-    const pendingAutoApprovals = new Set<string>();
+    // Track in-flight approvals using composite key (sessionId:tools) to prevent double-firing
+    const pendingAutoApprovals = new Map<string, number>();
 
     watcher.on('pending-approval', async ({ sessionId, projectPath, tools }) => {
       // Skip if auto-approve is not enabled (neither config nor client toggle)
       if (config.autoApproveTools.length === 0 && !wsHandler.autoApproveEnabled) {
+        console.log(`[AUTO-APPROVE] Skipped: auto-approve not enabled (config tools: ${config.autoApproveTools.length}, client toggle: ${wsHandler.autoApproveEnabled})`);
         return;
       }
 
       // Check if any pending tool should be auto-approved
       const autoApprovable = tools.filter((tool: string) => {
-        // Config-level auto-approve for specific tools
         if (config.autoApproveTools.includes(tool)) return true;
-        // Client toggle enables ALL tools to be auto-approved
         if (wsHandler.autoApproveEnabled) return true;
         return false;
       });
 
-      if (autoApprovable.length > 0) {
-        // Skip if we already have an auto-approval in flight for this session
-        if (pendingAutoApprovals.has(sessionId)) {
-          return;
-        }
-        pendingAutoApprovals.add(sessionId);
+      if (autoApprovable.length === 0) {
+        console.log(`[AUTO-APPROVE] No auto-approvable tools in: [${tools.join(', ')}]`);
+        return;
+      }
 
-        try {
-          // Find the tmux session that matches this conversation's project path
-          let targetTmuxSession: string | undefined;
-          if (projectPath) {
-            const tmuxSessions = await tmux.listSessions();
-            const match = tmuxSessions.find(ts => ts.workingDir === projectPath);
-            if (match) {
-              targetTmuxSession = match.name;
+      // Composite dedup key: session + sorted tool names
+      const dedupKey = `${sessionId}:${autoApprovable.sort().join(',')}`;
+      const now = Date.now();
+      const lastApproval = pendingAutoApprovals.get(dedupKey);
+      if (lastApproval && now - lastApproval < 5000) {
+        console.log(`[AUTO-APPROVE] Dedup: skipping (last approval ${now - lastApproval}ms ago for ${dedupKey})`);
+        return;
+      }
+      pendingAutoApprovals.set(dedupKey, now);
+
+      // Clean up old entries
+      for (const [key, ts] of pendingAutoApprovals) {
+        if (now - ts > 10000) pendingAutoApprovals.delete(key);
+      }
+
+      try {
+        // Find the tmux session that matches this conversation's project path
+        let targetTmuxSession: string | undefined;
+        if (projectPath) {
+          const tmuxSessions = await tmux.listSessions();
+          // Try exact match first
+          const exactMatch = tmuxSessions.find(ts => ts.workingDir === projectPath);
+          if (exactMatch) {
+            targetTmuxSession = exactMatch.name;
+          } else {
+            // Try normalized path match (trailing slash differences, symlinks)
+            const normalizedPath = projectPath.replace(/\/+$/, '');
+            const fuzzyMatch = tmuxSessions.find(ts =>
+              ts.workingDir?.replace(/\/+$/, '') === normalizedPath
+            );
+            if (fuzzyMatch) {
+              targetTmuxSession = fuzzyMatch.name;
+              console.log(`[AUTO-APPROVE] Fuzzy path match: "${fuzzyMatch.name}" for ${projectPath}`);
             }
           }
-
-          if (targetTmuxSession) {
-            console.log(`Auto-approving tools [${autoApprovable.join(', ')}] in tmux session "${targetTmuxSession}" (conversation: ${sessionId})`);
-            await new Promise(resolve => setTimeout(resolve, 200));
-            await injector.sendInput('yes', targetTmuxSession);
-          } else {
-            console.log(`Auto-approving tools [${autoApprovable.join(', ')}] in active session (no tmux match for ${projectPath})`);
-            await new Promise(resolve => setTimeout(resolve, 200));
-            await injector.sendInput('yes');
-          }
-        } finally {
-          // Clear the in-flight flag after a delay to let Claude process
-          setTimeout(() => pendingAutoApprovals.delete(sessionId), 3000);
         }
+
+        // Wait for terminal to settle before sending approval
+        await new Promise(resolve => setTimeout(resolve, 300));
+
+        const sendApproval = async (target?: string): Promise<boolean> => {
+          try {
+            await injector.sendInput('yes', target);
+            return true;
+          } catch (err) {
+            console.log(`[AUTO-APPROVE] Send failed: ${err}`);
+            return false;
+          }
+        };
+
+        if (targetTmuxSession) {
+          console.log(`[AUTO-APPROVE] Sending to tmux="${targetTmuxSession}" for tools [${autoApprovable.join(', ')}] (session: ${sessionId})`);
+          const success = await sendApproval(targetTmuxSession);
+          if (!success) {
+            // Retry once after 500ms
+            console.log(`[AUTO-APPROVE] Retrying after 500ms...`);
+            await new Promise(resolve => setTimeout(resolve, 500));
+            await sendApproval(targetTmuxSession);
+          }
+        } else {
+          console.log(`[AUTO-APPROVE] Sending to active session for tools [${autoApprovable.join(', ')}] (no tmux match for ${projectPath})`);
+          const success = await sendApproval();
+          if (!success) {
+            console.log(`[AUTO-APPROVE] Retrying after 500ms...`);
+            await new Promise(resolve => setTimeout(resolve, 500));
+            await sendApproval();
+          }
+        }
+      } catch (err) {
+        console.error(`[AUTO-APPROVE] Error: ${err}`);
       }
     });
   }
