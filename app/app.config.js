@@ -10,6 +10,10 @@ export default {
     orientation: "portrait",
     userInterfaceStyle: "automatic",
     icon: "./assets/icon.png",
+    splash: {
+      backgroundColor: "#111827",
+      resizeMode: "contain"
+    },
     ios: {
       bundleIdentifier: "com.claudecompanion.app",
       infoPlist: {

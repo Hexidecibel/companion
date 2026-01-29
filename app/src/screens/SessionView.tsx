@@ -247,31 +247,27 @@ export function SessionView({ server, onBack, initialSessionId, onNewProject }: 
           // This invalidates any in-flight requests from previous session
           const epoch = sessionGuard.beginSwitch(initialSessionId);
 
-          try {
-            // Send switch request with epoch for server-side tracking
-            const response = await wsService.sendRequest('switch_session', {
-              sessionId: initialSessionId,
-              epoch,
-            });
-            if (!response.success) {
-              console.error('Failed to switch session:', response.error);
-            }
-          } catch (e) {
-            console.error('Failed to switch session:', e);
-          }
+          // Fire switch_session without awaiting - the daemon sets the active
+          // session synchronously before yielding for tmux lookup, so by the
+          // time get_highlights is processed the session is already switched.
+          wsService.sendRequest('switch_session', {
+            sessionId: initialSessionId,
+            epoch,
+          }).catch(e => console.error('Failed to switch session:', e));
         } else if (initialSessionId && !sessionGuard.getCurrentSessionId()) {
           // First load - set session in guard without incrementing epoch
           sessionGuard.beginSwitch(initialSessionId);
           setCurrentSessionId(initialSessionId);
         }
 
-        // Clear first if switching sessions to avoid showing stale content
+        // Fetch data immediately - don't wait for switch_session response
         refresh(!!isSwitching);
-        // Sync instant notify preference with daemon
-        const settings = await getSessionSettings(server.id);
-        if (settings.instantNotify) {
-          wsService.sendRequest('set_instant_notify', { enabled: true });
-        }
+        // Sync instant notify preference with daemon (fire-and-forget)
+        getSessionSettings(server.id).then(settings => {
+          if (settings.instantNotify) {
+            wsService.sendRequest('set_instant_notify', { enabled: true });
+          }
+        });
         // Only reset scroll state when switching sessions, not on every reconnect
         if (isSwitching) {
           lastDataLength.current = 0;

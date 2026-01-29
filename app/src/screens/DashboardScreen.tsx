@@ -77,6 +77,7 @@ function ServerCard({
   onLongPress,
   onSessionPress,
   onToggleEnabled,
+  onNewProject,
 }: {
   server: Server;
   status: ServerStatus;
@@ -84,6 +85,7 @@ function ServerCard({
   onLongPress: () => void;
   onSessionPress: (sessionId: string) => void;
   onToggleEnabled: (enabled: boolean) => void;
+  onNewProject?: () => void;
 }) {
   const isEnabled = server.enabled !== false;
   const connectionColor = !isEnabled
@@ -108,6 +110,11 @@ function ServerCard({
           <View style={styles.badge}>
             <Text style={styles.badgeText}>{status.summary.waitingCount}</Text>
           </View>
+        )}
+        {onNewProject && status.connected && (
+          <TouchableOpacity style={styles.serverActionButton} onPress={onNewProject}>
+            <Text style={styles.serverActionIcon}>✦</Text>
+          </TouchableOpacity>
         )}
         <Switch
           value={isEnabled}
@@ -241,19 +248,9 @@ export function DashboardScreen({
     <View style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Claude Companion</Text>
-        <View style={styles.headerButtons}>
-          <TouchableOpacity style={styles.headerButton} onPress={onOpenSetup}>
-            <Text style={styles.headerButtonText}>?</Text>
-          </TouchableOpacity>
-          {onOpenNewProject && (
-            <TouchableOpacity style={styles.headerButton} onPress={onOpenNewProject}>
-              <Text style={styles.headerButtonIcon}>✦</Text>
-            </TouchableOpacity>
-          )}
-          <TouchableOpacity style={styles.headerButton} onPress={onAddServer}>
-            <Text style={styles.headerButtonText}>+</Text>
-          </TouchableOpacity>
-        </View>
+        <TouchableOpacity style={styles.headerButton} onPress={onOpenSetup}>
+          <Text style={styles.headerButtonText}>?</Text>
+        </TouchableOpacity>
       </View>
 
       {/* Summary bar */}
@@ -324,9 +321,13 @@ export function DashboardScreen({
                     await updateServer(updated);
                     await loadServers();
                   }}
+                  onNewProject={onOpenNewProject}
                 />
               );
             })}
+            <TouchableOpacity style={styles.addServerButton} onPress={onAddServer}>
+              <Text style={styles.addServerButtonText}>+ Add Server</Text>
+            </TouchableOpacity>
           </>
         )}
       </ScrollView>
@@ -359,10 +360,6 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: '700',
   },
-  headerButtons: {
-    flexDirection: 'row',
-    gap: 8,
-  },
   headerButton: {
     width: 36,
     height: 36,
@@ -375,10 +372,6 @@ const styles = StyleSheet.create({
     color: '#f3f4f6',
     fontSize: 18,
     fontWeight: '600',
-  },
-  headerButtonIcon: {
-    color: '#10b981',
-    fontSize: 18,
   },
   summaryBar: {
     flexDirection: 'row',
@@ -573,5 +566,31 @@ const styles = StyleSheet.create({
   setupLinkText: {
     color: '#60a5fa',
     fontSize: 14,
+  },
+  serverActionButton: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: '#374151',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginLeft: 8,
+  },
+  serverActionIcon: {
+    color: '#10b981',
+    fontSize: 16,
+  },
+  addServerButton: {
+    borderWidth: 1,
+    borderColor: '#374151',
+    borderStyle: 'dashed',
+    borderRadius: 12,
+    paddingVertical: 16,
+    alignItems: 'center',
+  },
+  addServerButtonText: {
+    color: '#6b7280',
+    fontSize: 15,
+    fontWeight: '500',
   },
 });

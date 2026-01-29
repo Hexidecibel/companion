@@ -39,12 +39,116 @@ const MAX_MESSAGES = 100; // Limit to most recent messages
 // Tools that typically require user approval
 const APPROVAL_TOOLS = ['Bash', 'Edit', 'Write', 'NotebookEdit', 'Task'];
 
-export function parseConversationFile(filePath: string, limit: number = MAX_MESSAGES): ConversationMessage[] {
+/**
+ * Fast function to detect current activity by reading only the last few KB of a file.
+ * Much faster than parsing the entire conversation file.
+ * Tracks tool_result entries to avoid showing stale "pending" status for completed tools.
+ */
+export function detectCurrentActivityFast(filePath: string): string | undefined {
   if (!fs.existsSync(filePath)) {
+    return undefined;
+  }
+
+  try {
+    const stats = fs.statSync(filePath);
+    const fileSize = stats.size;
+
+    // Read last 32KB - enough to get recent messages
+    const readSize = Math.min(32 * 1024, fileSize);
+    const buffer = Buffer.alloc(readSize);
+    const fd = fs.openSync(filePath, 'r');
+    fs.readSync(fd, buffer, 0, readSize, Math.max(0, fileSize - readSize));
+    fs.closeSync(fd);
+
+    const tail = buffer.toString('utf-8');
+    const lines = tail.split('\n').filter(line => line.trim());
+
+    // Collect tool_result IDs from recent lines so we know which tools completed
+    const completedToolIds = new Set<string>();
+    for (let i = lines.length - 1; i >= 0; i--) {
+      try {
+        const entry: JsonlEntry = JSON.parse(lines[i]);
+        if (entry.message?.content && Array.isArray(entry.message.content)) {
+          for (const block of entry.message.content) {
+            if (block.type === 'tool_result' && block.tool_use_id) {
+              completedToolIds.add(block.tool_use_id);
+            }
+          }
+        }
+      } catch {
+        continue;
+      }
+    }
+
+    // Walk backward to find the most recent meaningful entry
+    for (let i = lines.length - 1; i >= 0; i--) {
+      try {
+        const entry: JsonlEntry = JSON.parse(lines[i]);
+        if (entry.message?.role === 'user') {
+          return 'Processing...';
+        }
+        if (entry.message?.role === 'assistant' && entry.message.content) {
+          const entryContent = entry.message.content;
+          if (Array.isArray(entryContent)) {
+            // Find the last tool_use that hasn't been completed
+            for (let j = entryContent.length - 1; j >= 0; j--) {
+              const block = entryContent[j];
+              if (block.type === 'tool_use' && block.name && block.id) {
+                // Skip tools that already have results
+                if (completedToolIds.has(block.id)) {
+                  continue;
+                }
+
+                const toolDescriptions: Record<string, string> = {
+                  'Read': 'Reading file',
+                  'Write': 'Writing file',
+                  'Edit': 'Editing file',
+                  'Bash': 'Running command',
+                  'Glob': 'Searching files',
+                  'Grep': 'Searching code',
+                  'Task': 'Running agent',
+                  'WebFetch': 'Fetching web page',
+                  'WebSearch': 'Searching web',
+                  'AskUserQuestion': 'Waiting for response',
+                };
+
+                // Check if this needs approval
+                if (APPROVAL_TOOLS.includes(block.name)) {
+                  const input = block.input as Record<string, unknown> | undefined;
+                  if (block.name === 'Bash' && input?.command) {
+                    const cmd = (input.command as string).substring(0, 40);
+                    return `Approve? ${cmd}${(input.command as string).length > 40 ? '...' : ''}`;
+                  }
+                  if ((block.name === 'Edit' || block.name === 'Write') && input?.file_path) {
+                    const fileName = (input.file_path as string).split('/').pop() || input.file_path;
+                    return `Approve ${block.name.toLowerCase()}: ${fileName}?`;
+                  }
+                  return `Approve ${block.name}?`;
+                }
+
+                return toolDescriptions[block.name] || `Using ${block.name}`;
+              }
+            }
+          }
+          return undefined; // Assistant message, all tools completed
+        }
+      } catch {
+        continue;
+      }
+    }
+
+    return undefined;
+  } catch (err) {
+    return undefined;
+  }
+}
+
+export function parseConversationFile(filePath: string, limit: number = MAX_MESSAGES, preReadContent?: string): ConversationMessage[] {
+  const content = preReadContent ?? (fs.existsSync(filePath) ? fs.readFileSync(filePath, 'utf-8') : '');
+  if (!content) {
     return [];
   }
 
-  const content = fs.readFileSync(filePath, 'utf-8');
   const lines = content.split('\n').filter(line => line.trim());
 
   // First pass: collect all tool results, start times, and completion times
@@ -251,12 +355,22 @@ export function extractHighlights(messages: ConversationMessage[]): Conversation
         tc => tc.status === 'completed' || tc.status === 'error' || tc.output !== undefined
       );
 
+      // Check if user already responded after this message (tool is running, not waiting)
+      const userRespondedAfter = originalIndex < messages.length - 1 &&
+        messages.slice(originalIndex + 1).some(m => m.type === 'user');
+
       // Show options if:
       // 1. This message has options AND
       // 2. Either it's the last message OR it has pending approval tools AND
-      // 3. Tools haven't all completed
+      // 3. Tools haven't all completed AND
+      // 4. User hasn't already responded (tool would be running, not waiting)
       const showOptions = msg.options && msg.options.length > 0 &&
-        (isLastMessage || hasPendingApprovalTools) && !allToolsCompleted;
+        (isLastMessage || hasPendingApprovalTools) && !allToolsCompleted && !userRespondedAfter;
+
+      // If user responded after this message, pending tools are now running (not waiting for approval)
+      const toolCalls = userRespondedAfter && msg.toolCalls
+        ? msg.toolCalls.map(tc => tc.status === 'pending' ? { ...tc, status: 'running' as const } : tc)
+        : msg.toolCalls;
 
       return {
         id: msg.id,
@@ -266,7 +380,7 @@ export function extractHighlights(messages: ConversationMessage[]): Conversation
         options: showOptions ? msg.options : undefined,
         isWaitingForChoice: showOptions ? msg.isWaitingForChoice : false,
         multiSelect: showOptions ? msg.multiSelect : undefined,
-        toolCalls: msg.toolCalls,
+        toolCalls,
       };
     });
 
@@ -494,13 +608,14 @@ export function detectCompaction(
   sessionId: string,
   sessionName: string,
   projectPath: string,
-  lastCheckedLine: number = 0
+  lastCheckedLine: number = 0,
+  preReadContent?: string
 ): { event: CompactionEvent | null; lastLine: number } {
-  if (!fs.existsSync(filePath)) {
+  const content = preReadContent ?? (fs.existsSync(filePath) ? fs.readFileSync(filePath, 'utf-8') : '');
+  if (!content) {
     return { event: null, lastLine: 0 };
   }
 
-  const content = fs.readFileSync(filePath, 'utf-8');
   const lines = content.split('\n').filter(line => line.trim());
   let compactionEvent: CompactionEvent | null = null;
 

@@ -187,6 +187,10 @@ export class WebSocketHandler {
 
   private handleMessage(client: AuthenticatedClient, message: WebSocketMessage): void {
     const { type, token, payload, requestId } = message;
+    const reqStart = Date.now();
+    if (type !== 'ping') {
+      console.log(`WebSocket: >> recv ${type} (${requestId || 'no-id'}) from ${client.id}`);
+    }
 
     // Authenticate first
     if (type === 'authenticate') {
@@ -252,10 +256,14 @@ export class WebSocketHandler {
         });
         break;
 
-      case 'get_highlights':
+      case 'get_highlights': {
+        const t0 = Date.now();
         const messages = this.watcher.getMessages();
+        const t1 = Date.now();
         const highlights = extractHighlights(messages);
+        const t2 = Date.now();
         const hlSessionId = this.watcher.getActiveSessionId();
+        console.log(`WebSocket: get_highlights - getMessages: ${t1-t0}ms, extractHighlights: ${t2-t1}ms, ${messages.length} msgs`);
         this.send(client.ws, {
           type: 'highlights',
           success: true,
@@ -264,10 +272,14 @@ export class WebSocketHandler {
           requestId,
         } as WebSocketResponse);
         break;
+      }
 
-      case 'get_full':
+      case 'get_full': {
+        const t0 = Date.now();
         const fullMessages = this.watcher.getMessages();
+        const t1 = Date.now();
         const fullSessionId = this.watcher.getActiveSessionId();
+        console.log(`WebSocket: get_full - getMessages: ${t1-t0}ms, ${fullMessages.length} msgs`);
         this.send(client.ws, {
           type: 'full',
           success: true,
@@ -276,10 +288,15 @@ export class WebSocketHandler {
           requestId,
         } as WebSocketResponse);
         break;
+      }
 
-      case 'get_status':
+      case 'get_status': {
+        const t0 = Date.now();
         const status = this.watcher.getStatus();
+        const t1 = Date.now();
         const statusSessionId = this.watcher.getActiveSessionId();
+        console.log(`WebSocket: get_status - ${t1-t0}ms`);
+
         this.send(client.ws, {
           type: 'status',
           success: true,
@@ -288,6 +305,7 @@ export class WebSocketHandler {
           requestId,
         } as WebSocketResponse);
         break;
+      }
 
       case 'get_server_summary':
         // Get tmux sessions to filter - only show conversations with active tmux sessions
@@ -489,6 +507,7 @@ export class WebSocketHandler {
 
       // Tmux session management
       case 'list_tmux_sessions':
+        console.log('WebSocket: Received list_tmux_sessions request');
         this.handleListTmuxSessions(client, requestId);
         break;
 
@@ -1744,7 +1763,13 @@ export class WebSocketHandler {
 
   private send(ws: WebSocket, response: WebSocketResponse): void {
     if (ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify(response));
+      const data = JSON.stringify(response);
+      if (response.type !== 'pong' && response.requestId) {
+        console.log(`WebSocket: << send ${response.type} (${response.requestId}) ${data.length} bytes`);
+      }
+      ws.send(data);
+    } else {
+      console.log(`WebSocket: !! send FAILED - ws not open (state: ${ws.readyState}) for ${response.type}`);
     }
   }
 

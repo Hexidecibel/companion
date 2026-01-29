@@ -108,31 +108,29 @@ export function useConversation() {
     const { sessionId: expectedSessionId } = sessionGuard.getContext();
 
     try {
-      // Subscribe to updates for this session
-      await wsService.sendRequest('subscribe', { sessionId: expectedSessionId });
+      // Fire subscribe, data, and status ALL in parallel - no sequential waits
+      const subscribeRequest = wsService.sendRequest('subscribe', { sessionId: expectedSessionId });
+      const dataRequest = viewMode === 'highlights'
+        ? wsService.sendRequest('get_highlights', undefined, 30000)
+        : wsService.sendRequest('get_full', undefined, 30000);
+      const statusRequest = wsService.sendRequest('get_status', undefined, 30000);
 
-      // Fetch current data based on view mode
-      if (viewMode === 'highlights') {
-        const response = await wsService.sendRequest('get_highlights');
-        // Validate response is for current session
-        if (response.success && response.payload && sessionGuard.isValid(response.sessionId)) {
-          const payload = response.payload as { highlights: ConversationHighlight[] };
+      const [, dataResponse, statusResponse] = await Promise.all([subscribeRequest, dataRequest, statusRequest]);
+
+      // Apply data response
+      if (dataResponse.success && dataResponse.payload && sessionGuard.isValid(dataResponse.sessionId)) {
+        if (viewMode === 'highlights') {
+          const payload = dataResponse.payload as { highlights: ConversationHighlight[] };
           setHighlights(payload.highlights || []);
-        } else if (response.sessionId && !sessionGuard.isValid(response.sessionId)) {
-          console.log(`useConversation: Discarding highlights response for wrong session ${response.sessionId}`);
-        }
-      } else {
-        const response = await wsService.sendRequest('get_full');
-        if (response.success && response.payload && sessionGuard.isValid(response.sessionId)) {
-          const payload = response.payload as { messages: ConversationMessage[] };
+        } else {
+          const payload = dataResponse.payload as { messages: ConversationMessage[] };
           setMessages(payload.messages || []);
-        } else if (response.sessionId && !sessionGuard.isValid(response.sessionId)) {
-          console.log(`useConversation: Discarding full response for wrong session ${response.sessionId}`);
         }
+      } else if (dataResponse.sessionId && !sessionGuard.isValid(dataResponse.sessionId)) {
+        console.log(`useConversation: Discarding data response for wrong session ${dataResponse.sessionId}`);
       }
 
-      // Get status
-      const statusResponse = await wsService.sendRequest('get_status');
+      // Apply status response
       if (statusResponse.success && statusResponse.payload && sessionGuard.isValid(statusResponse.sessionId)) {
         setStatus(statusResponse.payload as SessionStatus);
       }

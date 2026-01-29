@@ -286,10 +286,8 @@ function App() {
           <Settings
             onBack={handleBackFromSettings}
             onOpenNotificationSettings={handleOpenNotificationSettings}
-            onOpenUsage={handleOpenUsage}
             onOpenAgents={handleOpenAgents}
             onOpenArchive={handleOpenArchive}
-            onOpenNewProject={handleOpenNewProject}
           />
         );
       case 'usage':
@@ -331,12 +329,13 @@ function App() {
   };
 
   return (
-    <SafeAreaProvider>
-      <ErrorBoundary>
-        <StatusBar barStyle="light-content" backgroundColor="#111827" />
-        <SafeAreaView style={styles.container} edges={['top']}>
-          {renderScreen()}
-        </SafeAreaView>
+    <View style={styles.rootContainer}>
+      <SafeAreaProvider>
+        <ErrorBoundary>
+          <StatusBar barStyle="light-content" backgroundColor="#111827" />
+          <SafeAreaView style={styles.container} edges={['top']}>
+            {renderScreen()}
+          </SafeAreaView>
         {currentScreen === 'dashboard' && (
           <View style={styles.settingsButton}>
             <SafeAreaView edges={['bottom']}>
@@ -350,10 +349,15 @@ function App() {
         )}
       </ErrorBoundary>
     </SafeAreaProvider>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
+  rootContainer: {
+    flex: 1,
+    backgroundColor: '#111827',
+  },
   container: {
     flex: 1,
     backgroundColor: '#111827',

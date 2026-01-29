@@ -18,13 +18,11 @@ import { wsService } from '../services/websocket';
 interface SettingsProps {
   onBack: () => void;
   onOpenNotificationSettings: () => void;
-  onOpenUsage: () => void;
   onOpenAgents?: () => void;
   onOpenArchive?: () => void;
-  onOpenNewProject?: () => void;
 }
 
-export function Settings({ onBack, onOpenNotificationSettings, onOpenUsage, onOpenAgents, onOpenArchive, onOpenNewProject }: SettingsProps) {
+export function Settings({ onBack, onOpenNotificationSettings, onOpenAgents, onOpenArchive }: SettingsProps) {
   const [settings, setSettings] = useState<AppSettings>({
     stayConnected: false,
     pushEnabled: false,
@@ -164,21 +162,6 @@ export function Settings({ onBack, onOpenNotificationSettings, onOpenUsage, onOp
       </View>
 
       <ScrollView style={styles.content} contentContainerStyle={styles.contentContainer}>
-        {onOpenNewProject && (
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Projects</Text>
-            <TouchableOpacity style={styles.linkRow} onPress={onOpenNewProject}>
-              <View style={styles.settingInfo}>
-                <Text style={styles.settingLabel}>New Project</Text>
-                <Text style={styles.settingDescription}>
-                  Scaffold a new project with templates
-                </Text>
-              </View>
-              <Text style={styles.linkArrow}>›</Text>
-            </TouchableOpacity>
-          </View>
-        )}
-
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Connection</Text>
 
@@ -201,16 +184,6 @@ export function Settings({ onBack, onOpenNotificationSettings, onOpenUsage, onOp
               <Text style={styles.settingLabel}>Push Notifications</Text>
               <Text style={styles.settingDescription}>
                 Configure alerts and quiet hours
-              </Text>
-            </View>
-            <Text style={styles.linkArrow}>›</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity style={styles.linkRow} onPress={onOpenUsage}>
-            <View style={styles.settingInfo}>
-              <Text style={styles.settingLabel}>Usage Statistics</Text>
-              <Text style={styles.settingDescription}>
-                View token usage and estimated costs
               </Text>
             </View>
             <Text style={styles.linkArrow}>›</Text>

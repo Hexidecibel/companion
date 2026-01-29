@@ -235,16 +235,19 @@ export function useMultiServerStatus(servers: Server[]) {
   }, [servers, refreshServer]);
 
   // Effect to connect when servers change
+  // Don't disconnect on unmount - connections persist so dashboard
+  // loads instantly when navigating back from session view
   useEffect(() => {
-    connectAll();
-
-    return () => {
-      // Cleanup on unmount
-      connections.current.forEach((_, serverId) => {
+    // Clean up connections for servers no longer in the list
+    const currentServerIds = new Set(servers.map(s => s.id));
+    connections.current.forEach((_, serverId) => {
+      if (!currentServerIds.has(serverId)) {
         disconnectFromServer(serverId);
-      });
-    };
-  }, [connectAll, disconnectFromServer]);
+      }
+    });
+
+    connectAll();
+  }, [connectAll, disconnectFromServer, servers]);
 
   // Get status array for easier rendering
   const statusArray = Array.from(statuses.values());

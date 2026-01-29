@@ -5,7 +5,7 @@ import { EventEmitter } from 'events';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import { ConversationFile, ConversationMessage, SessionStatus, TmuxSession } from './types';
-import { parseConversationFile, extractHighlights, detectWaitingForInput, detectCurrentActivity, getRecentActivity, getPendingApprovalTools, detectCompaction } from './parser';
+import { parseConversationFile, extractHighlights, detectWaitingForInput, detectCurrentActivity, detectCurrentActivityFast, getRecentActivity, getPendingApprovalTools, detectCompaction } from './parser';
 
 const execAsync = promisify(exec);
 
@@ -16,6 +16,7 @@ interface TrackedConversation {
   messageCount: number;
   isWaitingForInput: boolean;
   lastCompactionLine: number;
+  cachedMessages: ConversationMessage[] | null;
 }
 
 export class ClaudeWatcher extends EventEmitter {
@@ -29,6 +30,8 @@ export class ClaudeWatcher extends EventEmitter {
   private startTime: number = Date.now();
   private tmuxProjectPaths: Set<string> = new Set();
   private tmuxFilterEnabled: boolean = true;
+  private debounceTimers: Map<string, NodeJS.Timeout> = new Map();
+  private static readonly DEBOUNCE_MS = 150; // Debounce file changes per session
 
   constructor(claudeHome: string) {
     super();
@@ -113,6 +116,11 @@ export class ClaudeWatcher extends EventEmitter {
       this.watcher.close();
       this.watcher = null;
     }
+    // Clear all debounce timers
+    for (const timer of this.debounceTimers.values()) {
+      clearTimeout(timer);
+    }
+    this.debounceTimers.clear();
   }
 
   private handleFileChange(filePath: string): void {
@@ -132,12 +140,34 @@ export class ClaudeWatcher extends EventEmitter {
       return;
     }
 
+    // Debounce per session - avoid blocking the event loop with rapid
+    // successive file parses when Claude Code is actively writing
+    const existingTimer = this.debounceTimers.get(sessionId);
+    if (existingTimer) {
+      clearTimeout(existingTimer);
+    }
+    this.debounceTimers.set(sessionId, setTimeout(() => {
+      this.debounceTimers.delete(sessionId);
+      this.processFileChange(filePath, sessionId);
+    }, ClaudeWatcher.DEBOUNCE_MS));
+  }
+
+  private processFileChange(filePath: string, sessionId: string): void {
     const stats = fs.statSync(filePath);
     const projectPath = this.extractProjectPath(filePath);
 
-    // Parse the conversation
-    const messages = parseConversationFile(filePath);
+    // Read the file ONCE and share the content
+    const content = fs.readFileSync(filePath, 'utf-8');
+
+    // Parse the conversation from content
+    const t0 = Date.now();
+    const messages = parseConversationFile(filePath, undefined, content);
+    const t1 = Date.now();
     const highlights = extractHighlights(messages);
+    const t2 = Date.now();
+    if (t2 - t0 > 50) {
+      console.log(`Watcher: processFileChange parse took ${t1-t0}ms + highlights ${t2-t1}ms = ${t2-t0}ms (${messages.length} msgs) for ${sessionId}`);
+    }
     const wasWaiting = this.isWaitingForInput;
     const conversationWaiting = detectWaitingForInput(messages);
 
@@ -145,14 +175,15 @@ export class ClaudeWatcher extends EventEmitter {
     const prevTracked = this.conversations.get(sessionId);
     const lastCompactionLine = prevTracked?.lastCompactionLine || 0;
 
-    // Check for compaction events
+    // Check for compaction events using already-read content
     const sessionName = projectPath.split('/').pop() || sessionId;
     const { event: compactionEvent, lastLine: newCompactionLine } = detectCompaction(
       filePath,
       sessionId,
       sessionName,
       projectPath,
-      lastCompactionLine
+      lastCompactionLine,
+      content
     );
 
     if (compactionEvent) {
@@ -160,7 +191,7 @@ export class ClaudeWatcher extends EventEmitter {
       this.emit('compaction', compactionEvent);
     }
 
-    // Track this conversation
+    // Track this conversation with cached parse result
     const tracked: TrackedConversation = {
       path: filePath,
       projectPath,
@@ -168,6 +199,7 @@ export class ClaudeWatcher extends EventEmitter {
       messageCount: messages.length,
       isWaitingForInput: conversationWaiting,
       lastCompactionLine: newCompactionLine,
+      cachedMessages: messages,
     };
     this.conversations.set(sessionId, tracked);
 
@@ -233,7 +265,6 @@ export class ClaudeWatcher extends EventEmitter {
       }
     } else {
       // Emit activity notification for non-active sessions
-      // Use prevTracked from line 145, not the updated map
       const hadMessages = prevTracked?.messageCount || 0;
       if (messages.length > hadMessages) {
         const lastMessage = messages[messages.length - 1];
@@ -345,6 +376,8 @@ export class ClaudeWatcher extends EventEmitter {
     const tracked = this.conversations.get(targetId);
     if (!tracked) return [];
 
+    // Use cached messages from last file change instead of re-parsing
+    if (tracked.cachedMessages) return tracked.cachedMessages;
     return parseConversationFile(tracked.path);
   }
 
@@ -367,7 +400,8 @@ export class ClaudeWatcher extends EventEmitter {
       };
     }
 
-    const messages = parseConversationFile(tracked.path);
+    // Use cached messages instead of re-parsing
+    const messages = tracked.cachedMessages || parseConversationFile(tracked.path);
     const lastMessage = messages[messages.length - 1];
 
     return {
@@ -414,8 +448,8 @@ export class ClaudeWatcher extends EventEmitter {
         this.isWaitingForInput = tracked.isWaitingForInput;
         this.lastMessageCount = tracked.messageCount;
 
-        // Emit update for the new active session
-        const messages = parseConversationFile(tracked.path);
+        // Use cached messages instead of re-parsing
+        const messages = tracked.cachedMessages || parseConversationFile(tracked.path);
         const highlights = extractHighlights(messages);
 
         this.emit('conversation-update', {
@@ -500,8 +534,8 @@ export class ClaudeWatcher extends EventEmitter {
         continue;
       }
 
-      const messages = parseConversationFile(conv.path);
-      const currentActivity = detectCurrentActivity(messages);
+      // Use fast tail-based detection instead of parsing entire file
+      const currentActivity = detectCurrentActivityFast(conv.path);
 
       // Determine status
       let status: 'idle' | 'working' | 'waiting' | 'error' = 'idle';

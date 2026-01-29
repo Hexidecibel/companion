@@ -35,7 +35,7 @@ export interface ToolCall {
   name: string;
   input: Record<string, unknown>;
   output?: string;
-  status: 'pending' | 'completed' | 'error';
+  status: 'pending' | 'running' | 'completed' | 'error';
   startedAt?: number;
   completedAt?: number;
 }

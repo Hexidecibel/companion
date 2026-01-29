@@ -153,8 +153,8 @@ function ToolCard({ tool, forceExpanded }: { tool: ToolCall; forceExpanded?: boo
   const summary = getToolSummary(tool);
   const icon = getToolIcon(tool.name);
   const hasOutput = tool.output && tool.output.length > 0;
-  const statusColor = tool.status === 'pending' ? '#f59e0b' : '#10b981';
-  const statusText = tool.status === 'pending' ? 'running' : 'done';
+  const statusColor = tool.status === 'completed' ? '#10b981' : tool.status === 'error' ? '#ef4444' : '#f59e0b';
+  const statusText = tool.status === 'completed' ? 'done' : tool.status === 'error' ? 'error' : 'running';
 
   // Extract input values safely
   const input = tool.input || {};
@@ -275,6 +275,10 @@ function ToolCard({ tool, forceExpanded }: { tool: ToolCall; forceExpanded?: boo
           {tool.status === 'pending' ? (
             <View style={toolCardStyles.pendingBadge}>
               <Text style={toolCardStyles.pendingText}>Waiting for approval</Text>
+            </View>
+          ) : tool.status === 'running' ? (
+            <View style={[toolCardStyles.pendingBadge, { backgroundColor: '#1e3a5f' }]}>
+              <Text style={[toolCardStyles.pendingText, { color: '#60a5fa' }]}>Running...</Text>
             </View>
           ) : null}
         </View>
