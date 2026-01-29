@@ -8,6 +8,7 @@ import {
   RefreshControl,
   ActivityIndicator,
   Switch,
+  Alert,
 } from 'react-native';
 import { Server, ServerStatus, SessionSummary, TaskSummary, TaskItem } from '../types';
 import { getServers, updateServer } from '../services/storage';
@@ -90,6 +91,7 @@ function ServerCard({
   onNewProject,
   sendRequest,
   onOpenTaskDetail,
+  onRefresh,
 }: {
   server: Server;
   status: ServerStatus;
@@ -100,6 +102,7 @@ function ServerCard({
   onNewProject?: () => void;
   sendRequest?: (serverId: string, type: string, payload?: unknown) => Promise<any>;
   onOpenTaskDetail?: (task: TaskItem, sessionId: string) => void;
+  onRefresh?: () => void;
 }) {
   const [expandedSessions, setExpandedSessions] = useState<Set<string>>(new Set());
   const [tasksBySession, setTasksBySession] = useState<Map<string, TaskItem[]>>(new Map());
@@ -128,6 +131,33 @@ function ServerCard({
       });
     }
   }, [server.id, sendRequest]);
+
+  const handleKillSession = useCallback((sessionName: string) => {
+    Alert.alert(
+      'Kill Session',
+      `Kill session "${sessionName}"? This will terminate the Claude process.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Kill',
+          style: 'destructive',
+          onPress: async () => {
+            if (!sendRequest) return;
+            try {
+              const response = await sendRequest(server.id, 'kill_tmux_session', { sessionName });
+              if (response.success) {
+                onRefresh?.();
+              } else {
+                Alert.alert('Error', response.error || 'Failed to kill session');
+              }
+            } catch (err) {
+              Alert.alert('Error', 'Failed to kill session');
+            }
+          },
+        },
+      ]
+    );
+  }, [server.id, sendRequest, onRefresh]);
 
   const toggleTaskExpansion = useCallback((sessionId: string) => {
     setExpandedSessions(prev => {
@@ -214,6 +244,13 @@ function ServerCard({
                     <Text style={styles.sessionTime}>
                       {formatRelativeTime(session.lastActivity)}
                     </Text>
+                    <TouchableOpacity
+                      style={styles.killButton}
+                      onPress={() => handleKillSession(session.name)}
+                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    >
+                      <Text style={styles.killButtonText}>x</Text>
+                    </TouchableOpacity>
                   </View>
                   <Text style={styles.sessionPath} numberOfLines={1}>
                     {session.projectPath}
@@ -323,6 +360,7 @@ export function DashboardScreen({
     totalWorking,
     connectedCount,
     refreshAll,
+    refreshServer,
     sendRequest: hookSendRequest,
   } = useMultiServerStatus(servers);
 
@@ -449,6 +487,7 @@ export function DashboardScreen({
                   onNewProject={onOpenNewProject}
                   sendRequest={resolvedSendRequest}
                   onOpenTaskDetail={onOpenTaskDetail ? (task, sessionId) => onOpenTaskDetail(server, sessionId, task) : undefined}
+                  onRefresh={() => refreshServer(server.id)}
                 />
               );
             })}
@@ -634,6 +673,21 @@ const styles = StyleSheet.create({
     color: '#6b7280',
     fontSize: 11,
     marginLeft: 8,
+  },
+  killButton: {
+    marginLeft: 6,
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: '#4b5563',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  killButtonText: {
+    color: '#9ca3af',
+    fontSize: 11,
+    fontWeight: '700',
+    lineHeight: 13,
   },
   sessionPath: {
     color: '#6b7280',

@@ -51,7 +51,7 @@ Auto-approve gets hung up at prompts when it should be auto-approving.
 ---
 
 ## 3. Kill session from server dashboard
-**Status:** planned
+**Status:** done
 
 ### Backend
 Already exists: `kill_tmux_session` endpoint in `daemon/src/websocket.ts` lines 1082-1127
