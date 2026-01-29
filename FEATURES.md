@@ -16,16 +16,25 @@ High-level features of the Claude Companion mobile app and daemon.
 
 ## Dashboard
 - Multi-server overview with connection status
-- Session cards showing current activity
+- Session cards showing current activity and task progress
+- Expandable task list per session with status indicators
+- Task detail screen with full metadata and dependencies
+- Kill sessions directly from dashboard with confirmation
+- Create new sessions with recent project picker
 - Quick navigation to any session
 - Server enable/disable toggles
+- Server cards disabled when no active sessions
 
 ## Conversation Viewer
 - Markdown rendering with syntax highlighting
 - Expandable tool cards with inputs/outputs
+- Smart tool card collapsing with tool name chips and grouping
+- Line numbers and language labels on Write/Edit views
+- Expandable diff view with "Show all" toggle (40-line default)
+- Graceful fallback rendering for unknown tool types
 - Full-screen message viewer for long responses
-- Diff view for file changes
 - Activity counters (tokens, cache hits)
+- Inline auto-approve toggle in session header
 
 ## Push Notifications
 - FCM-based notifications when Claude needs input
@@ -61,7 +70,25 @@ High-level features of the Claude Companion mobile app and daemon.
 - TLS support for secure connections
 - Token-based authentication
 
+## Terminal Output Viewer
+- Raw tmux terminal output display
+- Auto-refresh polling with toggle
+- Horizontal scroll for long lines
+- Pull-to-refresh and auto-scroll to bottom
+- Accessible from session header
+
+## Auto-Approve System
+- Automatic approval of safe tool calls (Read, Glob, Grep, etc.)
+- Composite key deduplication to prevent duplicate approvals
+- Fuzzy tmux session path matching
+- Retry logic for failed approval sends
+- Detailed logging for debugging approval flow
+
 ## Developer Tools
 - Sentry error tracking integration
+- Error boundary with user feedback and bug reporting
+- Centralized tool configuration (daemon/src/tool-config.ts)
+- Structured parser warnings for unknown tools and entry types
+- Build date and version info in settings
 - Scroll behavior analytics
 - Client error reporting

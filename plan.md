@@ -131,7 +131,7 @@ Parser already falls back to tool name for unknown tools. But app rendering has 
 ---
 
 ## 7. Terminal output viewer
-**Status:** planned
+**Status:** done
 
 ### Overview
 Way to see raw terminal output from tmux sessions. Useful for debugging when it's unclear if a session is frozen or working.
@@ -154,7 +154,7 @@ Way to see raw terminal output from tmux sessions. Useful for debugging when it'
 ---
 
 ## 8. Move tool definitions to config
-**Status:** planned
+**Status:** done
 
 ### Overview
 Tool names, descriptions, approval status, and input field mappings should be in a config file.
@@ -180,7 +180,7 @@ Tool names, descriptions, approval status, and input field mappings should be in
 ---
 
 ## 9. Better write operation viewer
-**Status:** planned
+**Status:** done
 
 ### Current State
 - Write: shows file path + full content (truncated at 1000 chars)
@@ -201,7 +201,7 @@ Tool names, descriptions, approval status, and input field mappings should be in
 ---
 
 ## 10. Collapse tool cards improvements
-**Status:** planned
+**Status:** done
 
 ### Current State
 Already collapses when >= 3 tools. Shows summary bar with counts and last tool.
@@ -235,7 +235,7 @@ Already collapses when >= 3 tools. Shows summary bar with counts and last tool.
 ---
 
 ## 12. Move permissions into session settings
-**Status:** planned
+**Status:** done
 
 ### Current State
 Auto-approve toggle is in a modal in SessionView. User wants it more accessible as part of session settings.
@@ -272,7 +272,7 @@ Auto-approve toggle is in a modal in SessionView. User wants it more accessible 
 ---
 
 ## 14. Error boundary with bug reports
-**Status:** planned
+**Status:** done
 
 ### Current State
 ErrorBoundary already sends errors to daemon via WebSocket. Has copy-to-clipboard and try-again.
