@@ -39,6 +39,25 @@ const MAX_MESSAGES = 100; // Limit to most recent messages
 // Tools that typically require user approval
 const APPROVAL_TOOLS = ['Bash', 'Edit', 'Write', 'NotebookEdit', 'Task'];
 
+// Known tool names for warning on unknowns
+const KNOWN_TOOLS = new Set([
+  'Bash', 'Read', 'Write', 'Edit', 'Glob', 'Grep', 'Task',
+  'WebFetch', 'WebSearch', 'AskUserQuestion', 'NotebookEdit',
+  'TodoRead', 'TodoWrite', 'TaskCreate', 'TaskUpdate', 'TaskGet', 'TaskList',
+  'EnterPlanMode', 'ExitPlanMode', 'Skill',
+]);
+
+// Rate-limit parser warnings: max one per key per 60s
+const _warnedRecently = new Map<string, number>();
+function logParserWarning(type: string, details: string): void {
+  const key = `${type}:${details.substring(0, 100)}`;
+  const now = Date.now();
+  const last = _warnedRecently.get(key);
+  if (last && now - last < 60000) return;
+  _warnedRecently.set(key, now);
+  console.log(`[PARSER_WARN] ${type}: ${details}`);
+}
+
 /**
  * Fast function to detect current activity by reading only the last few KB of a file.
  * Much faster than parsing the entire conversation file.
@@ -111,6 +130,11 @@ export function detectCurrentActivityFast(filePath: string): string | undefined 
                   'WebSearch': 'Searching web',
                   'AskUserQuestion': 'Waiting for response',
                 };
+
+                // Warn about unknown tools
+                if (!KNOWN_TOOLS.has(block.name)) {
+                  logParserWarning('unknown_tool', `Unrecognized tool: ${block.name}`);
+                }
 
                 // Check if this needs approval
                 if (APPROVAL_TOOLS.includes(block.name)) {
@@ -204,6 +228,8 @@ export function parseConversationFile(filePath: string, limit: number = MAX_MESS
         if (message) {
           messages.unshift(message); // Add to beginning to maintain order
         }
+      } else if (entry.type && entry.type !== 'summary') {
+        logParserWarning('unknown_entry_type', `Unexpected JSONL entry type: ${entry.type}`);
       }
     } catch {
       // Skip malformed lines
@@ -235,7 +261,14 @@ function parseEntry(
     for (const block of message.content) {
       if (block.type === 'text' && block.text) {
         content += block.text;
-      } else if (block.type === 'tool_use' && block.name) {
+      } else if (block.type === 'tool_use') {
+        if (!block.name) {
+          logParserWarning('missing_tool_name', `tool_use block without name, id: ${block.id}`);
+          continue;
+        }
+        if (!KNOWN_TOOLS.has(block.name)) {
+          logParserWarning('unknown_tool', `Unrecognized tool in parseEntry: ${block.name}`);
+        }
         const toolId = block.id || entry.uuid || '';
         const output = toolResults.get(toolId);
         const isPending = !output && output !== '';

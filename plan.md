@@ -114,7 +114,7 @@ Parser already falls back to tool name for unknown tools. But app rendering has 
 ---
 
 ## 6. Add logging for unknown parser structures
-**Status:** planned
+**Status:** done
 
 ### Files to Modify
 - `daemon/src/parser.ts` - Add structured warnings for unknowns
