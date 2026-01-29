@@ -34,9 +34,10 @@ interface SessionViewProps {
   onBack: () => void;
   initialSessionId?: string | null;
   onNewProject?: () => void;
+  onOpenTerminal?: (sessionName: string) => void;
 }
 
-export function SessionView({ server, onBack, initialSessionId, onNewProject }: SessionViewProps) {
+export function SessionView({ server, onBack, initialSessionId, onNewProject, onOpenTerminal }: SessionViewProps) {
   const { connectionState, isConnected, isConnecting, reconnect } = useConnection(server);
   const {
     highlights,
@@ -462,6 +463,26 @@ export function SessionView({ server, onBack, initialSessionId, onNewProject }: 
             />
           )}
         </View>
+        {onOpenTerminal && (
+          <TouchableOpacity
+            style={styles.terminalButton}
+            onPress={async () => {
+              try {
+                const response = await wsService.sendRequest('list_tmux_sessions', {});
+                if (response.success && response.payload) {
+                  const payload = response.payload as { activeSession: string };
+                  if (payload.activeSession) {
+                    onOpenTerminal(payload.activeSession);
+                  }
+                }
+              } catch {
+                // Ignore errors
+              }
+            }}
+          >
+            <Text style={styles.terminalButtonText}>{'>_'}</Text>
+          </TouchableOpacity>
+        )}
         <TouchableOpacity
           style={styles.refreshButton}
           onPress={() => refresh()}
@@ -918,6 +939,16 @@ const styles = StyleSheet.create({
   },
   refreshIconDisabled: {
     opacity: 0.4,
+  },
+  terminalButton: {
+    padding: 8,
+    marginRight: 2,
+  },
+  terminalButtonText: {
+    fontSize: 16,
+    color: '#9ca3af',
+    fontFamily: 'monospace',
+    fontWeight: '700',
   },
   settingsButton: {
     padding: 8,

@@ -3,7 +3,7 @@ import { View, StyleSheet, StatusBar, AppState } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import * as Sentry from '@sentry/react-native';
 import Constants from 'expo-constants';
-import { Server } from './src/types';
+import { Server, TaskItem } from './src/types';
 import { getServers, getSettings } from './src/services/storage';
 import { DashboardScreen } from './src/screens/DashboardScreen';
 import { ServerList } from './src/screens/ServerList';
@@ -16,6 +16,8 @@ import { AgentTreeScreen } from './src/screens/AgentTreeScreen';
 import { Archive } from './src/screens/Archive';
 import { NewProjectScreen } from './src/screens/NewProjectScreen';
 import { EditServerScreen } from './src/screens/EditServerScreen';
+import { TaskDetailScreen } from './src/screens/TaskDetailScreen';
+import { TerminalScreen } from './src/screens/TerminalScreen';
 import { ErrorBoundary } from './src/components/ErrorBoundary';
 import { wsService } from './src/services/websocket';
 import { archiveService } from './src/services/archive';
@@ -39,12 +41,15 @@ if (sentryDsn) {
 }
 
 
-type Screen = 'dashboard' | 'servers' | 'session' | 'settings' | 'setup' | 'notificationSettings' | 'usage' | 'agents' | 'archive' | 'newProject' | 'editServer';
+type Screen = 'dashboard' | 'servers' | 'session' | 'settings' | 'setup' | 'notificationSettings' | 'usage' | 'agents' | 'archive' | 'newProject' | 'editServer' | 'taskDetail' | 'terminal';
 
 function App() {
   const [currentScreen, setCurrentScreen] = useState<Screen>('dashboard');
   const [selectedServer, setSelectedServer] = useState<Server | null>(null);
   const [serverToEdit, setServerToEdit] = useState<Server | null>(null);
+  const [selectedTask, setSelectedTask] = useState<TaskItem | null>(null);
+  const [selectedTaskSessionId, setSelectedTaskSessionId] = useState<string | null>(null);
+  const [terminalSessionName, setTerminalSessionName] = useState<string | null>(null);
   const pendingSessionId = useRef<string | null>(null);
 
   useEffect(() => {
@@ -244,6 +249,29 @@ function App() {
     setCurrentScreen('dashboard');
   }, []);
 
+  const handleOpenTaskDetail = useCallback((server: Server, sessionId: string, task: TaskItem) => {
+    setSelectedServer(server);
+    setSelectedTask(task);
+    setSelectedTaskSessionId(sessionId);
+    setCurrentScreen('taskDetail');
+  }, []);
+
+  const handleBackFromTaskDetail = useCallback(() => {
+    setSelectedTask(null);
+    setSelectedTaskSessionId(null);
+    setCurrentScreen('dashboard');
+  }, []);
+
+  const handleOpenTerminal = useCallback((sessionName: string) => {
+    setTerminalSessionName(sessionName);
+    setCurrentScreen('terminal');
+  }, []);
+
+  const handleBackFromTerminal = useCallback(() => {
+    setTerminalSessionName(null);
+    setCurrentScreen('session');
+  }, []);
+
   const handleBackFromServers = useCallback(() => {
     setCurrentScreen('dashboard');
   }, []);
@@ -258,6 +286,7 @@ function App() {
             onEditServer={handleEditServer}
             onOpenSetup={handleOpenSetup}
             onOpenNewProject={handleOpenNewProject}
+            onOpenTaskDetail={handleOpenTaskDetail}
           />
         );
       case 'servers':
@@ -279,6 +308,7 @@ function App() {
             onBack={handleBackFromSession}
             initialSessionId={pendingSessionId.current}
             onNewProject={handleOpenNewProject}
+            onOpenTerminal={handleOpenTerminal}
           />
         );
       case 'settings':
@@ -315,6 +345,28 @@ function App() {
             onSaved={handleBackFromEditServer}
           />
         );
+      case 'taskDetail':
+        if (!selectedTask) {
+          setCurrentScreen('dashboard');
+          return null;
+        }
+        return (
+          <TaskDetailScreen
+            task={selectedTask}
+            onBack={handleBackFromTaskDetail}
+          />
+        );
+      case 'terminal':
+        if (!terminalSessionName) {
+          setCurrentScreen('session');
+          return null;
+        }
+        return (
+          <TerminalScreen
+            sessionName={terminalSessionName}
+            onBack={handleBackFromTerminal}
+          />
+        );
       default:
         return (
           <DashboardScreen
@@ -323,6 +375,7 @@ function App() {
             onEditServer={handleEditServer}
             onOpenSetup={handleOpenSetup}
             onOpenNewProject={handleOpenNewProject}
+            onOpenTaskDetail={handleOpenTaskDetail}
           />
         );
     }

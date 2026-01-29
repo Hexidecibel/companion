@@ -207,20 +207,6 @@ export class TmuxManager {
   }
 
   /**
-   * Get the current pane content (for debugging)
-   */
-  async capturePane(sessionName: string, lines: number = 50): Promise<string> {
-    try {
-      const { stdout } = await execAsync(
-        `tmux capture-pane -t "${sessionName}" -p -S -${lines}`
-      );
-      return stdout;
-    } catch (err) {
-      return '';
-    }
-  }
-
-  /**
    * List available directories (for browsing)
    */
   async listDirectories(basePath: string): Promise<string[]> {
@@ -239,6 +225,21 @@ export class TmuxManager {
    */
   getHomeDir(): string {
     return process.env.HOME || '/root';
+  }
+
+  /**
+   * Capture the current terminal output from a tmux pane.
+   * Returns the last N lines of visible output.
+   */
+  async capturePane(sessionName: string, lines: number = 100): Promise<string> {
+    try {
+      const { stdout } = await execAsync(
+        `tmux capture-pane -p -t "${sessionName}" -S -${lines} 2>/dev/null`
+      );
+      return stdout;
+    } catch {
+      return '';
+    }
   }
 
   /**

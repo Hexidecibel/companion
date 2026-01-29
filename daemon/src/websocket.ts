@@ -525,6 +525,37 @@ export class WebSocketHandler {
         this.handleListTmuxSessions(client, requestId);
         break;
 
+      case 'get_terminal_output': {
+        const termPayload = payload as { sessionName: string; lines?: number } | undefined;
+        if (termPayload?.sessionName) {
+          this.tmux.capturePane(termPayload.sessionName, termPayload.lines || 100)
+            .then((output) => {
+              this.send(client.ws, {
+                type: 'terminal_output',
+                success: true,
+                payload: { output, sessionName: termPayload.sessionName },
+                requestId,
+              });
+            })
+            .catch(() => {
+              this.send(client.ws, {
+                type: 'terminal_output',
+                success: false,
+                error: 'Failed to capture terminal output',
+                requestId,
+              });
+            });
+        } else {
+          this.send(client.ws, {
+            type: 'terminal_output',
+            success: false,
+            error: 'Missing sessionName',
+            requestId,
+          });
+        }
+        break;
+      }
+
       case 'create_tmux_session':
         this.handleCreateTmuxSession(
           client,
@@ -1052,6 +1083,10 @@ export class WebSocketHandler {
       // This prevents returning old session data until the new conversation is created
       this.watcher.clearActiveSession();
       console.log(`WebSocket: Cleared active session after creating tmux session "${sessionName}"`);
+
+      // Immediately refresh tmux paths so the watcher recognizes the new session's
+      // conversation files as soon as they appear (otherwise waits up to 5s)
+      await this.watcher.refreshTmuxPaths();
 
       this.send(client.ws, {
         type: 'tmux_session_created',
