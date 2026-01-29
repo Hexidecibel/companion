@@ -491,6 +491,20 @@ export function SessionView({ server, onBack, initialSessionId, onNewProject, on
           <Text style={[styles.refreshIconText, loading && styles.refreshIconDisabled]}>↻</Text>
         </TouchableOpacity>
         <TouchableOpacity
+          style={[
+            styles.autoApproveButton,
+            sessionSettings.autoApproveEnabled && styles.autoApproveButtonActive,
+          ]}
+          onPress={() => handleAutoApproveChange(!sessionSettings.autoApproveEnabled)}
+        >
+          <Text style={[
+            styles.autoApproveText,
+            sessionSettings.autoApproveEnabled && styles.autoApproveTextActive,
+          ]}>
+            AA
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
           style={styles.settingsButton}
           onPress={() => setShowSettings(true)}
         >
@@ -936,6 +950,24 @@ const styles = StyleSheet.create({
   refreshIconText: {
     fontSize: 22,
     color: '#9ca3af',
+  },
+  autoApproveButton: {
+    paddingHorizontal: 6,
+    paddingVertical: 4,
+    borderRadius: 6,
+    backgroundColor: '#374151',
+    marginRight: 4,
+  },
+  autoApproveButtonActive: {
+    backgroundColor: '#78350f',
+  },
+  autoApproveText: {
+    color: '#6b7280',
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  autoApproveTextActive: {
+    color: '#fbbf24',
   },
   refreshIconDisabled: {
     opacity: 0.4,
