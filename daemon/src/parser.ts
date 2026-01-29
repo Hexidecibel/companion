@@ -1,5 +1,6 @@
 import * as fs from 'fs';
 import { ConversationMessage, ConversationHighlight, ToolCall, SessionStatus, QuestionOption, SessionUsage, CompactionEvent, TaskItem } from './types';
+import { APPROVAL_TOOLS, KNOWN_TOOL_NAMES, getToolDescription, isKnownTool } from './tool-config';
 
 // Re-export TaskItem for tests
 export { TaskItem } from './types';
@@ -36,16 +37,8 @@ interface AskUserQuestionInput {
 
 const MAX_MESSAGES = 100; // Limit to most recent messages
 
-// Tools that typically require user approval
-const APPROVAL_TOOLS = ['Bash', 'Edit', 'Write', 'NotebookEdit', 'Task'];
-
-// Known tool names for warning on unknowns
-const KNOWN_TOOLS = new Set([
-  'Bash', 'Read', 'Write', 'Edit', 'Glob', 'Grep', 'Task',
-  'WebFetch', 'WebSearch', 'AskUserQuestion', 'NotebookEdit',
-  'TodoRead', 'TodoWrite', 'TaskCreate', 'TaskUpdate', 'TaskGet', 'TaskList',
-  'EnterPlanMode', 'ExitPlanMode', 'Skill',
-]);
+// KNOWN_TOOLS alias for backward compatibility in this file
+const KNOWN_TOOLS = KNOWN_TOOL_NAMES;
 
 // Rate-limit parser warnings: max one per key per 60s
 const _warnedRecently = new Map<string, number>();
@@ -118,21 +111,8 @@ export function detectCurrentActivityFast(filePath: string): string | undefined 
                   continue;
                 }
 
-                const toolDescriptions: Record<string, string> = {
-                  'Read': 'Reading file',
-                  'Write': 'Writing file',
-                  'Edit': 'Editing file',
-                  'Bash': 'Running command',
-                  'Glob': 'Searching files',
-                  'Grep': 'Searching code',
-                  'Task': 'Running agent',
-                  'WebFetch': 'Fetching web page',
-                  'WebSearch': 'Searching web',
-                  'AskUserQuestion': 'Waiting for response',
-                };
-
                 // Warn about unknown tools
-                if (!KNOWN_TOOLS.has(block.name)) {
+                if (!isKnownTool(block.name)) {
                   logParserWarning('unknown_tool', `Unrecognized tool: ${block.name}`);
                 }
 
@@ -150,7 +130,7 @@ export function detectCurrentActivityFast(filePath: string): string | undefined 
                   return `Approve ${block.name}?`;
                 }
 
-                return toolDescriptions[block.name] || `Using ${block.name}`;
+                return getToolDescription(block.name);
               }
             }
           }
@@ -508,21 +488,7 @@ export function detectCurrentActivity(messages: ConversationMessage[]): string |
       return `Approve ${lastTool.name}?`;
     }
 
-    // Map tool names to friendly descriptions
-    const toolDescriptions: Record<string, string> = {
-      'Read': 'Reading file',
-      'Write': 'Writing file',
-      'Edit': 'Editing file',
-      'Bash': 'Running command',
-      'Glob': 'Searching files',
-      'Grep': 'Searching code',
-      'Task': 'Running agent',
-      'WebFetch': 'Fetching web page',
-      'WebSearch': 'Searching web',
-      'AskUserQuestion': 'Waiting for response',
-    };
-
-    const description = toolDescriptions[lastTool.name] || `Using ${lastTool.name}`;
+    const description = getToolDescription(lastTool.name);
 
     // Add file path info if available
     if (lastTool.input) {

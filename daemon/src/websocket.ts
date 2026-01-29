@@ -13,6 +13,7 @@ import { extractHighlights, extractUsageFromFile, extractTasks } from './parser'
 import { WebSocketMessage, WebSocketResponse, DaemonConfig, TmuxSessionConfig } from './types';
 import { loadConfig, saveConfig } from './config';
 import { fetchTodayUsage, fetchMonthUsage, fetchAnthropicUsage } from './anthropic-usage';
+import { DEFAULT_TOOL_CONFIG } from './tool-config';
 import { SubAgentWatcher } from './subagent-watcher';
 import { templates as scaffoldTemplates } from './scaffold/templates';
 import { scaffoldProject, previewScaffold } from './scaffold/generator';
@@ -555,6 +556,15 @@ export class WebSocketHandler {
         }
         break;
       }
+
+      case 'get_tool_config':
+        this.send(client.ws, {
+          type: 'tool_config',
+          success: true,
+          payload: { tools: DEFAULT_TOOL_CONFIG },
+          requestId,
+        });
+        break;
 
       case 'create_tmux_session':
         this.handleCreateTmuxSession(
