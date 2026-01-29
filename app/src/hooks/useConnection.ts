@@ -15,11 +15,8 @@ export function useConnection(server: Server | null) {
 
   useEffect(() => {
     if (server) {
-      // Only connect if not already connected to this server
-      const currentServerId = wsService.getServerId();
-      if (currentServerId !== server.id || !wsService.isConnected()) {
-        wsService.connect(server);
-      }
+      // wsService.connect() already guards against double-connect
+      wsService.connect(server);
     } else {
       wsService.disconnect();
     }

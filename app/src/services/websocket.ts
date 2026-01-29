@@ -31,6 +31,20 @@ export class WebSocketService {
   private requestCounter = 0;
 
   connect(server: Server): void {
+    // Guard against double-connect: if already connecting/connected to same server, skip
+    if (this.server?.id === server.id &&
+        (this.connectionState.status === 'connecting' ||
+         this.connectionState.status === 'connected' ||
+         this.connectionState.status === 'reconnecting')) {
+      console.log(`Already ${this.connectionState.status} to ${server.id}, skipping connect`);
+      return;
+    }
+
+    // If switching servers, disconnect first
+    if (this.server && this.server.id !== server.id) {
+      this.disconnect();
+    }
+
     this.server = server;
     this.doConnect();
   }
