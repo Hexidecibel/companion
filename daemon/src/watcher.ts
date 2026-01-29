@@ -41,7 +41,7 @@ export class ClaudeWatcher extends EventEmitter {
     setInterval(() => this.refreshTmuxPaths(), 5000);
   }
 
-  private async refreshTmuxPaths(): Promise<void> {
+  async refreshTmuxPaths(): Promise<void> {
     try {
       // Get list of tmux sessions with their working directories
       const { stdout } = await execAsync(

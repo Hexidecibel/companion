@@ -11,10 +11,16 @@ interface ServerConnection {
   lastPoll: number;
 }
 
+interface PendingRequest {
+  resolve: (response: any) => void;
+  reject: (error: Error) => void;
+}
+
 export function useMultiServerStatus(servers: Server[]) {
   const [statuses, setStatuses] = useState<Map<string, ServerStatus>>(new Map());
   const connections = useRef<Map<string, ServerConnection>>(new Map());
   const pollTimers = useRef<Map<string, NodeJS.Timeout>>(new Map());
+  const pendingRequests = useRef<Map<string, PendingRequest>>(new Map());
 
   // Initialize status for a server
   const initStatus = useCallback((server: Server): ServerStatus => ({
@@ -71,6 +77,14 @@ export function useMultiServerStatus(servers: Server[]) {
       ws.onmessage = (event) => {
         try {
           const message = JSON.parse(event.data);
+
+          // Check for pending request responses
+          if (message.requestId && pendingRequests.current.has(message.requestId)) {
+            const pending = pendingRequests.current.get(message.requestId)!;
+            pendingRequests.current.delete(message.requestId);
+            pending.resolve(message);
+            return;
+          }
 
           // Wait for 'connected' message before authenticating
           if (message.type === 'connected') {
@@ -234,6 +248,37 @@ export function useMultiServerStatus(servers: Server[]) {
     });
   }, [servers, refreshServer]);
 
+  // Send a request through an existing server connection
+  const sendRequest = useCallback((serverId: string, type: string, payload?: unknown): Promise<any> => {
+    return new Promise((resolve, reject) => {
+      const conn = connections.current.get(serverId);
+      if (!conn?.ws || conn.ws.readyState !== WebSocket.OPEN || !conn.authenticated) {
+        reject(new Error('Not connected to server'));
+        return;
+      }
+
+      const requestId = `req-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
+      const timeout = setTimeout(() => {
+        pendingRequests.current.delete(requestId);
+        reject(new Error('Request timeout'));
+      }, 10000);
+
+      pendingRequests.current.set(requestId, {
+        resolve: (response) => {
+          clearTimeout(timeout);
+          resolve(response);
+        },
+        reject: (error) => {
+          clearTimeout(timeout);
+          reject(error);
+        },
+      });
+
+      conn.ws.send(JSON.stringify({ type, payload, requestId }));
+    });
+  }, []);
+
   // Effect to connect when servers change
   // Don't disconnect on unmount - connections persist so dashboard
   // loads instantly when navigating back from session view
@@ -271,6 +316,7 @@ export function useMultiServerStatus(servers: Server[]) {
     connectedCount,
     refreshServer,
     refreshAll,
+    sendRequest,
     connectToServer: (server: Server) => connectToServer(server),
     disconnectFromServer,
   };

@@ -16,9 +16,12 @@ Quick capture for ideas and tasks. Run `/plan` to process into detailed plans.
 - [skipped] CLI for daemon management - current /up /down skills work fine
 
 ## Dashboard
-- [in-progress] Expandable session on dashboard to show running tasks beneath. With ability to click into task to see its current output in a new task screen
+- [done] Expandable session on dashboard to show running tasks beneath. With ability to click into task to see its current output in a new task screen
   - Backend done: task parser, types, WebSocket endpoint
-  - TODO: Dashboard UI to show tasks
+  - Frontend done: tappable task bar expands to show tasks, task detail screen
+- [planned] Kill session from server dashboard - add kill/close action per session row
+- [planned] Create new session from server dashboard - with recent projects list
+- [planned] Server card should not be clickable/navigable when no sessions - after killing all sessions, tapping still shows last killed convo
 
 ## Stability
 - [done] More scrolling/chat window stability and tests. It is hard to use sometimes when lots of messages come through
@@ -33,13 +36,21 @@ Quick capture for ideas and tasks. Run `/plan` to process into detailed plans.
 - [deferred] iOS build (need Apple Developer account first)
 
 ## New
-- Build info/date for APK somewhere in about screen
-- Collapse multiple tool windows into one expandable card (to make reading easier, span less pages)
-- Finish rich session task expansion card (with task detail page)
+- [planned] Build info/date for APK somewhere in about screen
+- [planned] Collapse multiple tool windows into one expandable card (to make reading easier, span less pages)
+- [done] Finish rich session task expansion card (with task detail page)
 - Installable actions/skills - introspect codebase and create custom skills like /todo, /up, /down, /work
 - [done] New project setup wizard - skill setup, git setup, language choice. Discuss project at high level and scaffold starting dir via Claude
 - Populate features file with all current features (big highlights, not granular) - work command will keep it updated
 - [done] Scroll to bottom of conversation on session switch
 - [done] Fix in-app notifications - not seeing banner when other sessions have activity (bug: shadowed variable)
-- Error boundary page should allow sending bug reports. Possibly through Sentry? Nice UI to collect details from the error and from the user, then submit a bug that you can resolve
-- Move permissions into session (makes more sense in session settings)
+- [planned] Error boundary page should allow sending bug reports. Possibly through Sentry? Nice UI to collect details from the error and from the user, then submit a bug that you can resolve
+- [planned] Move permissions into session (makes more sense in session settings)
+- [planned] Better viewer for write operations - visually review and verify code changes more easily
+- [planned] Debug auto-approve in session settings - still getting hung up at prompts when it should be auto-approving
+- [planned] Move tool definitions to config instead of hardcoding - tool names, descriptions, approval list, and input field mappings should live in a config file so they can be updated without code changes
+- [planned] Graceful fallbacks for unrecognized tools/formats - show raw data instead of blank/broken UI when parser encounters unknown tool names or unexpected input structures
+- [planned] Add logging for unknown parser structures - log warnings when the daemon encounters unrecognized tools, message types, or unexpected JSONL shapes so format breaks are caught early
+- [planned] Terminal output viewer - way to see full terminal/raw output from sessions. Helpful for debugging when it's unclear if session is frozen or working
+- Multi-select bug in AskUserQuestion - selecting multiple options in Termux only submits the first selection. UI looks correct but data isn't captured
+- [planned] Populate features file with all current features (big highlights, not granular) - work command will keep it updated
