@@ -490,7 +490,18 @@ function ConversationItemInner({ item, showToolCalls, onSelectOption, onFileTap,
             <Markdown style={markdownStyles} rules={rules}>
               {item.content}
             </Markdown>
-            {!expanded && needsExpansion && <View style={styles.fadeOverlay} />}
+            {!expanded && needsExpansion && (
+              <View style={styles.fadeOverlay}>
+                <View style={styles.fadeLayer1} />
+                <View style={styles.fadeLayer2} />
+                <View style={styles.fadeLayer3} />
+                <View style={styles.tapMoreRow}>
+                  <View style={styles.tapMoreLine} />
+                  <Text style={styles.tapMoreText}>tap to see more</Text>
+                  <View style={styles.tapMoreLine} />
+                </View>
+              </View>
+            )}
           </View>
         )}
         {hasOptions && (
@@ -949,8 +960,37 @@ const styles = StyleSheet.create({
     bottom: 0,
     left: 0,
     right: 0,
-    height: 40,
-    backgroundColor: 'rgba(55, 65, 81, 0.95)',
+    height: 80,
+  },
+  fadeLayer1: {
+    height: 20,
+    backgroundColor: 'rgba(55, 65, 81, 0.3)',
+  },
+  fadeLayer2: {
+    height: 20,
+    backgroundColor: 'rgba(55, 65, 81, 0.7)',
+  },
+  fadeLayer3: {
+    height: 12,
+    backgroundColor: 'rgba(55, 65, 81, 1)',
+  },
+  tapMoreRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#374151',
+    paddingBottom: 2,
+    paddingHorizontal: 4,
+  },
+  tapMoreLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: '#4b5563',
+  },
+  tapMoreText: {
+    fontSize: 11,
+    color: '#9ca3af',
+    marginHorizontal: 8,
+    fontWeight: '500',
   },
   userBubble: {
     backgroundColor: '#3b82f6',

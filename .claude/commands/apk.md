@@ -1,6 +1,6 @@
 # Build Android APK Locally
 
-Build the Claude Companion Android APK without EAS.
+Build the Claude Companion Android APK without EAS and install it to the connected device.
 
 ## Steps
 
@@ -19,4 +19,9 @@ cd /Users/chriscushman/local/src/claude-companion/app/android && ./gradlew assem
 /Users/chriscushman/local/src/claude-companion/app/android/app/build/outputs/apk/release/app-release.apk
 ```
 
-Run all commands and report the APK location when done. If the build fails, show the error.
+4. Install to connected device via ADB:
+```bash
+adb install -r /Users/chriscushman/local/src/claude-companion/app/android/app/build/outputs/apk/release/app-release.apk
+```
+
+Run all commands and report the APK location when done. If the build fails, show the error. If ADB install fails (no device connected), report the APK path so the user can install manually.

@@ -8,10 +8,19 @@ const highlightsEqual = (a: ConversationHighlight[], b: ConversationHighlight[])
   if (a.length !== b.length) return false;
   for (let i = 0; i < a.length; i++) {
     if (a[i].id !== b[i].id || a[i].content !== b[i].content) return false;
-    // Also check if options changed (important for AskUserQuestion)
+    // Check if options changed (important for AskUserQuestion)
     const aOpts = a[i].options?.length || 0;
     const bOpts = b[i].options?.length || 0;
     if (aOpts !== bOpts) return false;
+    // Check if tool call statuses changed (pending -> running -> completed)
+    const aTools = a[i].toolCalls;
+    const bTools = b[i].toolCalls;
+    if ((aTools?.length || 0) !== (bTools?.length || 0)) return false;
+    if (aTools && bTools) {
+      for (let j = 0; j < aTools.length; j++) {
+        if (aTools[j].status !== bTools[j].status) return false;
+      }
+    }
   }
   return true;
 };
@@ -75,8 +84,13 @@ export function useConversation() {
         }
 
         case 'other_session_activity': {
-          // This is intentionally for OTHER sessions, so don't filter by current
+          // Only show notification if activity is for a DIFFERENT session
           const activityPayload = message.payload as OtherSessionActivity;
+          const currentId = sessionGuard.getCurrentSessionId();
+          if (activityPayload.sessionId === currentId) {
+            // Activity is for the session we're already viewing - ignore
+            return;
+          }
           setOtherSessionActivity(activityPayload);
           break;
         }
@@ -99,6 +113,13 @@ export function useConversation() {
       setHighlights([]);
       setMessages([]);
       setStatus(null);
+      // Auto-dismiss other-session notification if we're switching to that session
+      setOtherSessionActivity(prev => {
+        if (prev && prev.sessionId === sessionGuard.getCurrentSessionId()) {
+          return null;
+        }
+        return prev;
+      });
     }
 
     setLoading(true);

@@ -324,8 +324,11 @@ export function SessionView({ server, onBack, initialSessionId, onNewProject }: 
     console.log(`SessionView: Switching to other session ${newSessionId} (epoch ${epoch})`);
 
     try {
-      const response = await wsService.sendRequest('switch_tmux_session', {
-        sessionName: newSessionId,
+      // Use switch_session (not switch_tmux_session) - it accepts conversation
+      // session IDs and handles the tmux mapping internally
+      const response = await wsService.sendRequest('switch_session', {
+        sessionId: newSessionId,
+        epoch,
       });
       if (response.success) {
         lastSwitchedSessionId.current = newSessionId;
@@ -525,7 +528,9 @@ export function SessionView({ server, onBack, initialSessionId, onNewProject }: 
               <Text style={styles.otherSessionMessage} numberOfLines={1}>
                 {otherSessionActivity.isWaitingForInput
                   ? 'Waiting for input'
-                  : `${otherSessionActivity.newMessageCount} new message${otherSessionActivity.newMessageCount > 1 ? 's' : ''}`}
+                  : otherSessionActivity.newMessageCount > 0
+                    ? `${otherSessionActivity.newMessageCount} new message${otherSessionActivity.newMessageCount > 1 ? 's' : ''}`
+                    : 'New activity'}
               </Text>
             </View>
           </View>

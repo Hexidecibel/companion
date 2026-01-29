@@ -41,3 +41,5 @@ Quick capture for ideas and tasks. Run `/plan` to process into detailed plans.
 - Populate features file with all current features (big highlights, not granular) - work command will keep it updated
 - [done] Scroll to bottom of conversation on session switch
 - [done] Fix in-app notifications - not seeing banner when other sessions have activity (bug: shadowed variable)
+- Error boundary page should allow sending bug reports. Possibly through Sentry? Nice UI to collect details from the error and from the user, then submit a bug that you can resolve
+- Move permissions into session (makes more sense in session settings)

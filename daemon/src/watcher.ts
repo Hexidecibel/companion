@@ -259,6 +259,7 @@ export class ClaudeWatcher extends EventEmitter {
         if (pendingTools.length > 0) {
           this.emit('pending-approval', {
             sessionId,
+            projectPath,
             tools: pendingTools,
           });
         }
@@ -266,7 +267,12 @@ export class ClaudeWatcher extends EventEmitter {
     } else {
       // Emit activity notification for non-active sessions
       const hadMessages = prevTracked?.messageCount || 0;
-      if (messages.length > hadMessages) {
+      const wasWaitingOther = prevTracked?.isWaitingForInput || false;
+      const hasNewMessages = messages.length > hadMessages;
+      const waitingStatusChanged = conversationWaiting !== wasWaitingOther;
+
+      // Notify on new messages OR when waiting-for-input status changes
+      if (hasNewMessages || waitingStatusChanged) {
         const lastMessage = messages[messages.length - 1];
         this.emit('other-session-activity', {
           sessionId,
@@ -274,8 +280,18 @@ export class ClaudeWatcher extends EventEmitter {
           sessionName: projectPath.split('/').pop() || sessionId,
           isWaitingForInput: conversationWaiting,
           lastMessage,
-          newMessageCount: messages.length - hadMessages,
+          newMessageCount: hasNewMessages ? messages.length - hadMessages : 0,
         });
+
+        // Check for pending tools in non-active sessions too
+        const pendingTools = getPendingApprovalTools(messages);
+        if (pendingTools.length > 0) {
+          this.emit('pending-approval', {
+            sessionId,
+            projectPath,
+            tools: pendingTools,
+          });
+        }
       }
     }
   }
