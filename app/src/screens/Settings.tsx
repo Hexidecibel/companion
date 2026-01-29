@@ -10,6 +10,7 @@ import {
   Linking,
   Platform,
 } from 'react-native';
+import Constants from 'expo-constants';
 import { getSettings, saveSettings, AppSettings, clearAll, getServers } from '../services/storage';
 import { historyService } from '../services/history';
 import { registerWithDaemon, unregisterWithDaemon } from '../services/push';
@@ -288,7 +289,14 @@ export function Settings({ onBack, onOpenNotificationSettings, onOpenAgents, onO
 
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>About</Text>
-          <Text style={styles.aboutText}>Claude Companion v1.0.0</Text>
+          <Text style={styles.aboutText}>
+            Claude Companion v{Constants.expoConfig?.version || '1.0.0'}
+          </Text>
+          {Constants.expoConfig?.extra?.buildDate && (
+            <Text style={styles.aboutBuildDate}>
+              Built {new Date(Constants.expoConfig.extra.buildDate).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })}
+            </Text>
+          )}
           <Text style={styles.aboutDescription}>
             A companion app for Claude Code that lets you monitor sessions
             and respond to Claude from your mobile device.
@@ -429,6 +437,11 @@ const styles = StyleSheet.create({
   aboutText: {
     fontSize: 16,
     color: '#f3f4f6',
+    marginBottom: 4,
+  },
+  aboutBuildDate: {
+    fontSize: 12,
+    color: '#6b7280',
     marginBottom: 8,
   },
   aboutDescription: {

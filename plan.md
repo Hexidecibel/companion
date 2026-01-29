@@ -219,7 +219,7 @@ Already collapses when >= 3 tools. Shows summary bar with counts and last tool.
 ---
 
 ## 11. Build info/date in about screen
-**Status:** planned
+**Status:** done
 
 ### Files to Modify
 - `app/app.config.js` - Add build date to extra config

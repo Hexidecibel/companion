@@ -61,6 +61,7 @@ export default {
       },
       // Secrets passed via environment variables
       sentryDsn: process.env.SENTRY_DSN,
+      buildDate: new Date().toISOString(),
     },
     owner: "xludax"
   }
