@@ -5,6 +5,7 @@ import { InputInjector } from './input-injector';
 import { MdnsAdvertiser } from './mdns';
 import { PushNotificationService } from './push';
 import { WebSocketHandler } from './websocket';
+import { TmuxManager } from './tmux-manager';
 import { createServer, validateTlsConfig } from './tls';
 import { certsExist, generateAndSaveCerts, getDefaultCertPaths } from './cert-generator';
 import { createQRRequestHandler } from './qr-server';
@@ -86,16 +87,45 @@ async function main(): Promise<void> {
   // Auto-approve safe tools
   if (config.autoApproveTools.length > 0) {
     console.log(`Auto-approve enabled for: ${config.autoApproveTools.join(', ')}`);
+    const tmux = new TmuxManager('claude');
+    // Track in-flight approvals to prevent double-firing
+    const pendingAutoApprovals = new Set<string>();
 
-    watcher.on('pending-approval', async ({ sessionId, tools }) => {
+    watcher.on('pending-approval', async ({ sessionId, projectPath, tools }) => {
       // Check if any pending tool should be auto-approved
       const autoApprovable = tools.filter((tool: string) => config.autoApproveTools.includes(tool));
 
       if (autoApprovable.length > 0) {
-        console.log(`Auto-approving tools: ${autoApprovable.join(', ')}`);
-        // Small delay to avoid race conditions with file writes
-        await new Promise(resolve => setTimeout(resolve, 200));
-        await injector.sendInput('yes');
+        // Skip if we already have an auto-approval in flight for this session
+        if (pendingAutoApprovals.has(sessionId)) {
+          return;
+        }
+        pendingAutoApprovals.add(sessionId);
+
+        try {
+          // Find the tmux session that matches this conversation's project path
+          let targetTmuxSession: string | undefined;
+          if (projectPath) {
+            const tmuxSessions = await tmux.listSessions();
+            const match = tmuxSessions.find(ts => ts.workingDir === projectPath);
+            if (match) {
+              targetTmuxSession = match.name;
+            }
+          }
+
+          if (targetTmuxSession) {
+            console.log(`Auto-approving tools [${autoApprovable.join(', ')}] in tmux session "${targetTmuxSession}" (conversation: ${sessionId})`);
+            await new Promise(resolve => setTimeout(resolve, 200));
+            await injector.sendInput('yes', targetTmuxSession);
+          } else {
+            console.log(`Auto-approving tools [${autoApprovable.join(', ')}] in active session (no tmux match for ${projectPath})`);
+            await new Promise(resolve => setTimeout(resolve, 200));
+            await injector.sendInput('yes');
+          }
+        } finally {
+          // Clear the in-flight flag after a delay to let Claude process
+          setTimeout(() => pendingAutoApprovals.delete(sessionId), 3000);
+        }
       }
     });
   }
