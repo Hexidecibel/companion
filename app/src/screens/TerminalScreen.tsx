@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import {
   View,
   Text,
@@ -6,20 +6,29 @@ import {
   ScrollView,
   TouchableOpacity,
   RefreshControl,
+  useWindowDimensions,
+  ActivityIndicator,
 } from 'react-native';
 import { wsService } from '../services/websocket';
+import { parseAnsiText, AnsiSpan } from '../utils/ansiParser';
 
 interface TerminalScreenProps {
   sessionName: string;
   onBack: () => void;
 }
 
+const DEFAULT_FONT_SIZE = 11;
+const MIN_FONT_SIZE = 8;
+const MAX_FONT_SIZE = 20;
+
 export function TerminalScreen({ sessionName, onBack }: TerminalScreenProps) {
   const [output, setOutput] = useState('');
   const [loading, setLoading] = useState(true);
   const [autoRefresh, setAutoRefresh] = useState(true);
+  const [fontSize, setFontSize] = useState(DEFAULT_FONT_SIZE);
   const scrollRef = useRef<ScrollView>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const { width: screenWidth } = useWindowDimensions();
 
   const fetchOutput = useCallback(async () => {
     try {
@@ -61,6 +70,44 @@ export function TerminalScreen({ sessionName, onBack }: TerminalScreenProps) {
     }, 50);
   }, [output]);
 
+  // Parse ANSI escape codes into styled spans
+  const parsedLines = useMemo(() => parseAnsiText(output), [output]);
+
+  const lineHeight = Math.round(fontSize * 1.45);
+
+  const zoomIn = useCallback(() => {
+    setFontSize(s => Math.min(s + 1, MAX_FONT_SIZE));
+  }, []);
+
+  const zoomOut = useCallback(() => {
+    setFontSize(s => Math.max(s - 1, MIN_FONT_SIZE));
+  }, []);
+
+  const renderSpan = useCallback((span: AnsiSpan, index: number, currentFontSize: number) => {
+    const style: Record<string, unknown> = {
+      fontFamily: 'monospace',
+      fontSize: currentFontSize,
+    };
+
+    if (span.inverse) {
+      style.color = span.bgColor || '#0d1117';
+      style.backgroundColor = span.color || '#c9d1d9';
+    } else {
+      if (span.color) style.color = span.color;
+      if (span.bgColor) style.backgroundColor = span.bgColor;
+    }
+
+    if (span.bold) style.fontWeight = 'bold';
+    if (span.dim) style.opacity = 0.6;
+    if (span.underline) style.textDecorationLine = 'underline';
+
+    return (
+      <Text key={index} style={style}>
+        {span.text}
+      </Text>
+    );
+  }, []);
+
   return (
     <View style={styles.container}>
       <View style={styles.header}>
@@ -70,35 +117,73 @@ export function TerminalScreen({ sessionName, onBack }: TerminalScreenProps) {
         <Text style={styles.headerTitle} numberOfLines={1}>
           {sessionName}
         </Text>
-        <TouchableOpacity
-          style={[styles.refreshToggle, autoRefresh && styles.refreshToggleActive]}
-          onPress={() => setAutoRefresh(!autoRefresh)}
-        >
-          <Text style={[styles.refreshToggleText, autoRefresh && styles.refreshToggleTextActive]}>
-            Auto
-          </Text>
-        </TouchableOpacity>
+        <View style={styles.headerRight}>
+          <TouchableOpacity
+            style={[styles.zoomButton, fontSize <= MIN_FONT_SIZE && styles.zoomButtonDisabled]}
+            onPress={zoomOut}
+            disabled={fontSize <= MIN_FONT_SIZE}
+          >
+            <Text style={[styles.zoomButtonText, fontSize <= MIN_FONT_SIZE && styles.zoomButtonTextDisabled]}>-</Text>
+          </TouchableOpacity>
+          <Text style={styles.zoomLabel}>{fontSize}</Text>
+          <TouchableOpacity
+            style={[styles.zoomButton, fontSize >= MAX_FONT_SIZE && styles.zoomButtonDisabled]}
+            onPress={zoomIn}
+            disabled={fontSize >= MAX_FONT_SIZE}
+          >
+            <Text style={[styles.zoomButtonText, fontSize >= MAX_FONT_SIZE && styles.zoomButtonTextDisabled]}>+</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.refreshToggle, autoRefresh && styles.refreshToggleActive]}
+            onPress={() => setAutoRefresh(!autoRefresh)}
+          >
+            <Text style={[styles.refreshToggleText, autoRefresh && styles.refreshToggleTextActive]}>
+              Auto
+            </Text>
+          </TouchableOpacity>
+        </View>
       </View>
 
-      <ScrollView
-        ref={scrollRef}
-        style={styles.terminal}
-        contentContainerStyle={styles.terminalContent}
-        horizontal={false}
-        refreshControl={
-          <RefreshControl
-            refreshing={loading}
-            onRefresh={fetchOutput}
-            tintColor="#3b82f6"
-          />
-        }
-      >
-        <ScrollView horizontal showsHorizontalScrollIndicator nestedScrollEnabled>
-          <Text style={styles.terminalText} selectable>
-            {output || (loading ? 'Loading...' : 'No output')}
-          </Text>
+      {loading && !output ? (
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#3b82f6" />
+          <Text style={styles.loadingText}>Loading terminal...</Text>
+        </View>
+      ) : (
+        <ScrollView
+          ref={scrollRef}
+          style={styles.terminal}
+          contentContainerStyle={styles.terminalContent}
+          horizontal={false}
+          refreshControl={
+            <RefreshControl
+              refreshing={false}
+              onRefresh={fetchOutput}
+              tintColor="#3b82f6"
+            />
+          }
+        >
+          <ScrollView horizontal showsHorizontalScrollIndicator nestedScrollEnabled>
+            <View style={{ minWidth: screenWidth - 16 }}>
+              {parsedLines.map((spans, lineIdx) => (
+                <Text
+                  key={lineIdx}
+                  style={{
+                    color: '#c9d1d9',
+                    fontFamily: 'monospace',
+                    fontSize,
+                    lineHeight,
+                  }}
+                  selectable
+                >
+                  {spans.map((span, spanIdx) => renderSpan(span, spanIdx, fontSize))}
+                  {'\n'}
+                </Text>
+              ))}
+            </View>
+          </ScrollView>
         </ScrollView>
-      </ScrollView>
+      )}
     </View>
   );
 }
@@ -135,6 +220,38 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     fontFamily: 'monospace',
   },
+  headerRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  zoomButton: {
+    width: 28,
+    height: 28,
+    borderRadius: 6,
+    backgroundColor: '#374151',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  zoomButtonDisabled: {
+    opacity: 0.4,
+  },
+  zoomButtonText: {
+    color: '#c9d1d9',
+    fontSize: 16,
+    fontWeight: '700',
+    lineHeight: 18,
+  },
+  zoomButtonTextDisabled: {
+    color: '#6b7280',
+  },
+  zoomLabel: {
+    color: '#9ca3af',
+    fontSize: 11,
+    fontFamily: 'monospace',
+    minWidth: 20,
+    textAlign: 'center',
+  },
   refreshToggle: {
     paddingHorizontal: 10,
     paddingVertical: 4,
@@ -142,6 +259,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#374151',
     minWidth: 50,
     alignItems: 'center',
+    marginLeft: 4,
   },
   refreshToggleActive: {
     backgroundColor: '#1e3a5f',
@@ -154,6 +272,17 @@ const styles = StyleSheet.create({
   refreshToggleTextActive: {
     color: '#60a5fa',
   },
+  loadingContainer: {
+    flex: 1,
+    backgroundColor: '#0d1117',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingText: {
+    color: '#9ca3af',
+    fontSize: 14,
+    marginTop: 12,
+  },
   terminal: {
     flex: 1,
     backgroundColor: '#0d1117',
@@ -161,11 +290,5 @@ const styles = StyleSheet.create({
   terminalContent: {
     padding: 8,
     paddingBottom: 40,
-  },
-  terminalText: {
-    color: '#c9d1d9',
-    fontSize: 11,
-    fontFamily: 'monospace',
-    lineHeight: 16,
   },
 });

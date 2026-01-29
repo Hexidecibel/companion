@@ -234,7 +234,7 @@ export class TmuxManager {
   async capturePane(sessionName: string, lines: number = 100): Promise<string> {
     try {
       const { stdout } = await execAsync(
-        `tmux capture-pane -p -t "${sessionName}" -S -${lines} 2>/dev/null`
+        `tmux capture-pane -p -e -t "${sessionName}" -S -${lines} 2>/dev/null`
       );
       return stdout;
     } catch {
