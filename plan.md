@@ -95,7 +95,7 @@ Already exists: `create_tmux_session` endpoint, `list_tmux_sessions` for recent 
 ---
 
 ## 5. Graceful fallbacks for unrecognized tools/formats
-**Status:** planned
+**Status:** done
 
 ### Current State
 Parser already falls back to tool name for unknown tools. But app rendering has hardcoded switch statements.

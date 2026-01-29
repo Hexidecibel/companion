@@ -37,8 +37,13 @@ function getToolSummary(tool: ToolCall): string {
       return input.url ? String(input.url) : 'Fetch URL';
     case 'WebSearch':
       return input.query ? `Search: ${input.query}` : 'Web search';
-    default:
-      return tool.name;
+    default: {
+      // For unknown tools, try to extract a useful summary from the first string input field
+      const firstStringValue = Object.values(input).find(
+        (v) => typeof v === 'string' && v.length > 0 && v.length < 200
+      );
+      return firstStringValue ? `${tool.name}: ${String(firstStringValue).substring(0, 60)}` : tool.name;
+    }
   }
 }
 
@@ -303,6 +308,21 @@ function ToolCard({ tool, forceExpanded }: { tool: ToolCall; forceExpanded?: boo
               )}
             </View>
           ) : null}
+
+          {/* Generic fallback for unknown tools */}
+          {!['Bash', 'Edit', 'Write', 'Read', 'Glob', 'Grep', 'Task', 'WebFetch', 'WebSearch'].includes(tool.name) && Object.keys(tool.input || {}).length > 0 && (
+            <View style={toolCardStyles.section}>
+              <Text style={toolCardStyles.sectionLabel}>Input:</Text>
+              {Object.entries(tool.input || {}).map(([key, value]) => (
+                <View key={key} style={toolCardStyles.genericField}>
+                  <Text style={toolCardStyles.genericFieldKey}>{key}:</Text>
+                  <Text style={toolCardStyles.genericFieldValue} numberOfLines={4}>
+                    {typeof value === 'string' ? value.substring(0, 500) : JSON.stringify(value)}
+                  </Text>
+                </View>
+              ))}
+            </View>
+          )}
 
           {/* Show output */}
           {hasOutput ? (
@@ -871,6 +891,20 @@ const toolCardStyles = StyleSheet.create({
     color: '#fbbf24',
     fontSize: 11,
     fontWeight: '500',
+  },
+  genericField: {
+    marginBottom: 4,
+  },
+  genericFieldKey: {
+    color: '#9ca3af',
+    fontSize: 11,
+    fontWeight: '600',
+    marginBottom: 1,
+  },
+  genericFieldValue: {
+    color: '#d1d5db',
+    fontSize: 12,
+    fontFamily: 'monospace',
   },
 });
 
