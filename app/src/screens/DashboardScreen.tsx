@@ -9,7 +9,7 @@ import {
   ActivityIndicator,
   Switch,
 } from 'react-native';
-import { Server, ServerStatus, SessionSummary, TaskSummary } from '../types';
+import { Server, ServerStatus, SessionSummary, TaskSummary, TaskItem } from '../types';
 import { getServers, updateServer } from '../services/storage';
 import { useMultiServerStatus } from '../hooks/useMultiServerStatus';
 
@@ -19,6 +19,8 @@ interface DashboardScreenProps {
   onEditServer: (server: Server) => void;
   onOpenSetup: () => void;
   onOpenNewProject?: () => void;
+  onOpenTaskDetail?: (server: Server, sessionId: string, task: TaskItem) => void;
+  sendRequest?: (serverId: string, type: string, payload?: unknown) => Promise<any>;
 }
 
 function SessionStatusIcon({ status }: { status: SessionSummary['status'] }) {
@@ -70,6 +72,14 @@ function formatRelativeTime(timestamp: number): string {
   return `${days}d ago`;
 }
 
+function TaskStatusDot({ status }: { status: TaskItem['status'] }) {
+  const color =
+    status === 'completed' ? '#10b981' :
+    status === 'in_progress' ? '#3b82f6' :
+    '#6b7280';
+  return <View style={[styles.taskStatusDot, { backgroundColor: color }]} />;
+}
+
 function ServerCard({
   server,
   status,
@@ -78,6 +88,8 @@ function ServerCard({
   onSessionPress,
   onToggleEnabled,
   onNewProject,
+  sendRequest,
+  onOpenTaskDetail,
 }: {
   server: Server;
   status: ServerStatus;
@@ -86,7 +98,51 @@ function ServerCard({
   onSessionPress: (sessionId: string) => void;
   onToggleEnabled: (enabled: boolean) => void;
   onNewProject?: () => void;
+  sendRequest?: (serverId: string, type: string, payload?: unknown) => Promise<any>;
+  onOpenTaskDetail?: (task: TaskItem, sessionId: string) => void;
 }) {
+  const [expandedSessions, setExpandedSessions] = useState<Set<string>>(new Set());
+  const [tasksBySession, setTasksBySession] = useState<Map<string, TaskItem[]>>(new Map());
+  const [loadingTasks, setLoadingTasks] = useState<Set<string>>(new Set());
+
+  const fetchTasks = useCallback(async (sessionId: string) => {
+    if (!sendRequest) return;
+    setLoadingTasks(prev => new Set(prev).add(sessionId));
+    try {
+      const response = await sendRequest(server.id, 'get_tasks', { sessionId });
+      if (response.success && response.payload) {
+        const tasks = (response.payload as { tasks: TaskItem[] }).tasks || [];
+        setTasksBySession(prev => {
+          const next = new Map(prev);
+          next.set(sessionId, tasks);
+          return next;
+        });
+      }
+    } catch (err) {
+      console.error('Failed to fetch tasks:', err);
+    } finally {
+      setLoadingTasks(prev => {
+        const next = new Set(prev);
+        next.delete(sessionId);
+        return next;
+      });
+    }
+  }, [server.id, sendRequest]);
+
+  const toggleTaskExpansion = useCallback((sessionId: string) => {
+    setExpandedSessions(prev => {
+      const next = new Set(prev);
+      if (next.has(sessionId)) {
+        next.delete(sessionId);
+      } else {
+        next.add(sessionId);
+        if (!tasksBySession.has(sessionId)) {
+          fetchTasks(sessionId);
+        }
+      }
+      return next;
+    });
+  }, [tasksBySession, fetchTasks]);
   const isEnabled = server.enabled !== false;
   const connectionColor = !isEnabled
     ? '#6b7280'
@@ -96,12 +152,14 @@ function ServerCard({
     ? '#f59e0b'
     : '#ef4444';
 
+  const hasSessions = (status.summary?.sessions.length ?? 0) > 0;
+
   return (
     <TouchableOpacity
       style={[styles.serverCard, !isEnabled && styles.serverCardDisabled]}
-      onPress={onPress}
+      onPress={hasSessions ? onPress : undefined}
       onLongPress={onLongPress}
-      activeOpacity={0.8}
+      activeOpacity={hasSessions ? 0.8 : 1}
     >
       <View style={styles.serverHeader}>
         <View style={[styles.connectionDot, { backgroundColor: connectionColor }]} />
@@ -166,26 +224,66 @@ function ServerCard({
                     </Text>
                   )}
                   {session.taskSummary && session.taskSummary.total > 0 && (
-                    <View style={styles.taskBar}>
-                      <View style={styles.taskProgress}>
-                        <View style={[styles.taskProgressFill, {
-                          flex: session.taskSummary.completed,
-                          backgroundColor: '#10b981',
-                        }]} />
-                        <View style={[styles.taskProgressFill, {
-                          flex: session.taskSummary.inProgress,
-                          backgroundColor: '#3b82f6',
-                        }]} />
-                        <View style={[styles.taskProgressFill, {
-                          flex: session.taskSummary.pending,
-                          backgroundColor: '#374151',
-                        }]} />
-                      </View>
-                      <Text style={styles.taskLabel}>
-                        {session.taskSummary.completed}/{session.taskSummary.total} tasks
-                        {session.taskSummary.activeTask ? ` - ${session.taskSummary.activeTask}` : ''}
-                      </Text>
-                    </View>
+                    <>
+                      <TouchableOpacity
+                        style={styles.taskBar}
+                        onPress={() => toggleTaskExpansion(session.id)}
+                        activeOpacity={0.7}
+                      >
+                        <View style={styles.taskProgress}>
+                          <View style={[styles.taskProgressFill, {
+                            flex: session.taskSummary.completed,
+                            backgroundColor: '#10b981',
+                          }]} />
+                          <View style={[styles.taskProgressFill, {
+                            flex: session.taskSummary.inProgress,
+                            backgroundColor: '#3b82f6',
+                          }]} />
+                          <View style={[styles.taskProgressFill, {
+                            flex: session.taskSummary.pending,
+                            backgroundColor: '#374151',
+                          }]} />
+                        </View>
+                        <View style={styles.taskLabelRow}>
+                          <Text style={styles.taskLabel}>
+                            {session.taskSummary.completed}/{session.taskSummary.total} tasks
+                            {session.taskSummary.activeTask ? ` - ${session.taskSummary.activeTask}` : ''}
+                          </Text>
+                          <Text style={styles.taskChevron}>
+                            {expandedSessions.has(session.id) ? '\u25B4' : '\u25BE'}
+                          </Text>
+                        </View>
+                      </TouchableOpacity>
+                      {expandedSessions.has(session.id) && (
+                        <View style={styles.expandedTasks}>
+                          {loadingTasks.has(session.id) ? (
+                            <ActivityIndicator size="small" color="#3b82f6" style={{ paddingVertical: 8 }} />
+                          ) : (
+                            (tasksBySession.get(session.id) || []).map((task) => (
+                              <TouchableOpacity
+                                key={task.id}
+                                style={styles.taskRow}
+                                onPress={() => onOpenTaskDetail?.(task, session.id)}
+                                activeOpacity={0.7}
+                              >
+                                <TaskStatusDot status={task.status} />
+                                <View style={styles.taskInfo}>
+                                  <Text style={styles.taskSubject} numberOfLines={1}>
+                                    {task.subject}
+                                  </Text>
+                                  {task.status === 'in_progress' && task.activeForm && (
+                                    <Text style={styles.taskActiveForm} numberOfLines={1}>
+                                      {task.activeForm}
+                                    </Text>
+                                  )}
+                                </View>
+                                <Text style={styles.taskRowChevron}>{'\u203A'}</Text>
+                              </TouchableOpacity>
+                            ))
+                          )}
+                        </View>
+                      )}
+                    </>
                   )}
                 </View>
               </TouchableOpacity>
@@ -212,6 +310,8 @@ export function DashboardScreen({
   onEditServer,
   onOpenSetup,
   onOpenNewProject,
+  onOpenTaskDetail,
+  sendRequest,
 }: DashboardScreenProps) {
   const [servers, setServers] = useState<Server[]>([]);
   const [loading, setLoading] = useState(true);
@@ -223,7 +323,10 @@ export function DashboardScreen({
     totalWorking,
     connectedCount,
     refreshAll,
+    sendRequest: hookSendRequest,
   } = useMultiServerStatus(servers);
+
+  const resolvedSendRequest = sendRequest || hookSendRequest;
 
   const loadServers = useCallback(async () => {
     const loaded = await getServers();
@@ -344,6 +447,8 @@ export function DashboardScreen({
                     await loadServers();
                   }}
                   onNewProject={onOpenNewProject}
+                  sendRequest={resolvedSendRequest}
+                  onOpenTaskDetail={onOpenTaskDetail ? (task, sessionId) => onOpenTaskDetail(server, sessionId, task) : undefined}
                 />
               );
             })}
@@ -628,9 +733,59 @@ const styles = StyleSheet.create({
   taskProgressFill: {
     height: '100%',
   },
+  taskLabelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 2,
+  },
   taskLabel: {
     color: '#9ca3af',
     fontSize: 10,
-    marginTop: 2,
+    flex: 1,
+  },
+  taskChevron: {
+    color: '#6b7280',
+    fontSize: 10,
+    marginLeft: 4,
+  },
+  expandedTasks: {
+    marginTop: 6,
+    borderTopWidth: 1,
+    borderTopColor: '#4b5563',
+    paddingTop: 6,
+    gap: 4,
+  },
+  taskRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 6,
+    paddingHorizontal: 4,
+    backgroundColor: '#1f2937',
+    borderRadius: 6,
+  },
+  taskStatusDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    marginRight: 8,
+  },
+  taskInfo: {
+    flex: 1,
+  },
+  taskSubject: {
+    color: '#e5e7eb',
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  taskActiveForm: {
+    color: '#60a5fa',
+    fontSize: 11,
+    marginTop: 1,
+  },
+  taskRowChevron: {
+    color: '#6b7280',
+    fontSize: 16,
+    marginLeft: 4,
   },
 });
