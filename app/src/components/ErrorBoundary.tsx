@@ -6,8 +6,10 @@ import {
   TouchableOpacity,
   ScrollView,
   Alert,
+  TextInput,
 } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
+import * as Sentry from '@sentry/react-native';
 import { wsService } from '../services/websocket';
 
 interface Props {
@@ -19,6 +21,8 @@ interface State {
   error: Error | null;
   errorInfo: ErrorInfo | null;
   sent: boolean;
+  userDescription: string;
+  reportSent: boolean;
 }
 
 export class ErrorBoundary extends Component<Props, State> {
@@ -29,6 +33,8 @@ export class ErrorBoundary extends Component<Props, State> {
       error: null,
       errorInfo: null,
       sent: false,
+      userDescription: '',
+      reportSent: false,
     };
   }
 
@@ -81,12 +87,32 @@ export class ErrorBoundary extends Component<Props, State> {
     Alert.alert('Copied', 'Error details copied to clipboard');
   }
 
+  private async reportBug() {
+    const { error, errorInfo, userDescription } = this.state;
+    try {
+      Sentry.withScope((scope) => {
+        scope.setExtra('userDescription', userDescription || 'No description provided');
+        scope.setExtra('componentStack', errorInfo?.componentStack || 'N/A');
+        scope.setTag('source', 'error_boundary');
+        if (error) {
+          Sentry.captureException(error);
+        }
+      });
+      this.setState({ reportSent: true });
+    } catch (e) {
+      console.error('Failed to send bug report:', e);
+      Alert.alert('Error', 'Failed to send bug report');
+    }
+  }
+
   private reload() {
     this.setState({
       hasError: false,
       error: null,
       errorInfo: null,
       sent: false,
+      userDescription: '',
+      reportSent: false,
     });
   }
 
@@ -124,12 +150,37 @@ export class ErrorBoundary extends Component<Props, State> {
               <Text style={styles.sentText}>Error sent to daemon</Text>
             )}
 
+            <Text style={styles.feedbackLabel}>What were you doing when this happened?</Text>
+            <TextInput
+              style={styles.feedbackInput}
+              placeholder="Describe what you were doing..."
+              placeholderTextColor="#6b7280"
+              value={this.state.userDescription}
+              onChangeText={(text) => this.setState({ userDescription: text })}
+              multiline
+              numberOfLines={3}
+            />
+
+            {this.state.reportSent && (
+              <Text style={styles.reportSentText}>Bug report sent. Thank you!</Text>
+            )}
+
             <View style={styles.buttonRow}>
               <TouchableOpacity
                 style={[styles.button, styles.copyButton]}
                 onPress={() => this.copyError()}
               >
-                <Text style={styles.buttonText}>Copy Error</Text>
+                <Text style={styles.buttonText}>Copy</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.button, styles.reportButton]}
+                onPress={() => this.reportBug()}
+                disabled={this.state.reportSent}
+              >
+                <Text style={styles.buttonText}>
+                  {this.state.reportSent ? 'Sent' : 'Report Bug'}
+                </Text>
               </TouchableOpacity>
 
               <TouchableOpacity
@@ -219,25 +270,51 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginBottom: 12,
   },
+  feedbackLabel: {
+    color: '#9ca3af',
+    fontSize: 13,
+    marginBottom: 8,
+  },
+  feedbackInput: {
+    backgroundColor: '#1f2937',
+    color: '#f3f4f6',
+    borderRadius: 8,
+    padding: 12,
+    fontSize: 14,
+    minHeight: 60,
+    textAlignVertical: 'top',
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#374151',
+  },
+  reportSentText: {
+    color: '#10b981',
+    fontSize: 12,
+    textAlign: 'center',
+    marginBottom: 12,
+  },
   buttonRow: {
     flexDirection: 'row',
-    gap: 12,
+    gap: 8,
   },
   button: {
     flex: 1,
-    paddingVertical: 14,
+    paddingVertical: 12,
     borderRadius: 10,
     alignItems: 'center',
   },
   copyButton: {
     backgroundColor: '#374151',
   },
+  reportButton: {
+    backgroundColor: '#b45309',
+  },
   reloadButton: {
     backgroundColor: '#3b82f6',
   },
   buttonText: {
     color: '#ffffff',
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: '600',
   },
 });
