@@ -9,7 +9,7 @@ import {
   ActivityIndicator,
   Switch,
 } from 'react-native';
-import { Server, ServerStatus, SessionSummary } from '../types';
+import { Server, ServerStatus, SessionSummary, TaskSummary } from '../types';
 import { getServers, updateServer } from '../services/storage';
 import { useMultiServerStatus } from '../hooks/useMultiServerStatus';
 
@@ -164,6 +164,28 @@ function ServerCard({
                     <Text style={styles.sessionActivity} numberOfLines={1}>
                       {session.currentActivity}
                     </Text>
+                  )}
+                  {session.taskSummary && session.taskSummary.total > 0 && (
+                    <View style={styles.taskBar}>
+                      <View style={styles.taskProgress}>
+                        <View style={[styles.taskProgressFill, {
+                          flex: session.taskSummary.completed,
+                          backgroundColor: '#10b981',
+                        }]} />
+                        <View style={[styles.taskProgressFill, {
+                          flex: session.taskSummary.inProgress,
+                          backgroundColor: '#3b82f6',
+                        }]} />
+                        <View style={[styles.taskProgressFill, {
+                          flex: session.taskSummary.pending,
+                          backgroundColor: '#374151',
+                        }]} />
+                      </View>
+                      <Text style={styles.taskLabel}>
+                        {session.taskSummary.completed}/{session.taskSummary.total} tasks
+                        {session.taskSummary.activeTask ? ` - ${session.taskSummary.activeTask}` : ''}
+                      </Text>
+                    </View>
                   )}
                 </View>
               </TouchableOpacity>
@@ -592,5 +614,23 @@ const styles = StyleSheet.create({
     color: '#6b7280',
     fontSize: 15,
     fontWeight: '500',
+  },
+  taskBar: {
+    marginTop: 4,
+  },
+  taskProgress: {
+    flexDirection: 'row',
+    height: 3,
+    borderRadius: 1.5,
+    overflow: 'hidden',
+    backgroundColor: '#1f2937',
+  },
+  taskProgressFill: {
+    height: '100%',
+  },
+  taskLabel: {
+    color: '#9ca3af',
+    fontSize: 10,
+    marginTop: 2,
   },
 });

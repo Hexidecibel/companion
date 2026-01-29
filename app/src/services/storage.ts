@@ -13,6 +13,7 @@ export interface AppSettings {
 
 export interface SessionSettings {
   instantNotify: boolean;
+  autoApproveEnabled: boolean;
 }
 
 const DEFAULT_SETTINGS: AppSettings = {
@@ -87,6 +88,7 @@ export async function clearAll(): Promise<void> {
 
 const DEFAULT_SESSION_SETTINGS: SessionSettings = {
   instantNotify: false,
+  autoApproveEnabled: false,
 };
 
 export async function getSessionSettings(serverId: string): Promise<SessionSettings> {

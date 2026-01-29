@@ -5,7 +5,7 @@ import { EventEmitter } from 'events';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import { ConversationFile, ConversationMessage, SessionStatus, TmuxSession } from './types';
-import { parseConversationFile, extractHighlights, detectWaitingForInput, detectCurrentActivity, detectCurrentActivityFast, getRecentActivity, getPendingApprovalTools, detectCompaction } from './parser';
+import { parseConversationFile, extractHighlights, detectWaitingForInput, detectCurrentActivity, detectCurrentActivityFast, getRecentActivity, getPendingApprovalTools, detectCompaction, extractTasks } from './parser';
 
 const execAsync = promisify(exec);
 
@@ -520,6 +520,13 @@ export class ClaudeWatcher extends EventEmitter {
       status: 'idle' | 'working' | 'waiting' | 'error';
       lastActivity: number;
       currentActivity?: string;
+      taskSummary?: {
+        total: number;
+        pending: number;
+        inProgress: number;
+        completed: number;
+        activeTask?: string;
+      };
     }>;
     totalSessions: number;
     waitingCount: number;
@@ -538,6 +545,13 @@ export class ClaudeWatcher extends EventEmitter {
       status: 'idle' | 'working' | 'waiting' | 'error';
       lastActivity: number;
       currentActivity?: string;
+      taskSummary?: {
+        total: number;
+        pending: number;
+        inProgress: number;
+        completed: number;
+        activeTask?: string;
+      };
     }> = [];
 
     let waitingCount = 0;
@@ -563,6 +577,27 @@ export class ClaudeWatcher extends EventEmitter {
         workingCount++;
       }
 
+      // Extract task summary (use cached content if available)
+      let taskSummary: typeof sessions[0]['taskSummary'];
+      try {
+        const content = fs.readFileSync(conv.path, 'utf-8');
+        const tasks = extractTasks(content);
+        if (tasks.length > 0) {
+          const pending = tasks.filter(t => t.status === 'pending').length;
+          const inProgress = tasks.filter(t => t.status === 'in_progress');
+          const completed = tasks.filter(t => t.status === 'completed').length;
+          taskSummary = {
+            total: tasks.length,
+            pending,
+            inProgress: inProgress.length,
+            completed,
+            activeTask: inProgress[0]?.activeForm || inProgress[0]?.subject,
+          };
+        }
+      } catch {
+        // Silent fail - tasks are optional
+      }
+
       sessions.push({
         id,
         name: conv.projectPath.split('/').pop() || id,
@@ -570,6 +605,7 @@ export class ClaudeWatcher extends EventEmitter {
         status,
         lastActivity: conv.lastModified,
         currentActivity,
+        taskSummary,
       });
     }
 

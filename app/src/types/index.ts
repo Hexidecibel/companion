@@ -122,6 +122,14 @@ export interface OtherSessionActivity {
 }
 
 // Dashboard types
+export interface TaskSummary {
+  total: number;
+  pending: number;
+  inProgress: number;
+  completed: number;
+  activeTask?: string;
+}
+
 export interface SessionSummary {
   id: string;
   name: string;
@@ -129,6 +137,7 @@ export interface SessionSummary {
   status: 'idle' | 'working' | 'waiting' | 'error';
   lastActivity: number;
   currentActivity?: string;
+  taskSummary?: TaskSummary;
 }
 
 export interface ServerSummary {

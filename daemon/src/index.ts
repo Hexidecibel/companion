@@ -84,16 +84,27 @@ async function main(): Promise<void> {
   watcher.start();
   subAgentWatcher.start();
 
-  // Auto-approve safe tools
-  if (config.autoApproveTools.length > 0) {
-    console.log(`Auto-approve enabled for: ${config.autoApproveTools.join(', ')}`);
+  // Auto-approve safe tools (from config and/or client toggle)
+  {
+    console.log(`Auto-approve tools from config: ${config.autoApproveTools.length > 0 ? config.autoApproveTools.join(', ') : '(none - client toggle only)'}`);
     const tmux = new TmuxManager('claude');
     // Track in-flight approvals to prevent double-firing
     const pendingAutoApprovals = new Set<string>();
 
     watcher.on('pending-approval', async ({ sessionId, projectPath, tools }) => {
+      // Skip if auto-approve is not enabled (neither config nor client toggle)
+      if (config.autoApproveTools.length === 0 && !wsHandler.autoApproveEnabled) {
+        return;
+      }
+
       // Check if any pending tool should be auto-approved
-      const autoApprovable = tools.filter((tool: string) => config.autoApproveTools.includes(tool));
+      const autoApprovable = tools.filter((tool: string) => {
+        // Config-level auto-approve for specific tools
+        if (config.autoApproveTools.includes(tool)) return true;
+        // Client toggle enables ALL tools to be auto-approved
+        if (wsHandler.autoApproveEnabled) return true;
+        return false;
+      });
 
       if (autoApprovable.length > 0) {
         // Skip if we already have an auto-approval in flight for this session

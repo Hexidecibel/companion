@@ -79,11 +79,57 @@ async function copyToClipboard(text: string, label: string) {
   }
 }
 
-// Tool calls container with expand/collapse all
+// Threshold for collapsing tool calls into a summary
+const TOOL_COLLAPSE_THRESHOLD = 3;
+
+// Tool calls container with collapse/expand for many tools
 function ToolCallsContainer({ toolCalls }: { toolCalls: ToolCall[] }) {
+  const [showAll, setShowAll] = useState(false);
   const [allExpanded, setAllExpanded] = useState<boolean | undefined>(undefined);
 
   if (toolCalls.length === 0) return null;
+
+  const completedCount = toolCalls.filter(t => t.status === 'completed').length;
+  const runningCount = toolCalls.filter(t => t.status === 'running' || t.status === 'pending').length;
+  const errorCount = toolCalls.filter(t => t.status === 'error').length;
+
+  // For many tools, show a collapsed summary with only the last tool visible
+  if (toolCalls.length >= TOOL_COLLAPSE_THRESHOLD && !showAll) {
+    const lastTool = toolCalls[toolCalls.length - 1];
+    return (
+      <View style={styles.toolCallsContainer}>
+        <TouchableOpacity
+          style={toolGroupStyles.summaryBar}
+          onPress={() => setShowAll(true)}
+          activeOpacity={0.7}
+        >
+          <View style={toolGroupStyles.summaryLeft}>
+            <Text style={toolGroupStyles.summaryCount}>{toolCalls.length} tools</Text>
+            <View style={toolGroupStyles.summaryStats}>
+              {completedCount > 0 && (
+                <View style={[toolGroupStyles.statBadge, { backgroundColor: '#065f46' }]}>
+                  <Text style={[toolGroupStyles.statText, { color: '#6ee7b7' }]}>{completedCount} done</Text>
+                </View>
+              )}
+              {runningCount > 0 && (
+                <View style={[toolGroupStyles.statBadge, { backgroundColor: '#713f12' }]}>
+                  <Text style={[toolGroupStyles.statText, { color: '#fde68a' }]}>{runningCount} active</Text>
+                </View>
+              )}
+              {errorCount > 0 && (
+                <View style={[toolGroupStyles.statBadge, { backgroundColor: '#7f1d1d' }]}>
+                  <Text style={[toolGroupStyles.statText, { color: '#fca5a5' }]}>{errorCount} error</Text>
+                </View>
+              )}
+            </View>
+          </View>
+          <Text style={toolGroupStyles.expandText}>Show all ▶</Text>
+        </TouchableOpacity>
+        {/* Always show the last/most recent tool */}
+        <ToolCard key={lastTool.id} tool={lastTool} forceExpanded={undefined} />
+      </View>
+    );
+  }
 
   const toggleAll = () => {
     setAllExpanded(prev => prev === true ? false : true);
@@ -92,11 +138,18 @@ function ToolCallsContainer({ toolCalls }: { toolCalls: ToolCall[] }) {
   return (
     <View style={styles.toolCallsContainer}>
       {toolCalls.length > 1 && (
-        <TouchableOpacity style={styles.expandAllButton} onPress={toggleAll}>
-          <Text style={styles.expandAllText}>
-            {allExpanded === true ? 'Collapse All' : 'Expand All'}
-          </Text>
-        </TouchableOpacity>
+        <View style={toolGroupStyles.toolbar}>
+          {toolCalls.length >= TOOL_COLLAPSE_THRESHOLD && (
+            <TouchableOpacity onPress={() => setShowAll(false)}>
+              <Text style={toolGroupStyles.collapseText}>◀ Collapse</Text>
+            </TouchableOpacity>
+          )}
+          <TouchableOpacity style={styles.expandAllButton} onPress={toggleAll}>
+            <Text style={styles.expandAllText}>
+              {allExpanded === true ? 'Collapse All' : 'Expand All'}
+            </Text>
+          </TouchableOpacity>
+        </View>
       )}
       {toolCalls.map((tool) => (
         <ToolCard key={tool.id} tool={tool} forceExpanded={allExpanded} />
@@ -566,6 +619,61 @@ function ConversationItemInner({ item, showToolCalls, onSelectOption, onFileTap,
     </View>
   );
 }
+
+const toolGroupStyles = StyleSheet.create({
+  summaryBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#1f2937',
+    borderRadius: 6,
+    marginTop: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    borderLeftWidth: 3,
+    borderLeftColor: '#6b7280',
+  },
+  summaryLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+    flexWrap: 'wrap',
+    gap: 6,
+  },
+  summaryCount: {
+    color: '#d1d5db',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  summaryStats: {
+    flexDirection: 'row',
+    gap: 4,
+  },
+  statBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  statText: {
+    fontSize: 10,
+    fontWeight: '600',
+  },
+  expandText: {
+    color: '#9ca3af',
+    fontSize: 11,
+  },
+  toolbar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 8,
+    marginBottom: -4,
+  },
+  collapseText: {
+    color: '#9ca3af',
+    fontSize: 11,
+  },
+});
 
 const filePathStyles = StyleSheet.create({
   filePath: {

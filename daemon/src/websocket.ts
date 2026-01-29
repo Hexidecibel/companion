@@ -53,6 +53,7 @@ export class WebSocketHandler {
   private readonly MAX_CLIENT_ERRORS = 50;
   private scrollLogs: Array<{ event: string; ts: number; [key: string]: unknown }> = [];
   private readonly MAX_SCROLL_LOGS = 200;
+  public autoApproveEnabled: boolean = false;
 
   constructor(
     server: Server,
@@ -460,6 +461,19 @@ export class WebSocketHandler {
           });
         }
         break;
+
+      case 'set_auto_approve': {
+        const autoApprovePayload = payload as { enabled: boolean };
+        this.autoApproveEnabled = autoApprovePayload?.enabled ?? false;
+        console.log(`Auto-approve ${this.autoApproveEnabled ? 'enabled' : 'disabled'} by client`);
+        this.send(client.ws, {
+          type: 'auto_approve_set',
+          success: true,
+          payload: { enabled: this.autoApproveEnabled },
+          requestId,
+        });
+        break;
+      }
 
       case 'set_notification_prefs':
         const notifPrefs = payload as {

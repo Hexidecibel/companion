@@ -259,18 +259,6 @@ export function EditServerScreen({ server, onBack, onSaved }: EditServerScreenPr
           />
         </View>
 
-        <View style={styles.switchRow}>
-          <Text style={styles.switchLabel}>Auto-Approve Mode</Text>
-          <Switch
-            value={formAutoApproveEnabled}
-            onValueChange={setFormAutoApproveEnabled}
-            trackColor={{ false: '#374151', true: '#10b981' }}
-          />
-        </View>
-        <Text style={styles.switchHint}>
-          When enabled, safe tool calls are auto-approved
-        </Text>
-
         {isEditing && (
           <TouchableOpacity style={styles.deleteButton} onPress={handleDelete}>
             <Text style={styles.deleteButtonText}>Delete Server</Text>

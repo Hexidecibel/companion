@@ -427,18 +427,6 @@ export function ServerList({ onSelectServer, onOpenSetup, onBack }: ServerListPr
               />
             </View>
 
-            <View style={styles.switchRow}>
-              <View style={styles.switchInfo}>
-                <Text style={styles.switchLabel}>Auto-Approve Mode</Text>
-                <Text style={styles.switchHint}>Enable if Claude has dangerously-skip-permissions</Text>
-              </View>
-              <Switch
-                value={formAutoApproveEnabled}
-                onValueChange={setFormAutoApproveEnabled}
-                trackColor={{ false: '#374151', true: '#f59e0b' }}
-              />
-            </View>
-
             <Text style={styles.hint}>
               Tip: Visit http://your-server:9877 in a browser to see a QR code for easy setup.
               The token can also be found in /etc/claude-companion/config.json

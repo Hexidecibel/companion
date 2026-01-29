@@ -102,7 +102,7 @@ export function SessionView({ server, onBack, initialSessionId, onNewProject }: 
   }, [data.length, scrollToBottom]);
 
   const [showSettings, setShowSettings] = useState(false);
-  const [sessionSettings, setSessionSettings] = useState<SessionSettings>({ instantNotify: false });
+  const [sessionSettings, setSessionSettings] = useState<SessionSettings>({ instantNotify: false, autoApproveEnabled: false });
   const [showActivityModal, setShowActivityModal] = useState(false);
   const [showSessionPicker, setShowSessionPicker] = useState(false);
   const [viewingFile, setViewingFile] = useState<string | null>(null);
@@ -227,6 +227,17 @@ export function SessionView({ server, onBack, initialSessionId, onNewProject }: 
     }
   }, [server.id, sessionSettings]);
 
+  const handleAutoApproveChange = useCallback(async (value: boolean) => {
+    const newSettings = { ...sessionSettings, autoApproveEnabled: value };
+    setSessionSettings(newSettings);
+    await saveSessionSettings(server.id, newSettings);
+
+    // Tell daemon to enable/disable auto-approve
+    if (wsService.isConnected()) {
+      wsService.sendRequest('set_auto_approve', { enabled: value });
+    }
+  }, [server.id, sessionSettings]);
+
   // Auto-scroll disabled - was too aggressive and prevented reading history
   // User can tap the scroll-to-bottom button when needed
 
@@ -262,10 +273,13 @@ export function SessionView({ server, onBack, initialSessionId, onNewProject }: 
 
         // Fetch data immediately - don't wait for switch_session response
         refresh(!!isSwitching);
-        // Sync instant notify preference with daemon (fire-and-forget)
+        // Sync session preferences with daemon (fire-and-forget)
         getSessionSettings(server.id).then(settings => {
           if (settings.instantNotify) {
             wsService.sendRequest('set_instant_notify', { enabled: true });
+          }
+          if (settings.autoApproveEnabled) {
+            wsService.sendRequest('set_auto_approve', { enabled: true });
           }
         });
         // Only reset scroll state when switching sessions, not on every reconnect
@@ -479,6 +493,20 @@ export function SessionView({ server, onBack, initialSessionId, onNewProject }: 
         >
           <View style={styles.modalContent} onStartShouldSetResponder={() => true}>
             <Text style={styles.modalTitle}>Session Settings</Text>
+
+            <View style={styles.modalRow}>
+              <View style={styles.modalRowInfo}>
+                <Text style={styles.modalRowLabel}>Auto-Approve</Text>
+                <Text style={styles.modalRowDescription}>
+                  Auto-approve safe tool calls (Read, Glob, Grep, etc.)
+                </Text>
+              </View>
+              <Switch
+                value={sessionSettings.autoApproveEnabled}
+                onValueChange={handleAutoApproveChange}
+                trackColor={{ false: '#374151', true: '#f59e0b' }}
+              />
+            </View>
 
             <View style={styles.modalRow}>
               <View style={styles.modalRowInfo}>
