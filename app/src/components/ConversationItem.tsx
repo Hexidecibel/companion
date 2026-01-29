@@ -15,6 +15,23 @@ interface ConversationItemProps {
 const COLLAPSED_LINES = 12;
 const COLLAPSED_HEIGHT = 250;
 
+// Map file extension to language label
+function getLanguageLabel(filePath: string): string | null {
+  const ext = filePath.split('.').pop()?.toLowerCase();
+  const map: Record<string, string> = {
+    ts: 'TypeScript', tsx: 'TypeScript React', js: 'JavaScript', jsx: 'JavaScript React',
+    py: 'Python', rs: 'Rust', go: 'Go', rb: 'Ruby', java: 'Java', kt: 'Kotlin',
+    swift: 'Swift', c: 'C', cpp: 'C++', h: 'C Header', cs: 'C#',
+    json: 'JSON', yaml: 'YAML', yml: 'YAML', toml: 'TOML', xml: 'XML',
+    html: 'HTML', css: 'CSS', scss: 'SCSS', md: 'Markdown',
+    sh: 'Shell', bash: 'Bash', zsh: 'Zsh', fish: 'Fish',
+    sql: 'SQL', graphql: 'GraphQL', proto: 'Protocol Buffers',
+    dockerfile: 'Dockerfile', makefile: 'Makefile',
+  };
+  if (!ext) return null;
+  return map[ext] || null;
+}
+
 // Helper to get a summary of tool input for display
 function getToolSummary(tool: ToolCall): string {
   const input = tool.input || {};
@@ -165,41 +182,100 @@ function ToolCallsContainer({ toolCalls }: { toolCalls: ToolCall[] }) {
 
 // Render a unified diff view
 function DiffView({ oldText, newText }: { oldText: string; newText: string }) {
+  const [showAll, setShowAll] = useState(false);
   const oldLines = oldText.split('\n');
   const newLines = newText.split('\n');
+  const limit = showAll ? Infinity : 40;
+  const isTruncated = oldLines.length > 40 || newLines.length > 40;
 
   return (
     <View style={diffStyles.container}>
       <View style={diffStyles.section}>
         <View style={diffStyles.header}>
-          <Text style={diffStyles.headerText}>- Remove</Text>
+          <Text style={diffStyles.headerText}>- Remove ({oldLines.length} lines)</Text>
         </View>
         <ScrollView style={diffStyles.scroll} nestedScrollEnabled>
-          {oldLines.slice(0, 20).map((line, i) => (
-            <Text key={`old-${i}`} style={diffStyles.removeLine}>
-              {line}
-            </Text>
+          {oldLines.slice(0, limit).map((line, i) => (
+            <View key={`old-${i}`} style={diffStyles.lineRow}>
+              <Text style={diffStyles.lineNumber}>{i + 1}</Text>
+              <Text style={diffStyles.removeLine}>{line}</Text>
+            </View>
           ))}
-          {oldLines.length > 20 && (
-            <Text style={diffStyles.truncated}>... {oldLines.length - 20} more lines</Text>
+          {!showAll && oldLines.length > 40 && (
+            <Text style={diffStyles.truncated}>... {oldLines.length - 40} more lines</Text>
           )}
         </ScrollView>
       </View>
       <View style={diffStyles.section}>
         <View style={[diffStyles.header, diffStyles.addHeader]}>
-          <Text style={diffStyles.headerText}>+ Add</Text>
+          <Text style={diffStyles.headerText}>+ Add ({newLines.length} lines)</Text>
         </View>
         <ScrollView style={diffStyles.scroll} nestedScrollEnabled>
-          {newLines.slice(0, 20).map((line, i) => (
-            <Text key={`new-${i}`} style={diffStyles.addLine}>
-              {line}
-            </Text>
+          {newLines.slice(0, limit).map((line, i) => (
+            <View key={`new-${i}`} style={diffStyles.lineRow}>
+              <Text style={diffStyles.lineNumber}>{i + 1}</Text>
+              <Text style={diffStyles.addLine}>{line}</Text>
+            </View>
           ))}
-          {newLines.length > 20 && (
-            <Text style={diffStyles.truncated}>... {newLines.length - 20} more lines</Text>
+          {!showAll && newLines.length > 40 && (
+            <Text style={diffStyles.truncated}>... {newLines.length - 40} more lines</Text>
           )}
         </ScrollView>
       </View>
+      {isTruncated && (
+        <TouchableOpacity style={diffStyles.showMoreButton} onPress={() => setShowAll(!showAll)}>
+          <Text style={diffStyles.showMoreText}>{showAll ? 'Show less' : 'Show all'}</Text>
+        </TouchableOpacity>
+      )}
+    </View>
+  );
+}
+
+// Write content view with line numbers and show more
+function WriteContentView({ filePath, content }: { filePath: string; content: string }) {
+  const [showAll, setShowAll] = useState(false);
+  const langLabel = getLanguageLabel(filePath);
+  const lines = content.split('\n');
+  const charLimit = showAll ? Infinity : 2000;
+  const truncatedContent = content.substring(0, charLimit);
+  const isTruncated = content.length > 2000;
+  const displayLines = truncatedContent.split('\n');
+
+  return (
+    <View style={toolCardStyles.section}>
+      <View style={toolCardStyles.sectionHeader}>
+        <Text style={toolCardStyles.sectionLabel}>File: {filePath}</Text>
+        {langLabel && <Text style={toolCardStyles.langLabel}>{langLabel}</Text>}
+        {content && (
+          <TouchableOpacity
+            style={toolCardStyles.copyButton}
+            onPress={() => copyToClipboard(content, 'Content')}
+          >
+            <Text style={toolCardStyles.copyButtonText}>Copy</Text>
+          </TouchableOpacity>
+        )}
+      </View>
+      {content && (
+        <>
+          <Text style={toolCardStyles.lineCount}>{lines.length} lines</Text>
+          <ScrollView style={toolCardStyles.codeScroll} nestedScrollEnabled>
+            {displayLines.map((line, i) => (
+              <View key={i} style={toolCardStyles.numberedLine}>
+                <Text style={toolCardStyles.lineNum}>{i + 1}</Text>
+                <Text style={toolCardStyles.codeText}>{line}</Text>
+              </View>
+            ))}
+            {!showAll && isTruncated && (
+              <Text style={diffStyles.truncated}>... content truncated</Text>
+            )}
+          </ScrollView>
+          {isTruncated && (
+            <TouchableOpacity style={diffStyles.showMoreButton} onPress={() => setShowAll(!showAll)}>
+              <Text style={diffStyles.showMoreText}>{showAll ? 'Show less' : 'Show all'}</Text>
+            </TouchableOpacity>
+          )}
+        </>
+      )}
     </View>
   );
 }
@@ -279,34 +355,19 @@ function ToolCard({ tool, forceExpanded }: { tool: ToolCall; forceExpanded?: boo
 
           {(tool.name === 'Edit') && filePath && oldString ? (
             <View style={toolCardStyles.section}>
-              <Text style={toolCardStyles.sectionLabel}>File:</Text>
+              <View style={toolCardStyles.sectionHeader}>
+                <Text style={toolCardStyles.sectionLabel}>File:</Text>
+                {getLanguageLabel(filePath) && (
+                  <Text style={toolCardStyles.langLabel}>{getLanguageLabel(filePath)}</Text>
+                )}
+              </View>
               <Text style={toolCardStyles.filePath}>{filePath}</Text>
               <DiffView oldText={oldString} newText={newString} />
             </View>
           ) : null}
 
           {(tool.name === 'Write') && filePath ? (
-            <View style={toolCardStyles.section}>
-              <View style={toolCardStyles.sectionHeader}>
-                <Text style={toolCardStyles.sectionLabel}>File: {filePath}</Text>
-                {newString && (
-                  <TouchableOpacity
-                    style={toolCardStyles.copyButton}
-                    onPress={() => copyToClipboard(newString, 'Content')}
-                  >
-                    <Text style={toolCardStyles.copyButtonText}>Copy</Text>
-                  </TouchableOpacity>
-                )}
-              </View>
-              {newString && (
-                <ScrollView style={toolCardStyles.codeScroll} nestedScrollEnabled>
-                  <Text style={toolCardStyles.codeText}>
-                    {newString.substring(0, 1000)}
-                    {newString.length > 1000 ? '\n... (truncated)' : ''}
-                  </Text>
-                </ScrollView>
-              )}
-            </View>
+            <WriteContentView filePath={filePath} content={newString} />
           ) : null}
 
           {/* Generic fallback for unknown tools */}
@@ -726,26 +787,50 @@ const diffStyles = StyleSheet.create({
     fontWeight: '600',
   },
   scroll: {
-    maxHeight: 100,
+    maxHeight: 200,
     padding: 8,
+  },
+  lineRow: {
+    flexDirection: 'row',
+  },
+  lineNumber: {
+    color: '#4b5563',
+    fontFamily: 'monospace',
+    fontSize: 10,
+    lineHeight: 16,
+    width: 30,
+    textAlign: 'right',
+    marginRight: 8,
   },
   removeLine: {
     color: '#fca5a5',
     fontFamily: 'monospace',
     fontSize: 11,
     lineHeight: 16,
+    flex: 1,
   },
   addLine: {
     color: '#86efac',
     fontFamily: 'monospace',
     fontSize: 11,
     lineHeight: 16,
+    flex: 1,
   },
   truncated: {
     color: '#6b7280',
     fontSize: 10,
     fontStyle: 'italic',
     marginTop: 4,
+  },
+  showMoreButton: {
+    paddingVertical: 6,
+    alignItems: 'center',
+    backgroundColor: '#1a2332',
+  },
+  showMoreText: {
+    color: '#3b82f6',
+    fontSize: 11,
+    fontWeight: '600',
   },
 });
 
@@ -857,7 +942,7 @@ const toolCardStyles = StyleSheet.create({
     backgroundColor: '#111827',
     borderRadius: 4,
     padding: 8,
-    maxHeight: 120,
+    maxHeight: 200,
   },
   codeText: {
     color: '#e5e7eb',
@@ -868,6 +953,33 @@ const toolCardStyles = StyleSheet.create({
     color: '#60a5fa',
     fontSize: 12,
     marginBottom: 8,
+  },
+  langLabel: {
+    color: '#6b7280',
+    fontSize: 10,
+    fontWeight: '500',
+    backgroundColor: '#1f2937',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+    marginLeft: 8,
+    overflow: 'hidden',
+  },
+  lineCount: {
+    color: '#6b7280',
+    fontSize: 10,
+    marginBottom: 4,
+  },
+  numberedLine: {
+    flexDirection: 'row',
+  },
+  lineNum: {
+    color: '#4b5563',
+    fontFamily: 'monospace',
+    fontSize: 10,
+    width: 30,
+    textAlign: 'right',
+    marginRight: 8,
   },
   outputScroll: {
     backgroundColor: '#111827',
