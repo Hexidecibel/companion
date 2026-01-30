@@ -32,7 +32,7 @@ A mobile companion app for [Claude Code](https://claude.ai/claude-code). Monitor
 **Option A: npm (recommended)**
 
 ```bash
-npm install -g @hexi/claude-companion
+npm install -g @hexidecibel/claude-companion
 ```
 
 **Option B: From source**

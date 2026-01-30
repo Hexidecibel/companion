@@ -1,5 +1,5 @@
 {
-  "name": "@hexi/claude-companion",
+  "name": "@hexidecibel/claude-companion",
   "version": "0.0.1",
   "description": "Server daemon for Claude Companion - watches Claude Code sessions and serves data to mobile app",
   "main": "dist/index.js",
