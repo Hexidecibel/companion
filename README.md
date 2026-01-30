@@ -29,11 +29,18 @@ A mobile companion app for [Claude Code](https://claude.ai/claude-code). Monitor
 
 ### 1. Install the Daemon
 
-On your server (macOS, Ubuntu, Fedora, Arch, or Alpine):
+**Option A: npm (recommended)**
+
+```bash
+npm install -g @hexi/claude-companion
+```
+
+**Option B: From source**
 
 ```bash
 git clone https://github.com/Hexidecibel/claude-companion.git
 cd claude-companion/daemon
+npm install && npm run build
 bash scripts/install.sh
 ```
 

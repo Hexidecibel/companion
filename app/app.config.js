@@ -4,7 +4,7 @@ export default {
   expo: {
     name: "Claude Companion",
     slug: "claude-companion",
-    version: "1.0.0",
+    version: "0.0.1",
     sdkVersion: "54.0.0",
     platforms: ["ios", "android", "web"],
     orientation: "portrait",

@@ -50,6 +50,7 @@ High-level features of the Claude Companion mobile app and daemon.
 - Directory browser for project selection
 - Session recreation for missing sessions
 - Auto-detect Claude Code in tmux
+- Session scoping: only monitors sessions created/adopted by the app (env var tagging)
 
 ## Project Scaffolding (New Project Wizard)
 - Multiple stack templates (React, Node, Python, MUI)
@@ -69,6 +70,7 @@ High-level features of the Claude Companion mobile app and daemon.
 
 ## Server Setup
 - QR code scanning for quick setup
+- Token-gated QR code page (enter token first, then see QR + web client link)
 - mDNS/Bonjour discovery
 - TLS support for secure connections
 - Token-based authentication
@@ -86,6 +88,13 @@ High-level features of the Claude Companion mobile app and daemon.
 - Fuzzy tmux session path matching
 - Retry logic for failed approval sends
 - Detailed logging for debugging approval flow
+
+## Session Header
+- Connection status dot in header (green/yellow/orange/red)
+- Unified activity bar combining processing and agent status
+- Agents bar togglable via session settings
+- Long-press tooltips on all header icons
+- Inline auto-approve toggle
 
 ## Connection Resilience
 - Dead WebSocket detection via readyState verification

@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 import { loadConfig } from './config';
 import { ClaudeWatcher } from './watcher';
 import { SubAgentWatcher } from './subagent-watcher';

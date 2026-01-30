@@ -1,6 +1,6 @@
 {
   "name": "claude-companion-app",
-  "version": "1.0.0",
+  "version": "0.0.1",
   "main": "expo/AppEntry.js",
   "scripts": {
     "start": "expo start --port 9009",
