@@ -47,14 +47,18 @@ High-level features of the Companion mobile app and daemon.
 
 ## Tmux Session Management
 - Create/list/switch tmux sessions from app
+- Git worktree support: branch sessions for concurrent editing on the same repo
+- Worktree cleanup on session kill
 - Directory browser for project selection
 - Session recreation for missing sessions
 - Auto-detect the CLI in tmux
 - Session scoping: only monitors sessions created/adopted by the app (env var tagging)
 
 ## Project Scaffolding (New Project Wizard)
-- Multiple stack templates (React, Node, Python, MUI)
-- Git initialization option
+- Multiple stack templates (React, Node, Python, Go, Next.js, MUI)
+- Auto-generated CLAUDE.md with project-specific instructions
+- Standard slash commands (.claude/commands/) tailored per stack: /up, /down, /todo, /plan, /work, /test
+- Git initialization and GitHub repo creation
 - Template variable interpolation
 - Progress tracking during creation
 
@@ -76,10 +80,13 @@ High-level features of the Companion mobile app and daemon.
 - Token-based authentication
 
 ## Terminal Output Viewer
-- Raw tmux terminal output display
-- Auto-refresh polling with toggle
+- Raw tmux terminal output display with ANSI color rendering
+- SSH command display with tap-to-copy (mobile) and click-to-copy (web)
+- Scroll-position-aware auto-scroll: pauses when reading, resumes at bottom
+- Auto-refresh polling with pause/resume toggle
 - Horizontal scroll for long lines
-- Pull-to-refresh and auto-scroll to bottom
+- Font size zoom controls (mobile)
+- Pull-to-refresh (mobile) and manual refresh button (web)
 - Accessible from session header
 
 ## Auto-Approve System
@@ -102,6 +109,13 @@ High-level features of the Companion mobile app and daemon.
 - Session state recovery after reconnection
 - Double-connect guard prevents orphaned sockets
 - Exponential backoff reconnection with configurable max attempts
+
+## Daemon CLI
+- `companion status` — show running state, PID, tmux sessions, config summary
+- `companion stop` — graceful shutdown via PID file
+- `companion config` — view/set config values
+- `companion logs` — platform-aware log viewing (macOS launchd / Linux journalctl)
+- `companion install` — install as system service
 
 ## Developer Tools
 - Sentry error tracking integration
