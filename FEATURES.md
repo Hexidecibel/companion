@@ -6,13 +6,16 @@ High-level features of the Claude Companion mobile app and daemon.
 - Live WebSocket updates from Claude Code sessions
 - Multi-server, multi-session support
 - Session status indicators (waiting, working, idle)
-- Sub-agent visibility and tracking
+- Sub-agent tracking with real-time status bar
+- Click-to-view sub-agent conversation detail
+- Running/completed agent sections with collapsible completed list
 
 ## Mobile Input
 - Send text and images to Claude from your phone
 - Quick reply chips and slash commands
 - Message queuing when disconnected
-- Multi-select question answering
+- Multi-question answering with per-question selection and "Other" freetext
+- Multi-select checkbox UI for questions that allow multiple answers
 
 ## Dashboard
 - Multi-server overview with connection status

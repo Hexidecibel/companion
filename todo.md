@@ -38,10 +38,11 @@ Quick capture for ideas and tasks. Run `/plan` to process into detailed plans.
 - [done] Better waiting/idle distinction on dashboard - idle state, grayed out sessions
 - [done] Change settings icon to a cog on server dashboard bottom left FAB
 - [done] Show password in token field on Server edit screen
+- [done] Fix AskUserQuestion multi-select and multiple questions
+- [done] Improve sub-agents UX - click-to-view detail, better status, collapsible completed
 
 ## Planned
-- [planned] Fix AskUserQuestion multi-select and multiple questions (plan #8)
-- [planned] Improve sub-agents UX - click-to-view detail, better status, collapsible completed (plan #9)
+(none)
 
 ## Upcoming
 - Beef up new project helper - let Claude help choose language/stack with back-and-forth discussion, analyze project and order options by recommendation, option to create a private GitHub repo
