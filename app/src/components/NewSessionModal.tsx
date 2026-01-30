@@ -22,12 +22,15 @@ interface NewSessionModalProps {
   visible: boolean;
   onClose: () => void;
   onCreate: (workingDir: string, startSession: boolean) => Promise<void>;
+  onCreateWorktree?: (parentDir: string, branch: string, startSession: boolean) => Promise<void>;
   onFetchRecents: () => Promise<RecentProject[]>;
 }
 
-export function NewSessionModal({ visible, onClose, onCreate, onFetchRecents }: NewSessionModalProps) {
+export function NewSessionModal({ visible, onClose, onCreate, onCreateWorktree, onFetchRecents }: NewSessionModalProps) {
   const [path, setPath] = useState('');
   const [startSession, setStartSession] = useState(true);
+  const [branchMode, setBranchMode] = useState(false);
+  const [branchName, setBranchName] = useState('');
   const [recents, setRecents] = useState<RecentProject[]>([]);
   const [loadingRecents, setLoadingRecents] = useState(false);
   const [creating, setCreating] = useState(false);
@@ -35,6 +38,8 @@ export function NewSessionModal({ visible, onClose, onCreate, onFetchRecents }: 
   useEffect(() => {
     if (visible) {
       setPath('');
+      setBranchMode(false);
+      setBranchName('');
       setCreating(false);
       loadRecents();
     }
@@ -60,14 +65,19 @@ export function NewSessionModal({ visible, onClose, onCreate, onFetchRecents }: 
     }
     setCreating(true);
     try {
-      await onCreate(trimmed, startSession);
+      if (branchMode && onCreateWorktree) {
+        await onCreateWorktree(trimmed, branchName.trim(), startSession);
+      } else {
+        await onCreate(trimmed, startSession);
+      }
       onClose();
     } catch (err) {
-      Alert.alert('Error', 'Failed to create session');
+      const msg = err instanceof Error ? err.message : 'Failed to create session';
+      Alert.alert('Error', msg);
     } finally {
       setCreating(false);
     }
-  }, [path, startSession, onCreate, onClose]);
+  }, [path, startSession, branchMode, branchName, onCreate, onCreateWorktree, onClose]);
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
@@ -102,6 +112,32 @@ export function NewSessionModal({ visible, onClose, onCreate, onFetchRecents }: 
             />
           </View>
 
+          {onCreateWorktree && (
+            <View style={styles.toggleRow}>
+              <Text style={styles.toggleLabel}>Branch Session (git worktree)</Text>
+              <Switch
+                value={branchMode}
+                onValueChange={setBranchMode}
+                trackColor={{ false: '#374151', true: '#10b981' }}
+              />
+            </View>
+          )}
+
+          {branchMode && (
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>Branch Name (optional)</Text>
+              <TextInput
+                style={styles.input}
+                value={branchName}
+                onChangeText={setBranchName}
+                placeholder="feature-my-branch"
+                placeholderTextColor="#6b7280"
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+            </View>
+          )}
+
           {recents.length > 0 && (
             <View style={styles.recentsSection}>
               <Text style={styles.recentsTitle}>Recent Projects</Text>
@@ -133,7 +169,7 @@ export function NewSessionModal({ visible, onClose, onCreate, onFetchRecents }: 
             {creating ? (
               <ActivityIndicator size="small" color="#fff" />
             ) : (
-              <Text style={styles.createButtonText}>Create Session</Text>
+              <Text style={styles.createButtonText}>{branchMode ? 'Create Branch Session' : 'Create Session'}</Text>
             )}
           </TouchableOpacity>
         </View>

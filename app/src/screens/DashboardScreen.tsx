@@ -123,6 +123,19 @@ function ServerCard({
     onRefresh?.();
   }, [server.id, sendRequest, onRefresh]);
 
+  const handleCreateWorktree = useCallback(async (parentDir: string, branch: string, startSession: boolean) => {
+    if (!sendRequest) return;
+    const response = await sendRequest(server.id, 'create_worktree_session', {
+      parentDir,
+      branch: branch || undefined,
+      startCli: startSession,
+    });
+    if (!response.success) {
+      throw new Error(response.error || 'Failed to create worktree session');
+    }
+    onRefresh?.();
+  }, [server.id, sendRequest, onRefresh]);
+
   const fetchRecents = useCallback(async () => {
     if (!sendRequest) return [];
     try {
@@ -379,6 +392,7 @@ function ServerCard({
         visible={showNewSession}
         onClose={() => setShowNewSession(false)}
         onCreate={handleCreateSession}
+        onCreateWorktree={handleCreateWorktree}
         onFetchRecents={fetchRecents}
       />
     </TouchableOpacity>
