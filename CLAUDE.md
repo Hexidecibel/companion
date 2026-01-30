@@ -1,6 +1,6 @@
-# Claude Companion
+# Companion
 
-A mobile companion for Claude Code. Daemon runs on a Linux server, watches Claude Code sessions, and exposes a WebSocket API. React Native app connects to monitor and respond from your phone.
+A mobile companion for your AI coding CLI. Daemon runs on a Linux server, watches coding sessions, and exposes a WebSocket API. React Native app connects to monitor and respond from your phone.
 
 ## Project Structure
 
@@ -11,9 +11,9 @@ app/            # React Native/Expo mobile app
 
 ## Daemon
 
-**Install location:** `/opt/claude-companion`
-**Config:** `/etc/claude-companion/config.json`
-**Service:** `claude-companion` (systemd)
+**Install location:** `/opt/companion`
+**Config:** `/etc/companion/config.json`
+**Service:** `companion` (systemd)
 
 ### Key files
 - `src/index.ts` - Entry point, initializes all services
@@ -33,10 +33,10 @@ cd daemon && npm install && npm run build
 sudo bash scripts/install.sh
 
 # Manage
-sudo systemctl start claude-companion
-sudo systemctl stop claude-companion
-sudo systemctl restart claude-companion
-sudo journalctl -u claude-companion -f   # View logs
+sudo systemctl start companion
+sudo systemctl stop companion
+sudo systemctl restart companion
+sudo journalctl -u companion -f   # View logs
 ```
 
 ### Config options
@@ -46,7 +46,7 @@ sudo journalctl -u claude-companion -f   # View logs
   "token": "your-secret-token",
   "tls": false,
   "tmux_session": "claude",
-  "claude_home": "/home/user/.claude",
+  "code_home": "/home/user/.claude",
   "mdns_enabled": true
 }
 ```
@@ -71,9 +71,9 @@ eas build --platform ios    # Production build
 
 ## Architecture
 
-1. User runs Claude Code in tmux: `tmux new -s claude && claude`
+1. User runs the CLI in tmux: `tmux new -s claude && claude`
 2. Daemon watches `~/.claude/projects/*.jsonl` for changes
-3. Parses conversations, detects when Claude is waiting for input
+3. Parses conversations, detects when the CLI is waiting for input
 4. Broadcasts updates via WebSocket to connected apps
 5. App can send text/images back, daemon injects via tmux
 
@@ -86,7 +86,7 @@ Message types:
 - `authenticate` - Login with token
 - `subscribe` - Start receiving updates
 - `get_highlights` / `get_full` - Fetch conversation
-- `send_input` - Send text to Claude
+- `send_input` - Send text to the CLI
 - `send_image` - Send image (base64)
 - `register_push` - Register FCM token for push notifications
 
@@ -94,13 +94,13 @@ Message types:
 
 ```bash
 # Check if daemon is running
-sudo systemctl status claude-companion
+sudo systemctl status companion
 
 # View logs
-sudo journalctl -u claude-companion -f
+sudo journalctl -u companion -f
 
 # Check config
-cat /etc/claude-companion/config.json
+cat /etc/companion/config.json
 
 # Test WebSocket manually
 wscat -c ws://localhost:9877

@@ -7,14 +7,12 @@
     "development": {
       "developmentClient": true,
       "distribution": "internal",
-      "credentialsSource": "local",
       "android": {
         "buildType": "apk"
       }
     },
     "preview": {
       "distribution": "internal",
-      "credentialsSource": "local",
       "env": {
         "SENTRY_DISABLE_AUTO_UPLOAD": "true"
       },

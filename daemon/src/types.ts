@@ -5,7 +5,7 @@ export interface DaemonConfig {
   certPath?: string;
   keyPath?: string;
   tmuxSession: string;
-  claudeHome: string;
+  codeHome: string;
   mdnsEnabled: boolean;
   fcmCredentialsPath?: string;
   pushDelayMs: number;
@@ -121,7 +121,7 @@ export interface ConversationFile {
 export interface TmuxSessionConfig {
   name: string;
   workingDir: string;
-  startClaude: boolean;
+  startCli: boolean;
   lastUsed: number;
 }
 

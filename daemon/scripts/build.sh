@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-echo "Building Claude Companion Daemon..."
+echo "Building Companion Daemon..."
 
 cd "$(dirname "$0")/.."
 

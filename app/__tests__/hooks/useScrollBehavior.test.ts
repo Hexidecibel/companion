@@ -444,7 +444,7 @@ describe('useScrollBehavior', () => {
   });
 
   describe('sending while receiving (real-world scenarios)', () => {
-    it('should handle user sending message while Claude is responding', () => {
+    it('should handle user sending message while assistant is responding', () => {
       const { result } = renderHook(() => useScrollBehavior());
 
       // Initial conversation
@@ -470,7 +470,7 @@ describe('useScrollBehavior', () => {
         result.current.handleContentSizeChange(0, 1100);
       });
 
-      // Claude starts responding (content grows more)
+      // assistant starts responding (content grows more)
       act(() => {
         result.current.handleContentSizeChange(0, 1200);
       });
@@ -481,10 +481,10 @@ describe('useScrollBehavior', () => {
       expect(result.current.state.showScrollButton).toBe(false);
     });
 
-    it('should handle user scrolling up to read while Claude continues responding', () => {
+    it('should handle user scrolling up to read while assistant continues responding', () => {
       const { result } = renderHook(() => useScrollBehavior());
 
-      // Ongoing conversation with Claude responding
+      // Ongoing conversation with assistant responding
       act(() => {
         result.current.handleContentSizeChange(0, 1500);
       });
@@ -506,7 +506,7 @@ describe('useScrollBehavior', () => {
       // Advance past user scroll cooldown
       advanceTime(1100);
 
-      // Claude keeps responding (content grows)
+      // assistant keeps responding (content grows)
       act(() => {
         result.current.handleContentSizeChange(0, 1700);
       });
@@ -515,7 +515,7 @@ describe('useScrollBehavior', () => {
       expect(result.current.state.hasNewMessages).toBe(true);
       expect(result.current.state.autoScrollEnabled).toBe(false);
 
-      // More Claude output
+      // More assistant output
       act(() => {
         result.current.handleContentSizeChange(0, 2000);
       });
@@ -635,7 +635,7 @@ describe('useScrollBehavior', () => {
     it('should show new message badge when waiting for input and user scrolled up', () => {
       const { result } = renderHook(() => useScrollBehavior());
 
-      // Claude working, user reading history
+      // assistant working, user reading history
       act(() => {
         result.current.handleContentSizeChange(0, 1500);
       });
@@ -645,7 +645,7 @@ describe('useScrollBehavior', () => {
       });
       advanceTime(1100);
 
-      // Claude finishes and shows input request
+      // assistant finishes and shows input request
       act(() => {
         result.current.handleContentSizeChange(0, 1600);
       });
@@ -657,7 +657,7 @@ describe('useScrollBehavior', () => {
     it('should not show badge when waiting for input and user is pinned', () => {
       const { result } = renderHook(() => useScrollBehavior());
 
-      // User at bottom watching Claude work
+      // User at bottom watching assistant work
       act(() => {
         result.current.handleContentSizeChange(0, 1500);
       });
@@ -666,7 +666,7 @@ describe('useScrollBehavior', () => {
         result.current.handleScroll(createScrollEvent(1500, 850, 600));
       });
 
-      // Claude finishes and shows input request
+      // assistant finishes and shows input request
       act(() => {
         result.current.handleContentSizeChange(0, 1600);
       });

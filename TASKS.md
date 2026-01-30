@@ -1,12 +1,12 @@
-# Claude Companion - Task List
+# Companion - Task List
 
 ## Completed
 
 ### Core Features
 - [x] Real-time session monitoring via WebSocket
-- [x] Mobile input to send text/images to Claude
+- [x] Mobile input to send text/images to the CLI
 - [x] Multi-server support with server list management
-- [x] Push notifications (FCM) when Claude is waiting for input
+- [x] Push notifications (FCM) when the CLI is waiting for input
 - [x] Android 13+ notification permission prompt
 - [x] mDNS discovery for local daemons
 - [x] Auto-reconnection with exponential backoff
@@ -100,12 +100,12 @@ _Empty - all items from this round complete!_
 
 ### Daemon CLI
 - Unified CLI for daemon management
-  - `claude-companion up` - Start daemon
-  - `claude-companion down` - Stop daemon
-  - `claude-companion status` - Show status, port, connected clients
-  - `claude-companion install` - Set up as system service (systemd on Linux, launchd on macOS)
-  - `claude-companion logs` - Tail daemon logs
-  - `claude-companion config` - Show/edit config
+  - `companion up` - Start daemon
+  - `companion down` - Stop daemon
+  - `companion status` - Show status, port, connected clients
+  - `companion install` - Set up as system service (systemd on Linux, launchd on macOS)
+  - `companion logs` - Tail daemon logs
+  - `companion config` - Show/edit config
 - Could use commander.js or similar for CLI parsing
 - Auto-detect platform for service installation
 

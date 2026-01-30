@@ -48,7 +48,7 @@ export function QRScanner({ onScan, onClose }: QRScannerProps) {
 
       onScan(config);
     } catch {
-      Alert.alert('Invalid QR Code', 'Could not parse the QR code. Make sure you are scanning a Claude Companion setup QR code.', [
+      Alert.alert('Invalid QR Code', 'Could not parse the QR code. Make sure you are scanning a Companion setup QR code.', [
         { text: 'Try Again', onPress: () => setScanned(false) },
         { text: 'Cancel', onPress: onClose },
       ]);

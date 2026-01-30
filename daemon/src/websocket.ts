@@ -5,7 +5,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import * as crypto from 'crypto';
-import { ClaudeWatcher } from './watcher';
+import { SessionWatcher } from './watcher';
 import { InputInjector } from './input-injector';
 import { PushNotificationService } from './push';
 import { TmuxManager } from './tmux-manager';
@@ -20,7 +20,7 @@ import { scaffoldProject, previewScaffold } from './scaffold/generator';
 import { ProjectConfig } from './scaffold/types';
 
 // File for persisting tmux session configs
-const TMUX_CONFIGS_FILE = path.join(os.homedir(), '.claude-companion', 'tmux-sessions.json');
+const TMUX_CONFIGS_FILE = path.join(os.homedir(), '.companion', 'tmux-sessions.json');
 
 interface AuthenticatedClient {
   id: string;
@@ -43,7 +43,7 @@ export class WebSocketHandler {
   private wss: WebSocketServer;
   private clients: Map<string, AuthenticatedClient> = new Map();
   private token: string;
-  private watcher: ClaudeWatcher;
+  private watcher: SessionWatcher;
   private subAgentWatcher: SubAgentWatcher | null;
   private injector: InputInjector;
   private push: PushNotificationService;
@@ -59,7 +59,7 @@ export class WebSocketHandler {
   constructor(
     server: Server,
     config: DaemonConfig,
-    watcher: ClaudeWatcher,
+    watcher: SessionWatcher,
     injector: InputInjector,
     push: PushNotificationService,
     tmux?: TmuxManager,
@@ -71,7 +71,7 @@ export class WebSocketHandler {
     this.subAgentWatcher = subAgentWatcher || null;
     this.injector = injector;
     this.push = push;
-    this.tmux = tmux || new TmuxManager('claude');
+    this.tmux = tmux || new TmuxManager('companion');
 
     this.wss = new WebSocketServer({ server });
 
@@ -141,11 +141,11 @@ export class WebSocketHandler {
     }
   }
 
-  private storeTmuxSessionConfig(name: string, workingDir: string, startClaude: boolean = true): void {
+  private storeTmuxSessionConfig(name: string, workingDir: string, startCli: boolean = true): void {
     this.tmuxSessionConfigs.set(name, {
       name,
       workingDir,
-      startClaude,
+      startCli,
       lastUsed: Date.now(),
     });
     this.saveTmuxSessionConfigs();
@@ -417,7 +417,7 @@ export class WebSocketHandler {
         break;
 
       case 'upload_image':
-        // Just upload and save, don't send to Claude yet
+        // Just upload and save, don't send yet
         this.handleUploadImage(client, payload as { base64: string; mimeType: string }, requestId);
         break;
 
@@ -592,7 +592,7 @@ export class WebSocketHandler {
       case 'create_tmux_session':
         this.handleCreateTmuxSession(
           client,
-          payload as { name?: string; workingDir: string; startClaude?: boolean },
+          payload as { name?: string; workingDir: string; startCli?: boolean },
           requestId
         );
         break;
@@ -781,7 +781,7 @@ export class WebSocketHandler {
     this.send(client.ws, {
       type: 'input_sent',
       success,
-      error: success ? undefined : 'Failed to send input to Claude',
+      error: success ? undefined : 'Failed to send input to session',
       requestId,
     });
   }
@@ -804,7 +804,7 @@ export class WebSocketHandler {
     try {
       // Determine file extension from mime type
       const ext = payload.mimeType === 'image/png' ? 'png' : 'jpg';
-      const filename = `claude-companion-${Date.now()}.${ext}`;
+      const filename = `companion-${Date.now()}.${ext}`;
       const filepath = path.join(os.tmpdir(), filename);
 
       // Save image to temp file
@@ -816,14 +816,14 @@ export class WebSocketHandler {
       // Cancel any pending push notification
       this.push.cancelPendingNotification();
 
-      // Send the file path to Claude Code
+      // Send the file path to the coding session
       const success = await this.injector.sendInput(`Please look at this image: ${filepath}`);
 
       this.send(client.ws, {
         type: 'image_sent',
         success,
         payload: { filepath },
-        error: success ? undefined : 'Failed to send image path to Claude',
+        error: success ? undefined : 'Failed to send image path to session',
         requestId,
       });
     } catch (err) {
@@ -854,7 +854,7 @@ export class WebSocketHandler {
 
     try {
       const ext = payload.mimeType === 'image/png' ? 'png' : 'jpg';
-      const filename = `claude-companion-${Date.now()}.${ext}`;
+      const filename = `companion-${Date.now()}.${ext}`;
       const filepath = path.join(os.tmpdir(), filename);
 
       const buffer = Buffer.from(payload.base64, 'base64');
@@ -1078,7 +1078,7 @@ export class WebSocketHandler {
 
   private async handleCreateTmuxSession(
     client: AuthenticatedClient,
-    payload: { name?: string; workingDir: string; startClaude?: boolean } | undefined,
+    payload: { name?: string; workingDir: string; startCli?: boolean } | undefined,
     requestId?: string
   ): Promise<void> {
     if (!payload?.workingDir) {
@@ -1103,15 +1103,15 @@ export class WebSocketHandler {
     }
 
     const sessionName = payload.name || this.tmux.generateSessionName(payload.workingDir);
-    const startClaude = payload.startClaude !== false; // Default true
+    const startCli = payload.startCli !== false; // Default true
 
     console.log(`WebSocket: Creating tmux session "${sessionName}" in ${payload.workingDir}`);
 
-    const result = await this.tmux.createSession(sessionName, payload.workingDir, startClaude);
+    const result = await this.tmux.createSession(sessionName, payload.workingDir, startCli);
 
     if (result.success) {
       // Store the session config for potential recreation later
-      this.storeTmuxSessionConfig(sessionName, payload.workingDir, startClaude);
+      this.storeTmuxSessionConfig(sessionName, payload.workingDir, startCli);
 
       // Switch input target to the new session
       this.injector.setActiveSession(sessionName);
@@ -1225,7 +1225,7 @@ export class WebSocketHandler {
     this.injector.setActiveSession(payload.sessionName);
     console.log(`WebSocket: Switched to tmux session "${payload.sessionName}"`);
 
-    // Tag the session as managed by Claude Companion (adopt if not already tagged)
+    // Tag the session as managed by Companion (adopt if not already tagged)
     await this.tmux.tagSession(payload.sessionName);
     // Refresh tmux paths so watcher picks up the newly tagged session
     await this.watcher.refreshTmuxPaths();
@@ -1240,7 +1240,7 @@ export class WebSocketHandler {
       // Store the session config for potential recreation later
       this.storeTmuxSessionConfig(payload.sessionName, tmuxSession.workingDir, true);
 
-      // Encode the working directory the same way Claude does: /a/b/c -> -a-b-c
+      // Encode the working directory the same way the CLI does: /a/b/c -> -a-b-c
       const encodedPath = tmuxSession.workingDir.replace(/\//g, '-');
 
       // Find conversation session whose ID matches or starts with this encoded path
@@ -1324,12 +1324,12 @@ export class WebSocketHandler {
     const result = await this.tmux.createSession(
       savedConfig.name,
       savedConfig.workingDir,
-      savedConfig.startClaude
+      savedConfig.startCli
     );
 
     if (result.success) {
       // Update the last used timestamp
-      this.storeTmuxSessionConfig(savedConfig.name, savedConfig.workingDir, savedConfig.startClaude);
+      this.storeTmuxSessionConfig(savedConfig.name, savedConfig.workingDir, savedConfig.startCli);
 
       // Ensure we're targeting this session
       this.injector.setActiveSession(sessionName);

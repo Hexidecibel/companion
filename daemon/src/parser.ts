@@ -326,7 +326,7 @@ function parseEntry(
           console.log(`Parser: Pending ${block.name} tool needs approval: "${description.substring(0, 50)}..."`);
         }
       } else if (block.type === 'tool_result') {
-        // Skip tool results entirely - they're internal Claude responses
+        // Skip tool results entirely - they're internal assistant responses
         // We only want to show actual user-typed messages
       }
     }
@@ -479,7 +479,7 @@ export function detectWaitingForInput(messages: ConversationMessage[]): boolean 
   return false;
 }
 
-// Detect if Claude has finished working and is idle (not actively expecting a response)
+// Detect if the assistant has finished working and is idle (not actively expecting a response)
 export function detectIdle(messages: ConversationMessage[]): boolean {
   if (messages.length === 0) return false;
 
@@ -514,7 +514,7 @@ export function detectCurrentActivity(messages: ConversationMessage[]): string |
 
   const lastMessage = messages[messages.length - 1];
 
-  // If last message is from user, Claude is processing
+  // If last message is from user, the assistant is processing
   if (lastMessage.type === 'user') {
     return 'Processing...';
   }
@@ -673,7 +673,7 @@ export function detectCompaction(
     try {
       const entry = JSON.parse(lines[i]);
 
-      // Look for summary type entries (Claude compaction)
+      // Look for summary type entries (context compaction)
       if (entry.type === 'summary' && entry.summary) {
         const timestamp = entry.timestamp ? new Date(entry.timestamp).getTime() : Date.now();
         compactionEvent = {

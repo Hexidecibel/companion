@@ -1,9 +1,9 @@
-# Claude Companion Features
+# Companion Features
 
-High-level features of the Claude Companion mobile app and daemon.
+High-level features of the Companion mobile app and daemon.
 
 ## Real-Time Monitoring
-- Live WebSocket updates from Claude Code sessions
+- Live WebSocket updates from CLI coding sessions
 - Multi-server, multi-session support
 - Session status indicators (waiting, working, idle)
 - Sub-agent tracking with real-time status bar
@@ -11,7 +11,7 @@ High-level features of the Claude Companion mobile app and daemon.
 - Running/completed agent sections with collapsible completed list
 
 ## Mobile Input
-- Send text and images to Claude from your phone
+- Send text and images to the CLI from your phone
 - Quick reply chips and slash commands
 - Message queuing when disconnected
 - Multi-question answering with per-question selection and "Other" freetext
@@ -40,7 +40,7 @@ High-level features of the Claude Companion mobile app and daemon.
 - Inline auto-approve toggle in session header
 
 ## Push Notifications
-- FCM-based notifications when Claude needs input
+- FCM-based notifications when the CLI needs input
 - Quiet hours scheduling
 - Per-server notification preferences
 - Instant vs batched notification modes
@@ -49,7 +49,7 @@ High-level features of the Claude Companion mobile app and daemon.
 - Create/list/switch tmux sessions from app
 - Directory browser for project selection
 - Session recreation for missing sessions
-- Auto-detect Claude Code in tmux
+- Auto-detect the CLI in tmux
 - Session scoping: only monitors sessions created/adopted by the app (env var tagging)
 
 ## Project Scaffolding (New Project Wizard)

@@ -60,7 +60,7 @@ export async function fetchAnthropicUsage(
       headers: {
         'anthropic-version': '2023-06-01',
         'x-api-key': adminApiKey,
-        'User-Agent': 'ClaudeCompanion/1.0.0',
+        'User-Agent': 'Companion/1.0.0',
       },
     });
 

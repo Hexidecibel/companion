@@ -1,5 +1,5 @@
 {
-  "name": "claude-companion-app",
+  "name": "companion-app",
   "version": "0.0.1",
   "main": "expo/AppEntry.js",
   "scripts": {

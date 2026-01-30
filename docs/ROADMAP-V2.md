@@ -1,8 +1,8 @@
-# Claude Companion v2 Roadmap
+# Companion v2 Roadmap
 
 ## Overview
 
-Four major features to transform Claude Companion from a "session monitor" into an "autonomous assistant manager":
+Four major features to transform Companion from a "session monitor" into an "autonomous assistant manager":
 
 1. **Multi-Server Dashboard** - See all servers at a glance
 2. **Approval Queue** - Structured tool approval workflow
@@ -24,7 +24,7 @@ See all connected servers and their sessions at a glance. Know which ones need a
 ### Proposed UX
 ```
 ┌─────────────────────────────────────┐
-│  Claude Companion          [+ Add]  │
+│  Companion                 [+ Add]  │
 ├─────────────────────────────────────┤
 │                                     │
 │  ┌─────────────────────────────┐    │
@@ -99,14 +99,14 @@ interface SessionSummary {
 Show pending tool calls that need approval. Enable batch approve/reject. Set auto-approve rules.
 
 ### Current State
-- Claude Code shows tool calls in conversation
+- The CLI shows tool calls in conversation
 - User must read conversation to find pending approvals
 - No structured way to approve/reject from app
 
-### How Claude Code Approvals Work
-When Claude wants to use a tool that requires approval:
+### How CLI Approvals Work
+When the CLI wants to use a tool that requires approval:
 1. Tool call appears in conversation with `tool_use` block
-2. Claude Code waits for user input (y/n/yes/no or custom response)
+2. The CLI waits for user input (y/n/yes/no or custom response)
 3. After approval, `tool_result` block appears
 
 We can detect pending approvals by finding `tool_use` blocks without corresponding `tool_result`.
@@ -210,7 +210,7 @@ interface PendingApproval {
 ### Open Questions
 - How to handle approvals that timeout or are handled elsewhere?
 - Should auto-approve happen in daemon or require app to be connected?
-- How to show approval context (what was Claude trying to do?)
+- How to show approval context (what was the CLI trying to do?)
 
 ### Estimate: 2-3 days
 
@@ -219,11 +219,11 @@ interface PendingApproval {
 ## 3. Sub-Agent Visibility
 
 ### Goal
-When Claude spawns Task agents, show them in a tree view. See what each is doing, cancel specific ones.
+When the CLI spawns Task agents, show them in a tree view. See what each is doing, cancel specific ones.
 
-### How Claude Code Sub-Agents Work
-1. Claude calls the `Task` tool with a prompt
-2. Claude Code spawns a sub-process
+### How CLI Sub-Agents Work
+1. The CLI calls the `Task` tool with a prompt
+2. The CLI spawns a sub-process
 3. Sub-agent output is written to `~/.claude/projects/<project>/subagents/agent-<id>.jsonl`
 4. Parent conversation shows Task tool_use and eventually tool_result
 
@@ -450,14 +450,14 @@ interface AgentRun {
 **New Daemon Components:**
 
 1. **SchedulerService** - Manages cron jobs, intervals, triggers
-2. **AgentRunner** - Spawns tmux sessions, runs Claude, monitors status
+2. **AgentRunner** - Spawns tmux sessions, runs the CLI, monitors status
 3. **AgentStore** - Persists agent configs and run history
 
 **Agent Execution Flow:**
 1. Trigger fires (cron, interval, webhook, file change)
 2. SchedulerService calls AgentRunner.spawn(agent)
 3. AgentRunner creates tmux session: `tmux new -d -s agent-<id>`
-4. AgentRunner runs Claude: `claude --prompt "<prompt>" --dangerously-skip-permissions` (with auto-approve rules)
+4. AgentRunner runs the CLI: `claude --prompt "<prompt>" --dangerously-skip-permissions` (with auto-approve rules)
 5. Watcher picks up the new conversation file
 6. AgentRunner monitors for completion/error/waiting
 7. On completion, parse final message for summary
@@ -473,7 +473,7 @@ interface AgentRun {
 
 ### Config Storage
 ```json
-// ~/.claude-companion/scheduled-agents.json
+// ~/.companion/scheduled-agents.json
 {
   "agents": [
     {

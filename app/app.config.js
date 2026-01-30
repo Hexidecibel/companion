@@ -2,8 +2,8 @@ import 'dotenv/config';
 
 export default {
   expo: {
-    name: "Claude Companion",
-    slug: "claude-companion",
+    name: "Companion",
+    slug: "companion-app",
     version: "0.0.1",
     sdkVersion: "54.0.0",
     platforms: ["ios", "android", "web"],
@@ -15,17 +15,18 @@ export default {
       resizeMode: "contain"
     },
     ios: {
-      bundleIdentifier: "com.claudecompanion.app",
+      bundleIdentifier: "com.companion.codeapp",
       infoPlist: {
+        ITSAppUsesNonExemptEncryption: false,
         NSAppTransportSecurity: {
           NSAllowsArbitraryLoads: true,
           NSAllowsLocalNetworking: true
         },
-        NSLocalNetworkUsageDescription: "Connect to Claude Companion daemon on your local network"
+        NSLocalNetworkUsageDescription: "Connect to Companion daemon on your local network"
       }
     },
     android: {
-      package: "com.claudecompanion.app",
+      package: "com.companion.codeapp",
       softwareKeyboardLayoutMode: "pan",
       adaptiveIcon: {
         foregroundImage: "./assets/adaptive-icon.png",

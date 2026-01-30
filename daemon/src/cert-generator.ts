@@ -24,7 +24,7 @@ export function certsExist(certPath: string, keyPath: string): boolean {
 }
 
 export function generateSelfSignedCert(
-  commonName: string = 'claude-companion'
+  commonName: string = 'companion'
 ): GeneratedCert {
   // Generate RSA key pair
   const { privateKey, publicKey } = crypto.generateKeyPairSync('rsa', {
@@ -329,7 +329,7 @@ export function generateAndSaveCerts(certPath: string, keyPath: string): CertPat
   ensureCertsDirectory(certsDir);
 
   console.log('Generating self-signed TLS certificates...');
-  const { cert, key } = generateSelfSignedCert('claude-companion');
+  const { cert, key } = generateSelfSignedCert('companion');
 
   fs.writeFileSync(certPath, cert, { mode: 0o644 });
   fs.writeFileSync(keyPath, key, { mode: 0o600 });
@@ -341,7 +341,7 @@ export function generateAndSaveCerts(certPath: string, keyPath: string): CertPat
 }
 
 export function getDefaultCertPaths(): CertPaths {
-  const certsDir = process.env.CERTS_DIR || '/etc/claude-companion/certs';
+  const certsDir = process.env.CERTS_DIR || '/etc/companion/certs';
   return {
     certPath: path.join(certsDir, 'cert.pem'),
     keyPath: path.join(certsDir, 'key.pem'),

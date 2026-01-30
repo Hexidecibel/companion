@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ConversationHighlight } from '../types';
 
-const HISTORY_STORAGE_KEY = 'claude_companion_history';
+const HISTORY_STORAGE_KEY = 'companion_history';
 const MAX_SESSIONS = 50;
 const MAX_MESSAGES_PER_SESSION = 100;
 

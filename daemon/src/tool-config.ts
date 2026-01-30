@@ -1,5 +1,5 @@
 /**
- * Centralized tool definitions for Claude Code tools.
+ * Centralized tool definitions for CLI tools.
  * Used by parser and exposed to app via WebSocket.
  */
 

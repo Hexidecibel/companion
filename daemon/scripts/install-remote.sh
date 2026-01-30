@@ -1,10 +1,10 @@
 #!/bin/bash
-# One-liner installer for Claude Companion Daemon
+# One-liner installer for Companion Daemon
 # Usage: curl -fsSL https://raw.githubusercontent.com/Hexidecibel/claude-companion/main/daemon/scripts/install-remote.sh | bash
 
 set -e
 
-echo "Downloading Claude Companion installer..."
+echo "Downloading Companion installer..."
 
 # Create temp directory
 TEMP_DIR=$(mktemp -d)

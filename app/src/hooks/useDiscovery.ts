@@ -26,7 +26,7 @@ export function useDiscovery() {
       //
       // Example with react-native-zeroconf:
       // const zeroconf = new Zeroconf();
-      // zeroconf.scan('claude-companion', 'tcp', 'local.');
+      // zeroconf.scan('companion', 'tcp', 'local.');
       // zeroconf.on('resolved', service => {
       //   setDiscoveredServers(prev => [...prev, {
       //     name: service.name,

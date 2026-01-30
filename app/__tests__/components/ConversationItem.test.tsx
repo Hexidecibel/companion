@@ -16,7 +16,7 @@ describe('ConversationItem', () => {
   const mockUserMessage: ConversationMessage = {
     id: 'msg-1',
     type: 'user',
-    content: 'Hello, Claude!',
+    content: 'Hello there!',
     timestamp: Date.now(),
   };
 
@@ -31,13 +31,13 @@ describe('ConversationItem', () => {
     const { getByText } = render(<ConversationItem item={mockUserMessage} />);
 
     expect(getByText('You')).toBeTruthy();
-    expect(getByText('Hello, Claude!')).toBeTruthy();
+    expect(getByText('Hello there!')).toBeTruthy();
   });
 
   it('renders assistant message correctly', () => {
     const { getByText } = render(<ConversationItem item={mockAssistantMessage} />);
 
-    expect(getByText('Claude')).toBeTruthy();
+    expect(getByText('Assistant')).toBeTruthy();
     expect(getByText('Hello! How can I help you today?')).toBeTruthy();
   });
 

@@ -758,7 +758,7 @@ function ConversationItemInner({ item, showToolCalls, onSelectOption, onFileTap,
       >
         <View style={styles.headerRow}>
           <Text style={[styles.role, isUser ? styles.userRole : styles.assistantRole]}>
-            {isUser ? 'You' : 'Claude'}
+            {isUser ? 'You' : 'Assistant'}
           </Text>
           {(needsExpansion || onMessageTap) && !isUser && (
             <Text style={styles.expandHint}>

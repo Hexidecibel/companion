@@ -298,7 +298,7 @@ export function ServerList({ onSelectServer, onOpenSetup, onBack }: ServerListPr
           <View style={styles.emptyContainer}>
             <Text style={styles.emptyTitle}>No Servers</Text>
             <Text style={styles.emptyText}>
-              Add a server to connect to your Claude Code sessions
+              Add a server to connect to your coding sessions
             </Text>
             {onOpenSetup && (
               <TouchableOpacity style={styles.setupButton} onPress={onOpenSetup}>
@@ -429,7 +429,7 @@ export function ServerList({ onSelectServer, onOpenSetup, onBack }: ServerListPr
 
             <Text style={styles.hint}>
               Tip: Visit http://your-server:9877 in a browser to see a QR code for easy setup.
-              The token can also be found in /etc/claude-companion/config.json
+              The token can also be found in /etc/companion/config.json
             </Text>
           </ScrollView>
         </SafeAreaView>

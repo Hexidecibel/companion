@@ -7,7 +7,7 @@ export interface Server {
   useTls: boolean;
   isDefault?: boolean;
   enabled?: boolean; // Whether to connect to this server (default: true)
-  autoApproveEnabled?: boolean; // Whether Claude has auto-approve mode on this server
+  autoApproveEnabled?: boolean; // Whether auto-approve mode is on for this server
 }
 
 export interface ConnectionState {

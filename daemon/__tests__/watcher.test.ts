@@ -14,21 +14,21 @@ jest.mock('chokidar', () => ({
 jest.mock('fs');
 
 import chokidar from 'chokidar';
-import { ClaudeWatcher } from '../src/watcher';
+import { SessionWatcher } from '../src/watcher';
 
 const mockFs = fs as jest.Mocked<typeof fs>;
 const mockChokidar = chokidar as jest.Mocked<typeof chokidar>;
 
-describe('ClaudeWatcher', () => {
-  const claudeHome = '/home/user/.claude';
-  let watcher: ClaudeWatcher;
+describe('SessionWatcher', () => {
+  const codeHome = '/home/user/.claude';
+  let watcher: SessionWatcher;
 
   beforeEach(() => {
     jest.clearAllMocks();
     mockFs.existsSync.mockReturnValue(true);
     mockFs.readFileSync.mockReturnValue('');
     mockFs.statSync.mockReturnValue({ mtimeMs: Date.now() } as fs.Stats);
-    watcher = new ClaudeWatcher(claudeHome);
+    watcher = new SessionWatcher(codeHome);
   });
 
   afterEach(() => {

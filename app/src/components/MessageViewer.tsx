@@ -39,7 +39,7 @@ export function MessageViewer({ content, timestamp, onClose }: MessageViewerProp
         <View style={styles.container}>
           <View style={styles.header}>
             <View style={styles.headerInfo}>
-              <Text style={styles.headerTitle}>Claude</Text>
+              <Text style={styles.headerTitle}>Assistant</Text>
               {timestamp && (
                 <Text style={styles.headerTime}>{formatTime(timestamp)}</Text>
               )}

@@ -114,9 +114,9 @@ function ServerCard({
   const [loadingTasks, setLoadingTasks] = useState<Set<string>>(new Set());
   const [showNewSession, setShowNewSession] = useState(false);
 
-  const handleCreateSession = useCallback(async (workingDir: string, startClaude: boolean) => {
+  const handleCreateSession = useCallback(async (workingDir: string, startSession: boolean) => {
     if (!sendRequest) return;
-    const response = await sendRequest(server.id, 'create_tmux_session', { workingDir, startClaude });
+    const response = await sendRequest(server.id, 'create_tmux_session', { workingDir, startCli: startSession });
     if (!response.success) {
       throw new Error(response.error || 'Failed to create session');
     }
@@ -164,7 +164,7 @@ function ServerCard({
   const handleKillSession = useCallback((sessionName: string) => {
     Alert.alert(
       'Kill Session',
-      `Kill session "${sessionName}"? This will terminate the Claude process.`,
+      `Kill session "${sessionName}"? This will terminate the coding process.`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -455,7 +455,7 @@ export function DashboardScreen({
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>Claude Companion</Text>
+        <Text style={styles.headerTitle}>Companion</Text>
         <TouchableOpacity style={styles.headerButton} onPress={onOpenSetup}>
           <Text style={styles.headerButtonText}>?</Text>
         </TouchableOpacity>
@@ -496,7 +496,7 @@ export function DashboardScreen({
           <View style={styles.emptyState}>
             <Text style={styles.emptyTitle}>No Servers</Text>
             <Text style={styles.emptyText}>
-              Add a server to get started monitoring your Claude sessions.
+              Add a server to get started monitoring your coding sessions.
             </Text>
             <TouchableOpacity style={styles.addButton} onPress={onAddServer}>
               <Text style={styles.addButtonText}>Add Server</Text>

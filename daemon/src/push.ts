@@ -309,14 +309,14 @@ export class PushNotificationService {
     const message: admin.messaging.MulticastMessage = {
       tokens,
       notification: {
-        title: 'Claude is waiting',
+        title: 'Waiting for input',
         body: preview,
       },
       data,
       android: {
         priority: 'high',
         notification: {
-          channelId: 'claude_waiting',
+          channelId: 'input_waiting',
           sound: 'default',
         },
       },
@@ -356,12 +356,12 @@ export class PushNotificationService {
 
     const messages: ExpoPushMessage[] = tokens.map((token) => ({
       to: token,
-      title: 'Claude is waiting',
+      title: 'Waiting for input',
       body: preview,
       data: notifData,
       sound: 'default',
       badge: 1,
-      channelId: 'claude_waiting',
+      channelId: 'input_waiting',
       priority: 'high',
     }));
 

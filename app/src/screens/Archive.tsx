@@ -156,7 +156,7 @@ export function Archive({ onBack }: ArchiveProps) {
         <View style={styles.emptyState}>
           <Text style={styles.emptyTitle}>No Archives</Text>
           <Text style={styles.emptyText}>
-            Conversation summaries will be saved here when Claude compacts the context.
+            Conversation summaries will be saved here when the context is compacted.
           </Text>
         </View>
       ) : (

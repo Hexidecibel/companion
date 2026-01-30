@@ -120,7 +120,7 @@ export function createQRRequestHandler(config: DaemonConfig): http.RequestListen
           const body = Buffer.concat(chunks);
           const contentType = req.headers['content-type'] || 'image/jpeg';
           const ext = contentType.includes('png') ? 'png' : 'jpg';
-          const filename = `claude-companion-${Date.now()}.${ext}`;
+          const filename = `companion-${Date.now()}.${ext}`;
           const filepath = path.join(os.tmpdir(), filename);
 
           fs.writeFileSync(filepath, body);
@@ -255,7 +255,7 @@ export function createQRRequestHandler(config: DaemonConfig): http.RequestListen
       const html = `<!DOCTYPE html>
 <html>
 <head>
-  <title>Claude Companion Setup</title>
+  <title>Companion Setup</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <style>
     body {
@@ -337,7 +337,7 @@ export function createQRRequestHandler(config: DaemonConfig): http.RequestListen
   </style>
 </head>
 <body>
-  <h1>Claude Companion</h1>
+  <h1>Companion</h1>
 
   <div id="auth-section">
     <p>Enter your token to access setup</p>

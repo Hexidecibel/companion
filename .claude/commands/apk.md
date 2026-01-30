@@ -1,6 +1,6 @@
 # Build Android APK Locally
 
-Build the Claude Companion Android APK without EAS and install it to the connected device.
+Build the Companion Android APK without EAS and install it to the connected device.
 
 ## Steps
 

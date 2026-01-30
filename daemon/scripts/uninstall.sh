@@ -10,7 +10,7 @@ NC='\033[0m'
 
 echo -e "${BLUE}"
 echo "╔══════════════════════════════════════════════════════════════╗"
-echo "║         Claude Companion Daemon Uninstaller                  ║"
+echo "║         Companion Daemon Uninstaller                          ║"
 echo "╚══════════════════════════════════════════════════════════════╝"
 echo -e "${NC}"
 
@@ -22,7 +22,7 @@ else
 fi
 
 # Confirm
-echo -e "${YELLOW}This will remove Claude Companion daemon.${NC}"
+echo -e "${YELLOW}This will remove Companion daemon.${NC}"
 echo ""
 read -p "Continue? (y/N) " -n 1 -r
 echo
@@ -36,7 +36,7 @@ echo -e "${BLUE}Stopping service...${NC}"
 
 if [[ "$OS" == "macos" ]]; then
   # macOS: unload launchd
-  PLIST_PATH="$HOME/Library/LaunchAgents/com.claude-companion.daemon.plist"
+  PLIST_PATH="$HOME/Library/LaunchAgents/com.companion.daemon.plist"
   if [[ -f "$PLIST_PATH" ]]; then
     launchctl unload "$PLIST_PATH" 2>/dev/null || true
     rm -f "$PLIST_PATH"
@@ -44,17 +44,17 @@ if [[ "$OS" == "macos" ]]; then
   fi
 else
   # Linux: stop systemd
-  if systemctl --user is-active claude-companion &>/dev/null; then
-    systemctl --user stop claude-companion
-    systemctl --user disable claude-companion
-    rm -f "$HOME/.config/systemd/user/claude-companion.service"
+  if systemctl --user is-active companion &>/dev/null; then
+    systemctl --user stop companion
+    systemctl --user disable companion
+    rm -f "$HOME/.config/systemd/user/companion.service"
     systemctl --user daemon-reload
     echo -e "  ${GREEN}✓${NC} User systemd service removed"
-  elif systemctl is-active claude-companion &>/dev/null 2>&1; then
+  elif systemctl is-active companion &>/dev/null 2>&1; then
     if [ "$EUID" -eq 0 ]; then
-      systemctl stop claude-companion
-      systemctl disable claude-companion
-      rm -f /etc/systemd/system/claude-companion.service
+      systemctl stop companion
+      systemctl disable companion
+      rm -f /etc/systemd/system/companion.service
       systemctl daemon-reload
       echo -e "  ${GREEN}✓${NC} System systemd service removed"
     else
@@ -64,15 +64,15 @@ else
 fi
 
 # Kill any running processes
-pkill -f "node.*claude-companion" 2>/dev/null || true
+pkill -f "node.*companion" 2>/dev/null || true
 
 echo ""
 echo -e "${BLUE}Removing files...${NC}"
 
 # Remove install directories
 DIRS_TO_CHECK=(
-  "$HOME/.claude-companion"
-  "/opt/claude-companion"
+  "$HOME/.companion"
+  "/opt/companion"
 )
 
 for dir in "${DIRS_TO_CHECK[@]}"; do
@@ -88,12 +88,12 @@ read -p "Remove configuration and certificates? (y/N) " -n 1 -r
 echo
 if [[ $REPLY =~ ^[Yy]$ ]]; then
   CONFIG_DIRS=(
-    "$HOME/.claude-companion"
-    "/etc/claude-companion"
+    "$HOME/.companion"
+    "/etc/companion"
   )
   for dir in "${CONFIG_DIRS[@]}"; do
     if [[ -d "$dir" ]]; then
-      if [[ "$dir" == "/etc/claude-companion" ]] && [ "$EUID" -ne 0 ]; then
+      if [[ "$dir" == "/etc/companion" ]] && [ "$EUID" -ne 0 ]; then
         echo -e "  ${YELLOW}Cannot remove $dir without sudo${NC}"
       else
         rm -rf "$dir"
@@ -105,9 +105,9 @@ fi
 
 # Remove logs on macOS
 if [[ "$OS" == "macos" ]]; then
-  rm -f "$HOME/Library/Logs/claude-companion.log" 2>/dev/null
-  rm -f "$HOME/Library/Logs/claude-companion.error.log" 2>/dev/null
+  rm -f "$HOME/Library/Logs/companion.log" 2>/dev/null
+  rm -f "$HOME/Library/Logs/companion.error.log" 2>/dev/null
 fi
 
 echo ""
-echo -e "${GREEN}Claude Companion daemon has been uninstalled.${NC}"
+echo -e "${GREEN}Companion daemon has been uninstalled.${NC}"

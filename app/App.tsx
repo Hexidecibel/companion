@@ -208,7 +208,7 @@ function App() {
       const response = await wsService.sendRequest('create_tmux_session', {
         name: sessionName,
         workingDir: projectPath,
-        startClaude: true,
+        startCli: true,
       });
 
       if (response.success) {

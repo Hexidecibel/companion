@@ -14,7 +14,7 @@ export interface TmuxSessionInfo {
 export class TmuxManager {
   private sessionPrefix: string;
 
-  constructor(sessionPrefix: string = 'claude') {
+  constructor(sessionPrefix: string = 'companion') {
     this.sessionPrefix = sessionPrefix;
   }
 
@@ -74,11 +74,11 @@ export class TmuxManager {
   }
 
   /**
-   * Tag an existing tmux session as managed by Claude Companion
+   * Tag an existing tmux session as managed by Companion
    */
   async tagSession(name: string): Promise<boolean> {
     try {
-      await execAsync(`tmux set-environment -t "${name}" CLAUDE_COMPANION 1`);
+      await execAsync(`tmux set-environment -t "${name}" COMPANION_APP 1`);
       console.log(`TmuxManager: Tagged session "${name}" as managed`);
       return true;
     } catch {
@@ -87,26 +87,26 @@ export class TmuxManager {
   }
 
   /**
-   * Check if a tmux session is tagged as managed by Claude Companion
+   * Check if a tmux session is tagged as managed by Companion
    */
   async isTagged(name: string): Promise<boolean> {
     try {
       const { stdout } = await execAsync(
-        `tmux show-environment -t "${name}" CLAUDE_COMPANION 2>/dev/null`
+        `tmux show-environment -t "${name}" COMPANION_APP 2>/dev/null`
       );
-      return stdout.trim().includes('CLAUDE_COMPANION=1');
+      return stdout.trim().includes('COMPANION_APP=1');
     } catch {
       return false;
     }
   }
 
   /**
-   * Create a new tmux session and start Claude in it
+   * Create a new tmux session and start a coding session in it
    */
   async createSession(
     name: string,
     workingDir: string,
-    startClaude: boolean = true
+    startCli: boolean = true
   ): Promise<{ success: boolean; error?: string }> {
     // Validate session name
     const safeName = name.replace(/[^a-zA-Z0-9_-]/g, '_');
@@ -122,23 +122,23 @@ export class TmuxManager {
         `tmux new-session -d -s "${safeName}" -c "${workingDir}"`
       );
 
-      // Tag session as managed by Claude Companion so daemon only monitors our sessions
+      // Tag session as managed by Companion so daemon only monitors our sessions
       await execAsync(
-        `tmux set-environment -t "${safeName}" CLAUDE_COMPANION 1`
+        `tmux set-environment -t "${safeName}" COMPANION_APP 1`
       );
 
       console.log(`TmuxManager: Created session "${safeName}" in ${workingDir} (tagged)`);
 
-      // Start Claude if requested
-      if (startClaude) {
+      // Start CLI in the session if requested
+      if (startCli) {
         // Small delay to let the session initialize
         await new Promise(resolve => setTimeout(resolve, 200));
 
-        // Send the claude command
+        // Send the CLI command
         await execAsync(
           `tmux send-keys -t "${safeName}" "claude" Enter`
         );
-        console.log(`TmuxManager: Started Claude in session "${safeName}"`);
+        console.log(`TmuxManager: Started CLI in session "${safeName}"`);
       }
 
       return { success: true };
@@ -154,13 +154,13 @@ export class TmuxManager {
    */
   async killSession(name: string): Promise<{ success: boolean; error?: string }> {
     try {
-      // First try to gracefully exit Claude Code
+      // First try to gracefully exit the coding session
       try {
         // Send Ctrl+C to interrupt any running operation
         await execAsync(`tmux send-keys -t "${name}" C-c`);
         await new Promise(resolve => setTimeout(resolve, 300));
 
-        // Send Ctrl+D to exit Claude gracefully (preferred over "exit")
+        // Send Ctrl+D to exit gracefully (preferred over "exit")
         await execAsync(`tmux send-keys -t "${name}" C-d`);
         await new Promise(resolve => setTimeout(resolve, 1000));
 

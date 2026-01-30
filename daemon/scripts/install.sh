@@ -10,7 +10,7 @@ NC='\033[0m' # No Color
 
 echo -e "${BLUE}"
 echo "╔══════════════════════════════════════════════════════════════╗"
-echo "║         Claude Companion Daemon Installer                    ║"
+echo "║         Companion Daemon Installer                            ║"
 echo "╚══════════════════════════════════════════════════════════════╝"
 echo -e "${NC}"
 
@@ -48,8 +48,8 @@ check_permissions() {
     # macOS: running as user is fine for user-level install
     ACTUAL_USER="$USER"
     ACTUAL_HOME="$HOME"
-    INSTALL_DIR="$HOME/.claude-companion"
-    CONFIG_DIR="$HOME/.claude-companion"
+    INSTALL_DIR="$HOME/.companion"
+    CONFIG_DIR="$HOME/.companion"
     NEEDS_SUDO=false
   else
     # Linux: prefer system-wide install with sudo
@@ -57,14 +57,14 @@ check_permissions() {
       echo -e "${YELLOW}Running without sudo - will install to user directory${NC}"
       ACTUAL_USER="$USER"
       ACTUAL_HOME="$HOME"
-      INSTALL_DIR="$HOME/.claude-companion"
-      CONFIG_DIR="$HOME/.claude-companion"
+      INSTALL_DIR="$HOME/.companion"
+      CONFIG_DIR="$HOME/.companion"
       NEEDS_SUDO=false
     else
       ACTUAL_USER="${SUDO_USER:-$USER}"
       ACTUAL_HOME=$(eval echo "~$ACTUAL_USER")
-      INSTALL_DIR="/opt/claude-companion"
-      CONFIG_DIR="/etc/claude-companion"
+      INSTALL_DIR="/opt/companion"
+      CONFIG_DIR="/etc/companion"
       NEEDS_SUDO=true
     fi
   fi
@@ -221,10 +221,10 @@ setup_source() {
   echo -e "${BLUE}Setting up source code...${NC}"
 
   # Check if we're already in the daemon directory
-  if [[ -f "./package.json" ]] && grep -q "claude-companion-daemon" "./package.json" 2>/dev/null; then
+  if [[ -f "./package.json" ]] && grep -q "companion-daemon" "./package.json" 2>/dev/null; then
     SOURCE_DIR="$(pwd)"
     echo -e "  ${GREEN}✓${NC} Using current directory: $SOURCE_DIR"
-  elif [[ -f "../daemon/package.json" ]] && grep -q "claude-companion-daemon" "../daemon/package.json" 2>/dev/null; then
+  elif [[ -f "../daemon/package.json" ]] && grep -q "companion-daemon" "../daemon/package.json" 2>/dev/null; then
     SOURCE_DIR="$(cd ../daemon && pwd)"
     echo -e "  ${GREEN}✓${NC} Using parent daemon directory: $SOURCE_DIR"
   else
@@ -316,8 +316,8 @@ setup_config() {
   "tls": true,
   "cert_path": "$CONFIG_DIR/certs/cert.pem",
   "key_path": "$CONFIG_DIR/certs/key.pem",
-  "tmux_session": "claude",
-  "claude_home": "$ACTUAL_HOME/.claude",
+  "tmux_session": "companion",
+  "code_home": "$ACTUAL_HOME/.claude",
   "mdns_enabled": true,
   "push_delay_ms": 60000
 }
@@ -341,7 +341,7 @@ setup_service() {
 
 # macOS launchd setup
 setup_launchd() {
-  PLIST_PATH="$HOME/Library/LaunchAgents/com.claude-companion.daemon.plist"
+  PLIST_PATH="$HOME/Library/LaunchAgents/com.companion.daemon.plist"
   mkdir -p "$HOME/Library/LaunchAgents"
 
   cat << EOF > "$PLIST_PATH"
@@ -350,7 +350,7 @@ setup_launchd() {
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>com.claude-companion.daemon</string>
+    <string>com.companion.daemon</string>
     <key>ProgramArguments</key>
     <array>
         <string>/usr/local/bin/node</string>
@@ -370,9 +370,9 @@ setup_launchd() {
     <key>KeepAlive</key>
     <true/>
     <key>StandardOutPath</key>
-    <string>$HOME/Library/Logs/claude-companion.log</string>
+    <string>$HOME/Library/Logs/companion.log</string>
     <key>StandardErrorPath</key>
-    <string>$HOME/Library/Logs/claude-companion.error.log</string>
+    <string>$HOME/Library/Logs/companion.error.log</string>
 </dict>
 </plist>
 EOF
@@ -400,15 +400,15 @@ setup_systemd() {
   fi
 
   if $NEEDS_SUDO; then
-    SERVICE_FILE="/etc/systemd/system/claude-companion.service"
+    SERVICE_FILE="/etc/systemd/system/companion.service"
   else
     mkdir -p "$HOME/.config/systemd/user"
-    SERVICE_FILE="$HOME/.config/systemd/user/claude-companion.service"
+    SERVICE_FILE="$HOME/.config/systemd/user/companion.service"
   fi
 
   cat << EOF > "$SERVICE_FILE"
 [Unit]
-Description=Claude Companion Daemon
+Description=Companion Daemon
 After=network.target
 
 [Service]
@@ -426,13 +426,13 @@ EOF
 
   if $NEEDS_SUDO; then
     systemctl daemon-reload
-    systemctl enable claude-companion
-    systemctl start claude-companion
+    systemctl enable companion
+    systemctl start companion
     echo -e "  ${GREEN}✓${NC} Systemd service created (system-wide)"
   else
     systemctl --user daemon-reload
-    systemctl --user enable claude-companion
-    systemctl --user start claude-companion
+    systemctl --user enable companion
+    systemctl --user start companion
     echo -e "  ${GREEN}✓${NC} Systemd service created (user-level)"
   fi
 
@@ -447,20 +447,20 @@ verify_installation() {
   sleep 2
 
   # Check if process is running
-  if pgrep -f "node.*claude-companion" > /dev/null; then
+  if pgrep -f "node.*companion" > /dev/null; then
     echo -e "  ${GREEN}✓${NC} Daemon is running"
   else
     echo -e "  ${RED}✗${NC} Daemon is not running"
     echo ""
     echo "Check logs:"
     if [[ "$OS" == "macos" ]]; then
-      echo "  cat ~/Library/Logs/claude-companion.log"
-      echo "  cat ~/Library/Logs/claude-companion.error.log"
+      echo "  cat ~/Library/Logs/companion.log"
+      echo "  cat ~/Library/Logs/companion.error.log"
     elif [[ "$SERVICE_TYPE" == "systemd" ]]; then
       if $NEEDS_SUDO; then
-        echo "  sudo journalctl -u claude-companion -e"
+        echo "  sudo journalctl -u companion -e"
       else
-        echo "  journalctl --user -u claude-companion -e"
+        echo "  journalctl --user -u companion -e"
       fi
     fi
     return 1
@@ -492,26 +492,26 @@ print_success() {
   echo -e "${GREEN}Your authentication token:${NC}"
   echo -e "  ${YELLOW}$TOKEN${NC}"
   echo ""
-  echo -e "${GREEN}Add this to your Claude Companion mobile app.${NC}"
+  echo -e "${GREEN}Add this to your Companion mobile app.${NC}"
   echo ""
   echo -e "${BLUE}Service commands:${NC}"
 
   if [[ "$OS" == "macos" ]]; then
-    echo "  View logs:     tail -f ~/Library/Logs/claude-companion.log"
-    echo "  Restart:       launchctl kickstart -k gui/\$(id -u)/com.claude-companion.daemon"
-    echo "  Stop:          launchctl unload ~/Library/LaunchAgents/com.claude-companion.daemon.plist"
-    echo "  Start:         launchctl load ~/Library/LaunchAgents/com.claude-companion.daemon.plist"
+    echo "  View logs:     tail -f ~/Library/Logs/companion.log"
+    echo "  Restart:       launchctl kickstart -k gui/\$(id -u)/com.companion.daemon"
+    echo "  Stop:          launchctl unload ~/Library/LaunchAgents/com.companion.daemon.plist"
+    echo "  Start:         launchctl load ~/Library/LaunchAgents/com.companion.daemon.plist"
   elif [[ "$SERVICE_TYPE" == "systemd" ]]; then
     if $NEEDS_SUDO; then
-      echo "  View logs:     sudo journalctl -u claude-companion -f"
-      echo "  Restart:       sudo systemctl restart claude-companion"
-      echo "  Stop:          sudo systemctl stop claude-companion"
-      echo "  Status:        sudo systemctl status claude-companion"
+      echo "  View logs:     sudo journalctl -u companion -f"
+      echo "  Restart:       sudo systemctl restart companion"
+      echo "  Stop:          sudo systemctl stop companion"
+      echo "  Status:        sudo systemctl status companion"
     else
-      echo "  View logs:     journalctl --user -u claude-companion -f"
-      echo "  Restart:       systemctl --user restart claude-companion"
-      echo "  Stop:          systemctl --user stop claude-companion"
-      echo "  Status:        systemctl --user status claude-companion"
+      echo "  View logs:     journalctl --user -u companion -f"
+      echo "  Restart:       systemctl --user restart companion"
+      echo "  Stop:          systemctl --user stop companion"
+      echo "  Status:        systemctl --user status companion"
     fi
   else
     echo "  Run manually:  CONFIG_PATH=$CONFIG_DIR/config.json node $INSTALL_DIR/dist/index.js"
@@ -521,8 +521,8 @@ print_success() {
   echo -e "${BLUE}Config file:${NC} $CONFIG_DIR/config.json"
   echo ""
   echo -e "${YELLOW}Next steps:${NC}"
-  echo "  1. Make sure tmux is running: tmux new -s claude"
-  echo "  2. Start Claude Code in tmux: claude"
+  echo "  1. Make sure tmux is running: tmux new -s companion"
+  echo "  2. Start your coding session in tmux"
   echo "  3. Connect from the mobile app using your token"
 }
 

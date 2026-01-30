@@ -25,15 +25,15 @@ const MANUAL_STEPS = `# The installer automatically:
 # - Sets up auto-start service (systemd/launchd)
 
 # For macOS:
-#   Installs to ~/.claude-companion
+#   Installs to ~/.companion
 #   Uses launchd for auto-start
 
 # For Linux with sudo:
-#   Installs to /opt/claude-companion
+#   Installs to /opt/companion
 #   Uses systemd for auto-start
 
 # For Linux without sudo:
-#   Installs to ~/.claude-companion
+#   Installs to ~/.companion
 #   Uses user-level systemd
 
 # After install, save your token and use it in the app!
@@ -101,7 +101,7 @@ export function SetupScreen({ onBack }: SetupScreenProps) {
         </View>
         <View style={styles.listItem}>
           <Text style={styles.bullet}>-</Text>
-          <Text style={styles.listText}>tmux (for Claude Code sessions)</Text>
+          <Text style={styles.listText}>tmux (for coding sessions)</Text>
         </View>
         <View style={styles.listItem}>
           <Text style={styles.bullet}>-</Text>
@@ -138,7 +138,7 @@ export function SetupScreen({ onBack }: SetupScreenProps) {
           <Text style={styles.troubleLabel}>Invalid token:</Text> Check that the token in the app matches your config.json exactly
         </Text>
         <Text style={styles.troubleItem}>
-          <Text style={styles.troubleLabel}>No messages:</Text> Ensure Claude Code is running in the tmux session specified in config
+          <Text style={styles.troubleLabel}>No messages:</Text> Ensure a coding session is running in the tmux session specified in config
         </Text>
 
         <View style={styles.bottomPadding} />

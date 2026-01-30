@@ -1,6 +1,6 @@
 # Technical Documentation
 
-Detailed technical information for Claude Companion.
+Detailed technical information for Companion.
 
 ## Architecture
 
@@ -8,7 +8,7 @@ Detailed technical information for Claude Companion.
 ┌─────────────────────────────────────────────────────────────┐
 │  Your Server (Linux/Ubuntu)                                 │
 │  ┌─────────────────┐    ┌─────────────────────────────────┐ │
-│  │ Claude Code     │    │ claude-companion-daemon         │ │
+│  │ Coding CLI      │    │ companion-daemon                │ │
 │  │ (in tmux)       │◄──►│ - Watches ~/.claude/ logs       │ │
 │  │                 │    │ - WebSocket server (port 9877)  │ │
 │  └─────────────────┘    │ - Detects "waiting for input"   │ │
@@ -16,7 +16,7 @@ Detailed technical information for Claude Companion.
 └───────────────────────────────────────┼─────────────────────┘
                                         │ WebSocket
                     ┌───────────────────▼───────────────────┐
-                    │  Claude Companion Mobile App          │
+                    │  Companion Mobile App                 │
                     │  - Server list & switching            │
                     │  - Conversation view                  │
                     │  - Text input for responses           │
@@ -46,7 +46,7 @@ The daemon serves a QR code for easy mobile app configuration:
 
 ## Daemon Configuration
 
-Config file: `/etc/claude-companion/config.json`
+Config file: `/etc/companion/config.json`
 
 ```json
 {
@@ -54,7 +54,7 @@ Config file: `/etc/claude-companion/config.json`
   "token": "your-secret-token",
   "tls": false,
   "tmux_session": "claude",
-  "claude_home": "/home/user/.claude",
+  "code_home": "/home/user/.claude",
   "mdns_enabled": true,
   "push_delay_ms": 60000
 }
@@ -67,8 +67,8 @@ Config file: `/etc/claude-companion/config.json`
 | `port` | WebSocket server port | `9877` |
 | `token` | Authentication token for clients | (generated) |
 | `tls` | Enable TLS encryption | `false` |
-| `tmux_session` | Name of tmux session running Claude | `claude` |
-| `claude_home` | Path to `.claude` directory | `~/.claude` |
+| `tmux_session` | Name of tmux session running the CLI | `claude` |
+| `code_home` | Path to `.claude` directory (also accepts `claude_home` for backward compatibility) | `~/.claude` |
 | `mdns_enabled` | Broadcast service via mDNS/Bonjour | `true` |
 | `push_delay_ms` | Delay before sending push notification | `60000` |
 
@@ -79,33 +79,33 @@ For secure access over the internet:
 ```bash
 # Generate self-signed cert
 sudo openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
-  -keyout /etc/claude-companion/key.pem \
-  -out /etc/claude-companion/cert.pem
+  -keyout /etc/companion/key.pem \
+  -out /etc/companion/cert.pem
 
 # Update config
-sudo nano /etc/claude-companion/config.json
+sudo nano /etc/companion/config.json
 ```
 
 Add to config:
 ```json
 {
   "tls": true,
-  "cert_path": "/etc/claude-companion/cert.pem",
-  "key_path": "/etc/claude-companion/key.pem"
+  "cert_path": "/etc/companion/cert.pem",
+  "key_path": "/etc/companion/key.pem"
 }
 ```
 
-Restart: `sudo systemctl restart claude-companion`
+Restart: `sudo systemctl restart companion`
 
 ## Push Notifications (Firebase)
 
-For push notifications when Claude is waiting:
+For push notifications when the CLI is waiting:
 
 1. Create project at https://console.firebase.google.com
-2. Add Android app with package `com.claudecompanion.app`
+2. Add Android app with package `com.companion.app`
 3. Download service account JSON
-4. Place at `/etc/claude-companion/fcm-credentials.json`
-5. Add to config: `"fcm_credentials_path": "/etc/claude-companion/fcm-credentials.json"`
+4. Place at `/etc/companion/fcm-credentials.json`
+5. Add to config: `"fcm_credentials_path": "/etc/companion/fcm-credentials.json"`
 6. Restart daemon
 
 ### Notification Preferences
@@ -132,7 +132,7 @@ The app supports per-server notification settings:
 | `get_full` | Client → Server | Fetch full conversation |
 | `conversation` | Server → Client | Conversation data |
 | `update` | Server → Client | Real-time update |
-| `send_input` | Client → Server | Send text to Claude |
+| `send_input` | Client → Server | Send text to the CLI |
 | `send_image` | Client → Server | Send image (base64) |
 | `register_push` | Client → Server | Register FCM token |
 
@@ -159,16 +159,16 @@ sudo ufw allow 9877/tcp
 
 ```bash
 # View logs
-sudo journalctl -u claude-companion -f
+sudo journalctl -u companion -f
 
 # Restart service
-sudo systemctl restart claude-companion
+sudo systemctl restart companion
 
 # Check status
-sudo systemctl status claude-companion
+sudo systemctl status companion
 
 # Stop service
-sudo systemctl stop claude-companion
+sudo systemctl stop companion
 ```
 
 ## Development
@@ -200,17 +200,17 @@ eas build --platform android --profile preview
 ## Troubleshooting
 
 ### Daemon won't start
-- Check logs: `sudo journalctl -u claude-companion -e`
-- Verify config: `cat /etc/claude-companion/config.json`
-- Ensure Claude home directory exists
+- Check logs: `sudo journalctl -u companion -e`
+- Verify config: `cat /etc/companion/config.json`
+- Ensure the CLI home directory exists
 
 ### Can't connect from app
 - Verify network connectivity
-- Check daemon status: `sudo systemctl status claude-companion`
+- Check daemon status: `sudo systemctl status companion`
 - Test WebSocket: `wscat -c ws://server:9877`
 - Check firewall settings
 
-### Input not reaching Claude
+### Input not reaching the CLI
 - Verify tmux session name matches config
 - Check if session exists: `tmux list-sessions`
 - Ensure daemon can send to tmux
@@ -228,7 +228,7 @@ eas build --platform android --profile preview
 SENTRY_DSN=your-sentry-dsn  # Optional error tracking
 ```
 
-**Claude Skills (.claude/secrets.env):**
+**CLI Skills (.claude/secrets.env):**
 ```bash
 SENTRY_API_TOKEN=your-sentry-api-token
 SENTRY_ORG=your-sentry-org

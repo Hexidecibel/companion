@@ -1,6 +1,6 @@
-// Claude Companion Web Client
+// Companion Web Client
 
-class ClaudeCompanion {
+class CompanionApp {
   constructor() {
     this.ws = null;
     this.connected = false;
@@ -79,7 +79,7 @@ class ClaudeCompanion {
 
   loadSavedConfig() {
     try {
-      const saved = localStorage.getItem('claude-companion-config');
+      const saved = localStorage.getItem('companion-config');
       if (saved) {
         const config = JSON.parse(saved);
         this.hostInput.value = config.host || '';
@@ -94,7 +94,7 @@ class ClaudeCompanion {
 
   saveConfig() {
     try {
-      localStorage.setItem('claude-companion-config', JSON.stringify(this.config));
+      localStorage.setItem('companion-config', JSON.stringify(this.config));
     } catch (e) {
       console.error('Failed to save config:', e);
     }
@@ -514,7 +514,7 @@ class ClaudeCompanion {
   updateWaitingIndicator(isWaiting) {
     if (isWaiting) {
       this.waitingIndicator.classList.remove('hidden');
-      this.messageInput.placeholder = 'Claude is waiting for your input...';
+      this.messageInput.placeholder = 'Waiting for your input...';
       this.messageInput.focus();
     } else {
       this.waitingIndicator.classList.add('hidden');
@@ -569,7 +569,7 @@ class ClaudeCompanion {
     const indicator = document.createElement('div');
     indicator.className = 'working-indicator';
     indicator.id = 'working-indicator';
-    indicator.innerHTML = '<span class="working-spinner"></span> Claude is working...';
+    indicator.innerHTML = '<span class="working-spinner"></span> Working...';
     this.messagesContainer.appendChild(indicator);
     this.scrollToBottom();
   }
@@ -646,5 +646,5 @@ class ClaudeCompanion {
 
 // Initialize app
 document.addEventListener('DOMContentLoaded', () => {
-  window.app = new ClaudeCompanion();
+  window.app = new CompanionApp();
 });

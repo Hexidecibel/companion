@@ -45,7 +45,7 @@ Quick capture for ideas and tasks. Run `/plan` to process into detailed plans.
 (none)
 
 ## Upcoming
-- Beef up new project helper - let Claude help choose language/stack with back-and-forth discussion, analyze project and order options by recommendation, option to create a private GitHub repo
+- Beef up new project helper - let the assistant help choose language/stack with back-and-forth discussion, analyze project and order options by recommendation, option to create a private GitHub repo
 - Move permissions into session (makes more sense in session settings)
 - Installable actions/skills - introspect codebase and create custom skills
 - Don't include token in QR code unauthenticated - force entry of token before showing QR
@@ -53,3 +53,4 @@ Quick capture for ideas and tasks. Run `/plan` to process into detailed plans.
 ## Deferred
 - iOS build (need Apple Developer account first)
 - CLI for daemon management (current /up /down skills work fine)
+- Desktop/web control center - upgrade web client to show taskbar widget with all sessions and their status. Local notifications in Notification Center when input is needed, escalate to remote push after 5 minutes of being blocked. Like a control center for all coding clients.

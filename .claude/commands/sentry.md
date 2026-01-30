@@ -1,6 +1,6 @@
 # Sentry Issue Investigation
 
-Fetch and investigate recent Sentry errors for Claude Companion.
+Fetch and investigate recent Sentry errors for Companion.
 
 ## Setup
 Secrets are stored in `.claude/secrets.env`. Source it first:

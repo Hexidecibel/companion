@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { loadConfig } from './config';
-import { ClaudeWatcher } from './watcher';
+import { SessionWatcher } from './watcher';
 import { SubAgentWatcher } from './subagent-watcher';
 import { InputInjector } from './input-injector';
 import { MdnsAdvertiser } from './mdns';
@@ -12,7 +12,7 @@ import { certsExist, generateAndSaveCerts, getDefaultCertPaths } from './cert-ge
 import { createQRRequestHandler } from './qr-server';
 
 async function main(): Promise<void> {
-  console.log('Claude Companion Daemon v1.0.0');
+  console.log('Companion Daemon v0.0.1');
   console.log('==============================');
 
   // Load configuration
@@ -55,8 +55,8 @@ async function main(): Promise<void> {
   }
 
   // Initialize components
-  const watcher = new ClaudeWatcher(config.claudeHome);
-  const subAgentWatcher = new SubAgentWatcher(config.claudeHome);
+  const watcher = new SessionWatcher(config.codeHome);
+  const subAgentWatcher = new SubAgentWatcher(config.codeHome);
   const injector = new InputInjector(config.tmuxSession);
   const push = new PushNotificationService(config.fcmCredentialsPath, config.pushDelayMs);
 
@@ -88,7 +88,7 @@ async function main(): Promise<void> {
   // Auto-approve safe tools (from config and/or client toggle)
   {
     console.log(`Auto-approve tools from config: ${config.autoApproveTools.length > 0 ? config.autoApproveTools.join(', ') : '(none - client toggle only)'}`);
-    const tmux = new TmuxManager('claude');
+    const tmux = new TmuxManager('companion');
     // Track in-flight approvals using composite key (sessionId:tools) to prevent double-firing
     const pendingAutoApprovals = new Map<string, number>();
 

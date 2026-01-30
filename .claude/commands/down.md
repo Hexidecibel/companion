@@ -1,4 +1,4 @@
-# Stop Claude Companion Services
+# Stop Companion Services
 
 Stop the daemon and Expo dev server.
 
@@ -6,7 +6,7 @@ Stop the daemon and Expo dev server.
 
 1. Kill the daemon process:
 ```bash
-pkill -f "node.*claude-companion-daemon" || true
+pkill -f "node.*companion-daemon" || true
 ```
 
 2. Kill Expo processes:

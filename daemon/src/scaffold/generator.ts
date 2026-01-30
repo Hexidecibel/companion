@@ -104,7 +104,7 @@ export async function scaffoldProject(
         await execAsync('which git');
         await execAsync('git init', { cwd: projectPath });
         await execAsync('git add .', { cwd: projectPath });
-        await execAsync('git commit -m "Initial commit from Claude Companion"', { cwd: projectPath });
+        await execAsync('git commit -m "Initial commit from Companion"', { cwd: projectPath });
 
         // Step 3b: Create GitHub repo if requested
         if (config.options.createGitHubRepo) {

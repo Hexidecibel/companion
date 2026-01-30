@@ -399,7 +399,7 @@ export function NewProjectScreen({ onBack, onComplete }: NewProjectScreenProps) 
           style={styles.buttonPrimary}
           onPress={() => result && onComplete(result.projectPath)}
         >
-          <Text style={styles.buttonPrimaryText}>Open in Claude</Text>
+          <Text style={styles.buttonPrimaryText}>Open Session</Text>
         </TouchableOpacity>
       </View>
     </View>

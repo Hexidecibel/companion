@@ -1,12 +1,12 @@
-# Claude Companion
+# Companion
 
-A mobile companion app for [Claude Code](https://claude.ai/claude-code). Monitor and interact with your Claude Code sessions from your phone.
+A mobile companion app for your AI coding CLI. Monitor and interact with your coding sessions from your phone.
 
 ## Features
 
-- **Real-time monitoring** - Watch Claude Code work from anywhere
-- **Mobile input** - Send text and images to Claude Code
-- **Push notifications** - Get notified when Claude needs input
+- **Real-time monitoring** - Watch the CLI work from anywhere
+- **Mobile input** - Send text and images to the CLI
+- **Push notifications** - Get notified when the CLI needs input
 - **Multiple servers** - Connect to multiple machines
 - **Session switching** - Switch between tmux sessions
 - **Secure** - TLS encryption and token authentication
@@ -20,7 +20,7 @@ A mobile companion app for [Claude Code](https://claude.ai/claude-code). Monitor
 └─────────────────┘                    └────────┬────────┘
                                                 │
                                        ┌────────▼────────┐
-                                       │  Claude Code    │
+                                       │   Coding CLI    │
                                        │   (in tmux)     │
                                        └─────────────────┘
 ```
@@ -52,7 +52,7 @@ The installer will:
 
 **Save the token shown at the end - you'll need it for the app!**
 
-### 2. Start Claude Code in tmux
+### 2. Start the CLI in tmux
 
 ```bash
 tmux new -s claude
@@ -61,7 +61,7 @@ claude
 
 ### 3. Connect from the App
 
-1. Download the Claude Companion app
+1. Download the Companion app
 2. Add a new server with your machine's IP address
 3. Enter the token from the installer
 4. Connect and start monitoring!
@@ -94,9 +94,9 @@ bash scripts/install.sh
 ## Configuration
 
 Config file location:
-- **macOS**: `~/.claude-companion/config.json`
-- **Linux (with sudo)**: `/etc/claude-companion/config.json`
-- **Linux (without sudo)**: `~/.claude-companion/config.json`
+- **macOS**: `~/.companion/config.json`
+- **Linux (with sudo)**: `/etc/companion/config.json`
+- **Linux (without sudo)**: `~/.companion/config.json`
 
 ```json
 {
@@ -104,7 +104,7 @@ Config file location:
   "token": "your-secret-token",
   "tls": true,
   "tmux_session": "claude",
-  "claude_home": "~/.claude",
+  "code_home": "~/.claude",
   "mdns_enabled": true,
   "push_delay_ms": 60000
 }
@@ -118,7 +118,7 @@ Config file location:
 | `token` | (generated) | Authentication token |
 | `tls` | true | Enable TLS encryption |
 | `tmux_session` | "claude" | Default tmux session name |
-| `claude_home` | "~/.claude" | Claude Code config directory |
+| `code_home` | "~/.claude" | CLI config directory (also accepts `claude_home` for backward compatibility) |
 | `mdns_enabled` | true | Enable Bonjour/mDNS discovery |
 | `push_delay_ms` | 60000 | Delay before sending push notifications |
 
@@ -128,32 +128,32 @@ Config file location:
 
 ```bash
 # View logs
-tail -f ~/Library/Logs/claude-companion.log
+tail -f ~/Library/Logs/companion.log
 
 # Restart
-launchctl kickstart -k gui/$(id -u)/com.claude-companion.daemon
+launchctl kickstart -k gui/$(id -u)/com.companion.daemon
 
 # Stop
-launchctl unload ~/Library/LaunchAgents/com.claude-companion.daemon.plist
+launchctl unload ~/Library/LaunchAgents/com.companion.daemon.plist
 
 # Start
-launchctl load ~/Library/LaunchAgents/com.claude-companion.daemon.plist
+launchctl load ~/Library/LaunchAgents/com.companion.daemon.plist
 ```
 
 ### Linux (systemd)
 
 ```bash
 # System-wide install
-sudo journalctl -u claude-companion -f    # View logs
-sudo systemctl restart claude-companion   # Restart
-sudo systemctl stop claude-companion      # Stop
-sudo systemctl status claude-companion    # Status
+sudo journalctl -u companion -f    # View logs
+sudo systemctl restart companion   # Restart
+sudo systemctl stop companion      # Stop
+sudo systemctl status companion    # Status
 
 # User-level install
-journalctl --user -u claude-companion -f
-systemctl --user restart claude-companion
-systemctl --user stop claude-companion
-systemctl --user status claude-companion
+journalctl --user -u companion -f
+systemctl --user restart companion
+systemctl --user stop companion
+systemctl --user status companion
 ```
 
 ## Uninstalling
@@ -175,7 +175,7 @@ bash scripts/uninstall.sh
 - Tokens are case-sensitive
 
 ### No messages showing
-- Make sure Claude Code is running in the tmux session
+- Make sure the CLI is running in the tmux session
 - Check the session name in your config matches
 
 ### Daemon won't start

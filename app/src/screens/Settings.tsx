@@ -290,7 +290,7 @@ export function Settings({ onBack, onOpenNotificationSettings, onOpenAgents, onO
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>About</Text>
           <Text style={styles.aboutText}>
-            Claude Companion v{Constants.expoConfig?.version || '1.0.0'}
+            Companion v{Constants.expoConfig?.version || '1.0.0'}
           </Text>
           {Constants.expoConfig?.extra?.buildDate && (
             <Text style={styles.aboutBuildDate}>
@@ -298,8 +298,8 @@ export function Settings({ onBack, onOpenNotificationSettings, onOpenAgents, onO
             </Text>
           )}
           <Text style={styles.aboutDescription}>
-            A companion app for Claude Code that lets you monitor sessions
-            and respond to Claude from your mobile device.
+            A companion app for AI coding sessions that lets you monitor sessions
+            and respond from your mobile device.
           </Text>
         </View>
       </ScrollView>

@@ -29,8 +29,8 @@ interface TrackedConversation {
   lastEmittedPendingTools: string; // JSON key of last emitted pending tools to deduplicate
 }
 
-export class ClaudeWatcher extends EventEmitter {
-  private claudeHome: string;
+export class SessionWatcher extends EventEmitter {
+  private codeHome: string;
   private watcher: chokidar.FSWatcher | null = null;
   private conversations: Map<string, TrackedConversation> = new Map();
   private activeSessionId: string | null = null;
@@ -43,9 +43,9 @@ export class ClaudeWatcher extends EventEmitter {
   private debounceTimers: Map<string, NodeJS.Timeout> = new Map();
   private static readonly DEBOUNCE_MS = 150; // Debounce file changes per session
 
-  constructor(claudeHome: string) {
+  constructor(codeHome: string) {
     super();
-    this.claudeHome = claudeHome;
+    this.codeHome = codeHome;
     // Refresh tmux paths periodically
     this.refreshTmuxPaths();
     setInterval(() => this.refreshTmuxPaths(), 5000);
@@ -53,21 +53,21 @@ export class ClaudeWatcher extends EventEmitter {
 
   async refreshTmuxPaths(): Promise<void> {
     try {
-      // Get list of tmux sessions - only those tagged with CLAUDE_COMPANION=1
+      // Get list of tmux sessions - only those tagged with COMPANION_APP=1
       // First get all session names, then filter to tagged ones
       const { stdout: sessionList } = await execAsync(
         'tmux list-sessions -F "#{session_name}" 2>/dev/null'
       );
       const sessionNames = sessionList.trim().split('\n').filter(s => s);
 
-      // Check which sessions are tagged as managed by Claude Companion
+      // Check which sessions are tagged as managed by Companion
       const taggedSessions: string[] = [];
       for (const name of sessionNames) {
         try {
           const { stdout: envOut } = await execAsync(
-            `tmux show-environment -t "${name}" CLAUDE_COMPANION 2>/dev/null`
+            `tmux show-environment -t "${name}" COMPANION_APP 2>/dev/null`
           );
-          if (envOut.trim().includes('CLAUDE_COMPANION=1')) {
+          if (envOut.trim().includes('COMPANION_APP=1')) {
             taggedSessions.push(name);
           }
         } catch {
@@ -108,7 +108,7 @@ export class ClaudeWatcher extends EventEmitter {
 
     // Extract project path from file path
     // e.g., ~/.claude/projects/-Users-foo-bar/uuid.jsonl -> -Users-foo-bar
-    const projectsDir = path.join(this.claudeHome, 'projects');
+    const projectsDir = path.join(this.codeHome, 'projects');
     const relativePath = path.relative(projectsDir, filePath);
     const projectDir = relativePath.split(path.sep)[0];
 
@@ -116,12 +116,12 @@ export class ClaudeWatcher extends EventEmitter {
   }
 
   start(): void {
-    const projectsDir = path.join(this.claudeHome, 'projects');
+    const projectsDir = path.join(this.codeHome, 'projects');
 
     // Watch for .jsonl files in the projects directory
     const pattern = path.join(projectsDir, '**', '*.jsonl');
 
-    console.log(`Watching for Claude conversations in: ${projectsDir}`);
+    console.log(`Watching for conversations in: ${projectsDir}`);
 
     this.watcher = chokidar.watch(pattern, {
       persistent: true,
@@ -142,8 +142,8 @@ export class ClaudeWatcher extends EventEmitter {
       this.emit('error', error);
     });
 
-    // Also watch the main claude directory for any root-level conversation files
-    const rootPattern = path.join(this.claudeHome, '*.jsonl');
+    // Also watch the main directory for any root-level conversation files
+    const rootPattern = path.join(this.codeHome, '*.jsonl');
     this.watcher.add(rootPattern);
   }
 
@@ -177,7 +177,7 @@ export class ClaudeWatcher extends EventEmitter {
     }
 
     // Debounce per session - avoid blocking the event loop with rapid
-    // successive file parses when Claude Code is actively writing
+    // successive file parses when the CLI is actively writing
     const existingTimer = this.debounceTimers.get(sessionId);
     if (existingTimer) {
       clearTimeout(existingTimer);
@@ -185,7 +185,7 @@ export class ClaudeWatcher extends EventEmitter {
     this.debounceTimers.set(sessionId, setTimeout(() => {
       this.debounceTimers.delete(sessionId);
       this.processFileChange(filePath, sessionId);
-    }, ClaudeWatcher.DEBOUNCE_MS));
+    }, SessionWatcher.DEBOUNCE_MS));
   }
 
   private processFileChange(filePath: string, sessionId: string): void {
@@ -367,7 +367,7 @@ export class ClaudeWatcher extends EventEmitter {
   private extractProjectPath(filePath: string): string {
     // Extract project path from conversation file path
     // e.g., ~/.claude/projects/-Users-foo-bar/abc123.jsonl -> /Users/foo/bar
-    const projectsDir = path.join(this.claudeHome, 'projects');
+    const projectsDir = path.join(this.codeHome, 'projects');
     const relative = path.relative(projectsDir, filePath);
     const parts = relative.split(path.sep);
 
@@ -430,11 +430,11 @@ export class ClaudeWatcher extends EventEmitter {
 
   private generateSessionId(filePath: string): string {
     // Use the directory name as session ID
-    const projectsDir = path.join(this.claudeHome, 'projects');
+    const projectsDir = path.join(this.codeHome, 'projects');
     const relative = path.relative(projectsDir, filePath);
     const parts = relative.split(path.sep);
     const sessionId = parts[0] || 'default';
-    // Skip files outside the projects directory (like history.jsonl in root .claude)
+    // Skip files outside the projects directory (like history.jsonl in root)
     if (sessionId === '..' || sessionId.startsWith('..')) {
       return '';
     }
@@ -623,7 +623,7 @@ export class ClaudeWatcher extends EventEmitter {
     workingCount: number;
   }> {
     // Get tmux sessions to filter - only show conversations with active tmux sessions
-    // Encode the tmux paths the same way Claude does: /a/b/c -> -a-b-c
+    // Encode the tmux paths the same way the CLI does: /a/b/c -> -a-b-c
     const activeTmuxEncodedPaths = new Set(
       tmuxSessions?.map(s => s.workingDir?.replace(/\//g, '-')).filter((p): p is string => !!p) || []
     );

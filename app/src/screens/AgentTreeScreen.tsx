@@ -193,7 +193,7 @@ export function AgentTreeScreen({ onBack, sessionId }: AgentTreeScreenProps) {
                   <Text style={styles.emptyIcon}>🤖</Text>
                   <Text style={styles.emptyTitle}>No Sub-Agents</Text>
                   <Text style={styles.emptyText}>
-                    Sub-agents appear when Claude spawns background tasks
+                    Sub-agents appear when background tasks are spawned
                   </Text>
                 </View>
               ) : (
@@ -276,7 +276,7 @@ export function AgentTreeScreen({ onBack, sessionId }: AgentTreeScreenProps) {
             <View style={styles.section}>
               <View style={styles.infoBox}>
                 <Text style={styles.infoText}>
-                  Sub-agents are spawned when Claude uses the Task tool to run background work.
+                  Sub-agents are spawned when the Task tool is used to run background work.
                   Tap an agent to see more details.
                 </Text>
               </View>

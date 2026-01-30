@@ -3,7 +3,7 @@ import * as path from 'path';
 import { DaemonConfig } from './types';
 
 const HOME_DIR = process.env.HOME || '/root';
-const CONFIG_DIR = path.join(HOME_DIR, '.claude-companion');
+const CONFIG_DIR = path.join(HOME_DIR, '.companion');
 
 // Safe tools that can be auto-approved without user confirmation
 const DEFAULT_AUTO_APPROVE_TOOLS = [
@@ -20,8 +20,8 @@ const DEFAULT_CONFIG: DaemonConfig = {
   tls: false,
   certPath: path.join(CONFIG_DIR, 'certs', 'cert.pem'),
   keyPath: path.join(CONFIG_DIR, 'certs', 'key.pem'),
-  tmuxSession: 'claude',
-  claudeHome: path.join(HOME_DIR, '.claude'),
+  tmuxSession: 'main',
+  codeHome: path.join(HOME_DIR, '.claude'),
   mdnsEnabled: true,
   pushDelayMs: 60000, // 1 minute
   autoApproveTools: DEFAULT_AUTO_APPROVE_TOOLS,
@@ -45,7 +45,7 @@ export function loadConfig(): DaemonConfig {
         certPath: parsed.cert_path,
         keyPath: parsed.key_path,
         tmuxSession: parsed.tmux_session,
-        claudeHome: parsed.claude_home,
+        codeHome: parsed.code_home || parsed.claude_home,
         mdnsEnabled: parsed.mdns_enabled,
         fcmCredentialsPath: parsed.fcm_credentials_path,
         pushDelayMs: parsed.push_delay_ms,
@@ -88,7 +88,7 @@ export function saveConfig(config: DaemonConfig): void {
     cert_path: config.certPath,
     key_path: config.keyPath,
     tmux_session: config.tmuxSession,
-    claude_home: config.claudeHome,
+    code_home: config.codeHome,
     mdns_enabled: config.mdnsEnabled,
     fcm_credentials_path: config.fcmCredentialsPath,
     push_delay_ms: config.pushDelayMs,

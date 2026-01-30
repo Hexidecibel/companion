@@ -18,8 +18,8 @@ export class MdnsAdvertiser {
     const hostname = os.hostname();
 
     this.service = this.bonjour.publish({
-      name: `Claude Companion on ${hostname}`,
-      type: 'claude-companion',
+      name: `Companion on ${hostname}`,
+      type: 'companion',
       protocol: 'tcp',
       port: this.port,
       txt: {
@@ -29,7 +29,7 @@ export class MdnsAdvertiser {
       },
     });
 
-    console.log(`mDNS: Advertising _claude-companion._tcp on port ${this.port}`);
+    console.log(`mDNS: Advertising _companion._tcp on port ${this.port}`);
 
     this.service.on('up', () => {
       console.log('mDNS: Service advertised successfully');

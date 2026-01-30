@@ -171,7 +171,7 @@ export function SessionPicker({ currentSessionId, onSessionChange, isOpen, onClo
 
       const response = await wsService.sendRequest('create_tmux_session', {
         workingDir: dirPath,
-        startClaude: true,
+        startCli: true,
       });
       if (response.success && response.payload) {
         const payload = response.payload as { sessionName: string; workingDir?: string };
@@ -195,7 +195,7 @@ export function SessionPicker({ currentSessionId, onSessionChange, isOpen, onClo
   const handleKillSession = (session: TmuxSessionInfo) => {
     Alert.alert(
       'Kill Session',
-      `Kill "${session.workingDir?.split('/').pop() || session.name}"?\nThis will terminate Claude in this session.`,
+      `Kill "${session.workingDir?.split('/').pop() || session.name}"?\nThis will terminate the coding session.`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -329,7 +329,7 @@ export function SessionPicker({ currentSessionId, onSessionChange, isOpen, onClo
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>
-                {showBrowser ? 'Select Directory' : 'Claude Sessions'}
+                {showBrowser ? 'Select Directory' : 'Sessions'}
               </Text>
               <TouchableOpacity
                 style={styles.closeButton}
@@ -382,7 +382,7 @@ export function SessionPicker({ currentSessionId, onSessionChange, isOpen, onClo
                     {loading ? (
                       <ActivityIndicator size="small" color="#fff" />
                     ) : (
-                      <Text style={styles.createButtonText}>Start Claude Here</Text>
+                      <Text style={styles.createButtonText}>Start Here</Text>
                     )}
                   </TouchableOpacity>
                 </View>
@@ -397,7 +397,7 @@ export function SessionPicker({ currentSessionId, onSessionChange, isOpen, onClo
                   <View style={styles.emptyContainer}>
                     <Text style={styles.emptyText}>No active sessions</Text>
                     <Text style={styles.emptySubtext}>
-                      Create a new session to start Claude in a directory
+                      Create a new session to start coding in a directory
                     </Text>
                   </View>
                 ) : (

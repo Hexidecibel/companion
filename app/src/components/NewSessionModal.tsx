@@ -21,13 +21,13 @@ interface RecentProject {
 interface NewSessionModalProps {
   visible: boolean;
   onClose: () => void;
-  onCreate: (workingDir: string, startClaude: boolean) => Promise<void>;
+  onCreate: (workingDir: string, startSession: boolean) => Promise<void>;
   onFetchRecents: () => Promise<RecentProject[]>;
 }
 
 export function NewSessionModal({ visible, onClose, onCreate, onFetchRecents }: NewSessionModalProps) {
   const [path, setPath] = useState('');
-  const [startClaude, setStartClaude] = useState(true);
+  const [startSession, setStartSession] = useState(true);
   const [recents, setRecents] = useState<RecentProject[]>([]);
   const [loadingRecents, setLoadingRecents] = useState(false);
   const [creating, setCreating] = useState(false);
@@ -60,14 +60,14 @@ export function NewSessionModal({ visible, onClose, onCreate, onFetchRecents }: 
     }
     setCreating(true);
     try {
-      await onCreate(trimmed, startClaude);
+      await onCreate(trimmed, startSession);
       onClose();
     } catch (err) {
       Alert.alert('Error', 'Failed to create session');
     } finally {
       setCreating(false);
     }
-  }, [path, startClaude, onCreate, onClose]);
+  }, [path, startSession, onCreate, onClose]);
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
@@ -94,10 +94,10 @@ export function NewSessionModal({ visible, onClose, onCreate, onFetchRecents }: 
           </View>
 
           <View style={styles.toggleRow}>
-            <Text style={styles.toggleLabel}>Start Claude</Text>
+            <Text style={styles.toggleLabel}>Start Session</Text>
             <Switch
-              value={startClaude}
-              onValueChange={setStartClaude}
+              value={startSession}
+              onValueChange={setStartSession}
               trackColor={{ false: '#374151', true: '#3b82f6' }}
             />
           </View>

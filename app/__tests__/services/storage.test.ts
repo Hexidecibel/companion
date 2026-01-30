@@ -33,7 +33,7 @@ describe('Storage Service', () => {
       const servers = await getServers();
 
       expect(servers).toEqual([]);
-      expect(mockAsyncStorage.getItem).toHaveBeenCalledWith('@claude_companion_servers');
+      expect(mockAsyncStorage.getItem).toHaveBeenCalledWith('@companion_servers');
     });
 
     it('returns parsed servers from storage', async () => {
@@ -79,7 +79,7 @@ describe('Storage Service', () => {
       await saveServers(servers);
 
       expect(mockAsyncStorage.setItem).toHaveBeenCalledWith(
-        '@claude_companion_servers',
+        '@companion_servers',
         JSON.stringify(servers)
       );
     });
@@ -109,7 +109,7 @@ describe('Storage Service', () => {
       await addServer(newServer);
 
       expect(mockAsyncStorage.setItem).toHaveBeenCalledWith(
-        '@claude_companion_servers',
+        '@companion_servers',
         expect.stringContaining('server-2')
       );
     });
@@ -129,7 +129,7 @@ describe('Storage Service', () => {
       await addServer(newServer);
 
       expect(mockAsyncStorage.setItem).toHaveBeenCalledWith(
-        '@claude_companion_servers',
+        '@companion_servers',
         JSON.stringify([newServer])
       );
     });
@@ -208,7 +208,7 @@ describe('Storage Service', () => {
       await saveSettings(settings);
 
       expect(mockAsyncStorage.setItem).toHaveBeenCalledWith(
-        '@claude_companion_settings',
+        '@companion_settings',
         JSON.stringify(settings)
       );
     });

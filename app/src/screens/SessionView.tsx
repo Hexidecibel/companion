@@ -407,7 +407,7 @@ export function SessionView({ server, onBack, initialSessionId, onNewProject, on
   const handleCancel = () => {
     Alert.alert(
       'Cancel Request',
-      'Send interrupt signal to Claude?',
+      'Send interrupt signal to session?',
       [
         { text: 'No', style: 'cancel' },
         { text: 'Yes', onPress: () => sendInput('\x03') }, // Ctrl+C
@@ -466,7 +466,7 @@ export function SessionView({ server, onBack, initialSessionId, onNewProject, on
       <View style={styles.emptyContainer}>
         <Text style={styles.emptyTitle}>No Messages</Text>
         <Text style={styles.emptyText}>
-          Start a Claude Code session on your server to see messages here
+          Start a coding session on your server to see messages here
         </Text>
       </View>
     );

@@ -28,7 +28,7 @@ describe('SessionPicker', () => {
       workingDir: '/Users/test/project1',
     },
     {
-      name: 'claude-sitehound',
+      name: 'sitehound',
       created: Date.now() - 1800000,
       attached: true,
       windows: 1,
@@ -63,14 +63,14 @@ describe('SessionPicker', () => {
     const { getByText, queryByText } = render(<SessionPicker />);
 
     // Modal should not be visible initially
-    expect(queryByText('Claude Sessions')).toBeNull();
+    expect(queryByText('Sessions')).toBeNull();
 
     // Press the picker button
     fireEvent.press(getByText(/Sessions|project1/));
 
     // Modal should now be visible
     await waitFor(() => {
-      expect(getByText('Claude Sessions')).toBeTruthy();
+      expect(getByText('Sessions')).toBeTruthy();
     });
   });
 
@@ -112,7 +112,7 @@ describe('SessionPicker', () => {
         type: 'switch_session',
         success: true,
         // Include conversationSessionId which the component prefers
-        payload: { sessionName: 'claude-sitehound', conversationSessionId: '-Users-test-sitehound' },
+        payload: { sessionName: 'sitehound', conversationSessionId: '-Users-test-sitehound' },
       });
 
     const { getByText } = render(<SessionPicker onSessionChange={onSessionChange} />);
@@ -127,7 +127,7 @@ describe('SessionPicker', () => {
 
     await waitFor(() => {
       expect(mockWsService.sendRequest).toHaveBeenCalledWith('switch_tmux_session', {
-        sessionName: 'claude-sitehound',
+        sessionName: 'sitehound',
       });
     });
 
@@ -140,12 +140,12 @@ describe('SessionPicker', () => {
   it('opens when isOpen prop is true', async () => {
     const { getByText, rerender } = render(<SessionPicker isOpen={false} />);
 
-    expect(() => getByText('Claude Sessions')).toThrow();
+    expect(() => getByText('Sessions')).toThrow();
 
     rerender(<SessionPicker isOpen={true} />);
 
     await waitFor(() => {
-      expect(getByText('Claude Sessions')).toBeTruthy();
+      expect(getByText('Sessions')).toBeTruthy();
     });
   });
 
@@ -154,7 +154,7 @@ describe('SessionPicker', () => {
     const { getByText } = render(<SessionPicker isOpen={true} onClose={onClose} />);
 
     await waitFor(() => {
-      expect(getByText('Claude Sessions')).toBeTruthy();
+      expect(getByText('Sessions')).toBeTruthy();
     });
 
     // Press close button
@@ -199,7 +199,7 @@ describe('SessionPicker', () => {
 
     // Modal should show loading state
     await waitFor(() => {
-      expect(getByText('Claude Sessions')).toBeTruthy();
+      expect(getByText('Sessions')).toBeTruthy();
     });
   });
 

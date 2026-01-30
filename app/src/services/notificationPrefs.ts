@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const NOTIFICATION_PREFS_KEY = '@claude_companion_notification_prefs';
+const NOTIFICATION_PREFS_KEY = '@companion_notification_prefs';
 
 export interface NotificationPreferences {
   enabled: boolean;

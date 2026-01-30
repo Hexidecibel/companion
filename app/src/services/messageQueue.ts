@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const QUEUE_STORAGE_KEY = 'claude_companion_message_queue';
+const QUEUE_STORAGE_KEY = 'companion_message_queue';
 
 export interface QueuedMessage {
   id: string;

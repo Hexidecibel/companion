@@ -1,9 +1,9 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Server } from '../types';
 
-const SERVERS_KEY = '@claude_companion_servers';
-const SETTINGS_KEY = '@claude_companion_settings';
-const SESSION_SETTINGS_KEY = '@claude_companion_session_settings';
+const SERVERS_KEY = '@companion_servers';
+const SETTINGS_KEY = '@companion_settings';
+const SESSION_SETTINGS_KEY = '@companion_session_settings';
 
 export interface AppSettings {
   stayConnected: boolean;

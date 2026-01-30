@@ -34,14 +34,14 @@ interface TrackedSubAgent {
 }
 
 export class SubAgentWatcher extends EventEmitter {
-  private claudeHome: string;
+  private codeHome: string;
   private watcher: chokidar.FSWatcher | null = null;
   private agents: Map<string, TrackedSubAgent> = new Map();
   private cleanupInterval: NodeJS.Timeout | null = null;
 
-  constructor(claudeHome: string) {
+  constructor(codeHome: string) {
     super();
-    this.claudeHome = claudeHome;
+    this.codeHome = codeHome;
   }
 
   // Remove agents older than 24 hours from memory
@@ -60,7 +60,7 @@ export class SubAgentWatcher extends EventEmitter {
   }
 
   start(): void {
-    const projectsDir = path.join(this.claudeHome, 'projects');
+    const projectsDir = path.join(this.codeHome, 'projects');
     const pattern = path.join(projectsDir, '**', 'subagents', '*.jsonl');
 
     console.log(`SubAgentWatcher: Watching for sub-agents in: ${projectsDir}`);
