@@ -22,7 +22,7 @@
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/Hexidecibel/claude-companion.git",
+    "url": "https://github.com/Hexidecibel/companion.git",
     "directory": "daemon"
   },
   "author": "Hexidecibel",

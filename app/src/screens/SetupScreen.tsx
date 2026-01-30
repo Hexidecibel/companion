@@ -13,8 +13,8 @@ interface SetupScreenProps {
   onBack: () => void;
 }
 
-const INSTALL_SCRIPT = `git clone https://github.com/Hexidecibel/claude-companion.git
-cd claude-companion/daemon
+const INSTALL_SCRIPT = `git clone https://github.com/Hexidecibel/companion.git
+cd companion/daemon
 bash scripts/install.sh`;
 
 const MANUAL_STEPS = `# The installer automatically:
@@ -46,8 +46,8 @@ const MANUAL_STEPS = `# The installer automatically:
 # Fedora: sudo dnf install nodejs tmux
 
 # 2. Clone and build
-git clone https://github.com/Hexidecibel/claude-companion.git
-cd claude-companion/daemon
+git clone https://github.com/Hexidecibel/companion.git
+cd companion/daemon
 npm install && npm run build
 
 # 3. Run the installer

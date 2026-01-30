@@ -38,8 +38,8 @@ npm install -g @hexidecibel/claude-companion
 **Option B: From source**
 
 ```bash
-git clone https://github.com/Hexidecibel/claude-companion.git
-cd claude-companion/daemon
+git clone https://github.com/Hexidecibel/companion.git
+cd companion/daemon
 npm install && npm run build
 bash scripts/install.sh
 ```
@@ -82,8 +82,8 @@ sudo apt install nodejs npm tmux
 sudo dnf install nodejs tmux
 
 # Clone and build
-git clone https://github.com/Hexidecibel/claude-companion.git
-cd claude-companion/daemon
+git clone https://github.com/Hexidecibel/companion.git
+cd companion/daemon
 npm install
 npm run build
 
@@ -159,7 +159,7 @@ systemctl --user status companion
 ## Uninstalling
 
 ```bash
-cd claude-companion/daemon
+cd companion/daemon
 bash scripts/uninstall.sh
 ```
 

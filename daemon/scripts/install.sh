@@ -231,8 +231,8 @@ setup_source() {
     # Need to clone
     echo -e "  ${YELLOW}Source not found locally. Cloning repository...${NC}"
     TEMP_DIR=$(mktemp -d)
-    git clone --depth 1 https://github.com/Hexidecibel/claude-companion.git "$TEMP_DIR/claude-companion"
-    SOURCE_DIR="$TEMP_DIR/claude-companion/daemon"
+    git clone --depth 1 https://github.com/Hexidecibel/companion.git "$TEMP_DIR/companion"
+    SOURCE_DIR="$TEMP_DIR/companion/daemon"
     CLEANUP_TEMP=true
   fi
 
