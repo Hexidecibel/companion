@@ -2,6 +2,7 @@ import { useState, useMemo } from 'react';
 import { ServerSummary, ActiveSession, SessionSummary } from '../types';
 import { useConnections } from '../hooks/useConnections';
 import { NewSessionPanel } from './NewSessionPanel';
+import { TmuxModal } from './TmuxModal';
 
 interface SessionSidebarProps {
   summaries: Map<string, ServerSummary>;
@@ -9,6 +10,9 @@ interface SessionSidebarProps {
   onSelectSession: (serverId: string, sessionId: string) => void;
   onManageServers: () => void;
   onSessionCreated?: (serverId: string, sessionName: string) => void;
+  onToggleSplit?: () => void;
+  splitEnabled?: boolean;
+  secondarySession?: ActiveSession | null;
 }
 
 const STATUS_DOT_CLASS: Record<SessionSummary['status'], string> = {
@@ -57,9 +61,13 @@ export function SessionSidebar({
   onSelectSession,
   onManageServers,
   onSessionCreated,
+  onToggleSplit,
+  splitEnabled,
+  secondarySession,
 }: SessionSidebarProps) {
   const { snapshots } = useConnections();
   const [newSessionServerId, setNewSessionServerId] = useState<string | null>(null);
+  const [tmuxServerId, setTmuxServerId] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
 
   // Count total sessions across all servers for filter visibility
@@ -72,17 +80,35 @@ export function SessionSidebar({
     return count;
   }, [snapshots, summaries]);
 
+  // Find the server name for the tmux modal
+  const tmuxServerName = useMemo(() => {
+    if (!tmuxServerId) return '';
+    const snap = snapshots.find((s) => s.serverId === tmuxServerId);
+    return snap?.serverName ?? '';
+  }, [tmuxServerId, snapshots]);
+
   return (
     <aside className="sidebar">
       <div className="sidebar-header">
         <span className="sidebar-title">Companion</span>
-        <button
-          className="icon-btn small"
-          onClick={onManageServers}
-          title="Manage servers"
-        >
-          &equiv;
-        </button>
+        <div className="sidebar-header-actions">
+          {onToggleSplit && (
+            <button
+              className={`sidebar-split-btn ${splitEnabled ? 'active' : ''}`}
+              onClick={onToggleSplit}
+              title={splitEnabled ? 'Disable split view' : 'Enable split view'}
+            >
+              {splitEnabled ? '\u25A3' : '\u25A1'}
+            </button>
+          )}
+          <button
+            className="icon-btn small"
+            onClick={onManageServers}
+            title="Manage servers"
+          >
+            &equiv;
+          </button>
+        </div>
       </div>
 
       {totalSessionCount > 1 && (
@@ -125,17 +151,30 @@ export function SessionSidebar({
                   <span className="sidebar-session-count">{summary.sessions.length}</span>
                 )}
                 {isConnected && (
-                  <button
-                    className="sidebar-new-session-btn"
-                    onClick={() =>
-                      setNewSessionServerId(
-                        newSessionServerId === snap.serverId ? null : snap.serverId,
-                      )
-                    }
-                    title="New session"
-                  >
-                    +
-                  </button>
+                  <>
+                    <button
+                      className="sidebar-new-session-btn"
+                      onClick={() =>
+                        setNewSessionServerId(
+                          newSessionServerId === snap.serverId ? null : snap.serverId,
+                        )
+                      }
+                      title="New session"
+                    >
+                      +
+                    </button>
+                    <button
+                      className="sidebar-tmux-btn"
+                      onClick={() =>
+                        setTmuxServerId(
+                          tmuxServerId === snap.serverId ? null : snap.serverId,
+                        )
+                      }
+                      title="Tmux sessions"
+                    >
+                      T
+                    </button>
+                  </>
                 )}
               </div>
 
@@ -172,11 +211,18 @@ export function SessionSidebar({
                   const isActive =
                     activeSession?.serverId === snap.serverId &&
                     activeSession?.sessionId === session.id;
+                  const isSecondary =
+                    secondarySession?.serverId === snap.serverId &&
+                    secondarySession?.sessionId === session.id;
+
+                  let sessionClass = 'sidebar-session';
+                  if (isActive) sessionClass += ' active';
+                  else if (isSecondary) sessionClass += ' active-secondary';
 
                   return (
                     <div
                       key={session.id}
-                      className={`sidebar-session ${isActive ? 'active' : ''}`}
+                      className={sessionClass}
                       onClick={() => onSelectSession(snap.serverId, session.id)}
                     >
                       <span className={`status-dot ${STATUS_DOT_CLASS[session.status]}`} />
@@ -198,6 +244,14 @@ export function SessionSidebar({
           );
         })}
       </div>
+
+      {tmuxServerId && (
+        <TmuxModal
+          serverId={tmuxServerId}
+          serverName={tmuxServerName}
+          onClose={() => setTmuxServerId(null)}
+        />
+      )}
     </aside>
   );
 }

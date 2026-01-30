@@ -150,6 +150,17 @@ export interface AgentTree {
   completedCount: number;
 }
 
+// Tmux types
+
+export interface TmuxSessionInfo {
+  name: string;
+  created: number;
+  attached: boolean;
+  windows: number;
+  workingDir?: string;
+  tagged?: boolean;
+}
+
 // Active session tracking
 
 export interface ActiveSession {
