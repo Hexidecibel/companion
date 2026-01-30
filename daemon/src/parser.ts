@@ -609,7 +609,9 @@ export function getSessionStatus(
 }
 
 /**
- * Get list of pending tools that need approval from the last message
+ * Get list of pending tools that need approval from the last message.
+ * Only returns tools that actually require user approval (Bash, Write, Edit, etc.)
+ * Excludes Task (runs in background), AskUserQuestion (choice prompts, not tool approval).
  */
 export function getPendingApprovalTools(messages: ConversationMessage[]): string[] {
   if (messages.length === 0) return [];
@@ -618,7 +620,7 @@ export function getPendingApprovalTools(messages: ConversationMessage[]): string
   if (lastMessage.type !== 'assistant' || !lastMessage.toolCalls) return [];
 
   return lastMessage.toolCalls
-    .filter(tc => tc.status === 'pending')
+    .filter(tc => tc.status === 'pending' && APPROVAL_TOOLS.includes(tc.name) && tc.name !== 'Task')
     .map(tc => tc.name);
 }
 

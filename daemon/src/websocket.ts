@@ -57,7 +57,7 @@ export class WebSocketHandler {
   private readonly MAX_CLIENT_ERRORS = 50;
   private scrollLogs: Array<{ event: string; ts: number; [key: string]: unknown }> = [];
   private readonly MAX_SCROLL_LOGS = 200;
-  public autoApproveEnabled: boolean = false;
+  public autoApproveSessions: Set<string> = new Set();
   private escalation: EscalationService;
 
   constructor(
@@ -509,18 +509,28 @@ export class WebSocketHandler {
       // set_instant_notify removed — escalation model replaces per-device instant notify
 
       case 'set_auto_approve': {
-        const autoApprovePayload = payload as { enabled: boolean };
-        this.autoApproveEnabled = autoApprovePayload?.enabled ?? false;
-        console.log(`Auto-approve ${this.autoApproveEnabled ? 'enabled' : 'disabled'} by client`);
+        const autoApprovePayload = payload as { enabled: boolean; sessionId?: string };
+        const targetSessionId = autoApprovePayload?.sessionId || this.watcher.getActiveSessionId();
+        const enabled = autoApprovePayload?.enabled ?? false;
+
+        if (targetSessionId) {
+          if (enabled) {
+            this.autoApproveSessions.add(targetSessionId);
+          } else {
+            this.autoApproveSessions.delete(targetSessionId);
+          }
+          console.log(`Auto-approve ${enabled ? 'enabled' : 'disabled'} for session ${targetSessionId} (${this.autoApproveSessions.size} sessions active)`);
+        }
+
         this.send(client.ws, {
           type: 'auto_approve_set',
           success: true,
-          payload: { enabled: this.autoApproveEnabled },
+          payload: { enabled, sessionId: targetSessionId },
           requestId,
         });
 
         // When toggled ON, immediately check for pending tools that should be auto-approved
-        if (this.autoApproveEnabled) {
+        if (enabled) {
           this.watcher.checkAndEmitPendingApproval();
         }
         break;

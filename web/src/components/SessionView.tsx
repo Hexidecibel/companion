@@ -42,7 +42,7 @@ export function SessionView({ serverId, sessionId, tmuxSessionName }: SessionVie
 
   const { tasks, loading: tasksLoading } = useTasks(serverId, sessionId);
   const { agents, runningCount, completedCount, totalAgents } = useSubAgents(serverId, sessionId);
-  const autoApprove = useAutoApprove(serverId);
+  const autoApprove = useAutoApprove(serverId, sessionId);
   const sessionMute = useSessionMute(serverId);
   const { queuedMessages, enqueue, cancel: cancelQueued, clearAll: clearAllQueued } = useMessageQueue(serverId);
 
@@ -122,10 +122,9 @@ export function SessionView({ serverId, sessionId, tmuxSessionName }: SessionVie
             reader.readAsDataURL(img.file);
           });
 
-          const response = await conn.sendRequest('send_image', {
-            image: base64,
+          const response = await conn.sendRequest('upload_image', {
+            base64,
             mimeType: img.file.type,
-            filename: img.file.name,
           });
 
           if (!response.success) {
@@ -133,9 +132,9 @@ export function SessionView({ serverId, sessionId, tmuxSessionName }: SessionVie
             return false;
           }
 
-          const payload = response.payload as { path?: string };
-          if (payload?.path) {
-            imagePaths.push(payload.path);
+          const payload = response.payload as { filepath?: string };
+          if (payload?.filepath) {
+            imagePaths.push(payload.filepath);
           }
         }
 

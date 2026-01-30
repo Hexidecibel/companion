@@ -87,24 +87,27 @@ async function main(): Promise<void> {
   watcher.start();
   subAgentWatcher.start();
 
-  // Auto-approve safe tools (from config and/or client toggle)
+  // Auto-approve tools (from config and/or per-session client toggle)
   {
     console.log(`Auto-approve tools from config: ${config.autoApproveTools.length > 0 ? config.autoApproveTools.join(', ') : '(none - client toggle only)'}`);
     const tmux = new TmuxManager('companion');
-    // Track in-flight approvals using composite key (sessionId:tools) to prevent double-firing
-    const pendingAutoApprovals = new Map<string, number>();
+    // Track recent approvals per session to avoid double-firing for the same prompt.
+    // Key: sessionId, Value: timestamp of last approval sent.
+    const lastApprovalBySession = new Map<string, number>();
 
     watcher.on('pending-approval', async ({ sessionId, projectPath, tools }) => {
-      // Skip if auto-approve is not enabled (neither config nor client toggle)
-      if (config.autoApproveTools.length === 0 && !wsHandler.autoApproveEnabled) {
-        console.log(`[AUTO-APPROVE] Skipped: auto-approve not enabled (config tools: ${config.autoApproveTools.length}, client toggle: ${wsHandler.autoApproveEnabled})`);
+      // Check per-session toggle OR config-level tools
+      const sessionEnabled = wsHandler.autoApproveSessions.has(sessionId);
+      if (config.autoApproveTools.length === 0 && !sessionEnabled) {
+        console.log(`[AUTO-APPROVE] Skipped: not enabled for session ${sessionId}`);
         return;
       }
 
-      // Check if any pending tool should be auto-approved
+      // Only approve tools that are in the config list OR if the session has auto-approve on.
+      // Either way, only APPROVAL_TOOLS are valid (getPendingApprovalTools already filters).
       const autoApprovable = tools.filter((tool: string) => {
         if (config.autoApproveTools.includes(tool)) return true;
-        if (wsHandler.autoApproveEnabled) return true;
+        if (sessionEnabled) return true;
         return false;
       });
 
@@ -113,21 +116,21 @@ async function main(): Promise<void> {
         return;
       }
 
-      // Composite dedup key: session + sorted tool names
-      // The watcher already deduplicates emissions (only fires on change),
-      // but this provides a safety net against rapid re-fires.
-      const dedupKey = `${sessionId}:${autoApprovable.sort().join(',')}`;
+      // Per-session dedup: don't re-fire within 3 seconds of the last approval
+      // for the same session. This prevents double-sends when the file watcher
+      // re-fires before the CLI has processed the previous "yes".
+      // Short window (3s) so sequential tool approvals still work.
       const now = Date.now();
-      const lastApproval = pendingAutoApprovals.get(dedupKey);
-      if (lastApproval && now - lastApproval < 15000) {
-        console.log(`[AUTO-APPROVE] Dedup: skipping (last approval ${now - lastApproval}ms ago for ${dedupKey})`);
+      const lastApproval = lastApprovalBySession.get(sessionId);
+      if (lastApproval && now - lastApproval < 3000) {
+        console.log(`[AUTO-APPROVE] Dedup: skipping (last approval ${now - lastApproval}ms ago for ${sessionId})`);
         return;
       }
-      pendingAutoApprovals.set(dedupKey, now);
+      lastApprovalBySession.set(sessionId, now);
 
       // Clean up old entries
-      for (const [key, ts] of pendingAutoApprovals) {
-        if (now - ts > 30000) pendingAutoApprovals.delete(key);
+      for (const [key, ts] of lastApprovalBySession) {
+        if (now - ts > 30000) lastApprovalBySession.delete(key);
       }
 
       try {
@@ -169,7 +172,6 @@ async function main(): Promise<void> {
           console.log(`[AUTO-APPROVE] Sending to tmux="${targetTmuxSession}" for tools [${autoApprovable.join(', ')}] (session: ${sessionId})`);
           const success = await sendApproval(targetTmuxSession);
           if (!success) {
-            // Retry once after 500ms
             console.log(`[AUTO-APPROVE] Retrying after 500ms...`);
             await new Promise(resolve => setTimeout(resolve, 500));
             await sendApproval(targetTmuxSession);

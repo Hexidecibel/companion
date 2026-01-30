@@ -117,18 +117,26 @@ export function MessageBubble({ message, onSelectOption, onViewFile }: MessageBu
 
   const toolCalls = !isUser ? message.toolCalls : undefined;
   const hasMultipleTools = toolCalls && toolCalls.length >= 2;
+  const hasContent = message.content && message.content.trim().length > 0;
+
+  // Hide completely empty assistant messages that have no text, no tools, and no options
+  if (!isUser && !hasContent && (!toolCalls || toolCalls.length === 0) && !message.isWaitingForChoice) {
+    return null;
+  }
 
   return (
     <div className={`msg-row ${isUser ? 'msg-row-user' : 'msg-row-assistant'}`}>
-      <div className={`msg-bubble ${isUser ? 'msg-bubble-user' : 'msg-bubble-assistant'}`}>
-        {!isUser && onViewFile ? (
-          <pre className="msg-content">
-            <FilePathContent content={message.content} onViewFile={onViewFile} />
-          </pre>
-        ) : (
-          <pre className="msg-content">{message.content}</pre>
-        )}
-      </div>
+      {hasContent && (
+        <div className={`msg-bubble ${isUser ? 'msg-bubble-user' : 'msg-bubble-assistant'}`}>
+          {!isUser && onViewFile ? (
+            <pre className="msg-content">
+              <FilePathContent content={message.content} onViewFile={onViewFile} />
+            </pre>
+          ) : (
+            <pre className="msg-content">{message.content}</pre>
+          )}
+        </div>
+      )}
 
       {toolCalls && toolCalls.length > 0 && (
         <div className="msg-tools">

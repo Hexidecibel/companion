@@ -1,24 +1,24 @@
 import { useState, useEffect, useCallback } from 'react';
 import { connectionManager } from '../services/ConnectionManager';
 
-const STORAGE_KEY = 'companion_auto_approve';
+const STORAGE_KEY = 'companion_auto_approve_sessions';
 
-function getStoredState(serverId: string): boolean {
+function getStoredState(serverId: string, sessionId: string): boolean {
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
     if (!stored) return false;
     const map = JSON.parse(stored) as Record<string, boolean>;
-    return map[serverId] ?? false;
+    return map[`${serverId}:${sessionId}`] ?? false;
   } catch {
     return false;
   }
 }
 
-function setStoredState(serverId: string, enabled: boolean): void {
+function setStoredState(serverId: string, sessionId: string, enabled: boolean): void {
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
     const map = stored ? (JSON.parse(stored) as Record<string, boolean>) : {};
-    map[serverId] = enabled;
+    map[`${serverId}:${sessionId}`] = enabled;
     localStorage.setItem(STORAGE_KEY, JSON.stringify(map));
   } catch {
     // Silently ignore
@@ -31,20 +31,29 @@ interface UseAutoApproveReturn {
   loading: boolean;
 }
 
-export function useAutoApprove(serverId: string | null): UseAutoApproveReturn {
+export function useAutoApprove(serverId: string | null, sessionId?: string | null): UseAutoApproveReturn {
   const [enabled, setEnabled] = useState(false);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    if (!serverId) {
+    if (!serverId || !sessionId) {
       setEnabled(false);
       return;
     }
-    setEnabled(getStoredState(serverId));
-  }, [serverId]);
+    const stored = getStoredState(serverId, sessionId);
+    setEnabled(stored);
+
+    // Sync stored state to daemon on mount/session change
+    if (stored) {
+      const conn = connectionManager.getConnection(serverId);
+      if (conn && conn.isConnected()) {
+        conn.sendRequest('set_auto_approve', { enabled: true, sessionId }).catch(() => {});
+      }
+    }
+  }, [serverId, sessionId]);
 
   const toggle = useCallback(async () => {
-    if (!serverId || loading) return;
+    if (!serverId || !sessionId || loading) return;
 
     const newState = !enabled;
     setLoading(true);
@@ -52,16 +61,16 @@ export function useAutoApprove(serverId: string | null): UseAutoApproveReturn {
     const conn = connectionManager.getConnection(serverId);
     if (conn && conn.isConnected()) {
       try {
-        await conn.sendRequest('set_auto_approve', { enabled: newState });
+        await conn.sendRequest('set_auto_approve', { enabled: newState, sessionId });
       } catch {
         // Proceed anyway -- persist locally
       }
     }
 
     setEnabled(newState);
-    setStoredState(serverId, newState);
+    setStoredState(serverId, sessionId, newState);
     setLoading(false);
-  }, [serverId, enabled, loading]);
+  }, [serverId, sessionId, enabled, loading]);
 
   return { enabled, toggle, loading };
 }
