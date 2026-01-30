@@ -268,14 +268,14 @@ function ServerCard({
             sortSessions(status.summary.sessions).slice(0, 5).map((session) => (
               <TouchableOpacity
                 key={session.id}
-                style={styles.sessionRow}
+                style={[styles.sessionRow, session.status === 'idle' && styles.sessionRowIdle]}
                 onPress={() => onSessionPress(session.id)}
                 activeOpacity={0.7}
               >
                 <SessionStatusIcon status={session.status} />
                 <View style={styles.sessionInfo}>
                   <View style={styles.sessionHeader}>
-                    <Text style={styles.sessionName} numberOfLines={1}>
+                    <Text style={[styles.sessionName, session.status === 'idle' && styles.sessionNameIdle]} numberOfLines={1}>
                       {session.name}
                     </Text>
                     <Text style={styles.sessionTime}>
@@ -696,6 +696,9 @@ const styles = StyleSheet.create({
     backgroundColor: '#374151',
     borderRadius: 8,
   },
+  sessionRowIdle: {
+    opacity: 0.55,
+  },
   statusIcon: {
     fontSize: 16,
     marginRight: 10,
@@ -713,6 +716,9 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '500',
     flex: 1,
+  },
+  sessionNameIdle: {
+    color: '#9ca3af',
   },
   sessionTime: {
     color: '#6b7280',

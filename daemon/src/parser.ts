@@ -423,7 +423,7 @@ export function detectWaitingForInput(messages: ConversationMessage[]): boolean 
       }
     }
 
-    // Check for text content that looks like a question
+    // Check for text content that looks like a question or prompt
     if (lastMessage.content.trim()) {
       const questionPatterns = [
         /\?$/,
@@ -440,11 +440,28 @@ export function detectWaitingForInput(messages: ConversationMessage[]): boolean 
           return true;
         }
       }
+    }
+  }
 
-      // Also check if there are no pending tool calls (Claude is done working)
-      if (!lastMessage.toolCalls || lastMessage.toolCalls.every(tc => tc.status === 'completed')) {
-        return true;
-      }
+  return false;
+}
+
+// Detect if Claude has finished working and is idle (not actively expecting a response)
+export function detectIdle(messages: ConversationMessage[]): boolean {
+  if (messages.length === 0) return false;
+
+  const lastMessage = messages[messages.length - 1];
+
+  // If the last message is from the assistant with all tools completed and no question
+  if (lastMessage.type === 'assistant') {
+    // Still has running/pending tools = not idle
+    if (lastMessage.toolCalls?.some(tc => tc.status === 'pending' || tc.status === 'running')) {
+      return false;
+    }
+
+    // All tools completed, no question pattern = idle (finished task)
+    if (!lastMessage.toolCalls || lastMessage.toolCalls.every(tc => tc.status === 'completed')) {
+      return !detectWaitingForInput(messages);
     }
   }
 
