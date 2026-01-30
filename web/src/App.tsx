@@ -53,6 +53,15 @@ export function App() {
       execute: () => navigateTo('servers'),
     },
     {
+      id: 'notifications',
+      label: 'Notification Settings',
+      icon: '\u{1F514}',
+      execute: () => {
+        navigateTo('dashboard');
+        window.dispatchEvent(new CustomEvent('open-notification-settings'));
+      },
+    },
+    {
       id: 'focus-input',
       label: 'Focus Input',
       icon: '/',

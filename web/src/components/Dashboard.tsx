@@ -1,10 +1,12 @@
-import { useState, useCallback, useMemo } from 'react';
-import { ActiveSession } from '../types';
+import { useState, useCallback, useMemo, useEffect } from 'react';
+import { ActiveSession, SessionSummary } from '../types';
 import { useAllServerSummaries } from '../hooks/useAllServerSummaries';
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
 import { useConnections } from '../hooks/useConnections';
 import { SessionSidebar } from './SessionSidebar';
 import { SessionView } from './SessionView';
+import { NotificationSettingsModal } from './NotificationSettingsModal';
+import { useSessionMute } from '../hooks/useSessionMute';
 
 interface DashboardProps {
   onManageServers: () => void;
@@ -12,7 +14,9 @@ interface DashboardProps {
 
 export function Dashboard({ onManageServers }: DashboardProps) {
   const [activeSession, setActiveSession] = useState<ActiveSession | null>(null);
+  const [showNotifSettings, setShowNotifSettings] = useState(false);
   const summaries = useAllServerSummaries();
+  const sessionMute = useSessionMute(activeSession?.serverId ?? null);
   const { snapshots } = useConnections();
 
   // Build flat session list for j/k navigation
@@ -80,6 +84,21 @@ export function Dashboard({ onManageServers }: DashboardProps) {
 
   useKeyboardShortcuts(shortcuts);
 
+  // Look up tmuxSessionName for the active session
+  const activeSessionSummary: SessionSummary | undefined = useMemo(() => {
+    if (!activeSession) return undefined;
+    const serverSummary = summaries.get(activeSession.serverId);
+    if (!serverSummary) return undefined;
+    return serverSummary.sessions.find((s) => s.id === activeSession.sessionId);
+  }, [activeSession, summaries]);
+
+  // Listen for command palette event to open notification settings
+  useEffect(() => {
+    const handler = () => setShowNotifSettings(true);
+    window.addEventListener('open-notification-settings', handler);
+    return () => window.removeEventListener('open-notification-settings', handler);
+  }, []);
+
   return (
     <div className="dashboard">
       <SessionSidebar
@@ -88,13 +107,23 @@ export function Dashboard({ onManageServers }: DashboardProps) {
         onSelectSession={handleSelectSession}
         onManageServers={onManageServers}
         onSessionCreated={handleSessionCreated}
+        onNotificationSettings={activeSession ? () => setShowNotifSettings(true) : undefined}
+        mutedSessions={sessionMute.mutedSessions}
       />
       <main className="dashboard-main">
         <SessionView
           serverId={activeSession?.serverId ?? null}
           sessionId={activeSession?.sessionId ?? null}
+          tmuxSessionName={activeSessionSummary?.tmuxSessionName}
         />
       </main>
+
+      {showNotifSettings && activeSession && (
+        <NotificationSettingsModal
+          serverId={activeSession.serverId}
+          onClose={() => setShowNotifSettings(false)}
+        />
+      )}
     </div>
   );
 }

@@ -17,6 +17,7 @@ export function ServerForm({ serverId, onBack }: ServerFormProps) {
   const [token, setToken] = useState('');
   const [useTls, setUseTls] = useState(false);
   const [enabled, setEnabled] = useState(true);
+  const [sshUser, setSshUser] = useState('');
 
   useEffect(() => {
     if (existing) {
@@ -26,6 +27,7 @@ export function ServerForm({ serverId, onBack }: ServerFormProps) {
       setToken(existing.token);
       setUseTls(existing.useTls);
       setEnabled(existing.enabled !== false);
+      setSshUser(existing.sshUser || '');
     }
   }, [existing]);
 
@@ -40,6 +42,7 @@ export function ServerForm({ serverId, onBack }: ServerFormProps) {
       token: token.trim(),
       useTls,
       enabled,
+      sshUser: sshUser.trim() || undefined,
     };
 
     if (existing) {
@@ -106,6 +109,17 @@ export function ServerForm({ serverId, onBack }: ServerFormProps) {
               onChange={(e) => setToken(e.target.value)}
               placeholder="Auth token"
               required
+            />
+          </div>
+
+          <div className="form-group">
+            <label htmlFor="sshUser">SSH User (optional)</label>
+            <input
+              id="sshUser"
+              type="text"
+              value={sshUser}
+              onChange={(e) => setSshUser(e.target.value)}
+              placeholder="username"
             />
           </div>
 

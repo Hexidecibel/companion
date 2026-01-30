@@ -2665,3 +2665,540 @@ body {
   z-index: 10;
   pointer-events: none;
 }
+
+/* ========================================
+   Notification Settings Modal
+   ======================================== */
+
+.notif-modal {
+  max-width: 580px;
+  max-height: 85vh;
+}
+
+.notif-tabs {
+  display: flex;
+  border-bottom: 1px solid var(--border-color);
+  flex-shrink: 0;
+}
+
+.notif-tab {
+  flex: 1;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 500;
+  padding: 10px 0;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.notif-tab:hover {
+  color: var(--text-secondary);
+}
+
+.notif-tab.active {
+  color: var(--accent-blue);
+  border-bottom-color: var(--accent-blue);
+}
+
+.notif-tab-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px 16px 16px;
+}
+
+.notif-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.notif-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+}
+
+.notif-add-btn,
+.notif-clear-btn {
+  background: var(--bg-tertiary);
+  border: none;
+  color: var(--accent-blue);
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.15s;
+}
+
+.notif-add-btn:hover,
+.notif-clear-btn:hover {
+  background: var(--bg-hover);
+}
+
+.notif-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.notif-card {
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+.notif-card.disabled {
+  opacity: 0.5;
+}
+
+.notif-card-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.notif-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.notif-event-badge {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 10px;
+  color: #fff;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.notif-card-name {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.notif-card-detail {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.notif-card-detail code {
+  background: var(--bg-tertiary);
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 11px;
+}
+
+.notif-preview {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
+.notif-device-id {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+  font-family: monospace;
+}
+
+.notif-timestamp {
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.notif-delete-btn {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 16px;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+  transition: color 0.15s;
+}
+
+.notif-delete-btn:hover {
+  color: var(--accent-red);
+}
+
+/* Toggle switch */
+.notif-toggle {
+  position: relative;
+  display: inline-block;
+  width: 36px;
+  height: 20px;
+  flex-shrink: 0;
+}
+
+.notif-toggle input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.notif-toggle-slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: var(--bg-tertiary);
+  transition: background-color 0.2s;
+  border-radius: 20px;
+}
+
+.notif-toggle-slider::before {
+  content: '';
+  position: absolute;
+  height: 14px;
+  width: 14px;
+  left: 3px;
+  bottom: 3px;
+  background-color: var(--text-muted);
+  transition: transform 0.2s, background-color 0.2s;
+  border-radius: 50%;
+}
+
+.notif-toggle input:checked + .notif-toggle-slider {
+  background-color: var(--accent-blue);
+}
+
+.notif-toggle input:checked + .notif-toggle-slider::before {
+  transform: translateX(16px);
+  background-color: #fff;
+}
+
+/* Form elements */
+.notif-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.notif-input,
+.notif-select {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-size: 13px;
+  padding: 8px 10px;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.notif-input:focus,
+.notif-select:focus {
+  border-color: var(--accent-blue);
+}
+
+.notif-select {
+  cursor: pointer;
+}
+
+.notif-quiet-hours-row {
+  display: flex;
+  gap: 16px;
+  margin-top: 8px;
+  align-items: flex-end;
+}
+
+.notif-quiet-hours-row label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.notif-time-input {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-size: 13px;
+  padding: 6px 10px;
+}
+
+.notif-time-input:focus {
+  border-color: var(--accent-blue);
+  outline: none;
+}
+
+.notif-submit-btn {
+  background: var(--accent-blue);
+  border: none;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 500;
+  padding: 8px 16px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background-color 0.15s;
+}
+
+.notif-submit-btn:hover:not(:disabled) {
+  background: var(--accent-blue-hover);
+}
+
+.notif-submit-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.notif-permission-badge {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 10px;
+  text-transform: uppercase;
+}
+
+.notif-permission-badge.granted {
+  background: var(--accent-green);
+  color: #fff;
+}
+
+.notif-permission-badge.denied {
+  background: var(--accent-red);
+  color: #fff;
+}
+
+.notif-permission-badge.default {
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+}
+
+.notif-browser-event-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 0;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.notif-empty {
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 13px;
+  padding: 24px 16px;
+}
+
+/* Bell icon button in sidebar */
+.sidebar-bell-btn {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 15px;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+  transition: color 0.15s, background-color 0.15s;
+  line-height: 1;
+}
+
+.sidebar-bell-btn:hover {
+  color: var(--text-primary);
+  background: var(--bg-tertiary);
+}
+
+/* Mute button in session header */
+.session-mute-btn {
+  background: var(--bg-tertiary);
+  border: none;
+  color: var(--text-secondary);
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background-color 0.15s, color 0.15s;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.session-mute-btn:hover {
+  background: var(--bg-hover);
+}
+
+.session-mute-btn.muted {
+  color: var(--accent-amber);
+}
+
+/* Muted indicator in sidebar */
+.sidebar-muted-icon {
+  color: var(--accent-amber);
+  font-size: 11px;
+  margin-left: 4px;
+  opacity: 0.8;
+}
+
+/* ========================================
+   Terminal Panel
+   ======================================== */
+
+.terminal-panel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  background-color: #0d1117;
+  overflow: hidden;
+}
+
+.terminal-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 12px;
+  background-color: #161b22;
+  border-bottom: 1px solid #30363d;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+
+.terminal-toolbar-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.terminal-toolbar-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #8b949e;
+  font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
+}
+
+.terminal-toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.terminal-toolbar-btn {
+  background: #21262d;
+  border: 1px solid #30363d;
+  color: #8b949e;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.15s, color 0.15s;
+  white-space: nowrap;
+}
+
+.terminal-toolbar-btn:hover {
+  background-color: #30363d;
+  color: #c9d1d9;
+}
+
+.terminal-toolbar-btn.active {
+  background-color: rgba(245, 158, 11, 0.15);
+  color: var(--accent-amber);
+  border-color: rgba(245, 158, 11, 0.3);
+}
+
+.terminal-error {
+  padding: 6px 12px;
+  font-size: 12px;
+  color: var(--accent-red);
+  background: rgba(239, 68, 68, 0.1);
+  flex-shrink: 0;
+}
+
+.terminal-output {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: auto;
+  padding: 8px 12px;
+  font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
+  font-size: 12px;
+  line-height: 1.4;
+  color: #c9d1d9;
+}
+
+.terminal-line {
+  white-space: pre;
+  min-height: 1em;
+}
+
+/* SSH command display */
+.ssh-command {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: #21262d;
+  border: 1px solid #30363d;
+  border-radius: 4px;
+  padding: 2px 4px 2px 8px;
+  max-width: 400px;
+  overflow: hidden;
+}
+
+.ssh-command-text {
+  font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
+  font-size: 11px;
+  color: #8b949e;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ssh-command-copy {
+  background: #30363d;
+  border: none;
+  color: #8b949e;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: background-color 0.15s, color 0.15s;
+  flex-shrink: 0;
+}
+
+.ssh-command-copy:hover {
+  background-color: #484f58;
+  color: #c9d1d9;
+}
+
+.ssh-command-copy.copied {
+  background-color: rgba(16, 185, 129, 0.2);
+  color: var(--accent-green);
+}
+
+.ssh-command-hint {
+  font-size: 11px;
+  color: #484f58;
+  font-style: italic;
+}
+
+/* Terminal toggle button in session header */
+.session-header-btn.terminal-active {
+  background-color: rgba(16, 185, 129, 0.15);
+  color: var(--accent-green);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+}

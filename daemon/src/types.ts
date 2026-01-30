@@ -133,6 +133,7 @@ export interface SessionSummary {
   status: 'idle' | 'working' | 'waiting' | 'error';
   lastActivity: number;
   currentActivity?: string;
+  tmuxSessionName?: string;
 }
 
 export interface ServerSummary {
@@ -225,6 +226,70 @@ export interface AgentTree {
   totalAgents: number;
   runningCount: number;
   completedCount: number;
+}
+
+// Notification event types (no longer includes text_match)
+export type NotificationEventType = 'waiting_for_input' | 'error_detected' | 'session_completed';
+
+// Escalation config — replaces NotificationRule system
+export interface EscalationConfig {
+  events: {
+    waiting_for_input: boolean;
+    error_detected: boolean;
+    session_completed: boolean;
+  };
+  pushDelaySeconds: number;      // default: 300 (5 min). 0 = immediate push
+  rateLimitSeconds: number;      // default: 60. Min time between notifs per session
+  quietHours: {
+    enabled: boolean;
+    start: string; // "HH:MM"
+    end: string;   // "HH:MM"
+  };
+}
+
+export const DEFAULT_ESCALATION_CONFIG: EscalationConfig = {
+  events: {
+    waiting_for_input: true,
+    error_detected: true,
+    session_completed: false,
+  },
+  pushDelaySeconds: 300,
+  rateLimitSeconds: 60,
+  quietHours: {
+    enabled: false,
+    start: '22:00',
+    end: '08:00',
+  },
+};
+
+// Pending event — tracks an unacknowledged notification awaiting push escalation
+export interface PendingEvent {
+  id: string;
+  sessionId: string;
+  sessionName: string;
+  eventType: NotificationEventType;
+  preview: string;
+  createdAt: number;
+  pushScheduledAt: number;  // createdAt + pushDelaySeconds*1000
+  pushSent: boolean;
+  acknowledgedAt?: number;
+}
+
+export interface NotificationHistoryEntry {
+  id: string;
+  timestamp: number;
+  eventType: NotificationEventType;
+  sessionId?: string;
+  sessionName?: string;
+  preview: string;
+  tier: 'browser' | 'push' | 'both';
+  acknowledged: boolean;
+}
+
+export interface PersistedNotificationState {
+  escalation: EscalationConfig;
+  devices: RegisteredDevice[];
+  mutedSessions: string[];
 }
 
 // Archive types for compacted conversations

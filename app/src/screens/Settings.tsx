@@ -8,12 +8,10 @@ import {
   TouchableOpacity,
   Alert,
   Linking,
-  Platform,
 } from 'react-native';
 import Constants from 'expo-constants';
-import { getSettings, saveSettings, AppSettings, clearAll, getServers } from '../services/storage';
+import { getSettings, saveSettings, AppSettings, clearAll } from '../services/storage';
 import { historyService } from '../services/history';
-import { registerWithDaemon, unregisterWithDaemon } from '../services/push';
 import { wsService } from '../services/websocket';
 
 interface SettingsProps {
@@ -29,8 +27,6 @@ export function Settings({ onBack, onOpenNotificationSettings, onOpenAgents, onO
     pushEnabled: false,
   });
   const [loading, setLoading] = useState(true);
-  const [pushAvailable] = useState(true);
-
   useEffect(() => {
     loadSettings();
   }, []);
@@ -52,37 +48,6 @@ export function Settings({ onBack, onOpenNotificationSettings, onOpenAgents, onO
 
   const handleStayConnectedChange = async (value: boolean) => {
     updateSetting('stayConnected', value);
-  };
-
-  const handlePushEnabledChange = async (value: boolean) => {
-    updateSetting('pushEnabled', value);
-
-    if (value) {
-      // Registration happens automatically when connected to a server
-      // Just save the setting - useConnection will register when connected
-      if (!wsService.isConnected()) {
-        Alert.alert(
-          'Push Enabled',
-          'Push notifications are enabled. You will be registered when you connect to a server.'
-        );
-      } else {
-        const servers = await getServers();
-        const connectedServer = servers.find(s => wsService.getServerId() === s.id);
-        const deviceId = `${Platform.OS}-${connectedServer?.id || 'default'}`;
-        const success = await registerWithDaemon(deviceId);
-        if (success) {
-          Alert.alert('Push Enabled', 'Push notifications registered successfully.');
-        }
-      }
-    } else {
-      // Unregister if connected
-      if (wsService.isConnected()) {
-        const servers = await getServers();
-        const connectedServer = servers.find(s => wsService.getServerId() === s.id);
-        const deviceId = `${Platform.OS}-${connectedServer?.id || 'default'}`;
-        await unregisterWithDaemon(deviceId);
-      }
-    }
   };
 
   const handleClearData = () => {
@@ -182,7 +147,7 @@ export function Settings({ onBack, onOpenNotificationSettings, onOpenAgents, onO
 
           <TouchableOpacity style={styles.linkRow} onPress={onOpenNotificationSettings}>
             <View style={styles.settingInfo}>
-              <Text style={styles.settingLabel}>Push Notifications</Text>
+              <Text style={styles.settingLabel}>Notification Settings</Text>
               <Text style={styles.settingDescription}>
                 Configure alerts and quiet hours
               </Text>

@@ -7,16 +7,77 @@ import {
   Switch,
   TouchableOpacity,
   Modal,
+  Alert,
 } from 'react-native';
-import { Server } from '../types';
-import { getServers } from '../services/storage';
-import {
-  NotificationPreferences,
-  getNotificationPreferences,
-  saveNotificationPreferences,
-  DEFAULT_NOTIFICATION_PREFERENCES,
-} from '../services/notificationPrefs';
 import { wsService } from '../services/websocket';
+
+interface EscalationConfig {
+  events: {
+    waiting_for_input: boolean;
+    error_detected: boolean;
+    session_completed: boolean;
+  };
+  pushDelaySeconds: number;
+  rateLimitSeconds: number;
+  quietHours: {
+    enabled: boolean;
+    start: string;
+    end: string;
+  };
+}
+
+interface RegisteredDevice {
+  deviceId: string;
+  token: string;
+  registeredAt: number;
+  lastSeen: number;
+}
+
+interface HistoryEntry {
+  id: string;
+  timestamp: number;
+  eventType: string;
+  sessionId?: string;
+  sessionName?: string;
+  preview: string;
+  tier: 'browser' | 'push' | 'both';
+  acknowledged: boolean;
+}
+
+const EVENT_TYPE_LABELS: Record<string, string> = {
+  waiting_for_input: 'Waiting',
+  error_detected: 'Error',
+  session_completed: 'Completed',
+};
+
+const EVENT_TYPE_COLORS: Record<string, string> = {
+  waiting_for_input: '#f59e0b',
+  error_detected: '#ef4444',
+  session_completed: '#10b981',
+};
+
+const PUSH_DELAY_OPTIONS = [
+  { value: 0, label: 'Immediate' },
+  { value: 60, label: '1 min' },
+  { value: 120, label: '2 min' },
+  { value: 300, label: '5 min' },
+  { value: 600, label: '10 min' },
+  { value: 1800, label: '30 min' },
+];
+
+const RATE_LIMIT_OPTIONS = [
+  { value: 0, label: 'None' },
+  { value: 30, label: '30s' },
+  { value: 60, label: '1 min' },
+  { value: 300, label: '5 min' },
+  { value: 900, label: '15 min' },
+];
+
+const TIER_COLORS: Record<string, string> = {
+  browser: '#3b82f6',
+  push: '#f59e0b',
+  both: '#10b981',
+};
 
 interface NotificationSettingsProps {
   onBack: () => void;
@@ -116,35 +177,29 @@ function TimePicker({
   );
 }
 
-// Throttle picker
-const THROTTLE_OPTIONS = [
-  { value: 0, label: 'No limit' },
-  { value: 5, label: '5 minutes' },
-  { value: 15, label: '15 minutes' },
-  { value: 30, label: '30 minutes' },
-  { value: 60, label: '1 hour' },
-  { value: 120, label: '2 hours' },
-];
-
-function ThrottlePicker({
+// Option picker modal
+function OptionPicker({
   visible,
+  title,
+  options,
   value,
   onSelect,
   onCancel,
 }: {
   visible: boolean;
+  title: string;
+  options: { value: number; label: string }[];
   value: number;
-  onSelect: (minutes: number) => void;
+  onSelect: (value: number) => void;
   onCancel: () => void;
 }) {
   return (
     <Modal visible={visible} transparent animationType="fade">
       <View style={pickerStyles.overlay}>
         <View style={pickerStyles.container}>
-          <Text style={pickerStyles.title}>Minimum Time Between Notifications</Text>
-
+          <Text style={pickerStyles.title}>{title}</Text>
           <View style={pickerStyles.optionList}>
-            {THROTTLE_OPTIONS.map((option) => (
+            {options.map((option) => (
               <TouchableOpacity
                 key={option.value}
                 style={[pickerStyles.listOption, value === option.value && pickerStyles.optionSelected]}
@@ -156,7 +211,6 @@ function ThrottlePicker({
               </TouchableOpacity>
             ))}
           </View>
-
           <TouchableOpacity style={pickerStyles.fullCancelButton} onPress={onCancel}>
             <Text style={pickerStyles.cancelText}>Cancel</Text>
           </TouchableOpacity>
@@ -166,97 +220,89 @@ function ThrottlePicker({
   );
 }
 
-interface ServerNotificationCardProps {
-  server: Server;
-  prefs: NotificationPreferences;
-  onUpdate: (prefs: NotificationPreferences) => void;
-  isConnected: boolean;
-}
+export function NotificationSettings({ onBack }: NotificationSettingsProps) {
+  const [isConnected, setIsConnected] = useState(wsService.isConnected());
+  const [config, setConfig] = useState<EscalationConfig | null>(null);
+  const [devices, setDevices] = useState<RegisteredDevice[]>([]);
+  const [history, setHistory] = useState<HistoryEntry[]>([]);
+  const [loading, setLoading] = useState(true);
 
-function ServerNotificationCard({
-  server,
-  prefs,
-  onUpdate,
-  isConnected,
-}: ServerNotificationCardProps) {
   const [showStartPicker, setShowStartPicker] = useState(false);
   const [showEndPicker, setShowEndPicker] = useState(false);
-  const [showThrottlePicker, setShowThrottlePicker] = useState(false);
+  const [showDelayPicker, setShowDelayPicker] = useState(false);
+  const [showRatePicker, setShowRatePicker] = useState(false);
 
-  const isCurrentServer = isConnected && wsService.getServerId() === server.id;
+  useEffect(() => {
+    const unsubscribe = wsService.onStateChange((state) => {
+      setIsConnected(state.status === 'connected');
+    });
+    return unsubscribe;
+  }, []);
 
-  const handleToggleEnabled = (value: boolean) => {
-    onUpdate({ ...prefs, enabled: value });
-  };
+  useEffect(() => {
+    if (isConnected) {
+      loadAll();
+    } else {
+      setLoading(false);
+    }
+  }, [isConnected]);
 
-  const handleToggleQuietHours = async (value: boolean) => {
-    const newPrefs = { ...prefs, quietHoursEnabled: value };
-    onUpdate(newPrefs);
-    if (isCurrentServer) {
-      try {
-        await wsService.sendRequest('set_notification_prefs', {
-          quietHoursEnabled: value,
-          quietHoursStart: prefs.quietHoursStart,
-          quietHoursEnd: prefs.quietHoursEnd,
-          throttleMinutes: prefs.throttleMinutes,
-        });
-      } catch (err) {
-        console.error('Failed to update quiet hours:', err);
+  const loadAll = async () => {
+    setLoading(true);
+    try {
+      const [configRes, devicesRes, historyRes] = await Promise.all([
+        wsService.sendRequest('get_escalation_config'),
+        wsService.sendRequest('get_devices'),
+        wsService.sendRequest('get_notification_history', { limit: 20 }),
+      ]);
+
+      if (configRes.success && configRes.payload) {
+        const p = configRes.payload as { config: EscalationConfig };
+        setConfig(p.config);
       }
+      if (devicesRes.success && devicesRes.payload) {
+        const p = devicesRes.payload as { devices: RegisteredDevice[] };
+        setDevices(p.devices ?? []);
+      }
+      if (historyRes.success && historyRes.payload) {
+        const p = historyRes.payload as { entries: HistoryEntry[] };
+        setHistory(p.entries ?? []);
+      }
+    } catch (err) {
+      console.error('Failed to load notification settings:', err);
+    } finally {
+      setLoading(false);
     }
   };
 
-  const handleSetStartTime = async (time: string) => {
-    setShowStartPicker(false);
-    const newPrefs = { ...prefs, quietHoursStart: time };
-    onUpdate(newPrefs);
-    if (isCurrentServer) {
-      try {
-        await wsService.sendRequest('set_notification_prefs', {
-          quietHoursEnabled: prefs.quietHoursEnabled,
-          quietHoursStart: time,
-          quietHoursEnd: prefs.quietHoursEnd,
-          throttleMinutes: prefs.throttleMinutes,
-        });
-      } catch (err) {
-        console.error('Failed to update start time:', err);
+  const updateConfig = useCallback(async (updates: Partial<EscalationConfig>) => {
+    try {
+      const response = await wsService.sendRequest('update_escalation_config', updates);
+      if (response.success && response.payload) {
+        const p = response.payload as { config: EscalationConfig };
+        setConfig(p.config);
       }
+    } catch (err) {
+      console.error('Failed to update escalation config:', err);
     }
+  }, []);
+
+  const handleEventToggle = (eventType: keyof EscalationConfig['events'], value: boolean) => {
+    if (!config) return;
+    updateConfig({ events: { ...config.events, [eventType]: value } });
   };
 
-  const handleSetEndTime = async (time: string) => {
-    setShowEndPicker(false);
-    const newPrefs = { ...prefs, quietHoursEnd: time };
-    onUpdate(newPrefs);
-    if (isCurrentServer) {
-      try {
-        await wsService.sendRequest('set_notification_prefs', {
-          quietHoursEnabled: prefs.quietHoursEnabled,
-          quietHoursStart: prefs.quietHoursStart,
-          quietHoursEnd: time,
-          throttleMinutes: prefs.throttleMinutes,
-        });
-      } catch (err) {
-        console.error('Failed to update end time:', err);
-      }
-    }
+  const handleQuietHoursToggle = (value: boolean) => {
+    if (!config) return;
+    updateConfig({ quietHours: { ...config.quietHours, enabled: value } });
   };
 
-  const handleSetThrottle = async (minutes: number) => {
-    setShowThrottlePicker(false);
-    const newPrefs = { ...prefs, throttleMinutes: minutes };
-    onUpdate(newPrefs);
-    if (isCurrentServer) {
-      try {
-        await wsService.sendRequest('set_notification_prefs', {
-          quietHoursEnabled: prefs.quietHoursEnabled,
-          quietHoursStart: prefs.quietHoursStart,
-          quietHoursEnd: prefs.quietHoursEnd,
-          throttleMinutes: minutes,
-        });
-      } catch (err) {
-        console.error('Failed to update throttle:', err);
-      }
+  const handleTestPush = async () => {
+    try {
+      await wsService.sendRequest('send_test_notification');
+      Alert.alert('Sent', 'Test push notification sent to all devices.');
+    } catch {
+      Alert.alert('Error', 'Failed to send test notification.');
     }
   };
 
@@ -267,154 +313,56 @@ function ServerNotificationCard({
     return `${hour12}:${m.toString().padStart(2, '0')} ${suffix}`;
   };
 
-  const getThrottleLabel = (minutes: number) => {
-    const option = THROTTLE_OPTIONS.find((o) => o.value === minutes);
-    return option?.label || `${minutes} min`;
+  const getDelayLabel = (seconds: number) => {
+    const opt = PUSH_DELAY_OPTIONS.find((o) => o.value === seconds);
+    return opt?.label || `${seconds}s`;
   };
 
-  return (
-    <View style={styles.serverCard}>
-      <View style={styles.serverHeader}>
-        <Text style={styles.serverName}>{server.name}</Text>
-        {isCurrentServer && (
-          <View style={styles.connectedBadge}>
-            <Text style={styles.connectedText}>Connected</Text>
-          </View>
-        )}
-      </View>
-
-      <View style={styles.settingRow}>
-        <View style={styles.settingInfo}>
-          <Text style={styles.settingLabel}>Notifications</Text>
-          <Text style={styles.settingDescription}>
-            Receive push notifications from this server
-          </Text>
-        </View>
-        <Switch
-          value={prefs.enabled}
-          onValueChange={handleToggleEnabled}
-          trackColor={{ false: '#374151', true: '#3b82f6' }}
-        />
-      </View>
-
-      {prefs.enabled && (
-        <>
-          <View style={styles.settingRow}>
-            <View style={styles.settingInfo}>
-              <Text style={styles.settingLabel}>Quiet Hours</Text>
-              <Text style={styles.settingDescription}>
-                Silence notifications during set hours
-              </Text>
-            </View>
-            <Switch
-              value={prefs.quietHoursEnabled}
-              onValueChange={handleToggleQuietHours}
-              trackColor={{ false: '#374151', true: '#3b82f6' }}
-            />
-          </View>
-
-          {prefs.quietHoursEnabled && (
-            <View style={styles.timeRow}>
-              <TouchableOpacity style={styles.timeButton} onPress={() => setShowStartPicker(true)}>
-                <Text style={styles.timeLabel}>From</Text>
-                <Text style={styles.timeValue}>{formatTime(prefs.quietHoursStart)}</Text>
-              </TouchableOpacity>
-              <Text style={styles.timeSeparator}>to</Text>
-              <TouchableOpacity style={styles.timeButton} onPress={() => setShowEndPicker(true)}>
-                <Text style={styles.timeLabel}>Until</Text>
-                <Text style={styles.timeValue}>{formatTime(prefs.quietHoursEnd)}</Text>
-              </TouchableOpacity>
-            </View>
-          )}
-
-          <View style={styles.divider} />
-
-          <TouchableOpacity style={styles.settingRow} onPress={() => setShowThrottlePicker(true)}>
-            <View style={styles.settingInfo}>
-              <Text style={styles.settingLabel}>Rate Limit</Text>
-              <Text style={styles.settingDescription}>
-                Minimum time between notifications
-              </Text>
-            </View>
-            <View style={styles.valueButton}>
-              <Text style={styles.valueText}>{getThrottleLabel(prefs.throttleMinutes)}</Text>
-              <Text style={styles.valueArrow}>›</Text>
-            </View>
-          </TouchableOpacity>
-        </>
-      )}
-
-      <TimePicker
-        visible={showStartPicker}
-        value={prefs.quietHoursStart}
-        onSelect={handleSetStartTime}
-        onCancel={() => setShowStartPicker(false)}
-        title="Quiet Hours Start"
-      />
-      <TimePicker
-        visible={showEndPicker}
-        value={prefs.quietHoursEnd}
-        onSelect={handleSetEndTime}
-        onCancel={() => setShowEndPicker(false)}
-        title="Quiet Hours End"
-      />
-      <ThrottlePicker
-        visible={showThrottlePicker}
-        value={prefs.throttleMinutes}
-        onSelect={handleSetThrottle}
-        onCancel={() => setShowThrottlePicker(false)}
-      />
-    </View>
-  );
-}
-
-export function NotificationSettings({ onBack }: NotificationSettingsProps) {
-  const [servers, setServers] = useState<Server[]>([]);
-  const [preferences, setPreferences] = useState<Map<string, NotificationPreferences>>(new Map());
-  const [loading, setLoading] = useState(true);
-  const [isConnected, setIsConnected] = useState(wsService.isConnected());
-
-  useEffect(() => {
-    loadData();
-
-    const unsubscribe = wsService.onStateChange((state) => {
-      setIsConnected(state.status === 'connected');
-    });
-
-    return unsubscribe;
-  }, []);
-
-  const loadData = async () => {
-    const loadedServers = await getServers();
-    setServers(loadedServers);
-
-    const prefsMap = new Map<string, NotificationPreferences>();
-    for (const server of loadedServers) {
-      const prefs = await getNotificationPreferences(server.id);
-      prefsMap.set(server.id, prefs);
-    }
-    setPreferences(prefsMap);
-    setLoading(false);
+  const getRateLimitLabel = (seconds: number) => {
+    const opt = RATE_LIMIT_OPTIONS.find((o) => o.value === seconds);
+    return opt?.label || `${seconds}s`;
   };
 
-  const handleUpdatePrefs = useCallback(
-    async (serverId: string, newPrefs: NotificationPreferences) => {
-      setPreferences((prev) => {
-        const updated = new Map(prev);
-        updated.set(serverId, newPrefs);
-        return updated;
-      });
-
-      await saveNotificationPreferences(serverId, newPrefs);
-    },
-    []
-  );
+  const formatRelative = (timestamp: number) => {
+    const delta = Date.now() - timestamp;
+    if (delta < 60_000) return 'just now';
+    const mins = Math.floor(delta / 60_000);
+    if (mins < 60) return `${mins}m ago`;
+    const hours = Math.floor(mins / 60);
+    if (hours < 24) return `${hours}h ago`;
+    const days = Math.floor(hours / 24);
+    return `${days}d ago`;
+  };
 
   if (loading) {
     return (
       <View style={styles.container}>
+        <View style={styles.header}>
+          <TouchableOpacity onPress={onBack} style={styles.backButton}>
+            <Text style={styles.backButtonText}>‹ Back</Text>
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>Notifications</Text>
+          <View style={styles.placeholder} />
+        </View>
         <View style={styles.centered}>
           <Text style={styles.loadingText}>Loading...</Text>
+        </View>
+      </View>
+    );
+  }
+
+  if (!isConnected) {
+    return (
+      <View style={styles.container}>
+        <View style={styles.header}>
+          <TouchableOpacity onPress={onBack} style={styles.backButton}>
+            <Text style={styles.backButtonText}>‹ Back</Text>
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>Notifications</Text>
+          <View style={styles.placeholder} />
+        </View>
+        <View style={styles.centered}>
+          <Text style={styles.emptyText}>Connect to a server to configure notifications.</Text>
         </View>
       </View>
     );
@@ -431,43 +379,202 @@ export function NotificationSettings({ onBack }: NotificationSettingsProps) {
       </View>
 
       <ScrollView style={styles.content} contentContainerStyle={styles.contentContainer}>
-        {servers.length === 0 ? (
-          <View style={styles.emptyState}>
-            <Text style={styles.emptyText}>
-              No servers configured. Add a server first to configure notifications.
-            </Text>
-          </View>
-        ) : (
+        {config && (
           <>
-            <Text style={styles.sectionTitle}>Per-Server Settings</Text>
-            {servers.map((server) => {
-              const prefs = preferences.get(server.id) || DEFAULT_NOTIFICATION_PREFERENCES;
-              return (
-                <ServerNotificationCard
-                  key={server.id}
-                  server={server}
-                  prefs={prefs}
-                  onUpdate={(newPrefs) => handleUpdatePrefs(server.id, newPrefs)}
-                  isConnected={isConnected}
-                />
-              );
-            })}
+            {/* Escalation Config */}
+            <Text style={styles.sectionTitle}>Escalation</Text>
 
-            <View style={styles.helpSection}>
-              <Text style={styles.helpTitle}>About Notifications</Text>
-              <Text style={styles.helpText}>
-                • Quiet Hours: No notifications during specified times
-              </Text>
-              <Text style={styles.helpText}>
-                • Rate Limit: Prevents notification spam
-              </Text>
-              <Text style={styles.helpText}>
-                • Instant Notify: Available per-session in session settings
-              </Text>
+            <View style={styles.card}>
+              <Text style={styles.cardTitle}>Event Types</Text>
+              {(['waiting_for_input', 'error_detected', 'session_completed'] as const).map((evt) => (
+                <View key={evt} style={styles.settingRow}>
+                  <Text style={styles.settingLabel}>{EVENT_TYPE_LABELS[evt] || evt}</Text>
+                  <Switch
+                    value={config.events[evt]}
+                    onValueChange={(v) => handleEventToggle(evt, v)}
+                    trackColor={{ false: '#374151', true: '#3b82f6' }}
+                  />
+                </View>
+              ))}
+            </View>
+
+            <TouchableOpacity style={styles.card} onPress={() => setShowDelayPicker(true)}>
+              <View style={styles.settingRowNoFlex}>
+                <View style={styles.settingInfo}>
+                  <Text style={styles.settingLabel}>Push Escalation Delay</Text>
+                  <Text style={styles.settingDescription}>
+                    Wait before sending push if unacknowledged
+                  </Text>
+                </View>
+                <View style={styles.valueButton}>
+                  <Text style={styles.valueText}>{getDelayLabel(config.pushDelaySeconds)}</Text>
+                  <Text style={styles.valueArrow}>›</Text>
+                </View>
+              </View>
+            </TouchableOpacity>
+
+            <TouchableOpacity style={styles.card} onPress={() => setShowRatePicker(true)}>
+              <View style={styles.settingRowNoFlex}>
+                <View style={styles.settingInfo}>
+                  <Text style={styles.settingLabel}>Rate Limit</Text>
+                  <Text style={styles.settingDescription}>
+                    Min time between notifications per session
+                  </Text>
+                </View>
+                <View style={styles.valueButton}>
+                  <Text style={styles.valueText}>{getRateLimitLabel(config.rateLimitSeconds)}</Text>
+                  <Text style={styles.valueArrow}>›</Text>
+                </View>
+              </View>
+            </TouchableOpacity>
+
+            <View style={styles.card}>
+              <View style={styles.settingRow}>
+                <View style={styles.settingInfo}>
+                  <Text style={styles.settingLabel}>Quiet Hours</Text>
+                  <Text style={styles.settingDescription}>
+                    Suppress push during set hours
+                  </Text>
+                </View>
+                <Switch
+                  value={config.quietHours.enabled}
+                  onValueChange={handleQuietHoursToggle}
+                  trackColor={{ false: '#374151', true: '#3b82f6' }}
+                />
+              </View>
+              {config.quietHours.enabled && (
+                <View style={styles.timeRow}>
+                  <TouchableOpacity style={styles.timeButton} onPress={() => setShowStartPicker(true)}>
+                    <Text style={styles.timeLabel}>From</Text>
+                    <Text style={styles.timeValue}>{formatTime(config.quietHours.start)}</Text>
+                  </TouchableOpacity>
+                  <Text style={styles.timeSeparator}>to</Text>
+                  <TouchableOpacity style={styles.timeButton} onPress={() => setShowEndPicker(true)}>
+                    <Text style={styles.timeLabel}>Until</Text>
+                    <Text style={styles.timeValue}>{formatTime(config.quietHours.end)}</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
             </View>
           </>
         )}
+
+        {/* Devices */}
+        <Text style={[styles.sectionTitle, { marginTop: 24 }]}>Devices ({devices.length})</Text>
+        {devices.length === 0 ? (
+          <View style={styles.card}>
+            <Text style={styles.emptyText}>
+              Push automatically registered on connect. No devices yet.
+            </Text>
+          </View>
+        ) : (
+          devices.map((device) => (
+            <View key={device.deviceId} style={styles.card}>
+              <Text style={styles.deviceId}>{device.deviceId}</Text>
+              <Text style={styles.settingDescription}>
+                Registered {new Date(device.registeredAt).toLocaleDateString()} | Last seen {formatRelative(device.lastSeen)}
+              </Text>
+            </View>
+          ))
+        )}
+
+        {devices.length > 0 && (
+          <TouchableOpacity style={styles.actionButton} onPress={handleTestPush}>
+            <Text style={styles.actionButtonText}>Send Test Push</Text>
+          </TouchableOpacity>
+        )}
+
+        {/* Recent History */}
+        <Text style={[styles.sectionTitle, { marginTop: 24 }]}>Recent History</Text>
+        {history.length === 0 ? (
+          <View style={styles.card}>
+            <Text style={styles.emptyText}>No notification history yet.</Text>
+          </View>
+        ) : (
+          history.slice(0, 10).map((entry) => (
+            <View key={entry.id} style={styles.card}>
+              <View style={styles.historyHeader}>
+                <View style={[styles.badge, { backgroundColor: EVENT_TYPE_COLORS[entry.eventType] || '#374151' }]}>
+                  <Text style={styles.badgeText}>{EVENT_TYPE_LABELS[entry.eventType] || entry.eventType}</Text>
+                </View>
+                <View style={[styles.badge, { backgroundColor: TIER_COLORS[entry.tier] || '#374151' }]}>
+                  <Text style={styles.badgeText}>{entry.tier}</Text>
+                </View>
+                {entry.acknowledged && (
+                  <View style={[styles.badge, { backgroundColor: '#10b981' }]}>
+                    <Text style={styles.badgeText}>ACK</Text>
+                  </View>
+                )}
+                <Text style={styles.timestampText}>{formatRelative(entry.timestamp)}</Text>
+              </View>
+              <Text style={styles.previewText} numberOfLines={2}>{entry.preview}</Text>
+            </View>
+          ))
+        )}
+
+        <View style={styles.helpSection}>
+          <Text style={styles.helpTitle}>How it works</Text>
+          <Text style={styles.helpText}>
+            1. Event occurs (waiting, error, completed)
+          </Text>
+          <Text style={styles.helpText}>
+            2. Browser notification fires immediately
+          </Text>
+          <Text style={styles.helpText}>
+            3. If unacknowledged after delay, push sent to phone
+          </Text>
+          <Text style={styles.helpText}>
+            4. Viewing session or sending input cancels push
+          </Text>
+        </View>
       </ScrollView>
+
+      {config && (
+        <>
+          <TimePicker
+            visible={showStartPicker}
+            value={config.quietHours.start}
+            onSelect={(time) => {
+              setShowStartPicker(false);
+              updateConfig({ quietHours: { ...config.quietHours, start: time } });
+            }}
+            onCancel={() => setShowStartPicker(false)}
+            title="Quiet Hours Start"
+          />
+          <TimePicker
+            visible={showEndPicker}
+            value={config.quietHours.end}
+            onSelect={(time) => {
+              setShowEndPicker(false);
+              updateConfig({ quietHours: { ...config.quietHours, end: time } });
+            }}
+            onCancel={() => setShowEndPicker(false)}
+            title="Quiet Hours End"
+          />
+          <OptionPicker
+            visible={showDelayPicker}
+            title="Push Escalation Delay"
+            options={PUSH_DELAY_OPTIONS}
+            value={config.pushDelaySeconds}
+            onSelect={(value) => {
+              setShowDelayPicker(false);
+              updateConfig({ pushDelaySeconds: value });
+            }}
+            onCancel={() => setShowDelayPicker(false)}
+          />
+          <OptionPicker
+            visible={showRatePicker}
+            title="Rate Limit"
+            options={RATE_LIMIT_OPTIONS}
+            value={config.rateLimitSeconds}
+            onSelect={(value) => {
+              setShowRatePicker(false);
+              updateConfig({ rateLimitSeconds: value });
+            }}
+            onCancel={() => setShowRatePicker(false)}
+          />
+        </>
+      )}
     </View>
   );
 }
@@ -630,42 +737,28 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     marginBottom: 12,
   },
-  serverCard: {
+  card: {
     backgroundColor: '#1f2937',
     borderRadius: 12,
     padding: 16,
-    marginBottom: 16,
+    marginBottom: 8,
   },
-  serverHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 16,
-    paddingBottom: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#374151',
-  },
-  serverName: {
+  cardTitle: {
     color: '#f3f4f6',
-    fontSize: 18,
+    fontSize: 15,
     fontWeight: '600',
-  },
-  connectedBadge: {
-    backgroundColor: '#10b981',
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 4,
-  },
-  connectedText: {
-    color: '#fff',
-    fontSize: 11,
-    fontWeight: '600',
+    marginBottom: 12,
   },
   settingRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingVertical: 8,
+    paddingVertical: 6,
+  },
+  settingRowNoFlex: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
   },
   settingInfo: {
     flex: 1,
@@ -680,10 +773,22 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: '#9ca3af',
   },
-  divider: {
-    height: 1,
+  valueButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
     backgroundColor: '#374151',
-    marginVertical: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+  },
+  valueText: {
+    color: '#f3f4f6',
+    fontSize: 14,
+  },
+  valueArrow: {
+    color: '#6b7280',
+    fontSize: 18,
+    marginLeft: 8,
   },
   timeRow: {
     flexDirection: 'row',
@@ -714,26 +819,51 @@ const styles = StyleSheet.create({
     color: '#6b7280',
     fontSize: 14,
   },
-  valueButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#374151',
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 8,
-  },
-  valueText: {
+  deviceId: {
     color: '#f3f4f6',
     fontSize: 14,
+    fontWeight: '500',
+    marginBottom: 4,
   },
-  valueArrow: {
-    color: '#6b7280',
-    fontSize: 18,
-    marginLeft: 8,
-  },
-  emptyState: {
-    padding: 32,
+  actionButton: {
+    backgroundColor: '#3b82f6',
+    borderRadius: 8,
+    paddingVertical: 12,
     alignItems: 'center',
+    marginBottom: 8,
+  },
+  actionButtonText: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  historyHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 6,
+    flexWrap: 'wrap',
+  },
+  badge: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 10,
+  },
+  badgeText: {
+    color: '#fff',
+    fontSize: 10,
+    fontWeight: '600',
+    textTransform: 'uppercase',
+  },
+  timestampText: {
+    color: '#6b7280',
+    fontSize: 12,
+    marginLeft: 'auto',
+  },
+  previewText: {
+    color: '#9ca3af',
+    fontSize: 13,
+    lineHeight: 18,
   },
   emptyText: {
     color: '#9ca3af',
@@ -744,7 +874,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#1f2937',
     borderRadius: 12,
     padding: 16,
-    marginTop: 8,
+    marginTop: 16,
   },
   helpTitle: {
     color: '#f3f4f6',

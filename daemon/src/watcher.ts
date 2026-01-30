@@ -23,10 +23,12 @@ interface TrackedConversation {
   lastModified: number;
   messageCount: number;
   isWaitingForInput: boolean;
+  isRunning: boolean;
   lastCompactionLine: number;
   cachedMessages: ConversationMessage[] | null;
   cachedTaskSummary?: TaskSummary;
   lastEmittedPendingTools: string; // JSON key of last emitted pending tools to deduplicate
+  lastErrorCount: number; // Track error count for dedup
 }
 
 export class SessionWatcher extends EventEmitter {
@@ -247,6 +249,21 @@ export class SessionWatcher extends EventEmitter {
       // Silent fail - tasks are optional
     }
 
+    // Detect error tool results for error-detected event
+    let errorCount = 0;
+    for (const msg of messages) {
+      if (msg.toolCalls) {
+        for (const tc of msg.toolCalls) {
+          if (tc.status === 'error') errorCount++;
+        }
+      }
+    }
+
+    // Detect running state: has messages and last message is from assistant with no waiting
+    const currentIsRunning = messages.length > 0 && !conversationWaiting;
+    const prevWasRunning = prevTracked?.isRunning ?? false;
+    const prevErrorCount = prevTracked?.lastErrorCount ?? 0;
+
     // Track this conversation with cached parse result
     const tracked: TrackedConversation = {
       path: filePath,
@@ -254,12 +271,40 @@ export class SessionWatcher extends EventEmitter {
       lastModified: stats.mtimeMs,
       messageCount: messages.length,
       isWaitingForInput: conversationWaiting,
+      isRunning: currentIsRunning,
       lastCompactionLine: newCompactionLine,
       cachedMessages: messages,
       cachedTaskSummary,
       lastEmittedPendingTools: prevTracked?.lastEmittedPendingTools || '',
+      lastErrorCount: errorCount,
     };
     this.conversations.set(sessionId, tracked);
+
+    // Emit error-detected when new errors appear
+    if (errorCount > prevErrorCount) {
+      const lastErrorTool = messages
+        .flatMap(m => m.toolCalls || [])
+        .filter(tc => tc.status === 'error')
+        .pop();
+      this.emit('error-detected', {
+        sessionId,
+        projectPath,
+        sessionName,
+        content: lastErrorTool?.output || 'Tool error detected',
+      });
+    }
+
+    // Emit session-completed when running transitions to not-running (idle)
+    // Only emit after initial load to avoid false positives on startup
+    if (prevWasRunning && !currentIsRunning && prevTracked) {
+      const lastMsg = messages[messages.length - 1];
+      this.emit('session-completed', {
+        sessionId,
+        projectPath,
+        sessionName,
+        content: lastMsg?.content?.substring(0, 200) || 'Session completed',
+      });
+    }
 
     // During initial load (first 3 seconds), always pick the most recent session
     // After that, only auto-select if no active session exists
@@ -610,6 +655,7 @@ export class SessionWatcher extends EventEmitter {
       status: 'idle' | 'working' | 'waiting' | 'error';
       lastActivity: number;
       currentActivity?: string;
+      tmuxSessionName?: string;
       taskSummary?: {
         total: number;
         pending: number;
@@ -624,9 +670,15 @@ export class SessionWatcher extends EventEmitter {
   }> {
     // Get tmux sessions to filter - only show conversations with active tmux sessions
     // Encode the tmux paths the same way the CLI does: /a/b/c -> -a-b-c
-    const activeTmuxEncodedPaths = new Set(
-      tmuxSessions?.map(s => s.workingDir?.replace(/\//g, '-')).filter((p): p is string => !!p) || []
-    );
+    const activeTmuxEncodedPaths = new Map<string, string>();
+    if (tmuxSessions) {
+      for (const s of tmuxSessions) {
+        const encoded = s.workingDir?.replace(/\//g, '-');
+        if (encoded) {
+          activeTmuxEncodedPaths.set(encoded, s.name);
+        }
+      }
+    }
 
     const sessions: Array<{
       id: string;
@@ -635,6 +687,7 @@ export class SessionWatcher extends EventEmitter {
       status: 'idle' | 'working' | 'waiting' | 'error';
       lastActivity: number;
       currentActivity?: string;
+      tmuxSessionName?: string;
       taskSummary?: {
         total: number;
         pending: number;
@@ -672,6 +725,9 @@ export class SessionWatcher extends EventEmitter {
       // Task summaries are computed during processFileChange and cached.
       const taskSummary = conv.cachedTaskSummary;
 
+      // Look up the tmux session name from the encoded path map
+      const tmuxSessionName = activeTmuxEncodedPaths.get(id);
+
       sessions.push({
         id,
         name: conv.projectPath.split('/').pop() || id,
@@ -679,6 +735,7 @@ export class SessionWatcher extends EventEmitter {
         status,
         lastActivity: conv.lastModified,
         currentActivity,
+        tmuxSessionName,
         taskSummary,
       });
     }

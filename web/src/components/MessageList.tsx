@@ -85,8 +85,17 @@ export function MessageList({
     );
   }
 
+  const handleClick = (e: React.MouseEvent) => {
+    // Don't steal focus from interactive elements or text selection
+    const target = e.target as HTMLElement;
+    if (target.closest('button, a, code, pre, .option-btn, .tool-card')) return;
+    if (window.getSelection()?.toString()) return;
+    const textarea = document.querySelector('.input-bar-textarea') as HTMLElement | null;
+    textarea?.focus();
+  };
+
   return (
-    <div className="msg-list" ref={containerRef} onScroll={handleScroll}>
+    <div className="msg-list" ref={containerRef} onScroll={handleScroll} onClick={handleClick}>
       {loadingMore && (
         <div className="msg-list-loading-more">
           <div className="spinner small" />

@@ -19,6 +19,8 @@ import { templates as scaffoldTemplates } from './scaffold/templates';
 import { scaffoldProject, previewScaffold } from './scaffold/generator';
 import { ProjectConfig } from './scaffold/types';
 import { scoreTemplates } from './scaffold/scorer';
+import { EscalationService, EscalationEvent } from './escalation';
+import { NotificationEventType, EscalationConfig } from './types';
 
 // File for persisting tmux session configs
 const TMUX_CONFIGS_FILE = path.join(os.homedir(), '.companion', 'tmux-sessions.json');
@@ -56,6 +58,7 @@ export class WebSocketHandler {
   private scrollLogs: Array<{ event: string; ts: number; [key: string]: unknown }> = [];
   private readonly MAX_SCROLL_LOGS = 200;
   public autoApproveEnabled: boolean = false;
+  private escalation: EscalationService;
 
   constructor(
     server: Server,
@@ -74,6 +77,8 @@ export class WebSocketHandler {
     this.push = push;
     this.tmux = tmux || new TmuxManager('companion');
 
+    this.escalation = new EscalationService(this.push.getStore(), this.push);
+
     this.wss = new WebSocketServer({ server });
 
     this.wss.on('connection', (ws, req) => this.handleConnection(ws, req));
@@ -86,15 +91,21 @@ export class WebSocketHandler {
     this.watcher.on('status-change', (data) => {
       this.broadcast('status_change', data);
 
-      // Schedule push notification if waiting for input (include session info)
+      // Escalation for waiting_for_input
       if (data.isWaitingForInput && data.lastMessage) {
-        this.push.scheduleWaitingNotification(
-          data.lastMessage.content,
-          data.sessionId || undefined,
-          this.injector.getActiveSession() || undefined
-        );
-      } else {
-        this.push.cancelPendingNotification();
+        const event: EscalationEvent = {
+          eventType: 'waiting_for_input',
+          sessionId: data.sessionId || 'unknown',
+          sessionName: this.injector.getActiveSession() || 'unknown',
+          content: data.lastMessage.content,
+        };
+        const result = this.escalation.handleEvent(event);
+        if (result.shouldBroadcast) {
+          console.log(`Escalation: waiting_for_input broadcast for session "${event.sessionName}"`);
+        }
+      } else if (!data.isWaitingForInput && data.sessionId) {
+        // Session stopped waiting — acknowledge (cancel pending push)
+        this.escalation.acknowledgeSession(data.sessionId);
       }
     });
 
@@ -107,6 +118,25 @@ export class WebSocketHandler {
     this.watcher.on('compaction', (data) => {
       this.broadcast('compaction', data);
     });
+
+    // Escalation-based notifications for error-detected and session-completed
+    const handleEscalationEvent = (eventType: NotificationEventType, data: { sessionId: string; sessionName: string; content: string }) => {
+      const event: EscalationEvent = {
+        eventType,
+        sessionId: data.sessionId,
+        sessionName: data.sessionName,
+        content: data.content,
+      };
+      const result = this.escalation.handleEvent(event);
+      if (result.shouldBroadcast) {
+        console.log(`Escalation: ${eventType} broadcast for session "${data.sessionName}"`);
+      }
+      // Always broadcast the event to connected web clients
+      this.broadcast(eventType, data);
+    };
+
+    this.watcher.on('error-detected', (data) => handleEscalationEvent('error_detected', data));
+    this.watcher.on('session-completed', (data) => handleEscalationEvent('session_completed', data));
 
     // Load saved tmux session configs
     this.loadTmuxSessionConfigs();
@@ -316,7 +346,7 @@ export class WebSocketHandler {
         const status = this.watcher.getStatus();
         const t1 = Date.now();
         const statusSessionId = this.watcher.getActiveSessionId();
-        console.log(`WebSocket: get_status - ${t1-t0}ms`);
+        console.log(`WebSocket: get_status - ${t1-t0}ms - waiting: ${status.isWaitingForInput}, running: ${status.isRunning}, session: ${statusSessionId}`);
 
         this.send(client.ws, {
           type: 'status',
@@ -407,10 +437,24 @@ export class WebSocketHandler {
       case 'switch_session':
         // Handle switch_session asynchronously but await completion
         this.handleSwitchSession(client, payload as { sessionId: string; epoch?: number }, requestId);
+        // Acknowledge session — user is viewing it, cancel push escalation
+        {
+          const switchPayload = payload as { sessionId: string } | undefined;
+          if (switchPayload?.sessionId) {
+            this.escalation.acknowledgeSession(switchPayload.sessionId);
+          }
+        }
         break;
 
       case 'send_input':
         this.handleSendInput(client, payload as { input: string }, requestId);
+        // Acknowledge session — user is responding, cancel push escalation
+        {
+          const activeSessionId = this.watcher.getActiveSessionId();
+          if (activeSessionId) {
+            this.escalation.acknowledgeSession(activeSessionId);
+          }
+        }
         break;
 
       case 'send_image':
@@ -462,25 +506,7 @@ export class WebSocketHandler {
         }
         break;
 
-      case 'set_instant_notify':
-        const instantPayload = payload as { enabled: boolean };
-        if (client.deviceId) {
-          this.push.setInstantNotify(client.deviceId, instantPayload?.enabled ?? false);
-          this.send(client.ws, {
-            type: 'instant_notify_set',
-            success: true,
-            payload: { enabled: instantPayload?.enabled ?? false },
-            requestId,
-          });
-        } else {
-          this.send(client.ws, {
-            type: 'instant_notify_set',
-            success: false,
-            error: 'Device not registered for push',
-            requestId,
-          });
-        }
-        break;
+      // set_instant_notify removed — escalation model replaces per-device instant notify
 
       case 'set_auto_approve': {
         const autoApprovePayload = payload as { enabled: boolean };
@@ -500,34 +526,7 @@ export class WebSocketHandler {
         break;
       }
 
-      case 'set_notification_prefs':
-        const notifPrefs = payload as {
-          quietHoursEnabled?: boolean;
-          quietHoursStart?: string;
-          quietHoursEnd?: string;
-          throttleMinutes?: number;
-        };
-        if (client.deviceId) {
-          this.push.setNotificationPrefs(client.deviceId, {
-            quietHoursEnabled: notifPrefs?.quietHoursEnabled ?? false,
-            quietHoursStart: notifPrefs?.quietHoursStart ?? '22:00',
-            quietHoursEnd: notifPrefs?.quietHoursEnd ?? '08:00',
-            throttleMinutes: notifPrefs?.throttleMinutes ?? 0,
-          });
-          this.send(client.ws, {
-            type: 'notification_prefs_set',
-            success: true,
-            requestId,
-          });
-        } else {
-          this.send(client.ws, {
-            type: 'notification_prefs_set',
-            success: false,
-            error: 'Device not registered for push',
-            requestId,
-          });
-        }
-        break;
+      // set_notification_prefs removed — escalation config replaces per-device prefs
 
       case 'ping':
         if (client.deviceId) {
@@ -729,6 +728,149 @@ export class WebSocketHandler {
         })();
         break;
 
+      // Escalation config endpoints (replaces notification rules CRUD)
+      case 'get_escalation_config': {
+        const store = this.push.getStore();
+        this.send(client.ws, {
+          type: 'escalation_config',
+          success: true,
+          payload: { config: store.getEscalation() },
+          requestId,
+        });
+        break;
+      }
+
+      case 'update_escalation_config': {
+        const configPayload = payload as Partial<EscalationConfig>;
+        const store = this.push.getStore();
+        const updated = store.setEscalation(configPayload);
+        this.send(client.ws, {
+          type: 'escalation_config_updated',
+          success: true,
+          payload: { config: updated },
+          requestId,
+        });
+        break;
+      }
+
+      case 'get_pending_events': {
+        const events = this.escalation.getPendingEvents();
+        this.send(client.ws, {
+          type: 'pending_events',
+          success: true,
+          payload: { events },
+          requestId,
+        });
+        break;
+      }
+
+      // Device management
+      case 'get_devices': {
+        const store = this.push.getStore();
+        this.send(client.ws, {
+          type: 'devices',
+          success: true,
+          payload: { devices: store.getDevices() },
+          requestId,
+        });
+        break;
+      }
+
+      case 'remove_device': {
+        const removePayload = payload as { deviceId: string };
+        if (!removePayload?.deviceId) {
+          this.send(client.ws, { type: 'device_removed', success: false, error: 'Missing deviceId', requestId });
+          break;
+        }
+        const store = this.push.getStore();
+        const removed = store.removeDevice(removePayload.deviceId);
+        this.send(client.ws, {
+          type: 'device_removed',
+          success: removed,
+          error: removed ? undefined : 'Device not found',
+          requestId,
+        });
+        break;
+      }
+
+      // Session muting
+      case 'set_session_muted': {
+        const mutePayload = payload as { sessionId: string; muted: boolean };
+        if (!mutePayload?.sessionId || mutePayload.muted === undefined) {
+          this.send(client.ws, { type: 'session_muted_set', success: false, error: 'Missing sessionId or muted', requestId });
+          break;
+        }
+        const store = this.push.getStore();
+        store.setSessionMuted(mutePayload.sessionId, mutePayload.muted);
+        this.send(client.ws, {
+          type: 'session_muted_set',
+          success: true,
+          payload: { sessionId: mutePayload.sessionId, muted: mutePayload.muted },
+          requestId,
+        });
+        // Broadcast to all clients so mute state is visible everywhere
+        this.broadcast('session_mute_changed', { sessionId: mutePayload.sessionId, muted: mutePayload.muted });
+        break;
+      }
+
+      case 'get_muted_sessions': {
+        const store = this.push.getStore();
+        this.send(client.ws, {
+          type: 'muted_sessions',
+          success: true,
+          payload: { sessionIds: store.getMutedSessions() },
+          requestId,
+        });
+        break;
+      }
+
+      // Notification history
+      case 'get_notification_history': {
+        const histPayload = payload as { limit?: number } | undefined;
+        const store = this.push.getStore();
+        const history = store.getHistory(histPayload?.limit);
+        this.send(client.ws, {
+          type: 'notification_history',
+          success: true,
+          payload: history,
+          requestId,
+        });
+        break;
+      }
+
+      case 'clear_notification_history': {
+        const store = this.push.getStore();
+        store.clearHistory();
+        this.send(client.ws, {
+          type: 'notification_history_cleared',
+          success: true,
+          requestId,
+        });
+        break;
+      }
+
+      case 'send_test_notification': {
+        (async () => {
+          try {
+            const result = await this.push.sendTestNotification();
+            this.send(client.ws, {
+              type: 'test_notification_sent',
+              success: true,
+              payload: result,
+              requestId,
+            });
+          } catch (err) {
+            this.send(client.ws, {
+              type: 'test_notification_sent',
+              success: false,
+              error: String(err),
+              requestId,
+            });
+          }
+        })();
+        break;
+      }
+
       case 'scaffold_create':
         (async () => {
           try {
@@ -786,9 +928,6 @@ export class WebSocketHandler {
       });
       return;
     }
-
-    // Cancel any pending push notification since user is responding
-    this.push.cancelPendingNotification();
 
     // Check if the target session exists before trying to send
     const activeSession = this.injector.getActiveSession();
@@ -850,9 +989,6 @@ export class WebSocketHandler {
       fs.writeFileSync(filepath, buffer);
 
       console.log(`Image saved to: ${filepath}`);
-
-      // Cancel any pending push notification
-      this.push.cancelPendingNotification();
 
       // Send the file path to the coding session
       const success = await this.injector.sendInput(`Please look at this image: ${filepath}`);
@@ -931,9 +1067,6 @@ export class WebSocketHandler {
       });
       return;
     }
-
-    // Cancel any pending push notification
-    this.push.cancelPendingNotification();
 
     // Build combined message: image paths + user message
     const parts: string[] = [];

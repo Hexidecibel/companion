@@ -9,6 +9,7 @@ import { useMessageQueue } from '../hooks/useMessageQueue';
 import { addArchive } from '../services/archiveService';
 import { messageQueue } from '../services/messageQueue';
 import { connectionManager } from '../services/ConnectionManager';
+import { useSessionMute } from '../hooks/useSessionMute';
 import { WaitingIndicator } from './WaitingIndicator';
 import { TaskList } from './TaskList';
 import { MessageList } from './MessageList';
@@ -19,13 +20,15 @@ import { SubAgentDetail } from './SubAgentDetail';
 import { FileViewerModal } from './FileViewerModal';
 import { QueuedMessageBar } from './QueuedMessageBar';
 import { ArchiveModal } from './ArchiveModal';
+import { TerminalPanel } from './TerminalPanel';
 
 interface SessionViewProps {
   serverId: string | null;
   sessionId: string | null;
+  tmuxSessionName?: string;
 }
 
-export function SessionView({ serverId, sessionId }: SessionViewProps) {
+export function SessionView({ serverId, sessionId, tmuxSessionName }: SessionViewProps) {
   const {
     highlights,
     status,
@@ -40,6 +43,7 @@ export function SessionView({ serverId, sessionId }: SessionViewProps) {
   const { tasks, loading: tasksLoading } = useTasks(serverId, sessionId);
   const { agents, runningCount, completedCount, totalAgents } = useSubAgents(serverId, sessionId);
   const autoApprove = useAutoApprove(serverId);
+  const sessionMute = useSessionMute(serverId);
   const { queuedMessages, enqueue, cancel: cancelQueued, clearAll: clearAllQueued } = useMessageQueue(serverId);
 
   // Sub-agent state
@@ -52,6 +56,20 @@ export function SessionView({ serverId, sessionId }: SessionViewProps) {
 
   // Archive state
   const [showArchiveModal, setShowArchiveModal] = useState(false);
+
+  // Terminal view state
+  const [showTerminal, setShowTerminal] = useState(false);
+
+  // Auto-focus input and reset terminal view when session changes
+  useEffect(() => {
+    setShowTerminal(false);
+    if (serverId && sessionId) {
+      requestAnimationFrame(() => {
+        const textarea = document.querySelector('.input-bar-textarea') as HTMLElement | null;
+        textarea?.focus();
+      });
+    }
+  }, [serverId, sessionId]);
 
   // Track waiting state for auto-dequeue
   const prevWaitingRef = useRef(false);
@@ -167,6 +185,15 @@ export function SessionView({ serverId, sessionId }: SessionViewProps) {
       {/* Session header with actions */}
       <div className="session-header">
         <div className="session-header-actions">
+          {sessionId && (
+            <button
+              className={`session-mute-btn ${sessionMute.isMuted(sessionId) ? 'muted' : ''}`}
+              onClick={() => sessionMute.toggleMute(sessionId)}
+              title={sessionMute.isMuted(sessionId) ? 'Unmute notifications' : 'Mute notifications'}
+            >
+              {sessionMute.isMuted(sessionId) ? '\u{1F515} Muted' : '\u{1F514} Notify'}
+            </button>
+          )}
           <button
             className={`auto-approve-btn ${autoApprove.enabled ? 'auto-approve-btn-active' : ''}`}
             onClick={autoApprove.toggle}
@@ -175,6 +202,15 @@ export function SessionView({ serverId, sessionId }: SessionViewProps) {
           >
             {autoApprove.enabled ? 'Auto: ON' : 'Auto: OFF'}
           </button>
+          {tmuxSessionName && (
+            <button
+              className={`session-header-btn ${showTerminal ? 'terminal-active' : ''}`}
+              onClick={() => setShowTerminal(!showTerminal)}
+              title={showTerminal ? 'Show conversation' : 'Show terminal output'}
+            >
+              Terminal
+            </button>
+          )}
           <button
             className="session-header-btn"
             onClick={handleArchive}
@@ -193,38 +229,47 @@ export function SessionView({ serverId, sessionId }: SessionViewProps) {
         </div>
       </div>
 
-      <WaitingIndicator status={status} />
+      {showTerminal && tmuxSessionName && serverId ? (
+        <TerminalPanel
+          serverId={serverId}
+          tmuxSessionName={tmuxSessionName}
+        />
+      ) : (
+        <>
+          <WaitingIndicator status={status} />
 
-      <SubAgentBar
-        agents={agents}
-        runningCount={runningCount}
-        totalAgents={totalAgents}
-        onClick={() => setShowAgentsModal(true)}
-      />
+          <SubAgentBar
+            agents={agents}
+            runningCount={runningCount}
+            totalAgents={totalAgents}
+            onClick={() => setShowAgentsModal(true)}
+          />
 
-      <TaskList tasks={tasks} loading={tasksLoading} />
+          <TaskList tasks={tasks} loading={tasksLoading} />
 
-      <MessageList
-        highlights={highlights}
-        loading={loading}
-        loadingMore={loadingMore}
-        hasMore={hasMore}
-        onLoadMore={loadMore}
-        onSelectOption={handleSelectOption}
-        onViewFile={setViewingFile}
-      />
+          <MessageList
+            highlights={highlights}
+            loading={loading}
+            loadingMore={loadingMore}
+            hasMore={hasMore}
+            onLoadMore={loadMore}
+            onSelectOption={handleSelectOption}
+            onViewFile={setViewingFile}
+          />
 
-      <QueuedMessageBar
-        messages={queuedMessages}
-        onCancel={cancelQueued}
-        onClearAll={clearAllQueued}
-      />
+          <QueuedMessageBar
+            messages={queuedMessages}
+            onCancel={cancelQueued}
+            onClearAll={clearAllQueued}
+          />
 
-      <InputBar
-        onSend={handleSend}
-        onSendWithImages={handleSendWithImages}
-        disabled={!status?.isWaitingForInput && !status?.isRunning}
-      />
+          <InputBar
+            onSend={handleSend}
+            onSendWithImages={handleSendWithImages}
+            disabled={!status?.isWaitingForInput && !status?.isRunning}
+          />
+        </>
+      )}
 
       {/* Modals */}
       {showAgentsModal && (

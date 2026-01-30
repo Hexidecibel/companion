@@ -1,6 +1,7 @@
 import * as admin from 'firebase-admin';
 import * as fs from 'fs';
-import { RegisteredDevice } from './types';
+import { RegisteredDevice, NotificationEventType } from './types';
+import { NotificationStore } from './notification-store';
 
 interface ExpoPushMessage {
   to: string;
@@ -22,41 +23,12 @@ interface ExpoPushResponse {
   }>;
 }
 
-interface BatchedNotification {
-  preview: string;
-  timestamp: number;
-}
-
-interface DeviceNotificationPrefs {
-  quietHoursEnabled: boolean;
-  quietHoursStart: string; // "HH:MM"
-  quietHoursEnd: string;   // "HH:MM"
-  throttleMinutes: number;
-}
-
-const DEFAULT_DEVICE_PREFS: DeviceNotificationPrefs = {
-  quietHoursEnabled: false,
-  quietHoursStart: '22:00',
-  quietHoursEnd: '08:00',
-  throttleMinutes: 0,
-};
-
 export class PushNotificationService {
-  private devices: Map<string, RegisteredDevice> = new Map();
-  private instantNotifyDevices: Set<string> = new Set();
-  private devicePrefs: Map<string, DeviceNotificationPrefs> = new Map();
-  private lastNotificationTime: Map<string, number> = new Map();
-  private pendingPush: NodeJS.Timeout | null = null;
-  private pushDelayMs: number;
+  private store: NotificationStore;
   private firebaseInitialized: boolean = false;
 
-  // Batched notifications for non-instant devices
-  private batchedNotifications: BatchedNotification[] = [];
-  private batchTimer: NodeJS.Timeout | null = null;
-  private readonly BATCH_INTERVAL_MS = 4 * 60 * 60 * 1000; // 4 hours
-
-  constructor(credentialsPath: string | undefined, pushDelayMs: number) {
-    this.pushDelayMs = pushDelayMs;
+  constructor(credentialsPath: string | undefined, _pushDelayMs: number, store: NotificationStore) {
+    this.store = store;
 
     // Initialize Firebase if credentials provided
     if (credentialsPath && fs.existsSync(credentialsPath)) {
@@ -76,67 +48,12 @@ export class PushNotificationService {
     }
   }
 
-  setInstantNotify(deviceId: string, enabled: boolean): void {
-    if (enabled) {
-      this.instantNotifyDevices.add(deviceId);
-      console.log(`Push notifications: Instant notify enabled for ${deviceId}`);
-    } else {
-      this.instantNotifyDevices.delete(deviceId);
-      console.log(`Push notifications: Instant notify disabled for ${deviceId}`);
-    }
-  }
-
-  setNotificationPrefs(deviceId: string, prefs: DeviceNotificationPrefs): void {
-    this.devicePrefs.set(deviceId, prefs);
-    console.log(`Push notifications: Updated prefs for ${deviceId}:`, prefs);
-  }
-
-  private isInQuietHours(deviceId: string): boolean {
-    const prefs = this.devicePrefs.get(deviceId) || DEFAULT_DEVICE_PREFS;
-    if (!prefs.quietHoursEnabled) {
-      return false;
-    }
-
-    const now = new Date();
-    const currentMinutes = now.getHours() * 60 + now.getMinutes();
-
-    const [startH, startM] = prefs.quietHoursStart.split(':').map(Number);
-    const [endH, endM] = prefs.quietHoursEnd.split(':').map(Number);
-    const startMinutes = startH * 60 + startM;
-    const endMinutes = endH * 60 + endM;
-
-    // Handle overnight quiet hours (e.g., 22:00 - 08:00)
-    if (startMinutes > endMinutes) {
-      // Quiet hours span midnight
-      return currentMinutes >= startMinutes || currentMinutes < endMinutes;
-    } else {
-      // Same-day quiet hours
-      return currentMinutes >= startMinutes && currentMinutes < endMinutes;
-    }
-  }
-
-  private isThrottled(deviceId: string): boolean {
-    const prefs = this.devicePrefs.get(deviceId) || DEFAULT_DEVICE_PREFS;
-    if (prefs.throttleMinutes <= 0) {
-      return false;
-    }
-
-    const lastTime = this.lastNotificationTime.get(deviceId);
-    if (!lastTime) {
-      return false;
-    }
-
-    const elapsed = Date.now() - lastTime;
-    const throttleMs = prefs.throttleMinutes * 60 * 1000;
-    return elapsed < throttleMs;
-  }
-
-  private recordNotificationSent(deviceId: string): void {
-    this.lastNotificationTime.set(deviceId, Date.now());
+  getStore(): NotificationStore {
+    return this.store;
   }
 
   registerDevice(deviceId: string, pushToken: string): void {
-    this.devices.set(deviceId, {
+    this.store.setDevice({
       token: pushToken,
       deviceId,
       registeredAt: Date.now(),
@@ -146,158 +63,64 @@ export class PushNotificationService {
   }
 
   unregisterDevice(deviceId: string): void {
-    this.devices.delete(deviceId);
+    this.store.removeDevice(deviceId);
     console.log(`Push notifications: Unregistered device ${deviceId}`);
   }
 
   updateDeviceLastSeen(deviceId: string): void {
-    const device = this.devices.get(deviceId);
-    if (device) {
-      device.lastSeen = Date.now();
-    }
+    this.store.updateDeviceLastSeen(deviceId);
   }
 
-  scheduleWaitingNotification(preview: string, sessionId?: string, sessionName?: string): void {
-    if (this.devices.size === 0) {
-      return;
-    }
-
-    // Send instant notifications immediately to devices that want them
-    // But filter out devices in quiet hours or throttled
-    const instantDevices = Array.from(this.devices.entries())
-      .filter(([deviceId]) => this.instantNotifyDevices.has(deviceId))
-      .filter(([deviceId]) => !this.isInQuietHours(deviceId))
-      .filter(([deviceId]) => !this.isThrottled(deviceId));
-
-    if (instantDevices.length > 0) {
-      console.log(`Push notifications: Sending instant notification to ${instantDevices.length} device(s)`);
-      this.sendNotificationsToDevices(preview, instantDevices, sessionId, sessionName);
-    }
-
-    // Log skipped devices
-    const skippedQuiet = Array.from(this.devices.entries())
-      .filter(([deviceId]) => this.instantNotifyDevices.has(deviceId))
-      .filter(([deviceId]) => this.isInQuietHours(deviceId));
-    if (skippedQuiet.length > 0) {
-      console.log(`Push notifications: Skipped ${skippedQuiet.length} device(s) in quiet hours`);
-    }
-
-    const skippedThrottled = Array.from(this.devices.entries())
-      .filter(([deviceId]) => this.instantNotifyDevices.has(deviceId))
-      .filter(([deviceId]) => !this.isInQuietHours(deviceId))
-      .filter(([deviceId]) => this.isThrottled(deviceId));
-    if (skippedThrottled.length > 0) {
-      console.log(`Push notifications: Skipped ${skippedThrottled.length} device(s) due to throttle`);
-    }
-
-    // For non-instant devices, batch notifications
-    const batchedDevices = Array.from(this.devices.entries())
-      .filter(([deviceId]) => !this.instantNotifyDevices.has(deviceId));
-
-    if (batchedDevices.length > 0) {
-      // Add to batch queue
-      this.batchedNotifications.push({
-        preview,
-        timestamp: Date.now(),
-      });
-      console.log(`Push notifications: Added to batch queue (${this.batchedNotifications.length} pending)`);
-
-      // Start batch timer if not already running
-      if (!this.batchTimer) {
-        console.log(`Push notifications: Starting batch timer (${this.BATCH_INTERVAL_MS / 1000 / 60} minutes)`);
-        this.batchTimer = setTimeout(() => {
-          this.sendBatchedNotifications();
-        }, this.BATCH_INTERVAL_MS);
-      }
-    }
-  }
-
-  private sendBatchedNotifications(): void {
-    const batchedDevices = Array.from(this.devices.entries())
-      .filter(([deviceId]) => !this.instantNotifyDevices.has(deviceId));
-
-    if (batchedDevices.length === 0 || this.batchedNotifications.length === 0) {
-      this.batchedNotifications = [];
-      this.batchTimer = null;
-      return;
-    }
-
-    // Create summary message
-    const count = this.batchedNotifications.length;
-    const lastPreview = this.batchedNotifications[this.batchedNotifications.length - 1].preview;
-    const summary = count === 1
-      ? lastPreview
-      : `${count} messages waiting - Latest: ${lastPreview.substring(0, 100)}`;
-
-    console.log(`Push notifications: Sending batched notification (${count} messages) to ${batchedDevices.length} device(s)`);
-
-    this.sendNotifications(
-      summary,
-      batchedDevices.map(([_, d]) => d.token)
-    );
-
-    // Clear batch
-    this.batchedNotifications = [];
-    this.batchTimer = null;
-  }
-
-  cancelPendingNotification(): void {
-    if (this.pendingPush) {
-      clearTimeout(this.pendingPush);
-      this.pendingPush = null;
-      console.log('Push notifications: Cancelled pending notification');
-    }
-
-    // Also clear batched notifications when user responds
-    if (this.batchedNotifications.length > 0) {
-      this.batchedNotifications = [];
-      console.log('Push notifications: Cleared batched notifications');
-    }
-    if (this.batchTimer) {
-      clearTimeout(this.batchTimer);
-      this.batchTimer = null;
-    }
-  }
-
-  private async sendNotificationsToDevices(
+  /**
+   * Send push notification to ALL registered devices unconditionally.
+   * Called by escalation service when push timer fires.
+   */
+  sendToAllDevices(
     preview: string,
-    devices: [string, RegisteredDevice][],
+    eventType: NotificationEventType,
     sessionId?: string,
-    sessionName?: string
-  ): Promise<void> {
-    // Record notification time for throttling
-    for (const [deviceId] of devices) {
-      this.recordNotificationSent(deviceId);
-    }
-    // Send using existing method
-    await this.sendNotifications(preview, devices.map(([_, d]) => d.token), sessionId, sessionName);
-  }
-
-  private async sendNotifications(preview: string, tokens: string[], sessionId?: string, sessionName?: string): Promise<void> {
-    if (tokens.length === 0) {
+    sessionName?: string,
+  ): void {
+    const allDevices = this.store.getDevices();
+    if (allDevices.length === 0) {
+      console.log('Push notifications: No devices registered, skipping');
       return;
     }
 
-    // Truncate preview to reasonable length
-    const truncatedPreview =
-      preview.length > 200 ? preview.substring(0, 197) + '...' : preview;
+    const title = this.getTitleForEvent(eventType);
+    const tokens = allDevices.map(d => d.token);
 
-    // Determine if tokens are FCM (no ExponentPushToken prefix) or Expo
+    console.log(`Push notifications: Sending to ${allDevices.length} device(s) for ${eventType}`);
+    this.sendNotifications(preview, tokens, sessionId, sessionName, title);
+  }
+
+  private getTitleForEvent(eventType: NotificationEventType): string {
+    switch (eventType) {
+      case 'waiting_for_input': return 'Waiting for input';
+      case 'error_detected': return 'Error detected';
+      case 'session_completed': return 'Session completed';
+    }
+  }
+
+  private async sendNotifications(preview: string, tokens: string[], sessionId?: string, sessionName?: string, title?: string): Promise<void> {
+    if (tokens.length === 0) return;
+
+    const truncatedPreview = preview.length > 200 ? preview.substring(0, 197) + '...' : preview;
+    const notificationTitle = title || 'Waiting for input';
+
     const fcmTokens = tokens.filter(t => !t.startsWith('ExponentPushToken'));
     const expoTokens = tokens.filter(t => t.startsWith('ExponentPushToken'));
 
-    // Send via Firebase if we have FCM tokens and Firebase is initialized
     if (fcmTokens.length > 0 && this.firebaseInitialized) {
-      await this.sendViaFirebase(truncatedPreview, fcmTokens, sessionId, sessionName);
+      await this.sendViaFirebase(truncatedPreview, fcmTokens, sessionId, sessionName, notificationTitle);
     }
 
-    // Send via Expo Push if we have Expo tokens
     if (expoTokens.length > 0) {
-      await this.sendViaExpo(truncatedPreview, expoTokens, sessionId, sessionName);
+      await this.sendViaExpo(truncatedPreview, expoTokens, sessionId, sessionName, notificationTitle);
     }
   }
 
-  private async sendViaFirebase(preview: string, tokens: string[], sessionId?: string, sessionName?: string): Promise<void> {
+  private async sendViaFirebase(preview: string, tokens: string[], sessionId?: string, sessionName?: string, title?: string): Promise<void> {
     const data: Record<string, string> = {
       type: 'waiting_for_input',
       preview,
@@ -309,7 +132,7 @@ export class PushNotificationService {
     const message: admin.messaging.MulticastMessage = {
       tokens,
       notification: {
-        title: 'Waiting for input',
+        title: title || 'Waiting for input',
         body: preview,
       },
       data,
@@ -326,16 +149,14 @@ export class PushNotificationService {
       const response = await admin.messaging().sendEachForMulticast(message);
       console.log(`Push notifications (FCM): Sent to ${response.successCount}/${tokens.length} devices`);
 
-      // Log detailed errors for failed tokens
       response.responses.forEach((resp, idx) => {
         if (!resp.success) {
           console.error(`Push notifications (FCM): Failed for token ${tokens[idx].substring(0, 20)}...: ${resp.error?.code} - ${resp.error?.message}`);
           if (resp.error?.code === 'messaging/registration-token-not-registered') {
-            const deviceId = Array.from(this.devices.entries()).find(
-              ([_, d]) => d.token === tokens[idx]
-            )?.[0];
-            if (deviceId) {
-              this.unregisterDevice(deviceId);
+            const allDevices = this.store.getDevices();
+            const device = allDevices.find(d => d.token === tokens[idx]);
+            if (device) {
+              this.unregisterDevice(device.deviceId);
             }
           }
         }
@@ -345,7 +166,7 @@ export class PushNotificationService {
     }
   }
 
-  private async sendViaExpo(preview: string, tokens: string[], sessionId?: string, sessionName?: string): Promise<void> {
+  private async sendViaExpo(preview: string, tokens: string[], sessionId?: string, sessionName?: string, title?: string): Promise<void> {
     const notifData: Record<string, string> = {
       type: 'waiting_for_input',
       preview,
@@ -356,7 +177,7 @@ export class PushNotificationService {
 
     const messages: ExpoPushMessage[] = tokens.map((token) => ({
       to: token,
-      title: 'Waiting for input',
+      title: title || 'Waiting for input',
       body: preview,
       data: notifData,
       sound: 'default',
@@ -383,11 +204,10 @@ export class PushNotificationService {
         if (ticket.status === 'ok') {
           successCount++;
         } else if (ticket.details?.error === 'DeviceNotRegistered') {
-          const deviceId = Array.from(this.devices.entries()).find(
-            ([_, d]) => d.token === tokens[idx]
-          )?.[0];
-          if (deviceId) {
-            this.unregisterDevice(deviceId);
+          const allDevices = this.store.getDevices();
+          const device = allDevices.find(d => d.token === tokens[idx]);
+          if (device) {
+            this.unregisterDevice(device.deviceId);
           }
         }
       });
@@ -398,11 +218,50 @@ export class PushNotificationService {
     }
   }
 
+  /**
+   * Send a test push notification to all registered devices.
+   */
+  async sendTestNotification(): Promise<{ sent: number; failed: number }> {
+    const devices = this.store.getDevices();
+    if (devices.length === 0) return { sent: 0, failed: 0 };
+
+    const tokens = devices.map(d => d.token);
+    const preview = 'This is a test notification from Companion.';
+    const title = 'Test Notification';
+
+    const fcmTokens = tokens.filter(t => !t.startsWith('ExponentPushToken'));
+    const expoTokens = tokens.filter(t => t.startsWith('ExponentPushToken'));
+
+    let sent = 0;
+    let failed = 0;
+
+    if (fcmTokens.length > 0 && this.firebaseInitialized) {
+      try {
+        await this.sendViaFirebase(preview, fcmTokens, undefined, undefined, title);
+        sent += fcmTokens.length;
+      } catch {
+        failed += fcmTokens.length;
+      }
+    }
+
+    if (expoTokens.length > 0) {
+      try {
+        await this.sendViaExpo(preview, expoTokens, undefined, undefined, title);
+        sent += expoTokens.length;
+      } catch {
+        failed += expoTokens.length;
+      }
+    }
+
+    console.log(`Push notifications: Test sent to ${sent} device(s), ${failed} failed`);
+    return { sent, failed };
+  }
+
   isEnabled(): boolean {
     return true;
   }
 
   getRegisteredDeviceCount(): number {
-    return this.devices.size;
+    return this.store.getDeviceCount();
   }
 }

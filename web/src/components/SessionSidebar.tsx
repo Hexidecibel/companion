@@ -13,6 +13,8 @@ interface SessionSidebarProps {
   onToggleSplit?: () => void;
   splitEnabled?: boolean;
   secondarySession?: ActiveSession | null;
+  onNotificationSettings?: () => void;
+  mutedSessions?: Set<string>;
 }
 
 const STATUS_DOT_CLASS: Record<SessionSummary['status'], string> = {
@@ -64,6 +66,8 @@ export function SessionSidebar({
   onToggleSplit,
   splitEnabled,
   secondarySession,
+  onNotificationSettings,
+  mutedSessions,
 }: SessionSidebarProps) {
   const { snapshots } = useConnections();
   const [newSessionServerId, setNewSessionServerId] = useState<string | null>(null);
@@ -99,6 +103,15 @@ export function SessionSidebar({
               title={splitEnabled ? 'Disable split view' : 'Enable split view'}
             >
               {splitEnabled ? '\u25A3' : '\u25A1'}
+            </button>
+          )}
+          {onNotificationSettings && (
+            <button
+              className="sidebar-bell-btn"
+              onClick={onNotificationSettings}
+              title="Notification settings"
+            >
+              &#x1F514;
             </button>
           )}
           <button
@@ -227,7 +240,12 @@ export function SessionSidebar({
                     >
                       <span className={`status-dot ${STATUS_DOT_CLASS[session.status]}`} />
                       <div className="sidebar-session-info">
-                        <span className="sidebar-session-name">{session.name}</span>
+                        <span className="sidebar-session-name">
+                          {session.name}
+                          {mutedSessions?.has(session.id) && (
+                            <span className="sidebar-muted-icon" title="Notifications muted">&#x1F515;</span>
+                          )}
+                        </span>
                         {session.currentActivity && (
                           <span className="sidebar-session-activity">
                             {session.currentActivity}

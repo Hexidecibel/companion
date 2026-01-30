@@ -454,25 +454,16 @@ export function detectWaitingForInput(messages: ConversationMessage[]): boolean 
       if (hasPendingApproval) {
         return true;
       }
+
+      // If any tools are still running, not waiting yet
+      if (lastMessage.toolCalls.some(tc => tc.status === 'running')) {
+        return false;
+      }
     }
 
-    // Check for text content that looks like a question or prompt
-    if (lastMessage.content.trim()) {
-      const questionPatterns = [
-        /\?$/,
-        /would you like/i,
-        /do you want/i,
-        /should I/i,
-        /let me know/i,
-        /please confirm/i,
-        /please provide/i,
-      ];
-
-      for (const pattern of questionPatterns) {
-        if (pattern.test(lastMessage.content)) {
-          return true;
-        }
-      }
+    // Assistant finished with all tools completed (or no tools) = waiting for next user input
+    if (!lastMessage.toolCalls || lastMessage.toolCalls.every(tc => tc.status === 'completed' || tc.status === 'error')) {
+      return true;
     }
   }
 

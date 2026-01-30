@@ -5,6 +5,7 @@ import { SubAgentWatcher } from './subagent-watcher';
 import { InputInjector } from './input-injector';
 import { MdnsAdvertiser } from './mdns';
 import { PushNotificationService } from './push';
+import { NotificationStore } from './notification-store';
 import { WebSocketHandler } from './websocket';
 import { TmuxManager } from './tmux-manager';
 import { createServer, validateTlsConfig } from './tls';
@@ -58,7 +59,8 @@ async function main(): Promise<void> {
   const watcher = new SessionWatcher(config.codeHome);
   const subAgentWatcher = new SubAgentWatcher(config.codeHome);
   const injector = new InputInjector(config.tmuxSession);
-  const push = new PushNotificationService(config.fcmCredentialsPath, config.pushDelayMs);
+  const notificationStore = new NotificationStore();
+  const push = new PushNotificationService(config.fcmCredentialsPath, config.pushDelayMs, notificationStore);
 
   // Create HTTP/HTTPS server with QR code endpoint
   const qrHandler = createQRRequestHandler(config);
@@ -198,6 +200,7 @@ async function main(): Promise<void> {
   const shutdown = async (): Promise<void> => {
     console.log('\nShutting down...');
 
+    notificationStore.flush();
     watcher.stop();
     subAgentWatcher.stop();
     if (mdns) mdns.stop();

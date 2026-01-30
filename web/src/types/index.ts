@@ -6,6 +6,7 @@ export interface Server {
   token: string;
   useTls: boolean;
   enabled?: boolean;
+  sshUser?: string;
 }
 
 export interface ConnectionState {
@@ -94,6 +95,7 @@ export interface SessionSummary {
   status: 'idle' | 'working' | 'waiting' | 'error';
   lastActivity: number;
   currentActivity?: string;
+  tmuxSessionName?: string;
 }
 
 export interface ServerSummary {

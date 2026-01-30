@@ -104,6 +104,9 @@ export class ServerConnection {
       });
 
       if (response.success) {
+        // Subscribe to broadcasts so we receive real-time status_change events
+        await this.send({ type: 'subscribe', requestId: `req_${++this.requestCounter}` });
+
         this.updateState({
           status: 'connected',
           error: undefined,
