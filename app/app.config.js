@@ -16,6 +16,7 @@ export default {
     },
     ios: {
       bundleIdentifier: "com.companion.codeapp",
+      googleServicesFile: process.env.GOOGLE_SERVICES_PLIST || "./GoogleService-Info.plist",
       infoPlist: {
         ITSAppUsesNonExemptEncryption: false,
         NSAppTransportSecurity: {
@@ -58,7 +59,7 @@ export default {
     },
     extra: {
       eas: {
-        projectId: "a2c8ed18-6605-4dfc-a5c3-cec39533f8c2"
+        projectId: "ab8aeb70-f2ee-4f80-8a52-e6b30b1e883d"
       },
       // Secrets passed via environment variables
       sentryDsn: process.env.SENTRY_DSN,
