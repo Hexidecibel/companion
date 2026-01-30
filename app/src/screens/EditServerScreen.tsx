@@ -14,6 +14,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Server } from '../types';
 import { getServers, addServer, updateServer, deleteServer } from '../services/storage';
 import { QRScanner, QRConfig } from '../components/QRScanner';
+import Ionicons from '@expo/vector-icons/Ionicons';
 
 interface EditServerScreenProps {
   server: Server | null; // null = add new
@@ -30,6 +31,7 @@ export function EditServerScreen({ server, onBack, onSaved }: EditServerScreenPr
   const [formIsDefault, setFormIsDefault] = useState(server?.isDefault || false);
   const [formEnabled, setFormEnabled] = useState(server?.enabled !== false);
   const [formAutoApproveEnabled, setFormAutoApproveEnabled] = useState(server?.autoApproveEnabled || false);
+  const [showToken, setShowToken] = useState(false);
   const [saving, setSaving] = useState(false);
   const [showQRScanner, setShowQRScanner] = useState(false);
 
@@ -229,16 +231,28 @@ export function EditServerScreen({ server, onBack, onSaved }: EditServerScreenPr
 
         <View style={styles.inputGroup}>
           <Text style={styles.label}>Token *</Text>
-          <TextInput
-            style={styles.input}
-            value={formToken}
-            onChangeText={setFormToken}
-            placeholder="Authentication token"
-            placeholderTextColor="#6b7280"
-            autoCapitalize="none"
-            autoCorrect={false}
-            secureTextEntry
-          />
+          <View style={styles.tokenRow}>
+            <TextInput
+              style={[styles.input, styles.tokenInput]}
+              value={formToken}
+              onChangeText={setFormToken}
+              placeholder="Authentication token"
+              placeholderTextColor="#6b7280"
+              autoCapitalize="none"
+              autoCorrect={false}
+              secureTextEntry={!showToken}
+            />
+            <TouchableOpacity
+              style={styles.tokenToggle}
+              onPress={() => setShowToken(!showToken)}
+            >
+              <Ionicons
+                name={showToken ? 'eye-off-outline' : 'eye-outline'}
+                size={22}
+                color="#9ca3af"
+              />
+            </TouchableOpacity>
+          </View>
         </View>
 
         <View style={styles.switchRow}>
@@ -341,6 +355,17 @@ const styles = StyleSheet.create({
     color: '#f3f4f6',
     borderWidth: 1,
     borderColor: '#374151',
+  },
+  tokenRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  tokenInput: {
+    flex: 1,
+  },
+  tokenToggle: {
+    padding: 10,
+    marginLeft: 8,
   },
   switchRow: {
     flexDirection: 'row',

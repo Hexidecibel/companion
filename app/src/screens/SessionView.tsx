@@ -28,6 +28,7 @@ import { getSessionSettings, saveSessionSettings, SessionSettings } from '../ser
 import { wsService } from '../services/websocket';
 import { messageQueue, QueuedMessage } from '../services/messageQueue';
 import { sessionGuard } from '../services/sessionGuard';
+import Ionicons from '@expo/vector-icons/Ionicons';
 
 interface SessionViewProps {
   server: Server;
@@ -501,7 +502,7 @@ export function SessionView({ server, onBack, initialSessionId, onNewProject, on
         </View>
         {onOpenTerminal && (
           <TouchableOpacity
-            style={styles.terminalButton}
+            style={styles.headerIconButton}
             onPress={async () => {
               if (terminalLoading) return;
               setTerminalLoading(true);
@@ -524,16 +525,16 @@ export function SessionView({ server, onBack, initialSessionId, onNewProject, on
             {terminalLoading ? (
               <ActivityIndicator size="small" color="#9ca3af" />
             ) : (
-              <Text style={styles.terminalButtonText}>{'>_'}</Text>
+              <Ionicons name="terminal-outline" size={20} color="#9ca3af" />
             )}
           </TouchableOpacity>
         )}
         <TouchableOpacity
-          style={styles.refreshButton}
+          style={styles.headerIconButton}
           onPress={() => refresh()}
           disabled={loading}
         >
-          <Text style={[styles.refreshIconText, loading && styles.refreshIconDisabled]}>↻</Text>
+          <Ionicons name="refresh" size={20} color={loading ? '#4b5563' : '#9ca3af'} />
         </TouchableOpacity>
         <TouchableOpacity
           style={[
@@ -542,20 +543,17 @@ export function SessionView({ server, onBack, initialSessionId, onNewProject, on
           ]}
           onPress={() => handleAutoApproveChange(!sessionSettings.autoApproveEnabled)}
         >
-          <Text style={[
-            styles.autoApproveText,
-            sessionSettings.autoApproveEnabled && styles.autoApproveTextActive,
-          ]}>
-            AA
-          </Text>
+          <Ionicons
+            name={sessionSettings.autoApproveEnabled ? 'shield-checkmark' : 'shield-outline'}
+            size={18}
+            color={sessionSettings.autoApproveEnabled ? '#fbbf24' : '#6b7280'}
+          />
         </TouchableOpacity>
         <TouchableOpacity
-          style={styles.settingsButton}
+          style={styles.headerIconButton}
           onPress={() => setShowSettings(true)}
         >
-          <View style={styles.settingsIcon}>
-            <Text style={styles.settingsIconText}>⚙</Text>
-          </View>
+          <Ionicons name="settings-outline" size={20} color="#9ca3af" />
         </TouchableOpacity>
       </View>
 
@@ -573,20 +571,6 @@ export function SessionView({ server, onBack, initialSessionId, onNewProject, on
         >
           <View style={styles.modalContent} onStartShouldSetResponder={() => true}>
             <Text style={styles.modalTitle}>Session Settings</Text>
-
-            <View style={styles.modalRow}>
-              <View style={styles.modalRowInfo}>
-                <Text style={styles.modalRowLabel}>Auto-Approve</Text>
-                <Text style={styles.modalRowDescription}>
-                  Auto-approve safe tool calls (Read, Glob, Grep, etc.)
-                </Text>
-              </View>
-              <Switch
-                value={sessionSettings.autoApproveEnabled}
-                onValueChange={handleAutoApproveChange}
-                trackColor={{ false: '#374151', true: '#f59e0b' }}
-              />
-            </View>
 
             <View style={styles.modalRow}>
               <View style={styles.modalRowInfo}>
@@ -1002,57 +986,16 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     flexShrink: 1,
   },
-  refreshButton: {
+  headerIconButton: {
     padding: 8,
-    marginRight: 4,
-  },
-  refreshIconText: {
-    fontSize: 22,
-    color: '#9ca3af',
   },
   autoApproveButton: {
-    paddingHorizontal: 6,
-    paddingVertical: 4,
+    padding: 6,
     borderRadius: 6,
     backgroundColor: '#374151',
-    marginRight: 4,
   },
   autoApproveButtonActive: {
     backgroundColor: '#78350f',
-  },
-  autoApproveText: {
-    color: '#6b7280',
-    fontSize: 10,
-    fontWeight: '700',
-  },
-  autoApproveTextActive: {
-    color: '#fbbf24',
-  },
-  refreshIconDisabled: {
-    opacity: 0.4,
-  },
-  terminalButton: {
-    padding: 8,
-    marginRight: 2,
-  },
-  terminalButtonText: {
-    fontSize: 16,
-    color: '#9ca3af',
-    fontFamily: 'monospace',
-    fontWeight: '700',
-  },
-  settingsButton: {
-    padding: 8,
-  },
-  settingsIcon: {
-    width: 28,
-    height: 28,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  settingsIconText: {
-    fontSize: 20,
-    color: '#9ca3af',
   },
   modalOverlay: {
     flex: 1,

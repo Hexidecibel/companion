@@ -32,22 +32,23 @@ Quick capture for ideas and tasks. Run `/plan` to process into detailed plans.
 - [done] Inline auto-approve toggle in session header
 - [done] Populate features file
 - [done] Disabled servers still connecting - block in wsService.connect() and auto-reconnect
+- [done] Fix session switching regression - dead WebSocket detection and reconnection
+- [done] Fix new session creation/attaching bugs (wrong chat, can't send)
 
-## In Progress
-- Fix session switching regression - dead WebSocket detection and reconnection
-- Fix new session creation/attaching bugs (wrong chat, can't send)
+## Planned
+- [planned] Session header redesign - proper icons via @expo/vector-icons, remove auto-approve from modal (header only), instant notify session-only
+- [planned] Better waiting/idle distinction on dashboard - add idle state, gray out idle sessions, fix sort order
+- [planned] Change settings icon to a cog on server dashboard bottom left FAB
+- [planned] Show password in token field on Server edit screen
 
 ## Upcoming
-- Change settings icon to a cog on server dashboard bottom left FAB
 - Beef up new project helper - let Claude help choose language/stack with back-and-forth discussion, analyze project and order options by recommendation, option to create a private GitHub repo
 - Move permissions into session (makes more sense in session settings)
 - Installable actions/skills - introspect codebase and create custom skills
 - Multi-select bug in AskUserQuestion - selecting multiple options in Termux only submits first
 - Evaluate sub-agents UX - not useful as-is, need click-to-view status, proper cleanup when done, or remove from session view entirely since they're always running
-- Show password in token field on Server edit screen
 - Don't include token in QR code unauthenticated - force entry of token before showing QR
-- Session header redesign - icons look odd, auto-approve duplicated in header and session settings, instant notify duplicated in session settings and server settings, re-evaluate header and session settings for optimal layout/experience
-- Better waiting/idle distinction on dashboard - finished sessions show "waiting" and rise to top over working ones, add "idle" state and gray out idle sessions
+- Fix plan mode multiple choice questions - AskUserQuestion with multiple options doesn't work in app, have to use Termux
 
 ## Deferred
 - iOS build (need Apple Developer account first)

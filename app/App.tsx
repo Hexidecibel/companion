@@ -3,6 +3,7 @@ import { View, StyleSheet, StatusBar, AppState } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import * as Sentry from '@sentry/react-native';
 import Constants from 'expo-constants';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { Server, TaskItem } from './src/types';
 import { getServers, getSettings } from './src/services/storage';
 import { DashboardScreen } from './src/screens/DashboardScreen';
@@ -396,7 +397,7 @@ function App() {
             <SafeAreaView edges={['bottom']}>
               <View style={styles.settingsButtonInner}>
                 <View style={styles.settingsIcon} onTouchEnd={handleOpenSettings}>
-                  <View style={styles.settingsGear} />
+                  <Ionicons name="settings-sharp" size={22} color="#9ca3af" />
                 </View>
               </View>
             </SafeAreaView>
@@ -436,13 +437,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#374151',
     justifyContent: 'center',
     alignItems: 'center',
-  },
-  settingsGear: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    borderWidth: 3,
-    borderColor: '#9ca3af',
   },
 });
 

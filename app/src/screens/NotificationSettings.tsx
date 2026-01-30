@@ -189,17 +189,6 @@ function ServerNotificationCard({
     onUpdate({ ...prefs, enabled: value });
   };
 
-  const handleToggleInstant = async (value: boolean) => {
-    onUpdate({ ...prefs, instantNotify: value });
-    if (isCurrentServer) {
-      try {
-        await wsService.sendRequest('set_instant_notify', { enabled: value });
-      } catch (err) {
-        console.error('Failed to update instant notify:', err);
-      }
-    }
-  };
-
   const handleToggleQuietHours = async (value: boolean) => {
     const newPrefs = { ...prefs, quietHoursEnabled: value };
     onUpdate(newPrefs);
@@ -310,22 +299,6 @@ function ServerNotificationCard({
 
       {prefs.enabled && (
         <>
-          <View style={styles.settingRow}>
-            <View style={styles.settingInfo}>
-              <Text style={styles.settingLabel}>Instant Notifications</Text>
-              <Text style={styles.settingDescription}>
-                Get notified immediately when Claude is waiting
-              </Text>
-            </View>
-            <Switch
-              value={prefs.instantNotify}
-              onValueChange={handleToggleInstant}
-              trackColor={{ false: '#374151', true: '#3b82f6' }}
-            />
-          </View>
-
-          <View style={styles.divider} />
-
           <View style={styles.settingRow}>
             <View style={styles.settingInfo}>
               <Text style={styles.settingLabel}>Quiet Hours</Text>
@@ -483,13 +456,13 @@ export function NotificationSettings({ onBack }: NotificationSettingsProps) {
             <View style={styles.helpSection}>
               <Text style={styles.helpTitle}>About Notifications</Text>
               <Text style={styles.helpText}>
-                • Instant: Notified immediately when Claude needs input
-              </Text>
-              <Text style={styles.helpText}>
                 • Quiet Hours: No notifications during specified times
               </Text>
               <Text style={styles.helpText}>
                 • Rate Limit: Prevents notification spam
+              </Text>
+              <Text style={styles.helpText}>
+                • Instant Notify: Available per-session in session settings
               </Text>
             </View>
           </>
