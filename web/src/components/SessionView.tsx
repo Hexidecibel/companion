@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { PendingImage } from '../types';
 import { useConversation } from '../hooks/useConversation';
 import { useTasks } from '../hooks/useTasks';
 import { useSubAgents } from '../hooks/useSubAgents';
@@ -7,6 +8,7 @@ import { useAutoApprove } from '../hooks/useAutoApprove';
 import { useMessageQueue } from '../hooks/useMessageQueue';
 import { addArchive } from '../services/archiveService';
 import { messageQueue } from '../services/messageQueue';
+import { connectionManager } from '../services/ConnectionManager';
 import { WaitingIndicator } from './WaitingIndicator';
 import { TaskList } from './TaskList';
 import { MessageList } from './MessageList';
@@ -78,6 +80,60 @@ export function SessionView({ serverId, sessionId }: SessionViewProps) {
       return sendInput(text);
     },
     [status, serverId, enqueue, sendInput],
+  );
+
+  const handleSendWithImages = useCallback(
+    async (text: string, images: PendingImage[]): Promise<boolean> => {
+      if (!serverId) return false;
+      const conn = connectionManager.getConnection(serverId);
+      if (!conn) return false;
+
+      try {
+        // Upload each image via send_image
+        const imagePaths: string[] = [];
+        for (const img of images) {
+          const reader = new FileReader();
+          const base64 = await new Promise<string>((resolve, reject) => {
+            reader.onload = () => {
+              const result = reader.result as string;
+              // Strip data:image/...;base64, prefix
+              const b64 = result.includes(',') ? result.split(',')[1] : result;
+              resolve(b64);
+            };
+            reader.onerror = reject;
+            reader.readAsDataURL(img.file);
+          });
+
+          const response = await conn.sendRequest('send_image', {
+            image: base64,
+            mimeType: img.file.type,
+            filename: img.file.name,
+          });
+
+          if (!response.success) {
+            console.log('Image upload failed:', response.error);
+            return false;
+          }
+
+          const payload = response.payload as { path?: string };
+          if (payload?.path) {
+            imagePaths.push(payload.path);
+          }
+        }
+
+        // Send message with image paths
+        const response = await conn.sendRequest('send_with_images', {
+          message: text,
+          imagePaths,
+        });
+
+        return response.success;
+      } catch (err) {
+        console.log('Failed to send images:', err);
+        return false;
+      }
+    },
+    [serverId],
   );
 
   const handleArchive = useCallback(() => {
@@ -164,7 +220,11 @@ export function SessionView({ serverId, sessionId }: SessionViewProps) {
         onClearAll={clearAllQueued}
       />
 
-      <InputBar onSend={handleSend} disabled={!status?.isWaitingForInput && !status?.isRunning} />
+      <InputBar
+        onSend={handleSend}
+        onSendWithImages={handleSendWithImages}
+        disabled={!status?.isWaitingForInput && !status?.isRunning}
+      />
 
       {/* Modals */}
       {showAgentsModal && (

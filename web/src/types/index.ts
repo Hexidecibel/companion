@@ -161,6 +161,13 @@ export interface TmuxSessionInfo {
   tagged?: boolean;
 }
 
+// Pending image for upload
+export interface PendingImage {
+  id: string;
+  file: File;
+  previewUrl: string;
+}
+
 // Active session tracking
 
 export interface ActiveSession {

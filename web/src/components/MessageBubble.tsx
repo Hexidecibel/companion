@@ -1,11 +1,114 @@
-import { useState } from 'react';
-import { ConversationHighlight } from '../types';
+import { useState, useCallback } from 'react';
+import { ConversationHighlight, Question } from '../types';
 import { ToolCard } from './ToolCard';
 
 interface MessageBubbleProps {
   message: ConversationHighlight;
   onSelectOption?: (label: string) => void;
   onViewFile?: (path: string) => void;
+}
+
+interface QuestionBlockProps {
+  question: Question;
+  onSelectOption: (label: string) => void;
+}
+
+function QuestionBlock({ question, onSelectOption }: QuestionBlockProps) {
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [showOther, setShowOther] = useState(false);
+  const [otherText, setOtherText] = useState('');
+
+  const handleOptionClick = useCallback((label: string) => {
+    if (question.multiSelect) {
+      setSelected((prev) => {
+        const next = new Set(prev);
+        if (next.has(label)) {
+          next.delete(label);
+        } else {
+          next.add(label);
+        }
+        return next;
+      });
+    } else {
+      onSelectOption(label);
+    }
+  }, [question.multiSelect, onSelectOption]);
+
+  const handleSubmitMulti = useCallback(() => {
+    if (selected.size === 0) return;
+    onSelectOption(Array.from(selected).join(', '));
+  }, [selected, onSelectOption]);
+
+  const handleSendOther = useCallback(() => {
+    const trimmed = otherText.trim();
+    if (!trimmed) return;
+    onSelectOption(trimmed);
+  }, [otherText, onSelectOption]);
+
+  return (
+    <div className="question-block">
+      {question.header && (
+        <div className="question-block-header">{question.header}</div>
+      )}
+      {question.question && (
+        <div className="question-block-text">{question.question}</div>
+      )}
+      <div className="question-block-options">
+        {question.options.map((opt) => (
+          <button
+            key={opt.label}
+            className={`msg-option-btn ${question.multiSelect && selected.has(opt.label) ? 'selected' : ''}`}
+            onClick={() => handleOptionClick(opt.label)}
+            title={opt.description}
+          >
+            {opt.label}
+          </button>
+        ))}
+      </div>
+
+      <div className="question-block-actions">
+        {question.multiSelect && (
+          <button
+            className="question-block-submit"
+            onClick={handleSubmitMulti}
+            disabled={selected.size === 0}
+          >
+            Submit ({selected.size})
+          </button>
+        )}
+        <button
+          className="question-block-other-toggle"
+          onClick={() => setShowOther(!showOther)}
+        >
+          Other...
+        </button>
+      </div>
+
+      {showOther && (
+        <div className="question-block-other-input">
+          <input
+            type="text"
+            value={otherText}
+            onChange={(e) => setOtherText(e.target.value)}
+            placeholder="Type your response..."
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                handleSendOther();
+              }
+            }}
+            autoFocus
+          />
+          <button
+            className="question-block-other-send"
+            onClick={handleSendOther}
+          >
+            Send
+          </button>
+        </div>
+      )}
+    </div>
+  );
 }
 
 export function MessageBubble({ message, onSelectOption, onViewFile }: MessageBubbleProps) {
@@ -44,20 +147,11 @@ export function MessageBubble({ message, onSelectOption, onViewFile }: MessageBu
       )}
 
       {message.isWaitingForChoice && message.questions && onSelectOption && (
-        <div className="msg-options">
-          {message.questions.map((q) =>
-            q.options.map((opt) => (
-              <button
-                key={opt.label}
-                className="msg-option-btn"
-                onClick={() => onSelectOption(opt.label)}
-                title={opt.description}
-              >
-                {opt.label}
-              </button>
-            )),
-          )}
-        </div>
+        <>
+          {message.questions.map((q, i) => (
+            <QuestionBlock key={i} question={q} onSelectOption={onSelectOption} />
+          ))}
+        </>
       )}
 
       {message.isWaitingForChoice && !message.questions && message.options && onSelectOption && (
