@@ -2,7 +2,7 @@ import 'dotenv/config';
 
 export default {
   expo: {
-    name: "Companion",
+    name: "Hexi's Companion",
     slug: "companion-app",
     version: "0.0.1",
     sdkVersion: "54.0.0",
@@ -41,6 +41,11 @@ export default {
         {
           android: {
             usesCleartextTraffic: true
+          },
+          ios: {
+            useFrameworks: "static",
+            useModularHeaders: true,
+            buildReactNativeFromSource: true
           }
         }
       ],

@@ -20,7 +20,11 @@
         "buildType": "apk"
       }
     },
-    "production": {}
+    "production": {
+      "env": {
+        "SENTRY_DISABLE_AUTO_UPLOAD": "true"
+      }
+    }
   },
   "submit": {
     "production": {}

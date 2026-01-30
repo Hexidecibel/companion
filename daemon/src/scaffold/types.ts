@@ -12,6 +12,14 @@ export interface ScaffoldFile {
   content: string;
 }
 
+// Scoring metadata for template recommendation
+export interface TemplateScoring {
+  primaryKeywords: string[];    // Weight 3 - core technology terms
+  secondaryKeywords: string[];  // Weight 1 - related but less specific terms
+  useCases: string[];           // Weight 5 - substring match against full description
+  typeSignals: Record<string, number>; // Weight 2 - synonym-based type matching
+}
+
 // Stack template definition
 export interface StackTemplate {
   id: string;
@@ -20,6 +28,7 @@ export interface StackTemplate {
   type: 'frontend' | 'backend' | 'fullstack' | 'library' | 'cli';
   icon: string;
   tags: string[];
+  scoring?: TemplateScoring;
   // Files to create - path supports {{variables}}
   files: {
     path: string;

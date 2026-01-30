@@ -7,6 +7,12 @@ export const pythonFastapiTemplate: StackTemplate = {
   type: 'backend',
   icon: '🐍',
   tags: ['python', 'fastapi', 'backend', 'api', 'async'],
+  scoring: {
+    primaryKeywords: ['python', 'fastapi', 'uvicorn', 'pydantic'],
+    secondaryKeywords: ['async', 'api', 'ml', 'machine learning', 'data', 'science', 'model'],
+    useCases: ['python api', 'fastapi service', 'python ml service', 'python backend', 'data api', 'machine learning api'],
+    typeSignals: { python: 3, ml: 2, 'machine learning': 2, data: 1, science: 1 },
+  },
   files: [
     {
       path: 'pyproject.toml',

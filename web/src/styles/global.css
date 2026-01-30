@@ -1367,3 +1367,625 @@ body {
     padding: 24px;
   }
 }
+
+/* ========================================
+   Session Header
+   ======================================== */
+
+.session-header {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 6px 16px;
+  background-color: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-color);
+  flex-shrink: 0;
+}
+
+.session-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.session-header-btn {
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  border: none;
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 0.15s, color 0.15s;
+}
+
+.session-header-btn:hover:not(:disabled) {
+  background-color: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.session-header-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* ========================================
+   Auto-Approve Button
+   ======================================== */
+
+.auto-approve-btn {
+  background: var(--bg-tertiary);
+  color: var(--text-muted);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.auto-approve-btn:hover {
+  background-color: var(--bg-hover);
+  color: var(--text-secondary);
+}
+
+.auto-approve-btn-active {
+  background-color: rgba(245, 158, 11, 0.15);
+  color: var(--accent-amber);
+  border-color: rgba(245, 158, 11, 0.3);
+}
+
+.auto-approve-btn-active:hover {
+  background-color: rgba(245, 158, 11, 0.25);
+  color: var(--accent-amber);
+}
+
+.auto-approve-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* ========================================
+   Tools Toggle (Expand All / Collapse All)
+   ======================================== */
+
+.msg-tools-toggle {
+  background: none;
+  border: 1px solid var(--border-color);
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  align-self: flex-start;
+  transition: background-color 0.15s, color 0.15s;
+}
+
+.msg-tools-toggle:hover {
+  background-color: var(--bg-tertiary);
+  color: var(--text-secondary);
+}
+
+/* ========================================
+   Sub-Agent Bar
+   ======================================== */
+
+.subagent-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 16px;
+  background-color: rgba(59, 130, 246, 0.08);
+  border-bottom: 1px solid rgba(59, 130, 246, 0.12);
+  cursor: pointer;
+  transition: background-color 0.15s;
+  flex-shrink: 0;
+}
+
+.subagent-bar:hover {
+  background-color: rgba(59, 130, 246, 0.14);
+}
+
+.subagent-bar-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.subagent-bar-indicator {
+  font-size: 8px;
+  color: var(--accent-blue);
+}
+
+.subagent-bar-count {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent-blue);
+  white-space: nowrap;
+}
+
+.subagent-bar-activity {
+  flex: 1;
+  font-size: 11px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.subagent-bar-chevron {
+  color: var(--text-muted);
+  font-size: 16px;
+  flex-shrink: 0;
+}
+
+/* ========================================
+   Modal Overlay (shared)
+   ======================================== */
+
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  animation: fadeIn 0.15s ease-out;
+}
+
+.modal-content {
+  background-color: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  width: 90%;
+  max-width: 640px;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: var(--shadow-lg);
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--border-color);
+  flex-shrink: 0;
+}
+
+.modal-header h3 {
+  font-size: 16px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.modal-close {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 16px;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 4px;
+  transition: background-color 0.15s, color 0.15s;
+}
+
+.modal-close:hover {
+  background-color: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
+/* ========================================
+   Sub-Agent Modal
+   ======================================== */
+
+.subagent-modal-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px 18px;
+}
+
+.subagent-modal-section {
+  margin-bottom: 16px;
+}
+
+.subagent-modal-section:last-child {
+  margin-bottom: 0;
+}
+
+.subagent-modal-section-title {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+}
+
+.subagent-card {
+  background-color: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-bottom: 6px;
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+
+.subagent-card:hover {
+  border-color: var(--bg-hover);
+}
+
+.subagent-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.subagent-card-slug {
+  font-size: 13px;
+  font-weight: 600;
+  font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
+  color: var(--text-primary);
+}
+
+.subagent-card-status {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+
+.subagent-status-running {
+  background-color: rgba(59, 130, 246, 0.2);
+  color: var(--accent-blue);
+}
+
+.subagent-status-completed {
+  background-color: rgba(34, 197, 94, 0.15);
+  color: var(--accent-green);
+}
+
+.subagent-status-error {
+  background-color: rgba(239, 68, 68, 0.15);
+  color: var(--accent-red);
+}
+
+.subagent-card-desc {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-top: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.subagent-card-meta {
+  display: flex;
+  gap: 10px;
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 6px;
+}
+
+/* ========================================
+   Sub-Agent Detail
+   ======================================== */
+
+.subagent-detail {
+  max-width: 720px;
+}
+
+.subagent-detail-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 18px;
+  border-bottom: 1px solid var(--border-color);
+  flex-shrink: 0;
+}
+
+.subagent-detail-status {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.subagent-detail-type {
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
+}
+
+.subagent-detail-duration,
+.subagent-detail-msgs {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.subagent-detail-desc {
+  padding: 8px 18px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border-color);
+  flex-shrink: 0;
+}
+
+.subagent-detail-conversation {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* ========================================
+   File Link in Messages
+   ======================================== */
+
+.msg-file-link {
+  color: var(--accent-blue);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+  transition: color 0.15s;
+}
+
+.msg-file-link:hover {
+  color: var(--accent-blue-hover);
+}
+
+/* ========================================
+   File Viewer Modal
+   ======================================== */
+
+.file-viewer {
+  max-width: 800px;
+}
+
+.file-viewer-title {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.file-viewer-title h3 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.file-viewer-path {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-viewer-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0;
+}
+
+.file-viewer-error {
+  padding: 16px 18px;
+  color: var(--accent-red);
+  font-size: 13px;
+}
+
+.file-viewer-code {
+  font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-primary);
+  white-space: pre;
+  overflow-x: auto;
+  padding: 16px 18px;
+  margin: 0;
+  tab-size: 4;
+}
+
+/* ========================================
+   Queued Message Bar
+   ======================================== */
+
+.queued-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 16px;
+  background-color: rgba(245, 158, 11, 0.1);
+  border-top: 1px solid rgba(245, 158, 11, 0.15);
+  flex-shrink: 0;
+}
+
+.queued-bar-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+}
+
+.queued-bar-count {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent-amber);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.queued-bar-preview {
+  font-size: 11px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.queued-bar-actions {
+  flex-shrink: 0;
+}
+
+.queued-bar-cancel {
+  background: none;
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  color: var(--accent-amber);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.15s;
+}
+
+.queued-bar-cancel:hover {
+  background-color: rgba(245, 158, 11, 0.15);
+}
+
+/* ========================================
+   Archive Modal
+   ======================================== */
+
+.archive-list-modal {
+  max-width: 540px;
+}
+
+.archive-list-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px 18px;
+}
+
+.archive-empty {
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 14px;
+  padding: 24px 0;
+}
+
+.archive-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  background-color: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  margin-bottom: 6px;
+  transition: border-color 0.15s;
+}
+
+.archive-item:hover {
+  border-color: var(--bg-hover);
+}
+
+.archive-item-info {
+  flex: 1;
+  min-width: 0;
+  cursor: pointer;
+}
+
+.archive-item-name {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.archive-item-meta {
+  display: block;
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.archive-item-delete {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 12px;
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: 4px;
+  flex-shrink: 0;
+  transition: color 0.15s, background-color 0.15s;
+}
+
+.archive-item-delete:hover {
+  color: var(--accent-red);
+  background-color: rgba(239, 68, 68, 0.1);
+}
+
+/* Archive Viewer */
+
+.archive-viewer {
+  max-width: 720px;
+}
+
+.archive-viewer-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.archive-back-btn {
+  background: none;
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 500;
+  padding: 2px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.15s, color 0.15s;
+}
+
+.archive-back-btn:hover {
+  background-color: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
+.archive-viewer-meta {
+  display: flex;
+  gap: 12px;
+  padding: 8px 18px;
+  font-size: 12px;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border-color);
+  flex-shrink: 0;
+}
+
+.archive-viewer-messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}

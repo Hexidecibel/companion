@@ -57,15 +57,24 @@ function getContentType(filePath: string): string {
  * Find the web directory (handles both dev and installed paths)
  */
 function findWebDir(): string | null {
-  // Try relative to daemon dist (installed or dev)
-  const candidates = [
+  // Try built Vite output first (web/dist/), then fall back to source web/
+  const bases = [
     path.join(__dirname, '../../web'),           // From dist/
     path.join(__dirname, '../../../web'),        // From dist/ in installed location
     path.join(process.cwd(), '../web'),          // From daemon directory
     path.join(process.cwd(), 'web'),             // From project root
   ];
 
-  for (const dir of candidates) {
+  // Prefer web/dist/ (Vite build output)
+  for (const base of bases) {
+    const distDir = path.join(base, 'dist');
+    if (fs.existsSync(path.join(distDir, 'index.html'))) {
+      return distDir;
+    }
+  }
+
+  // Fall back to web/ root (old vanilla client)
+  for (const dir of bases) {
     if (fs.existsSync(path.join(dir, 'index.html'))) {
       return dir;
     }
@@ -161,14 +170,27 @@ export function createQRRequestHandler(config: DaemonConfig): http.RequestListen
       }
 
       try {
+        // SPA fallback: if file not found and not a static asset, serve index.html
+        let servePath = fullPath;
         if (!fs.existsSync(fullPath)) {
-          res.writeHead(404, { 'Content-Type': 'text/plain' });
-          res.end('Not Found');
-          return;
+          const ext = path.extname(fullPath);
+          if (ext && ext !== '.html') {
+            // Static asset not found — genuine 404
+            res.writeHead(404, { 'Content-Type': 'text/plain' });
+            res.end('Not Found');
+            return;
+          }
+          // Route path — serve index.html for client-side routing
+          servePath = path.join(webDir, 'index.html');
+          if (!fs.existsSync(servePath)) {
+            res.writeHead(404, { 'Content-Type': 'text/plain' });
+            res.end('Not Found');
+            return;
+          }
         }
 
-        const content = fs.readFileSync(fullPath);
-        const contentType = getContentType(fullPath);
+        const content = fs.readFileSync(servePath);
+        const contentType = getContentType(servePath);
 
         res.writeHead(200, {
           'Content-Type': contentType,

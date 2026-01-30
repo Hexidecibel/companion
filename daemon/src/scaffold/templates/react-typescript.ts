@@ -7,6 +7,12 @@ export const reactTypescriptTemplate: StackTemplate = {
   type: 'frontend',
   icon: '⚛️',
   tags: ['react', 'typescript', 'vite', 'frontend'],
+  scoring: {
+    primaryKeywords: ['react', 'vite', 'jsx', 'tsx', 'component', 'spa'],
+    secondaryKeywords: ['frontend', 'ui', 'interface', 'web', 'app', 'client', 'browser'],
+    useCases: ['react app', 'single page', 'web app', 'frontend app', 'react dashboard', 'react project'],
+    typeSignals: { frontend: 3, spa: 3, dashboard: 2, widget: 1, ui: 2 },
+  },
   files: [
     {
       path: 'package.json',

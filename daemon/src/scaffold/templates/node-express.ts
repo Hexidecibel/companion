@@ -7,6 +7,12 @@ export const nodeExpressTemplate: StackTemplate = {
   type: 'backend',
   icon: '🟢',
   tags: ['node', 'express', 'typescript', 'backend', 'api'],
+  scoring: {
+    primaryKeywords: ['express', 'node', 'rest', 'api', 'server', 'endpoint'],
+    secondaryKeywords: ['backend', 'http', 'middleware', 'route', 'json', 'microservice'],
+    useCases: ['rest api', 'node api', 'express server', 'backend service', 'api server', 'web server'],
+    typeSignals: { api: 3, server: 3, backend: 2, microservice: 2, service: 1 },
+  },
   files: [
     {
       path: 'package.json',

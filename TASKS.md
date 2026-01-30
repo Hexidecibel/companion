@@ -74,7 +74,66 @@ _Empty - all items from this round complete!_
 
 ---
 
-## Future / V2 Ideas
+## Phase 5: Web Control Center & Configurable Push Notifications
+
+The web client becomes the primary high-performance workspace for managing all Claude instances. Mobile remains the on-the-go fallback.
+
+### 5.1 - Web Foundation & Framework
+- [ ] Choose and set up web framework (React + Vite or similar) to replace vanilla JS
+- [ ] Set up build tooling, dev server, TypeScript
+- [ ] Multi-server connection manager - connect to multiple daemons simultaneously
+- [ ] Server configuration persistence (localStorage) - add/edit/remove servers
+- [ ] Authentication flow per server (token-based, same as today)
+- [ ] Connection health monitoring - status indicators, auto-reconnect per server
+
+### 5.2 - Multi-Server Dashboard
+- [ ] Aggregated dashboard view - all servers, all sessions, one screen
+- [ ] Session cards with server name, status (waiting/working/idle), last activity
+- [ ] Sorting and filtering - by status, by server, by project
+- [ ] Server health indicators (connected/disconnected/error) in sidebar or header
+- [ ] Session count badges per server
+- [ ] Click-through from dashboard to full session view
+
+### 5.3 - Session View Feature Parity
+- [ ] Full conversation renderer with role styling and timestamps
+- [ ] Tool cards with expand/collapse, diff view, copy-to-clipboard, elapsed time
+- [ ] Expand-all / collapse-all toggle
+- [ ] Sub-agent visibility - indicator bar, detail modal with status/duration
+- [ ] File viewer - click file paths to view content
+- [ ] Quick reply chips for yes/no/options
+- [ ] Scroll-to-bottom with new message indicator
+- [ ] Queued message display with cancel
+- [ ] Auto-approve toggle for safe tools
+- [ ] Conversation archive - save, list, view, delete
+
+### 5.4 - Control Center Power Features
+- [ ] Tmux session management - list, create, kill sessions remotely
+- [ ] Multi-pane / split view - watch multiple sessions side by side
+- [ ] Keyboard shortcuts for navigation and common actions
+- [ ] Command palette (Ctrl+K / Cmd+K) for quick actions
+- [ ] Usage/stats view - API token usage and cost breakdown per server
+- [ ] Image upload support (paste, drag-and-drop, file picker)
+
+### 5.5 - Configurable Push Notifications
+- [ ] Notification rules engine on daemon - define conditions for when to notify
+- [ ] Rule types: waiting for input, errors, session completed, custom text match
+- [ ] Per-server notification preferences (which servers notify you)
+- [ ] Per-session notification preferences (mute/unmute individual sessions)
+- [ ] Device management UI - see registered devices, remove old ones
+- [ ] Browser notifications for the web client (Notification API + service worker)
+- [ ] Enhanced mobile push - rules-based filtering applied before FCM/Expo send
+- [ ] Notification history/log - see what was sent and when
+
+### 5.6 - Daemon Endpoints for Control Center
+- [ ] `manage_tmux` endpoint - list/create/kill tmux sessions
+- [ ] `get_server_info` endpoint - server name, uptime, connected clients
+- [ ] `get_notification_rules` / `set_notification_rules` endpoints
+- [ ] `get_devices` / `remove_device` endpoints for device management
+- [ ] `get_stats` endpoint - aggregated usage across sessions
+
+---
+
+## Future / V2+ Ideas
 
 ### Conversation Archive - V2 Enhancements
 - Full-text search across archived conversations
@@ -87,16 +146,6 @@ _Empty - all items from this round complete!_
 - CRUD endpoints for scheduled agents
 - Webhook endpoint support
 - File watcher trigger support
-
-### Platform Expansion
-- iOS build and TestFlight distribution
-- Web interface feature parity with mobile
-  - File viewer with APK download support
-  - Sub-agent visibility and modal
-  - Session picker and multi-session support
-  - Tool cards with expand/collapse, diff view
-  - Quick reply chips for yes/no options
-  - Scroll behavior and new message indicator
 
 ### Daemon CLI
 - Unified CLI for daemon management

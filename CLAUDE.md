@@ -7,6 +7,7 @@ A mobile companion for your AI coding CLI. Daemon runs on a Linux server, watche
 ```
 daemon/         # Node.js/TypeScript daemon (runs on server)
 app/            # React Native/Expo mobile app
+web/            # React + Vite + TypeScript web client
 ```
 
 ## Daemon
@@ -68,6 +69,31 @@ cd app && npm install
 npx expo start          # Dev mode
 eas build --platform ios    # Production build
 ```
+
+## Web Client
+
+React + Vite + TypeScript SPA. Connects to multiple daemons simultaneously via WebSocket.
+
+### Key files
+- `src/App.tsx` - Screen routing (status | servers | editServer)
+- `src/services/ServerConnection.ts` - Single server WS connection
+- `src/services/ConnectionManager.ts` - Multi-server orchestrator
+- `src/services/storage.ts` - localStorage CRUD for servers
+- `src/context/ConnectionContext.tsx` - React context wrapping ConnectionManager
+- `src/components/StatusPage.tsx` - Dashboard with live connection badges
+- `src/components/ServerList.tsx` - Server management list
+- `src/components/ServerForm.tsx` - Add/edit server form
+
+### Commands
+```bash
+cd web && npm install
+npm run dev             # Vite dev server (proxies WS to localhost:9877)
+npm run build           # Production build to web/dist/
+npm run typecheck       # Type check only
+```
+
+### Serving
+The daemon serves `web/dist/` at `http://<host>:9877/web`. After building, restart the daemon or it will pick up the dist directory on next start. During development, use `npm run dev` and access via the Vite dev server directly.
 
 ## Architecture
 
@@ -204,8 +230,9 @@ private async handleMyEndpoint(payload: unknown): Promise<{ success: boolean; pa
 ### Adding Types
 
 - **App types:** `app/src/types/index.ts`
+- **Web types:** `web/src/types/index.ts`
 - **Daemon types:** `daemon/src/types.ts`
-- Keep types in sync between app and daemon for shared interfaces
+- Keep types in sync between app, web, and daemon for shared interfaces
 
 ### Code Style
 
@@ -259,7 +286,8 @@ export function useMyHook(param: string) {
 
 1. **App:** Run `npx expo start` in `app/`, test on device/emulator
 2. **Daemon:** Run `npm run build && node dist/index.js` in `daemon/`
-3. **Type check:** `npx tsc --noEmit` in either directory
+3. **Web:** Run `npm run dev` in `web/`, or `npm run build` for production
+4. **Type check:** `npx tsc --noEmit` in any project directory
 
 ### Building
 

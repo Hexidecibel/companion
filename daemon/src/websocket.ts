@@ -18,6 +18,7 @@ import { SubAgentWatcher } from './subagent-watcher';
 import { templates as scaffoldTemplates } from './scaffold/templates';
 import { scaffoldProject, previewScaffold } from './scaffold/generator';
 import { ProjectConfig } from './scaffold/types';
+import { scoreTemplates } from './scaffold/scorer';
 
 // File for persisting tmux session configs
 const TMUX_CONFIGS_FILE = path.join(os.homedir(), '.companion', 'tmux-sessions.json');
@@ -660,23 +661,60 @@ export class WebSocketHandler {
         break;
 
       // Scaffold endpoints
-      case 'get_scaffold_templates':
-        this.send(client.ws, {
-          type: 'scaffold_templates',
-          success: true,
-          payload: {
-            templates: scaffoldTemplates.map(t => ({
-              id: t.id,
-              name: t.name,
-              description: t.description,
-              type: t.type,
-              icon: t.icon,
-              tags: t.tags,
-            })),
-          },
-          requestId,
-        });
+      case 'get_scaffold_templates': {
+        const scaffoldPayload = payload as { description?: string } | undefined;
+        const description = scaffoldPayload?.description;
+
+        if (description && description.trim()) {
+          const scores = scoreTemplates(scaffoldTemplates, description);
+          const scoreMap = new Map(scores.map(s => [s.templateId, s]));
+
+          // Sort templates by score descending
+          const sorted = [...scaffoldTemplates].sort((a, b) => {
+            const sa = scoreMap.get(a.id)?.score ?? 0;
+            const sb = scoreMap.get(b.id)?.score ?? 0;
+            return sb - sa;
+          });
+
+          this.send(client.ws, {
+            type: 'scaffold_templates',
+            success: true,
+            payload: {
+              templates: sorted.map(t => {
+                const s = scoreMap.get(t.id);
+                return {
+                  id: t.id,
+                  name: t.name,
+                  description: t.description,
+                  type: t.type,
+                  icon: t.icon,
+                  tags: t.tags,
+                  score: s?.score ?? 0,
+                  matchedKeywords: s?.matchedKeywords ?? [],
+                };
+              }),
+            },
+            requestId,
+          });
+        } else {
+          this.send(client.ws, {
+            type: 'scaffold_templates',
+            success: true,
+            payload: {
+              templates: scaffoldTemplates.map(t => ({
+                id: t.id,
+                name: t.name,
+                description: t.description,
+                type: t.type,
+                icon: t.icon,
+                tags: t.tags,
+              })),
+            },
+            requestId,
+          });
+        }
         break;
+      }
 
       case 'scaffold_preview':
         (async () => {
