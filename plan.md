@@ -276,7 +276,7 @@ export interface ConversationMessage {
 ---
 
 ## 9. Improve Sub-Agents UX
-**Status:** planned
+**Status:** done
 
 ### Problem
 Sub-agents (Task tool) display is not useful in its current form:

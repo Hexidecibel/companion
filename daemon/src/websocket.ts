@@ -629,6 +629,10 @@ export class WebSocketHandler {
         this.handleGetAgentTree(client, payload as { sessionId?: string } | undefined, requestId);
         break;
 
+      case 'get_agent_detail':
+        this.handleGetAgentDetail(client, payload as { agentId: string } | undefined, requestId);
+        break;
+
       case 'client_error':
         this.handleClientError(client, payload as ClientError, requestId);
         break;
@@ -1716,6 +1720,60 @@ export class WebSocketHandler {
         type: 'agent_tree',
         success: false,
         error: 'Failed to get agent tree',
+        requestId,
+      });
+    }
+  }
+
+  private handleGetAgentDetail(
+    client: AuthenticatedClient,
+    payload: { agentId: string } | undefined,
+    requestId?: string
+  ): void {
+    if (!this.subAgentWatcher) {
+      this.send(client.ws, {
+        type: 'agent_detail',
+        success: false,
+        error: 'Sub-agent watcher not initialized',
+        requestId,
+      });
+      return;
+    }
+
+    if (!payload?.agentId) {
+      this.send(client.ws, {
+        type: 'agent_detail',
+        success: false,
+        error: 'Missing agentId',
+        requestId,
+      });
+      return;
+    }
+
+    try {
+      const detail = this.subAgentWatcher.getAgentDetail(payload.agentId);
+      if (!detail) {
+        this.send(client.ws, {
+          type: 'agent_detail',
+          success: false,
+          error: 'Agent not found',
+          requestId,
+        });
+        return;
+      }
+
+      this.send(client.ws, {
+        type: 'agent_detail',
+        success: true,
+        payload: detail,
+        requestId,
+      });
+    } catch (err) {
+      console.error('Failed to get agent detail:', err);
+      this.send(client.ws, {
+        type: 'agent_detail',
+        success: false,
+        error: 'Failed to get agent detail',
         requestId,
       });
     }

@@ -2,7 +2,8 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as chokidar from 'chokidar';
 import { EventEmitter } from 'events';
-import { SubAgent, AgentTree } from './types';
+import { SubAgent, AgentTree, ConversationHighlight } from './types';
+import { parseConversationFile, extractHighlights } from './parser';
 
 interface SubAgentJsonlEntry {
   agentId?: string;
@@ -274,5 +275,53 @@ export class SubAgentWatcher extends EventEmitter {
 
   getAgentsForSession(sessionId: string): SubAgent[] {
     return this.getAgentTree(sessionId).agents;
+  }
+
+  /**
+   * Get detailed conversation for a specific sub-agent by parsing its .jsonl file
+   */
+  getAgentDetail(agentId: string): {
+    agent: SubAgent;
+    highlights: ConversationHighlight[];
+  } | null {
+    // Find the tracked agent
+    let tracked: TrackedSubAgent | null = null;
+    for (const t of this.agents.values()) {
+      if (t.agentId === agentId) {
+        tracked = t;
+        break;
+      }
+    }
+
+    if (!tracked || !fs.existsSync(tracked.filePath)) {
+      return null;
+    }
+
+    // Parse the agent's conversation file using the existing parser
+    const messages = parseConversationFile(tracked.filePath, 200);
+    const highlights = extractHighlights(messages);
+
+    // Build the SubAgent info
+    const now = Date.now();
+    const oneHourAgo = now - 60 * 60 * 1000;
+    const isStale = tracked.lastActivity < oneHourAgo;
+    const isActuallyComplete = tracked.isComplete || isStale;
+    const status = isActuallyComplete ? 'completed' : 'running';
+
+    const agent: SubAgent = {
+      agentId: tracked.agentId,
+      slug: tracked.slug,
+      sessionId: tracked.sessionId,
+      status,
+      startedAt: tracked.startedAt,
+      completedAt: tracked.completedAt || (isStale ? tracked.lastActivity : undefined),
+      description: tracked.description,
+      subagentType: tracked.subagentType,
+      messageCount: tracked.messageCount,
+      lastActivity: tracked.lastActivity,
+      currentActivity: tracked.lastContent,
+    };
+
+    return { agent, highlights };
   }
 }

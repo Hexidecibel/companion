@@ -15,7 +15,8 @@ import {
   NativeSyntheticEvent,
   NativeScrollEvent,
 } from 'react-native';
-import { Server, ConversationHighlight, AgentTree } from '../types';
+import { Server, ConversationHighlight, AgentTree, SubAgent } from '../types';
+import { SubAgentDetailScreen } from './SubAgentDetailScreen';
 import { useConnection } from '../hooks/useConnection';
 import { useConversation } from '../hooks/useConversation';
 import { StatusIndicator } from '../components/StatusIndicator';
@@ -142,6 +143,8 @@ export function SessionView({ server, onBack, initialSessionId, onNewProject, on
   const [queuedMessages, setQueuedMessages] = useState<QueuedMessage[]>([]);
   const [agentTree, setAgentTree] = useState<AgentTree | null>(null);
   const [showAgentsModal, setShowAgentsModal] = useState(false);
+  const [viewingAgentDetail, setViewingAgentDetail] = useState<{ agentId: string; agent?: SubAgent } | null>(null);
+  const [showCompletedAgents, setShowCompletedAgents] = useState(false);
 
   // Subscribe to message queue updates
   useEffect(() => {
@@ -664,6 +667,10 @@ export function SessionView({ server, onBack, initialSessionId, onNewProject, on
       {(() => {
         const runningAgents = agentTree?.agents.filter(a => a.status === 'running') || [];
         if (!isConnected || runningAgents.length === 0) return null;
+        // Single agent: show description; Multiple: show count + latest activity
+        const barText = runningAgents.length === 1
+          ? (runningAgents[0].currentActivity || runningAgents[0].description || runningAgents[0].slug || 'Sub-agent running')
+          : `${runningAgents.length} agents running` + (runningAgents[0].currentActivity ? ` · ${runningAgents[0].currentActivity}` : '');
         return (
           <TouchableOpacity
             style={styles.subAgentsBar}
@@ -672,11 +679,11 @@ export function SessionView({ server, onBack, initialSessionId, onNewProject, on
           >
             <View style={styles.subAgentsContent}>
               <View style={styles.subAgentsDot} />
-              <Text style={styles.subAgentsText}>
-                {runningAgents.length} sub-agent{runningAgents.length > 1 ? 's' : ''} running
+              <Text style={styles.subAgentsText} numberOfLines={1}>
+                {barText}
               </Text>
             </View>
-            <Text style={styles.subAgentsArrow}>{'>'}</Text>
+            <Ionicons name="chevron-forward" size={14} color="#86efac" />
           </TouchableOpacity>
         );
       })()}
@@ -794,40 +801,103 @@ export function SessionView({ server, onBack, initialSessionId, onNewProject, on
 
             <ScrollView style={styles.agentsModalScroll}>
               {agentTree && agentTree.agents.length > 0 ? (
-                agentTree.agents.map((agent) => (
-                  <View key={agent.agentId} style={styles.agentCard}>
-                    <View style={styles.agentCardHeader}>
-                      <Text style={[
-                        styles.agentStatusDot,
-                        { color: agent.status === 'running' ? '#22c55e' : '#3b82f6' }
-                      ]}>
-                        {agent.status === 'running' ? '●' : '✓'}
-                      </Text>
-                      <View style={styles.agentCardInfo}>
-                        <Text style={styles.agentSlug} numberOfLines={1}>
-                          {agent.slug || agent.agentId.slice(0, 8)}
+                <>
+                  {/* Running agents section */}
+                  {agentTree.agents.filter(a => a.status === 'running').length > 0 && (
+                    <>
+                      <Text style={styles.agentSectionTitle}>Running</Text>
+                      {agentTree.agents.filter(a => a.status === 'running').map((agent) => (
+                        <TouchableOpacity
+                          key={agent.agentId}
+                          style={styles.agentCard}
+                          onPress={() => {
+                            setViewingAgentDetail({ agentId: agent.agentId, agent });
+                            setShowAgentsModal(false);
+                          }}
+                          activeOpacity={0.7}
+                        >
+                          <View style={styles.agentCardHeader}>
+                            <Text style={[styles.agentStatusDot, { color: '#22c55e' }]}>
+                              {'●'}
+                            </Text>
+                            <View style={styles.agentCardInfo}>
+                              <Text style={styles.agentSlug} numberOfLines={1}>
+                                {agent.slug || agent.agentId.slice(0, 8)}
+                              </Text>
+                              <Text style={styles.agentMeta}>
+                                Running for {formatDuration(agent.startedAt)}
+                                {' '}{agent.messageCount} msgs
+                              </Text>
+                            </View>
+                            <Ionicons name="chevron-forward" size={16} color="#6b7280" />
+                          </View>
+                          {agent.description && (
+                            <Text style={styles.agentDescription} numberOfLines={3}>
+                              {agent.description}
+                            </Text>
+                          )}
+                          {agent.currentActivity && (
+                            <Text style={styles.agentActivity} numberOfLines={1}>
+                              {agent.currentActivity}
+                            </Text>
+                          )}
+                        </TouchableOpacity>
+                      ))}
+                    </>
+                  )}
+
+                  {/* Completed agents section */}
+                  {agentTree.agents.filter(a => a.status !== 'running').length > 0 && (
+                    <>
+                      <TouchableOpacity
+                        style={styles.agentSectionHeader}
+                        onPress={() => setShowCompletedAgents(!showCompletedAgents)}
+                        activeOpacity={0.7}
+                      >
+                        <Text style={styles.agentSectionTitle}>
+                          Completed ({agentTree.agents.filter(a => a.status !== 'running').length})
                         </Text>
-                        <Text style={styles.agentMeta}>
-                          {agent.status === 'running'
-                            ? `Running for ${formatDuration(agent.startedAt)}`
-                            : `Completed in ${formatDuration(agent.startedAt, agent.completedAt)}`
-                          }
-                          {' '}{agent.messageCount} msgs
-                        </Text>
-                      </View>
-                    </View>
-                    {agent.description && (
-                      <Text style={styles.agentDescription} numberOfLines={2}>
-                        {agent.description}
-                      </Text>
-                    )}
-                    {agent.currentActivity && agent.status === 'running' && (
-                      <Text style={styles.agentActivity} numberOfLines={1}>
-                        {agent.currentActivity}
-                      </Text>
-                    )}
-                  </View>
-                ))
+                        <Ionicons
+                          name={showCompletedAgents ? 'chevron-down' : 'chevron-forward'}
+                          size={16}
+                          color="#6b7280"
+                        />
+                      </TouchableOpacity>
+                      {showCompletedAgents && agentTree.agents.filter(a => a.status !== 'running').map((agent) => (
+                        <TouchableOpacity
+                          key={agent.agentId}
+                          style={[styles.agentCard, styles.agentCardCompleted]}
+                          onPress={() => {
+                            setViewingAgentDetail({ agentId: agent.agentId, agent });
+                            setShowAgentsModal(false);
+                          }}
+                          activeOpacity={0.7}
+                        >
+                          <View style={styles.agentCardHeader}>
+                            <Text style={[styles.agentStatusDot, { color: '#3b82f6' }]}>
+                              {'✓'}
+                            </Text>
+                            <View style={styles.agentCardInfo}>
+                              <Text style={[styles.agentSlug, { color: '#9ca3af' }]} numberOfLines={1}>
+                                {agent.slug || agent.agentId.slice(0, 8)}
+                              </Text>
+                              <Text style={styles.agentMeta}>
+                                Completed in {formatDuration(agent.startedAt, agent.completedAt)}
+                                {' '}{agent.messageCount} msgs
+                              </Text>
+                            </View>
+                            <Ionicons name="chevron-forward" size={16} color="#6b7280" />
+                          </View>
+                          {agent.description && (
+                            <Text style={styles.agentDescription} numberOfLines={2}>
+                              {agent.description}
+                            </Text>
+                          )}
+                        </TouchableOpacity>
+                      ))}
+                    </>
+                  )}
+                </>
               ) : (
                 <Text style={styles.agentsEmptyText}>No sub-agents found</Text>
               )}
@@ -842,6 +912,20 @@ export function SessionView({ server, onBack, initialSessionId, onNewProject, on
           </View>
         </View>
       </Modal>
+
+      {/* Sub-Agent Detail Screen (overlays everything) */}
+      {viewingAgentDetail && (
+        <View style={StyleSheet.absoluteFill}>
+          <SubAgentDetailScreen
+            agentId={viewingAgentDetail.agentId}
+            initialAgent={viewingAgentDetail.agent}
+            onBack={() => {
+              setViewingAgentDetail(null);
+              setShowAgentsModal(true);
+            }}
+          />
+        </View>
+      )}
 
       {error && (
         <View style={styles.errorBanner}>
@@ -1517,6 +1601,24 @@ const styles = StyleSheet.create({
     marginTop: 4,
     marginLeft: 26,
     fontStyle: 'italic',
+  },
+  agentSectionTitle: {
+    color: '#9ca3af',
+    fontSize: 13,
+    fontWeight: '600',
+    textTransform: 'uppercase',
+    marginBottom: 8,
+  },
+  agentSectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 16,
+    marginBottom: 8,
+    paddingRight: 4,
+  },
+  agentCardCompleted: {
+    opacity: 0.7,
   },
   agentsEmptyText: {
     color: '#6b7280',
