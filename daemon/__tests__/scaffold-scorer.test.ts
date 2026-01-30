@@ -142,10 +142,10 @@ describe('scoreTemplates', () => {
     expect(results[0].templateId).toBe('react-typescript');
   });
 
-  // Integration tests with full template set (added later in item 6)
+  // Integration tests with full 7-template set
   describe('full template set integration', () => {
-    it('has all registered templates', () => {
-      expect(templates.length).toBeGreaterThanOrEqual(4);
+    it('has all 7 registered templates', () => {
+      expect(templates.length).toBe(7);
     });
 
     it('scores "React dashboard" - react-typescript wins', () => {
@@ -166,6 +166,34 @@ describe('scoreTemplates', () => {
     it('scores "Material UI marketing website" - react-mui-website wins', () => {
       const results = scoreTemplates(templates, 'Material UI marketing website');
       expect(results[0].templateId).toBe('react-mui-website');
+    });
+
+    it('scores "SEO blog with SSR" - nextjs wins', () => {
+      const results = scoreTemplates(templates, 'SEO blog with SSR');
+      expect(results[0].templateId).toBe('nextjs');
+    });
+
+    it('scores "Go command line tool" - go-cli wins', () => {
+      const results = scoreTemplates(templates, 'Go command line tool');
+      expect(results[0].templateId).toBe('go-cli');
+    });
+
+    it('scores "npm utility package" - typescript-library wins', () => {
+      const results = scoreTemplates(templates, 'npm utility package');
+      expect(results[0].templateId).toBe('typescript-library');
+    });
+
+    it('every template has scoring metadata', () => {
+      for (const t of templates) {
+        expect(t.scoring).toBeDefined();
+        expect(t.scoring!.primaryKeywords.length).toBeGreaterThan(0);
+        expect(t.scoring!.useCases.length).toBeGreaterThan(0);
+      }
+    });
+
+    it('no two templates share the same id', () => {
+      const ids = templates.map(t => t.id);
+      expect(new Set(ids).size).toBe(ids.length);
     });
   });
 });
