@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -12,6 +12,10 @@ import {
 import { wsService } from '../services/websocket';
 import { TmuxSessionInfo, DirectoryEntry } from '../types';
 import { sessionGuard } from '../services/sessionGuard';
+
+// Module-level cache: sessions survive unmount/remount for instant display
+let cachedSessions: TmuxSessionInfo[] = [];
+let cachedHomeDir = '';
 
 interface SessionPickerProps {
   currentSessionId?: string;
@@ -31,10 +35,10 @@ export function SessionPicker({ currentSessionId, onSessionChange, isOpen, onClo
       setVisible(isOpen);
     }
   }, [isOpen]);
-  const [sessions, setSessions] = useState<TmuxSessionInfo[]>([]);
+  const [sessions, setSessions] = useState<TmuxSessionInfo[]>(cachedSessions);
   const [activeSession, setActiveSession] = useState<string | undefined>(currentSessionId);
   const [loading, setLoading] = useState(false);
-  const [homeDir, setHomeDir] = useState<string>('');
+  const [homeDir, setHomeDir] = useState<string>(cachedHomeDir);
 
   // Directory browser state
   const [showBrowser, setShowBrowser] = useState(false);
@@ -42,10 +46,17 @@ export function SessionPicker({ currentSessionId, onSessionChange, isOpen, onClo
   const [directories, setDirectories] = useState<DirectoryEntry[]>([]);
   const [browseLoading, setBrowseLoading] = useState(false);
 
+  // Use ref for currentSessionId to avoid recreating loadSessions on every change
+  const currentSessionIdRef = useRef(currentSessionId);
+  currentSessionIdRef.current = currentSessionId;
+
   const loadSessions = useCallback(async () => {
     if (!wsService.isConnected()) return;
 
-    setLoading(true);
+    // Only show loading spinner when we have no cached data
+    if (cachedSessions.length === 0) {
+      setLoading(true);
+    }
     try {
       const response = await wsService.sendRequest('list_tmux_sessions', {});
       if (response.success && response.payload) {
@@ -54,10 +65,12 @@ export function SessionPicker({ currentSessionId, onSessionChange, isOpen, onClo
           activeSession: string;
           homeDir: string;
         };
+        cachedSessions = payload.sessions;
+        cachedHomeDir = payload.homeDir;
         setSessions(payload.sessions);
         // Only use daemon's activeSession if we don't have a currentSessionId from parent
         // This prevents overwriting the session that user clicked on from dashboard
-        if (!currentSessionId) {
+        if (!currentSessionIdRef.current) {
           setActiveSession(payload.activeSession);
         }
         setHomeDir(payload.homeDir);
@@ -67,7 +80,7 @@ export function SessionPicker({ currentSessionId, onSessionChange, isOpen, onClo
     } finally {
       setLoading(false);
     }
-  }, [currentSessionId]);
+  }, []);
 
   const browseDirectory = useCallback(async (path: string) => {
     setBrowseLoading(true);
@@ -88,20 +101,19 @@ export function SessionPicker({ currentSessionId, onSessionChange, isOpen, onClo
     }
   }, []);
 
-  // Load sessions when connected and when currentSessionId changes
-  // to show correct name in closed state
+  // Load sessions once when connected
   useEffect(() => {
     if (isConnected) {
       loadSessions();
     }
-  }, [loadSessions, currentSessionId, isConnected]);
+  }, [isConnected, loadSessions]);
 
-  // Reload when modal opens
+  // Refresh when modal opens
   useEffect(() => {
     if (visible && isConnected) {
       loadSessions();
     }
-  }, [visible, loadSessions, isConnected]);
+  }, [visible, isConnected, loadSessions]);
 
   const handleSelectSession = async (session: TmuxSessionInfo) => {
     if (session.name === activeSession) {

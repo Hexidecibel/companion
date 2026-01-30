@@ -9,6 +9,14 @@ import { parseConversationFile, extractHighlights, detectWaitingForInput, detect
 
 const execAsync = promisify(exec);
 
+interface TaskSummary {
+  total: number;
+  pending: number;
+  inProgress: number;
+  completed: number;
+  activeTask?: string;
+}
+
 interface TrackedConversation {
   path: string;
   projectPath: string;
@@ -17,6 +25,8 @@ interface TrackedConversation {
   isWaitingForInput: boolean;
   lastCompactionLine: number;
   cachedMessages: ConversationMessage[] | null;
+  cachedTaskSummary?: TaskSummary;
+  lastEmittedPendingTools: string; // JSON key of last emitted pending tools to deduplicate
 }
 
 export class ClaudeWatcher extends EventEmitter {
@@ -191,6 +201,26 @@ export class ClaudeWatcher extends EventEmitter {
       this.emit('compaction', compactionEvent);
     }
 
+    // Extract and cache task summary from already-read content
+    let cachedTaskSummary: TaskSummary | undefined;
+    try {
+      const tasks = extractTasks(content);
+      if (tasks.length > 0) {
+        const pending = tasks.filter(t => t.status === 'pending').length;
+        const inProgressTasks = tasks.filter(t => t.status === 'in_progress');
+        const completed = tasks.filter(t => t.status === 'completed').length;
+        cachedTaskSummary = {
+          total: tasks.length,
+          pending,
+          inProgress: inProgressTasks.length,
+          completed,
+          activeTask: inProgressTasks[0]?.activeForm || inProgressTasks[0]?.subject,
+        };
+      }
+    } catch {
+      // Silent fail - tasks are optional
+    }
+
     // Track this conversation with cached parse result
     const tracked: TrackedConversation = {
       path: filePath,
@@ -200,6 +230,8 @@ export class ClaudeWatcher extends EventEmitter {
       isWaitingForInput: conversationWaiting,
       lastCompactionLine: newCompactionLine,
       cachedMessages: messages,
+      cachedTaskSummary,
+      lastEmittedPendingTools: prevTracked?.lastEmittedPendingTools || '',
     };
     this.conversations.set(sessionId, tracked);
 
@@ -253,16 +285,22 @@ export class ClaudeWatcher extends EventEmitter {
           currentActivity,
           lastMessage,
         });
+      }
 
-        // Check for pending tools that might need auto-approval
-        const pendingTools = getPendingApprovalTools(messages);
-        if (pendingTools.length > 0) {
-          this.emit('pending-approval', {
-            sessionId,
-            projectPath,
-            tools: pendingTools,
-          });
-        }
+      // Check for pending tools - only emit when the set of pending tools CHANGES
+      // to avoid spamming auto-approve on every 100ms file poll.
+      const pendingTools = getPendingApprovalTools(messages);
+      const pendingKey = pendingTools.length > 0 ? pendingTools.sort().join(',') : '';
+      if (pendingKey && pendingKey !== tracked.lastEmittedPendingTools) {
+        tracked.lastEmittedPendingTools = pendingKey;
+        this.emit('pending-approval', {
+          sessionId,
+          projectPath,
+          tools: pendingTools,
+        });
+      } else if (!pendingKey) {
+        // Clear when no more pending tools (so next approval triggers fresh)
+        tracked.lastEmittedPendingTools = '';
       }
     } else {
       // Emit activity notification for non-active sessions
@@ -283,14 +321,18 @@ export class ClaudeWatcher extends EventEmitter {
           newMessageCount: hasNewMessages ? messages.length - hadMessages : 0,
         });
 
-        // Check for pending tools in non-active sessions too
+        // Check for pending tools in non-active sessions too (only on change)
         const pendingTools = getPendingApprovalTools(messages);
-        if (pendingTools.length > 0) {
+        const pendingKey = pendingTools.length > 0 ? pendingTools.sort().join(',') : '';
+        if (pendingKey && pendingKey !== tracked.lastEmittedPendingTools) {
+          tracked.lastEmittedPendingTools = pendingKey;
           this.emit('pending-approval', {
             sessionId,
             projectPath,
             tools: pendingTools,
           });
+        } else if (!pendingKey) {
+          tracked.lastEmittedPendingTools = '';
         }
       }
     }
@@ -512,6 +554,28 @@ export class ClaudeWatcher extends EventEmitter {
     return this.isWaitingForInput;
   }
 
+  /**
+   * Check the active session for pending approval tools and emit if found.
+   * Called externally when auto-approve is toggled on to retroactively approve.
+   */
+  checkAndEmitPendingApproval(): void {
+    const sessionId = this.activeSessionId;
+    if (!sessionId) return;
+
+    const tracked = this.conversations.get(sessionId);
+    if (!tracked) return;
+
+    const messages = tracked.cachedMessages || parseConversationFile(tracked.path);
+    const pendingTools = getPendingApprovalTools(messages);
+    if (pendingTools.length > 0) {
+      this.emit('pending-approval', {
+        sessionId,
+        projectPath: tracked.projectPath,
+        tools: pendingTools,
+      });
+    }
+  }
+
   async getServerSummary(tmuxSessions?: Array<{ name: string; workingDir?: string }>): Promise<{
     sessions: Array<{
       id: string;
@@ -564,8 +628,9 @@ export class ClaudeWatcher extends EventEmitter {
         continue;
       }
 
-      // Use fast tail-based detection instead of parsing entire file
-      const currentActivity = detectCurrentActivityFast(conv.path);
+      // Use cached messages for activity detection instead of re-reading large files
+      const messages = conv.cachedMessages;
+      const currentActivity = messages ? detectCurrentActivity(messages) : detectCurrentActivityFast(conv.path);
 
       // Determine status
       let status: 'idle' | 'working' | 'waiting' | 'error' = 'idle';
@@ -577,26 +642,9 @@ export class ClaudeWatcher extends EventEmitter {
         workingCount++;
       }
 
-      // Extract task summary (use cached content if available)
-      let taskSummary: typeof sessions[0]['taskSummary'];
-      try {
-        const content = fs.readFileSync(conv.path, 'utf-8');
-        const tasks = extractTasks(content);
-        if (tasks.length > 0) {
-          const pending = tasks.filter(t => t.status === 'pending').length;
-          const inProgress = tasks.filter(t => t.status === 'in_progress');
-          const completed = tasks.filter(t => t.status === 'completed').length;
-          taskSummary = {
-            total: tasks.length,
-            pending,
-            inProgress: inProgress.length,
-            completed,
-            activeTask: inProgress[0]?.activeForm || inProgress[0]?.subject,
-          };
-        }
-      } catch {
-        // Silent fail - tasks are optional
-      }
+      // Use cached task summary instead of re-reading multi-MB files on every poll.
+      // Task summaries are computed during processFileChange and cached.
+      const taskSummary = conv.cachedTaskSummary;
 
       sessions.push({
         id,

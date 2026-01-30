@@ -43,8 +43,11 @@ export function SessionView({ server, onBack, initialSessionId, onNewProject, on
     highlights,
     status,
     loading,
+    loadingMore,
+    hasMore,
     error,
     refresh,
+    loadMore,
     sendInput,
     sendImage,
     uploadImage,
@@ -61,14 +64,20 @@ export function SessionView({ server, onBack, initialSessionId, onNewProject, on
   // Simple scroll state - no complex auto-scroll logic
   const scrollViewRef = useRef<ScrollView>(null);
   const [showScrollButton, setShowScrollButton] = useState(false);
+  const [terminalLoading, setTerminalLoading] = useState(false);
   const [hasNewMessages, setHasNewMessages] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const isNearBottom = useRef(true);
   const contentHeight = useRef(0);
   const scrollViewHeight = useRef(0);
   const lastDataLength = useRef(0);
   const shouldScrollOnLoad = useRef(true); // Scroll to bottom on session enter
 
-  // Track scroll position to show/hide scroll button
+  // Track content height for scroll position preservation after prepending
+  const prevContentHeight = useRef(0);
+  const isLoadingMoreRef = useRef(false);
+
+  // Track scroll position to show/hide scroll button and trigger load-more
   const handleScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
     const { layoutMeasurement, contentOffset, contentSize } = event.nativeEvent;
     const distanceFromBottom = contentSize.height - layoutMeasurement.height - contentOffset.y;
@@ -77,13 +86,33 @@ export function SessionView({ server, onBack, initialSessionId, onNewProject, on
     if (isNearBottom.current) {
       setHasNewMessages(false);
     }
-  }, []);
+
+    // Detect scroll near top to trigger load-more
+    if (contentOffset.y < 200 && hasMore && !isLoadingMoreRef.current) {
+      isLoadingMoreRef.current = true;
+      prevContentHeight.current = contentSize.height;
+      loadMore().finally(() => {
+        isLoadingMoreRef.current = false;
+      });
+    }
+  }, [hasMore, loadMore]);
 
   // Scroll to bottom helper
   const scrollToBottom = useCallback((animated = true) => {
     scrollViewRef.current?.scrollToEnd({ animated });
     setHasNewMessages(false);
     setShowScrollButton(false);
+  }, []);
+
+  // Preserve scroll position after prepending older items
+  const handleContentSizeChange = useCallback((_w: number, h: number) => {
+    contentHeight.current = h;
+    if (prevContentHeight.current > 0 && h > prevContentHeight.current) {
+      const heightDiff = h - prevContentHeight.current;
+      // Scroll down by the amount of content that was prepended
+      scrollViewRef.current?.scrollTo({ y: heightDiff, animated: false });
+      prevContentHeight.current = 0;
+    }
   }, []);
 
   // When data changes, mark new messages if not at bottom
@@ -244,6 +273,13 @@ export function SessionView({ server, onBack, initialSessionId, onNewProject, on
 
   const lastSwitchedSessionId = useRef<string | null>(null);
   const [currentSessionId, setCurrentSessionId] = useState<string | undefined>(initialSessionId || undefined);
+
+  // Reset switch tracking when connection drops so we re-switch on reconnect
+  useEffect(() => {
+    if (!isConnected) {
+      lastSwitchedSessionId.current = null;
+    }
+  }, [isConnected]);
 
   // Refresh when connection is established and sync settings
   useEffect(() => {
@@ -467,6 +503,8 @@ export function SessionView({ server, onBack, initialSessionId, onNewProject, on
           <TouchableOpacity
             style={styles.terminalButton}
             onPress={async () => {
+              if (terminalLoading) return;
+              setTerminalLoading(true);
               try {
                 const response = await wsService.sendRequest('list_tmux_sessions', {});
                 if (response.success && response.payload) {
@@ -477,10 +515,17 @@ export function SessionView({ server, onBack, initialSessionId, onNewProject, on
                 }
               } catch {
                 // Ignore errors
+              } finally {
+                setTerminalLoading(false);
               }
             }}
+            disabled={terminalLoading}
           >
-            <Text style={styles.terminalButtonText}>{'>_'}</Text>
+            {terminalLoading ? (
+              <ActivityIndicator size="small" color="#9ca3af" />
+            ) : (
+              <Text style={styles.terminalButtonText}>{'>_'}</Text>
+            )}
           </TouchableOpacity>
         )}
         <TouchableOpacity
@@ -567,11 +612,14 @@ export function SessionView({ server, onBack, initialSessionId, onNewProject, on
         </TouchableOpacity>
       </Modal>
 
-      <StatusIndicator
-        connectionState={connectionState}
-        isWaitingForInput={status?.isWaitingForInput}
-        onReconnect={reconnect}
-      />
+      {/* Hide status bar when full-screen loading/connecting states are shown */}
+      {data.length > 0 && (
+        <StatusIndicator
+          connectionState={connectionState}
+          isWaitingForInput={status?.isWaitingForInput}
+          onReconnect={reconnect}
+        />
+      )}
 
       {/* Other session activity notification */}
       {otherSessionActivity && (
@@ -826,15 +874,26 @@ export function SessionView({ server, onBack, initialSessionId, onNewProject, on
         ]}
         refreshControl={
           <RefreshControl
-            refreshing={loading}
-            onRefresh={refresh}
+            refreshing={isRefreshing}
+            onRefresh={async () => {
+              setIsRefreshing(true);
+              try { await refresh(); } finally { setIsRefreshing(false); }
+            }}
             tintColor="#ffffff"
           />
         }
         onScroll={handleScroll}
+        onContentSizeChange={handleContentSizeChange}
         scrollEventThrottle={16}
         keyboardShouldPersistTaps="handled"
       >
+        {/* Loading indicator at top when fetching older highlights */}
+        {loadingMore && (
+          <View style={styles.loadMoreIndicator}>
+            <ActivityIndicator size="small" color="#3b82f6" />
+            <Text style={styles.loadMoreText}>Loading older messages...</Text>
+          </View>
+        )}
         {data.length === 0 ? (
           renderEmptyContent()
         ) : (
@@ -1205,6 +1264,18 @@ const styles = StyleSheet.create({
   listContent: {
     paddingTop: 12,
     paddingBottom: 100,  // Extra space for InputBar
+  },
+  loadMoreIndicator: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+  },
+  loadMoreText: {
+    color: '#9ca3af',
+    fontSize: 13,
+    marginLeft: 8,
   },
   listContentEmpty: {
     flex: 1,

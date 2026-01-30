@@ -84,6 +84,13 @@ High-level features of the Claude Companion mobile app and daemon.
 - Retry logic for failed approval sends
 - Detailed logging for debugging approval flow
 
+## Connection Resilience
+- Dead WebSocket detection via readyState verification
+- Automatic reconnection on silent WiFi drops
+- Session state recovery after reconnection
+- Double-connect guard prevents orphaned sockets
+- Exponential backoff reconnection with configurable max attempts
+
 ## Developer Tools
 - Sentry error tracking integration
 - Error boundary with user feedback and bug reporting

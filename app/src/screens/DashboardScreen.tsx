@@ -82,6 +82,10 @@ function TaskStatusDot({ status }: { status: TaskItem['status'] }) {
   return <View style={[styles.taskStatusDot, { backgroundColor: color }]} />;
 }
 
+// Module-level cache: servers survive unmount/remount so useMultiServerStatus
+// doesn't see an empty array on re-navigation and disconnect the WebSocket
+let cachedServers: Server[] = [];
+
 function ServerCard({
   server,
   status,
@@ -390,7 +394,7 @@ export function DashboardScreen({
   onOpenTaskDetail,
   sendRequest,
 }: DashboardScreenProps) {
-  const [servers, setServers] = useState<Server[]>([]);
+  const [servers, setServers] = useState<Server[]>(cachedServers);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -408,6 +412,7 @@ export function DashboardScreen({
 
   const loadServers = useCallback(async () => {
     const loaded = await getServers();
+    cachedServers = loaded;
     setServers(loaded);
     setLoading(false);
   }, []);
@@ -507,7 +512,7 @@ export function DashboardScreen({
                 serverId: server.id,
                 serverName: server.name,
                 connected: false,
-                connecting: true,
+                connecting: server.enabled !== false,
                 lastUpdated: Date.now(),
               };
 

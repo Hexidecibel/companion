@@ -88,8 +88,8 @@ export function createQRRequestHandler(config: DaemonConfig): http.RequestListen
   return async (req: http.IncomingMessage, res: http.ServerResponse) => {
     // Handle CORS preflight
     res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 
     if (req.method === 'OPTIONS') {
       res.writeHead(204);
@@ -100,6 +100,42 @@ export function createQRRequestHandler(config: DaemonConfig): http.RequestListen
     const fullUrl = req.url || '/';
     const [urlPath, queryString] = fullUrl.split('?');
     const params = new URLSearchParams(queryString || '');
+
+    // HTTP image upload endpoint - more reliable than WebSocket for large payloads
+    if (urlPath === '/upload' && req.method === 'POST') {
+      // Verify auth token
+      const authHeader = req.headers['authorization'];
+      const token = authHeader?.replace('Bearer ', '');
+      if (token !== config.token) {
+        res.writeHead(401, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: 'Unauthorized' }));
+        return;
+      }
+
+      // Read request body (raw binary image data)
+      const chunks: Buffer[] = [];
+      req.on('data', (chunk: Buffer) => chunks.push(chunk));
+      req.on('end', () => {
+        try {
+          const body = Buffer.concat(chunks);
+          const contentType = req.headers['content-type'] || 'image/jpeg';
+          const ext = contentType.includes('png') ? 'png' : 'jpg';
+          const filename = `claude-companion-${Date.now()}.${ext}`;
+          const filepath = path.join(os.tmpdir(), filename);
+
+          fs.writeFileSync(filepath, body);
+          console.log(`HTTP upload: ${filepath} (${body.length} bytes)`);
+
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: true, filepath }));
+        } catch (err) {
+          console.error('HTTP upload error:', err);
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: false, error: 'Upload failed' }));
+        }
+      });
+      return;
+    }
 
     // Web client routes - public access, security via WebSocket token
     if (urlPath.startsWith('/web')) {

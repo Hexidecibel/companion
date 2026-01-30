@@ -1,323 +1,132 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { Server, ServerStatus, ServerSummary } from '../types';
+import { wsService } from '../services/websocket';
 
 const POLL_INTERVAL = 5000; // 5 seconds
-const CONNECTION_TIMEOUT = 10000; // 10 seconds
-const MAX_CONCURRENT = 5;
 
-interface ServerConnection {
-  ws: WebSocket | null;
-  authenticated: boolean;
-  lastPoll: number;
-}
-
-interface PendingRequest {
-  resolve: (response: any) => void;
-  reject: (error: Error) => void;
-}
+// Module-level cache: survives component unmount/remount
+let cachedSummary: ServerSummary | undefined;
+let cachedConnected = false;
 
 export function useMultiServerStatus(servers: Server[]) {
-  const [statuses, setStatuses] = useState<Map<string, ServerStatus>>(new Map());
-  const connections = useRef<Map<string, ServerConnection>>(new Map());
-  const pollTimers = useRef<Map<string, NodeJS.Timeout>>(new Map());
-  const pendingRequests = useRef<Map<string, PendingRequest>>(new Map());
+  // Use the first enabled server - don't connect to disabled servers
+  const server = servers.find(s => s.enabled !== false) || null;
 
-  // Initialize status for a server
-  const initStatus = useCallback((server: Server): ServerStatus => ({
-    serverId: server.id,
-    serverName: server.name,
-    connected: false,
-    connecting: false,
+  const makeStatus = useCallback((connected: boolean, connecting: boolean, error?: string): ServerStatus => ({
+    serverId: server?.id || '',
+    serverName: server?.name || '',
+    connected,
+    connecting,
+    error,
+    summary: cachedSummary,
     lastUpdated: Date.now(),
-  }), []);
+  }), [server?.id, server?.name]);
 
-  // Update status for a specific server
-  const updateStatus = useCallback((serverId: string, update: Partial<ServerStatus>) => {
-    setStatuses(prev => {
-      const newMap = new Map(prev);
-      const current = newMap.get(serverId);
-      if (current) {
-        newMap.set(serverId, { ...current, ...update, lastUpdated: Date.now() });
-      }
-      return newMap;
-    });
+  const [status, setStatus] = useState<ServerStatus>(() =>
+    makeStatus(cachedConnected, false)
+  );
+
+  const pollTimer = useRef<NodeJS.Timeout | null>(null);
+
+  // Poll for server summary
+  const pollSummary = useCallback(() => {
+    if (!wsService.isConnected()) return;
+
+    wsService.sendRequest('get_server_summary', undefined, 10000)
+      .then(response => {
+        if (response.success && response.payload) {
+          cachedSummary = response.payload as ServerSummary;
+          setStatus(prev => ({ ...prev, summary: cachedSummary, lastUpdated: Date.now() }));
+        }
+      })
+      .catch(() => { /* silent fail on poll */ });
   }, []);
 
-  // Connect to a server
-  const connectToServer = useCallback((server: Server) => {
-    const existingConn = connections.current.get(server.id);
-    if (existingConn?.ws?.readyState === WebSocket.OPEN) {
-      return; // Already connected
-    }
-
-    updateStatus(server.id, { connecting: true, error: undefined });
-
-    const protocol = server.useTls ? 'wss' : 'ws';
-    const url = `${protocol}://${server.host}:${server.port}`;
-
-    try {
-      const ws = new WebSocket(url);
-
-      const timeout = setTimeout(() => {
-        if (ws.readyState !== WebSocket.OPEN) {
-          ws.close();
-          updateStatus(server.id, {
-            connecting: false,
-            connected: false,
-            error: 'Connection timeout',
-          });
-        }
-      }, CONNECTION_TIMEOUT);
-
-      ws.onopen = () => {
-        clearTimeout(timeout);
-        // Server will send 'connected' message, then we authenticate
-      };
-
-      ws.onmessage = (event) => {
-        try {
-          const message = JSON.parse(event.data);
-
-          // Check for pending request responses
-          if (message.requestId && pendingRequests.current.has(message.requestId)) {
-            const pending = pendingRequests.current.get(message.requestId)!;
-            pendingRequests.current.delete(message.requestId);
-            pending.resolve(message);
-            return;
-          }
-
-          // Wait for 'connected' message before authenticating
-          if (message.type === 'connected') {
-            ws.send(JSON.stringify({
-              type: 'authenticate',
-              token: server.token,
-            }));
-            return;
-          }
-
-          if (message.type === 'authenticated' && message.success) {
-            connections.current.set(server.id, {
-              ws,
-              authenticated: true,
-              lastPoll: 0,
-            });
-            updateStatus(server.id, {
-              connecting: false,
-              connected: true,
-              error: undefined,
-            });
-            // Start polling
-            pollServer(server);
-          } else if (message.type === 'server_summary' && message.success) {
-            updateStatus(server.id, {
-              summary: message.payload as ServerSummary,
-            });
-          } else if (message.type === 'error') {
-            updateStatus(server.id, {
-              error: message.error || 'Unknown error',
-            });
-          }
-        } catch (err) {
-          console.error('Failed to parse message:', err);
-        }
-      };
-
-      ws.onerror = () => {
-        clearTimeout(timeout);
-        updateStatus(server.id, {
-          connecting: false,
-          connected: false,
-          error: 'Connection failed',
-        });
-      };
-
-      ws.onclose = () => {
-        clearTimeout(timeout);
-        connections.current.delete(server.id);
-        updateStatus(server.id, {
-          connecting: false,
-          connected: false,
-        });
-        // Clear poll timer
-        const timer = pollTimers.current.get(server.id);
-        if (timer) {
-          clearInterval(timer);
-          pollTimers.current.delete(server.id);
-        }
-      };
-
-      connections.current.set(server.id, {
-        ws,
-        authenticated: false,
-        lastPoll: 0,
-      });
-    } catch (err) {
-      updateStatus(server.id, {
-        connecting: false,
-        connected: false,
-        error: 'Failed to connect',
-      });
-    }
-  }, [updateStatus]);
-
-  // Poll a server for status
-  const pollServer = useCallback((server: Server) => {
-    const conn = connections.current.get(server.id);
-    if (!conn?.ws || conn.ws.readyState !== WebSocket.OPEN || !conn.authenticated) {
+  // Single effect: connect, track state, and poll
+  useEffect(() => {
+    if (!server) {
+      // All servers disabled - disconnect if connected
+      if (wsService.isConnected()) {
+        wsService.disconnect();
+      }
+      cachedConnected = false;
+      cachedSummary = undefined;
       return;
     }
 
-    // Send request
-    conn.ws.send(JSON.stringify({
-      type: 'get_server_summary',
-      requestId: `poll-${Date.now()}`,
-    }));
-    conn.lastPoll = Date.now();
+    // Connect if needed
+    if (wsService.getServerId() !== server.id || !wsService.isConnected()) {
+      wsService.connect(server);
+    }
+
+    // Track connection state
+    const unsubscribe = wsService.onStateChange((state) => {
+      const connected = state.status === 'connected';
+      const connecting = state.status === 'connecting' || state.status === 'reconnecting';
+      cachedConnected = connected;
+
+      setStatus({
+        serverId: server.id,
+        serverName: server.name,
+        connected,
+        connecting,
+        error: state.error,
+        summary: cachedSummary,
+        lastUpdated: Date.now(),
+      });
+
+      // When we become connected, immediately poll for summary
+      if (connected) {
+        pollSummary();
+      }
+    });
+
+    // If already connected, poll now
+    if (wsService.isConnected()) {
+      pollSummary();
+    }
 
     // Set up recurring poll
-    if (!pollTimers.current.has(server.id)) {
-      const timer = setInterval(() => {
-        const c = connections.current.get(server.id);
-        if (c?.ws?.readyState === WebSocket.OPEN && c.authenticated) {
-          c.ws.send(JSON.stringify({
-            type: 'get_server_summary',
-            requestId: `poll-${Date.now()}`,
-          }));
-        }
-      }, POLL_INTERVAL);
-      pollTimers.current.set(server.id, timer);
-    }
-  }, []);
+    const timer = setInterval(pollSummary, POLL_INTERVAL);
+    pollTimer.current = timer;
 
-  // Disconnect from a server
-  const disconnectFromServer = useCallback((serverId: string) => {
-    const conn = connections.current.get(serverId);
-    if (conn?.ws) {
-      conn.ws.close();
-    }
-    connections.current.delete(serverId);
-
-    const timer = pollTimers.current.get(serverId);
-    if (timer) {
+    return () => {
+      unsubscribe();
       clearInterval(timer);
-      pollTimers.current.delete(serverId);
-    }
-  }, []);
+      pollTimer.current = null;
+      // Do NOT disconnect wsService - it persists across screens
+    };
+  }, [server?.id, server?.name, pollSummary]);
 
-  // Connect to all servers (respecting max concurrent)
-  const connectAll = useCallback(() => {
-    // Initialize statuses for all servers
-    setStatuses(prev => {
-      const newMap = new Map(prev);
-      servers.forEach(server => {
-        if (!newMap.has(server.id)) {
-          newMap.set(server.id, initStatus(server));
-        }
-      });
-      return newMap;
-    });
+  // Refresh
+  const refreshServer = useCallback((_serverId: string) => {
+    pollSummary();
+  }, [pollSummary]);
 
-    // Connect to enabled servers only (limit concurrent connections)
-    const enabledServers = servers.filter(s => s.enabled !== false);
-    const toConnect = enabledServers.slice(0, MAX_CONCURRENT);
-    toConnect.forEach(server => {
-      connectToServer(server);
-    });
-  }, [servers, initStatus, connectToServer]);
-
-  // Refresh a specific server
-  const refreshServer = useCallback((serverId: string) => {
-    const server = servers.find(s => s.id === serverId);
-    if (server) {
-      const conn = connections.current.get(serverId);
-      if (conn?.ws?.readyState === WebSocket.OPEN && conn.authenticated) {
-        conn.ws.send(JSON.stringify({
-          type: 'get_server_summary',
-          requestId: `refresh-${Date.now()}`,
-        }));
-      } else {
-        connectToServer(server);
-      }
-    }
-  }, [servers, connectToServer]);
-
-  // Refresh all servers
   const refreshAll = useCallback(() => {
-    servers.forEach(server => {
-      refreshServer(server.id);
-    });
-  }, [servers, refreshServer]);
+    pollSummary();
+  }, [pollSummary]);
 
-  // Send a request through an existing server connection
-  const sendRequest = useCallback((serverId: string, type: string, payload?: unknown): Promise<any> => {
-    return new Promise((resolve, reject) => {
-      const conn = connections.current.get(serverId);
-      if (!conn?.ws || conn.ws.readyState !== WebSocket.OPEN || !conn.authenticated) {
-        reject(new Error('Not connected to server'));
-        return;
-      }
-
-      const requestId = `req-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-
-      const timeout = setTimeout(() => {
-        pendingRequests.current.delete(requestId);
-        reject(new Error('Request timeout'));
-      }, 10000);
-
-      pendingRequests.current.set(requestId, {
-        resolve: (response) => {
-          clearTimeout(timeout);
-          resolve(response);
-        },
-        reject: (error) => {
-          clearTimeout(timeout);
-          reject(error);
-        },
-      });
-
-      conn.ws.send(JSON.stringify({ type, payload, requestId }));
-    });
+  // Send a request through wsService
+  const sendRequest = useCallback((_serverId: string, type: string, payload?: unknown): Promise<any> => {
+    return wsService.sendRequest(type, payload);
   }, []);
 
-  // Effect to connect when servers change
-  // Don't disconnect on unmount - connections persist so dashboard
-  // loads instantly when navigating back from session view
-  useEffect(() => {
-    // Clean up connections for servers no longer in the list
-    const currentServerIds = new Set(servers.map(s => s.id));
-    connections.current.forEach((_, serverId) => {
-      if (!currentServerIds.has(serverId)) {
-        disconnectFromServer(serverId);
-      }
-    });
-
-    connectAll();
-  }, [connectAll, disconnectFromServer, servers]);
-
-  // Get status array for easier rendering
-  const statusArray = Array.from(statuses.values());
-
-  // Computed values
-  const totalWaiting = statusArray.reduce(
-    (sum, s) => sum + (s.summary?.waitingCount || 0),
-    0
-  );
-  const totalWorking = statusArray.reduce(
-    (sum, s) => sum + (s.summary?.workingCount || 0),
-    0
-  );
-  const connectedCount = statusArray.filter(s => s.connected).length;
+  const statusArray = server ? [status] : [];
+  const totalWaiting = status.summary?.waitingCount || 0;
+  const totalWorking = status.summary?.workingCount || 0;
+  const connectedCount = status.connected ? 1 : 0;
 
   return {
     statuses: statusArray,
-    statusMap: statuses,
+    statusMap: new Map(server ? [[server.id, status]] : []),
     totalWaiting,
     totalWorking,
     connectedCount,
     refreshServer,
     refreshAll,
     sendRequest,
-    connectToServer: (server: Server) => connectToServer(server),
-    disconnectFromServer,
+    connectToServer: (s: Server) => wsService.connect(s),
+    disconnectFromServer: (_serverId: string) => wsService.disconnect(),
   };
 }

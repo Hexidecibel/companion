@@ -111,10 +111,12 @@ async function main(): Promise<void> {
       }
 
       // Composite dedup key: session + sorted tool names
+      // The watcher already deduplicates emissions (only fires on change),
+      // but this provides a safety net against rapid re-fires.
       const dedupKey = `${sessionId}:${autoApprovable.sort().join(',')}`;
       const now = Date.now();
       const lastApproval = pendingAutoApprovals.get(dedupKey);
-      if (lastApproval && now - lastApproval < 5000) {
+      if (lastApproval && now - lastApproval < 15000) {
         console.log(`[AUTO-APPROVE] Dedup: skipping (last approval ${now - lastApproval}ms ago for ${dedupKey})`);
         return;
       }
@@ -122,7 +124,7 @@ async function main(): Promise<void> {
 
       // Clean up old entries
       for (const [key, ts] of pendingAutoApprovals) {
-        if (now - ts > 10000) pendingAutoApprovals.delete(key);
+        if (now - ts > 30000) pendingAutoApprovals.delete(key);
       }
 
       try {

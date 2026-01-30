@@ -55,10 +55,12 @@ function App() {
   useEffect(() => {
     initializePushNotifications();
 
-    // Clear badge when app becomes active
+    // When app resumes from background, check WebSocket health and clear badge
     const subscription = AppState.addEventListener('change', (state) => {
       if (state === 'active') {
         clearBadge();
+        // OS may have killed the socket while backgrounded - detect and reconnect
+        wsService.checkHealth();
       }
     });
 

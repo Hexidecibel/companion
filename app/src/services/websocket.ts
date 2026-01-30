@@ -31,11 +31,19 @@ export class WebSocketService {
   private requestCounter = 0;
 
   connect(server: Server): void {
+    // Don't connect to disabled servers
+    if (server.enabled === false) {
+      console.log(`Server ${server.id} is disabled, skipping connect`);
+      return;
+    }
+
     // Guard against double-connect: if already connecting/connected to same server, skip
+    // For 'connected' status, also verify the WebSocket is actually open - WiFi drops
+    // can leave status as 'connected' while the socket is dead
     if (this.server?.id === server.id &&
         (this.connectionState.status === 'connecting' ||
-         this.connectionState.status === 'connected' ||
-         this.connectionState.status === 'reconnecting')) {
+         this.connectionState.status === 'reconnecting' ||
+         (this.connectionState.status === 'connected' && this.ws?.readyState === WebSocket.OPEN))) {
       console.log(`Already ${this.connectionState.status} to ${server.id}, skipping connect`);
       return;
     }
@@ -186,8 +194,8 @@ export class WebSocketService {
     });
     this.pendingRequests.clear();
 
-    // Attempt reconnection if we have a server and haven't exceeded attempts
-    if (this.server && this.connectionState.reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+    // Attempt reconnection if we have an enabled server and haven't exceeded attempts
+    if (this.server && this.server.enabled !== false && this.connectionState.reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
       const attempts = this.connectionState.reconnectAttempts + 1;
       const delay = Math.min(
         INITIAL_RECONNECT_DELAY * Math.pow(2, attempts - 1),
@@ -334,18 +342,53 @@ export class WebSocketService {
     return () => this.stateChangeHandlers.delete(handler);
   }
 
-  // Force a reconnection attempt
-  reconnect(): void {
-    if (this.server) {
+  // Check if the connection is actually alive and reconnect if dead.
+  // Called on app resume from background where the OS may have killed the socket.
+  checkHealth(): void {
+    if (!this.server || this.server.enabled === false) return;
+
+    // If we think we're connected but the socket is dead, force reconnect
+    if (this.connectionState.status === 'connected' && this.ws?.readyState !== WebSocket.OPEN) {
+      console.log('Health check: socket dead, reconnecting');
       this.connectionState.reconnectAttempts = 0;
       this.disconnect();
       this.connect(this.server);
+      return;
+    }
+
+    // If we're in error state (e.g., max reconnects exhausted while backgrounded), retry
+    if (this.connectionState.status === 'error') {
+      console.log('Health check: in error state, retrying');
+      this.connectionState.reconnectAttempts = 0;
+      this.connect(this.server);
+      return;
+    }
+
+    // If connected, restart the ping interval (timers may have been frozen)
+    if (this.connectionState.status === 'connected' && this.ws?.readyState === WebSocket.OPEN) {
+      this.startPingInterval();
+    }
+  }
+
+  // Force a reconnection attempt
+  reconnect(): void {
+    const server = this.server;
+    if (server) {
+      this.connectionState.reconnectAttempts = 0;
+      this.disconnect();
+      this.connect(server);
     }
   }
 
   // Get current server ID
   getServerId(): string | null {
     return this.server?.id || null;
+  }
+
+  // Get current server connection info for HTTP requests
+  getServerInfo(): { host: string; port: number; token: string; useTls: boolean } | null {
+    if (!this.server) return null;
+    return { host: this.server.host, port: this.server.port, token: this.server.token, useTls: this.server.useTls };
   }
 
   // Flush queued messages when connected

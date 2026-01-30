@@ -259,17 +259,31 @@ export class WebSocketHandler {
         break;
 
       case 'get_highlights': {
+        const hlParams = payload as { limit?: number; offset?: number } | undefined;
         const t0 = Date.now();
         const messages = this.watcher.getMessages();
         const t1 = Date.now();
-        const highlights = extractHighlights(messages);
+        const allHighlights = extractHighlights(messages);
         const t2 = Date.now();
         const hlSessionId = this.watcher.getActiveSessionId();
-        console.log(`WebSocket: get_highlights - getMessages: ${t1-t0}ms, extractHighlights: ${t2-t1}ms, ${messages.length} msgs`);
+        const total = allHighlights.length;
+
+        // Paginate: return most recent `limit` items, with optional offset from end
+        let resultHighlights = allHighlights;
+        let hasMore = false;
+        if (hlParams?.limit && hlParams.limit > 0) {
+          const offset = hlParams.offset || 0;
+          const startIdx = Math.max(0, total - offset - hlParams.limit);
+          const endIdx = total - offset;
+          resultHighlights = allHighlights.slice(startIdx, endIdx);
+          hasMore = startIdx > 0;
+        }
+
+        console.log(`WebSocket: get_highlights - getMessages: ${t1-t0}ms, extractHighlights: ${t2-t1}ms, ${messages.length} msgs, returning ${resultHighlights.length}/${total}`);
         this.send(client.ws, {
           type: 'highlights',
           success: true,
-          payload: { highlights },
+          payload: { highlights: resultHighlights, total, hasMore },
           sessionId: hlSessionId,
           requestId,
         } as WebSocketResponse);
@@ -473,6 +487,11 @@ export class WebSocketHandler {
           payload: { enabled: this.autoApproveEnabled },
           requestId,
         });
+
+        // When toggled ON, immediately check for pending tools that should be auto-approved
+        if (this.autoApproveEnabled) {
+          this.watcher.checkAndEmitPendingApproval();
+        }
         break;
       }
 
