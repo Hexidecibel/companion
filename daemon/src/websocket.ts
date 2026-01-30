@@ -5,6 +5,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import * as crypto from 'crypto';
+import { spawn } from 'child_process';
 import { SessionWatcher } from './watcher';
 import { InputInjector } from './input-injector';
 import { PushNotificationService } from './push';
@@ -625,6 +626,10 @@ export class WebSocketHandler {
 
       case 'read_file':
         this.handleReadFile(client, payload as { path: string }, requestId);
+        break;
+
+      case 'open_in_editor':
+        this.handleOpenInEditor(client, payload as { path: string }, requestId);
         break;
 
       case 'download_file':
@@ -1710,6 +1715,106 @@ export class WebSocketHandler {
         type: 'file_content',
         success: false,
         error: `Cannot read file: ${err instanceof Error ? err.message : 'Unknown error'}`,
+        requestId,
+      });
+    }
+  }
+
+  private async handleOpenInEditor(
+    client: AuthenticatedClient,
+    payload: { path: string } | undefined,
+    requestId?: string
+  ): Promise<void> {
+    const filePath = payload?.path;
+
+    if (!filePath) {
+      this.send(client.ws, {
+        type: 'open_in_editor',
+        success: false,
+        error: 'No file path provided',
+        requestId,
+      });
+      return;
+    }
+
+    try {
+      const homeDir = this.tmux.getHomeDir();
+      let resolvedPath: string;
+
+      if (filePath.startsWith('~/')) {
+        resolvedPath = path.join(homeDir, filePath.slice(2));
+      } else if (filePath.startsWith('/')) {
+        resolvedPath = filePath;
+      } else {
+        resolvedPath = path.resolve(homeDir, filePath);
+      }
+
+      resolvedPath = path.normalize(resolvedPath);
+
+      // Security: only allow opening files in home directory or /tmp
+      const allowedPaths = [homeDir, '/tmp', '/var/tmp'];
+      const isAllowed = allowedPaths.some(allowed => resolvedPath.startsWith(allowed));
+
+      if (!isAllowed) {
+        this.send(client.ws, {
+          type: 'open_in_editor',
+          success: false,
+          error: `Access denied: file outside allowed directories`,
+          requestId,
+        });
+        return;
+      }
+
+      // Check file exists
+      if (!fs.existsSync(resolvedPath)) {
+        this.send(client.ws, {
+          type: 'open_in_editor',
+          success: false,
+          error: 'File not found',
+          requestId,
+        });
+        return;
+      }
+
+      // Determine the editor command
+      // Priority: $VISUAL > $EDITOR > platform default (open/xdg-open)
+      const editor = process.env.VISUAL || process.env.EDITOR;
+      let cmd: string;
+      let args: string[];
+
+      if (editor) {
+        // Split editor string in case it has flags (e.g. "code --wait")
+        const parts = editor.split(/\s+/);
+        cmd = parts[0];
+        args = [...parts.slice(1), resolvedPath];
+      } else if (process.platform === 'darwin') {
+        cmd = 'open';
+        args = [resolvedPath];
+      } else {
+        cmd = 'xdg-open';
+        args = [resolvedPath];
+      }
+
+      // Spawn detached so it doesn't block the daemon
+      const child = spawn(cmd, args, {
+        detached: true,
+        stdio: 'ignore',
+      });
+      child.unref();
+
+      console.log(`Open in editor: ${cmd} ${args.join(' ')}`);
+
+      this.send(client.ws, {
+        type: 'open_in_editor',
+        success: true,
+        payload: { path: resolvedPath, editor: cmd },
+        requestId,
+      });
+    } catch (err) {
+      this.send(client.ws, {
+        type: 'open_in_editor',
+        success: false,
+        error: `Failed to open file: ${err instanceof Error ? err.message : 'Unknown error'}`,
         requestId,
       });
     }

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { connectionManager } from '../services/ConnectionManager';
 
 interface FileViewerModalProps {
@@ -11,6 +11,7 @@ export function FileViewerModal({ serverId, filePath, onClose }: FileViewerModal
   const [content, setContent] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [editorStatus, setEditorStatus] = useState<'idle' | 'opening' | 'opened' | 'error'>('idle');
 
   const fileName = filePath.split('/').pop() || filePath;
 
@@ -43,6 +44,26 @@ export function FileViewerModal({ serverId, filePath, onClose }: FileViewerModal
       });
   }, [serverId, filePath]);
 
+  const handleOpenInEditor = useCallback(async () => {
+    const conn = connectionManager.getConnection(serverId);
+    if (!conn || !conn.isConnected()) return;
+
+    setEditorStatus('opening');
+    try {
+      const response = await conn.sendRequest('open_in_editor', { path: filePath });
+      if (response.success) {
+        setEditorStatus('opened');
+        setTimeout(() => setEditorStatus('idle'), 2000);
+      } else {
+        setEditorStatus('error');
+        setTimeout(() => setEditorStatus('idle'), 3000);
+      }
+    } catch {
+      setEditorStatus('error');
+      setTimeout(() => setEditorStatus('idle'), 3000);
+    }
+  }, [serverId, filePath]);
+
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal-content file-viewer" onClick={(e) => e.stopPropagation()}>
@@ -51,7 +72,20 @@ export function FileViewerModal({ serverId, filePath, onClose }: FileViewerModal
             <h3>{fileName}</h3>
             <span className="file-viewer-path">{filePath}</span>
           </div>
-          <button className="modal-close" onClick={onClose}>{'\u2715'}</button>
+          <div className="file-viewer-actions">
+            <button
+              className={`file-viewer-editor-btn ${editorStatus}`}
+              onClick={handleOpenInEditor}
+              disabled={editorStatus === 'opening'}
+              title="Open in your default editor on the server"
+            >
+              {editorStatus === 'opening' ? 'Opening...'
+                : editorStatus === 'opened' ? 'Opened'
+                : editorStatus === 'error' ? 'Failed'
+                : 'Open in Editor'}
+            </button>
+            <button className="modal-close" onClick={onClose}>{'\u2715'}</button>
+          </div>
         </div>
 
         <div className="file-viewer-body">

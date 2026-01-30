@@ -1843,6 +1843,46 @@ body {
   white-space: nowrap;
 }
 
+.file-viewer-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.file-viewer-editor-btn {
+  padding: 4px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s;
+}
+
+.file-viewer-editor-btn:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+  border-color: var(--accent-blue);
+}
+
+.file-viewer-editor-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.file-viewer-editor-btn.opened {
+  color: var(--accent-green);
+  border-color: var(--accent-green);
+}
+
+.file-viewer-editor-btn.error {
+  color: var(--accent-red);
+  border-color: var(--accent-red);
+}
+
 .file-viewer-body {
   flex: 1;
   overflow-y: auto;
