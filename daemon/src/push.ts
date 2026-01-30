@@ -157,7 +157,7 @@ export class PushNotificationService {
     }
   }
 
-  scheduleWaitingNotification(preview: string): void {
+  scheduleWaitingNotification(preview: string, sessionId?: string, sessionName?: string): void {
     if (this.devices.size === 0) {
       return;
     }
@@ -171,7 +171,7 @@ export class PushNotificationService {
 
     if (instantDevices.length > 0) {
       console.log(`Push notifications: Sending instant notification to ${instantDevices.length} device(s)`);
-      this.sendNotificationsToDevices(preview, instantDevices);
+      this.sendNotificationsToDevices(preview, instantDevices, sessionId, sessionName);
     }
 
     // Log skipped devices
@@ -261,17 +261,19 @@ export class PushNotificationService {
 
   private async sendNotificationsToDevices(
     preview: string,
-    devices: [string, RegisteredDevice][]
+    devices: [string, RegisteredDevice][],
+    sessionId?: string,
+    sessionName?: string
   ): Promise<void> {
     // Record notification time for throttling
     for (const [deviceId] of devices) {
       this.recordNotificationSent(deviceId);
     }
     // Send using existing method
-    await this.sendNotifications(preview, devices.map(([_, d]) => d.token));
+    await this.sendNotifications(preview, devices.map(([_, d]) => d.token), sessionId, sessionName);
   }
 
-  private async sendNotifications(preview: string, tokens: string[]): Promise<void> {
+  private async sendNotifications(preview: string, tokens: string[], sessionId?: string, sessionName?: string): Promise<void> {
     if (tokens.length === 0) {
       return;
     }
@@ -286,27 +288,31 @@ export class PushNotificationService {
 
     // Send via Firebase if we have FCM tokens and Firebase is initialized
     if (fcmTokens.length > 0 && this.firebaseInitialized) {
-      await this.sendViaFirebase(truncatedPreview, fcmTokens);
+      await this.sendViaFirebase(truncatedPreview, fcmTokens, sessionId, sessionName);
     }
 
     // Send via Expo Push if we have Expo tokens
     if (expoTokens.length > 0) {
-      await this.sendViaExpo(truncatedPreview, expoTokens);
+      await this.sendViaExpo(truncatedPreview, expoTokens, sessionId, sessionName);
     }
   }
 
-  private async sendViaFirebase(preview: string, tokens: string[]): Promise<void> {
+  private async sendViaFirebase(preview: string, tokens: string[], sessionId?: string, sessionName?: string): Promise<void> {
+    const data: Record<string, string> = {
+      type: 'waiting_for_input',
+      preview,
+      timestamp: Date.now().toString(),
+    };
+    if (sessionId) data.sessionId = sessionId;
+    if (sessionName) data.sessionName = sessionName;
+
     const message: admin.messaging.MulticastMessage = {
       tokens,
       notification: {
         title: 'Claude is waiting',
         body: preview,
       },
-      data: {
-        type: 'waiting_for_input',
-        preview,
-        timestamp: Date.now().toString(),
-      },
+      data,
       android: {
         priority: 'high',
         notification: {
@@ -339,16 +345,20 @@ export class PushNotificationService {
     }
   }
 
-  private async sendViaExpo(preview: string, tokens: string[]): Promise<void> {
+  private async sendViaExpo(preview: string, tokens: string[], sessionId?: string, sessionName?: string): Promise<void> {
+    const notifData: Record<string, string> = {
+      type: 'waiting_for_input',
+      preview,
+      timestamp: Date.now().toString(),
+    };
+    if (sessionId) notifData.sessionId = sessionId;
+    if (sessionName) notifData.sessionName = sessionName;
+
     const messages: ExpoPushMessage[] = tokens.map((token) => ({
       to: token,
       title: 'Claude is waiting',
       body: preview,
-      data: {
-        type: 'waiting_for_input',
-        preview,
-        timestamp: Date.now().toString(),
-      },
+      data: notifData,
       sound: 'default',
       badge: 1,
       channelId: 'claude_waiting',

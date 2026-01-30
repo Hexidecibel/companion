@@ -915,7 +915,7 @@ export function SessionView({ server, onBack, initialSessionId, onNewProject, on
 
       {/* Sub-Agent Detail Screen (overlays everything) */}
       {viewingAgentDetail && (
-        <View style={StyleSheet.absoluteFill}>
+        <View style={[StyleSheet.absoluteFill, { backgroundColor: '#111827' }]}>
           <SubAgentDetailScreen
             agentId={viewingAgentDetail.agentId}
             initialAgent={viewingAgentDetail.agent}

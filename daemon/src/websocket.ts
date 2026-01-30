@@ -85,9 +85,13 @@ export class WebSocketHandler {
     this.watcher.on('status-change', (data) => {
       this.broadcast('status_change', data);
 
-      // Schedule push notification if waiting for input
+      // Schedule push notification if waiting for input (include session info)
       if (data.isWaitingForInput && data.lastMessage) {
-        this.push.scheduleWaitingNotification(data.lastMessage.content);
+        this.push.scheduleWaitingNotification(
+          data.lastMessage.content,
+          data.sessionId || undefined,
+          this.injector.getActiveSession() || undefined
+        );
       } else {
         this.push.cancelPendingNotification();
       }

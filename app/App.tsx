@@ -68,8 +68,12 @@ function App() {
     // Handle notification taps
     const responseListener = addNotificationResponseReceivedListener((response: unknown) => {
       // Navigate to session when notification tapped
-      const msg = response as { data?: { type?: string } };
+      const msg = response as { data?: { type?: string; sessionId?: string } };
       if (msg.data?.type === 'waiting_for_input') {
+        // Pass the session ID from the notification so SessionView opens the right session
+        if (msg.data.sessionId) {
+          pendingSessionId.current = msg.data.sessionId;
+        }
         setCurrentScreen('session');
       }
     });
