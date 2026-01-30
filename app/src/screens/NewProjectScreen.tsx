@@ -39,19 +39,29 @@ export function NewProjectScreen({ onBack, onComplete }: NewProjectScreenProps) 
   const [progress, setProgress] = useState<ScaffoldProgress | null>(null);
   const [result, setResult] = useState<ScaffoldResult | null>(null);
 
-  // Load templates on mount
+  // Load templates on mount (without scoring)
   useEffect(() => {
     loadTemplates();
   }, []);
 
-  const loadTemplates = async () => {
+  const loadTemplates = async (description?: string) => {
     setLoading(true);
     setError(null);
     try {
-      const response = await wsService.sendRequest('get_scaffold_templates', {});
+      const requestPayload: { description?: string } = {};
+      if (description && description.trim()) {
+        requestPayload.description = description;
+      }
+      const response = await wsService.sendRequest('get_scaffold_templates', requestPayload);
       if (response.success && response.payload) {
         const payload = response.payload as { templates: StackTemplate[] };
         setTemplates(payload.templates);
+
+        // Auto-select top template if score > 0.5
+        const top = payload.templates[0];
+        if (top?.score && top.score > 0.5) {
+          setSelectedTemplate(top.id);
+        }
       } else {
         setError(response.error || 'Failed to load templates');
       }
@@ -182,7 +192,10 @@ export function NewProjectScreen({ onBack, onComplete }: NewProjectScreenProps) 
         </TouchableOpacity>
         <TouchableOpacity
           style={[styles.buttonPrimary, !projectName && styles.buttonDisabled]}
-          onPress={() => setStep('template')}
+          onPress={() => {
+            loadTemplates(projectDescription);
+            setStep('template');
+          }}
           disabled={!projectName}
         >
           <Text style={styles.buttonPrimaryText}>Next</Text>
@@ -201,7 +214,7 @@ export function NewProjectScreen({ onBack, onComplete }: NewProjectScreenProps) 
       ) : error ? (
         <View style={styles.errorBox}>
           <Text style={styles.errorText}>{error}</Text>
-          <TouchableOpacity style={styles.retryButton} onPress={loadTemplates}>
+          <TouchableOpacity style={styles.retryButton} onPress={() => loadTemplates(projectDescription)}>
             <Text style={styles.retryButtonText}>Retry</Text>
           </TouchableOpacity>
         </View>
@@ -213,6 +226,7 @@ export function NewProjectScreen({ onBack, onComplete }: NewProjectScreenProps) 
               style={[
                 styles.templateCard,
                 selectedTemplate === template.id && styles.templateCardSelected,
+                template.score != null && template.score > 0.5 && styles.templateCardRecommended,
               ]}
               onPress={() => setSelectedTemplate(template.id)}
             >
@@ -222,11 +236,24 @@ export function NewProjectScreen({ onBack, onComplete }: NewProjectScreenProps) 
                   <Text style={styles.templateName}>{template.name}</Text>
                   <Text style={styles.templateType}>{template.type}</Text>
                 </View>
+                {template.score != null && template.score > 0.5 && (
+                  <View style={styles.recommendedBadge}>
+                    <Text style={styles.recommendedText}>Recommended</Text>
+                  </View>
+                )}
                 {selectedTemplate === template.id && (
                   <Text style={styles.checkmark}>✓</Text>
                 )}
               </View>
               <Text style={styles.templateDescription}>{template.description}</Text>
+              {template.score != null && template.score > 0 && (
+                <View style={styles.scoreBarContainer}>
+                  <View style={styles.scoreBar}>
+                    <View style={[styles.scoreBarFill, { width: `${Math.round(template.score * 100)}%` }]} />
+                  </View>
+                  <Text style={styles.scoreLabel}>{Math.round(template.score * 100)}% match</Text>
+                </View>
+              )}
               <View style={styles.tagRow}>
                 {template.tags.slice(0, 4).map((tag) => (
                   <View key={tag} style={styles.tag}>
@@ -624,6 +651,46 @@ const styles = StyleSheet.create({
   },
   templateCardSelected: {
     borderColor: '#3b82f6',
+  },
+  templateCardRecommended: {
+    borderColor: '#10b981',
+  },
+  recommendedBadge: {
+    backgroundColor: '#10b981',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 4,
+    marginRight: 8,
+  },
+  recommendedText: {
+    color: '#ffffff',
+    fontSize: 10,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+  },
+  scoreBarContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  scoreBar: {
+    flex: 1,
+    height: 4,
+    backgroundColor: '#374151',
+    borderRadius: 2,
+    overflow: 'hidden',
+    marginRight: 8,
+  },
+  scoreBarFill: {
+    height: '100%',
+    backgroundColor: '#10b981',
+    borderRadius: 2,
+  },
+  scoreLabel: {
+    fontSize: 11,
+    color: '#6b7280',
+    minWidth: 70,
+    textAlign: 'right',
   },
   templateHeader: {
     flexDirection: 'row',
