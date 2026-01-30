@@ -74,6 +74,33 @@ export class TmuxManager {
   }
 
   /**
+   * Tag an existing tmux session as managed by Claude Companion
+   */
+  async tagSession(name: string): Promise<boolean> {
+    try {
+      await execAsync(`tmux set-environment -t "${name}" CLAUDE_COMPANION 1`);
+      console.log(`TmuxManager: Tagged session "${name}" as managed`);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Check if a tmux session is tagged as managed by Claude Companion
+   */
+  async isTagged(name: string): Promise<boolean> {
+    try {
+      const { stdout } = await execAsync(
+        `tmux show-environment -t "${name}" CLAUDE_COMPANION 2>/dev/null`
+      );
+      return stdout.trim().includes('CLAUDE_COMPANION=1');
+    } catch {
+      return false;
+    }
+  }
+
+  /**
    * Create a new tmux session and start Claude in it
    */
   async createSession(
@@ -95,7 +122,12 @@ export class TmuxManager {
         `tmux new-session -d -s "${safeName}" -c "${workingDir}"`
       );
 
-      console.log(`TmuxManager: Created session "${safeName}" in ${workingDir}`);
+      // Tag session as managed by Claude Companion so daemon only monitors our sessions
+      await execAsync(
+        `tmux set-environment -t "${safeName}" CLAUDE_COMPANION 1`
+      );
+
+      console.log(`TmuxManager: Created session "${safeName}" in ${workingDir} (tagged)`);
 
       // Start Claude if requested
       if (startClaude) {

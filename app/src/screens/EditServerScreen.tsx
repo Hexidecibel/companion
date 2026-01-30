@@ -41,7 +41,7 @@ export function EditServerScreen({ server, onBack, onSaved }: EditServerScreenPr
     setFormName(`Server ${config.host}`);
     setFormHost(config.host);
     setFormPort(config.port.toString());
-    setFormToken(config.token);
+    if (config.token) setFormToken(config.token);
     setFormUseTls(config.tls);
     setShowQRScanner(false);
   };

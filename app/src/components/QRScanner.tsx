@@ -11,7 +11,7 @@ import { CameraView, useCameraPermissions } from 'expo-camera';
 export interface QRConfig {
   host: string;
   port: number;
-  token: string;
+  token?: string;
   tls: boolean;
 }
 
@@ -38,7 +38,7 @@ export function QRScanner({ onScan, onClose }: QRScannerProps) {
       const config = JSON.parse(data) as QRConfig;
 
       // Validate required fields
-      if (!config.host || !config.port || !config.token) {
+      if (!config.host || !config.port) {
         Alert.alert('Invalid QR Code', 'The QR code does not contain valid server configuration.', [
           { text: 'Try Again', onPress: () => setScanned(false) },
           { text: 'Cancel', onPress: onClose },

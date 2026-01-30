@@ -1225,6 +1225,11 @@ export class WebSocketHandler {
     this.injector.setActiveSession(payload.sessionName);
     console.log(`WebSocket: Switched to tmux session "${payload.sessionName}"`);
 
+    // Tag the session as managed by Claude Companion (adopt if not already tagged)
+    await this.tmux.tagSession(payload.sessionName);
+    // Refresh tmux paths so watcher picks up the newly tagged session
+    await this.watcher.refreshTmuxPaths();
+
     // Try to find and switch to the corresponding conversation session
     // Get the tmux session's working directory
     const sessions = await this.tmux.listSessions();

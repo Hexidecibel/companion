@@ -53,21 +53,47 @@ export class ClaudeWatcher extends EventEmitter {
 
   async refreshTmuxPaths(): Promise<void> {
     try {
-      // Get list of tmux sessions with their working directories
-      const { stdout } = await execAsync(
-        'tmux list-panes -a -F "#{pane_current_path}" 2>/dev/null'
+      // Get list of tmux sessions - only those tagged with CLAUDE_COMPANION=1
+      // First get all session names, then filter to tagged ones
+      const { stdout: sessionList } = await execAsync(
+        'tmux list-sessions -F "#{session_name}" 2>/dev/null'
       );
-      const paths = stdout.trim().split('\n').filter(p => p);
+      const sessionNames = sessionList.trim().split('\n').filter(s => s);
 
-      // Convert to project path format (e.g., /Users/foo/bar -> -Users-foo-bar)
+      // Check which sessions are tagged as managed by Claude Companion
+      const taggedSessions: string[] = [];
+      for (const name of sessionNames) {
+        try {
+          const { stdout: envOut } = await execAsync(
+            `tmux show-environment -t "${name}" CLAUDE_COMPANION 2>/dev/null`
+          );
+          if (envOut.trim().includes('CLAUDE_COMPANION=1')) {
+            taggedSessions.push(name);
+          }
+        } catch {
+          // Not tagged - skip
+        }
+      }
+
+      // Get pane paths only for tagged sessions
       this.tmuxProjectPaths.clear();
-      for (const p of paths) {
-        const projectPath = p.replace(/\//g, '-').replace(/^-/, '-');
-        this.tmuxProjectPaths.add(projectPath);
+      for (const name of taggedSessions) {
+        try {
+          const { stdout: paneOut } = await execAsync(
+            `tmux list-panes -t "${name}" -F "#{pane_current_path}" 2>/dev/null`
+          );
+          const paths = paneOut.trim().split('\n').filter(p => p);
+          for (const p of paths) {
+            const projectPath = p.replace(/\//g, '-').replace(/^-/, '-');
+            this.tmuxProjectPaths.add(projectPath);
+          }
+        } catch {
+          // Session may have been killed between list and pane check
+        }
       }
 
       if (this.tmuxProjectPaths.size > 0) {
-        console.log(`Watcher: Tracking ${this.tmuxProjectPaths.size} tmux project paths`);
+        console.log(`Watcher: Tracking ${this.tmuxProjectPaths.size} paths from ${taggedSessions.length} managed session(s)`);
       }
     } catch {
       // tmux not running or no sessions

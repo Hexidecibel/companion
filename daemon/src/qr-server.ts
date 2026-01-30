@@ -184,7 +184,18 @@ export function createQRRequestHandler(config: DaemonConfig): http.RequestListen
       return;
     }
 
+    // QR and JSON endpoints require token auth via query param
+    const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
+    const queryToken = url.searchParams.get('token');
+    const isAuthed = queryToken === config.token;
+
     if (urlPath === '/qr' || urlPath === '/qr.png') {
+      if (!isAuthed) {
+        res.writeHead(401, { 'Content-Type': 'text/plain' });
+        res.end('Unauthorized - token required');
+        return;
+      }
+
       try {
         const qrConfig: QRConfig = {
           host: getLocalIP(),
@@ -219,7 +230,12 @@ export function createQRRequestHandler(config: DaemonConfig): http.RequestListen
     }
 
     if (urlPath === '/qr.json') {
-      // Return raw config as JSON (for debugging/testing)
+      if (!isAuthed) {
+        res.writeHead(401, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Unauthorized - token required' }));
+        return;
+      }
+
       const qrConfig: QRConfig = {
         host: getLocalIP(),
         port: config.port,
@@ -233,10 +249,8 @@ export function createQRRequestHandler(config: DaemonConfig): http.RequestListen
     }
 
     if (urlPath === '/') {
-      // Simple HTML page showing QR code
-      const webClientLink = webDir
-        ? `<a href="/web" class="web-link">Open Web Client</a>`
-        : '';
+      // HTML page with token gate - must enter token before seeing QR
+      const webClientPath = webDir ? '/web' : '';
 
       const html = `<!DOCTYPE html>
 <html>
@@ -271,9 +285,7 @@ export function createQRRequestHandler(config: DaemonConfig): http.RequestListen
       font-size: 14px;
     }
     .info p { margin-bottom: 8px; }
-    .info code {
-      color: #3b82f6;
-    }
+    .info code { color: #3b82f6; }
     .web-link {
       display: inline-block;
       margin-top: 24px;
@@ -285,20 +297,93 @@ export function createQRRequestHandler(config: DaemonConfig): http.RequestListen
       font-weight: 600;
       transition: background 0.2s;
     }
-    .web-link:hover {
-      background: #2563eb;
+    .web-link:hover { background: #2563eb; }
+    .token-form {
+      background: #1f2937;
+      padding: 32px;
+      border-radius: 16px;
+      max-width: 400px;
+      width: 100%;
+      text-align: center;
     }
+    .token-input {
+      width: 100%;
+      padding: 12px 16px;
+      border: 1px solid #374151;
+      border-radius: 8px;
+      background: #111827;
+      color: #f3f4f6;
+      font-size: 16px;
+      margin-bottom: 16px;
+      box-sizing: border-box;
+      font-family: monospace;
+    }
+    .token-input:focus { outline: none; border-color: #3b82f6; }
+    .token-btn {
+      width: 100%;
+      padding: 12px;
+      background: #3b82f6;
+      color: white;
+      border: none;
+      border-radius: 8px;
+      font-size: 16px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .token-btn:hover { background: #2563eb; }
+    .error { color: #ef4444; font-size: 14px; margin-bottom: 12px; }
+    #auth-section { display: block; }
+    #qr-section { display: none; }
   </style>
 </head>
 <body>
   <h1>Claude Companion</h1>
-  <p>Scan this QR code with the app to connect</p>
-  <img src="/qr.png" alt="QR Code" width="300" height="300">
-  <div class="info">
-    <p>Server: <code>${getLocalIP()}:${config.port}</code></p>
-    <p>TLS: <code>${config.tls ? 'Enabled' : 'Disabled'}</code></p>
+
+  <div id="auth-section">
+    <p>Enter your token to access setup</p>
+    <div class="token-form">
+      <input type="password" id="token" class="token-input" placeholder="Enter token..." autofocus>
+      <div id="error" class="error" style="display:none"></div>
+      <button class="token-btn" onclick="authenticate()">Authenticate</button>
+    </div>
+    <div class="info">
+      <p>Server: <code>${getLocalIP()}:${config.port}</code></p>
+    </div>
   </div>
-  ${webClientLink}
+
+  <div id="qr-section">
+    <p>Scan this QR code with the app to connect</p>
+    <img id="qr-img" alt="QR Code" width="300" height="300">
+    <div class="info">
+      <p>Server: <code>${getLocalIP()}:${config.port}</code></p>
+      <p>TLS: <code>${config.tls ? 'Enabled' : 'Disabled'}</code></p>
+    </div>
+    ${webClientPath ? `<a href="${webClientPath}" class="web-link">Open Web Client</a>` : ''}
+  </div>
+
+  <script>
+    function authenticate() {
+      var token = document.getElementById('token').value;
+      if (!token) return;
+      // Test by fetching the QR image with the token
+      fetch('/qr.png?token=' + encodeURIComponent(token))
+        .then(function(res) {
+          if (res.ok) {
+            document.getElementById('auth-section').style.display = 'none';
+            document.getElementById('qr-section').style.display = 'flex';
+            document.getElementById('qr-section').style.flexDirection = 'column';
+            document.getElementById('qr-section').style.alignItems = 'center';
+            document.getElementById('qr-img').src = '/qr.png?token=' + encodeURIComponent(token);
+          } else {
+            document.getElementById('error').textContent = 'Invalid token';
+            document.getElementById('error').style.display = 'block';
+          }
+        });
+    }
+    document.getElementById('token').addEventListener('keydown', function(e) {
+      if (e.key === 'Enter') authenticate();
+    });
+  </script>
 </body>
 </html>`;
 

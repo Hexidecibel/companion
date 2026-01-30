@@ -251,7 +251,7 @@ export function ServerList({ onSelectServer, onOpenSetup, onBack }: ServerListPr
     // Auto-fill the form with scanned data
     setFormHost(config.host);
     setFormPort(String(config.port));
-    setFormToken(config.token);
+    if (config.token) setFormToken(config.token);
     setFormUseTls(config.tls);
     // Suggest a name based on host
     if (!formName) {
