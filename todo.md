@@ -34,12 +34,13 @@ Quick capture for ideas and tasks. Run `/plan` to process into detailed plans.
 - [done] Disabled servers still connecting - block in wsService.connect() and auto-reconnect
 - [done] Fix session switching regression - dead WebSocket detection and reconnection
 - [done] Fix new session creation/attaching bugs (wrong chat, can't send)
+- [done] Session header redesign - Ionicons, auto-approve header-only, instant notify session-only
+- [done] Better waiting/idle distinction on dashboard - idle state, grayed out sessions
+- [done] Change settings icon to a cog on server dashboard bottom left FAB
+- [done] Show password in token field on Server edit screen
 
 ## Planned
-- [planned] Session header redesign - proper icons via @expo/vector-icons, remove auto-approve from modal (header only), instant notify session-only
-- [planned] Better waiting/idle distinction on dashboard - add idle state, gray out idle sessions, fix sort order
-- [planned] Change settings icon to a cog on server dashboard bottom left FAB
-- [planned] Show password in token field on Server edit screen
+(none)
 
 ## Upcoming
 - Beef up new project helper - let Claude help choose language/stack with back-and-forth discussion, analyze project and order options by recommendation, option to create a private GitHub repo
