@@ -5,6 +5,7 @@ import { exec } from 'child_process';
 import { promisify } from 'util';
 import { ProjectConfig, ScaffoldProgress, ScaffoldResult, StackTemplate } from './types';
 import { getTemplate } from './templates';
+import { generateClaudeMd, generateCommandFiles } from './claude-commands';
 
 // Expand ~ to home directory
 function expandPath(p: string): string {
@@ -89,6 +90,31 @@ export async function scaffoldProject(
       await fs.mkdir(path.dirname(filePath), { recursive: true });
       await fs.writeFile(filePath, fileContent, 'utf-8');
       filesCreated.push(file.path);
+    }
+
+    // Step 2b: Generate CLAUDE.md and .claude/commands/
+    onProgress?.({
+      step: 'Generating CLAUDE.md and commands',
+      progress: 58,
+      complete: false,
+    });
+
+    const claudeMdContent = generateClaudeMd(
+      variables.projectName,
+      config.description || `A ${template.name} project`,
+      config.stackId,
+    );
+    const claudeMdPath = path.join(projectPath, 'CLAUDE.md');
+    await fs.writeFile(claudeMdPath, claudeMdContent, 'utf-8');
+    filesCreated.push('CLAUDE.md');
+
+    const commandFiles = generateCommandFiles(variables.projectName, config.stackId);
+    const commandsDir = path.join(projectPath, '.claude', 'commands');
+    await fs.mkdir(commandsDir, { recursive: true });
+    for (const cmd of commandFiles) {
+      const cmdPath = path.join(projectPath, cmd.path);
+      await fs.writeFile(cmdPath, cmd.content, 'utf-8');
+      filesCreated.push(cmd.path);
     }
 
     // Step 3: Initialize git if requested
@@ -194,6 +220,13 @@ export async function previewScaffold(
 
   const projectPath = path.join(expandPath(config.location), toValidName(config.name));
   const files = template.files.map(f => f.path);
+
+  // Include CLAUDE.md and commands in preview
+  files.push('CLAUDE.md');
+  const commandFiles = generateCommandFiles(toValidName(config.name), config.stackId);
+  for (const cmd of commandFiles) {
+    files.push(cmd.path);
+  }
 
   return { files, projectPath };
 }
