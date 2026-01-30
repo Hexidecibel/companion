@@ -47,18 +47,15 @@ Quick capture for ideas and tasks. Run `/plan` to process into detailed plans.
 - [done] Web: auto-scroll follow when at bottom + new text arrives
 - [done] Web: don't disable input bar so aggressively — allow typing while assistant is working
 - [done] CLI for daemon management (start, stop, status, config, logs, install)
+- [done] Beef up project wizard - CLAUDE.md + .claude/commands generation per template
+- [done] Git worktree support for multiple sessions on same project
+- [done] Mobile terminal parity - SSH command display, copy, scroll-aware auto-scroll
 
 ## Planned
 (none)
 
 ## Upcoming
-- New project wizard updates: collect project description from user, use it to advise on stack, then scaffold a v1 of the app (planning with user as first thing in new project)
-- Allow multiple sessions for the same folder - will need to set up git worktree stuff if doing concurrent editing
-- Beef up new project helper - let the assistant help choose language/stack with back-and-forth discussion, analyze project and order options by recommendation, option to create a private GitHub repo
-- Move permissions into session (makes more sense in session settings)
-- Installable actions/skills - introspect codebase and create custom skills
-- Don't include token in QR code unauthenticated - force entry of token before showing QR
-- Tmux session manager from web to mobile
+(none)
 
 ## Deferred
 (none)
