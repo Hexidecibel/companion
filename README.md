@@ -14,15 +14,15 @@ A mobile companion app for your AI coding CLI. Monitor and interact with your co
 ## Architecture
 
 ```
-┌─────────────────┐     WebSocket     ┌─────────────────┐
-│  Mobile App     │◄──────────────────►│     Daemon      │
+┌─────────────────┐                    ┌─────────────────┐
+│  Mobile App     │◄──  WebSocket  ───►│     Daemon      │
 │  (React Native) │                    │    (Node.js)    │
-└─────────────────┘                    └────────┬────────┘
-                                                │
-                                       ┌────────▼────────┐
-                                       │   Coding CLI    │
-                                       │   (in tmux)     │
-                                       └─────────────────┘
+└─────────────────┘                    └──┬──────────┬───┘
+                                          │          │
+┌─────────────────┐                       │   ┌──────▼──────┐
+│  Web Client     │◄──  WebSocket  ───────┘   │  Coding CLI │
+│  (React + Vite) │                           │  (in tmux)  │
+└─────────────────┘                           └─────────────┘
 ```
 
 ## Quick Start
@@ -201,6 +201,17 @@ cd app
 npm install
 npx expo start
 ```
+
+### Web Client
+
+```bash
+cd web
+npm install
+npm run dev       # Vite dev server
+npm run build     # Production build to web/dist/
+```
+
+The daemon serves `web/dist/` at `http://<host>:9877/web` after building.
 
 ## License
 
