@@ -371,6 +371,8 @@ function App() {
         return (
           <TerminalScreen
             sessionName={terminalSessionName}
+            serverHost={selectedServer?.host}
+            sshUser={selectedServer?.sshUser}
             onBack={handleBackFromTerminal}
           />
         );

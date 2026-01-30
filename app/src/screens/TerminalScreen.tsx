@@ -8,27 +8,49 @@ import {
   RefreshControl,
   useWindowDimensions,
   ActivityIndicator,
+  NativeSyntheticEvent,
+  NativeScrollEvent,
 } from 'react-native';
+import * as Clipboard from 'expo-clipboard';
 import { wsService } from '../services/websocket';
 import { parseAnsiText, AnsiSpan } from '../utils/ansiParser';
 
 interface TerminalScreenProps {
   sessionName: string;
+  serverHost?: string;
+  sshUser?: string;
   onBack: () => void;
 }
 
 const DEFAULT_FONT_SIZE = 11;
 const MIN_FONT_SIZE = 8;
 const MAX_FONT_SIZE = 20;
+const SCROLL_BOTTOM_THRESHOLD = 120;
 
-export function TerminalScreen({ sessionName, onBack }: TerminalScreenProps) {
+export function TerminalScreen({ sessionName, serverHost, sshUser, onBack }: TerminalScreenProps) {
   const [output, setOutput] = useState('');
   const [loading, setLoading] = useState(true);
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [fontSize, setFontSize] = useState(DEFAULT_FONT_SIZE);
+  const [sshCopied, setSshCopied] = useState(false);
   const scrollRef = useRef<ScrollView>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const isNearBottomRef = useRef(true);
   const { width: screenWidth } = useWindowDimensions();
+
+  // Build SSH command
+  const sshCommand = useMemo(() => {
+    if (!serverHost) return null;
+    const user = sshUser || 'user';
+    return `ssh ${user}@${serverHost} -t 'tmux attach -t ${sessionName}'`;
+  }, [serverHost, sshUser, sessionName]);
+
+  const copySshCommand = useCallback(async () => {
+    if (!sshCommand) return;
+    await Clipboard.setStringAsync(sshCommand);
+    setSshCopied(true);
+    setTimeout(() => setSshCopied(false), 2000);
+  }, [sshCommand]);
 
   const fetchOutput = useCallback(async () => {
     try {
@@ -63,11 +85,20 @@ export function TerminalScreen({ sessionName, onBack }: TerminalScreenProps) {
     };
   }, [autoRefresh, fetchOutput]);
 
-  // Auto-scroll to bottom when output changes
+  // Scroll-position-aware auto-scroll
+  const handleScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const { layoutMeasurement, contentOffset, contentSize } = event.nativeEvent;
+    const distanceFromBottom = contentSize.height - layoutMeasurement.height - contentOffset.y;
+    isNearBottomRef.current = distanceFromBottom < SCROLL_BOTTOM_THRESHOLD;
+  }, []);
+
+  // Auto-scroll to bottom only when near bottom
   useEffect(() => {
-    setTimeout(() => {
-      scrollRef.current?.scrollToEnd({ animated: false });
-    }, 50);
+    if (isNearBottomRef.current) {
+      setTimeout(() => {
+        scrollRef.current?.scrollToEnd({ animated: false });
+      }, 50);
+    }
   }, [output]);
 
   // Parse ANSI escape codes into styled spans
@@ -144,6 +175,16 @@ export function TerminalScreen({ sessionName, onBack }: TerminalScreenProps) {
         </View>
       </View>
 
+      {/* SSH Command Bar */}
+      {sshCommand && (
+        <TouchableOpacity style={styles.sshBar} onPress={copySshCommand} activeOpacity={0.7}>
+          <Text style={styles.sshLabel}>{sshCopied ? 'Copied!' : 'SSH'}</Text>
+          <Text style={styles.sshCommand} numberOfLines={1} ellipsizeMode="middle">
+            {sshCommand}
+          </Text>
+        </TouchableOpacity>
+      )}
+
       {loading && !output ? (
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#3b82f6" />
@@ -155,6 +196,8 @@ export function TerminalScreen({ sessionName, onBack }: TerminalScreenProps) {
           style={styles.terminal}
           contentContainerStyle={styles.terminalContent}
           horizontal={false}
+          onScroll={handleScroll}
+          scrollEventThrottle={100}
           refreshControl={
             <RefreshControl
               refreshing={false}
@@ -271,6 +314,32 @@ const styles = StyleSheet.create({
   },
   refreshToggleTextActive: {
     color: '#60a5fa',
+  },
+  sshBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#161b22',
+    borderBottomWidth: 1,
+    borderBottomColor: '#21262d',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    gap: 8,
+  },
+  sshLabel: {
+    color: '#3b82f6',
+    fontSize: 11,
+    fontWeight: '700',
+    backgroundColor: '#1e3a5f',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+    overflow: 'hidden',
+  },
+  sshCommand: {
+    color: '#8b949e',
+    fontSize: 11,
+    fontFamily: 'monospace',
+    flex: 1,
   },
   loadingContainer: {
     flex: 1,

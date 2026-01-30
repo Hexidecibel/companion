@@ -8,6 +8,7 @@ export interface Server {
   isDefault?: boolean;
   enabled?: boolean; // Whether to connect to this server (default: true)
   autoApproveEnabled?: boolean; // Whether auto-approve mode is on for this server
+  sshUser?: string; // SSH username for generating ssh/tmux attach commands
 }
 
 export interface ConnectionState {

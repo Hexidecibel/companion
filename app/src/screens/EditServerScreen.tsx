@@ -31,6 +31,7 @@ export function EditServerScreen({ server, onBack, onSaved }: EditServerScreenPr
   const [formIsDefault, setFormIsDefault] = useState(server?.isDefault || false);
   const [formEnabled, setFormEnabled] = useState(server?.enabled !== false);
   const [formAutoApproveEnabled, setFormAutoApproveEnabled] = useState(server?.autoApproveEnabled || false);
+  const [formSshUser, setFormSshUser] = useState(server?.sshUser || '');
   const [showToken, setShowToken] = useState(false);
   const [saving, setSaving] = useState(false);
   const [showQRScanner, setShowQRScanner] = useState(false);
@@ -118,6 +119,7 @@ export function EditServerScreen({ server, onBack, onSaved }: EditServerScreenPr
       isDefault: formIsDefault,
       enabled: formEnabled,
       autoApproveEnabled: formAutoApproveEnabled,
+      sshUser: formSshUser.trim() || undefined,
     };
 
     // Validate connection
@@ -261,6 +263,19 @@ export function EditServerScreen({ server, onBack, onSaved }: EditServerScreenPr
             value={formUseTls}
             onValueChange={setFormUseTls}
             trackColor={{ false: '#374151', true: '#3b82f6' }}
+          />
+        </View>
+
+        <View style={styles.inputGroup}>
+          <Text style={styles.label}>SSH User (optional)</Text>
+          <TextInput
+            style={styles.input}
+            value={formSshUser}
+            onChangeText={setFormSshUser}
+            placeholder="username"
+            placeholderTextColor="#6b7280"
+            autoCapitalize="none"
+            autoCorrect={false}
           />
         </View>
 
