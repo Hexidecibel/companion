@@ -42,13 +42,14 @@ Quick capture for ideas and tasks. Run `/plan` to process into detailed plans.
 - [done] Improve sub-agents UX - click-to-view detail, better status, collapsible completed
 - [done] iOS build
 - [done] Desktop/web control center - notification escalation, browser notifications, terminal viewer, SSH connect, session muting
+- [done] Per-session mute on mobile synced with web via daemon
+- [done] Open files in user's editor of choice from web client (daemon open_in_editor endpoint)
+- [done] Web: auto-scroll follow when at bottom + new text arrives
+- [done] Web: don't disable input bar so aggressively — allow typing while assistant is working
+- [done] CLI for daemon management (start, stop, status, config, logs, install)
 
 ## Planned
-- CLI for daemon management (install, start, stop, config, status)
-- Per-session mute on mobile (web already has it)
-- Open files in user's editor of choice (code files, md, etc) from web client — not a code editor, just launch external editor
-- Web: auto-scroll follow when at bottom + new text arrives
-- Web: don't disable input bar so aggressively — allow typing while assistant is working
+(none)
 
 ## Upcoming
 - New project wizard updates: collect project description from user, use it to advise on stack, then scaffold a v1 of the app (planning with user as first thing in new project)
