@@ -19,7 +19,7 @@ import { Server, ConversationHighlight, AgentTree, SubAgent } from '../types';
 import { SubAgentDetailScreen } from './SubAgentDetailScreen';
 import { useConnection } from '../hooks/useConnection';
 import { useConversation } from '../hooks/useConversation';
-import { StatusIndicator } from '../components/StatusIndicator';
+// StatusIndicator replaced by inline connection dot in header
 import { ConversationItem } from '../components/ConversationItem';
 import { InputBar } from '../components/InputBar';
 import { SessionPicker } from '../components/SessionPicker';
@@ -488,6 +488,25 @@ export function SessionView({ server, onBack, initialSessionId, onNewProject, on
         <TouchableOpacity onPress={onBack} style={styles.backButton}>
           <Text style={styles.backButtonText}>‹ Back</Text>
         </TouchableOpacity>
+        <TouchableOpacity
+          style={styles.connectionDot}
+          onPress={() => {
+            if (connectionState.status === 'error' || connectionState.status === 'disconnected') {
+              reconnect();
+            }
+          }}
+        >
+          <View style={[styles.connectionDotInner, {
+            backgroundColor:
+              connectionState.status === 'connected'
+                ? (status?.isWaitingForInput ? '#eab308' : '#22c55e')
+                : connectionState.status === 'connecting' || connectionState.status === 'reconnecting'
+                  ? '#f97316'
+                  : connectionState.status === 'error'
+                    ? '#ef4444'
+                    : '#6b7280',
+          }]} />
+        </TouchableOpacity>
         <View style={styles.headerCenter}>
           <Text style={styles.headerTitle} numberOfLines={1}>
             {server.name}
@@ -523,6 +542,7 @@ export function SessionView({ server, onBack, initialSessionId, onNewProject, on
                 setTerminalLoading(false);
               }
             }}
+            onLongPress={() => Alert.alert('Terminal', 'Open tmux terminal view')}
             disabled={terminalLoading}
           >
             {terminalLoading ? (
@@ -535,6 +555,7 @@ export function SessionView({ server, onBack, initialSessionId, onNewProject, on
         <TouchableOpacity
           style={styles.headerIconButton}
           onPress={() => refresh()}
+          onLongPress={() => Alert.alert('Refresh', 'Reload conversation')}
           disabled={loading}
         >
           <Ionicons name="refresh" size={20} color={loading ? '#4b5563' : '#9ca3af'} />
@@ -545,6 +566,7 @@ export function SessionView({ server, onBack, initialSessionId, onNewProject, on
             sessionSettings.autoApproveEnabled && styles.autoApproveButtonActive,
           ]}
           onPress={() => handleAutoApproveChange(!sessionSettings.autoApproveEnabled)}
+          onLongPress={() => Alert.alert('Auto-Approve', sessionSettings.autoApproveEnabled ? 'Tool calls are auto-approved. Tap to disable.' : 'Tool calls require manual approval. Tap to enable auto-approve.')}
         >
           <Ionicons
             name={sessionSettings.autoApproveEnabled ? 'shield-checkmark' : 'shield-outline'}
@@ -555,6 +577,7 @@ export function SessionView({ server, onBack, initialSessionId, onNewProject, on
         <TouchableOpacity
           style={styles.headerIconButton}
           onPress={() => setShowSettings(true)}
+          onLongPress={() => Alert.alert('Settings', 'Session settings')}
         >
           <Ionicons name="settings-outline" size={20} color="#9ca3af" />
         </TouchableOpacity>
@@ -599,13 +622,28 @@ export function SessionView({ server, onBack, initialSessionId, onNewProject, on
         </TouchableOpacity>
       </Modal>
 
-      {/* Hide status bar when full-screen loading/connecting states are shown */}
-      {data.length > 0 && (
-        <StatusIndicator
-          connectionState={connectionState}
-          isWaitingForInput={status?.isWaitingForInput}
-          onReconnect={reconnect}
-        />
+      {/* Connection issue banner - only show when NOT connected */}
+      {data.length > 0 && connectionState.status !== 'connected' && (
+        <TouchableOpacity
+          style={styles.connectionBanner}
+          onPress={reconnect}
+          activeOpacity={0.8}
+        >
+          <View style={[styles.connectionBannerDot, {
+            backgroundColor:
+              connectionState.status === 'connecting' || connectionState.status === 'reconnecting'
+                ? '#f97316' : '#ef4444',
+          }]} />
+          <Text style={styles.connectionBannerText}>
+            {connectionState.status === 'connecting' ? 'Connecting...'
+              : connectionState.status === 'reconnecting' ? `Reconnecting (${connectionState.reconnectAttempts})...`
+              : connectionState.status === 'error' ? (connectionState.error || 'Connection error')
+              : 'Disconnected'}
+          </Text>
+          {(connectionState.status === 'error' || connectionState.status === 'disconnected') && (
+            <Text style={styles.connectionBannerRetry}>Retry</Text>
+          )}
+        </TouchableOpacity>
       )}
 
       {/* Other session activity notification */}
@@ -644,47 +682,48 @@ export function SessionView({ server, onBack, initialSessionId, onNewProject, on
         </TouchableOpacity>
       )}
 
-      {/* Activity status bar with cancel button - tappable for full output modal */}
-      {isConnected && status?.currentActivity && (
-        <TouchableOpacity
-          style={styles.activityBar}
-          onPress={() => setShowActivityModal(true)}
-          activeOpacity={0.8}
-        >
-          <View style={styles.activityContent}>
-            <ActivityIndicator size="small" color="#60a5fa" style={styles.activitySpinner} />
-            <Text style={styles.activityText} numberOfLines={1}>
-              {status.currentActivity}
-            </Text>
-          </View>
-          <TouchableOpacity style={styles.activityCancelButton} onPress={handleCancel}>
-            <Text style={styles.activityCancelText}>Cancel</Text>
-          </TouchableOpacity>
-        </TouchableOpacity>
-      )}
-
-      {/* Sub-agents bar - shows when background tasks are running */}
+      {/* Unified activity bar - combines processing status and agents */}
       {(() => {
+        const hasActivity = isConnected && status?.currentActivity;
         const runningAgents = agentTree?.agents.filter(a => a.status === 'running') || [];
-        if (!isConnected || runningAgents.length === 0) return null;
-        // Single agent: show description; Multiple: show count + latest activity
-        const barText = runningAgents.length === 1
-          ? (runningAgents[0].currentActivity || runningAgents[0].description || runningAgents[0].slug || 'Sub-agent running')
-          : `${runningAgents.length} agents running` + (runningAgents[0].currentActivity ? ` · ${runningAgents[0].currentActivity}` : '');
+        const hasAgents = isConnected && runningAgents.length > 0;
+        if (!hasActivity && !hasAgents) return null;
+
         return (
-          <TouchableOpacity
-            style={styles.subAgentsBar}
-            onPress={() => setShowAgentsModal(true)}
-            activeOpacity={0.8}
-          >
-            <View style={styles.subAgentsContent}>
-              <View style={styles.subAgentsDot} />
-              <Text style={styles.subAgentsText} numberOfLines={1}>
-                {barText}
-              </Text>
-            </View>
-            <Ionicons name="chevron-forward" size={14} color="#86efac" />
-          </TouchableOpacity>
+          <View style={styles.unifiedActivityBar}>
+            {/* Processing row */}
+            {hasActivity && (
+              <TouchableOpacity
+                style={[styles.activityRow, hasAgents && styles.activityRowWithAgents]}
+                onPress={() => setShowActivityModal(true)}
+                activeOpacity={0.8}
+              >
+                <ActivityIndicator size="small" color="#60a5fa" style={styles.activitySpinner} />
+                <Text style={styles.activityText} numberOfLines={1}>
+                  {status!.currentActivity}
+                </Text>
+                <TouchableOpacity style={styles.activityCancelButton} onPress={handleCancel}>
+                  <Text style={styles.activityCancelText}>Cancel</Text>
+                </TouchableOpacity>
+              </TouchableOpacity>
+            )}
+            {/* Agents row */}
+            {hasAgents && (
+              <TouchableOpacity
+                style={styles.agentsRow}
+                onPress={() => setShowAgentsModal(true)}
+                activeOpacity={0.8}
+              >
+                <View style={styles.subAgentsDot} />
+                <Text style={styles.subAgentsText} numberOfLines={1}>
+                  {runningAgents.length === 1
+                    ? (runningAgents[0].currentActivity || runningAgents[0].description || runningAgents[0].slug || 'Sub-agent running')
+                    : `${runningAgents.length} agents` + (runningAgents[0].currentActivity ? ` · ${runningAgents[0].currentActivity}` : '')}
+                </Text>
+                <Ionicons name="chevron-forward" size={14} color="#86efac" />
+              </TouchableOpacity>
+            )}
+          </View>
         );
       })()}
 
@@ -913,20 +952,6 @@ export function SessionView({ server, onBack, initialSessionId, onNewProject, on
         </View>
       </Modal>
 
-      {/* Sub-Agent Detail Screen (overlays everything) */}
-      {viewingAgentDetail && (
-        <View style={[StyleSheet.absoluteFill, { backgroundColor: '#111827' }]}>
-          <SubAgentDetailScreen
-            agentId={viewingAgentDetail.agentId}
-            initialAgent={viewingAgentDetail.agent}
-            onBack={() => {
-              setViewingAgentDetail(null);
-              setShowAgentsModal(true);
-            }}
-          />
-        </View>
-      )}
-
       {error && (
         <View style={styles.errorBanner}>
           <Text style={styles.errorText}>{error}</Text>
@@ -1033,6 +1058,20 @@ export function SessionView({ server, onBack, initialSessionId, onNewProject, on
         timestamp={viewingMessage?.timestamp}
         onClose={() => setViewingMessage(null)}
       />
+
+      {/* Sub-Agent Detail Screen (overlays everything - must be last) */}
+      {viewingAgentDetail && (
+        <View style={[StyleSheet.absoluteFill, { backgroundColor: '#111827', zIndex: 999 }]}>
+          <SubAgentDetailScreen
+            agentId={viewingAgentDetail.agentId}
+            initialAgent={viewingAgentDetail.agent}
+            onBack={() => {
+              setViewingAgentDetail(null);
+              setShowAgentsModal(true);
+            }}
+          />
+        </View>
+      )}
     </View>
   );
 }
@@ -1080,6 +1119,68 @@ const styles = StyleSheet.create({
   },
   autoApproveButtonActive: {
     backgroundColor: '#78350f',
+  },
+  connectionDot: {
+    padding: 6,
+    marginLeft: 2,
+  },
+  connectionDotInner: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+  },
+  connectionBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    backgroundColor: '#7f1d1d',
+    borderBottomWidth: 1,
+    borderBottomColor: '#991b1b',
+  },
+  connectionBannerDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    marginRight: 8,
+  },
+  connectionBannerText: {
+    flex: 1,
+    color: '#fecaca',
+    fontSize: 13,
+  },
+  connectionBannerRetry: {
+    color: '#ffffff',
+    fontSize: 12,
+    fontWeight: '600',
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+    backgroundColor: '#3b82f6',
+    borderRadius: 10,
+    marginLeft: 8,
+    overflow: 'hidden',
+  },
+  unifiedActivityBar: {
+    borderBottomWidth: 1,
+    borderBottomColor: '#374151',
+  },
+  activityRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#1e3a5f',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  activityRowWithAgents: {
+    borderBottomWidth: 1,
+    borderBottomColor: '#1a4731',
+  },
+  agentsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#14532d',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
   },
   modalOverlay: {
     flex: 1,
