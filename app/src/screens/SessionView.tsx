@@ -134,7 +134,7 @@ export function SessionView({ server, onBack, initialSessionId, onNewProject, on
   }, [data.length, scrollToBottom]);
 
   const [showSettings, setShowSettings] = useState(false);
-  const [sessionSettings, setSessionSettings] = useState<SessionSettings>({ instantNotify: false, autoApproveEnabled: false });
+  const [sessionSettings, setSessionSettings] = useState<SessionSettings>({ instantNotify: false, autoApproveEnabled: false, showAgentsBar: false });
   const [showActivityModal, setShowActivityModal] = useState(false);
   const [showSessionPicker, setShowSessionPicker] = useState(false);
   const [viewingFile, setViewingFile] = useState<string | null>(null);
@@ -612,6 +612,24 @@ export function SessionView({ server, onBack, initialSessionId, onNewProject, on
               />
             </View>
 
+            <View style={styles.modalRow}>
+              <View style={styles.modalRowInfo}>
+                <Text style={styles.modalRowLabel}>Show Agents Bar</Text>
+                <Text style={styles.modalRowDescription}>
+                  Show sub-agent activity below the header
+                </Text>
+              </View>
+              <Switch
+                value={sessionSettings.showAgentsBar}
+                onValueChange={(value) => {
+                  const updated = { ...sessionSettings, showAgentsBar: value };
+                  setSessionSettings(updated);
+                  saveSessionSettings(server.id, updated);
+                }}
+                trackColor={{ false: '#374151', true: '#3b82f6' }}
+              />
+            </View>
+
             <TouchableOpacity
               style={styles.modalCloseButton}
               onPress={() => setShowSettings(false)}
@@ -686,7 +704,7 @@ export function SessionView({ server, onBack, initialSessionId, onNewProject, on
       {(() => {
         const hasActivity = isConnected && status?.currentActivity;
         const runningAgents = agentTree?.agents.filter(a => a.status === 'running') || [];
-        const hasAgents = isConnected && runningAgents.length > 0;
+        const hasAgents = isConnected && runningAgents.length > 0 && sessionSettings.showAgentsBar;
         if (!hasActivity && !hasAgents) return null;
 
         return (
