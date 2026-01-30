@@ -32,7 +32,7 @@ A mobile companion app for your AI coding CLI. Monitor and interact with your co
 **Option A: npm (recommended)**
 
 ```bash
-npm install -g @hexidecibel/claude-companion
+npm install -g @hexidecibel/companion
 ```
 
 **Option B: From source**
@@ -52,19 +52,12 @@ The installer will:
 
 **Save the token shown at the end - you'll need it for the app!**
 
-### 2. Start the CLI in tmux
-
-```bash
-tmux new -s claude
-claude
-```
-
-### 3. Connect from the App
+### 2. Connect from the App
 
 1. Download the Companion app
 2. Add a new server with your machine's IP address
 3. Enter the token from the installer
-4. Connect and start monitoring!
+4. Connect and create a new project or session!
 
 ## Manual Installation
 
