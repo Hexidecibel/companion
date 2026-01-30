@@ -357,7 +357,7 @@ export function extractHighlights(messages: ConversationMessage[]): Conversation
     }
   }
 
-  const highlights = messages
+  const rawHighlights = messages
     .filter(msg => {
       // Include user messages with content
       if (msg.type === 'user' && msg.content && msg.content.trim()) return true;
@@ -412,6 +412,23 @@ export function extractHighlights(messages: ConversationMessage[]): Conversation
         toolCalls,
       };
     });
+
+  // Merge consecutive assistant messages that are tool-only (no text content)
+  // into a single message so the UI can collapse them together
+  const highlights: ConversationHighlight[] = [];
+  for (const h of rawHighlights) {
+    const prev = highlights[highlights.length - 1];
+    const isToolOnly = h.type === 'assistant' && (!h.content || !h.content.trim()) && h.toolCalls && h.toolCalls.length > 0;
+    const prevIsToolOnly = prev && prev.type === 'assistant' && (!prev.content || !prev.content.trim()) && prev.toolCalls && prev.toolCalls.length > 0;
+
+    if (isToolOnly && prevIsToolOnly && !h.options && !prev.options) {
+      // Merge: append tool calls to previous message
+      prev.toolCalls = [...(prev.toolCalls || []), ...(h.toolCalls || [])];
+      prev.timestamp = h.timestamp; // Use latest timestamp
+    } else {
+      highlights.push(h);
+    }
+  }
 
   // Log if the last highlight has options
   const lastHighlight = highlights[highlights.length - 1];
