@@ -11,6 +11,18 @@ import { TmuxManager } from './tmux-manager';
 import { createServer, validateTlsConfig } from './tls';
 import { certsExist, generateAndSaveCerts, getDefaultCertPaths } from './cert-generator';
 import { createQRRequestHandler } from './qr-server';
+import { dispatchCli, writePidFile, removePidFile } from './cli';
+
+// Check CLI commands before starting daemon
+const cliArgs = process.argv.slice(2);
+dispatchCli(cliArgs).then((handled) => {
+  if (!handled) {
+    main().catch((err) => {
+      console.error('Fatal error:', err);
+      process.exit(1);
+    });
+  }
+});
 
 async function main(): Promise<void> {
   console.log('Companion Daemon v0.0.1');
@@ -191,6 +203,9 @@ async function main(): Promise<void> {
     });
   }
 
+  // Write PID file for CLI management
+  writePidFile();
+
   // Start HTTP server
   server.listen(config.port, () => {
     console.log(`Server listening on port ${config.port}`);
@@ -202,6 +217,7 @@ async function main(): Promise<void> {
   const shutdown = async (): Promise<void> => {
     console.log('\nShutting down...');
 
+    removePidFile();
     notificationStore.flush();
     watcher.stop();
     subAgentWatcher.stop();
@@ -233,7 +249,4 @@ async function main(): Promise<void> {
   }, 60000);
 }
 
-main().catch((err) => {
-  console.error('Fatal error:', err);
-  process.exit(1);
-});
+// main() is called from the CLI dispatcher above
