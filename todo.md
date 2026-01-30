@@ -40,9 +40,12 @@ Quick capture for ideas and tasks. Run `/plan` to process into detailed plans.
 - [done] Show password in token field on Server edit screen
 - [done] Fix AskUserQuestion multi-select and multiple questions
 - [done] Improve sub-agents UX - click-to-view detail, better status, collapsible completed
+- [done] iOS build
+- [done] Desktop/web control center - notification escalation, browser notifications, terminal viewer, SSH connect, session muting
 
 ## Planned
-(none)
+- CLI for daemon management (install, start, stop, config, status)
+- Per-session mute on mobile (web already has it)
 
 ## Upcoming
 - New project wizard updates: collect project description from user, use it to advise on stack, then scaffold a v1 of the app (planning with user as first thing in new project)
@@ -55,6 +58,4 @@ Quick capture for ideas and tasks. Run `/plan` to process into detailed plans.
 - Tmux session manager from web to mobile
 
 ## Deferred
-- iOS build (need Apple Developer account first)
-- CLI for daemon management (current /up /down skills work fine)
-- Desktop/web control center - upgrade web client to show taskbar widget with all sessions and their status. Local notifications in Notification Center when input is needed, escalate to remote push after 5 minutes of being blocked. Like a control center for all coding clients.
+(none)
