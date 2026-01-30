@@ -22,6 +22,13 @@ export interface QuestionOption {
   description: string;
 }
 
+export interface Question {
+  question: string;
+  header: string;
+  options: QuestionOption[];
+  multiSelect: boolean;
+}
+
 export interface ConversationMessage {
   id: string;
   type: 'user' | 'assistant' | 'system';
@@ -29,6 +36,7 @@ export interface ConversationMessage {
   timestamp: number;
   toolCalls?: ToolCall[];
   options?: QuestionOption[];
+  questions?: Question[];
   isWaitingForChoice?: boolean;
   multiSelect?: boolean;
 }
@@ -49,6 +57,7 @@ export interface ConversationHighlight {
   content: string;
   timestamp: number;
   options?: QuestionOption[];
+  questions?: Question[];
   isWaitingForChoice?: boolean;
   multiSelect?: boolean;
   toolCalls?: ToolCall[];

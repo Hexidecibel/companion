@@ -1,8 +1,8 @@
 import React, { useMemo, useState, useRef, memo } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, LayoutAnimation, Platform, UIManager } from 'react-native';
+import { View, Text, TextInput, StyleSheet, TouchableOpacity, ScrollView, Alert, LayoutAnimation, Platform, UIManager } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import Markdown from '@ronradtke/react-native-markdown-display';
-import { ConversationMessage, ConversationHighlight, ToolCall } from '../types';
+import { ConversationMessage, ConversationHighlight, ToolCall, Question } from '../types';
 
 interface ConversationItemProps {
   item: ConversationMessage | ConversationHighlight;
@@ -469,6 +469,12 @@ function ToolCard({ tool, forceExpanded }: { tool: ToolCall; forceExpanded?: boo
 function ConversationItemInner({ item, showToolCalls, onSelectOption, onFileTap, onMessageTap }: ConversationItemProps) {
   const [expanded, setExpanded] = useState(false);
   const [selectedOptions, setSelectedOptions] = useState<Set<string>>(new Set());
+  // Per-question selections for multi-question mode: Map<questionIndex, Set<optionLabel>>
+  const [perQuestionSelections, setPerQuestionSelections] = useState<Map<number, Set<string>>>(new Map());
+  // Per-question "Other" freetext values
+  const [otherTexts, setOtherTexts] = useState<Map<number, string>>(new Map());
+  // Per-question "Other" active state
+  const [otherActive, setOtherActive] = useState<Set<number>>(new Set());
   const isUser = item.type === 'user';
   const message = item as ConversationMessage;
   const hasToolCalls = showToolCalls && 'toolCalls' in message && message.toolCalls?.length;
@@ -476,6 +482,9 @@ function ConversationItemInner({ item, showToolCalls, onSelectOption, onFileTap,
   // (auto-approved tools will have options but isWaitingForChoice will be false)
   const hasOptions = 'options' in message && message.options && message.options.length > 0 && message.isWaitingForChoice;
   const isMultiSelect = 'multiSelect' in message && message.multiSelect === true;
+  // Check for multiple questions
+  const allQuestions: Question[] | undefined = 'questions' in message ? (message as ConversationMessage).questions : undefined;
+  const hasMultipleQuestions = allQuestions && allQuestions.length > 1 && message.isWaitingForChoice;
 
   // Handle option selection - toggle for multi-select, immediate send for single-select
   const handleOptionPress = (label: string) => {
@@ -494,7 +503,65 @@ function ConversationItemInner({ item, showToolCalls, onSelectOption, onFileTap,
     }
   };
 
-  // Submit all selected options for multi-select
+  // Handle per-question option selection (multi-question mode)
+  const handleQuestionOptionPress = (questionIdx: number, label: string, questionMultiSelect: boolean) => {
+    if (questionMultiSelect) {
+      // Toggle in per-question set
+      setPerQuestionSelections(prev => {
+        const next = new Map(prev);
+        const current = new Set(next.get(questionIdx) || []);
+        if (current.has(label)) {
+          current.delete(label);
+        } else {
+          current.add(label);
+        }
+        next.set(questionIdx, current);
+        return next;
+      });
+      // Deactivate "Other" if selecting a regular option
+      setOtherActive(prev => {
+        const next = new Set(prev);
+        next.delete(questionIdx);
+        return next;
+      });
+    } else {
+      // Single-select: set to just this one
+      setPerQuestionSelections(prev => {
+        const next = new Map(prev);
+        next.set(questionIdx, new Set([label]));
+        return next;
+      });
+      // Deactivate "Other"
+      setOtherActive(prev => {
+        const next = new Set(prev);
+        next.delete(questionIdx);
+        return next;
+      });
+    }
+  };
+
+  // Toggle "Other" freetext for a question
+  const handleOtherToggle = (questionIdx: number) => {
+    setOtherActive(prev => {
+      const next = new Set(prev);
+      if (next.has(questionIdx)) {
+        next.delete(questionIdx);
+      } else {
+        next.add(questionIdx);
+        // Clear regular selections for single-select questions
+        if (allQuestions && !allQuestions[questionIdx].multiSelect) {
+          setPerQuestionSelections(p => {
+            const n = new Map(p);
+            n.delete(questionIdx);
+            return n;
+          });
+        }
+      }
+      return next;
+    });
+  };
+
+  // Submit all selected options for multi-select (single question)
   const handleMultiSelectSubmit = () => {
     if (selectedOptions.size > 0) {
       const selectedLabels = Array.from(selectedOptions).join(', ');
@@ -502,6 +569,43 @@ function ConversationItemInner({ item, showToolCalls, onSelectOption, onFileTap,
       setSelectedOptions(new Set());
     }
   };
+
+  // Submit all answers for multi-question mode
+  const handleMultiQuestionSubmit = () => {
+    if (!allQuestions) return;
+    const answers: string[] = [];
+    for (let i = 0; i < allQuestions.length; i++) {
+      if (otherActive.has(i)) {
+        const text = otherTexts.get(i)?.trim();
+        answers.push(text || '');
+      } else {
+        const selected = perQuestionSelections.get(i);
+        if (selected && selected.size > 0) {
+          answers.push(Array.from(selected).join(', '));
+        } else {
+          answers.push('');
+        }
+      }
+    }
+    onSelectOption?.(answers.join('\n'));
+    setPerQuestionSelections(new Map());
+    setOtherTexts(new Map());
+    setOtherActive(new Set());
+  };
+
+  // Check if multi-question submit is ready (all questions have an answer)
+  const multiQuestionReady = useMemo(() => {
+    if (!allQuestions || !hasMultipleQuestions) return false;
+    for (let i = 0; i < allQuestions.length; i++) {
+      if (otherActive.has(i)) {
+        if (!(otherTexts.get(i)?.trim())) return false;
+      } else {
+        const selected = perQuestionSelections.get(i);
+        if (!selected || selected.size === 0) return false;
+      }
+    }
+    return true;
+  }, [allQuestions, hasMultipleQuestions, perQuestionSelections, otherActive, otherTexts]);
 
   // Check if content is long enough to need expansion
   const lineCount = item.content.split('\n').length;
@@ -683,7 +787,101 @@ function ConversationItemInner({ item, showToolCalls, onSelectOption, onFileTap,
             )}
           </View>
         )}
-        {hasOptions && (
+        {hasMultipleQuestions && allQuestions ? (
+          <View style={styles.optionsContainer}>
+            {allQuestions.map((q, qIdx) => {
+              const qSelections = perQuestionSelections.get(qIdx) || new Set<string>();
+              const isOtherActive = otherActive.has(qIdx);
+              return (
+                <View key={qIdx} style={[styles.questionSection, qIdx > 0 && styles.questionSectionSpacing]}>
+                  <View style={styles.questionHeaderChip}>
+                    <Text style={styles.questionHeaderText}>{q.header}</Text>
+                  </View>
+                  <Text style={styles.questionText}>{q.question}</Text>
+                  {q.multiSelect && (
+                    <Text style={styles.multiSelectHint}>Select one or more:</Text>
+                  )}
+                  {q.options.map((option, oIdx) => {
+                    const isSelected = !isOtherActive && qSelections.has(option.label);
+                    return (
+                      <TouchableOpacity
+                        key={oIdx}
+                        style={[
+                          styles.optionButton,
+                          oIdx > 0 && styles.optionButtonSpacing,
+                          isSelected && styles.optionButtonSelected,
+                        ]}
+                        onPress={() => handleQuestionOptionPress(qIdx, option.label, q.multiSelect)}
+                        activeOpacity={0.7}
+                      >
+                        <View style={styles.optionLabelRow}>
+                          <View style={[styles.checkbox, isSelected && styles.checkboxSelected]}>
+                            {isSelected && <Text style={styles.checkmark}>✓</Text>}
+                          </View>
+                          <Text style={[styles.optionLabel, isSelected && styles.optionLabelSelected]}>
+                            {option.label}
+                          </Text>
+                        </View>
+                        {option.description && (
+                          <Text style={styles.optionDescription}>{option.description}</Text>
+                        )}
+                      </TouchableOpacity>
+                    );
+                  })}
+                  {/* "Other" freetext option */}
+                  <TouchableOpacity
+                    style={[
+                      styles.optionButton,
+                      styles.optionButtonSpacing,
+                      isOtherActive && styles.optionButtonSelected,
+                    ]}
+                    onPress={() => handleOtherToggle(qIdx)}
+                    activeOpacity={0.7}
+                  >
+                    <View style={styles.optionLabelRow}>
+                      <View style={[styles.checkbox, isOtherActive && styles.checkboxSelected]}>
+                        {isOtherActive && <Text style={styles.checkmark}>✓</Text>}
+                      </View>
+                      <Text style={[styles.optionLabel, isOtherActive && styles.optionLabelSelected]}>
+                        Other
+                      </Text>
+                    </View>
+                  </TouchableOpacity>
+                  {isOtherActive && (
+                    <TextInput
+                      style={styles.otherTextInput}
+                      placeholder="Type your answer..."
+                      placeholderTextColor="#6b7280"
+                      value={otherTexts.get(qIdx) || ''}
+                      onChangeText={(text) => setOtherTexts(prev => {
+                        const next = new Map(prev);
+                        next.set(qIdx, text);
+                        return next;
+                      })}
+                      autoFocus
+                    />
+                  )}
+                </View>
+              );
+            })}
+            <TouchableOpacity
+              style={[
+                styles.submitButton,
+                !multiQuestionReady && styles.submitButtonDisabled,
+              ]}
+              onPress={handleMultiQuestionSubmit}
+              disabled={!multiQuestionReady}
+              activeOpacity={0.7}
+            >
+              <Text style={[
+                styles.submitButtonText,
+                !multiQuestionReady && styles.submitButtonTextDisabled,
+              ]}>
+                Submit Answers
+              </Text>
+            </TouchableOpacity>
+          </View>
+        ) : hasOptions && (
           <View style={styles.optionsContainer}>
             {isMultiSelect && (
               <Text style={styles.multiSelectHint}>Select one or more options:</Text>
@@ -1426,6 +1624,44 @@ const styles = StyleSheet.create({
   submitButtonTextDisabled: {
     color: '#6b7280',
   },
+  questionSection: {
+    backgroundColor: '#111827',
+    borderRadius: 8,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: '#374151',
+  },
+  questionSectionSpacing: {
+    marginTop: 12,
+  },
+  questionHeaderChip: {
+    backgroundColor: '#1e3a5f',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 4,
+    alignSelf: 'flex-start',
+    marginBottom: 6,
+  },
+  questionHeaderText: {
+    color: '#93c5fd',
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  questionText: {
+    color: '#e5e7eb',
+    fontSize: 14,
+    marginBottom: 8,
+  },
+  otherTextInput: {
+    backgroundColor: '#111827',
+    borderWidth: 1,
+    borderColor: '#3b82f6',
+    borderRadius: 8,
+    padding: 10,
+    marginTop: 8,
+    color: '#f3f4f6',
+    fontSize: 14,
+  },
   toolCallsContainer: {
     marginTop: 8,
     paddingTop: 8,
@@ -1457,6 +1693,8 @@ export const ConversationItem = memo(ConversationItemInner, (prevProps, nextProp
     // For messages with options, check if options changed
     ('options' in prevProps.item ? prevProps.item.options : undefined) ===
     ('options' in nextProps.item ? nextProps.item.options : undefined) &&
+    ('questions' in prevProps.item ? prevProps.item.questions : undefined) ===
+    ('questions' in nextProps.item ? nextProps.item.questions : undefined) &&
     ('isWaitingForChoice' in prevProps.item ? prevProps.item.isWaitingForChoice : undefined) ===
     ('isWaitingForChoice' in nextProps.item ? nextProps.item.isWaitingForChoice : undefined)
   );

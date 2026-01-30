@@ -40,16 +40,14 @@ Quick capture for ideas and tasks. Run `/plan` to process into detailed plans.
 - [done] Show password in token field on Server edit screen
 
 ## Planned
-(none)
+- [planned] Fix AskUserQuestion multi-select and multiple questions (plan #8)
+- [planned] Improve sub-agents UX - click-to-view detail, better status, collapsible completed (plan #9)
 
 ## Upcoming
 - Beef up new project helper - let Claude help choose language/stack with back-and-forth discussion, analyze project and order options by recommendation, option to create a private GitHub repo
 - Move permissions into session (makes more sense in session settings)
 - Installable actions/skills - introspect codebase and create custom skills
-- Multi-select bug in AskUserQuestion - selecting multiple options in Termux only submits first
-- Evaluate sub-agents UX - not useful as-is, need click-to-view status, proper cleanup when done, or remove from session view entirely since they're always running
 - Don't include token in QR code unauthenticated - force entry of token before showing QR
-- Fix plan mode multiple choice questions - AskUserQuestion with multiple options doesn't work in app, have to use Termux
 
 ## Deferred
 - iOS build (need Apple Developer account first)

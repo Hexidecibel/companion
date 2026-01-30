@@ -1,5 +1,5 @@
 import * as fs from 'fs';
-import { ConversationMessage, ConversationHighlight, ToolCall, SessionStatus, QuestionOption, SessionUsage, CompactionEvent, TaskItem } from './types';
+import { ConversationMessage, ConversationHighlight, ToolCall, SessionStatus, QuestionOption, Question, SessionUsage, CompactionEvent, TaskItem } from './types';
 import { APPROVAL_TOOLS, KNOWN_TOOL_NAMES, getToolDescription, isKnownTool } from './tool-config';
 
 // Re-export TaskItem for tests
@@ -232,6 +232,7 @@ function parseEntry(
   let content = '';
   const toolCalls: ToolCall[] = [];
   let options: QuestionOption[] | undefined;
+  let questions: Question[] | undefined;
   let isWaitingForChoice = false;
   let multiSelect = false;
 
@@ -270,15 +271,28 @@ function parseEntry(
           const input = block.input as AskUserQuestionInput;
           console.log(`Parser: Found AskUserQuestion tool, questions count: ${input.questions?.length || 0}`);
           if (input.questions && input.questions.length > 0) {
-            const question = input.questions[0];
-            content = question.question;
-            options = question.options.map(opt => ({
+            // Extract all questions
+            questions = input.questions.map(q => ({
+              question: q.question,
+              header: q.header,
+              options: q.options.map(opt => ({
+                label: opt.label,
+                description: opt.description,
+              })),
+              multiSelect: q.multiSelect || false,
+            }));
+
+            // Set content to first question for backward compat / message bubble text
+            const firstQuestion = input.questions[0];
+            content = firstQuestion.question;
+            // Set options from first question for backward compat (single-question case)
+            options = firstQuestion.options.map(opt => ({
               label: opt.label,
               description: opt.description,
             }));
             isWaitingForChoice = true;
-            multiSelect = question.multiSelect || false;
-            console.log(`Parser: Extracted ${options.length} options for question: "${content.substring(0, 50)}..." (multiSelect: ${multiSelect})`);
+            multiSelect = firstQuestion.multiSelect || false;
+            console.log(`Parser: Extracted ${questions.length} questions, first has ${options.length} options: "${content.substring(0, 50)}..." (multiSelect: ${multiSelect})`);
           }
         } else if (block.name === 'AskUserQuestion' && !isPending) {
           // Show the question content but no options (already answered)
@@ -327,6 +341,7 @@ function parseEntry(
     timestamp,
     toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
     options,
+    questions,
     isWaitingForChoice,
     multiSelect: multiSelect || undefined,
   };
@@ -391,6 +406,7 @@ export function extractHighlights(messages: ConversationMessage[]): Conversation
         content: msg.content,
         timestamp: msg.timestamp,
         options: showOptions ? msg.options : undefined,
+        questions: showOptions ? msg.questions : undefined,
         isWaitingForChoice: showOptions ? msg.isWaitingForChoice : false,
         multiSelect: showOptions ? msg.multiSelect : undefined,
         toolCalls,
