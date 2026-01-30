@@ -133,6 +133,9 @@ export function SessionView({ server, onBack, initialSessionId, onNewProject, on
     }
   }, [data.length, scrollToBottom]);
 
+  // Session mute state (synced with daemon)
+  const [mutedSessions, setMutedSessions] = useState<Set<string>>(new Set());
+
   const [showSettings, setShowSettings] = useState(false);
   const [sessionSettings, setSessionSettings] = useState<SessionSettings>({ instantNotify: false, autoApproveEnabled: false, showAgentsBar: false });
   const [showActivityModal, setShowActivityModal] = useState(false);
@@ -213,6 +216,67 @@ export function SessionView({ server, onBack, initialSessionId, onNewProject, on
   useEffect(() => {
     getSessionSettings(server.id).then(setSessionSettings);
   }, [server.id]);
+
+  // Fetch muted sessions from daemon and listen for changes
+  useEffect(() => {
+    if (!isConnected || !wsService.isConnected()) return;
+
+    // Fetch initial mute state
+    wsService.sendRequest('get_muted_sessions').then((response) => {
+      if (response.success && response.payload) {
+        const payload = response.payload as { sessionIds: string[] };
+        setMutedSessions(new Set(payload.sessionIds ?? []));
+      }
+    });
+
+    // Listen for mute changes from other clients (web, etc.)
+    const unsubscribe = wsService.onMessage((msg) => {
+      if (msg.type === 'session_mute_changed' && msg.payload) {
+        const payload = msg.payload as { sessionId: string; muted: boolean };
+        setMutedSessions(prev => {
+          const next = new Set(prev);
+          if (payload.muted) {
+            next.add(payload.sessionId);
+          } else {
+            next.delete(payload.sessionId);
+          }
+          return next;
+        });
+      }
+    });
+
+    return unsubscribe;
+  }, [isConnected]);
+
+  const handleToggleMute = useCallback(async (sessionId: string) => {
+    const currentlyMuted = mutedSessions.has(sessionId);
+    const newMuted = !currentlyMuted;
+
+    // Optimistic update
+    setMutedSessions(prev => {
+      const next = new Set(prev);
+      if (newMuted) next.add(sessionId);
+      else next.delete(sessionId);
+      return next;
+    });
+
+    if (wsService.isConnected()) {
+      const response = await wsService.sendRequest('set_session_muted', {
+        sessionId,
+        muted: newMuted,
+      });
+
+      if (!response.success) {
+        // Revert on failure
+        setMutedSessions(prev => {
+          const next = new Set(prev);
+          if (currentlyMuted) next.add(sessionId);
+          else next.delete(sessionId);
+          return next;
+        });
+      }
+    }
+  }, [mutedSessions]);
 
   // Show alert when tmux session is missing
   useEffect(() => {
@@ -574,6 +638,27 @@ export function SessionView({ server, onBack, initialSessionId, onNewProject, on
             color={sessionSettings.autoApproveEnabled ? '#fbbf24' : '#6b7280'}
           />
         </TouchableOpacity>
+        {currentSessionId && (
+          <TouchableOpacity
+            style={[
+              styles.muteButton,
+              mutedSessions.has(currentSessionId) && styles.muteButtonActive,
+            ]}
+            onPress={() => handleToggleMute(currentSessionId)}
+            onLongPress={() => Alert.alert(
+              'Mute',
+              mutedSessions.has(currentSessionId)
+                ? 'Notifications are muted for this session. Tap to unmute.'
+                : 'Notifications are enabled for this session. Tap to mute.'
+            )}
+          >
+            <Ionicons
+              name={mutedSessions.has(currentSessionId) ? 'notifications-off' : 'notifications-outline'}
+              size={18}
+              color={mutedSessions.has(currentSessionId) ? '#ef4444' : '#9ca3af'}
+            />
+          </TouchableOpacity>
+        )}
         <TouchableOpacity
           style={styles.headerIconButton}
           onPress={() => setShowSettings(true)}
@@ -597,6 +682,22 @@ export function SessionView({ server, onBack, initialSessionId, onNewProject, on
         >
           <View style={styles.modalContent} onStartShouldSetResponder={() => true}>
             <Text style={styles.modalTitle}>Session Settings</Text>
+
+            {currentSessionId && (
+              <View style={styles.modalRow}>
+                <View style={styles.modalRowInfo}>
+                  <Text style={styles.modalRowLabel}>Mute Session</Text>
+                  <Text style={styles.modalRowDescription}>
+                    Suppress all notifications for this session
+                  </Text>
+                </View>
+                <Switch
+                  value={mutedSessions.has(currentSessionId)}
+                  onValueChange={() => handleToggleMute(currentSessionId)}
+                  trackColor={{ false: '#374151', true: '#ef4444' }}
+                />
+              </View>
+            )}
 
             <View style={styles.modalRow}>
               <View style={styles.modalRowInfo}>
@@ -1137,6 +1238,14 @@ const styles = StyleSheet.create({
   },
   autoApproveButtonActive: {
     backgroundColor: '#78350f',
+  },
+  muteButton: {
+    padding: 6,
+    borderRadius: 6,
+    backgroundColor: '#374151',
+  },
+  muteButtonActive: {
+    backgroundColor: '#7f1d1d',
   },
   connectionDot: {
     padding: 6,
