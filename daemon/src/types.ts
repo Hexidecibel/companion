@@ -123,6 +123,10 @@ export interface TmuxSessionConfig {
   workingDir: string;
   startCli: boolean;
   lastUsed: number;
+  // Git worktree metadata (set when session was created via worktree)
+  isWorktree?: boolean;
+  mainRepoDir?: string;
+  branch?: string;
 }
 
 // Dashboard types

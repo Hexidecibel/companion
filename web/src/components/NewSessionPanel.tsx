@@ -27,10 +27,15 @@ export function NewSessionPanel({
     error,
     create,
     reset,
+    branchMode,
+    setBranchMode,
+    branchName,
+    setBranchName,
+    createWorktree,
   } = useNewSession(serverId);
 
   const handleCreate = async () => {
-    const ok = await create();
+    const ok = branchMode ? await createWorktree() : await create();
     if (ok) {
       const name = manualPath.trim().split('/').filter(Boolean).pop() || 'session';
       reset();
@@ -79,6 +84,31 @@ export function NewSessionPanel({
           />
           <label htmlFor={`startCli-${serverId}`}>Start CLI in session</label>
         </div>
+
+        {/* Branch session (git worktree) */}
+        <div className="new-session-checkbox">
+          <input
+            type="checkbox"
+            id={`branchMode-${serverId}`}
+            checked={branchMode}
+            onChange={(e) => setBranchMode(e.target.checked)}
+          />
+          <label htmlFor={`branchMode-${serverId}`}>Branch session (git worktree)</label>
+        </div>
+
+        {branchMode && (
+          <div className="new-session-field">
+            <label className="new-session-label">Branch name (optional)</label>
+            <input
+              type="text"
+              className="new-session-input"
+              value={branchName}
+              onChange={(e) => setBranchName(e.target.value)}
+              placeholder="feature-my-branch (auto-generated if empty)"
+              spellCheck={false}
+            />
+          </div>
+        )}
 
         {/* Error */}
         {error && <div className="new-session-error">{error}</div>}
@@ -160,7 +190,7 @@ export function NewSessionPanel({
           disabled={!manualPath.trim() || creating}
           onClick={handleCreate}
         >
-          {creating ? 'Creating...' : 'Create Session'}
+          {creating ? 'Creating...' : branchMode ? 'Create Branch Session' : 'Create Session'}
         </button>
       </div>
     </div>

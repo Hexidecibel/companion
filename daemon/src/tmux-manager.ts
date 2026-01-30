@@ -1,5 +1,6 @@
 import { exec, execSync, spawn } from 'child_process';
 import { promisify } from 'util';
+import * as path from 'path';
 
 const execAsync = promisify(exec);
 
@@ -9,6 +10,19 @@ export interface TmuxSessionInfo {
   attached: boolean;
   windows: number;
   workingDir?: string;
+}
+
+export interface WorktreeInfo {
+  path: string;
+  branch: string;
+  isMain: boolean;
+}
+
+export interface WorktreeResult {
+  success: boolean;
+  worktreePath?: string;
+  branch?: string;
+  error?: string;
 }
 
 export class TmuxManager {
@@ -282,5 +296,131 @@ export class TmuxManager {
     const safeName = dirName.replace(/[^a-zA-Z0-9_-]/g, '_');
     const timestamp = Date.now().toString(36);
     return `${this.sessionPrefix}-${safeName}-${timestamp}`;
+  }
+
+  // --- Git Worktree Support ---
+
+  /**
+   * Check if a directory is a git repository
+   */
+  async isGitRepo(dir: string): Promise<boolean> {
+    try {
+      await execAsync('git rev-parse --is-inside-work-tree', { cwd: dir });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Create a git worktree from a repository directory.
+   * Returns the path to the new worktree and the branch name.
+   */
+  async createWorktree(
+    repoDir: string,
+    branchName?: string
+  ): Promise<WorktreeResult> {
+    // Verify it's a git repo
+    if (!(await this.isGitRepo(repoDir))) {
+      return { success: false, error: 'not a git repository' };
+    }
+
+    // Get the git root (in case repoDir is a subdirectory)
+    const { stdout: gitRoot } = await execAsync(
+      'git rev-parse --show-toplevel',
+      { cwd: repoDir }
+    );
+    const rootDir = gitRoot.trim();
+
+    // Generate branch name if not provided
+    const branch = branchName || `wt-${Date.now().toString(36)}`;
+    const safeBranch = branch.replace(/[^a-zA-Z0-9_-]/g, '-');
+
+    // Worktree path: sibling directory named <repo>-wt-<branch>
+    const repoName = path.basename(rootDir);
+    const worktreePath = path.join(path.dirname(rootDir), `${repoName}-wt-${safeBranch}`);
+
+    try {
+      await execAsync(
+        `git worktree add "${worktreePath}" -b "${safeBranch}"`,
+        { cwd: rootDir }
+      );
+      return { success: true, worktreePath, branch: safeBranch };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return { success: false, error: message };
+    }
+  }
+
+  /**
+   * Remove a git worktree and its directory.
+   */
+  async removeWorktree(
+    repoDir: string,
+    worktreePath: string
+  ): Promise<{ success: boolean; error?: string }> {
+    try {
+      await execAsync(
+        `git worktree remove "${worktreePath}" --force`,
+        { cwd: repoDir }
+      );
+      return { success: true };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return { success: false, error: message };
+    }
+  }
+
+  /**
+   * List all worktrees for a git repository.
+   */
+  async listWorktrees(dir: string): Promise<WorktreeInfo[]> {
+    if (!(await this.isGitRepo(dir))) {
+      return [];
+    }
+
+    try {
+      const { stdout } = await execAsync(
+        'git worktree list --porcelain',
+        { cwd: dir }
+      );
+
+      const worktrees: WorktreeInfo[] = [];
+      let current: Partial<WorktreeInfo> = {};
+
+      for (const line of stdout.split('\n')) {
+        if (line.startsWith('worktree ')) {
+          if (current.path) {
+            worktrees.push(current as WorktreeInfo);
+          }
+          current = { path: line.replace('worktree ', ''), isMain: false };
+        } else if (line.startsWith('branch ')) {
+          // branch refs/heads/main → main
+          const ref = line.replace('branch ', '');
+          current.branch = ref.replace('refs/heads/', '');
+        } else if (line === 'bare') {
+          current.isMain = true;
+        } else if (line === '') {
+          // Empty line ends a worktree entry
+          if (current.path) {
+            worktrees.push({
+              path: current.path,
+              branch: current.branch || 'HEAD',
+              isMain: current.isMain || false,
+            });
+            current = {};
+          }
+        }
+      }
+
+      // Mark the first worktree as main (it's the original repo)
+      if (worktrees.length > 0) {
+        worktrees[0].isMain = true;
+      }
+
+      return worktrees;
+    } catch {
+      return [];
+    }
   }
 }

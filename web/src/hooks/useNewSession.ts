@@ -27,6 +27,12 @@ export interface UseNewSessionResult {
   error: string | null;
   create: () => Promise<boolean>;
   reset: () => void;
+  // Worktree support
+  branchMode: boolean;
+  setBranchMode: (v: boolean) => void;
+  branchName: string;
+  setBranchName: (v: string) => void;
+  createWorktree: () => Promise<boolean>;
 }
 
 export function useNewSession(serverId: string): UseNewSessionResult {
@@ -39,6 +45,8 @@ export function useNewSession(serverId: string): UseNewSessionResult {
   const [startCli, setStartCli] = useState(true);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [branchMode, setBranchMode] = useState(false);
+  const [branchName, setBranchName] = useState('');
 
   // Fetch recents + initial browse on mount
   useEffect(() => {
@@ -165,8 +173,40 @@ export function useNewSession(serverId: string): UseNewSessionResult {
     }
   }, [serverId, manualPath, startCli]);
 
+  const createWorktree = useCallback(async (): Promise<boolean> => {
+    const conn = connectionManager.getConnection(serverId);
+    if (!conn || !conn.isConnected() || !manualPath.trim()) return false;
+
+    setCreating(true);
+    setError(null);
+
+    try {
+      const resp = await conn.sendRequest('create_worktree_session', {
+        parentDir: manualPath.trim(),
+        branch: branchName.trim() || undefined,
+        startCli,
+      });
+
+      if (resp.success) {
+        addRecentDirectory(serverId, manualPath.trim());
+        setCreating(false);
+        return true;
+      } else {
+        setError(resp.error || 'Failed to create worktree session');
+        setCreating(false);
+        return false;
+      }
+    } catch (err) {
+      setError(String(err));
+      setCreating(false);
+      return false;
+    }
+  }, [serverId, manualPath, branchName, startCli]);
+
   const reset = useCallback(() => {
     setManualPath('');
+    setBranchMode(false);
+    setBranchName('');
     setError(null);
     setCreating(false);
   }, []);
@@ -186,5 +226,10 @@ export function useNewSession(serverId: string): UseNewSessionResult {
     error,
     create,
     reset,
+    branchMode,
+    setBranchMode,
+    branchName,
+    setBranchName,
+    createWorktree,
   };
 }

@@ -620,6 +620,18 @@ export class WebSocketHandler {
         this.handleRecreateTmuxSession(client, payload as { sessionName?: string }, requestId);
         break;
 
+      case 'create_worktree_session':
+        this.handleCreateWorktreeSession(
+          client,
+          payload as { parentDir: string; branch?: string; startCli?: boolean },
+          requestId
+        );
+        break;
+
+      case 'list_worktrees':
+        this.handleListWorktrees(client, payload as { dir: string }, requestId);
+        break;
+
       case 'browse_directories':
         this.handleBrowseDirectories(client, payload as { path?: string }, requestId);
         break;
@@ -1353,6 +1365,13 @@ export class WebSocketHandler {
     const result = await this.tmux.killSession(payload.sessionName);
 
     if (result.success) {
+      // If this was a worktree session, clean up the worktree
+      const config = this.tmuxSessionConfigs.get(payload.sessionName);
+      if (config?.isWorktree && config.mainRepoDir) {
+        console.log(`WebSocket: Cleaning up worktree at ${config.workingDir}`);
+        await this.tmux.removeWorktree(config.mainRepoDir, config.workingDir);
+      }
+
       // If we killed the active session, switch to another
       if (this.injector.getActiveSession() === payload.sessionName) {
         const remaining = await this.tmux.listSessions();
@@ -1378,6 +1397,124 @@ export class WebSocketHandler {
         requestId,
       });
     }
+  }
+
+  private async handleCreateWorktreeSession(
+    client: AuthenticatedClient,
+    payload: { parentDir: string; branch?: string; startCli?: boolean } | undefined,
+    requestId?: string
+  ): Promise<void> {
+    if (!payload?.parentDir) {
+      this.send(client.ws, {
+        type: 'worktree_session_created',
+        success: false,
+        error: 'Missing parentDir',
+        requestId,
+      });
+      return;
+    }
+
+    // Validate parent directory is a git repo
+    if (!(await this.tmux.isGitRepo(payload.parentDir))) {
+      this.send(client.ws, {
+        type: 'worktree_session_created',
+        success: false,
+        error: 'Not a git repository',
+        requestId,
+      });
+      return;
+    }
+
+    console.log(`WebSocket: Creating worktree session from ${payload.parentDir}, branch: ${payload.branch || 'auto'}`);
+
+    // Create the git worktree
+    const wtResult = await this.tmux.createWorktree(payload.parentDir, payload.branch);
+    if (!wtResult.success || !wtResult.worktreePath) {
+      this.send(client.ws, {
+        type: 'worktree_session_created',
+        success: false,
+        error: wtResult.error || 'Failed to create worktree',
+        requestId,
+      });
+      return;
+    }
+
+    // Create a tmux session in the worktree directory
+    const sessionName = this.tmux.generateSessionName(wtResult.worktreePath);
+    const startCli = payload.startCli !== false;
+    const tmuxResult = await this.tmux.createSession(sessionName, wtResult.worktreePath, startCli);
+
+    if (tmuxResult.success) {
+      // Store session config with worktree metadata
+      this.storeTmuxSessionConfig(sessionName, wtResult.worktreePath, startCli);
+
+      // Also store worktree info in the config
+      const configs = this.tmuxSessionConfigs;
+      const config = configs.get(sessionName);
+      if (config) {
+        config.isWorktree = true;
+        config.mainRepoDir = payload.parentDir;
+        config.branch = wtResult.branch;
+        this.saveTmuxSessionConfigs();
+      }
+
+      // Switch input target to the new session
+      this.injector.setActiveSession(sessionName);
+      this.watcher.clearActiveSession();
+      await this.watcher.refreshTmuxPaths();
+
+      this.send(client.ws, {
+        type: 'worktree_session_created',
+        success: true,
+        payload: {
+          sessionName,
+          workingDir: wtResult.worktreePath,
+          branch: wtResult.branch,
+          mainRepoDir: payload.parentDir,
+        },
+        requestId,
+      });
+
+      this.broadcast('tmux_sessions_changed', {
+        action: 'created',
+        sessionName,
+        isWorktree: true,
+        branch: wtResult.branch,
+      });
+    } else {
+      // Clean up the worktree since tmux session failed
+      await this.tmux.removeWorktree(payload.parentDir, wtResult.worktreePath);
+      this.send(client.ws, {
+        type: 'worktree_session_created',
+        success: false,
+        error: tmuxResult.error || 'Failed to create tmux session',
+        requestId,
+      });
+    }
+  }
+
+  private async handleListWorktrees(
+    client: AuthenticatedClient,
+    payload: { dir: string } | undefined,
+    requestId?: string
+  ): Promise<void> {
+    if (!payload?.dir) {
+      this.send(client.ws, {
+        type: 'worktrees_list',
+        success: false,
+        error: 'Missing dir',
+        requestId,
+      });
+      return;
+    }
+
+    const worktrees = await this.tmux.listWorktrees(payload.dir);
+    this.send(client.ws, {
+      type: 'worktrees_list',
+      success: true,
+      payload: { worktrees },
+      requestId,
+    });
   }
 
   private async handleSwitchTmuxSession(
