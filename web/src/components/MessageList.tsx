@@ -1,4 +1,4 @@
-import { useRef, useEffect, useLayoutEffect } from 'react';
+import { useRef, useEffect, useLayoutEffect, useCallback } from 'react';
 import { ConversationHighlight } from '../types';
 import { MessageBubble } from './MessageBubble';
 
@@ -23,28 +23,25 @@ export function MessageList({
 }: MessageListProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
-  const prevLengthRef = useRef(highlights.length);
-  const wasNearBottomRef = useRef(true);
+  const isNearBottomRef = useRef(true);
   const prevScrollHeightRef = useRef(0);
 
-  // Check if user is near bottom before updates
-  useEffect(() => {
+  // Track near-bottom state on every scroll
+  const updateNearBottom = useCallback(() => {
     const el = containerRef.current;
     if (!el) return;
     const threshold = 120;
-    wasNearBottomRef.current =
+    isNearBottomRef.current =
       el.scrollHeight - el.scrollTop - el.clientHeight < threshold;
-  });
+  }, []);
 
-  // Auto-scroll to bottom on new messages (when near bottom)
+  // Auto-scroll to bottom whenever highlights change (new messages OR content updates)
+  // if the user was already near the bottom
   useEffect(() => {
-    const added = highlights.length - prevLengthRef.current;
-    prevLengthRef.current = highlights.length;
-
-    if (added > 0 && wasNearBottomRef.current) {
+    if (isNearBottomRef.current) {
       bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
     }
-  }, [highlights.length]);
+  }, [highlights]);
 
   // Preserve scroll position when prepending (load more)
   useLayoutEffect(() => {
@@ -58,15 +55,16 @@ export function MessageList({
     prevScrollHeightRef.current = el.scrollHeight;
   }, [highlights]);
 
-  // Scroll handler for load-more trigger
-  const handleScroll = () => {
+  // Scroll handler for load-more trigger + near-bottom tracking
+  const handleScroll = useCallback(() => {
+    updateNearBottom();
     const el = containerRef.current;
     if (!el || loadingMore || !hasMore) return;
     if (el.scrollTop < 80) {
       prevScrollHeightRef.current = el.scrollHeight;
       onLoadMore();
     }
-  };
+  }, [loadingMore, hasMore, onLoadMore, updateNearBottom]);
 
   if (loading) {
     return (

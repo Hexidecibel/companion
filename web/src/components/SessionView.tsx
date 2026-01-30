@@ -265,7 +265,7 @@ export function SessionView({ serverId, sessionId, tmuxSessionName }: SessionVie
           <InputBar
             onSend={handleSend}
             onSendWithImages={handleSendWithImages}
-            disabled={!status?.isWaitingForInput && !status?.isRunning}
+            disabled={false}
           />
         </>
       )}

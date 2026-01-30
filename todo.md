@@ -52,7 +52,6 @@ Quick capture for ideas and tasks. Run `/plan` to process into detailed plans.
 
 ## Upcoming
 - New project wizard updates: collect project description from user, use it to advise on stack, then scaffold a v1 of the app (planning with user as first thing in new project)
-- Auto-approve sends "yes" too aggressively while processing - needs throttling or smarter detection of when approval is actually needed
 - Allow multiple sessions for the same folder - will need to set up git worktree stuff if doing concurrent editing
 - Beef up new project helper - let the assistant help choose language/stack with back-and-forth discussion, analyze project and order options by recommendation, option to create a private GitHub repo
 - Move permissions into session (makes more sense in session settings)
