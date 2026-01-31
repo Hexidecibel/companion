@@ -170,6 +170,45 @@ export interface PendingImage {
   previewUrl: string;
 }
 
+// Work Group types (parallel /work orchestration)
+
+export interface WorkerQuestion {
+  text: string;
+  options?: { label: string }[];
+  timestamp: number;
+}
+
+export interface WorkerSession {
+  id: string;
+  sessionId: string;
+  tmuxSessionName: string;
+  taskSlug: string;
+  taskDescription: string;
+  branch: string;
+  worktreePath: string;
+  status: 'spawning' | 'working' | 'waiting' | 'completed' | 'error';
+  commits: string[];
+  startedAt: number;
+  completedAt?: number;
+  lastActivity?: string;
+  lastQuestion?: WorkerQuestion;
+  error?: string;
+}
+
+export interface WorkGroup {
+  id: string;
+  name: string;
+  foremanSessionId: string;
+  foremanTmuxSession: string;
+  status: 'active' | 'merging' | 'completed' | 'failed' | 'cancelled';
+  workers: WorkerSession[];
+  createdAt: number;
+  completedAt?: number;
+  planFile?: string;
+  mergeCommit?: string;
+  error?: string;
+}
+
 // Active session tracking
 
 export interface ActiveSession {

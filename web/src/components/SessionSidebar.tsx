@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react';
-import { ServerSummary, ActiveSession, SessionSummary } from '../types';
+import { ServerSummary, ActiveSession, SessionSummary, WorkGroup } from '../types';
 import { useConnections } from '../hooks/useConnections';
 import { NewSessionPanel } from './NewSessionPanel';
 import { TmuxModal } from './TmuxModal';
@@ -15,6 +15,7 @@ interface SessionSidebarProps {
   secondarySession?: ActiveSession | null;
   onNotificationSettings?: () => void;
   mutedSessions?: Set<string>;
+  workGroups?: Map<string, WorkGroup[]>;
 }
 
 const STATUS_DOT_CLASS: Record<SessionSummary['status'], string> = {
@@ -57,6 +58,14 @@ function filterSessions(sessions: SessionSummary[], filter: StatusFilter): Sessi
   return sessions.filter((s) => s.status === filter);
 }
 
+const WORKER_STATUS_DOT: Record<string, string> = {
+  spawning: 'status-dot-gray',
+  working: 'status-dot-blue',
+  waiting: 'status-dot-amber',
+  completed: 'status-dot-green',
+  error: 'status-dot-red',
+};
+
 export function SessionSidebar({
   summaries,
   activeSession,
@@ -68,11 +77,13 @@ export function SessionSidebar({
   secondarySession,
   onNotificationSettings,
   mutedSessions,
+  workGroups,
 }: SessionSidebarProps) {
   const { snapshots } = useConnections();
   const [newSessionServerId, setNewSessionServerId] = useState<string | null>(null);
   const [tmuxServerId, setTmuxServerId] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
 
   // Count total sessions across all servers for filter visibility
   const totalSessionCount = useMemo(() => {
@@ -90,6 +101,30 @@ export function SessionSidebar({
     const snap = snapshots.find((s) => s.serverId === tmuxServerId);
     return snap?.serverName ?? '';
   }, [tmuxServerId, snapshots]);
+
+  // Build a set of session IDs that are workers in any active work group
+  const workerSessionIds = useMemo(() => {
+    const ids = new Set<string>();
+    if (!workGroups) return ids;
+    for (const groups of workGroups.values()) {
+      for (const group of groups) {
+        if (group.status === 'completed' || group.status === 'cancelled') continue;
+        for (const worker of group.workers) {
+          if (worker.sessionId) ids.add(worker.sessionId);
+        }
+      }
+    }
+    return ids;
+  }, [workGroups]);
+
+  const toggleGroupCollapse = (groupId: string) => {
+    setCollapsedGroups(prev => {
+      const next = new Set(prev);
+      if (next.has(groupId)) next.delete(groupId);
+      else next.add(groupId);
+      return next;
+    });
+  };
 
   return (
     <aside className="sidebar">
@@ -151,9 +186,19 @@ export function SessionSidebar({
         {snapshots.map((snap) => {
           const summary = summaries.get(snap.serverId);
           const isConnected = snap.state.status === 'connected';
-          const sessions = summary
+          const allSessions = summary
             ? filterSessions(sortSessions(summary.sessions), statusFilter)
             : [];
+
+          // Get active work groups for this server
+          const serverGroups = (workGroups?.get(snap.serverId) || [])
+            .filter(g => g.status === 'active' || g.status === 'merging');
+
+          // Separate foreman sessions (that have a work group) from regular sessions
+          const foremanSessionIds = new Set(serverGroups.map(g => g.foremanSessionId));
+
+          // Sessions that are NOT workers (foremen + regular sessions)
+          const topLevelSessions = allSessions.filter(s => !workerSessionIds.has(s.id));
 
           return (
             <div key={snap.serverId} className="sidebar-server-group">
@@ -215,12 +260,12 @@ export function SessionSidebar({
                 <div className="sidebar-server-offline">No active sessions</div>
               )}
 
-              {isConnected && summary && summary.sessions.length > 0 && sessions.length === 0 && (
+              {isConnected && summary && summary.sessions.length > 0 && allSessions.length === 0 && (
                 <div className="sidebar-server-offline">No {statusFilter} sessions</div>
               )}
 
               {isConnected &&
-                sessions.map((session) => {
+                topLevelSessions.map((session) => {
                   const isActive =
                     activeSession?.serverId === snap.serverId &&
                     activeSession?.sessionId === session.id;
@@ -232,29 +277,121 @@ export function SessionSidebar({
                   if (isActive) sessionClass += ' active';
                   else if (isSecondary) sessionClass += ' active-secondary';
 
+                  // Check if this session is a foreman with a work group
+                  const foremanGroup = foremanSessionIds.has(session.id)
+                    ? serverGroups.find(g => g.foremanSessionId === session.id)
+                    : undefined;
+
+                  const isGroupCollapsed = foremanGroup ? collapsedGroups.has(foremanGroup.id) : false;
+
                   return (
-                    <div
-                      key={session.id}
-                      className={sessionClass}
-                      onClick={() => onSelectSession(snap.serverId, session.id)}
-                    >
-                      <span className={`status-dot ${STATUS_DOT_CLASS[session.status]}`} />
-                      <div className="sidebar-session-info">
-                        <span className="sidebar-session-name">
-                          {session.name}
-                          {mutedSessions?.has(session.id) && (
-                            <span className="sidebar-muted-icon" title="Notifications muted">&#x1F515;</span>
-                          )}
-                        </span>
-                        {session.currentActivity && (
-                          <span className="sidebar-session-activity">
-                            {session.currentActivity}
-                          </span>
+                    <div key={session.id}>
+                      <div
+                        className={sessionClass}
+                        onClick={() => onSelectSession(snap.serverId, session.id)}
+                      >
+                        {foremanGroup && (
+                          <button
+                            className="sidebar-group-toggle"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              toggleGroupCollapse(foremanGroup.id);
+                            }}
+                          >
+                            {isGroupCollapsed ? '\u25B6' : '\u25BC'}
+                          </button>
                         )}
+                        <span className={`status-dot ${STATUS_DOT_CLASS[session.status]}`} />
+                        <div className="sidebar-session-info">
+                          <span className="sidebar-session-name">
+                            {session.name}
+                            {foremanGroup && (
+                              <span className="sidebar-foreman-label"> (foreman)</span>
+                            )}
+                            {mutedSessions?.has(session.id) && (
+                              <span className="sidebar-muted-icon" title="Notifications muted">&#x1F515;</span>
+                            )}
+                          </span>
+                          {foremanGroup && (
+                            <div className="sidebar-group-progress">
+                              <div className="sidebar-group-progress-bar">
+                                <div
+                                  className="sidebar-group-progress-fill"
+                                  style={{
+                                    width: `${foremanGroup.workers.length > 0
+                                      ? (foremanGroup.workers.filter(w => w.status === 'completed').length / foremanGroup.workers.length) * 100
+                                      : 0}%`,
+                                  }}
+                                />
+                              </div>
+                              <span className="sidebar-group-progress-text">
+                                {foremanGroup.workers.filter(w => w.status === 'completed').length}/{foremanGroup.workers.length}
+                              </span>
+                            </div>
+                          )}
+                          {!foremanGroup && session.currentActivity && (
+                            <span className="sidebar-session-activity">
+                              {session.currentActivity}
+                            </span>
+                          )}
+                        </div>
+                        <span className="sidebar-session-time">
+                          {formatRelativeTime(session.lastActivity)}
+                        </span>
                       </div>
-                      <span className="sidebar-session-time">
-                        {formatRelativeTime(session.lastActivity)}
-                      </span>
+
+                      {/* Worker sessions nested under foreman */}
+                      {foremanGroup && !isGroupCollapsed && (
+                        <div className="sidebar-worker-list">
+                          {foremanGroup.workers.map((worker, idx) => {
+                            const isWorkerActive =
+                              activeSession?.serverId === snap.serverId &&
+                              activeSession?.sessionId === worker.sessionId;
+                            const isLast = idx === foremanGroup.workers.length - 1;
+
+                            return (
+                              <div
+                                key={worker.id}
+                                className={`sidebar-worker ${isWorkerActive ? 'active' : ''}`}
+                                onClick={() => onSelectSession(snap.serverId, worker.sessionId)}
+                              >
+                                <span className="sidebar-worker-connector">
+                                  {isLast ? '\u2514' : '\u251C'}
+                                </span>
+                                <span className={`status-dot ${WORKER_STATUS_DOT[worker.status] || 'status-dot-gray'}`} />
+                                <div className="sidebar-session-info">
+                                  <span className="sidebar-session-name">
+                                    {worker.taskSlug}
+                                  </span>
+                                  {worker.lastActivity && worker.status === 'working' && (
+                                    <span className="sidebar-session-activity">
+                                      {worker.lastActivity}
+                                    </span>
+                                  )}
+                                  {worker.status === 'waiting' && (
+                                    <span className="sidebar-session-activity sidebar-worker-waiting">
+                                      Waiting for input
+                                    </span>
+                                  )}
+                                  {worker.status === 'completed' && (
+                                    <span className="sidebar-session-activity sidebar-worker-done">
+                                      Done
+                                    </span>
+                                  )}
+                                  {worker.status === 'error' && (
+                                    <span className="sidebar-session-activity sidebar-worker-error">
+                                      Error
+                                    </span>
+                                  )}
+                                </div>
+                                <span className="sidebar-session-time">
+                                  {formatRelativeTime(worker.startedAt)}
+                                </span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
                     </div>
                   );
                 })}

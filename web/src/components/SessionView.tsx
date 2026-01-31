@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { PendingImage } from '../types';
+import { PendingImage, WorkGroup } from '../types';
 import { useConversation } from '../hooks/useConversation';
 import { useTasks } from '../hooks/useTasks';
 import { useSubAgents } from '../hooks/useSubAgents';
@@ -21,14 +21,34 @@ import { FileViewerModal } from './FileViewerModal';
 import { QueuedMessageBar } from './QueuedMessageBar';
 import { ArchiveModal } from './ArchiveModal';
 import { TerminalPanel } from './TerminalPanel';
+import { WorkGroupBar } from './WorkGroupBar';
+import { WorkGroupPanel } from './WorkGroupPanel';
 
 interface SessionViewProps {
   serverId: string | null;
   sessionId: string | null;
   tmuxSessionName?: string;
+  workGroup?: WorkGroup;
+  onViewWorker?: (sessionId: string) => void;
+  onSendWorkerInput?: (workerId: string, text: string) => void;
+  onMergeGroup?: () => void;
+  onCancelGroup?: () => void;
+  onRetryWorker?: (workerId: string) => void;
+  merging?: boolean;
 }
 
-export function SessionView({ serverId, sessionId, tmuxSessionName }: SessionViewProps) {
+export function SessionView({
+  serverId,
+  sessionId,
+  tmuxSessionName,
+  workGroup,
+  onViewWorker,
+  onSendWorkerInput,
+  onMergeGroup,
+  onCancelGroup,
+  onRetryWorker,
+  merging,
+}: SessionViewProps) {
   const {
     highlights,
     status,
@@ -60,9 +80,13 @@ export function SessionView({ serverId, sessionId, tmuxSessionName }: SessionVie
   // Terminal view state
   const [showTerminal, setShowTerminal] = useState(false);
 
-  // Auto-focus input and reset terminal view when session changes
+  // Work group panel state
+  const [showWorkGroupPanel, setShowWorkGroupPanel] = useState(false);
+
+  // Auto-focus input and reset views when session changes
   useEffect(() => {
     setShowTerminal(false);
+    setShowWorkGroupPanel(false);
     if (serverId && sessionId) {
       requestAnimationFrame(() => {
         const textarea = document.querySelector('.input-bar-textarea') as HTMLElement | null;
@@ -233,6 +257,20 @@ export function SessionView({ serverId, sessionId, tmuxSessionName }: SessionVie
           serverId={serverId}
           tmuxSessionName={tmuxSessionName}
         />
+      ) : showWorkGroupPanel && workGroup && onViewWorker && onSendWorkerInput && onMergeGroup && onCancelGroup && onRetryWorker ? (
+        <WorkGroupPanel
+          group={workGroup}
+          onBack={() => setShowWorkGroupPanel(false)}
+          onViewWorker={(workerSessionId) => {
+            setShowWorkGroupPanel(false);
+            onViewWorker(workerSessionId);
+          }}
+          onSendWorkerInput={onSendWorkerInput}
+          onMerge={onMergeGroup}
+          onCancel={onCancelGroup}
+          onRetryWorker={onRetryWorker}
+          merging={merging}
+        />
       ) : (
         <>
           <WaitingIndicator status={status} />
@@ -243,6 +281,13 @@ export function SessionView({ serverId, sessionId, tmuxSessionName }: SessionVie
             totalAgents={totalAgents}
             onClick={() => setShowAgentsModal(true)}
           />
+
+          {workGroup && workGroup.status === 'active' && (
+            <WorkGroupBar
+              group={workGroup}
+              onClick={() => setShowWorkGroupPanel(true)}
+            />
+          )}
 
           <TaskList tasks={tasks} loading={tasksLoading} />
 

@@ -10,10 +10,11 @@ import {
   Switch,
   Alert,
 } from 'react-native';
-import { Server, ServerStatus, SessionSummary, TaskSummary, TaskItem } from '../types';
+import { Server, ServerStatus, SessionSummary, TaskSummary, TaskItem, WorkGroup } from '../types';
 import { getServers, updateServer } from '../services/storage';
 import { useMultiServerStatus } from '../hooks/useMultiServerStatus';
 import { NewSessionModal } from '../components/NewSessionModal';
+import { WorkGroupCard } from '../components/WorkGroupCard';
 
 interface DashboardScreenProps {
   onSelectServer: (server: Server, sessionId?: string) => void;
@@ -113,6 +114,66 @@ function ServerCard({
   const [tasksBySession, setTasksBySession] = useState<Map<string, TaskItem[]>>(new Map());
   const [loadingTasks, setLoadingTasks] = useState<Set<string>>(new Set());
   const [showNewSession, setShowNewSession] = useState(false);
+  const [workGroups, setWorkGroups] = useState<WorkGroup[]>([]);
+
+  // Fetch work groups periodically
+  useEffect(() => {
+    if (!sendRequest || !status.connected) return;
+    const fetchGroups = () => {
+      sendRequest(server.id, 'get_work_groups').then(response => {
+        if (response.success && response.payload) {
+          const groups = (response.payload as { groups: WorkGroup[] }).groups || [];
+          setWorkGroups(groups.filter(g => g.status === 'active' || g.status === 'merging'));
+        }
+      }).catch(() => {});
+    };
+    fetchGroups();
+    const timer = setInterval(fetchGroups, 5000);
+    return () => clearInterval(timer);
+  }, [server.id, sendRequest, status.connected]);
+
+  // Build set of worker session IDs to hide from top-level list
+  // and foreman session IDs for labeling
+  const workerSessionIds = React.useMemo(() => {
+    const ids = new Set<string>();
+    for (const group of workGroups) {
+      for (const worker of group.workers) {
+        if (worker.sessionId) ids.add(worker.sessionId);
+      }
+    }
+    return ids;
+  }, [workGroups]);
+
+  const foremanSessionIds = React.useMemo(() => {
+    const ids = new Set<string>();
+    for (const group of workGroups) {
+      if (group.foremanSessionId) ids.add(group.foremanSessionId);
+    }
+    return ids;
+  }, [workGroups]);
+
+  const handleWorkGroupSendInput = useCallback(async (groupId: string, workerId: string, text: string) => {
+    if (!sendRequest) return;
+    await sendRequest(server.id, 'send_worker_input', { groupId, workerId, text });
+  }, [server.id, sendRequest]);
+
+  const handleWorkGroupMerge = useCallback(async (groupId: string) => {
+    if (!sendRequest) return;
+    const response = await sendRequest(server.id, 'merge_work_group', { groupId });
+    if (!response.success) {
+      Alert.alert('Merge Failed', response.error || 'Unknown error');
+    }
+  }, [server.id, sendRequest]);
+
+  const handleWorkGroupCancel = useCallback(async (groupId: string) => {
+    if (!sendRequest) return;
+    await sendRequest(server.id, 'cancel_work_group', { groupId });
+  }, [server.id, sendRequest]);
+
+  const handleWorkGroupRetry = useCallback(async (groupId: string, workerId: string) => {
+    if (!sendRequest) return;
+    await sendRequest(server.id, 'retry_worker', { groupId, workerId });
+  }, [server.id, sendRequest]);
 
   const handleCreateSession = useCallback(async (workingDir: string, startSession: boolean) => {
     if (!sendRequest) return;
@@ -275,10 +336,29 @@ function ServerCard({
 
       {status.connected && status.summary && (
         <View style={styles.sessionsContainer}>
-          {status.summary.sessions.length === 0 ? (
+          {/* Work Groups */}
+          {workGroups.length > 0 && (
+            <View style={styles.workGroupsContainer}>
+              {workGroups.map(group => (
+                <WorkGroupCard
+                  key={group.id}
+                  group={group}
+                  onViewWorker={(sessionId) => onSessionPress(sessionId)}
+                  onSendWorkerInput={handleWorkGroupSendInput}
+                  onMerge={handleWorkGroupMerge}
+                  onCancel={handleWorkGroupCancel}
+                  onRetryWorker={handleWorkGroupRetry}
+                />
+              ))}
+            </View>
+          )}
+
+          {status.summary.sessions.length === 0 && workGroups.length === 0 ? (
             <Text style={styles.noSessionsText}>No active sessions</Text>
           ) : (
-            sortSessions(status.summary.sessions).slice(0, 5).map((session) => (
+            sortSessions(status.summary.sessions)
+              .filter(s => !workerSessionIds.has(s.id))
+              .slice(0, 5).map((session) => (
               <TouchableOpacity
                 key={session.id}
                 style={[styles.sessionRow, session.status === 'idle' && styles.sessionRowIdle]}
@@ -290,6 +370,9 @@ function ServerCard({
                   <View style={styles.sessionHeader}>
                     <Text style={[styles.sessionName, session.status === 'idle' && styles.sessionNameIdle]} numberOfLines={1}>
                       {session.name}
+                      {foremanSessionIds.has(session.id) && (
+                        <Text style={styles.foremanLabel}> (foreman)</Text>
+                      )}
                     </Text>
                     <Text style={styles.sessionTime}>
                       {formatRelativeTime(session.lastActivity)}
@@ -699,6 +782,10 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontStyle: 'italic',
   },
+  workGroupsContainer: {
+    gap: 8,
+    marginBottom: 8,
+  },
   sessionsContainer: {
     gap: 8,
   },
@@ -733,6 +820,11 @@ const styles = StyleSheet.create({
   },
   sessionNameIdle: {
     color: '#9ca3af',
+  },
+  foremanLabel: {
+    color: '#10b981',
+    fontSize: 11,
+    fontWeight: '400',
   },
   sessionTime: {
     color: '#6b7280',

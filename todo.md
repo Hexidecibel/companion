@@ -50,8 +50,12 @@ Quick capture for ideas and tasks. Run `/plan` to process into detailed plans.
 - [done] Beef up project wizard - CLAUDE.md + .claude/commands generation per template
 - [done] Git worktree support for multiple sessions on same project
 - [done] Mobile terminal parity - SSH command display, copy, scroll-aware auto-scroll
+- [done] Parallel Work Groups - daemon, web dashboard, mobile dashboard, push notifications, tests
 
 ## Planned
+(none)
+
+## In Progress
 (none)
 
 ## Upcoming

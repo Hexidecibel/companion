@@ -99,6 +99,9 @@ export class PushNotificationService {
       case 'waiting_for_input': return 'Waiting for input';
       case 'error_detected': return 'Error detected';
       case 'session_completed': return 'Session completed';
+      case 'worker_waiting': return 'Worker needs input';
+      case 'worker_error': return 'Worker error';
+      case 'work_group_ready': return 'Work group ready to merge';
     }
   }
 

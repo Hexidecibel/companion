@@ -233,7 +233,7 @@ export interface AgentTree {
 }
 
 // Notification event types (no longer includes text_match)
-export type NotificationEventType = 'waiting_for_input' | 'error_detected' | 'session_completed';
+export type NotificationEventType = 'waiting_for_input' | 'error_detected' | 'session_completed' | 'worker_waiting' | 'worker_error' | 'work_group_ready';
 
 // Escalation config — replaces NotificationRule system
 export interface EscalationConfig {
@@ -241,6 +241,9 @@ export interface EscalationConfig {
     waiting_for_input: boolean;
     error_detected: boolean;
     session_completed: boolean;
+    worker_waiting: boolean;
+    worker_error: boolean;
+    work_group_ready: boolean;
   };
   pushDelaySeconds: number;      // default: 300 (5 min). 0 = immediate push
   rateLimitSeconds: number;      // default: 60. Min time between notifs per session
@@ -256,6 +259,9 @@ export const DEFAULT_ESCALATION_CONFIG: EscalationConfig = {
     waiting_for_input: true,
     error_detected: true,
     session_completed: false,
+    worker_waiting: true,
+    worker_error: true,
+    work_group_ready: true,
   },
   pushDelaySeconds: 300,
   rateLimitSeconds: 60,
@@ -317,4 +323,42 @@ export interface TaskItem {
   blocks?: string[];
   createdAt: number;
   updatedAt: number;
+}
+
+// Work Group types (parallel /work orchestration)
+export interface WorkerQuestion {
+  text: string;
+  options?: { label: string }[];
+  timestamp: number;
+}
+
+export interface WorkerSession {
+  id: string;
+  sessionId: string;            // Conversation session ID (encoded path)
+  tmuxSessionName: string;
+  taskSlug: string;
+  taskDescription: string;
+  branch: string;               // Git branch: parallel/<slug>
+  worktreePath: string;         // Absolute path to worktree directory
+  status: 'spawning' | 'working' | 'waiting' | 'completed' | 'error';
+  commits: string[];
+  startedAt: number;
+  completedAt?: number;
+  lastActivity?: string;        // Current activity text
+  lastQuestion?: WorkerQuestion;
+  error?: string;
+}
+
+export interface WorkGroup {
+  id: string;
+  name: string;
+  foremanSessionId: string;
+  foremanTmuxSession: string;
+  status: 'active' | 'merging' | 'completed' | 'failed' | 'cancelled';
+  workers: WorkerSession[];
+  createdAt: number;
+  completedAt?: number;
+  planFile?: string;
+  mergeCommit?: string;
+  error?: string;
 }

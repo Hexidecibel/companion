@@ -117,6 +117,21 @@ High-level features of the Companion mobile app and daemon.
 - `companion logs` — platform-aware log viewing (macOS launchd / Linux journalctl)
 - `companion install` — install as system service
 
+## Parallel Work Groups
+- Spawn multiple Claude Code sessions in parallel from `/work` command
+- Each worker runs in its own git worktree on a dedicated branch
+- Foreman session orchestrates workers and handles sequential items
+- Worker lifecycle management: spawning, working, waiting, completed, error states
+- Inline question answering: respond to worker questions without switching sessions
+- Octopus merge of completed worker branches with conflict detection
+- Cancel/retry controls for individual workers or entire groups
+- Web dashboard: sidebar nesting with tree connectors and progress bars
+- Web dashboard: WorkGroupPanel with worker cards, merge/cancel controls
+- Mobile dashboard: expandable work group cards with worker sub-cards
+- Push notifications for worker questions, errors, and group completion
+- State persistence across daemon restarts
+- Worker prompt injection with scoped task instructions
+
 ## Developer Tools
 - Sentry error tracking integration
 - Error boundary with user feedback and bug reporting

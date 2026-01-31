@@ -1,8 +1,9 @@
 import { useState, useCallback, useMemo, useEffect } from 'react';
-import { ActiveSession, SessionSummary } from '../types';
+import { ActiveSession, SessionSummary, WorkGroup } from '../types';
 import { useAllServerSummaries } from '../hooks/useAllServerSummaries';
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
 import { useConnections } from '../hooks/useConnections';
+import { useWorkGroups } from '../hooks/useWorkGroups';
 import { SessionSidebar } from './SessionSidebar';
 import { SessionView } from './SessionView';
 import { NotificationSettingsModal } from './NotificationSettingsModal';
@@ -15,9 +16,31 @@ interface DashboardProps {
 export function Dashboard({ onManageServers }: DashboardProps) {
   const [activeSession, setActiveSession] = useState<ActiveSession | null>(null);
   const [showNotifSettings, setShowNotifSettings] = useState(false);
+  const [merging, setMerging] = useState(false);
   const summaries = useAllServerSummaries();
   const sessionMute = useSessionMute(activeSession?.serverId ?? null);
   const { snapshots } = useConnections();
+
+  // Use work groups for the active server
+  const activeWorkGroups = useWorkGroups(activeSession?.serverId ?? null);
+
+  // Merge all work groups into a per-server map for sidebar
+  const allWorkGroups = useMemo(() => {
+    const map = new Map<string, WorkGroup[]>();
+    if (activeSession?.serverId && activeWorkGroups.groups.length > 0) {
+      map.set(activeSession.serverId, activeWorkGroups.groups);
+    }
+    return map;
+  }, [activeSession?.serverId, activeWorkGroups.groups]);
+
+  // Find the work group for the current active session (if it's a foreman)
+  const activeWorkGroup = useMemo((): WorkGroup | undefined => {
+    if (!activeSession) return undefined;
+    return activeWorkGroups.getGroupForSession(activeSession.sessionId);
+  }, [activeSession, activeWorkGroups]);
+
+  // Is the active session a foreman of the work group?
+  const isForemanView = activeWorkGroup?.foremanSessionId === activeSession?.sessionId;
 
   // Build flat session list for j/k navigation
   const flatSessions = useMemo(() => {
@@ -99,6 +122,35 @@ export function Dashboard({ onManageServers }: DashboardProps) {
     return () => window.removeEventListener('open-notification-settings', handler);
   }, []);
 
+  // Work group action handlers
+  const handleViewWorker = useCallback((workerSessionId: string) => {
+    if (activeSession) {
+      setActiveSession({ serverId: activeSession.serverId, sessionId: workerSessionId });
+    }
+  }, [activeSession]);
+
+  const handleSendWorkerInput = useCallback(async (workerId: string, text: string) => {
+    if (!activeSession || !activeWorkGroup) return;
+    await activeWorkGroups.sendWorkerInput(activeSession.serverId, activeWorkGroup.id, workerId, text);
+  }, [activeSession, activeWorkGroup, activeWorkGroups]);
+
+  const handleMergeGroup = useCallback(async () => {
+    if (!activeSession || !activeWorkGroup) return;
+    setMerging(true);
+    await activeWorkGroups.mergeGroup(activeSession.serverId, activeWorkGroup.id);
+    setMerging(false);
+  }, [activeSession, activeWorkGroup, activeWorkGroups]);
+
+  const handleCancelGroup = useCallback(async () => {
+    if (!activeSession || !activeWorkGroup) return;
+    await activeWorkGroups.cancelGroup(activeSession.serverId, activeWorkGroup.id);
+  }, [activeSession, activeWorkGroup, activeWorkGroups]);
+
+  const handleRetryWorker = useCallback(async (workerId: string) => {
+    if (!activeSession || !activeWorkGroup) return;
+    await activeWorkGroups.retryWorker(activeSession.serverId, activeWorkGroup.id, workerId);
+  }, [activeSession, activeWorkGroup, activeWorkGroups]);
+
   return (
     <div className="dashboard">
       <SessionSidebar
@@ -109,12 +161,20 @@ export function Dashboard({ onManageServers }: DashboardProps) {
         onSessionCreated={handleSessionCreated}
         onNotificationSettings={activeSession ? () => setShowNotifSettings(true) : undefined}
         mutedSessions={sessionMute.mutedSessions}
+        workGroups={allWorkGroups}
       />
       <main className="dashboard-main">
         <SessionView
           serverId={activeSession?.serverId ?? null}
           sessionId={activeSession?.sessionId ?? null}
           tmuxSessionName={activeSessionSummary?.tmuxSessionName}
+          workGroup={isForemanView ? activeWorkGroup : undefined}
+          onViewWorker={handleViewWorker}
+          onSendWorkerInput={handleSendWorkerInput}
+          onMergeGroup={handleMergeGroup}
+          onCancelGroup={handleCancelGroup}
+          onRetryWorker={handleRetryWorker}
+          merging={merging}
         />
       </main>
 

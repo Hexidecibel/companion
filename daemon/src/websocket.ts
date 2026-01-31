@@ -16,6 +16,7 @@ import { loadConfig, saveConfig } from './config';
 import { fetchTodayUsage, fetchMonthUsage, fetchAnthropicUsage } from './anthropic-usage';
 import { DEFAULT_TOOL_CONFIG } from './tool-config';
 import { SubAgentWatcher } from './subagent-watcher';
+import { WorkGroupManager } from './work-group-manager';
 import { templates as scaffoldTemplates } from './scaffold/templates';
 import { scaffoldProject, previewScaffold } from './scaffold/generator';
 import { ProjectConfig } from './scaffold/types';
@@ -60,6 +61,7 @@ export class WebSocketHandler {
   private readonly MAX_SCROLL_LOGS = 200;
   public autoApproveSessions: Set<string> = new Set();
   private escalation: EscalationService;
+  private workGroupManager: WorkGroupManager | null;
 
   constructor(
     server: Server,
@@ -68,12 +70,14 @@ export class WebSocketHandler {
     injector: InputInjector,
     push: PushNotificationService,
     tmux?: TmuxManager,
-    subAgentWatcher?: SubAgentWatcher
+    subAgentWatcher?: SubAgentWatcher,
+    workGroupManager?: WorkGroupManager
   ) {
     this.config = config;
     this.token = config.token;
     this.watcher = watcher;
     this.subAgentWatcher = subAgentWatcher || null;
+    this.workGroupManager = workGroupManager || null;
     this.injector = injector;
     this.push = push;
     this.tmux = tmux || new TmuxManager('companion');
@@ -138,6 +142,13 @@ export class WebSocketHandler {
 
     this.watcher.on('error-detected', (data) => handleEscalationEvent('error_detected', data));
     this.watcher.on('session-completed', (data) => handleEscalationEvent('session_completed', data));
+
+    // Forward work group updates to clients
+    if (this.workGroupManager) {
+      this.workGroupManager.on('work-group-update', (group) => {
+        this.broadcast('work_group_update', group);
+      });
+    }
 
     // Load saved tmux session configs
     this.loadTmuxSessionConfigs();
@@ -684,6 +695,42 @@ export class WebSocketHandler {
       case 'clear_scroll_logs':
         this.scrollLogs = [];
         this.send(client.ws, { type: 'scroll_logs_cleared', success: true, requestId });
+        break;
+
+      // Work Group endpoints
+      case 'spawn_work_group':
+        this.handleSpawnWorkGroup(client, payload as {
+          name: string;
+          foremanSessionId: string;
+          foremanTmuxSession: string;
+          parentDir: string;
+          planFile?: string;
+          workers: { taskSlug: string; taskDescription: string; planSection: string; files: string[] }[];
+        }, requestId);
+        break;
+
+      case 'get_work_groups':
+        this.handleGetWorkGroups(client, requestId);
+        break;
+
+      case 'get_work_group':
+        this.handleGetWorkGroup(client, payload as { groupId: string }, requestId);
+        break;
+
+      case 'merge_work_group':
+        this.handleMergeWorkGroup(client, payload as { groupId: string }, requestId);
+        break;
+
+      case 'cancel_work_group':
+        this.handleCancelWorkGroup(client, payload as { groupId: string }, requestId);
+        break;
+
+      case 'retry_worker':
+        this.handleRetryWorker(client, payload as { groupId: string; workerId: string }, requestId);
+        break;
+
+      case 'send_worker_input':
+        this.handleSendWorkerInput(client, payload as { groupId: string; workerId: string; text: string }, requestId);
         break;
 
       // Scaffold endpoints
@@ -2346,6 +2393,153 @@ export class WebSocketHandler {
       type: 'error',
       success: false,
       error,
+    });
+  }
+
+  // --- Work Group handlers ---
+
+  private async handleSpawnWorkGroup(
+    client: AuthenticatedClient,
+    payload: {
+      name: string;
+      foremanSessionId: string;
+      foremanTmuxSession: string;
+      parentDir: string;
+      planFile?: string;
+      workers: { taskSlug: string; taskDescription: string; planSection: string; files: string[] }[];
+    } | undefined,
+    requestId?: string
+  ): Promise<void> {
+    if (!this.workGroupManager) {
+      this.send(client.ws, { type: 'work_group_spawned', success: false, error: 'Work groups not enabled', requestId });
+      return;
+    }
+    if (!payload?.name || !payload.workers?.length) {
+      this.send(client.ws, { type: 'work_group_spawned', success: false, error: 'Missing name or workers', requestId });
+      return;
+    }
+
+    try {
+      const group = await this.workGroupManager.createWorkGroup({
+        name: payload.name,
+        foremanSessionId: payload.foremanSessionId,
+        foremanTmuxSession: payload.foremanTmuxSession,
+        parentDir: payload.parentDir,
+        planFile: payload.planFile,
+        workers: payload.workers,
+      });
+
+      this.send(client.ws, {
+        type: 'work_group_spawned',
+        success: true,
+        payload: group,
+        requestId,
+      });
+    } catch (err) {
+      this.send(client.ws, {
+        type: 'work_group_spawned',
+        success: false,
+        error: err instanceof Error ? err.message : String(err),
+        requestId,
+      });
+    }
+  }
+
+  private handleGetWorkGroups(client: AuthenticatedClient, requestId?: string): void {
+    if (!this.workGroupManager) {
+      this.send(client.ws, { type: 'work_groups', success: true, payload: { groups: [] }, requestId });
+      return;
+    }
+    const groups = this.workGroupManager.getWorkGroups();
+    this.send(client.ws, { type: 'work_groups', success: true, payload: { groups }, requestId });
+  }
+
+  private handleGetWorkGroup(
+    client: AuthenticatedClient,
+    payload: { groupId: string } | undefined,
+    requestId?: string
+  ): void {
+    if (!this.workGroupManager || !payload?.groupId) {
+      this.send(client.ws, { type: 'work_group', success: false, error: 'Missing groupId', requestId });
+      return;
+    }
+    const group = this.workGroupManager.getWorkGroup(payload.groupId);
+    if (!group) {
+      this.send(client.ws, { type: 'work_group', success: false, error: 'Not found', requestId });
+      return;
+    }
+    this.send(client.ws, { type: 'work_group', success: true, payload: group, requestId });
+  }
+
+  private async handleMergeWorkGroup(
+    client: AuthenticatedClient,
+    payload: { groupId: string } | undefined,
+    requestId?: string
+  ): Promise<void> {
+    if (!this.workGroupManager || !payload?.groupId) {
+      this.send(client.ws, { type: 'work_group_merged', success: false, error: 'Missing groupId', requestId });
+      return;
+    }
+    const result = await this.workGroupManager.mergeWorkGroup(payload.groupId);
+    this.send(client.ws, {
+      type: 'work_group_merged',
+      success: result.success,
+      payload: result,
+      requestId,
+    });
+  }
+
+  private async handleCancelWorkGroup(
+    client: AuthenticatedClient,
+    payload: { groupId: string } | undefined,
+    requestId?: string
+  ): Promise<void> {
+    if (!this.workGroupManager || !payload?.groupId) {
+      this.send(client.ws, { type: 'work_group_cancelled', success: false, error: 'Missing groupId', requestId });
+      return;
+    }
+    const result = await this.workGroupManager.cancelWorkGroup(payload.groupId);
+    this.send(client.ws, {
+      type: 'work_group_cancelled',
+      success: result.success,
+      error: result.error,
+      requestId,
+    });
+  }
+
+  private async handleRetryWorker(
+    client: AuthenticatedClient,
+    payload: { groupId: string; workerId: string } | undefined,
+    requestId?: string
+  ): Promise<void> {
+    if (!this.workGroupManager || !payload?.groupId || !payload?.workerId) {
+      this.send(client.ws, { type: 'worker_retried', success: false, error: 'Missing groupId or workerId', requestId });
+      return;
+    }
+    const result = await this.workGroupManager.retryWorker(payload.groupId, payload.workerId);
+    this.send(client.ws, {
+      type: 'worker_retried',
+      success: result.success,
+      error: result.error,
+      requestId,
+    });
+  }
+
+  private async handleSendWorkerInput(
+    client: AuthenticatedClient,
+    payload: { groupId: string; workerId: string; text: string } | undefined,
+    requestId?: string
+  ): Promise<void> {
+    if (!this.workGroupManager || !payload?.groupId || !payload?.workerId || !payload?.text) {
+      this.send(client.ws, { type: 'worker_input_sent', success: false, error: 'Missing groupId, workerId, or text', requestId });
+      return;
+    }
+    const result = await this.workGroupManager.sendWorkerInput(payload.groupId, payload.workerId, payload.text);
+    this.send(client.ws, {
+      type: 'worker_input_sent',
+      success: result.success,
+      error: result.error,
+      requestId,
     });
   }
 

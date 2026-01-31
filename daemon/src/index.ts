@@ -8,6 +8,7 @@ import { PushNotificationService } from './push';
 import { NotificationStore } from './notification-store';
 import { WebSocketHandler } from './websocket';
 import { TmuxManager } from './tmux-manager';
+import { WorkGroupManager } from './work-group-manager';
 import { createServer, validateTlsConfig } from './tls';
 import { certsExist, generateAndSaveCerts, getDefaultCertPaths } from './cert-generator';
 import { createQRRequestHandler } from './qr-server';
@@ -85,8 +86,36 @@ async function main(): Promise<void> {
     qrHandler
   );
 
+  // Initialize work group manager for parallel /work orchestration
+  const workGroupTmux = new TmuxManager('companion');
+  const workGroupManager = new WorkGroupManager(workGroupTmux, injector, watcher);
+
+  // Work group push notifications
+  workGroupManager.on('worker-waiting', ({ groupName, worker }: { groupName: string; worker: any }) => {
+    const preview = worker.lastQuestion?.text
+      ? `${worker.taskSlug}: ${worker.lastQuestion.text}`
+      : `Worker "${worker.taskSlug}" needs input`;
+    push.sendToAllDevices(preview, 'worker_waiting', worker.sessionId, groupName);
+  });
+
+  workGroupManager.on('worker-error', ({ groupName, worker }: { groupName: string; worker: any }) => {
+    const preview = worker.error
+      ? `${worker.taskSlug}: ${worker.error}`
+      : `Worker "${worker.taskSlug}" encountered an error`;
+    push.sendToAllDevices(preview, 'worker_error', worker.sessionId, groupName);
+  });
+
+  workGroupManager.on('group-ready-to-merge', ({ groupId, name }: { groupId: string; name: string }) => {
+    push.sendToAllDevices(
+      `All workers complete. Ready to merge.`,
+      'work_group_ready',
+      undefined,
+      name,
+    );
+  });
+
   // Initialize WebSocket handler
-  const wsHandler = new WebSocketHandler(server, config, watcher, injector, push, undefined, subAgentWatcher);
+  const wsHandler = new WebSocketHandler(server, config, watcher, injector, push, undefined, subAgentWatcher, workGroupManager);
 
   // Start mDNS advertisement
   let mdns: MdnsAdvertiser | null = null;
@@ -219,6 +248,7 @@ async function main(): Promise<void> {
 
     removePidFile();
     notificationStore.flush();
+    workGroupManager.stop();
     watcher.stop();
     subAgentWatcher.stop();
     if (mdns) mdns.stop();
