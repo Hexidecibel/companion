@@ -70,3 +70,7 @@ export function deleteArchive(id: string): void {
 export function getArchive(id: string): ArchivedConversation | undefined {
   return loadArchives().find((a) => a.id === id);
 }
+
+export function clearAllArchives(): void {
+  saveArchives([]);
+}

@@ -1600,6 +1600,10 @@ body {
    Sub-Agent Bar
    ======================================== */
 
+.subagent-bar-wrapper {
+  flex-shrink: 0;
+}
+
 .subagent-bar {
   display: flex;
   align-items: center;
@@ -1621,6 +1625,17 @@ body {
   align-items: center;
   gap: 6px;
   flex-shrink: 0;
+  cursor: pointer;
+}
+
+.subagent-bar-expand {
+  font-size: 8px;
+  color: var(--text-muted);
+  transition: color 0.15s;
+}
+
+.subagent-bar-left:hover .subagent-bar-expand {
+  color: var(--accent-blue);
 }
 
 .subagent-bar-indicator {
@@ -1648,6 +1663,179 @@ body {
   color: var(--text-muted);
   font-size: 16px;
   flex-shrink: 0;
+  padding: 2px 4px;
+  border-radius: 4px;
+  transition: background-color 0.15s, color 0.15s;
+}
+
+.subagent-bar-chevron:hover {
+  background-color: rgba(59, 130, 246, 0.2);
+  color: var(--accent-blue);
+}
+
+/* ========================================
+   Sub-Agent Tree (inline expandable)
+   ======================================== */
+
+.subagent-tree {
+  background-color: rgba(59, 130, 246, 0.04);
+  border-bottom: 1px solid rgba(59, 130, 246, 0.12);
+  padding: 8px 16px 12px;
+}
+
+.subagent-tree-summary {
+  display: flex;
+  background-color: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 10px 0;
+  margin-bottom: 8px;
+}
+
+.subagent-tree-summary-item {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+.subagent-tree-summary-value {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.subagent-tree-summary-label {
+  font-size: 10px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.subagent-tree-summary-divider {
+  width: 1px;
+  background-color: var(--border-color);
+}
+
+.subagent-tree-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.subagent-tree-node {
+  background-color: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  overflow: hidden;
+  transition: border-color 0.15s;
+}
+
+.subagent-tree-node:hover {
+  border-color: var(--bg-hover);
+}
+
+.subagent-tree-node-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+}
+
+.subagent-tree-node-icon {
+  font-size: 14px;
+  width: 18px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.subagent-tree-status-running {
+  color: var(--accent-green);
+}
+
+.subagent-tree-status-completed {
+  color: var(--accent-blue);
+}
+
+.subagent-tree-status-error {
+  color: var(--accent-red);
+}
+
+.subagent-tree-node-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.subagent-tree-node-slug {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.subagent-tree-node-meta {
+  display: block;
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 1px;
+}
+
+.subagent-tree-node-expand {
+  font-size: 10px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.subagent-tree-node-details {
+  padding: 8px 12px 10px;
+  border-top: 1px solid var(--border-color);
+  background-color: var(--bg-primary);
+}
+
+.subagent-tree-detail-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 4px;
+  font-size: 12px;
+}
+
+.subagent-tree-detail-label {
+  color: var(--text-muted);
+  width: 60px;
+  flex-shrink: 0;
+}
+
+.subagent-tree-detail-value {
+  color: var(--text-secondary);
+  flex: 1;
+  min-width: 0;
+}
+
+.subagent-tree-agent-id {
+  font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
+  font-size: 11px;
+}
+
+.subagent-tree-view-btn {
+  margin-top: 8px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  color: var(--accent-blue);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background-color 0.15s;
+}
+
+.subagent-tree-view-btn:hover {
+  background-color: var(--bg-hover);
 }
 
 /* ========================================
@@ -2471,6 +2659,34 @@ body {
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+
+.archive-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.archive-clear-all-btn {
+  background: none;
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  color: var(--accent-red);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.15s, color 0.15s;
+}
+
+.archive-clear-all-btn:hover {
+  background-color: rgba(239, 68, 68, 0.1);
+}
+
+.archive-clear-all-btn.confirming {
+  background-color: var(--accent-red);
+  color: white;
+  border-color: var(--accent-red);
 }
 
 /* ========================================
