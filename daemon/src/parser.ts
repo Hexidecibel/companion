@@ -35,7 +35,7 @@ interface AskUserQuestionInput {
   }>;
 }
 
-const MAX_MESSAGES = 100; // Limit to most recent messages
+const MAX_MESSAGES = 500; // Limit to most recent messages
 
 // KNOWN_TOOLS alias for backward compatibility in this file
 const KNOWN_TOOLS = KNOWN_TOOL_NAMES;

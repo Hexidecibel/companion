@@ -602,6 +602,37 @@ export class WebSocketHandler {
         break;
       }
 
+      case 'send_terminal_keys': {
+        const termKeysPayload = payload as { sessionName: string; keys: string[] } | undefined;
+        if (termKeysPayload?.sessionName && termKeysPayload.keys?.length) {
+          this.tmux.sendRawKeys(termKeysPayload.sessionName, termKeysPayload.keys)
+            .then((ok) => {
+              this.send(client.ws, {
+                type: 'terminal_keys_sent',
+                success: ok,
+                error: ok ? undefined : 'Failed to send keys',
+                requestId,
+              });
+            })
+            .catch(() => {
+              this.send(client.ws, {
+                type: 'terminal_keys_sent',
+                success: false,
+                error: 'Failed to send terminal keys',
+                requestId,
+              });
+            });
+        } else {
+          this.send(client.ws, {
+            type: 'terminal_keys_sent',
+            success: false,
+            error: 'Missing sessionName or keys',
+            requestId,
+          });
+        }
+        break;
+      }
+
       case 'get_tool_config':
         this.send(client.ws, {
           type: 'tool_config',

@@ -3571,6 +3571,26 @@ body {
   min-height: 1em;
 }
 
+.terminal-interactive-active {
+  outline: 1px solid var(--accent-purple);
+  outline-offset: -1px;
+}
+
+.terminal-interactive-active:focus {
+  outline: 2px solid var(--accent-purple);
+  outline-offset: -2px;
+}
+
+.terminal-toolbar-btn.interactive-active {
+  background: rgba(139, 92, 246, 0.2);
+  color: var(--accent-purple);
+  border-color: var(--accent-purple);
+}
+
+.terminal-toolbar-btn.interactive-active:hover {
+  background: rgba(139, 92, 246, 0.3);
+}
+
 /* SSH command display */
 .ssh-command {
   display: flex;

@@ -227,6 +227,28 @@ export class TmuxManager {
   }
 
   /**
+   * Send raw (non-literal) keys to a tmux session.
+   * Unlike sendKeys() which uses -l for literal text, this sends key names
+   * directly so tmux interprets them (e.g. "Up", "Down", "C-c", "Enter").
+   */
+  async sendRawKeys(sessionName: string, keys: string[]): Promise<boolean> {
+    try {
+      for (const key of keys) {
+        // Validate key contains only safe characters (alphanumeric, dash, plus for combos like C-c)
+        if (!/^[a-zA-Z0-9\-+]+$/.test(key)) {
+          console.error(`TmuxManager: Rejecting unsafe raw key: "${key}"`);
+          continue;
+        }
+        await execAsync(`tmux send-keys -t "${sessionName}" ${key}`);
+      }
+      return true;
+    } catch (err) {
+      console.error(`TmuxManager: Failed to send raw keys to "${sessionName}":`, err);
+      return false;
+    }
+  }
+
+  /**
    * Send Enter key to a session
    */
   async sendEnter(sessionName: string): Promise<boolean> {

@@ -1,13 +1,11 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { PendingImage, WorkGroup } from '../types';
 import { useConversation } from '../hooks/useConversation';
 import { useTasks } from '../hooks/useTasks';
 import { useSubAgents } from '../hooks/useSubAgents';
 import { useSubAgentDetail } from '../hooks/useSubAgentDetail';
 import { useAutoApprove } from '../hooks/useAutoApprove';
-import { useMessageQueue } from '../hooks/useMessageQueue';
 import { addArchive } from '../services/archiveService';
-import { messageQueue } from '../services/messageQueue';
 import { connectionManager } from '../services/ConnectionManager';
 import { useSessionMute } from '../hooks/useSessionMute';
 import { WaitingIndicator } from './WaitingIndicator';
@@ -18,7 +16,7 @@ import { SubAgentBar } from './SubAgentBar';
 import { SubAgentModal } from './SubAgentModal';
 import { SubAgentDetail } from './SubAgentDetail';
 import { FileViewerModal } from './FileViewerModal';
-import { QueuedMessageBar } from './QueuedMessageBar';
+import { FileTabBar } from './FileTabBar';
 import { ArchiveModal } from './ArchiveModal';
 import { TerminalPanel } from './TerminalPanel';
 import { WorkGroupBar } from './WorkGroupBar';
@@ -64,8 +62,6 @@ export function SessionView({
   const { agents, runningCount, completedCount, totalAgents } = useSubAgents(serverId, sessionId);
   const autoApprove = useAutoApprove(serverId, sessionId);
   const sessionMute = useSessionMute(serverId);
-  const { queuedMessages, enqueue, cancel: cancelQueued, clearAll: clearAllQueued } = useMessageQueue(serverId, sessionId);
-
   // Sub-agent state
   const [showAgentsModal, setShowAgentsModal] = useState(false);
   const [viewingAgentId, setViewingAgentId] = useState<string | null>(null);
@@ -73,6 +69,7 @@ export function SessionView({
 
   // File viewer state
   const [viewingFile, setViewingFile] = useState<string | null>(null);
+  const [openFilePaths, setOpenFilePaths] = useState<string[]>([]);
 
   // Archive state
   const [showArchiveModal, setShowArchiveModal] = useState(false);
@@ -83,10 +80,21 @@ export function SessionView({
   // Work group panel state
   const [showWorkGroupPanel, setShowWorkGroupPanel] = useState(false);
 
+  // Add viewed file to open tabs
+  useEffect(() => {
+    if (viewingFile) {
+      setOpenFilePaths(prev =>
+        prev.includes(viewingFile) ? prev : [...prev, viewingFile].slice(-10)
+      );
+    }
+  }, [viewingFile]);
+
   // Auto-focus input and reset views when session changes
   useEffect(() => {
     setShowTerminal(false);
     setShowWorkGroupPanel(false);
+    setViewingFile(null);
+    setOpenFilePaths([]);
     if (serverId && sessionId) {
       requestAnimationFrame(() => {
         const textarea = document.querySelector('.input-bar-textarea') as HTMLElement | null;
@@ -95,48 +103,11 @@ export function SessionView({
     }
   }, [serverId, sessionId]);
 
-  // Track waiting state for auto-dequeue
-  const prevWaitingRef = useRef(false);
-  const initialLoadRef = useRef(true);
-
-  // Reset refs when session changes
-  useEffect(() => {
-    prevWaitingRef.current = false;
-    initialLoadRef.current = true;
-  }, [serverId, sessionId]);
-
-  useEffect(() => {
-    const wasWaiting = prevWaitingRef.current;
-    const isWaiting = status?.isWaitingForInput ?? false;
-    prevWaitingRef.current = isWaiting;
-
-    // Auto-send first queued message when:
-    // 1. Session transitions to waiting (false -> true)
-    // 2. On initial load if session is already waiting
-    // 3. Session is already waiting and a new message was just queued
-    const isTransition = isWaiting && (!wasWaiting || initialLoadRef.current);
-    const hasQueued = queuedMessages.length > 0;
-    const shouldDequeue = isWaiting && (isTransition || hasQueued);
-    initialLoadRef.current = false;
-
-    if (shouldDequeue && serverId && sessionId) {
-      const next = messageQueue.dequeue(serverId, sessionId);
-      if (next) {
-        sendInput(next.text);
-      }
-    }
-  }, [status?.isWaitingForInput, serverId, sessionId, sendInput, queuedMessages]);
-
   const handleSend = useCallback(
     async (text: string): Promise<boolean> => {
-      // If session is not waiting for input, queue the message
-      if (status && !status.isWaitingForInput && serverId) {
-        enqueue(text);
-        return true;
-      }
       return sendInput(text);
     },
-    [status, serverId, enqueue, sendInput],
+    [sendInput],
   );
 
   const handleSendWithImages = useCallback(
@@ -197,6 +168,16 @@ export function SessionView({
     const name = `Session ${new Date().toLocaleString()}`;
     addArchive(serverId, sessionId, name, highlights);
   }, [serverId, sessionId, highlights]);
+
+  const handleCloseFileTab = useCallback((path: string) => {
+    setOpenFilePaths(prev => prev.filter(p => p !== path));
+    setViewingFile(prev => prev === path ? null : prev);
+  }, []);
+
+  const handleCloseAllFileTabs = useCallback(() => {
+    setOpenFilePaths([]);
+    setViewingFile(null);
+  }, []);
 
   if (!serverId || !sessionId) {
     return (
@@ -316,10 +297,12 @@ export function SessionView({
             onViewFile={setViewingFile}
           />
 
-          <QueuedMessageBar
-            messages={queuedMessages}
-            onCancel={cancelQueued}
-            onClearAll={clearAllQueued}
+          <FileTabBar
+            files={openFilePaths}
+            activeFile={viewingFile}
+            onSelectFile={setViewingFile}
+            onCloseFile={handleCloseFileTab}
+            onCloseAll={handleCloseAllFileTabs}
           />
 
           <InputBar

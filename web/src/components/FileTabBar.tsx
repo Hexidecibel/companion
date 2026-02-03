@@ -1,7 +1,5 @@
-import { OpenFile } from '../services/openFiles';
-
 interface FileTabBarProps {
-  files: OpenFile[];
+  files: string[];
   activeFile: string | null;
   onSelectFile: (path: string) => void;
   onCloseFile: (path: string) => void;
@@ -14,22 +12,22 @@ export function FileTabBar({ files, activeFile, onSelectFile, onCloseFile, onClo
   return (
     <div className="file-tab-bar">
       <div className="file-tab-bar-tabs">
-        {files.map((f) => {
-          const fileName = f.path.split('/').pop() || f.path;
-          const isActive = f.path === activeFile;
+        {files.map((path) => {
+          const fileName = path.split('/').pop() || path;
+          const isActive = path === activeFile;
           return (
             <button
-              key={f.path}
+              key={path}
               className={`file-tab ${isActive ? 'file-tab-active' : ''}`}
-              onClick={() => onSelectFile(f.path)}
-              title={f.path}
+              onClick={() => onSelectFile(path)}
+              title={path}
             >
               <span className="file-tab-name">{fileName}</span>
               <span
                 className="file-tab-close"
                 onClick={(e) => {
                   e.stopPropagation();
-                  onCloseFile(f.path);
+                  onCloseFile(path);
                 }}
               >
                 {'\u2715'}
