@@ -11,6 +11,8 @@ import {
   Alert,
   NativeSyntheticEvent,
   NativeScrollEvent,
+  TextInput,
+  Keyboard,
 } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -29,15 +31,44 @@ const MIN_FONT_SIZE = 8;
 const MAX_FONT_SIZE = 20;
 const SCROLL_BOTTOM_THRESHOLD = 120;
 
+const POLL_INTERVAL = 2000;
+const INTERACTIVE_POLL_INTERVAL = 500;
+const KEY_DEBOUNCE_MS = 50;
+
+/** Virtual key definitions for the special key bar */
+const VIRTUAL_KEYS: { label: string; key: string }[] = [
+  { label: 'Esc', key: 'Escape' },
+  { label: 'Tab', key: 'Tab' },
+  { label: '\u2191', key: 'Up' },
+  { label: '\u2193', key: 'Down' },
+  { label: '\u2190', key: 'Left' },
+  { label: '\u2192', key: 'Right' },
+  { label: 'C-c', key: 'C-c' },
+  { label: 'C-d', key: 'C-d' },
+  { label: 'C-z', key: 'C-z' },
+  { label: 'C-l', key: 'C-l' },
+  { label: 'C-a', key: 'C-a' },
+  { label: 'C-e', key: 'C-e' },
+  { label: 'C-r', key: 'C-r' },
+  { label: 'C-u', key: 'C-u' },
+  { label: 'C-k', key: 'C-k' },
+  { label: 'C-w', key: 'C-w' },
+];
+
 export function TerminalScreen({ sessionName, serverHost, sshUser, onBack }: TerminalScreenProps) {
   const [output, setOutput] = useState('');
   const [loading, setLoading] = useState(true);
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [fontSize, setFontSize] = useState(DEFAULT_FONT_SIZE);
   const [sshCopied, setSshCopied] = useState(false);
+  const [interactive, setInteractive] = useState(false);
   const scrollRef = useRef<ScrollView>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const isNearBottomRef = useRef(true);
+  const hiddenInputRef = useRef<TextInput>(null);
+  const keyBufferRef = useRef<string[]>([]);
+  const keyFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const prevTextRef = useRef('');
   const { width: screenWidth } = useWindowDimensions();
 
   // Build SSH command
@@ -57,6 +88,33 @@ export function TerminalScreen({ sessionName, serverHost, sshUser, onBack }: Ter
       Alert.alert('Copy Failed', sshCommand);
     }
   }, [sshCommand]);
+
+  // Buffer and debounce raw key sends (50ms)
+  const sendRawKey = useCallback((key: string) => {
+    keyBufferRef.current.push(key);
+    if (keyFlushTimerRef.current) clearTimeout(keyFlushTimerRef.current);
+    keyFlushTimerRef.current = setTimeout(() => {
+      const batch = keyBufferRef.current.splice(0);
+      if (batch.length > 0) {
+        wsService.sendRequest('send_terminal_keys', {
+          sessionName,
+          keys: batch,
+        }).catch(() => {
+          // Silently fail on key send errors
+        });
+      }
+    }, KEY_DEBOUNCE_MS);
+  }, [sessionName]);
+
+  // Send a printable character as a raw key
+  const sendLiteralChar = useCallback((ch: string) => {
+    if (ch === ' ') {
+      sendRawKey('Space');
+    } else if (/^[a-zA-Z0-9\-+]$/.test(ch)) {
+      sendRawKey(ch);
+    }
+    // Punctuation that fails daemon validation regex is dropped
+  }, [sendRawKey]);
 
   const fetchOutput = useCallback(async () => {
     try {
@@ -79,17 +137,97 @@ export function TerminalScreen({ sessionName, serverHost, sshUser, onBack }: Ter
     fetchOutput();
   }, [fetchOutput]);
 
+  // Polling - faster when interactive (500ms vs 2000ms)
   useEffect(() => {
-    if (autoRefresh) {
-      intervalRef.current = setInterval(fetchOutput, 2000);
+    if (!autoRefresh && !interactive) {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
+      return;
     }
+
+    const interval = interactive ? INTERACTIVE_POLL_INTERVAL : POLL_INTERVAL;
+    intervalRef.current = setInterval(fetchOutput, interval);
     return () => {
       if (intervalRef.current) {
         clearInterval(intervalRef.current);
         intervalRef.current = null;
       }
     };
-  }, [autoRefresh, fetchOutput]);
+  }, [autoRefresh, interactive, fetchOutput]);
+
+  // Handle character input via onChangeText (most reliable cross-platform)
+  const handleChangeText = useCallback((text: string) => {
+    const prev = prevTextRef.current;
+    if (text.length > prev.length) {
+      const added = text.slice(prev.length);
+      for (const ch of added) {
+        sendLiteralChar(ch);
+      }
+    }
+    prevTextRef.current = text;
+    // Prevent text accumulation
+    if (text.length > 50) {
+      prevTextRef.current = '';
+      hiddenInputRef.current?.clear();
+    }
+  }, [sendLiteralChar]);
+
+  // Handle Backspace via onKeyPress (not captured by onChangeText when input is empty)
+  const handleKeyPress = useCallback((e: NativeSyntheticEvent<{ key: string }>) => {
+    const { key } = e.nativeEvent;
+    if (key === 'Backspace') {
+      sendRawKey('BSpace');
+      if (prevTextRef.current.length > 0) {
+        prevTextRef.current = prevTextRef.current.slice(0, -1);
+      }
+    }
+  }, [sendRawKey]);
+
+  // Handle Enter via onSubmitEditing (most reliable for Return key)
+  const handleSubmitEditing = useCallback(() => {
+    sendRawKey('Enter');
+    setTimeout(() => hiddenInputRef.current?.focus(), 50);
+  }, [sendRawKey]);
+
+  // Handle virtual key press - send key and refocus input
+  const handleVirtualKey = useCallback((key: string) => {
+    sendRawKey(key);
+    setTimeout(() => hiddenInputRef.current?.focus(), 50);
+  }, [sendRawKey]);
+
+  // Focus hidden input when interactive mode is toggled on
+  useEffect(() => {
+    if (interactive) {
+      prevTextRef.current = '';
+      setTimeout(() => hiddenInputRef.current?.focus(), 100);
+    } else {
+      Keyboard.dismiss();
+    }
+  }, [interactive]);
+
+  // Reset interactive mode when session changes
+  useEffect(() => {
+    setInteractive(false);
+  }, [sessionName]);
+
+  // Cleanup key flush timer on unmount
+  useEffect(() => {
+    return () => {
+      if (keyFlushTimerRef.current) clearTimeout(keyFlushTimerRef.current);
+    };
+  }, []);
+
+  // Toggle interactive mode
+  const toggleInteractive = useCallback(() => {
+    setInteractive(prev => {
+      if (!prev) {
+        setAutoRefresh(true); // Ensure auto-refresh when going interactive
+      }
+      return !prev;
+    });
+  }, []);
 
   // Scroll-position-aware auto-scroll
   const handleScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
@@ -171,6 +309,14 @@ export function TerminalScreen({ sessionName, serverHost, sshUser, onBack }: Ter
             <Text style={[styles.zoomButtonText, fontSize >= MAX_FONT_SIZE && styles.zoomButtonTextDisabled]}>+</Text>
           </TouchableOpacity>
           <TouchableOpacity
+            style={[styles.interactiveToggle, interactive && styles.interactiveToggleActive]}
+            onPress={toggleInteractive}
+          >
+            <Text style={[styles.interactiveToggleText, interactive && styles.interactiveToggleTextActive]}>
+              Keys
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
             style={[styles.refreshToggle, autoRefresh && styles.refreshToggleActive]}
             onPress={() => setAutoRefresh(!autoRefresh)}
           >
@@ -199,7 +345,7 @@ export function TerminalScreen({ sessionName, serverHost, sshUser, onBack }: Ter
       ) : (
         <ScrollView
           ref={scrollRef}
-          style={styles.terminal}
+          style={[styles.terminal, interactive && styles.terminalInteractive]}
           contentContainerStyle={styles.terminalContent}
           horizontal={false}
           onScroll={handleScroll}
@@ -232,6 +378,46 @@ export function TerminalScreen({ sessionName, serverHost, sshUser, onBack }: Ter
             </View>
           </ScrollView>
         </ScrollView>
+      )}
+
+      {/* Virtual Key Bar - shown when interactive */}
+      {interactive && (
+        <View style={styles.keyBar}>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.keyBarContent}
+            keyboardShouldPersistTaps="always"
+          >
+            {VIRTUAL_KEYS.map((vk) => (
+              <TouchableOpacity
+                key={vk.key}
+                style={styles.keyButton}
+                onPress={() => handleVirtualKey(vk.key)}
+                activeOpacity={0.6}
+              >
+                <Text style={styles.keyButtonText}>{vk.label}</Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        </View>
+      )}
+
+      {/* Hidden TextInput for keyboard capture */}
+      {interactive && (
+        <TextInput
+          ref={hiddenInputRef}
+          style={styles.hiddenInput}
+          autoFocus
+          autoCapitalize="none"
+          autoCorrect={false}
+          spellCheck={false}
+          blurOnSubmit={false}
+          onKeyPress={handleKeyPress}
+          onChangeText={handleChangeText}
+          onSubmitEditing={handleSubmitEditing}
+          caretHidden
+        />
       )}
     </View>
   );
@@ -300,6 +486,26 @@ const styles = StyleSheet.create({
     minWidth: 20,
     textAlign: 'center',
   },
+  interactiveToggle: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+    backgroundColor: '#374151',
+    minWidth: 50,
+    alignItems: 'center',
+    marginLeft: 4,
+  },
+  interactiveToggleActive: {
+    backgroundColor: '#3b1f6e',
+  },
+  interactiveToggleText: {
+    color: '#6b7280',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  interactiveToggleTextActive: {
+    color: '#c084fc',
+  },
   refreshToggle: {
     paddingHorizontal: 10,
     paddingVertical: 4,
@@ -361,8 +567,44 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#0d1117',
   },
+  terminalInteractive: {
+    borderWidth: 1,
+    borderColor: '#8b5cf6',
+  },
   terminalContent: {
     padding: 8,
     paddingBottom: 40,
+  },
+  keyBar: {
+    backgroundColor: '#161b22',
+    borderTopWidth: 1,
+    borderTopColor: '#30363d',
+    paddingVertical: 6,
+  },
+  keyBarContent: {
+    paddingHorizontal: 8,
+    gap: 6,
+  },
+  keyButton: {
+    backgroundColor: '#2d333b',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#444c56',
+  },
+  keyButtonText: {
+    color: '#c9d1d9',
+    fontSize: 13,
+    fontWeight: '600',
+    fontFamily: 'monospace',
+  },
+  hiddenInput: {
+    position: 'absolute',
+    left: 0,
+    bottom: 0,
+    width: 1,
+    height: 1,
+    opacity: 0,
   },
 });
