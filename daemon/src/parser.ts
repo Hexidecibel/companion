@@ -347,6 +347,67 @@ function parseEntry(
   };
 }
 
+/**
+ * Parse a chain of conversation files for cross-session infinite scroll.
+ * Files are ordered oldest-first. Pagination counts from the END of the
+ * newest (last) file backwards through older files.
+ *
+ * Returns { highlights, total, hasMore } matching the get_highlights contract.
+ */
+export function parseConversationChain(
+  files: string[],
+  limit: number,
+  offset: number
+): { highlights: ConversationHighlight[]; total: number; hasMore: boolean } {
+  if (files.length === 0) {
+    return { highlights: [], total: 0, hasMore: false };
+  }
+
+  // Parse all files and collect highlights per file, newest-first
+  // We cache this lazily — only parse as many files as needed
+  const allHighlights: ConversationHighlight[] = [];
+  let totalCount = 0;
+
+  // Walk from newest to oldest, stop once we have enough
+  for (let i = files.length - 1; i >= 0; i--) {
+    const messages = parseConversationFile(files[i]);
+    const highlights = extractHighlights(messages);
+
+    if (highlights.length > 0) {
+      // Insert a session boundary marker between files (not before the first/newest)
+      if (allHighlights.length > 0 && messages.length > 0) {
+        const boundaryTime = messages[messages.length - 1]?.timestamp || Date.now();
+        allHighlights.unshift({
+          id: `boundary-${i}`,
+          type: 'assistant',
+          content: `── Previous session ──`,
+          timestamp: boundaryTime,
+          isWaitingForChoice: false,
+        });
+        totalCount++;
+      }
+      // Prepend older highlights before newer ones
+      allHighlights.unshift(...highlights);
+      totalCount += highlights.length;
+    }
+
+    // Check if we have enough messages to satisfy the request
+    // We need at least offset + limit messages to paginate correctly
+    if (totalCount > offset + limit) {
+      break; // No need to parse more old files
+    }
+  }
+
+  // Paginate from the end, same logic as the existing get_highlights
+  const total = totalCount;
+  const startIdx = Math.max(0, total - offset - limit);
+  const endIdx = Math.max(total - offset, 0);
+  const resultHighlights = allHighlights.slice(startIdx, endIdx);
+  const hasMore = startIdx > 0;
+
+  return { highlights: resultHighlights, total, hasMore };
+}
+
 export function extractHighlights(messages: ConversationMessage[]): ConversationHighlight[] {
   // Find the index of the last user message - anything before this has been "responded to"
   let lastUserMessageIndex = -1;

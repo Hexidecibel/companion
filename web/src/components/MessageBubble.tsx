@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useMemo, memo } from 'react';
 import { ConversationHighlight, Question } from '../types';
 import { ToolCard } from './ToolCard';
 
@@ -6,6 +6,8 @@ interface MessageBubbleProps {
   message: ConversationHighlight;
   onSelectOption?: (label: string) => void;
   onViewFile?: (path: string) => void;
+  searchTerm?: string | null;
+  isCurrentMatch?: boolean;
 }
 
 interface QuestionBlockProps {
@@ -111,7 +113,56 @@ function QuestionBlock({ question, onSelectOption }: QuestionBlockProps) {
   );
 }
 
-export function MessageBubble({ message, onSelectOption, onViewFile }: MessageBubbleProps) {
+// Highlight search matches in text
+function HighlightedText({ text, term }: { text: string; term: string }) {
+  if (!term) return <>{text}</>;
+  const parts: Array<{ text: string; match: boolean }> = [];
+  const lower = text.toLowerCase();
+  const lowerTerm = term.toLowerCase();
+  let lastIdx = 0;
+  let idx = lower.indexOf(lowerTerm, lastIdx);
+  while (idx !== -1) {
+    if (idx > lastIdx) parts.push({ text: text.slice(lastIdx, idx), match: false });
+    parts.push({ text: text.slice(idx, idx + term.length), match: true });
+    lastIdx = idx + term.length;
+    idx = lower.indexOf(lowerTerm, lastIdx);
+  }
+  if (lastIdx < text.length) parts.push({ text: text.slice(lastIdx), match: false });
+  if (parts.length === 0) return <>{text}</>;
+  return (
+    <>
+      {parts.map((p, i) =>
+        p.match ? <mark key={i} className="search-highlight">{p.text}</mark> : <span key={i}>{p.text}</span>
+      )}
+    </>
+  );
+}
+
+// Detect plan file paths in content text
+const PLAN_PATH_RE = /(?:\/[^\s)>"'\]]*\.claude\/plans\/[^\s)>"'\]]+\.md|\/[^\s)>"'\]]*plan\.md)/g;
+
+export function extractPlanFilePath(message: ConversationHighlight): string | null {
+  // Check tool call inputs for plan references
+  if (message.toolCalls) {
+    for (const tool of message.toolCalls) {
+      if (tool.name === 'ExitPlanMode' || tool.name === 'EnterPlanMode') {
+        // Check output for plan file path
+        if (tool.output) {
+          const match = tool.output.match(PLAN_PATH_RE);
+          if (match) return match[0];
+        }
+      }
+    }
+  }
+  // Check message content
+  if (message.content) {
+    const match = message.content.match(PLAN_PATH_RE);
+    if (match) return match[0];
+  }
+  return null;
+}
+
+export function MessageBubble({ message, onSelectOption, onViewFile, searchTerm, isCurrentMatch }: MessageBubbleProps) {
   const isUser = message.type === 'user';
   const [allExpanded, setAllExpanded] = useState<boolean | undefined>(undefined);
 
@@ -126,15 +177,28 @@ export function MessageBubble({ message, onSelectOption, onViewFile }: MessageBu
   }
 
   return (
-    <div className={`msg-row ${isUser ? 'msg-row-user' : 'msg-row-assistant'}`}>
+    <div
+      className={`msg-row ${isUser ? 'msg-row-user' : 'msg-row-assistant'} ${isCurrentMatch ? 'msg-row-current-match' : ''}`}
+      data-highlight-id={message.id}
+    >
       {hasContent && (
         <div className={`msg-bubble ${isUser ? 'msg-bubble-user' : 'msg-bubble-assistant'}`}>
           {!isUser && onViewFile ? (
             <pre className="msg-content">
-              <FilePathContent content={message.content} onViewFile={onViewFile} />
+              {searchTerm ? (
+                <HighlightedText text={message.content} term={searchTerm} />
+              ) : (
+                <FilePathContent content={message.content} onViewFile={onViewFile} />
+              )}
             </pre>
           ) : (
-            <pre className="msg-content">{message.content}</pre>
+            <pre className="msg-content">
+              {searchTerm ? (
+                <HighlightedText text={message.content} term={searchTerm} />
+              ) : (
+                message.content
+              )}
+            </pre>
           )}
         </div>
       )}
@@ -149,9 +213,30 @@ export function MessageBubble({ message, onSelectOption, onViewFile }: MessageBu
               {allExpanded === true ? 'Collapse All' : 'Expand All'}
             </button>
           )}
-          {toolCalls.map((tool) => (
-            <ToolCard key={tool.id} tool={tool} forceExpanded={allExpanded} />
-          ))}
+          {toolCalls.map((tool) => {
+            if (tool.name === 'ExitPlanMode' && onViewFile) {
+              const planPath = extractPlanFilePath(message);
+              return (
+                <div key={tool.id} className="plan-card">
+                  <div className="plan-card-header">
+                    <span className="plan-card-icon">Plan Ready</span>
+                    <span className={`tool-card-status ${tool.status === 'completed' ? 'tool-status-completed' : 'tool-status-pending'}`}>
+                      {tool.status === 'completed' ? 'Approved' : 'Pending'}
+                    </span>
+                  </div>
+                  {planPath && (
+                    <button
+                      className="plan-card-view-btn"
+                      onClick={(e) => { e.stopPropagation(); onViewFile(planPath); }}
+                    >
+                      View Plan
+                    </button>
+                  )}
+                </div>
+              );
+            }
+            return <ToolCard key={tool.id} tool={tool} forceExpanded={allExpanded} />;
+          })}
         </div>
       )}
 
@@ -190,33 +275,36 @@ interface FilePathContentProps {
   onViewFile: (path: string) => void;
 }
 
-function FilePathContent({ content, onViewFile }: FilePathContentProps) {
-  const segments: Array<{ type: 'text' | 'path'; value: string }> = [];
-  let lastIndex = 0;
+const FilePathContent = memo(function FilePathContent({ content, onViewFile }: FilePathContentProps) {
+  const segments = useMemo(() => {
+    const result: Array<{ type: 'text' | 'path'; value: string }> = [];
+    let lastIndex = 0;
 
-  const regex = new RegExp(FILE_PATH_RE.source, 'g');
-  let match: RegExpExecArray | null;
+    const regex = new RegExp(FILE_PATH_RE.source, 'g');
+    let match: RegExpExecArray | null;
 
-  while ((match = regex.exec(content)) !== null) {
-    const path = (match[1] || match[0]).trim();
-    if (URL_RE.test(path) || path.length < 3) continue;
+    while ((match = regex.exec(content)) !== null) {
+      const path = (match[1] || match[0]).trim();
+      if (URL_RE.test(path) || path.length < 3) continue;
 
-    // Only match paths that look like file paths
-    if (!path.startsWith('/') && !path.startsWith('~/')) continue;
+      if (!path.startsWith('/') && !path.startsWith('~/')) continue;
 
-    const fullMatchStart = match.index + (match[0].length - (match[1] || match[0]).trim().length);
-    const fullMatchEnd = fullMatchStart + path.length;
+      const fullMatchStart = match.index + (match[0].length - (match[1] || match[0]).trim().length);
+      const fullMatchEnd = fullMatchStart + path.length;
 
-    if (fullMatchStart > lastIndex) {
-      segments.push({ type: 'text', value: content.slice(lastIndex, fullMatchStart) });
+      if (fullMatchStart > lastIndex) {
+        result.push({ type: 'text', value: content.slice(lastIndex, fullMatchStart) });
+      }
+      result.push({ type: 'path', value: path });
+      lastIndex = fullMatchEnd;
     }
-    segments.push({ type: 'path', value: path });
-    lastIndex = fullMatchEnd;
-  }
 
-  if (lastIndex < content.length) {
-    segments.push({ type: 'text', value: content.slice(lastIndex) });
-  }
+    if (lastIndex < content.length) {
+      result.push({ type: 'text', value: content.slice(lastIndex) });
+    }
+
+    return result;
+  }, [content]);
 
   if (segments.length === 0 || (segments.length === 1 && segments[0].type === 'text')) {
     return <>{content}</>;
@@ -239,4 +327,4 @@ function FilePathContent({ content, onViewFile }: FilePathContentProps) {
       )}
     </>
   );
-}
+});

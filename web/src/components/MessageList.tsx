@@ -10,6 +10,8 @@ interface MessageListProps {
   onLoadMore: () => void;
   onSelectOption?: (label: string) => void;
   onViewFile?: (path: string) => void;
+  searchTerm?: string | null;
+  currentMatchId?: string | null;
 }
 
 export function MessageList({
@@ -20,6 +22,8 @@ export function MessageList({
   onLoadMore,
   onSelectOption,
   onViewFile,
+  searchTerm,
+  currentMatchId,
 }: MessageListProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -43,6 +47,15 @@ export function MessageList({
       bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
     }
   }, [highlights]);
+
+  // Scroll to current search match
+  useEffect(() => {
+    if (!currentMatchId || !containerRef.current) return;
+    const el = containerRef.current.querySelector(`[data-highlight-id="${currentMatchId}"]`);
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  }, [currentMatchId]);
 
   // Preserve scroll position when prepending (load more) only — not on normal updates
   useLayoutEffect(() => {
@@ -108,6 +121,8 @@ export function MessageList({
           message={msg}
           onSelectOption={onSelectOption}
           onViewFile={onViewFile}
+          searchTerm={searchTerm}
+          isCurrentMatch={msg.id === currentMatchId}
         />
       ))}
       <div ref={bottomRef} />

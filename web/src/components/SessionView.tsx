@@ -1,11 +1,12 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { PendingImage, WorkGroup } from '../types';
 import { useConversation } from '../hooks/useConversation';
 import { useTasks } from '../hooks/useTasks';
 import { useSubAgents } from '../hooks/useSubAgents';
 import { useSubAgentDetail } from '../hooks/useSubAgentDetail';
 import { useAutoApprove } from '../hooks/useAutoApprove';
-import { addArchive } from '../services/archiveService';
+import { useOpenFiles } from '../hooks/useOpenFiles';
+import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
 import { connectionManager } from '../services/ConnectionManager';
 import { useSessionMute } from '../hooks/useSessionMute';
 import { WaitingIndicator } from './WaitingIndicator';
@@ -17,6 +18,8 @@ import { SubAgentModal } from './SubAgentModal';
 import { SubAgentDetail } from './SubAgentDetail';
 import { FileViewerModal } from './FileViewerModal';
 import { FileTabBar } from './FileTabBar';
+import { extractPlanFilePath } from './MessageBubble';
+import { SearchBar } from './SearchBar';
 import { ArchiveModal } from './ArchiveModal';
 import { TerminalPanel } from './TerminalPanel';
 import { WorkGroupBar } from './WorkGroupBar';
@@ -69,7 +72,7 @@ export function SessionView({
 
   // File viewer state
   const [viewingFile, setViewingFile] = useState<string | null>(null);
-  const [openFilePaths, setOpenFilePaths] = useState<string[]>([]);
+  const { openFiles, openFile, closeFile: closeOpenFile, closeAllFiles } = useOpenFiles(serverId, sessionId);
 
   // Archive state
   const [showArchiveModal, setShowArchiveModal] = useState(false);
@@ -80,21 +83,33 @@ export function SessionView({
   // Work group panel state
   const [showWorkGroupPanel, setShowWorkGroupPanel] = useState(false);
 
-  // Add viewed file to open tabs
-  useEffect(() => {
-    if (viewingFile) {
-      setOpenFilePaths(prev =>
-        prev.includes(viewingFile) ? prev : [...prev, viewingFile].slice(-10)
-      );
+  // Search state
+  const [searchTerm, setSearchTerm] = useState<string | null>(null);
+  const [showSearch, setShowSearch] = useState(false);
+  const [currentMatchIndex, setCurrentMatchIndex] = useState(0);
+
+  const searchMatches = useMemo(() => {
+    if (!searchTerm) return [];
+    const lower = searchTerm.toLowerCase();
+    return highlights
+      .map((h, i) => ({ id: h.id, index: i }))
+      .filter(({ index }) => highlights[index].content?.toLowerCase().includes(lower));
+  }, [highlights, searchTerm]);
+
+  // Detect plan file from conversation
+  const latestPlanFile = useMemo(() => {
+    for (let i = highlights.length - 1; i >= 0; i--) {
+      const planPath = extractPlanFilePath(highlights[i]);
+      if (planPath) return planPath;
     }
-  }, [viewingFile]);
+    return null;
+  }, [highlights]);
 
   // Auto-focus input and reset views when session changes
   useEffect(() => {
     setShowTerminal(false);
     setShowWorkGroupPanel(false);
     setViewingFile(null);
-    setOpenFilePaths([]);
     if (serverId && sessionId) {
       requestAnimationFrame(() => {
         const textarea = document.querySelector('.input-bar-textarea') as HTMLElement | null;
@@ -163,21 +178,51 @@ export function SessionView({
     [serverId],
   );
 
-  const handleArchive = useCallback(() => {
-    if (!serverId || !sessionId || highlights.length === 0) return;
-    const name = `Session ${new Date().toLocaleString()}`;
-    addArchive(serverId, sessionId, name, highlights);
-  }, [serverId, sessionId, highlights]);
+  const handleViewFile = useCallback((path: string) => {
+    setViewingFile(path);
+    openFile(path);
+  }, [openFile]);
 
   const handleCloseFileTab = useCallback((path: string) => {
-    setOpenFilePaths(prev => prev.filter(p => p !== path));
+    closeOpenFile(path);
     setViewingFile(prev => prev === path ? null : prev);
-  }, []);
+  }, [closeOpenFile]);
 
   const handleCloseAllFileTabs = useCallback(() => {
-    setOpenFilePaths([]);
+    closeAllFiles();
     setViewingFile(null);
+  }, [closeAllFiles]);
+
+  const handleCloseSearch = useCallback(() => {
+    setShowSearch(false);
+    setSearchTerm(null);
+    setCurrentMatchIndex(0);
   }, []);
+
+  const handleSearchNext = useCallback(() => {
+    if (searchMatches.length === 0) return;
+    setCurrentMatchIndex(prev => (prev + 1) % searchMatches.length);
+  }, [searchMatches.length]);
+
+  const handleSearchPrev = useCallback(() => {
+    if (searchMatches.length === 0) return;
+    setCurrentMatchIndex(prev => (prev - 1 + searchMatches.length) % searchMatches.length);
+  }, [searchMatches.length]);
+
+  // Session-specific keyboard shortcuts
+  useKeyboardShortcuts(useMemo(() => [
+    { key: 'f', meta: true, handler: () => setShowSearch(true) },
+    { key: 't', meta: true, handler: () => { if (tmuxSessionName) setShowTerminal(prev => !prev); } },
+    { key: 'a', meta: true, shift: true, handler: () => autoApprove.toggle() },
+    { key: 'm', meta: true, shift: true, handler: () => { if (sessionId) sessionMute.toggleMute(sessionId); } },
+    { key: 'Escape', handler: () => {
+      if (showSearch) handleCloseSearch();
+      else if (viewingFile) setViewingFile(null);
+      else if (showArchiveModal) setShowArchiveModal(false);
+      else if (showAgentsModal) setShowAgentsModal(false);
+      else if (viewingAgentId) setViewingAgentId(null);
+    }},
+  ], [tmuxSessionName, showSearch, viewingFile, showArchiveModal, showAgentsModal, viewingAgentId, sessionId, autoApprove, sessionMute, handleCloseSearch]));
 
   if (!serverId || !sessionId) {
     return (
@@ -230,14 +275,15 @@ export function SessionView({
               Terminal
             </button>
           )}
-          <button
-            className="session-header-btn"
-            onClick={handleArchive}
-            disabled={highlights.length === 0}
-            title="Save conversation archive"
-          >
-            Archive
-          </button>
+          {latestPlanFile && (
+            <button
+              className="session-header-btn plan-btn"
+              onClick={() => handleViewFile(latestPlanFile)}
+              title={`View plan: ${latestPlanFile}`}
+            >
+              Plan
+            </button>
+          )}
           <button
             className="session-header-btn"
             onClick={() => setShowArchiveModal(true)}
@@ -287,6 +333,17 @@ export function SessionView({
 
           <TaskList tasks={tasks} loading={tasksLoading} />
 
+          {showSearch && (
+            <SearchBar
+              onSearch={(term) => { setSearchTerm(term || null); setCurrentMatchIndex(0); }}
+              matchCount={searchMatches.length}
+              currentMatch={currentMatchIndex}
+              onNext={handleSearchNext}
+              onPrev={handleSearchPrev}
+              onClose={handleCloseSearch}
+            />
+          )}
+
           <MessageList
             highlights={highlights}
             loading={loading}
@@ -294,11 +351,13 @@ export function SessionView({
             hasMore={hasMore}
             onLoadMore={loadMore}
             onSelectOption={handleSelectOption}
-            onViewFile={setViewingFile}
+            onViewFile={handleViewFile}
+            searchTerm={searchTerm}
+            currentMatchId={searchMatches.length > 0 ? searchMatches[currentMatchIndex]?.id : null}
           />
 
           <FileTabBar
-            files={openFilePaths}
+            files={openFiles.map(f => f.path)}
             activeFile={viewingFile}
             onSelectFile={setViewingFile}
             onCloseFile={handleCloseFileTab}

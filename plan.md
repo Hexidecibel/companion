@@ -918,3 +918,731 @@ The app currently uses a flat, monochrome dark slate palette (`#111827` / `#1f29
 - Verify status colors still read clearly against new tinted backgrounds
 - Verify text contrast ratios remain accessible on tinted cards
 - Check `LinearGradient` performance on older devices (should be fine for static backgrounds)
+
+---
+
+## 6. Persistent File Tab Bar in Web SessionView
+**Status:** done
+
+### Overview
+
+The file tab bar scaffolding is complete — `openFilesService`, `useOpenFiles` hook, `FileTabBar` component, and CSS are all written and functional. The issue is that wiring the persistent `useOpenFiles` hook into `SessionView` (replacing the local `openFilePaths` state) causes a hard browser freeze when a file is opened.
+
+### Root Cause Analysis
+
+The current `SessionView` uses local state for file tracking (lines 71-72):
+```typescript
+const [viewingFile, setViewingFile] = useState<string | null>(null);
+const [openFilePaths, setOpenFilePaths] = useState<string[]>([]);
+```
+
+And a `useEffect` that adds viewed files to the list (lines 84-90):
+```typescript
+useEffect(() => {
+  if (viewingFile) {
+    setOpenFilePaths(prev =>
+      prev.includes(viewingFile) ? prev : [...prev, viewingFile].slice(-10)
+    );
+  }
+}, [viewingFile]);
+```
+
+The browser freeze likely comes from replacing this with `useOpenFiles` hook, which:
+1. Calls `openFilesService.openFile()` → writes to localStorage → returns new array
+2. Triggers `setOpenFiles()` → re-render
+3. The re-render triggers `FilePathContent` regex scanning across all messages
+4. Combined with `highlights` array reference changes from polling, creates a cascade
+
+### Diagnosis Plan
+
+Before fixing, confirm the root cause:
+1. Add `console.time('render')` / `console.timeEnd('render')` to SessionView
+2. Replace `useOpenFiles` hook integration one piece at a time
+3. Profile with React DevTools Profiler to find the hot component
+
+### Probable Fix
+
+**Option A: Decouple file open from render cycle**
+- Don't call `openFile()` inside a render-triggering effect
+- Instead, call it in the `onViewFile` callback directly (event handler, not effect)
+- Remove the `useEffect` that syncs `viewingFile` → `openFilePaths`
+- The `useOpenFiles` hook only reads on mount/session change, not on every file open
+
+```typescript
+const handleViewFile = useCallback((path: string) => {
+  setViewingFile(path);
+  openFile(path);  // from useOpenFiles — updates service + local state, no effect cascade
+}, [openFile]);
+```
+
+**Option B: Memoize FilePathContent**
+- Wrap `FilePathContent` in `React.memo` with deep comparison
+- Memoize the regex results per content string
+- This prevents re-scanning all messages when only the tab bar state changes
+
+**Recommended: Both A and B together.**
+
+### Files to Modify
+
+- `web/src/components/SessionView.tsx` — Replace local `openFilePaths` state with `useOpenFiles` hook, move `openFile()` call into event handler instead of effect
+- `web/src/components/MessageBubble.tsx` — Memoize `FilePathContent` with `React.memo`
+- `web/src/hooks/useOpenFiles.ts` — No changes needed (already correct)
+- `web/src/services/openFiles.ts` — No changes needed
+
+### Implementation Steps
+
+1. **Memoize FilePathContent** in `MessageBubble.tsx`
+   - Wrap with `React.memo`
+   - Cache regex results using `useMemo` keyed on content string
+   - This is a safety net regardless of the tab bar fix
+
+2. **Replace local state in SessionView**
+   - Import `useOpenFiles` hook
+   - Remove local `openFilePaths` state and the syncing `useEffect`
+   - Wire `useOpenFiles.openFile` into `handleViewFile` callback
+   - Wire `useOpenFiles.closeFile` and `closeAllFiles` into FileTabBar props
+   - Pass `useOpenFiles.openFiles.map(f => f.path)` to FileTabBar `files` prop
+
+3. **Test incrementally**
+   - Open a file → verify no freeze
+   - Open 5+ files → verify tab bar renders correctly
+   - Switch sessions → verify tabs persist and reload
+   - Close tab → verify removal from both UI and localStorage
+
+### Tests Needed
+- Opening a file does not freeze the browser
+- File tabs persist across session switches
+- File tabs persist across page refresh
+- Closing a tab removes it from storage
+- Close All clears all tabs for that session
+- Max 10 tabs enforced
+
+---
+
+## 7. Plan Viewer
+**Status:** done
+
+### Overview
+
+Claude generates markdown plan files via `EnterPlanMode` that get written to the scratchpad or project directory. These plan references appear in conversation messages as file paths, but there's no special detection or UX for them. This feature adds awareness of plan files as first-class conversation artifacts.
+
+### Current State
+
+- `EnterPlanMode`/`ExitPlanMode` are tool calls in `tool-config.ts` — displayed as generic tool cards
+- Plan file paths appear in assistant message text (e.g., `/path/to/plan.md`)
+- `FilePathContent` already makes these clickable → opens in `FileViewerModal`
+- `FileViewerModal` already renders `.md` files via `MarkdownRenderer`
+- The custom `MarkdownRenderer` supports headings, lists, code blocks, links, bold/italic
+
+### What's Actually Needed
+
+The existing infrastructure **already works** for viewing plans — clicking a plan path opens the markdown viewer. The gap is:
+
+1. **No visual indicator** that a plan file was created/updated during the conversation
+2. **Plan file paths buried** in assistant text — easy to miss
+3. **No persistent access** — once scrolled past, no way to get back to the plan without finding the message
+
+### Files to Modify
+
+- `web/src/components/MessageBubble.tsx` — Detect plan file references in tool calls, render a plan card
+- `web/src/components/SessionView.tsx` — Track active plan file, add plan shortcut to header
+- `web/src/styles/global.css` — Plan card and plan indicator styles
+- `daemon/src/parser.ts` — Extract plan file path from ExitPlanMode tool result content
+
+### Implementation Steps
+
+1. **Daemon: Extract plan file path from ExitPlanMode**
+   - In parser's tool call processing, when `ExitPlanMode` is encountered, look for the plan file path in the tool result
+   - ExitPlanMode's result typically contains the plan file path (e.g., `~/.claude/plans/foo.md`)
+   - Add `planFile?: string` to `ConversationHighlight` type (or attach to the tool call metadata)
+   - Alternatively, parse the `EnterPlanMode` tool result for the plan file path set by the system
+
+2. **Web: Plan card in MessageBubble**
+   - When a tool call is `ExitPlanMode`, render a special "Plan Ready" card instead of the generic tool card
+   - Card shows: plan file name, "View Plan" button
+   - Clicking opens the plan in FileViewerModal
+   - Styled with purple accent (plans are special artifacts)
+
+3. **Web: Plan indicator in session header**
+   - If the conversation has a plan file detected, show a small "Plan" button in the session header toolbar
+   - Clicking opens the most recent plan file in the viewer
+   - This gives persistent access without scrolling
+
+4. **Web: Highlight plan paths in message text**
+   - In `FilePathContent`, detect paths ending in common plan file patterns (files in `~/.claude/plans/` or named `plan.md`)
+   - Render with a distinct style (purple highlight, plan icon prefix)
+
+### Tests Needed
+- ExitPlanMode tool call renders plan card instead of generic tool card
+- Clicking "View Plan" opens the markdown viewer
+- Plan button appears in session header when plan file detected
+- Plan paths in message text get special highlighting
+- Plans render correctly in MarkdownRenderer (headings, code blocks, lists)
+
+---
+
+## 8. Cross-Session Infinite Scroll
+**Status:** done
+
+### Overview
+
+Currently, scrolling up in a conversation only goes back through the current JSONL file. Users often have multiple conversation files for the same project (each `claude` invocation creates a new UUID-named JSONL file in the same project directory). This feature stitches them together so scrolling up crosses file boundaries.
+
+### Current Architecture
+
+- **Watcher** discovers files in `~/.claude/projects/{encoded-path}/{uuid}.jsonl`
+- **Session ID** is the encoded project path (directory name), not the UUID
+- Multiple JSONL files can exist under the same session directory
+- **Parser** reads a single file, returns messages with offset/limit pagination
+- **get_highlights** endpoint paginates from the end of the current file's messages
+- The watcher tracks only ONE file per session (the most recently modified)
+
+### Design
+
+**Chain files by creation time:**
+- When `hasMore` is false for the current file, check for older sibling JSONL files
+- Load the previous file and continue pagination from its end
+- The user sees a seamless scroll — no indication of file boundaries (or optionally a subtle date separator)
+
+### Files to Modify
+
+- `daemon/src/watcher.ts` — Track all JSONL files per session directory (not just the latest), sort by creation time
+- `daemon/src/parser.ts` — Accept a list of file paths for chained parsing
+- `daemon/src/websocket.ts` — Update `get_highlights` to support cross-file pagination
+- `daemon/src/types.ts` — Add file chain metadata to tracked conversations
+
+### Implementation Steps
+
+1. **Watcher: Discover all conversation files per session**
+   - On startup and file discovery, collect ALL `.jsonl` files in each project directory (excluding `/subagents/`)
+   - Sort by file creation time (birthtime or first line timestamp)
+   - Store as ordered list: `conversationFiles: string[]` (oldest first)
+   - The "active" file remains the most recently modified one
+   - Add method: `getConversationChain(sessionId): string[]`
+
+2. **Parser: Chain-aware parsing**
+   - Add `parseConversationChain(files: string[], limit: number, offset: number)` function
+   - Parse files from newest to oldest
+   - When the newest file's messages are exhausted by offset, continue into the previous file
+   - Track cumulative message count across files for correct offset math
+   - Return combined highlights with correct `hasMore` (true if older files still have messages)
+
+3. **WebSocket: Update get_highlights**
+   - When handling `get_highlights`, get the full file chain from watcher
+   - Pass chain to the new `parseConversationChain()` function
+   - The offset/limit/hasMore contract stays the same from the client's perspective
+   - Client code needs NO changes — it just keeps calling loadMore and gets older messages
+
+4. **Optional: File boundary indicator**
+   - Insert a special "session boundary" highlight between files
+   - Shows date/time of when the previous session ended
+   - Styled as a subtle divider (not a message bubble)
+
+### Performance Considerations
+
+- Only parse older files when actually requested (lazy loading)
+- Cache parsed messages per file (already done for active file)
+- Don't re-parse old files on every poll — they're immutable once a new file becomes active
+- Limit maximum chain depth (e.g., last 20 files) to prevent memory issues on long-running projects
+
+### Tests Needed
+- Single file: behavior unchanged
+- Two files: scrolling past the first file's start loads messages from the previous file
+- hasMore correctly reports false only when all files exhausted
+- File boundary dates are accurate
+- Polling doesn't re-parse old immutable files
+- New session creation doesn't break existing chain
+- Performance: loading 5+ chained files doesn't cause lag
+
+---
+
+## 9. Interactive Terminal Mode for Mobile
+**Status:** planned
+
+### Overview
+
+Port the web interactive terminal feature to the React Native mobile app. The web version toggles keyboard capture on the terminal output div and maps browser KeyboardEvent to tmux key names. Mobile needs a different approach because React Native doesn't have browser-style keyboard events.
+
+### Approach: Hidden TextInput + Virtual Key Bar
+
+React Native's `TextInput` provides `onKeyPress` events on iOS/Android, but with limited key identification. A more reliable approach:
+
+1. **Hidden TextInput** for capturing printable character input
+2. **Virtual key bar** above the keyboard for special keys (arrows, Ctrl combos, Tab, Escape)
+3. **Send via existing `send_terminal_keys` daemon endpoint** (already implemented)
+
+### Daemon Support
+
+Already complete — the `send_terminal_keys` WebSocket endpoint and `TmuxManager.sendRawKeys()` method exist from the web implementation.
+
+### Files to Modify
+
+- `app/src/screens/TerminalScreen.tsx` — Add interactive toggle, hidden TextInput, virtual key bar, key sending logic
+- `app/src/types/index.ts` — No changes needed (endpoint already typed)
+
+### Implementation Steps
+
+1. **Add interactive mode toggle**
+   - Add `interactive` boolean state
+   - Toggle button in the toolbar (same position as web)
+   - When ON: show virtual key bar, focus hidden TextInput, increase poll rate to 500ms
+   - When OFF: hide key bar, dismiss keyboard, restore 2000ms poll rate
+
+2. **Hidden TextInput for character capture**
+   - Render an invisible `TextInput` (height: 1, opacity: 0, positioned absolutely)
+   - `autoFocus` when interactive mode enabled
+   - `onChangeText`: detect new characters, send each as literal key via `send_terminal_keys`
+   - Clear the TextInput after each character is sent
+   - This captures letters, numbers, spaces, and punctuation
+
+3. **Virtual key bar component**
+   - Horizontal scrollable row of buttons above the keyboard
+   - Layout: `[Tab] [Esc] [↑] [↓] [←] [→] [Ctrl] [Enter] [BSpace]`
+   - **Ctrl mode**: Tapping Ctrl toggles a "Ctrl active" state, next key press sends `C-{key}`
+   - Each button calls `sendRawKeys()` with the appropriate tmux key name
+   - Styled to match the terminal dark theme
+
+4. **Key mapping (reuse web constants)**
+   - Port `SPECIAL_KEY_MAP` values: Up, Down, Left, Right, Enter, BSpace, Tab, Escape
+   - Port `CTRL_KEY_MAP` values: C-c, C-d, C-z, C-l, C-a, C-e, C-r, C-u, C-k, C-w
+   - Space → "Space" in raw mode
+
+5. **Key debouncing**
+   - Buffer keys for 50ms before sending (same as web)
+   - Batch multiple rapid keypresses into one `send_terminal_keys` request
+
+6. **Faster polling when interactive**
+   - Change poll interval from 2000ms to 500ms when interactive mode is ON
+   - Revert on toggle OFF or unmount
+
+### Virtual Key Bar Design
+
+```
+┌──────────────────────────────────────────────────────┐
+│ [Tab] [Esc] [↑] [↓] [←] [→] [Ctrl] [⏎] [⌫] [C-c] │
+└──────────────────────────────────────────────────────┘
+```
+
+- Fixed height bar (44px) rendered above the system keyboard
+- Buttons: 40x36px, monospace font, dark background matching terminal
+- Ctrl button toggles: inactive (gray) → active (purple highlight)
+- C-c button as quick shortcut (most common ctrl combo)
+
+### Tests Needed
+- Toggle interactive ON → keyboard appears, key bar visible
+- Type characters → appear in terminal output on next poll
+- Arrow keys → cursor movement in terminal
+- Ctrl+C → interrupts running process
+- Toggle OFF → keyboard dismissed, key bar hidden
+- Session switch → interactive mode resets to OFF
+- Rapid typing → keys batched and sent correctly
+
+---
+
+## 10. OpenAI Codex CLI Parser
+**Status:** planned
+
+### Overview
+
+Add parser support for OpenAI's Codex CLI so Companion can monitor Codex sessions alongside Claude sessions. This requires discovering Codex conversation files, parsing their format, and translating into Companion's internal message types.
+
+### Research Needed
+
+Before implementation, need to determine:
+1. Where Codex CLI stores conversation files (equivalent of `~/.claude/projects/`)
+2. The file format (JSONL? JSON? SQLite?)
+3. Message structure (roles, tool calls, content blocks)
+4. How to detect "waiting for input" state
+5. Whether Codex uses tmux or another session manager
+
+### Speculative Architecture
+
+Assuming Codex stores conversations in a discoverable format:
+
+```
+~/.codex/           or    ~/.openai/codex/
+  projects/
+    {encoded-path}/
+      {session-id}.jsonl    (or .json)
+```
+
+### Files to Modify
+
+- `daemon/src/watcher.ts` — Add Codex file discovery alongside Claude file discovery
+- `daemon/src/codex-parser.ts` (new) — Parse Codex conversation format
+- `daemon/src/parser.ts` — Abstract shared parsing interface
+- `daemon/src/types.ts` — Add Codex-specific message types (or map to existing)
+- `daemon/src/tool-config.ts` — Add Codex tool definitions
+
+### Implementation Steps
+
+1. **Research: Discover Codex file format**
+   - Install Codex CLI, run a session, examine file output
+   - Document file location, format, and message structure
+   - Determine if tmux integration works similarly
+
+2. **Create parser interface**
+   - Extract a `ConversationParser` interface from the existing Claude parser
+   - Methods: `parseFile(path, limit)`, `detectActivity(path)`, `extractHighlights(messages)`
+   - Claude parser implements this interface
+   - Codex parser implements the same interface
+
+3. **Implement Codex parser**
+   - Map Codex message types to `ConversationMessage`
+   - Map Codex tool calls to `ToolCall` (likely different tool names/structures)
+   - Detect waiting-for-input state
+
+4. **Update watcher for multi-CLI support**
+   - Watch both `~/.claude/projects/` and Codex equivalent
+   - Tag sessions with their CLI source (claude/codex)
+   - Sessions from different CLIs can coexist on the same project
+
+5. **UI: Source indicator**
+   - Small badge on session cards showing "Claude" or "Codex"
+   - Different accent color per CLI source (purple for Claude, green for Codex)
+
+### Blockers
+- Need to install and examine Codex CLI first
+- Format may change — Codex is newer and less stable than Claude CLI
+- Consider making this a plugin architecture for future CLIs
+
+### Tests Needed
+- Codex file discovery finds conversation files
+- Codex messages parsed into ConversationHighlight format
+- Codex tool calls rendered correctly
+- Mixed Claude + Codex sessions on dashboard
+- Codex waiting-for-input detection works
+
+---
+
+## 11. Text Search Across Session History
+**Status:** done
+
+### Overview
+
+Add a search bar to the web session view that filters and highlights matching messages across the full conversation. Search should work across all loaded messages (including load-more results).
+
+### Design
+
+**UI: Search bar in session header**
+- Toggle with Cmd/Ctrl+F or a search icon button
+- Slides down below the session header toolbar
+- Input field + match count display + prev/next navigation arrows
+- Escape or X button to close
+
+**Search behavior:**
+- Client-side filtering — search the already-loaded highlights array
+- Case-insensitive substring match on message content
+- Highlight matching text within messages (wrap in `<mark>` tags)
+- Show match count: "3 of 12 matches"
+- Up/Down arrows jump between matches, scrolling into view
+- No server-side search needed initially — all messages are loaded client-side
+
+### Files to Modify
+
+- `web/src/components/SearchBar.tsx` (new) — Search input, match count, navigation
+- `web/src/components/SessionView.tsx` — Mount SearchBar, pass highlights, manage search state
+- `web/src/components/MessageBubble.tsx` — Accept search term prop, highlight matching text
+- `web/src/components/MessageList.tsx` — Scroll to matched message on navigation
+- `web/src/styles/global.css` — Search bar styles, match highlighting
+
+### Implementation Steps
+
+1. **Create SearchBar component**
+   - Props: `onSearch(term)`, `matchCount`, `currentMatch`, `onNext()`, `onPrev()`, `onClose()`
+   - Debounced input (150ms) to avoid re-rendering on every keystroke
+   - Display: `[🔍 input field] [3/12] [↑] [↓] [✕]`
+
+2. **Add search state to SessionView**
+   - `searchTerm: string | null`
+   - `searchMatches: number[]` — indices into highlights array that match
+   - `currentMatchIndex: number`
+   - Compute matches with `useMemo` on `[highlights, searchTerm]`
+   - Pass `searchTerm` down to MessageList → MessageBubble for highlighting
+
+3. **Highlight matching text in MessageBubble**
+   - When `searchTerm` is set, split message content on the search term
+   - Wrap matches in `<mark className="search-highlight">` elements
+   - Keep existing `FilePathContent` rendering — highlight within its output
+
+4. **Scroll to match in MessageList**
+   - When `currentMatchIndex` changes, find the matching message element by data attribute
+   - Call `scrollIntoView({ behavior: 'smooth', block: 'center' })`
+   - Add `data-highlight-id={msg.id}` to message elements for targeting
+
+5. **Keyboard shortcut**
+   - Cmd/Ctrl+F opens search bar
+   - Enter moves to next match
+   - Shift+Enter moves to previous match
+   - Escape closes search
+
+### CSS
+
+```css
+.search-bar { ... }
+.search-highlight {
+  background: rgba(250, 204, 21, 0.3);
+  color: inherit;
+  border-radius: 2px;
+  padding: 0 1px;
+}
+.search-highlight-current {
+  background: rgba(250, 204, 21, 0.6);
+}
+```
+
+### Tests Needed
+- Search finds messages containing the term
+- Match count updates as term changes
+- Next/prev navigation scrolls to correct messages
+- Highlighted text visible within messages
+- Search clears when closed
+- Empty search shows all messages
+- Case-insensitive matching works
+
+---
+
+## 12. Remove Archive Button from Web Session Header
+**Status:** done
+
+### Overview
+
+Simple removal — the "Archive" button in the web session header toolbar should be removed. The "History" button (which opens the archive modal to view saved archives) remains.
+
+### Current Location
+
+`web/src/components/SessionView.tsx` lines 233-239:
+```typescript
+<button
+  className="session-header-btn"
+  onClick={handleArchive}
+  disabled={highlights.length === 0}
+  title="Save conversation archive"
+>
+  Archive
+</button>
+```
+
+### Files to Modify
+
+- `web/src/components/SessionView.tsx` — Remove the Archive button JSX and `handleArchive` function (if unused elsewhere)
+
+### Implementation Steps
+
+1. Remove the `<button>Archive</button>` element from the header actions div
+2. Check if `handleArchive` is used anywhere else — if not, remove it
+3. Check if `addArchive` import is still needed for other functionality — if not, remove import
+
+### Tests Needed
+- Archive button no longer visible in session header
+- History button still works
+- No console errors from removed references
+
+---
+
+## 13. Web/Mobile Parity
+**Status:** planned
+
+### Overview
+
+Bring the web and mobile settings/features to parity. The main gaps are: font scale UI on web (already exists), token rotation (already exists on web), data management, about/version section, and a dedicated settings screen instead of scattered modals. Additionally, a sub-agents tree view for better visualization.
+
+### Current Parity Analysis
+
+| Feature | Web | Mobile |
+|---------|-----|--------|
+| Font scale (S/M/L/XL) | SettingsScreen ✓ | Settings ✓ |
+| Token rotation | SettingsScreen ✓ | Settings ✓ |
+| Clear All Data | SettingsScreen ✓ | Settings ✓ |
+| Clear History only | Missing ✗ | Settings ✓ |
+| About/version | Static "v0.0.1" | Dynamic from Expo config ✓ |
+| Dedicated settings screen | SettingsScreen (accessible from sidebar) ✓ | Settings ✓ |
+| Sub-agents tree view | Flat list only | Flat list only |
+| Archive management | History modal (per-archive delete) | Dedicated screen + Clear All |
+| Notification config | Per-server modal ✓ | Settings modal ✓ |
+
+### Files to Modify
+
+**Web:**
+- `web/src/components/SettingsScreen.tsx` — Add Clear History (separate from Clear All), dynamic version/build info
+- `web/src/components/ArchiveModal.tsx` — Add "Clear All Archives" button
+- `web/src/components/SubAgentBar.tsx` — Refactor to tree view (nested agents)
+- `web/src/components/SubAgentTree.tsx` (new) — Tree visualization of sub-agent hierarchy
+
+**Mobile:**
+- No changes needed — mobile is the reference implementation
+
+### Implementation Steps
+
+1. **Web: Add Clear History to SettingsScreen**
+   - Separate from "Clear All Data"
+   - Clears conversation cache and archives but keeps server configs
+   - Confirmation dialog before action
+
+2. **Web: Dynamic version info**
+   - Read version from `package.json` or build-time constant
+   - Show build date (injected by Vite at build time via `define`)
+   - Replace static "v0.0.1" string
+
+3. **Web: Clear All Archives button in ArchiveModal**
+   - Button at bottom of archive list
+   - Confirmation dialog
+   - Calls `clearAllArchives()` from storage service
+
+4. **Web: Sub-agents tree view**
+   - Parse sub-agent hierarchy from tool calls (agent spawns contain parent info)
+   - Render as indented tree with expand/collapse
+   - Show agent status, current activity, and message count per node
+   - Replace flat list in SubAgentBar when tree data is available
+
+### Tests Needed
+- Clear History removes conversation data but keeps server configs
+- Version displays dynamically from build
+- Clear All Archives removes all archives
+- Sub-agent tree renders nested hierarchy correctly
+
+---
+
+## 14. macOS Desktop App
+**Status:** planned
+
+### Overview
+
+Wrap the existing web client with Electron or Tauri to create a native macOS desktop application. The daemon already runs on macOS, so this just provides a native window instead of requiring a browser tab.
+
+### Approach: Tauri (Recommended)
+
+Tauri is preferred over Electron because:
+- Much smaller binary size (~5MB vs ~150MB)
+- Uses system WebView (WebKit on macOS) — no bundled Chromium
+- Rust-based backend with lower memory footprint
+- Native macOS integration (menu bar, notifications, dock badge)
+- The web client is already a static SPA — just needs to be loaded in a WebView
+
+### Files to Create
+
+- `desktop/` — New Tauri project directory
+- `desktop/src-tauri/` — Rust backend
+- `desktop/src-tauri/tauri.conf.json` — Tauri configuration
+- `desktop/src-tauri/src/main.rs` — Minimal Rust entry point
+- `desktop/package.json` — Node dependencies for build tooling
+
+### Implementation Steps
+
+1. **Initialize Tauri project**
+   - `npm create tauri-app@latest desktop`
+   - Configure to load from `../web/dist/` (or embed the built web client)
+   - Set window title, size, icon
+
+2. **Configure Tauri**
+   - Window: 1200x800, resizable, min 800x600
+   - Title: "Companion"
+   - Dev URL: `http://localhost:5173` (Vite dev server)
+   - Build: embed `web/dist/` into the binary
+   - Allow WebSocket connections to any host (for daemon connections)
+
+3. **macOS-specific features**
+   - Menu bar with standard macOS menus (File, Edit, Window, Help)
+   - Cmd+Q to quit
+   - Dock badge for unread notifications (if notification system supports it)
+   - Native notifications (forward from browser notification API)
+   - Auto-updater (Tauri built-in) for future releases
+
+4. **Build and packaging**
+   - `cd web && npm run build` first (produces dist/)
+   - `cd desktop && npm run tauri build` produces .dmg
+   - Universal binary (ARM + Intel) for macOS
+   - Code signing (optional, for distribution outside App Store)
+
+5. **Development workflow**
+   - `cd web && npm run dev` (Vite dev server on 5173)
+   - `cd desktop && npm run tauri dev` (opens Tauri window pointing to Vite)
+   - Hot reload works through Vite
+
+### Tests Needed
+- App launches and loads web client
+- WebSocket connections to daemon work
+- Window resizing works correctly
+- macOS menu bar works
+- Cmd+Q quits the app
+- Build produces a valid .dmg
+
+---
+
+## 15. Web Client Keyboard Shortcuts
+**Status:** done
+
+### Overview
+
+Add comprehensive keyboard shortcuts to the web client for power-user efficiency. Shortcuts for terminal toggle, sending messages, searching, switching conversations, and navigation.
+
+### Shortcut Map
+
+| Shortcut | Action | Context |
+|----------|--------|---------|
+| `Cmd/Ctrl+T` | Toggle terminal panel | Session view |
+| `Cmd/Ctrl+Enter` | Send message | Input bar focused |
+| `Cmd/Ctrl+K` | Open command palette / search | Global |
+| `Cmd/Ctrl+F` | Search messages in session | Session view |
+| `Cmd/Ctrl+1-9` | Switch to session by position | Global |
+| `Cmd/Ctrl+[` | Previous session | Global |
+| `Cmd/Ctrl+]` | Next session | Global |
+| `Escape` | Close modal/panel/search | Global |
+| `?` | Show shortcut help overlay | Global (when input not focused) |
+| `Cmd/Ctrl+Shift+A` | Toggle auto-approve | Session view |
+| `Cmd/Ctrl+Shift+M` | Toggle mute | Session view |
+
+### Files to Modify
+
+- `web/src/hooks/useKeyboardShortcuts.ts` (new) — Central keyboard shortcut handler
+- `web/src/components/ShortcutHelpOverlay.tsx` (new) — Help overlay showing all shortcuts
+- `web/src/components/Dashboard.tsx` — Wire up global shortcuts
+- `web/src/components/SessionView.tsx` — Wire up session-specific shortcuts
+- `web/src/components/InputBar.tsx` — Wire up Cmd+Enter for send
+- `web/src/styles/global.css` — Help overlay styles
+
+### Implementation Steps
+
+1. **Create useKeyboardShortcuts hook**
+   - Registers a global `keydown` listener on `window`
+   - Accepts a map of `{ shortcut: string, handler: () => void, when?: () => boolean }`
+   - Normalizes Cmd (Mac) / Ctrl (Windows/Linux) automatically
+   - Ignores shortcuts when focus is in a text input (except explicit overrides like Cmd+Enter)
+   - Returns cleanup function
+
+2. **Wire global shortcuts in Dashboard**
+   - `Cmd+1-9`: Switch session by sidebar index
+   - `Cmd+[`/`]`: Previous/next session
+   - `Escape`: Close any open modal or panel
+   - `?`: Show help overlay (only when not typing)
+   - `Cmd+K`: Open command palette (future) or focus search
+
+3. **Wire session shortcuts in SessionView**
+   - `Cmd+T`: Toggle terminal
+   - `Cmd+F`: Toggle search bar
+   - `Cmd+Shift+A`: Toggle auto-approve
+   - `Cmd+Shift+M`: Toggle mute
+
+4. **Wire input shortcuts in InputBar**
+   - `Cmd+Enter`: Send message (alternative to Enter)
+   - Or make Enter the default and Shift+Enter for newline (configurable)
+
+5. **Create ShortcutHelpOverlay**
+   - Modal overlay triggered by `?` key
+   - Two-column layout: shortcut on left, description on right
+   - Grouped by context (Global, Session, Input)
+   - Dismiss with Escape or clicking outside
+
+6. **Command palette (stretch goal)**
+   - `Cmd+K` opens a search-style input
+   - Fuzzy match against: session names, server names, actions
+   - Quick actions: "Switch to terminal", "Toggle auto-approve", "Open settings"
+   - Similar to VS Code's command palette
+
+### Tests Needed
+- Each shortcut triggers the correct action
+- Shortcuts don't fire when typing in input fields (except Cmd+Enter)
+- Help overlay shows all shortcuts
+- Shortcuts work on both Mac (Cmd) and Windows/Linux (Ctrl)
+- Escape closes modals, panels, search, and help overlay in correct priority order
+- Session switching via Cmd+1-9 selects correct session

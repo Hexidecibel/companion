@@ -10,7 +10,7 @@ import { SessionWatcher } from './watcher';
 import { InputInjector } from './input-injector';
 import { PushNotificationService } from './push';
 import { TmuxManager } from './tmux-manager';
-import { extractHighlights, extractUsageFromFile, extractTasks } from './parser';
+import { extractHighlights, extractUsageFromFile, extractTasks, parseConversationChain } from './parser';
 import { WebSocketMessage, WebSocketResponse, DaemonConfig, TmuxSessionConfig } from './types';
 import { loadConfig, saveConfig } from './config';
 import { fetchTodayUsage, fetchMonthUsage, fetchAnthropicUsage } from './anthropic-usage';
@@ -308,25 +308,43 @@ export class WebSocketHandler {
       case 'get_highlights': {
         const hlParams = payload as { limit?: number; offset?: number } | undefined;
         const t0 = Date.now();
-        const messages = this.watcher.getMessages();
-        const t1 = Date.now();
-        const allHighlights = extractHighlights(messages);
-        const t2 = Date.now();
         const hlSessionId = this.watcher.getActiveSessionId();
-        const total = allHighlights.length;
 
-        // Paginate: return most recent `limit` items, with optional offset from end
-        let resultHighlights = allHighlights;
-        let hasMore = false;
-        if (hlParams?.limit && hlParams.limit > 0) {
-          const offset = hlParams.offset || 0;
-          const startIdx = Math.max(0, total - offset - hlParams.limit);
-          const endIdx = total - offset;
-          resultHighlights = allHighlights.slice(startIdx, endIdx);
-          hasMore = startIdx > 0;
+        const limit = hlParams?.limit && hlParams.limit > 0 ? hlParams.limit : 0;
+        const offset = hlParams?.offset || 0;
+
+        // Use conversation chain for cross-session infinite scroll
+        const chain = hlSessionId ? this.watcher.getConversationChain(hlSessionId) : [];
+
+        let resultHighlights: ReturnType<typeof extractHighlights>;
+        let total: number;
+        let hasMore: boolean;
+
+        if (chain.length > 1 && limit > 0) {
+          // Multiple files — use chain-aware pagination
+          const result = parseConversationChain(chain, limit, offset);
+          resultHighlights = result.highlights;
+          total = result.total;
+          hasMore = result.hasMore;
+        } else {
+          // Single file or no limit — use existing fast path
+          const messages = this.watcher.getMessages();
+          const allHighlights = extractHighlights(messages);
+          total = allHighlights.length;
+
+          if (limit > 0) {
+            const startIdx = Math.max(0, total - offset - limit);
+            const endIdx = total - offset;
+            resultHighlights = allHighlights.slice(startIdx, endIdx);
+            hasMore = startIdx > 0;
+          } else {
+            resultHighlights = allHighlights;
+            hasMore = false;
+          }
         }
 
-        console.log(`WebSocket: get_highlights - getMessages: ${t1-t0}ms, extractHighlights: ${t2-t1}ms, ${messages.length} msgs, returning ${resultHighlights.length}/${total}`);
+        const t1 = Date.now();
+        console.log(`WebSocket: get_highlights - ${t1-t0}ms, chain: ${chain.length} files, returning ${resultHighlights.length}/${total}`);
         this.send(client.ws, {
           type: 'highlights',
           success: true,

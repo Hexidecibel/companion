@@ -53,20 +53,25 @@ Quick capture for ideas and tasks. Run `/plan` to process into detailed plans.
 - [done] Parallel Work Groups - daemon, web dashboard, mobile dashboard, push notifications, tests
 - [done] Vibrant color refresh - blue/purple accents across mobile + web
 - [done] Interactive terminal mode - toggle keyboard capture in terminal view, sends keys to tmux (arrow keys, enter, ctrl combos, printable chars), faster polling when active
+- [done] Remove client-side message queueing - replaced with direct tmux send, removed useMessageQueue/QueuedMessageBar
 
 ## Planned
-(none)
+- [planned] Persistent file tab bar in web SessionView -- debug browser freeze, wire useOpenFiles hook, memoize FilePathContent (plan.md #6)
+- [planned] Plan viewer -- detect plan file references, render plan cards for ExitPlanMode, plan button in session header (plan.md #7)
+- [planned] Cross-session infinite scroll -- chain JSONL files by creation time, cross-file pagination in parser (plan.md #8)
+- [planned] Interactive terminal mode for mobile -- hidden TextInput + virtual key bar, reuse send_terminal_keys endpoint (plan.md #9)
+- [planned] OpenAI Codex CLI parser -- discover Codex conversation files, parse format, translate to internal types (plan.md #10)
+- [planned] Text search across session history -- search bar with match highlighting, prev/next navigation (plan.md #11)
+- [planned] Remove archive button from web session header (plan.md #12)
+- [planned] Web/mobile parity -- clear history, dynamic version, clear all archives, sub-agents tree view (plan.md #13)
+- [planned] macOS desktop app -- Tauri wrapper around web client, native menus, .dmg packaging (plan.md #14)
+- [planned] Web client keyboard shortcuts -- Cmd/Ctrl+T terminal, Cmd+K palette, Cmd+1-9 sessions, ? help overlay (plan.md #15)
 
 ## In Progress
 (none)
 
 ## Upcoming
-- Persistent file tab bar in web SessionView -- service/hook/component scaffolded (web/src/services/openFiles.ts, hooks/useOpenFiles.ts, components/FileTabBar.tsx, CSS added) but wiring into SessionView causes a hard browser freeze on file open. Needs debugging -- possibly related to re-render cascade or FilePathContent regex interaction. Reverted SessionView to pre-tab-bar state.
-- Plan viewer: Claude generates markdown plan files (via EnterPlanMode) that aren't visible in the web client or mobile viewer. Add ability to detect plan file references in conversation, link to them, and open a markdown viewer. Plans are .md files written to the scratchpad or project directory.
-- Cross-session infinite scroll: Stitch together previous JSONL conversation files for the same project so the user can scroll back through the full project history, not just the current session. Watcher discovers sibling files sorted by creation time, parser chains backwards across file boundaries when load-more exhausts the current file.
-- Interactive terminal mode for mobile: Port the web interactive terminal feature (keyboard capture, key mapping, send_terminal_keys) to the React Native mobile app terminal view. Would need a keyboard input overlay and the same key mapping logic.
-- OpenAI Codex CLI parser: Add parser support for OpenAI Codex CLI conversation format so Companion can monitor and interact with Codex sessions alongside Claude sessions. Would need to discover Codex conversation files, parse their format, and translate into our internal message types.
-- Remove client-side message queueing -- just send directly via tmux (tmux already buffers input natively). Current queue gets stuck when isWaitingForInput state is stale.
+(none)
 
 ## Deferred
 (none)

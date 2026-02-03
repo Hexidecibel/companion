@@ -6,6 +6,7 @@ import { useConnections } from '../hooks/useConnections';
 import { useWorkGroups } from '../hooks/useWorkGroups';
 import { SessionSidebar } from './SessionSidebar';
 import { SessionView } from './SessionView';
+import { ShortcutHelpOverlay } from './ShortcutHelpOverlay';
 import { NotificationSettingsModal } from './NotificationSettingsModal';
 import { useSessionMute } from '../hooks/useSessionMute';
 
@@ -16,6 +17,7 @@ interface DashboardProps {
 export function Dashboard({ onSettings }: DashboardProps) {
   const [activeSession, setActiveSession] = useState<ActiveSession | null>(null);
   const [showNotifSettings, setShowNotifSettings] = useState(false);
+  const [showShortcutHelp, setShowShortcutHelp] = useState(false);
   const [merging, setMerging] = useState(false);
   const summaries = useAllServerSummaries();
   const sessionMute = useSessionMute(activeSession?.serverId ?? null);
@@ -78,32 +80,40 @@ export function Dashboard({ onSettings }: DashboardProps) {
     setActiveSession({ serverId: _serverId, sessionId: sessionName });
   }, []);
 
+  // Select session by index (Cmd+1-9)
+  const selectSessionByIndex = useCallback((index: number) => {
+    if (index < flatSessions.length) {
+      setActiveSession(flatSessions[index]);
+    }
+  }, [flatSessions]);
+
   // Keyboard shortcuts
   const shortcuts = useMemo(() => [
-    {
-      key: 'j',
-      handler: () => navigateSession(1),
-    },
-    {
-      key: 'ArrowDown',
-      handler: () => navigateSession(1),
-    },
-    {
-      key: 'k',
-      handler: () => navigateSession(-1),
-    },
-    {
-      key: 'ArrowUp',
-      handler: () => navigateSession(-1),
-    },
-    {
-      key: '/',
-      handler: () => {
-        const textarea = document.querySelector('.input-bar-textarea') as HTMLElement | null;
-        textarea?.focus();
-      },
-    },
-  ], [navigateSession]);
+    { key: 'j', handler: () => navigateSession(1) },
+    { key: 'ArrowDown', handler: () => navigateSession(1) },
+    { key: 'k', handler: () => navigateSession(-1) },
+    { key: 'ArrowUp', handler: () => navigateSession(-1) },
+    { key: '/', handler: () => {
+      const textarea = document.querySelector('.input-bar-textarea') as HTMLElement | null;
+      textarea?.focus();
+    }},
+    { key: '?', handler: () => setShowShortcutHelp(prev => !prev) },
+    { key: 'Escape', handler: () => {
+      if (showShortcutHelp) setShowShortcutHelp(false);
+      else if (showNotifSettings) setShowNotifSettings(false);
+    }},
+    { key: '[', meta: true, handler: () => navigateSession(-1) },
+    { key: ']', meta: true, handler: () => navigateSession(1) },
+    { key: '1', meta: true, handler: () => selectSessionByIndex(0) },
+    { key: '2', meta: true, handler: () => selectSessionByIndex(1) },
+    { key: '3', meta: true, handler: () => selectSessionByIndex(2) },
+    { key: '4', meta: true, handler: () => selectSessionByIndex(3) },
+    { key: '5', meta: true, handler: () => selectSessionByIndex(4) },
+    { key: '6', meta: true, handler: () => selectSessionByIndex(5) },
+    { key: '7', meta: true, handler: () => selectSessionByIndex(6) },
+    { key: '8', meta: true, handler: () => selectSessionByIndex(7) },
+    { key: '9', meta: true, handler: () => selectSessionByIndex(8) },
+  ], [navigateSession, selectSessionByIndex, showShortcutHelp, showNotifSettings]);
 
   useKeyboardShortcuts(shortcuts);
 
@@ -188,6 +198,10 @@ export function Dashboard({ onSettings }: DashboardProps) {
           serverId={activeSession.serverId}
           onClose={() => setShowNotifSettings(false)}
         />
+      )}
+
+      {showShortcutHelp && (
+        <ShortcutHelpOverlay onClose={() => setShowShortcutHelp(false)} />
       )}
     </div>
   );

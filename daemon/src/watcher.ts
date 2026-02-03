@@ -626,6 +626,42 @@ export class SessionWatcher extends EventEmitter {
   }
 
   /**
+   * Get all conversation JSONL files for a session, sorted oldest-first.
+   * Used for cross-session infinite scroll — when the client exhausts the
+   * current file's messages, older files in the same project dir are loaded.
+   */
+  getConversationChain(sessionId: string): string[] {
+    const tracked = this.conversations.get(sessionId);
+    if (!tracked) return [];
+
+    const dir = path.dirname(tracked.path);
+    try {
+      const files = fs.readdirSync(dir)
+        .filter(f => f.endsWith('.jsonl') && !f.includes('subagents'))
+        .map(f => {
+          const fullPath = path.join(dir, f);
+          try {
+            const stats = fs.statSync(fullPath);
+            return { path: fullPath, birthtime: stats.birthtimeMs };
+          } catch {
+            return null;
+          }
+        })
+        .filter((f): f is { path: string; birthtime: number } => f !== null);
+
+      // Sort oldest-first so index 0 is the oldest file
+      files.sort((a, b) => a.birthtime - b.birthtime);
+
+      // Limit to last 20 files to prevent memory issues
+      const chain = files.map(f => f.path);
+      return chain.length > 20 ? chain.slice(-20) : chain;
+    } catch {
+      // Directory read failed — fall back to just the tracked file
+      return [tracked.path];
+    }
+  }
+
+  /**
    * Check the active session for pending approval tools and emit if found.
    * Called externally when auto-approve is toggled on to retroactively approve.
    */
