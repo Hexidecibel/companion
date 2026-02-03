@@ -3,15 +3,41 @@
   --bg-secondary: #1e293b;
   --bg-tertiary: #334155;
   --bg-hover: #475569;
+  --bg-card-tinted: #111c33;
+  --bg-card-purple: #1a1033;
   --text-primary: #f1f5f9;
   --text-secondary: #94a3b8;
   --text-muted: #64748b;
   --accent-blue: #3b82f6;
   --accent-blue-hover: #2563eb;
+  --accent-blue-light: #60a5fa;
+  --accent-purple: #8b5cf6;
+  --accent-purple-hover: #7c3aed;
+  --accent-purple-light: #a78bfa;
+  --accent-indigo: #6366f1;
   --accent-green: #22c55e;
   --accent-amber: #f59e0b;
   --accent-red: #ef4444;
   --border-color: #334155;
+  --border-accent: #3b4f8a;
   --shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3), 0 2px 4px -2px rgba(0, 0, 0, 0.2);
   --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.3), 0 4px 6px -4px rgba(0, 0, 0, 0.2);
+
+  /* Gradients */
+  --gradient-primary: linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%);
+  --gradient-header: linear-gradient(135deg, #1a2744 0%, #1f1a3d 100%);
+  --gradient-button: linear-gradient(135deg, #3b82f6 0%, #7c3aed 100%);
+  --gradient-button-hover: linear-gradient(135deg, #2563eb 0%, #6d28d9 100%);
+  --gradient-progress: linear-gradient(90deg, #3b82f6 0%, #8b5cf6 100%);
+  --gradient-text: linear-gradient(135deg, #60a5fa 0%, #a78bfa 100%);
+
+  /* Focus glow */
+  --focus-glow: 0 0 0 2px rgba(139, 92, 246, 0.3);
+  --focus-glow-blue: 0 0 0 2px rgba(59, 130, 246, 0.3);
+
+  /* Font scaling */
+  --font-scale: 1;
+  --fs-content: calc(14px * var(--font-scale));
+  --fs-content-sm: calc(13px * var(--font-scale));
+  --fs-content-lg: calc(16px * var(--font-scale));
 }

@@ -10,6 +10,7 @@ import {
   Switch,
   Alert,
 } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 import { Server, ServerStatus, SessionSummary, TaskSummary, TaskItem, WorkGroup } from '../types';
 import { getServers, updateServer } from '../services/storage';
 import { useMultiServerStatus } from '../hooks/useMultiServerStatus';
@@ -403,7 +404,7 @@ function ServerCard({
                         <View style={styles.taskProgress}>
                           <View style={[styles.taskProgressFill, {
                             flex: session.taskSummary.completed,
-                            backgroundColor: '#10b981',
+                            backgroundColor: '#8b5cf6',
                           }]} />
                           <View style={[styles.taskProgressFill, {
                             flex: session.taskSummary.inProgress,
@@ -551,12 +552,12 @@ export function DashboardScreen({
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
+      <LinearGradient colors={['#1a2744', '#1f1a3d']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.header}>
         <Text style={styles.headerTitle}>Companion</Text>
         <TouchableOpacity style={styles.headerButton} onPress={onOpenSetup}>
           <Text style={styles.headerButtonText}>?</Text>
         </TouchableOpacity>
-      </View>
+      </LinearGradient>
 
       {/* Summary bar */}
       <View style={styles.summaryBar}>
@@ -659,7 +660,6 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: 16,
     paddingVertical: 12,
-    backgroundColor: '#1f2937',
     borderBottomWidth: 1,
     borderBottomColor: '#374151',
   },
@@ -683,7 +683,7 @@ const styles = StyleSheet.create({
   },
   summaryBar: {
     flexDirection: 'row',
-    backgroundColor: '#1f2937',
+    backgroundColor: '#111c33',
     paddingVertical: 12,
     paddingHorizontal: 16,
     borderBottomWidth: 1,
@@ -724,6 +724,8 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     padding: 16,
     marginBottom: 12,
+    borderLeftWidth: 3,
+    borderLeftColor: '#3b4f8a',
   },
   serverCardDisabled: {
     opacity: 0.6,
@@ -887,7 +889,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 32,
   },
   addButton: {
-    backgroundColor: '#3b82f6',
+    backgroundColor: '#7c3aed',
     paddingHorizontal: 24,
     paddingVertical: 12,
     borderRadius: 8,

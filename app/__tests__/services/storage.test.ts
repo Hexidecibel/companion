@@ -169,41 +169,22 @@ describe('Storage Service', () => {
 
       const settings = await getSettings();
 
-      expect(settings).toEqual({
-        stayConnected: false,
-        pushEnabled: false,
-      });
+      expect(settings).toEqual({});
     });
 
     it('returns stored settings', async () => {
-      const storedSettings: AppSettings = {
-        stayConnected: true,
-        pushEnabled: true,
-        defaultServerId: 'server-1',
-      };
+      const storedSettings: AppSettings = {};
       mockAsyncStorage.getItem.mockResolvedValue(JSON.stringify(storedSettings));
 
       const settings = await getSettings();
 
       expect(settings).toEqual(storedSettings);
     });
-
-    it('merges stored settings with defaults', async () => {
-      mockAsyncStorage.getItem.mockResolvedValue(JSON.stringify({ pushEnabled: true }));
-
-      const settings = await getSettings();
-
-      expect(settings.pushEnabled).toBe(true);
-      expect(settings.stayConnected).toBe(false);
-    });
   });
 
   describe('saveSettings', () => {
     it('saves settings to storage', async () => {
-      const settings: AppSettings = {
-        stayConnected: true,
-        pushEnabled: true,
-      };
+      const settings: AppSettings = {};
 
       await saveSettings(settings);
 

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import {
   View,
   Text,
@@ -8,14 +8,16 @@ import {
   ScrollView,
 } from 'react-native';
 import Markdown from '@ronradtke/react-native-markdown-display';
+import { scaledFont } from '../theme/fonts';
 
 interface MessageViewerProps {
   content: string | null;
   timestamp?: number;
   onClose: () => void;
+  fontScale?: number;
 }
 
-export function MessageViewer({ content, timestamp, onClose }: MessageViewerProps) {
+export function MessageViewer({ content, timestamp, onClose, fontScale = 1 }: MessageViewerProps) {
   if (!content) return null;
 
   const formatTime = (ts: number) => {
@@ -27,6 +29,39 @@ export function MessageViewer({ content, timestamp, onClose }: MessageViewerProp
       minute: '2-digit',
     });
   };
+
+  const scaledStyles = useMemo(() => {
+    if (fontScale === 1) return markdownStyles;
+    return StyleSheet.create({
+      ...markdownStyles,
+      body: {
+        ...markdownStyles.body,
+        fontSize: scaledFont(15, fontScale),
+        lineHeight: scaledFont(24, fontScale),
+      },
+      heading1: {
+        ...markdownStyles.heading1,
+        fontSize: scaledFont(22, fontScale),
+      },
+      heading2: {
+        ...markdownStyles.heading2,
+        fontSize: scaledFont(18, fontScale),
+      },
+      heading3: {
+        ...markdownStyles.heading3,
+        fontSize: scaledFont(16, fontScale),
+      },
+      code_inline: {
+        ...markdownStyles.code_inline,
+        fontSize: scaledFont(13, fontScale),
+      },
+      code_block: {
+        ...markdownStyles.code_block,
+        fontSize: scaledFont(13, fontScale),
+        lineHeight: scaledFont(20, fontScale),
+      },
+    });
+  }, [fontScale]);
 
   return (
     <Modal
@@ -53,7 +88,7 @@ export function MessageViewer({ content, timestamp, onClose }: MessageViewerProp
             style={styles.contentScroll}
             contentContainerStyle={styles.contentContainer}
           >
-            <Markdown style={markdownStyles}>
+            <Markdown style={scaledStyles}>
               {content}
             </Markdown>
           </ScrollView>

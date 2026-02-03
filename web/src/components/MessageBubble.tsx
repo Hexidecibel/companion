@@ -117,7 +117,8 @@ export function MessageBubble({ message, onSelectOption, onViewFile }: MessageBu
 
   const toolCalls = !isUser ? message.toolCalls : undefined;
   const hasMultipleTools = toolCalls && toolCalls.length >= 2;
-  const hasContent = message.content && message.content.trim().length > 0;
+  const trimmedContent = message.content?.trim();
+  const hasContent = trimmedContent && trimmedContent.length > 0 && trimmedContent !== '(no content)';
 
   // Hide completely empty assistant messages that have no text, no tools, and no options
   if (!isUser && !hasContent && (!toolCalls || toolCalls.length === 0) && !message.isWaitingForChoice) {

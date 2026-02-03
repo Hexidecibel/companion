@@ -6,6 +6,7 @@ import {
   ScrollView,
   TouchableOpacity,
 } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 import { TaskItem } from '../types';
 
 interface TaskDetailScreenProps {
@@ -17,7 +18,7 @@ interface TaskDetailScreenProps {
 function StatusBadge({ status }: { status: TaskItem['status'] }) {
   const color =
     status === 'completed' ? '#10b981' :
-    status === 'in_progress' ? '#3b82f6' :
+    status === 'in_progress' ? '#6366f1' :
     '#6b7280';
   const label =
     status === 'completed' ? 'Completed' :
@@ -50,13 +51,13 @@ function formatTimestamp(ts: number): string {
 export function TaskDetailScreen({ task, sessionName, onBack }: TaskDetailScreenProps) {
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
+      <LinearGradient colors={['#1a2744', '#1f1a3d']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.header}>
         <TouchableOpacity onPress={onBack} style={styles.backButton}>
           <Text style={styles.backButtonText}>&#8249; Back</Text>
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Task</Text>
         <View style={styles.placeholder} />
-      </View>
+      </LinearGradient>
 
       <ScrollView style={styles.content} contentContainerStyle={styles.contentContainer}>
         <View style={styles.card}>
@@ -140,7 +141,6 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: 12,
     paddingVertical: 12,
-    backgroundColor: '#1f2937',
     borderBottomWidth: 1,
     borderBottomColor: '#374151',
   },

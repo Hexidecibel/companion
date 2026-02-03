@@ -132,6 +132,16 @@ High-level features of the Companion mobile app and daemon.
 - State persistence across daemon restarts
 - Worker prompt injection with scoped task instructions
 
+## Visual Theme
+- Blue-to-purple gradient headers across all screens (mobile + web)
+- Gradient primary action buttons (blue to purple)
+- Tinted card backgrounds with accent left borders
+- Purple focus glow on input fields (web)
+- Gradient progress bars for tasks and work groups
+- Purple accent text and gradient headings
+- Centralized color system (app/src/theme/colors.ts, web CSS variables)
+- Consistent dark theme with vibrant accent hierarchy
+
 ## Developer Tools
 - Sentry error tracking integration
 - Error boundary with user feedback and bug reporting

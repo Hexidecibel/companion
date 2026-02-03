@@ -8,27 +8,27 @@ interface UseMessageQueueReturn {
   clearAll: () => void;
 }
 
-export function useMessageQueue(serverId: string | null): UseMessageQueueReturn {
+export function useMessageQueue(serverId: string | null, sessionId: string | null): UseMessageQueueReturn {
   const [queuedMessages, setQueuedMessages] = useState<QueuedMessage[]>([]);
 
   useEffect(() => {
-    if (!serverId) {
+    if (!serverId || !sessionId) {
       setQueuedMessages([]);
       return;
     }
 
-    setQueuedMessages(messageQueue.getMessagesForServer(serverId));
+    setQueuedMessages(messageQueue.getMessagesForSession(serverId, sessionId));
     const unsub = messageQueue.subscribe(() => {
-      setQueuedMessages(messageQueue.getMessagesForServer(serverId));
+      setQueuedMessages(messageQueue.getMessagesForSession(serverId, sessionId));
     });
     return unsub;
-  }, [serverId]);
+  }, [serverId, sessionId]);
 
   const enqueue = useCallback(
     (text: string) => {
-      if (serverId) messageQueue.enqueue(serverId, text);
+      if (serverId && sessionId) messageQueue.enqueue(serverId, sessionId, text);
     },
-    [serverId],
+    [serverId, sessionId],
   );
 
   const cancel = useCallback((id: string) => {
@@ -36,8 +36,8 @@ export function useMessageQueue(serverId: string | null): UseMessageQueueReturn 
   }, []);
 
   const clearAll = useCallback(() => {
-    if (serverId) messageQueue.clearAll(serverId);
-  }, [serverId]);
+    if (serverId && sessionId) messageQueue.clearAll(serverId, sessionId);
+  }, [serverId, sessionId]);
 
   return { queuedMessages, enqueue, cancel, clearAll };
 }

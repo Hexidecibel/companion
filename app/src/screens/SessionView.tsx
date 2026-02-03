@@ -15,6 +15,7 @@ import {
   NativeSyntheticEvent,
   NativeScrollEvent,
 } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 import { Server, ConversationHighlight, AgentTree, SubAgent } from '../types';
 import { SubAgentDetailScreen } from './SubAgentDetailScreen';
 import { useConnection } from '../hooks/useConnection';
@@ -29,6 +30,7 @@ import { getSessionSettings, saveSessionSettings, SessionSettings } from '../ser
 import { wsService } from '../services/websocket';
 import { messageQueue, QueuedMessage } from '../services/messageQueue';
 import { sessionGuard } from '../services/sessionGuard';
+import { useFontScale } from '../hooks/useFontScale';
 import Ionicons from '@expo/vector-icons/Ionicons';
 
 interface SessionViewProps {
@@ -62,6 +64,7 @@ export function SessionView({ server, onBack, initialSessionId, onNewProject, on
   } = useConversation();
 
   const data = highlights;
+  const fontScale = useFontScale();
 
   // Simple scroll state - no complex auto-scroll logic
   const scrollViewRef = useRef<ScrollView>(null);
@@ -548,7 +551,7 @@ export function SessionView({ server, onBack, initialSessionId, onNewProject, on
 
   return (
     <View style={containerStyle}>
-      <View style={styles.header}>
+      <LinearGradient colors={['#1a2744', '#1f1a3d']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.header}>
         <TouchableOpacity onPress={onBack} style={styles.backButton}>
           <Text style={styles.backButtonText}>‹ Back</Text>
         </TouchableOpacity>
@@ -666,7 +669,7 @@ export function SessionView({ server, onBack, initialSessionId, onNewProject, on
         >
           <Ionicons name="settings-outline" size={20} color="#9ca3af" />
         </TouchableOpacity>
-      </View>
+      </LinearGradient>
 
       {/* Session Settings Modal */}
       <Modal
@@ -1117,6 +1120,7 @@ export function SessionView({ server, onBack, initialSessionId, onNewProject, on
               onSelectOption={handleSelectOption}
               onFileTap={setViewingFile}
               onMessageTap={item.type === 'assistant' ? () => setViewingMessage({ content: item.content, timestamp: item.timestamp }) : undefined}
+              fontScale={fontScale}
             />
           ))
         )}
@@ -1176,6 +1180,7 @@ export function SessionView({ server, onBack, initialSessionId, onNewProject, on
         content={viewingMessage?.content || null}
         timestamp={viewingMessage?.timestamp}
         onClose={() => setViewingMessage(null)}
+        fontScale={fontScale}
       />
 
       {/* Sub-Agent Detail Screen (overlays everything - must be last) */}
@@ -1205,7 +1210,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 12,
     paddingVertical: 12,
-    backgroundColor: '#1f2937',
     borderBottomWidth: 1,
     borderBottomColor: '#374151',
   },
@@ -1294,7 +1298,7 @@ const styles = StyleSheet.create({
   activityRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#1e3a5f',
+    backgroundColor: '#1a1f4d',
     paddingHorizontal: 12,
     paddingVertical: 6,
   },
@@ -1316,7 +1320,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   modalContent: {
-    backgroundColor: '#1f2937',
+    backgroundColor: '#111c33',
     borderRadius: 16,
     padding: 20,
     width: '85%',
@@ -1365,7 +1369,7 @@ const styles = StyleSheet.create({
   activityBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#1e3a5f',
+    backgroundColor: '#1a1f4d',
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderBottomWidth: 1,
@@ -1582,7 +1586,7 @@ const styles = StyleSheet.create({
     elevation: 5,
   },
   scrollButtonNew: {
-    backgroundColor: '#10b981',
+    backgroundColor: '#7c3aed',
   },
   scrollButtonText: {
     color: '#ffffff',

@@ -340,10 +340,10 @@ export function WorkGroupCard({
 
 const styles = StyleSheet.create({
   card: {
-    backgroundColor: '#1a2332',
+    backgroundColor: '#111c33',
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#2d4a2d',
+    borderColor: '#2d2d5e',
     overflow: 'hidden',
   },
   cardHeader: {
@@ -392,7 +392,7 @@ const styles = StyleSheet.create({
     marginHorizontal: 10,
   },
   progressFill: {
-    backgroundColor: '#10b981',
+    backgroundColor: '#8b5cf6',
     height: '100%',
   },
   progressRemaining: {

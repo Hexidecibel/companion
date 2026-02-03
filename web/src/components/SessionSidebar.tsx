@@ -1,20 +1,26 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect, useCallback } from 'react';
 import { ServerSummary, ActiveSession, SessionSummary, WorkGroup } from '../types';
 import { useConnections } from '../hooks/useConnections';
+import { useServers } from '../hooks/useServers';
+import { connectionManager } from '../services/ConnectionManager';
 import { NewSessionPanel } from './NewSessionPanel';
 import { TmuxModal } from './TmuxModal';
+import { ServerForm } from './ServerForm';
+import { ContextMenu, ContextMenuEntry } from './ContextMenu';
+import { getFontScale, saveFontScale } from '../services/storage';
 
 interface SessionSidebarProps {
   summaries: Map<string, ServerSummary>;
   activeSession: ActiveSession | null;
   onSelectSession: (serverId: string, sessionId: string) => void;
-  onManageServers: () => void;
   onSessionCreated?: (serverId: string, sessionName: string) => void;
   onToggleSplit?: () => void;
   splitEnabled?: boolean;
   secondarySession?: ActiveSession | null;
   onNotificationSettings?: () => void;
+  onSettings?: () => void;
   mutedSessions?: Set<string>;
+  onToggleMute?: (serverId: string, sessionId: string) => void;
   workGroups?: Map<string, WorkGroup[]>;
 }
 
@@ -66,24 +72,45 @@ const WORKER_STATUS_DOT: Record<string, string> = {
   error: 'status-dot-red',
 };
 
+interface ContextMenuState {
+  type: 'server' | 'session';
+  position: { x: number; y: number };
+  serverId: string;
+  sessionId?: string;
+  tmuxSessionName?: string;
+}
+
 export function SessionSidebar({
   summaries,
   activeSession,
   onSelectSession,
-  onManageServers,
   onSessionCreated,
   onToggleSplit,
   splitEnabled,
   secondarySession,
   onNotificationSettings,
+  onSettings,
   mutedSessions,
+  onToggleMute,
   workGroups,
 }: SessionSidebarProps) {
   const { snapshots } = useConnections();
+  const { getServer, toggleEnabled, deleteServer } = useServers();
   const [newSessionServerId, setNewSessionServerId] = useState<string | null>(null);
   const [tmuxServerId, setTmuxServerId] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
+  const [fontScale, setFontScale] = useState(getFontScale);
+  const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
+  // undefined = not open, null = adding new, string = editing existing
+  const [editingServerId, setEditingServerId] = useState<string | undefined | null>(undefined);
+
+  // Listen for 'open-add-server' custom event (from command palette)
+  useEffect(() => {
+    const handler = () => setEditingServerId(null);
+    window.addEventListener('open-add-server', handler);
+    return () => window.removeEventListener('open-add-server', handler);
+  }, []);
 
   // Count total sessions across all servers for filter visibility
   const totalSessionCount = useMemo(() => {
@@ -126,6 +153,93 @@ export function SessionSidebar({
     });
   };
 
+  const handleServerContextMenu = useCallback((e: React.MouseEvent, serverId: string) => {
+    e.preventDefault();
+    setContextMenu({
+      type: 'server',
+      position: { x: e.clientX, y: e.clientY },
+      serverId,
+    });
+  }, []);
+
+  const handleSessionContextMenu = useCallback((e: React.MouseEvent, serverId: string, sessionId: string, tmuxSessionName?: string) => {
+    e.preventDefault();
+    setContextMenu({
+      type: 'session',
+      position: { x: e.clientX, y: e.clientY },
+      serverId,
+      sessionId,
+      tmuxSessionName,
+    });
+  }, []);
+
+  const buildServerMenuItems = useCallback((serverId: string): ContextMenuEntry[] => {
+    const snap = snapshots.find((s) => s.serverId === serverId);
+    const server = getServer(serverId);
+    const isConnected = snap?.state.status === 'connected';
+    const isDisabled = server?.enabled === false;
+    const conn = connectionManager.getConnection(serverId);
+
+    const items: ContextMenuEntry[] = [
+      { label: 'Edit Server', onClick: () => setEditingServerId(serverId) },
+      { label: 'New Session', onClick: () => setNewSessionServerId(serverId), disabled: !isConnected },
+      null,
+    ];
+
+    if (!isConnected) {
+      items.push({ label: 'Connect', onClick: () => { if (server) connectionManager.connectServer(server); }, disabled: isDisabled });
+    } else {
+      items.push({ label: 'Disconnect', onClick: () => connectionManager.disconnectServer(serverId) });
+      items.push({ label: 'Reconnect', onClick: () => conn?.reconnect() });
+    }
+
+    items.push(null);
+    items.push({
+      label: isDisabled ? 'Enable' : 'Disable',
+      onClick: () => toggleEnabled(serverId),
+    });
+    items.push({
+      label: 'Delete',
+      danger: true,
+      onClick: () => {
+        if (window.confirm(`Delete server "${server?.name || server?.host}"?`)) {
+          deleteServer(serverId);
+        }
+      },
+    });
+
+    return items;
+  }, [snapshots, getServer, toggleEnabled, deleteServer]);
+
+  const buildSessionMenuItems = useCallback((serverId: string, sessionId: string, tmuxSessionName?: string): ContextMenuEntry[] => {
+    const isMuted = mutedSessions?.has(sessionId) ?? false;
+
+    const items: ContextMenuEntry[] = [];
+
+    if (onToggleMute) {
+      items.push({
+        label: isMuted ? 'Unmute' : 'Mute',
+        onClick: () => onToggleMute(serverId, sessionId),
+      });
+    }
+
+    if (tmuxSessionName) {
+      if (items.length > 0) items.push(null);
+      items.push({
+        label: 'Kill Session',
+        danger: true,
+        onClick: () => {
+          const conn = connectionManager.getConnection(serverId);
+          if (conn) {
+            conn.sendRequest('kill_tmux_session', { sessionName: tmuxSessionName });
+          }
+        },
+      });
+    }
+
+    return items;
+  }, [mutedSessions, onToggleMute]);
+
   return (
     <aside className="sidebar">
       <div className="sidebar-header">
@@ -149,13 +263,15 @@ export function SessionSidebar({
               &#x1F514;
             </button>
           )}
-          <button
-            className="icon-btn small"
-            onClick={onManageServers}
-            title="Manage servers"
-          >
-            &equiv;
-          </button>
+          {onSettings && (
+            <button
+              className="sidebar-settings-btn"
+              onClick={onSettings}
+              title="Settings"
+            >
+              &#x2699;
+            </button>
+          )}
         </div>
       </div>
 
@@ -177,7 +293,7 @@ export function SessionSidebar({
         {snapshots.length === 0 && (
           <div className="sidebar-empty">
             <span>No servers configured</span>
-            <button className="sidebar-add-btn" onClick={onManageServers}>
+            <button className="sidebar-add-btn" onClick={() => setEditingServerId(null)}>
               Add Server
             </button>
           </div>
@@ -202,7 +318,10 @@ export function SessionSidebar({
 
           return (
             <div key={snap.serverId} className="sidebar-server-group">
-              <div className="sidebar-server-name">
+              <div
+                className="sidebar-server-name"
+                onContextMenu={(e) => handleServerContextMenu(e, snap.serverId)}
+              >
                 <span className={`status-dot ${isConnected ? 'status-dot-green' : 'status-dot-gray'}`} />
                 <span>{snap.serverName}</span>
                 {isConnected && summary && summary.sessions.length > 0 && (
@@ -289,6 +408,7 @@ export function SessionSidebar({
                       <div
                         className={sessionClass}
                         onClick={() => onSelectSession(snap.serverId, session.id)}
+                        onContextMenu={(e) => handleSessionContextMenu(e, snap.serverId, session.id, session.tmuxSessionName)}
                       >
                         {foremanGroup && (
                           <button
@@ -398,6 +518,13 @@ export function SessionSidebar({
             </div>
           );
         })}
+
+        <button
+          className="sidebar-add-server-btn"
+          onClick={() => setEditingServerId(null)}
+        >
+          + Add Server
+        </button>
       </div>
 
       {tmuxServerId && (
@@ -407,6 +534,48 @@ export function SessionSidebar({
           onClose={() => setTmuxServerId(null)}
         />
       )}
+
+      {contextMenu && (
+        <ContextMenu
+          items={
+            contextMenu.type === 'server'
+              ? buildServerMenuItems(contextMenu.serverId)
+              : buildSessionMenuItems(contextMenu.serverId, contextMenu.sessionId!, contextMenu.tmuxSessionName)
+          }
+          position={contextMenu.position}
+          onClose={() => setContextMenu(null)}
+        />
+      )}
+
+      {editingServerId !== undefined && (
+        <ServerForm
+          serverId={editingServerId ?? undefined}
+          onClose={() => setEditingServerId(undefined)}
+        />
+      )}
+
+      <div className="sidebar-footer">
+        <span className="sidebar-footer-label">Text</span>
+        <div className="sidebar-font-btns">
+          {([
+            { label: 'S', value: 0.85 },
+            { label: 'M', value: 1.0 },
+            { label: 'L', value: 1.15 },
+            { label: 'XL', value: 1.3 },
+          ] as const).map((p) => (
+            <button
+              key={p.label}
+              className={`sidebar-font-btn ${fontScale === p.value ? 'active' : ''}`}
+              onClick={() => {
+                saveFontScale(p.value);
+                setFontScale(p.value);
+              }}
+            >
+              {p.label}
+            </button>
+          ))}
+        </div>
+      </div>
     </aside>
   );
 }

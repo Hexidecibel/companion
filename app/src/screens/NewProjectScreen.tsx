@@ -10,6 +10,7 @@ import {
   ActivityIndicator,
   Alert,
 } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 import { wsService } from '../services/websocket';
 import { StackTemplate, ProjectConfig, ScaffoldProgress, ScaffoldResult } from '../types';
 
@@ -310,7 +311,7 @@ export function NewProjectScreen({ onBack, onComplete }: NewProjectScreenProps) 
         <Switch
           value={initGit}
           onValueChange={setInitGit}
-          trackColor={{ false: '#374151', true: '#3b82f6' }}
+          trackColor={{ false: '#374151', true: '#7c3aed' }}
         />
       </View>
 
@@ -323,7 +324,7 @@ export function NewProjectScreen({ onBack, onComplete }: NewProjectScreenProps) 
           <Switch
             value={createGitHubRepo}
             onValueChange={setCreateGitHubRepo}
-            trackColor={{ false: '#374151', true: '#3b82f6' }}
+            trackColor={{ false: '#374151', true: '#7c3aed' }}
           />
         </View>
       )}
@@ -337,7 +338,7 @@ export function NewProjectScreen({ onBack, onComplete }: NewProjectScreenProps) 
           <Switch
             value={privateRepo}
             onValueChange={setPrivateRepo}
-            trackColor={{ false: '#374151', true: '#3b82f6' }}
+            trackColor={{ false: '#374151', true: '#7c3aed' }}
           />
         </View>
       )}
@@ -434,13 +435,13 @@ export function NewProjectScreen({ onBack, onComplete }: NewProjectScreenProps) 
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
+      <LinearGradient colors={['#1a2744', '#1f1a3d']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.header}>
         <TouchableOpacity onPress={onBack} style={styles.backButton}>
           <Text style={styles.backButtonText}>‹ Back</Text>
         </TouchableOpacity>
         <Text style={styles.headerTitle}>New Project</Text>
         <View style={styles.placeholder} />
-      </View>
+      </LinearGradient>
 
       {step !== 'creating' && step !== 'done' && renderStepIndicator()}
 
@@ -466,7 +467,6 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: 12,
     paddingVertical: 12,
-    backgroundColor: '#1f2937',
     borderBottomWidth: 1,
     borderBottomColor: '#374151',
   },
@@ -509,7 +509,7 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   stepDotActive: {
-    backgroundColor: '#3b82f6',
+    backgroundColor: '#7c3aed',
   },
   stepDotText: {
     color: '#6b7280',
@@ -581,7 +581,7 @@ const styles = StyleSheet.create({
     marginTop: 24,
   },
   buttonPrimary: {
-    backgroundColor: '#3b82f6',
+    backgroundColor: '#7c3aed',
     paddingHorizontal: 24,
     paddingVertical: 14,
     borderRadius: 8,
@@ -650,7 +650,7 @@ const styles = StyleSheet.create({
     borderColor: 'transparent',
   },
   templateCardSelected: {
-    borderColor: '#3b82f6',
+    borderColor: '#8b5cf6',
   },
   templateCardRecommended: {
     borderColor: '#10b981',
@@ -716,7 +716,7 @@ const styles = StyleSheet.create({
   },
   checkmark: {
     fontSize: 20,
-    color: '#3b82f6',
+    color: '#8b5cf6',
     fontWeight: 'bold',
   },
   templateDescription: {
@@ -824,7 +824,7 @@ const styles = StyleSheet.create({
   },
   progressFill: {
     height: '100%',
-    backgroundColor: '#3b82f6',
+    backgroundColor: '#7c3aed',
     borderRadius: 3,
   },
   doneContainer: {

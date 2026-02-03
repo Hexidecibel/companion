@@ -10,10 +10,10 @@ import { NotificationSettingsModal } from './NotificationSettingsModal';
 import { useSessionMute } from '../hooks/useSessionMute';
 
 interface DashboardProps {
-  onManageServers: () => void;
+  onSettings?: () => void;
 }
 
-export function Dashboard({ onManageServers }: DashboardProps) {
+export function Dashboard({ onSettings }: DashboardProps) {
   const [activeSession, setActiveSession] = useState<ActiveSession | null>(null);
   const [showNotifSettings, setShowNotifSettings] = useState(false);
   const [merging, setMerging] = useState(false);
@@ -151,16 +151,21 @@ export function Dashboard({ onManageServers }: DashboardProps) {
     await activeWorkGroups.retryWorker(activeSession.serverId, activeWorkGroup.id, workerId);
   }, [activeSession, activeWorkGroup, activeWorkGroups]);
 
+  const handleToggleMute = useCallback((_serverId: string, sessionId: string) => {
+    sessionMute.toggleMute(sessionId);
+  }, [sessionMute]);
+
   return (
     <div className="dashboard">
       <SessionSidebar
         summaries={summaries}
         activeSession={activeSession}
         onSelectSession={handleSelectSession}
-        onManageServers={onManageServers}
         onSessionCreated={handleSessionCreated}
         onNotificationSettings={activeSession ? () => setShowNotifSettings(true) : undefined}
+        onSettings={onSettings}
         mutedSessions={sessionMute.mutedSessions}
+        onToggleMute={handleToggleMute}
         workGroups={allWorkGroups}
       />
       <main className="dashboard-main">

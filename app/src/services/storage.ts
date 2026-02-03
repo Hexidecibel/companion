@@ -6,9 +6,7 @@ const SETTINGS_KEY = '@companion_settings';
 const SESSION_SETTINGS_KEY = '@companion_session_settings';
 
 export interface AppSettings {
-  stayConnected: boolean;
-  pushEnabled: boolean;
-  defaultServerId?: string;
+  fontScale?: number;
 }
 
 export interface SessionSettings {
@@ -18,8 +16,6 @@ export interface SessionSettings {
 }
 
 const DEFAULT_SETTINGS: AppSettings = {
-  stayConnected: false,
-  pushEnabled: false,
 };
 
 export async function getServers(): Promise<Server[]> {

@@ -10,6 +10,7 @@ import {
   Alert,
   ActivityIndicator,
 } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Server } from '../types';
 import { getServers, addServer, updateServer, deleteServer } from '../services/storage';
@@ -174,19 +175,19 @@ export function EditServerScreen({ server, onBack, onSaved }: EditServerScreenPr
 
   return (
     <SafeAreaView style={styles.container} edges={['bottom']}>
-      <View style={styles.header}>
+      <LinearGradient colors={['#1a2744', '#1f1a3d']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.header}>
         <TouchableOpacity onPress={onBack} style={styles.backButton}>
           <Text style={styles.backButtonText}>Cancel</Text>
         </TouchableOpacity>
         <Text style={styles.headerTitle}>{isEditing ? 'Edit Server' : 'Add Server'}</Text>
         <TouchableOpacity onPress={handleSave} style={styles.saveButton} disabled={saving}>
           {saving ? (
-            <ActivityIndicator size="small" color="#3b82f6" />
+            <ActivityIndicator size="small" color="#7c3aed" />
           ) : (
             <Text style={styles.saveButtonText}>Save</Text>
           )}
         </TouchableOpacity>
-      </View>
+      </LinearGradient>
 
       <ScrollView style={styles.content} contentContainerStyle={styles.contentContainer}>
         {!isEditing && (
@@ -309,7 +310,6 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: 12,
     paddingVertical: 12,
-    backgroundColor: '#1f2937',
     borderBottomWidth: 1,
     borderBottomColor: '#374151',
   },
@@ -330,7 +330,7 @@ const styles = StyleSheet.create({
     alignItems: 'flex-end',
   },
   saveButtonText: {
-    color: '#3b82f6',
+    color: '#7c3aed',
     fontSize: 16,
     fontWeight: '600',
   },
@@ -342,7 +342,7 @@ const styles = StyleSheet.create({
     paddingBottom: 40,
   },
   qrButton: {
-    backgroundColor: '#3b82f6',
+    backgroundColor: '#7c3aed',
     padding: 14,
     borderRadius: 8,
     alignItems: 'center',

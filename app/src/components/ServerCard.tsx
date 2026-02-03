@@ -92,6 +92,8 @@ const styles = StyleSheet.create({
     padding: 16,
     marginHorizontal: 16,
     marginVertical: 6,
+    borderLeftWidth: 3,
+    borderLeftColor: '#3b4f8a',
   },
   content: {
     flex: 1,

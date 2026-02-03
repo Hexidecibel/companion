@@ -1,6 +1,7 @@
 import { Server } from '../types';
 
 const SERVERS_KEY = 'companion_servers';
+const FONT_SCALE_KEY = 'companion_font_scale';
 
 export function getServers(): Server[] {
   try {
@@ -41,4 +42,31 @@ export function deleteServer(id: string): void {
   const servers = getServers();
   const filtered = servers.filter((s) => s.id !== id);
   saveServers(filtered);
+}
+
+export function getFontScale(): number {
+  try {
+    const val = localStorage.getItem(FONT_SCALE_KEY);
+    if (val) return parseFloat(val) || 1;
+  } catch {
+    // ignore
+  }
+  return 1;
+}
+
+export function saveFontScale(scale: number): void {
+  try {
+    localStorage.setItem(FONT_SCALE_KEY, String(scale));
+    document.documentElement.style.setProperty('--font-scale', String(scale));
+  } catch {
+    // ignore
+  }
+}
+
+/** Apply saved font scale to CSS custom property on startup */
+export function applyFontScale(): void {
+  const scale = getFontScale();
+  if (scale !== 1) {
+    document.documentElement.style.setProperty('--font-scale', String(scale));
+  }
 }

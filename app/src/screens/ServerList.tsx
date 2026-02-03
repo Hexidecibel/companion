@@ -12,6 +12,7 @@ import {
   ScrollView,
   RefreshControl,
 } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Server, ConnectionState } from '../types';
 import { getServers, addServer, updateServer, deleteServer } from '../services/storage';
@@ -270,13 +271,13 @@ export function ServerList({ onSelectServer, onOpenSetup, onBack }: ServerListPr
   return (
     <View style={styles.container}>
       {onBack && (
-        <View style={styles.header}>
+        <LinearGradient colors={['#1a2744', '#1f1a3d']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.header}>
           <TouchableOpacity onPress={onBack} style={styles.backButton}>
             <Text style={styles.backButtonText}>‹ Back</Text>
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Manage Servers</Text>
           <View style={styles.backButton} />
-        </View>
+        </LinearGradient>
       )}
       <FlatList
         data={servers}
@@ -316,8 +317,10 @@ export function ServerList({ onSelectServer, onOpenSetup, onBack }: ServerListPr
         }
       />
 
-      <TouchableOpacity style={styles.addButton} onPress={openAddModal}>
-        <Text style={styles.addButtonText}>+ Add Server</Text>
+      <TouchableOpacity onPress={openAddModal} activeOpacity={0.8}>
+        <LinearGradient colors={['#3b82f6', '#7c3aed']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.addButton}>
+          <Text style={styles.addButtonText}>+ Add Server</Text>
+        </LinearGradient>
       </TouchableOpacity>
 
       <Modal
@@ -461,7 +464,6 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: 16,
     paddingVertical: 12,
-    backgroundColor: '#1f2937',
     borderBottomWidth: 1,
     borderBottomColor: '#374151',
   },
@@ -510,7 +512,6 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   addButton: {
-    backgroundColor: '#3b82f6',
     margin: 16,
     padding: 16,
     borderRadius: 12,
@@ -543,7 +544,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
   },
   saveButton: {
-    color: '#3b82f6',
+    color: '#7c3aed',
     fontSize: 16,
     fontWeight: '600',
   },

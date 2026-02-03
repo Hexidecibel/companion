@@ -9,6 +9,7 @@ import {
   ActivityIndicator,
   RefreshControl,
 } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 import { ArchivedConversation } from '../types';
 import { archiveService } from '../services/archive';
 
@@ -122,13 +123,13 @@ export function Archive({ onBack }: ArchiveProps) {
   if (loading) {
     return (
       <View style={styles.container}>
-        <View style={styles.header}>
+        <LinearGradient colors={['#1a2744', '#1f1a3d']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.header}>
           <TouchableOpacity onPress={onBack} style={styles.backButton}>
             <Text style={styles.backButtonText}>Back</Text>
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Archive</Text>
           <View style={styles.placeholder} />
-        </View>
+        </LinearGradient>
         <View style={styles.centered}>
           <ActivityIndicator size="large" color="#3b82f6" />
         </View>
@@ -138,7 +139,7 @@ export function Archive({ onBack }: ArchiveProps) {
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
+      <LinearGradient colors={['#1a2744', '#1f1a3d']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.header}>
         <TouchableOpacity onPress={onBack} style={styles.backButton}>
           <Text style={styles.backButtonText}>Back</Text>
         </TouchableOpacity>
@@ -150,7 +151,7 @@ export function Archive({ onBack }: ArchiveProps) {
         ) : (
           <View style={styles.placeholder} />
         )}
-      </View>
+      </LinearGradient>
 
       {archives.length === 0 ? (
         <View style={styles.emptyState}>
@@ -199,7 +200,6 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: 12,
     paddingVertical: 12,
-    backgroundColor: '#1f2937',
     borderBottomWidth: 1,
     borderBottomColor: '#374151',
   },
@@ -239,6 +239,8 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     padding: 16,
     marginBottom: 12,
+    borderLeftWidth: 3,
+    borderLeftColor: '#3b4f8a',
   },
   archiveHeader: {
     flexDirection: 'row',

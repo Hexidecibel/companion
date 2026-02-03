@@ -4,15 +4,17 @@ import {
   Text,
   StyleSheet,
   ScrollView,
-  Switch,
   TouchableOpacity,
   Alert,
   Linking,
 } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 import Constants from 'expo-constants';
-import { getSettings, saveSettings, AppSettings, clearAll } from '../services/storage';
+import { getSettings, AppSettings, clearAll } from '../services/storage';
 import { historyService } from '../services/history';
 import { wsService } from '../services/websocket';
+import { fontScaleService } from '../services/fontScale';
+import { scaledFont } from '../theme/fonts';
 
 interface SettingsProps {
   onBack: () => void;
@@ -22,32 +24,18 @@ interface SettingsProps {
 }
 
 export function Settings({ onBack, onOpenNotificationSettings, onOpenAgents, onOpenArchive }: SettingsProps) {
-  const [settings, setSettings] = useState<AppSettings>({
-    stayConnected: false,
-    pushEnabled: false,
-  });
+  const [settings, setSettings] = useState<AppSettings>({});
   const [loading, setLoading] = useState(true);
+  const [currentFontScale, setCurrentFontScale] = useState(fontScaleService.getScale());
   useEffect(() => {
     loadSettings();
+    return fontScaleService.subscribe(setCurrentFontScale);
   }, []);
 
   const loadSettings = async () => {
     const loaded = await getSettings();
     setSettings(loaded);
     setLoading(false);
-  };
-
-  const updateSetting = async <K extends keyof AppSettings>(
-    key: K,
-    value: AppSettings[K]
-  ) => {
-    const newSettings = { ...settings, [key]: value };
-    setSettings(newSettings);
-    await saveSettings(newSettings);
-  };
-
-  const handleStayConnectedChange = async (value: boolean) => {
-    updateSetting('stayConnected', value);
   };
 
   const handleClearData = () => {
@@ -61,7 +49,7 @@ export function Settings({ onBack, onOpenNotificationSettings, onOpenAgents, onO
           style: 'destructive',
           onPress: async () => {
             await clearAll();
-            setSettings({ stayConnected: false, pushEnabled: false });
+            setSettings({});
             Alert.alert('Done', 'All data has been cleared');
           },
         },
@@ -119,31 +107,17 @@ export function Settings({ onBack, onOpenNotificationSettings, onOpenAgents, onO
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
+      <LinearGradient colors={['#1a2744', '#1f1a3d']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.header}>
         <TouchableOpacity onPress={onBack} style={styles.backButton}>
           <Text style={styles.backButtonText}>‹ Back</Text>
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Settings</Text>
         <View style={styles.placeholder} />
-      </View>
+      </LinearGradient>
 
       <ScrollView style={styles.content} contentContainerStyle={styles.contentContainer}>
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Connection</Text>
-
-          <View style={styles.settingRow}>
-            <View style={styles.settingInfo}>
-              <Text style={styles.settingLabel}>Stay Connected</Text>
-              <Text style={styles.settingDescription}>
-                Keep WebSocket connection active in background
-              </Text>
-            </View>
-            <Switch
-              value={settings.stayConnected}
-              onValueChange={handleStayConnectedChange}
-              trackColor={{ false: '#374151', true: '#3b82f6' }}
-            />
-          </View>
 
           <TouchableOpacity style={styles.linkRow} onPress={onOpenNotificationSettings}>
             <View style={styles.settingInfo}>
@@ -166,6 +140,43 @@ export function Settings({ onBack, onOpenNotificationSettings, onOpenAgents, onO
               <Text style={styles.linkArrow}>›</Text>
             </TouchableOpacity>
           )}
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Display</Text>
+          <View style={styles.fontScaleRow}>
+            <Text style={styles.settingLabel}>Text Size</Text>
+            <View style={styles.fontScaleButtons}>
+              {([
+                { label: 'S', value: 0.85 },
+                { label: 'M', value: 1.0 },
+                { label: 'L', value: 1.15 },
+                { label: 'XL', value: 1.3 },
+              ] as const).map((preset) => (
+                <TouchableOpacity
+                  key={preset.label}
+                  style={[
+                    styles.fontScaleButton,
+                    currentFontScale === preset.value && styles.fontScaleButtonActive,
+                  ]}
+                  onPress={() => fontScaleService.setScale(preset.value)}
+                  activeOpacity={0.7}
+                >
+                  <Text style={[
+                    styles.fontScaleButtonText,
+                    currentFontScale === preset.value && styles.fontScaleButtonTextActive,
+                  ]}>
+                    {preset.label}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+          <View style={styles.fontScalePreview}>
+            <Text style={[styles.fontScalePreviewText, { fontSize: scaledFont(15, currentFontScale) }]}>
+              The quick brown fox jumps over the lazy dog.
+            </Text>
+          </View>
         </View>
 
         <View style={styles.section}>
@@ -293,7 +304,6 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: 12,
     paddingVertical: 12,
-    backgroundColor: '#1f2937',
     borderBottomWidth: 1,
     borderBottomColor: '#374151',
   },
@@ -331,15 +341,6 @@ const styles = StyleSheet.create({
     color: '#9ca3af',
     textTransform: 'uppercase',
     marginBottom: 12,
-  },
-  settingRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: '#1f2937',
-    padding: 16,
-    borderRadius: 12,
-    marginBottom: 8,
   },
   settingInfo: {
     flex: 1,
@@ -381,7 +382,7 @@ const styles = StyleSheet.create({
     padding: 16,
     borderRadius: 12,
     borderLeftWidth: 3,
-    borderLeftColor: '#3b82f6',
+    borderLeftColor: '#8b5cf6',
   },
   hintText: {
     fontSize: 13,
@@ -413,5 +414,45 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: '#9ca3af',
     lineHeight: 18,
+  },
+  fontScaleRow: {
+    backgroundColor: '#1f2937',
+    padding: 16,
+    borderRadius: 12,
+    marginBottom: 8,
+  },
+  fontScaleButtons: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 12,
+  },
+  fontScaleButton: {
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: 8,
+    backgroundColor: '#374151',
+    alignItems: 'center',
+  },
+  fontScaleButtonActive: {
+    backgroundColor: '#3b82f6',
+  },
+  fontScaleButtonText: {
+    color: '#9ca3af',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  fontScaleButtonTextActive: {
+    color: '#ffffff',
+  },
+  fontScalePreview: {
+    backgroundColor: '#1f2937',
+    padding: 16,
+    borderRadius: 12,
+    borderLeftWidth: 3,
+    borderLeftColor: '#8b5cf6',
+  },
+  fontScalePreviewText: {
+    color: '#f3f4f6',
+    lineHeight: 22,
   },
 });

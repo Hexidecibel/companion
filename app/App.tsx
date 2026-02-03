@@ -22,6 +22,7 @@ import { TerminalScreen } from './src/screens/TerminalScreen';
 import { ErrorBoundary } from './src/components/ErrorBoundary';
 import { wsService } from './src/services/websocket';
 import { archiveService } from './src/services/archive';
+import { fontScaleService } from './src/services/fontScale';
 import {
   registerForPushNotifications,
   setupNotificationChannel,
@@ -54,6 +55,7 @@ function App() {
   const pendingSessionId = useRef<string | null>(null);
 
   useEffect(() => {
+    fontScaleService.load();
     initializePushNotifications();
 
     // When app resumes from background, check WebSocket health and clear badge

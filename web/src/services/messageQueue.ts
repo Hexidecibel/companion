@@ -3,6 +3,7 @@ const STORAGE_KEY = 'companion_message_queue';
 export interface QueuedMessage {
   id: string;
   serverId: string;
+  sessionId: string;
   text: string;
   queuedAt: number;
 }
@@ -38,10 +39,11 @@ class MessageQueue {
     this.listeners.forEach((fn) => fn());
   }
 
-  enqueue(serverId: string, text: string): void {
+  enqueue(serverId: string, sessionId: string, text: string): void {
     const msg: QueuedMessage = {
       id: `q_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
       serverId,
+      sessionId,
       text,
       queuedAt: Date.now(),
     };
@@ -50,8 +52,8 @@ class MessageQueue {
     this.notify();
   }
 
-  dequeue(serverId: string): QueuedMessage | undefined {
-    const idx = this.messages.findIndex((m) => m.serverId === serverId);
+  dequeue(serverId: string, sessionId: string): QueuedMessage | undefined {
+    const idx = this.messages.findIndex((m) => m.serverId === serverId && m.sessionId === sessionId);
     if (idx === -1) return undefined;
     const [msg] = this.messages.splice(idx, 1);
     this.save();
@@ -65,14 +67,14 @@ class MessageQueue {
     this.notify();
   }
 
-  clearAll(serverId: string): void {
-    this.messages = this.messages.filter((m) => m.serverId !== serverId);
+  clearAll(serverId: string, sessionId: string): void {
+    this.messages = this.messages.filter((m) => !(m.serverId === serverId && m.sessionId === sessionId));
     this.save();
     this.notify();
   }
 
-  getMessagesForServer(serverId: string): QueuedMessage[] {
-    return this.messages.filter((m) => m.serverId === serverId);
+  getMessagesForSession(serverId: string, sessionId: string): QueuedMessage[] {
+    return this.messages.filter((m) => m.serverId === serverId && m.sessionId === sessionId);
   }
 
   subscribe(listener: Listener): () => void {

@@ -2,11 +2,7 @@ import { useConnections } from '../hooks/useConnections';
 import { useServers } from '../hooks/useServers';
 import { ConnectionStatus } from './ConnectionStatus';
 
-interface StatusPageProps {
-  onManageServers: () => void;
-}
-
-export function StatusPage({ onManageServers }: StatusPageProps) {
+export function StatusPage() {
   const { servers } = useServers();
   const { snapshots, connectedCount, totalCount } = useConnections();
 
@@ -18,9 +14,7 @@ export function StatusPage({ onManageServers }: StatusPageProps) {
       <header className="form-header">
         <div className="header-spacer" />
         <h2>Companion</h2>
-        <button className="icon-btn" onClick={onManageServers} title="Manage servers">
-          &equiv;
-        </button>
+        <div className="header-spacer" />
       </header>
 
       <div className="status-page">
@@ -36,9 +30,6 @@ export function StatusPage({ onManageServers }: StatusPageProps) {
         {servers.length === 0 ? (
           <div className="empty-state">
             <p>No servers configured</p>
-            <button className="btn-primary" onClick={onManageServers}>
-              Add Server
-            </button>
           </div>
         ) : (
           <div className="server-cards">

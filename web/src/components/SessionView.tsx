@@ -64,7 +64,7 @@ export function SessionView({
   const { agents, runningCount, completedCount, totalAgents } = useSubAgents(serverId, sessionId);
   const autoApprove = useAutoApprove(serverId, sessionId);
   const sessionMute = useSessionMute(serverId);
-  const { queuedMessages, enqueue, cancel: cancelQueued, clearAll: clearAllQueued } = useMessageQueue(serverId);
+  const { queuedMessages, enqueue, cancel: cancelQueued, clearAll: clearAllQueued } = useMessageQueue(serverId, sessionId);
 
   // Sub-agent state
   const [showAgentsModal, setShowAgentsModal] = useState(false);
@@ -97,20 +97,35 @@ export function SessionView({
 
   // Track waiting state for auto-dequeue
   const prevWaitingRef = useRef(false);
+  const initialLoadRef = useRef(true);
+
+  // Reset refs when session changes
+  useEffect(() => {
+    prevWaitingRef.current = false;
+    initialLoadRef.current = true;
+  }, [serverId, sessionId]);
 
   useEffect(() => {
     const wasWaiting = prevWaitingRef.current;
     const isWaiting = status?.isWaitingForInput ?? false;
     prevWaitingRef.current = isWaiting;
 
-    // Auto-send first queued message when session transitions to waiting
-    if (!wasWaiting && isWaiting && serverId) {
-      const next = messageQueue.dequeue(serverId);
+    // Auto-send first queued message when:
+    // 1. Session transitions to waiting (false -> true)
+    // 2. On initial load if session is already waiting
+    // 3. Session is already waiting and a new message was just queued
+    const isTransition = isWaiting && (!wasWaiting || initialLoadRef.current);
+    const hasQueued = queuedMessages.length > 0;
+    const shouldDequeue = isWaiting && (isTransition || hasQueued);
+    initialLoadRef.current = false;
+
+    if (shouldDequeue && serverId && sessionId) {
+      const next = messageQueue.dequeue(serverId, sessionId);
       if (next) {
         sendInput(next.text);
       }
     }
-  }, [status?.isWaitingForInput, serverId, sendInput]);
+  }, [status?.isWaitingForInput, serverId, sessionId, sendInput, queuedMessages]);
 
   const handleSend = useCallback(
     async (text: string): Promise<boolean> => {

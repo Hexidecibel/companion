@@ -1,16 +1,14 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { ConnectionProvider } from './context/ConnectionContext';
 import { StatusPage } from './components/StatusPage';
-import { ServerList } from './components/ServerList';
-import { ServerForm } from './components/ServerForm';
 import { Dashboard } from './components/Dashboard';
+import { SettingsScreen } from './components/SettingsScreen';
 import { CommandPalette, CommandAction } from './components/CommandPalette';
 
 type Screen =
   | { name: 'dashboard' }
   | { name: 'status' }
-  | { name: 'servers' }
-  | { name: 'editServer'; serverId?: string };
+  | { name: 'settings' };
 
 export function App() {
   const [screen, setScreen] = useState<Screen>({ name: 'dashboard' });
@@ -47,10 +45,19 @@ export function App() {
       execute: () => navigateTo('dashboard'),
     },
     {
-      id: 'go-servers',
-      label: 'Go to Servers',
-      icon: '\u2699',
-      execute: () => navigateTo('servers'),
+      id: 'add-server',
+      label: 'Add Server',
+      icon: '+',
+      execute: () => {
+        navigateTo('dashboard');
+        window.dispatchEvent(new CustomEvent('open-add-server'));
+      },
+    },
+    {
+      id: 'go-settings',
+      label: 'Go to Settings',
+      icon: '\u2731',
+      execute: () => navigateTo('settings'),
     },
     {
       id: 'notifications',
@@ -75,25 +82,15 @@ export function App() {
       <div id="app" className={isDashboard ? 'app-dashboard' : ''}>
         {screen.name === 'dashboard' && (
           <Dashboard
-            onManageServers={() => setScreen({ name: 'servers' })}
+            onSettings={() => setScreen({ name: 'settings' })}
           />
         )}
         {screen.name === 'status' && (
-          <StatusPage
-            onManageServers={() => setScreen({ name: 'servers' })}
-          />
+          <StatusPage />
         )}
-        {screen.name === 'servers' && (
-          <ServerList
+        {screen.name === 'settings' && (
+          <SettingsScreen
             onBack={() => setScreen({ name: 'dashboard' })}
-            onAddServer={() => setScreen({ name: 'editServer' })}
-            onEditServer={(id) => setScreen({ name: 'editServer', serverId: id })}
-          />
-        )}
-        {screen.name === 'editServer' && (
-          <ServerForm
-            serverId={screen.serverId}
-            onBack={() => setScreen({ name: 'servers' })}
           />
         )}
 

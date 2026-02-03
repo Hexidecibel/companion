@@ -8,10 +8,12 @@ import {
   RefreshControl,
   useWindowDimensions,
   ActivityIndicator,
+  Alert,
   NativeSyntheticEvent,
   NativeScrollEvent,
 } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
+import { LinearGradient } from 'expo-linear-gradient';
 import { wsService } from '../services/websocket';
 import { parseAnsiText, AnsiSpan } from '../utils/ansiParser';
 
@@ -47,9 +49,13 @@ export function TerminalScreen({ sessionName, serverHost, sshUser, onBack }: Ter
 
   const copySshCommand = useCallback(async () => {
     if (!sshCommand) return;
-    await Clipboard.setStringAsync(sshCommand);
-    setSshCopied(true);
-    setTimeout(() => setSshCopied(false), 2000);
+    try {
+      await Clipboard.setStringAsync(sshCommand);
+      setSshCopied(true);
+      setTimeout(() => setSshCopied(false), 2000);
+    } catch {
+      Alert.alert('Copy Failed', sshCommand);
+    }
   }, [sshCommand]);
 
   const fetchOutput = useCallback(async () => {
@@ -141,7 +147,7 @@ export function TerminalScreen({ sessionName, serverHost, sshUser, onBack }: Ter
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
+      <LinearGradient colors={['#1a2744', '#1f1a3d']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.header}>
         <TouchableOpacity onPress={onBack} style={styles.backButton}>
           <Text style={styles.backButtonText}>&#8249; Back</Text>
         </TouchableOpacity>
@@ -173,7 +179,7 @@ export function TerminalScreen({ sessionName, serverHost, sshUser, onBack }: Ter
             </Text>
           </TouchableOpacity>
         </View>
-      </View>
+      </LinearGradient>
 
       {/* SSH Command Bar */}
       {sshCommand && (
@@ -242,7 +248,6 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: 12,
     paddingVertical: 12,
-    backgroundColor: '#1f2937',
     borderBottomWidth: 1,
     borderBottomColor: '#374151',
   },
@@ -305,7 +310,7 @@ const styles = StyleSheet.create({
     marginLeft: 4,
   },
   refreshToggleActive: {
-    backgroundColor: '#1e3a5f',
+    backgroundColor: '#1a1f4d',
   },
   refreshToggleText: {
     color: '#6b7280',
@@ -313,7 +318,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   refreshToggleTextActive: {
-    color: '#60a5fa',
+    color: '#a78bfa',
   },
   sshBar: {
     flexDirection: 'row',
@@ -326,10 +331,10 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   sshLabel: {
-    color: '#3b82f6',
+    color: '#ffffff',
     fontSize: 11,
     fontWeight: '700',
-    backgroundColor: '#1e3a5f',
+    backgroundColor: '#7c3aed',
     paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: 4,

@@ -3,6 +3,13 @@ import { View, Text, TextInput, StyleSheet, TouchableOpacity, ScrollView, Alert,
 import * as Clipboard from 'expo-clipboard';
 import Markdown from '@ronradtke/react-native-markdown-display';
 import { ConversationMessage, ConversationHighlight, ToolCall, Question } from '../types';
+import { scaledFont } from '../theme/fonts';
+
+// Content that should be treated as empty / not rendered
+function isEmptyContent(content: string): boolean {
+  const trimmed = content.trim();
+  return !trimmed || trimmed === '(no content)';
+}
 
 interface ConversationItemProps {
   item: ConversationMessage | ConversationHighlight;
@@ -10,6 +17,7 @@ interface ConversationItemProps {
   onSelectOption?: (option: string) => void;
   onFileTap?: (filePath: string) => void;
   onMessageTap?: () => void;
+  fontScale?: number;
 }
 
 const COLLAPSED_LINES = 12;
@@ -466,7 +474,7 @@ function ToolCard({ tool, forceExpanded }: { tool: ToolCall; forceExpanded?: boo
   );
 }
 
-function ConversationItemInner({ item, showToolCalls, onSelectOption, onFileTap, onMessageTap }: ConversationItemProps) {
+function ConversationItemInner({ item, showToolCalls, onSelectOption, onFileTap, onMessageTap, fontScale = 1 }: ConversationItemProps) {
   const [expanded, setExpanded] = useState(false);
   const [selectedOptions, setSelectedOptions] = useState<Set<string>>(new Set());
   // Per-question selections for multi-question mode: Map<questionIndex, Set<optionLabel>>
@@ -477,6 +485,8 @@ function ConversationItemInner({ item, showToolCalls, onSelectOption, onFileTap,
   const [otherActive, setOtherActive] = useState<Set<number>>(new Set());
   const isUser = item.type === 'user';
   const message = item as ConversationMessage;
+
+  // Filter "(no content)" assistant messages that have no tools or options
   const hasToolCalls = showToolCalls && 'toolCalls' in message && message.toolCalls?.length;
   // Only show options if there are options AND we're actually waiting for a choice
   // (auto-approved tools will have options but isWaitingForChoice will be false)
@@ -485,6 +495,44 @@ function ConversationItemInner({ item, showToolCalls, onSelectOption, onFileTap,
   // Check for multiple questions
   const allQuestions: Question[] | undefined = 'questions' in message ? (message as ConversationMessage).questions : undefined;
   const hasMultipleQuestions = allQuestions && allQuestions.length > 1 && message.isWaitingForChoice;
+
+  // Skip rendering if assistant message is just "(no content)" with no tools or options
+  if (!isUser && isEmptyContent(item.content) && !hasToolCalls && !hasOptions && !hasMultipleQuestions) {
+    return null;
+  }
+
+  // Build scaled markdown styles when fontScale !== 1
+  const scaledMarkdownStyles = useMemo(() => {
+    if (fontScale === 1) return markdownStyles;
+    return StyleSheet.create({
+      ...markdownStyles,
+      body: {
+        ...markdownStyles.body,
+        fontSize: scaledFont(15, fontScale),
+        lineHeight: scaledFont(22, fontScale),
+      },
+      heading1: {
+        ...markdownStyles.heading1,
+        fontSize: scaledFont(18, fontScale),
+      },
+      heading2: {
+        ...markdownStyles.heading2,
+        fontSize: scaledFont(16, fontScale),
+      },
+      heading3: {
+        ...markdownStyles.heading3,
+        fontSize: scaledFont(15, fontScale),
+      },
+      code_inline: {
+        ...markdownStyles.code_inline,
+        fontSize: scaledFont(13, fontScale),
+      },
+      code_block: {
+        ...markdownStyles.code_block,
+        fontSize: scaledFont(13, fontScale),
+      },
+    });
+  }, [fontScale]);
 
   // Handle option selection - toggle for multi-select, immediate send for single-select
   const handleOptionPress = (label: string) => {
@@ -770,7 +818,7 @@ function ConversationItemInner({ item, showToolCalls, onSelectOption, onFileTap,
           <Text style={[styles.content, styles.userContent]}>{item.content}</Text>
         ) : (
           <View style={!expanded && needsExpansion ? styles.collapsedContent : undefined}>
-            <Markdown style={markdownStyles} rules={rules}>
+            <Markdown style={scaledMarkdownStyles} rules={rules}>
               {item.content}
             </Markdown>
             {!expanded && needsExpansion && (
@@ -1690,6 +1738,7 @@ export const ConversationItem = memo(ConversationItemInner, (prevProps, nextProp
     prevProps.item.content === nextProps.item.content &&
     prevProps.item.timestamp === nextProps.item.timestamp &&
     prevProps.showToolCalls === nextProps.showToolCalls &&
+    prevProps.fontScale === nextProps.fontScale &&
     // For messages with options, check if options changed
     ('options' in prevProps.item ? prevProps.item.options : undefined) ===
     ('options' in nextProps.item ? nextProps.item.options : undefined) &&

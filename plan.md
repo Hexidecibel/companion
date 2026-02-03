@@ -731,3 +731,190 @@ Clicking "← companion" returns to the foreman session. The breadcrumb only sho
 - `/work` command: detects 2 parallelizable items with no file overlap
 - `/work` command: detects sequential items due to shared files
 - `/work` command: presents proposal and spawns group on approval
+
+---
+
+## 5. Vibrant Color Refresh — Mobile + Web
+**Status:** done
+
+### Overview
+
+The app currently uses a flat, monochrome dark slate palette (`#111827` / `#1f2937` / `#374151`) with color only on status dots and action buttons. This refresh adds vibrant blue/purple accents throughout — gradient headers, tinted card backgrounds, colored borders, and richer visual hierarchy — while keeping the dark theme foundation. Both mobile app and web client get updated in sync.
+
+### Color Direction
+
+**Primary gradient:** Blue → Purple (`#3b82f6` → `#8b5cf6`)
+**Secondary gradient:** Indigo → Violet (`#6366f1` → `#a78bfa`)
+**Accent glow:** Subtle purple tints for card hover/active states
+**Warm accent:** Keep amber (`#f59e0b`) and green (`#10b981`) for status — they pop nicely against blue/purple
+
+### New Color Tokens
+
+```
+// Gradient anchors
+--gradient-start: #3b82f6     (blue-500)
+--gradient-end: #8b5cf6       (violet-500)
+--gradient-subtle-start: #1e3a5f
+--gradient-subtle-end: #2e1065
+
+// Tinted card backgrounds
+--card-bg-blue: #111c33       (very dark blue tint, replaces #1f2937 in key spots)
+--card-bg-purple: #1a1033     (very dark purple tint)
+--card-border-accent: #3b4f8a (muted blue border, replaces #374151 on key cards)
+
+// Interactive
+--button-gradient: linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%)
+--button-hover: linear-gradient(135deg, #2563eb 0%, #7c3aed 100%)
+
+// Text accents
+--text-accent-blue: #60a5fa   (existing, used more)
+--text-accent-purple: #a78bfa (existing, used more)
+--text-accent-gradient: gradient text for titles
+```
+
+### Requirements
+- Keep the dark theme base — this is accent enhancement, not a light mode
+- Blue/purple gradient direction inspired by Linear, Discord, Vercel
+- Both mobile app and web client updated
+- All screens touched evenly — dashboard, session view, settings, terminal, archives, task detail, new project wizard, work group cards
+- Status colors (green/amber/red) stay the same — they're semantic and already vibrant
+- No gradient overload — use gradients on headers and primary buttons, tints on cards
+- Web CSS variables make this systematic; mobile needs per-component updates
+
+### Files to Modify
+
+**Mobile App:**
+- `app/src/screens/DashboardScreen.tsx` — Header gradient, server card tinted borders, session row accent backgrounds, summary bar gradient accents
+- `app/src/screens/SessionView.tsx` — Header gradient, activity bar purple tint, user message bubble gradient, input bar accent border, modal header gradients
+- `app/src/screens/SettingsScreen.tsx` — Section headers with accent color, toggle track colors, hint box purple left border
+- `app/src/screens/TerminalScreen.tsx` — Header gradient, toolbar button accents, SSH bar gradient label
+- `app/src/screens/ServerList.tsx` — Add button gradient, form accent borders
+- `app/src/screens/EditServerScreen.tsx` — Save button gradient, QR button accent, section styling
+- `app/src/screens/ArchiveScreen.tsx` — Archive item left accent border, header gradient
+- `app/src/screens/TaskDetailScreen.tsx` — Status badge gradients, header gradient
+- `app/src/screens/NewProjectScreen.tsx` — Step indicator gradient dots, template card selected gradient border, progress bar gradient, button gradients
+- `app/src/components/ServerCard.tsx` — Card border-left gradient accent, name with subtle color
+- `app/src/components/WorkGroupCard.tsx` — Card border gradient (blue→purple instead of green), progress bar gradient
+- `app/src/components/StatusIndicator.tsx` — Keep as-is (status colors are semantic)
+- `app/src/components/MessageBubble.tsx` — User bubble gradient background, assistant bubble subtle border
+- `app/src/components/ToolCard.tsx` — Tool card header tint, chip colors
+
+**Web Client:**
+- `web/src/styles/variables.css` — Add new gradient and tint CSS variables
+- `web/src/styles/global.css` — Header gradients, sidebar accent, card tints, button gradients, progress bar gradients, input focus glow
+- `web/src/components/SessionSidebar.tsx` — Sidebar header gradient, active session highlight with blue/purple tint
+- `web/src/components/StatusPage.tsx` — Server card borders, summary stats accent colors
+- `web/src/components/SessionView.tsx` — Header gradient, message styling
+- `web/src/components/WorkGroupPanel.tsx` — Panel header gradient, worker card tints
+- `web/src/components/WorkGroupBar.tsx` — Bar gradient background
+- `web/src/components/WorkerCard.tsx` — Card border accent
+- `web/src/components/ServerForm.tsx` — Button gradients, input focus states
+- `web/src/components/ServerList.tsx` — Card hover states with purple tint
+
+### Implementation Steps
+
+**Phase 1: Create shared color foundation**
+
+1. **Web: Add gradient CSS variables to `variables.css`**
+   - Add all new tokens listed above
+   - Add gradient utility classes (`.gradient-header`, `.gradient-button`, `.gradient-text`)
+   - Add card tint background variants
+
+2. **Mobile: Create `app/src/theme/colors.ts`** (new file)
+   - Central color constants file so mobile stops using scattered hex values
+   - Export gradient configs for `expo-linear-gradient` (or `react-native-linear-gradient`)
+   - Export tinted background colors, accent borders, text accent colors
+   - All existing colors mapped to named constants
+
+**Phase 2: Headers and navigation (high visual impact)**
+
+3. **Mobile: Gradient headers on all screens**
+   - Replace flat `#1f2937` header backgrounds with `LinearGradient` (blue→purple)
+   - Screens: Dashboard, SessionView, Settings, Terminal, ServerList, EditServer, Archive, TaskDetail, NewProject
+   - Header text stays white, icons stay white — gradient is the background
+   - Subtle opacity so it's not overwhelming (maybe 85% opacity gradient over dark base)
+
+4. **Web: Gradient headers**
+   - Sidebar header gets subtle gradient
+   - Main content header/toolbar gets gradient
+   - Use CSS `background: linear-gradient(...)` on header elements
+
+**Phase 3: Cards and content areas**
+
+5. **Mobile: Tinted card backgrounds**
+   - Server cards: Replace `#1f2937` with `#111c33` (dark blue tint) + left border gradient (2px blue→purple)
+   - Session rows: Active session gets subtle blue tint background
+   - Work group cards: Blue/purple border gradient instead of green
+   - Task cards: Subtle purple tint on expanded task area
+   - Archive items: Left accent border (thin gradient line)
+
+6. **Web: Tinted cards and surfaces**
+   - Sidebar session items: Active state uses purple-tinted background
+   - Server cards on status page: Gradient left border
+   - Worker cards: Blue tint backgrounds
+   - Panel headers: Subtle gradient
+
+**Phase 4: Buttons and interactive elements**
+
+7. **Mobile: Gradient buttons**
+   - Primary action buttons (Add Session, Save, Send, Create Project): Blue→purple gradient
+   - Secondary buttons stay flat but get accent border color
+   - Input bar "send" button: Small gradient
+   - Toggle switches: Blue→purple track when enabled (instead of flat `#3b82f6`)
+
+8. **Web: Gradient buttons and interactions**
+   - Primary buttons: Gradient background
+   - Input focus states: Purple glow border (`box-shadow` with violet)
+   - Hover states on cards: Subtle purple tint transition
+
+**Phase 5: Progress bars and indicators**
+
+9. **Both: Gradient progress bars**
+   - Task progress bars: Blue→green gradient fill (instead of flat green)
+   - Work group progress: Blue→purple gradient fill
+   - New project creation progress: Gradient fill
+   - Step indicators: Active dot gets gradient background
+
+**Phase 6: Text and detail accents**
+
+10. **Mobile: Accent text colors**
+    - Screen titles could use gradient text (via `MaskedView` + `LinearGradient`) — sparingly
+    - Activity text: Use `#a78bfa` (purple) alongside existing `#60a5fa` (blue) for variety
+    - Tool card headers: Purple accent instead of all blue
+    - Section labels: Slightly tinted rather than pure gray
+
+11. **Web: Accent text and details**
+    - Gradient text on key headings (CSS `background-clip: text`)
+    - Link hover colors: Shift toward purple
+    - Code/tool labels: Purple accent chip backgrounds
+
+**Phase 7: Conversation view specifics**
+
+12. **Mobile: Message styling**
+    - User message bubbles: Subtle blue→purple gradient background (replacing flat blue)
+    - Assistant messages: Keep dark but add thin left border with gradient
+    - Tool cards: Header area gets blue tint, expand/collapse chevron in accent color
+    - Activity bar: Purple tint (instead of flat dark blue `#1e3a5f`)
+    - Agents bar: Keep green (semantic) but slightly more vibrant
+
+13. **Web: Message styling**
+    - User messages: Gradient background
+    - Tool cards: Accent border
+    - Status banners: Richer colored backgrounds
+
+### Notes
+
+- `expo-linear-gradient` is already available in Expo — no new dependency needed for mobile gradients
+- For gradient text on mobile, use `expo-masked-view` + `LinearGradient` — only use on 1-2 key headings, not everywhere
+- Web gradient text via `background: linear-gradient(...); -webkit-background-clip: text; -webkit-text-fill-color: transparent;`
+- Keep all status indicator colors (green/amber/red/gray) unchanged — they're semantic
+- The goal is "vibrant accents" not "everything is gradient" — restraint is key
+- Terminal screen keeps its GitHub-dark theme (`#0d1117`) — just the header gets gradient treatment
+
+### Tests Needed
+- Visual inspection on both iOS and Android (gradient rendering can differ)
+- Web: Check all screens in Chrome and Firefox
+- Dark mode only (no light mode considerations)
+- Verify status colors still read clearly against new tinted backgrounds
+- Verify text contrast ratios remain accessible on tinted cards
+- Check `LinearGradient` performance on older devices (should be fine for static backgrounds)

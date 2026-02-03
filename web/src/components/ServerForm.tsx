@@ -4,10 +4,10 @@ import { useServers } from '../hooks/useServers';
 
 interface ServerFormProps {
   serverId?: string;
-  onBack: () => void;
+  onClose: () => void;
 }
 
-export function ServerForm({ serverId, onBack }: ServerFormProps) {
+export function ServerForm({ serverId, onClose }: ServerFormProps) {
   const { getServer, addServer, updateServer } = useServers();
   const existing = serverId ? getServer(serverId) : undefined;
 
@@ -35,7 +35,7 @@ export function ServerForm({ serverId, onBack }: ServerFormProps) {
     e.preventDefault();
 
     const server: Server = {
-      id: existing?.id || crypto.randomUUID(),
+      id: existing?.id || (crypto.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`),
       name: name.trim() || host,
       host: host.trim(),
       port: parseInt(port, 10) || 9877,
@@ -51,102 +51,101 @@ export function ServerForm({ serverId, onBack }: ServerFormProps) {
       addServer(server);
     }
 
-    onBack();
+    onClose();
   };
 
   return (
-    <div className="screen">
-      <header className="form-header">
-        <button className="icon-btn" onClick={onBack}>
-          &larr;
-        </button>
-        <h2>{existing ? 'Edit Server' : 'Add Server'}</h2>
-        <div className="header-spacer" />
-      </header>
+    <div className="modal-overlay" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="modal-content server-form-modal">
+        <div className="modal-header">
+          <h3>{existing ? 'Edit Server' : 'Add Server'}</h3>
+          <button className="modal-close" onClick={onClose}>&times;</button>
+        </div>
 
-      <div className="form-container">
-        <form onSubmit={handleSubmit} className="server-form">
-          <div className="form-group">
-            <label htmlFor="name">Name</label>
-            <input
-              id="name"
-              type="text"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="My Server"
-            />
-          </div>
+        <div className="form-container">
+          <form onSubmit={handleSubmit} className="server-form">
+            <div className="form-group">
+              <label htmlFor="name">Name</label>
+              <input
+                id="name"
+                type="text"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="My Server"
+              />
+            </div>
 
-          <div className="form-group">
-            <label htmlFor="host">Host</label>
-            <input
-              id="host"
-              type="text"
-              value={host}
-              onChange={(e) => setHost(e.target.value)}
-              placeholder="192.168.1.100"
-              required
-            />
-          </div>
+            <div className="form-group">
+              <label htmlFor="host">Host</label>
+              <input
+                id="host"
+                type="text"
+                value={host}
+                onChange={(e) => setHost(e.target.value)}
+                placeholder="192.168.1.100"
+                required
+              />
+            </div>
 
-          <div className="form-group">
-            <label htmlFor="port">Port</label>
-            <input
-              id="port"
-              type="number"
-              value={port}
-              onChange={(e) => setPort(e.target.value)}
-              required
-            />
-          </div>
+            <div className="form-group">
+              <label htmlFor="port">Port</label>
+              <input
+                id="port"
+                type="number"
+                value={port}
+                onChange={(e) => setPort(e.target.value)}
+                required
+              />
+            </div>
 
-          <div className="form-group">
-            <label htmlFor="token">Token</label>
-            <input
-              id="token"
-              type="password"
-              value={token}
-              onChange={(e) => setToken(e.target.value)}
-              placeholder="Auth token"
-              required
-            />
-          </div>
+            <div className="form-group">
+              <label htmlFor="token">Token</label>
+              <input
+                id="token"
+                type="password"
+                value={token}
+                onChange={(e) => setToken(e.target.value)}
+                placeholder="Auth token"
+                required
+              />
+            </div>
 
-          <div className="form-group">
-            <label htmlFor="sshUser">SSH User (optional)</label>
-            <input
-              id="sshUser"
-              type="text"
-              value={sshUser}
-              onChange={(e) => setSshUser(e.target.value)}
-              placeholder="username"
-            />
-          </div>
+            <div className="form-group">
+              <label htmlFor="sshUser">SSH User (optional)</label>
+              <input
+                id="sshUser"
+                type="text"
+                value={sshUser}
+                onChange={(e) => setSshUser(e.target.value)}
+                placeholder="username"
+              />
+            </div>
 
-          <div className="form-group checkbox">
-            <input
-              id="useTls"
-              type="checkbox"
-              checked={useTls}
-              onChange={(e) => setUseTls(e.target.checked)}
-            />
-            <label htmlFor="useTls">Use TLS (wss://)</label>
-          </div>
+            <div className="form-group checkbox">
+              <input
+                id="useTls"
+                type="checkbox"
+                checked={useTls}
+                onChange={(e) => setUseTls(e.target.checked)}
+              />
+              <label htmlFor="useTls">Use TLS (wss://)</label>
+            </div>
 
-          <div className="form-group checkbox">
-            <input
-              id="enabled"
-              type="checkbox"
-              checked={enabled}
-              onChange={(e) => setEnabled(e.target.checked)}
-            />
-            <label htmlFor="enabled">Enabled</label>
-          </div>
+            <div className="form-group checkbox">
+              <input
+                id="enabled"
+                type="checkbox"
+                checked={enabled}
+                onChange={(e) => setEnabled(e.target.checked)}
+              />
+              <label htmlFor="enabled">Enabled</label>
+            </div>
 
-          <button type="submit" className="btn-primary">
-            {existing ? 'Save' : 'Add Server'}
-          </button>
-        </form>
+            <button type="submit" className="btn-primary">
+              {existing ? 'Save' : 'Add Server'}
+            </button>
+          </form>
+        </div>
       </div>
     </div>
   );

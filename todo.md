@@ -51,6 +51,7 @@ Quick capture for ideas and tasks. Run `/plan` to process into detailed plans.
 - [done] Git worktree support for multiple sessions on same project
 - [done] Mobile terminal parity - SSH command display, copy, scroll-aware auto-scroll
 - [done] Parallel Work Groups - daemon, web dashboard, mobile dashboard, push notifications, tests
+- [done] Vibrant color refresh - blue/purple accents across mobile + web
 
 ## Planned
 (none)
@@ -59,7 +60,7 @@ Quick capture for ideas and tasks. Run `/plan` to process into detailed plans.
 (none)
 
 ## Upcoming
-(none)
+- Persistent file tab bar in web SessionView -- service/hook/component scaffolded (web/src/services/openFiles.ts, hooks/useOpenFiles.ts, components/FileTabBar.tsx, CSS added) but wiring into SessionView causes a hard browser freeze on file open. Needs debugging -- possibly related to re-render cascade or FilePathContent regex interaction. Reverted SessionView to pre-tab-bar state.
 
 ## Deferred
 (none)

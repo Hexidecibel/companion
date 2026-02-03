@@ -363,7 +363,8 @@ export function extractHighlights(messages: ConversationMessage[]): Conversation
       if (msg.type === 'user' && msg.content && msg.content.trim()) return true;
       // Include assistant messages with content OR toolCalls
       if (msg.type === 'assistant') {
-        const hasContent = msg.content && msg.content.trim();
+        const trimmed = msg.content?.trim();
+        const hasContent = trimmed && trimmed !== '(no content)';
         const hasToolCalls = msg.toolCalls && msg.toolCalls.length > 0;
         return hasContent || hasToolCalls;
       }
