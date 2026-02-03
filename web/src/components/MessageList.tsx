@@ -25,6 +25,7 @@ export function MessageList({
   const bottomRef = useRef<HTMLDivElement>(null);
   const isNearBottomRef = useRef(true);
   const prevScrollHeightRef = useRef(0);
+  const isPrependRef = useRef(false);
 
   // Track near-bottom state on every scroll
   const updateNearBottom = useCallback(() => {
@@ -43,16 +44,17 @@ export function MessageList({
     }
   }, [highlights]);
 
-  // Preserve scroll position when prepending (load more)
+  // Preserve scroll position when prepending (load more) only — not on normal updates
   useLayoutEffect(() => {
     const el = containerRef.current;
     if (!el) return;
 
-    if (prevScrollHeightRef.current > 0 && el.scrollHeight > prevScrollHeightRef.current) {
+    if (isPrependRef.current && prevScrollHeightRef.current > 0 && el.scrollHeight > prevScrollHeightRef.current) {
       const diff = el.scrollHeight - prevScrollHeightRef.current;
       el.scrollTop += diff;
     }
     prevScrollHeightRef.current = el.scrollHeight;
+    isPrependRef.current = false;
   }, [highlights]);
 
   // Scroll handler for load-more trigger + near-bottom tracking
@@ -62,6 +64,7 @@ export function MessageList({
     if (!el || loadingMore || !hasMore) return;
     if (el.scrollTop < 80) {
       prevScrollHeightRef.current = el.scrollHeight;
+      isPrependRef.current = true;
       onLoadMore();
     }
   }, [loadingMore, hasMore, onLoadMore, updateNearBottom]);

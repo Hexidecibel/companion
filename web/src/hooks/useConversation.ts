@@ -117,8 +117,10 @@ export function useConversation(
     async function pollUpdates() {
       if (!conn || cancelled || !isValid(serverId!, sessionId!, guardEpoch)) return;
       try {
+        // Request at least as many items as currently loaded so load-more results aren't wiped
+        const pollLimit = Math.max(PAGE_SIZE, highlightsRef.current.length);
         const [hlResponse, statusResponse] = await Promise.all([
-          conn.sendRequest('get_highlights', { limit: PAGE_SIZE }),
+          conn.sendRequest('get_highlights', { limit: pollLimit }),
           conn.sendRequest('get_status'),
         ]);
 
