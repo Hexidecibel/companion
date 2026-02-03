@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { ConversationHighlight } from '../types';
-import { ArchivedConversation, getArchives, deleteArchive } from '../services/archiveService';
+import { ArchivedConversation, getArchives, deleteArchive, clearAllArchives } from '../services/archiveService';
 import { MessageBubble } from './MessageBubble';
 
 interface ArchiveModalProps {
@@ -16,6 +16,7 @@ function formatDate(ts: number): string {
 export function ArchiveModal({ onClose }: ArchiveModalProps) {
   const [archives, setArchives] = useState<ArchivedConversation[]>([]);
   const [viewing, setViewing] = useState<ArchivedConversation | null>(null);
+  const [confirmClearAll, setConfirmClearAll] = useState(false);
 
   useEffect(() => {
     setArchives(getArchives());
@@ -25,6 +26,17 @@ export function ArchiveModal({ onClose }: ArchiveModalProps) {
     deleteArchive(id);
     setArchives(getArchives());
     if (viewing?.id === id) setViewing(null);
+  };
+
+  const handleClearAll = () => {
+    if (!confirmClearAll) {
+      setConfirmClearAll(true);
+      return;
+    }
+    clearAllArchives();
+    setArchives([]);
+    setViewing(null);
+    setConfirmClearAll(false);
   };
 
   if (viewing) {
@@ -59,7 +71,17 @@ export function ArchiveModal({ onClose }: ArchiveModalProps) {
       <div className="modal-content archive-list-modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <h3>Archives ({archives.length})</h3>
-          <button className="modal-close" onClick={onClose}>{'\u2715'}</button>
+          <div className="archive-header-actions">
+            {archives.length > 0 && (
+              <button
+                className={`archive-clear-all-btn ${confirmClearAll ? 'confirming' : ''}`}
+                onClick={handleClearAll}
+              >
+                {confirmClearAll ? 'Confirm' : 'Clear All'}
+              </button>
+            )}
+            <button className="modal-close" onClick={onClose}>{'\u2715'}</button>
+          </div>
         </div>
 
         <div className="archive-list-body">

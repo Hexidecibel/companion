@@ -320,8 +320,12 @@ export function SessionView({
           <SubAgentBar
             agents={agents}
             runningCount={runningCount}
+            completedCount={completedCount}
             totalAgents={totalAgents}
             onClick={() => setShowAgentsModal(true)}
+            onViewAgent={(agentId) => {
+              setViewingAgentId(agentId);
+            }}
           />
 
           {workGroup && workGroup.status === 'active' && (

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useConnections } from '../hooks/useConnections';
 import { connectionManager } from '../services/ConnectionManager';
 import { getFontScale, saveFontScale } from '../services/storage';
+import { clearAllArchives } from '../services/archiveService';
 import { NotificationSettingsModal } from './NotificationSettingsModal';
 
 interface SettingsScreenProps {
@@ -20,12 +21,22 @@ export function SettingsScreen({ onBack }: SettingsScreenProps) {
   const [fontScale, setFontScale] = useState(getFontScale);
   const [notifServerId, setNotifServerId] = useState<string | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
+  const [confirmClearHistory, setConfirmClearHistory] = useState(false);
   const [rotatingServer, setRotatingServer] = useState<string | null>(null);
   const [rotateResult, setRotateResult] = useState<{ serverId: string; token?: string; error?: string } | null>(null);
 
   const handleFontScale = (value: number) => {
     saveFontScale(value);
     setFontScale(value);
+  };
+
+  const handleClearHistory = () => {
+    if (!confirmClearHistory) {
+      setConfirmClearHistory(true);
+      return;
+    }
+    clearAllArchives();
+    setConfirmClearHistory(false);
   };
 
   const handleClearData = () => {
@@ -167,6 +178,23 @@ export function SettingsScreen({ onBack }: SettingsScreenProps) {
           <h3 className="settings-section-title">Data</h3>
           <div className="settings-card">
             <button
+              className={`settings-action-btn ${confirmClearHistory ? 'settings-action-btn-danger' : ''}`}
+              onClick={handleClearHistory}
+              style={{ width: '100%', padding: '10px 14px', fontSize: 14 }}
+            >
+              {confirmClearHistory ? 'Confirm: Clear History' : 'Clear History'}
+            </button>
+            {confirmClearHistory && (
+              <div className="settings-card-detail" style={{ marginTop: 8 }}>
+                This will delete all saved conversation archives.{' '}
+                <button className="settings-cancel-link" onClick={() => setConfirmClearHistory(false)}>
+                  Cancel
+                </button>
+              </div>
+            )}
+          </div>
+          <div className="settings-card">
+            <button
               className={`settings-danger-btn ${confirmClear ? 'confirming' : ''}`}
               onClick={handleClearData}
             >
@@ -187,10 +215,13 @@ export function SettingsScreen({ onBack }: SettingsScreenProps) {
         <section className="settings-section">
           <h3 className="settings-section-title">About</h3>
           <div className="settings-card">
-            <div className="settings-card-label">Companion Web v0.0.1</div>
+            <div className="settings-card-label">Companion Web v{__APP_VERSION__}</div>
             <div className="settings-card-detail">
               A companion app for AI coding sessions that lets you monitor sessions
               and respond from your browser.
+            </div>
+            <div className="settings-card-detail" style={{ marginTop: 6, fontSize: 11 }}>
+              Built {new Date(__BUILD_TIME__).toLocaleString()}
             </div>
           </div>
         </section>
