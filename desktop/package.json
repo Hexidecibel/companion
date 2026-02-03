@@ -1,0 +1,14 @@
+{
+  "name": "@hexidecibel/companion-desktop",
+  "version": "0.0.1",
+  "private": true,
+  "scripts": {
+    "tauri": "tauri",
+    "dev": "tauri dev",
+    "build": "tauri build",
+    "typecheck": "echo 'No TypeScript in desktop — run cd ../web && npm run typecheck'"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.0.0"
+  }
+}
