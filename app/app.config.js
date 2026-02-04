@@ -4,7 +4,7 @@ export default {
   expo: {
     name: "Hexi's Companion",
     slug: "companion-app",
-    version: "0.0.1",
+    version: "0.1.0",
     sdkVersion: "54.0.0",
     platforms: ["ios", "android", "web"],
     orientation: "portrait",

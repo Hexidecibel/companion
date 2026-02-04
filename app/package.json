@@ -1,6 +1,6 @@
 {
   "name": "companion-app",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "main": "expo/AppEntry.js",
   "scripts": {
     "start": "expo start --port 9009",
