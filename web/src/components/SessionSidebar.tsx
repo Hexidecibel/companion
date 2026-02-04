@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect, useCallback } from 'react';
-import { ServerSummary, ActiveSession, SessionSummary, WorkGroup } from '../types';
+import { ServerSummary, ActiveSession, SessionSummary, WorkGroup, WorkerSession } from '../types';
 import { useConnections } from '../hooks/useConnections';
 import { useServers } from '../hooks/useServers';
 import { connectionManager } from '../services/ConnectionManager';
@@ -73,11 +73,13 @@ const WORKER_STATUS_DOT: Record<string, string> = {
 };
 
 interface ContextMenuState {
-  type: 'server' | 'session';
+  type: 'server' | 'session' | 'worker';
   position: { x: number; y: number };
   serverId: string;
   sessionId?: string;
   tmuxSessionName?: string;
+  workerId?: string;
+  workerGroupId?: string;
 }
 
 export function SessionSidebar({
@@ -172,6 +174,48 @@ export function SessionSidebar({
       tmuxSessionName,
     });
   }, []);
+
+  const handleWorkerContextMenu = useCallback((e: React.MouseEvent, serverId: string, worker: WorkerSession, group: WorkGroup) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setContextMenu({
+      type: 'worker',
+      position: { x: e.clientX, y: e.clientY },
+      serverId,
+      sessionId: worker.sessionId,
+      tmuxSessionName: worker.tmuxSessionName,
+      workerId: worker.id,
+      workerGroupId: group.id,
+    });
+  }, []);
+
+  const buildWorkerMenuItems = useCallback((serverId: string, sessionId: string, tmuxSessionName?: string): ContextMenuEntry[] => {
+    const isMuted = mutedSessions?.has(sessionId) ?? false;
+    const items: ContextMenuEntry[] = [];
+
+    if (onToggleMute) {
+      items.push({
+        label: isMuted ? 'Unmute' : 'Mute',
+        onClick: () => onToggleMute(serverId, sessionId),
+      });
+    }
+
+    if (tmuxSessionName) {
+      if (items.length > 0) items.push(null);
+      items.push({
+        label: 'Kill Worker',
+        danger: true,
+        onClick: () => {
+          const conn = connectionManager.getConnection(serverId);
+          if (conn) {
+            conn.sendRequest('kill_tmux_session', { sessionName: tmuxSessionName });
+          }
+        },
+      });
+    }
+
+    return items;
+  }, [mutedSessions, onToggleMute]);
 
   const buildServerMenuItems = useCallback((serverId: string): ContextMenuEntry[] => {
     const snap = snapshots.find((s) => s.serverId === serverId);
@@ -474,6 +518,7 @@ export function SessionSidebar({
                                 key={worker.id}
                                 className={`sidebar-worker ${isWorkerActive ? 'active' : ''}`}
                                 onClick={() => onSelectSession(snap.serverId, worker.sessionId)}
+                                onContextMenu={(e) => handleWorkerContextMenu(e, snap.serverId, worker, foremanGroup)}
                               >
                                 <span className="sidebar-worker-connector">
                                   {isLast ? '\u2514' : '\u251C'}
@@ -540,6 +585,8 @@ export function SessionSidebar({
           items={
             contextMenu.type === 'server'
               ? buildServerMenuItems(contextMenu.serverId)
+              : contextMenu.type === 'worker'
+              ? buildWorkerMenuItems(contextMenu.serverId, contextMenu.sessionId!, contextMenu.tmuxSessionName)
               : buildSessionMenuItems(contextMenu.serverId, contextMenu.sessionId!, contextMenu.tmuxSessionName)
           }
           position={contextMenu.position}

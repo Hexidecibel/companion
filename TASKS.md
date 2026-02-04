@@ -133,6 +133,31 @@ The web client becomes the primary high-performance workspace for managing all C
 
 ---
 
+## Phase 6: macOS Desktop App
+
+The Tauri-based desktop app wraps the web client in a native shell. These tasks add native platform features that a browser tab can't provide.
+
+### 6.1 - Essential (app feels broken without these)
+- [ ] File/image upload - drag-and-drop from Finder, clipboard paste (Cmd+V), and native file picker
+- [ ] Native macOS notifications - replace browser Notification API with Tauri `notification` plugin; integrate with Notification Center, Do Not Disturb, click-to-focus
+- [ ] Window state persistence - remember size/position between launches (Tauri `window-state` plugin)
+
+### 6.2 - Native Feel (makes it feel like a real Mac app)
+- [ ] macOS menu bar - File (New Session, Close Window), Edit (standard), View (Reload, Zoom), Window (Minimize, Zoom, Bring All to Front)
+- [ ] Menu keyboard shortcuts - Cmd+, for settings, Cmd+N new session, Cmd+1-9 switch sessions, Cmd+W close window (not quit)
+- [ ] System tray / menu bar icon - background status indicator, click to show/hide window, badge count for waiting sessions
+- [ ] Auto-launch on login - Tauri `autostart` plugin, toggle in settings
+
+### 6.3 - Nice to Have
+- [ ] Deep links - `companion://` URL scheme to open specific sessions from terminal or other apps
+- [ ] Global hotkey - toggle window visibility from anywhere (e.g. Ctrl+Shift+C)
+- [ ] Touch Bar support - session status indicators for older MacBook Pros
+- [ ] Build pipeline - add desktop/Tauri builds to CI workflow
+- [ ] Code signing and notarization for distribution outside App Store
+- [ ] Auto-update - Tauri `updater` plugin for in-app updates
+
+---
+
 ## Future / V2+ Ideas
 
 ### Conversation Archive - V2 Enhancements

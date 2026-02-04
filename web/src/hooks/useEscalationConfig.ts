@@ -6,6 +6,9 @@ export interface EscalationConfig {
     waiting_for_input: boolean;
     error_detected: boolean;
     session_completed: boolean;
+    worker_waiting: boolean;
+    worker_error: boolean;
+    work_group_ready: boolean;
   };
   pushDelaySeconds: number;
   rateLimitSeconds: number;
@@ -29,6 +32,9 @@ const DEFAULT_CONFIG: EscalationConfig = {
     waiting_for_input: true,
     error_detected: true,
     session_completed: false,
+    worker_waiting: true,
+    worker_error: true,
+    work_group_ready: true,
   },
   pushDelaySeconds: 300,
   rateLimitSeconds: 60,

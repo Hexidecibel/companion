@@ -291,6 +291,18 @@ export class WorkGroupManager extends EventEmitter {
     }
   }
 
+  async dismissWorkGroup(groupId: string): Promise<{ success: boolean }> {
+    const group = this.groups.get(groupId);
+    if (!group) return { success: false };
+    if (group.status === 'completed' || group.status === 'cancelled' || group.status === 'failed') {
+      this.groups.delete(groupId);
+      this.saveState();
+      this.emitUpdate(group);
+      return { success: true };
+    }
+    return { success: false };
+  }
+
   getWorkGroups(): WorkGroup[] {
     return Array.from(this.groups.values());
   }
@@ -375,9 +387,9 @@ export class WorkGroupManager extends EventEmitter {
       group.status = 'completed';
       group.completedAt = Date.now();
 
-      // Clean up worktrees for completed workers
+      // Clean up worktrees and branches for completed workers
       for (const worker of completedWorkers) {
-        await this.cleanupWorker(mainRepoDir, worker);
+        await this.cleanupWorker(mainRepoDir, worker, true);
       }
 
       this.saveState();
@@ -446,7 +458,7 @@ export class WorkGroupManager extends EventEmitter {
         await this.tmux.killSession(worker.tmuxSessionName);
       }
       if (mainRepoDir) {
-        await this.cleanupWorker(mainRepoDir, worker);
+        await this.cleanupWorker(mainRepoDir, worker, true);
       }
     }
 
@@ -538,7 +550,7 @@ export class WorkGroupManager extends EventEmitter {
     return { success };
   }
 
-  private async cleanupWorker(mainRepoDir: string, worker: WorkerSession): Promise<void> {
+  private async cleanupWorker(mainRepoDir: string, worker: WorkerSession, deleteBranch: boolean = false): Promise<void> {
     // Kill tmux session
     if (worker.tmuxSessionName) {
       try {
@@ -554,6 +566,15 @@ export class WorkGroupManager extends EventEmitter {
         await this.tmux.removeWorktree(mainRepoDir, worker.worktreePath);
       } catch {
         // Ignore
+      }
+    }
+
+    // Delete the branch (best-effort)
+    if (deleteBranch && worker.branch) {
+      try {
+        await execAsync(`git branch -D "${worker.branch}"`, { cwd: mainRepoDir });
+      } catch {
+        // Branch may already be gone
       }
     }
   }

@@ -10,6 +10,7 @@ interface WorkGroupPanelProps {
   onMerge: () => void;
   onCancel: () => void;
   onRetryWorker: (workerId: string) => void;
+  onDismiss?: () => void;
   merging?: boolean;
 }
 
@@ -40,6 +41,7 @@ export function WorkGroupPanel({
   onMerge,
   onCancel,
   onRetryWorker,
+  onDismiss,
   merging,
 }: WorkGroupPanelProps) {
   const [confirmCancel, setConfirmCancel] = useState(false);
@@ -114,6 +116,17 @@ export function WorkGroupPanel({
           />
         ))}
       </div>
+
+      {(group.status === 'completed' || group.status === 'cancelled' || group.status === 'failed') && onDismiss && (
+        <div className="workgroup-panel-actions">
+          <button
+            className="workgroup-panel-cancel-btn"
+            onClick={onDismiss}
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
 
       {group.status === 'active' && (
         <div className="workgroup-panel-actions">

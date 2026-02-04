@@ -782,6 +782,10 @@ export class WebSocketHandler {
         this.handleSendWorkerInput(client, payload as { groupId: string; workerId: string; text: string }, requestId);
         break;
 
+      case 'dismiss_work_group':
+        this.handleDismissWorkGroup(client, payload as { groupId: string }, requestId);
+        break;
+
       // Scaffold endpoints
       case 'get_scaffold_templates': {
         const scaffoldPayload = payload as { description?: string } | undefined;
@@ -2588,6 +2592,24 @@ export class WebSocketHandler {
       type: 'worker_input_sent',
       success: result.success,
       error: result.error,
+      requestId,
+    });
+  }
+
+  private async handleDismissWorkGroup(
+    client: AuthenticatedClient,
+    payload: { groupId: string } | undefined,
+    requestId?: string
+  ): Promise<void> {
+    if (!this.workGroupManager || !payload?.groupId) {
+      this.send(client.ws, { type: 'work_group_dismissed', success: false, error: 'Missing groupId', requestId });
+      return;
+    }
+    const result = await this.workGroupManager.dismissWorkGroup(payload.groupId);
+    this.send(client.ws, {
+      type: 'work_group_dismissed',
+      success: result.success,
+      error: result.success ? undefined : 'Group is not in completed or cancelled state',
       requestId,
     });
   }

@@ -9,6 +9,7 @@ import { SessionView } from './SessionView';
 import { ShortcutHelpOverlay } from './ShortcutHelpOverlay';
 import { NotificationSettingsModal } from './NotificationSettingsModal';
 import { useSessionMute } from '../hooks/useSessionMute';
+import { useBrowserNotificationListener } from '../hooks/useBrowserNotificationListener';
 
 interface DashboardProps {
   onSettings?: () => void;
@@ -25,6 +26,9 @@ export function Dashboard({ onSettings }: DashboardProps) {
 
   // Use work groups for the active server
   const activeWorkGroups = useWorkGroups(activeSession?.serverId ?? null);
+
+  // Browser notification listener (runs at dashboard level so notifications always fire)
+  useBrowserNotificationListener(activeSession?.serverId ?? null);
 
   // Merge all work groups into a per-server map for sidebar
   const allWorkGroups = useMemo(() => {
@@ -161,6 +165,11 @@ export function Dashboard({ onSettings }: DashboardProps) {
     await activeWorkGroups.retryWorker(activeSession.serverId, activeWorkGroup.id, workerId);
   }, [activeSession, activeWorkGroup, activeWorkGroups]);
 
+  const handleDismissGroup = useCallback(async () => {
+    if (!activeSession || !activeWorkGroup) return;
+    await activeWorkGroups.dismissGroup(activeSession.serverId, activeWorkGroup.id);
+  }, [activeSession, activeWorkGroup, activeWorkGroups]);
+
   const handleToggleMute = useCallback((_serverId: string, sessionId: string) => {
     sessionMute.toggleMute(sessionId);
   }, [sessionMute]);
@@ -189,6 +198,7 @@ export function Dashboard({ onSettings }: DashboardProps) {
           onMergeGroup={handleMergeGroup}
           onCancelGroup={handleCancelGroup}
           onRetryWorker={handleRetryWorker}
+          onDismissGroup={handleDismissGroup}
           merging={merging}
         />
       </main>

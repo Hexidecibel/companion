@@ -16,6 +16,7 @@ export function WorkGroupBar({ group, onClick }: WorkGroupBarProps) {
   if (errored > 0) statusText += ` \u00B7 ${errored} errored`;
   if (group.status === 'merging') statusText = 'Merging branches...';
   if (group.status === 'completed') statusText = `Merged \u2013 ${total} workers complete`;
+  if (group.status === 'failed') statusText = `Merge failed \u2013 click to dismiss`;
 
   const isActive = group.status === 'active' && group.workers.some(w => w.status === 'working');
 

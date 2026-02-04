@@ -5,6 +5,9 @@ interface BrowserNotifPrefs {
   waiting_for_input: boolean;
   error_detected: boolean;
   session_completed: boolean;
+  worker_waiting: boolean;
+  worker_error: boolean;
+  work_group_ready: boolean;
 }
 
 const DEFAULT_PREFS: BrowserNotifPrefs = {
@@ -12,6 +15,9 @@ const DEFAULT_PREFS: BrowserNotifPrefs = {
   waiting_for_input: true,
   error_detected: true,
   session_completed: true,
+  worker_waiting: true,
+  worker_error: true,
+  work_group_ready: true,
 };
 
 class BrowserNotificationService {
@@ -86,6 +92,9 @@ class BrowserNotificationService {
       case 'waiting_for_input': return prefs.waiting_for_input;
       case 'error_detected': return prefs.error_detected;
       case 'session_completed': return prefs.session_completed;
+      case 'worker_waiting': return prefs.worker_waiting;
+      case 'worker_error': return prefs.worker_error;
+      case 'work_group_ready': return prefs.work_group_ready;
       default: return true;
     }
   }

@@ -10,12 +10,18 @@ const EVENT_TYPE_LABELS: Record<string, string> = {
   waiting_for_input: 'Waiting for Input',
   error_detected: 'Error Detected',
   session_completed: 'Session Completed',
+  worker_waiting: 'Worker Waiting',
+  worker_error: 'Worker Error',
+  work_group_ready: 'Group Ready to Merge',
 };
 
 const EVENT_TYPE_COLORS: Record<string, string> = {
   waiting_for_input: 'var(--accent-amber)',
   error_detected: 'var(--accent-red)',
   session_completed: 'var(--accent-green)',
+  worker_waiting: 'var(--accent-amber)',
+  worker_error: 'var(--accent-red)',
+  work_group_ready: 'var(--accent-blue)',
 };
 
 const PUSH_DELAY_OPTIONS = [
@@ -148,7 +154,7 @@ function EscalationTab({
       {/* Event type checkboxes */}
       <div className="notif-card">
         <div className="notif-card-name" style={{ marginBottom: 8 }}>Event Types</div>
-        {(['waiting_for_input', 'error_detected', 'session_completed'] as const).map((evt) => (
+        {(['waiting_for_input', 'error_detected', 'session_completed', 'worker_waiting', 'worker_error', 'work_group_ready'] as const).map((evt) => (
           <div key={evt} className="notif-browser-event-row">
             <span>{EVENT_TYPE_LABELS[evt]}</span>
             <label className="notif-toggle">

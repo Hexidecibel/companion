@@ -505,8 +505,22 @@ export class SessionWatcher extends EventEmitter {
     const tracked = this.conversations.get(targetId);
     if (!tracked) return [];
 
-    // Use cached messages from last file change instead of re-parsing
-    if (tracked.cachedMessages) return tracked.cachedMessages;
+    // Check if file has been modified since our cache (catches race with debounce)
+    if (tracked.cachedMessages) {
+      try {
+        const currentMtime = fs.statSync(tracked.path).mtimeMs;
+        if (currentMtime > tracked.lastModified) {
+          // File changed since cache — re-parse and update cache
+          const messages = parseConversationFile(tracked.path);
+          tracked.cachedMessages = messages;
+          tracked.lastModified = currentMtime;
+          return messages;
+        }
+      } catch {
+        // stat failed, use cache
+      }
+      return tracked.cachedMessages;
+    }
     return parseConversationFile(tracked.path);
   }
 

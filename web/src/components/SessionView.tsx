@@ -35,6 +35,7 @@ interface SessionViewProps {
   onMergeGroup?: () => void;
   onCancelGroup?: () => void;
   onRetryWorker?: (workerId: string) => void;
+  onDismissGroup?: () => void;
   merging?: boolean;
 }
 
@@ -48,6 +49,7 @@ export function SessionView({
   onMergeGroup,
   onCancelGroup,
   onRetryWorker,
+  onDismissGroup,
   merging,
 }: SessionViewProps) {
   const {
@@ -311,6 +313,7 @@ export function SessionView({
           onMerge={onMergeGroup}
           onCancel={onCancelGroup}
           onRetryWorker={onRetryWorker}
+          onDismiss={onDismissGroup}
           merging={merging}
         />
       ) : (
@@ -328,7 +331,7 @@ export function SessionView({
             }}
           />
 
-          {workGroup && workGroup.status === 'active' && (
+          {workGroup && (workGroup.status === 'active' || workGroup.status === 'merging' || workGroup.status === 'completed' || workGroup.status === 'failed') && (
             <WorkGroupBar
               group={workGroup}
               onClick={() => setShowWorkGroupPanel(true)}

@@ -17,6 +17,8 @@ interface UseWorkGroupsReturn {
   cancelGroup: (serverId: string, groupId: string) => Promise<{ success: boolean; error?: string }>;
   /** Retry a failed worker */
   retryWorker: (serverId: string, groupId: string, workerId: string) => Promise<{ success: boolean; error?: string }>;
+  /** Dismiss a completed/cancelled work group from the list */
+  dismissGroup: (serverId: string, groupId: string) => Promise<{ success: boolean; error?: string }>;
 }
 
 export function useWorkGroups(serverId: string | null): UseWorkGroupsReturn {
@@ -140,5 +142,22 @@ export function useWorkGroups(serverId: string | null): UseWorkGroupsReturn {
     }
   }, []);
 
-  return { groups, loading, getGroupForSession, sendWorkerInput, mergeGroup, cancelGroup, retryWorker };
+  const dismissGroup = useCallback(async (
+    sid: string, groupId: string
+  ): Promise<{ success: boolean; error?: string }> => {
+    const conn = connectionManager.getConnection(sid);
+    if (!conn?.isConnected()) return { success: false, error: 'Not connected' };
+    try {
+      const res = await conn.sendRequest('dismiss_work_group', { groupId });
+      if (res.success) {
+        // Remove from local state immediately
+        setGroups(prev => prev.filter(g => g.id !== groupId));
+      }
+      return { success: res.success, error: res.error };
+    } catch (err) {
+      return { success: false, error: String(err) };
+    }
+  }, []);
+
+  return { groups, loading, getGroupForSession, sendWorkerInput, mergeGroup, cancelGroup, retryWorker, dismissGroup };
 }
