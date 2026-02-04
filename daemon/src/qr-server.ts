@@ -218,9 +218,13 @@ export function createQRRequestHandler(config: DaemonConfig): http.RequestListen
       }
 
       try {
+        // Prefer host/port sent by the client (from document.location) since
+        // reverse proxies like HAProxy may strip the Host header
+        const clientHost = url.searchParams.get('host');
+        const clientPort = url.searchParams.get('port');
         const qrConfig: QRConfig = {
-          host: getLocalIP(),
-          port: config.port,
+          host: clientHost || (req.headers.host || '').split(':')[0] || getLocalIP(),
+          port: clientPort ? parseInt(clientPort, 10) : config.port,
           token: config.token,
           tls: config.tls,
         };
@@ -257,9 +261,11 @@ export function createQRRequestHandler(config: DaemonConfig): http.RequestListen
         return;
       }
 
+      const clientHost = url.searchParams.get('host');
+      const clientPort = url.searchParams.get('port');
       const qrConfig: QRConfig = {
-        host: getLocalIP(),
-        port: config.port,
+        host: clientHost || (req.headers.host || '').split(':')[0] || getLocalIP(),
+        port: clientPort ? parseInt(clientPort, 10) : config.port,
         token: config.token,
         tls: config.tls,
       };
@@ -272,6 +278,8 @@ export function createQRRequestHandler(config: DaemonConfig): http.RequestListen
     if (urlPath === '/') {
       // HTML page with token gate - must enter token before seeing QR
       const webClientPath = webDir ? '/web' : '';
+      // Use request host for display; JS will read location.host at runtime
+      const displayHost = (req.headers.host || '').split(':')[0] || getLocalIP();
 
       const html = `<!DOCTYPE html>
 <html>
@@ -368,7 +376,7 @@ export function createQRRequestHandler(config: DaemonConfig): http.RequestListen
       <button class="token-btn" onclick="authenticate()">Authenticate</button>
     </div>
     <div class="info">
-      <p>Server: <code>${getLocalIP()}:${config.port}</code></p>
+      <p>Server: <code class="server-addr">${displayHost}:${config.port}</code></p>
     </div>
   </div>
 
@@ -376,25 +384,38 @@ export function createQRRequestHandler(config: DaemonConfig): http.RequestListen
     <p>Scan this QR code with the app to connect</p>
     <img id="qr-img" alt="QR Code" width="300" height="300">
     <div class="info">
-      <p>Server: <code>${getLocalIP()}:${config.port}</code></p>
+      <p>Server: <code class="server-addr">${displayHost}:${config.port}</code></p>
       <p>TLS: <code>${config.tls ? 'Enabled' : 'Disabled'}</code></p>
     </div>
-    ${webClientPath ? `<a href="${webClientPath}" class="web-link">Open Web Client</a>` : ''}
+    ${webClientPath ? `<a id="web-link" href="${webClientPath}" class="web-link">Open Web Client</a>` : ''}
   </div>
 
   <script>
     function authenticate() {
       var token = document.getElementById('token').value;
       if (!token) return;
-      // Test by fetching the QR image with the token
-      fetch('/qr.png?token=' + encodeURIComponent(token))
+      // Pass the browser's host back to the server so the QR code uses the
+      // correct address even behind reverse proxies that strip the Host header
+      var qrParams = 'token=' + encodeURIComponent(token)
+        + '&host=' + encodeURIComponent(location.hostname)
+        + '&port=' + encodeURIComponent(location.port || (location.protocol === 'https:' ? '443' : '80'));
+      fetch('/qr.png?' + qrParams)
         .then(function(res) {
           if (res.ok) {
             document.getElementById('auth-section').style.display = 'none';
             document.getElementById('qr-section').style.display = 'flex';
             document.getElementById('qr-section').style.flexDirection = 'column';
             document.getElementById('qr-section').style.alignItems = 'center';
-            document.getElementById('qr-img').src = '/qr.png?token=' + encodeURIComponent(token);
+            document.getElementById('qr-img').src = '/qr.png?' + qrParams;
+            // Update server info to show actual host
+            document.querySelectorAll('.server-addr').forEach(function(el) {
+              el.textContent = location.host;
+            });
+            // Update web client link to pass token so it auto-connects
+            var webLink = document.getElementById('web-link');
+            if (webLink) {
+              webLink.href = '/web#token=' + encodeURIComponent(token);
+            }
           } else {
             document.getElementById('error').textContent = 'Invalid token';
             document.getElementById('error').style.display = 'block';

@@ -3,6 +3,46 @@ import { Server } from '../types';
 import { connectionManager, ConnectionSnapshot } from '../services/ConnectionManager';
 import { getServers, addServer as storageAddServer, updateServer as storageUpdateServer, deleteServer as storageDeleteServer } from '../services/storage';
 
+const LOCAL_SERVER_ID = '__local__';
+
+/**
+ * Check URL hash for a token (e.g. /web#token=xxx) and auto-create a server
+ * entry using the current browser location. This lets the setup page at /
+ * link directly to the web client with zero manual config.
+ */
+function autoDetectLocalServer(existingServers: Server[]): Server | null {
+  const hash = window.location.hash; // e.g. "#token=abc123"
+  if (!hash.startsWith('#token=')) return null;
+
+  const token = decodeURIComponent(hash.slice('#token='.length));
+  if (!token) return null;
+
+  // Clear the token from the URL so it's not visible/bookmarkable
+  history.replaceState(null, '', window.location.pathname + window.location.search);
+
+  const host = window.location.hostname;
+  const port = parseInt(window.location.port, 10) || (window.location.protocol === 'https:' ? 443 : 80);
+  const useTls = window.location.protocol === 'https:';
+
+  // Check if we already have a server for this host:port - update its token
+  const existing = existingServers.find(
+    (s) => s.host === host && s.port === port,
+  );
+  if (existing) {
+    return { ...existing, token, enabled: true };
+  }
+
+  return {
+    id: LOCAL_SERVER_ID,
+    name: host === 'localhost' || host === '127.0.0.1' ? 'Local' : host,
+    host,
+    port,
+    token,
+    useTls,
+    enabled: true,
+  };
+}
+
 interface ConnectionContextValue {
   servers: Server[];
   snapshots: ConnectionSnapshot[];
@@ -20,9 +60,22 @@ export function ConnectionProvider({ children }: { children: ReactNode }) {
   const [servers, setServers] = useState<Server[]>([]);
   const [snapshots, setSnapshots] = useState<ConnectionSnapshot[]>([]);
 
-  // Load servers from storage on mount
+  // Load servers from storage on mount, auto-detect local server from URL hash
   useEffect(() => {
-    const loaded = getServers();
+    let loaded = getServers();
+
+    const autoServer = autoDetectLocalServer(loaded);
+    if (autoServer) {
+      const existingIdx = loaded.findIndex((s) => s.id === autoServer.id);
+      if (existingIdx !== -1) {
+        loaded[existingIdx] = autoServer;
+        storageUpdateServer(autoServer);
+      } else {
+        loaded.push(autoServer);
+        storageAddServer(autoServer);
+      }
+    }
+
     setServers(loaded);
     connectionManager.connectAll(loaded);
   }, []);

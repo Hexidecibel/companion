@@ -11,11 +11,17 @@ export function ServerForm({ serverId, onClose }: ServerFormProps) {
   const { getServer, addServer, updateServer } = useServers();
   const existing = serverId ? getServer(serverId) : undefined;
 
+  // Pre-fill host/port from window.location when adding a new server
+  // (the web client is typically served by the daemon itself)
+  const detectedHost = window.location.hostname;
+  const detectedPort = window.location.port || (window.location.protocol === 'https:' ? '443' : '80');
+  const detectedTls = window.location.protocol === 'https:';
+
   const [name, setName] = useState('');
-  const [host, setHost] = useState('');
-  const [port, setPort] = useState('9877');
+  const [host, setHost] = useState(existing ? '' : detectedHost);
+  const [port, setPort] = useState(existing ? '9877' : detectedPort);
   const [token, setToken] = useState('');
-  const [useTls, setUseTls] = useState(false);
+  const [useTls, setUseTls] = useState(existing ? false : detectedTls);
   const [enabled, setEnabled] = useState(true);
   const [sshUser, setSshUser] = useState('');
 
