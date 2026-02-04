@@ -20,16 +20,38 @@ const DEFAULT_PREFS: BrowserNotifPrefs = {
   work_group_ready: true,
 };
 
+const isTauri = () => !!(window as any).__TAURI_INTERNALS__;
+
 class BrowserNotificationService {
   private permission: NotificationPermission = 'default';
 
   constructor() {
-    if ('Notification' in window) {
+    if (isTauri()) {
+      // Tauri notifications are always available once permission granted
+      this.permission = 'default';
+      this.initTauriPermission();
+    } else if ('Notification' in window) {
       this.permission = Notification.permission;
     }
   }
 
+  private async initTauriPermission() {
+    try {
+      const { isPermissionGranted, requestPermission } = await import('@tauri-apps/plugin-notification');
+      const granted = await isPermissionGranted();
+      if (granted) {
+        this.permission = 'granted';
+      } else {
+        const result = await requestPermission();
+        this.permission = result === 'granted' ? 'granted' : 'denied';
+      }
+    } catch {
+      // Plugin not available — fall through to browser API
+    }
+  }
+
   isSupported(): boolean {
+    if (isTauri()) return true;
     return 'Notification' in window;
   }
 
@@ -38,19 +60,40 @@ class BrowserNotificationService {
   }
 
   async requestPermission(): Promise<NotificationPermission> {
+    if (isTauri()) {
+      try {
+        const { isPermissionGranted, requestPermission } = await import('@tauri-apps/plugin-notification');
+        const granted = await isPermissionGranted();
+        if (granted) {
+          this.permission = 'granted';
+          return 'granted';
+        }
+        const result = await requestPermission();
+        this.permission = result === 'granted' ? 'granted' : 'denied';
+        return this.permission;
+      } catch {
+        return 'denied';
+      }
+    }
     if (!this.isSupported()) return 'denied';
     this.permission = await Notification.requestPermission();
     return this.permission;
   }
 
   show(title: string, options?: { body?: string; tag?: string; force?: boolean }): void {
-    if (!this.isSupported()) return;
     if (this.permission !== 'granted') return;
-    // Don't show if tab is focused (unless forced, e.g. test button)
+    // Don't show if window is focused (unless forced)
     if (!options?.force && document.hasFocus()) return;
 
     const prefs = this.getPrefs();
     if (!prefs.enabled) return;
+
+    if (isTauri()) {
+      this.showTauriNotification(title, options?.body);
+      return;
+    }
+
+    if (!('Notification' in window)) return;
 
     const notification = new Notification(title, {
       body: options?.body,
@@ -66,6 +109,15 @@ class BrowserNotificationService {
       window.focus();
       notification.close();
     };
+  }
+
+  private async showTauriNotification(title: string, body?: string) {
+    try {
+      const { sendNotification } = await import('@tauri-apps/plugin-notification');
+      sendNotification({ title, body: body || '' });
+    } catch {
+      // Fallback silently
+    }
   }
 
   getPrefs(): BrowserNotifPrefs {

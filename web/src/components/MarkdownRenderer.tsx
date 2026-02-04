@@ -3,6 +3,7 @@ import { useMemo, useCallback } from 'react';
 interface MarkdownRendererProps {
   content: string;
   onFileClick?: (path: string) => void;
+  className?: string;
 }
 
 type InlineNode =
@@ -145,10 +146,47 @@ type Block =
   | { type: 'heading'; level: number; text: string }
   | { type: 'code'; lang: string; lines: string[] }
   | { type: 'blockquote'; lines: string[] }
-  | { type: 'ul'; items: string[] }
-  | { type: 'ol'; items: string[] }
+  | { type: 'ul'; items: ListItem[] }
+  | { type: 'ol'; items: ListItem[] }
+  | { type: 'table'; headers: string[]; alignments: ('left' | 'center' | 'right' | null)[]; rows: string[][] }
   | { type: 'hr' }
   | { type: 'paragraph'; text: string };
+
+interface ListItem {
+  text: string;
+  checked?: boolean; // for task lists: true = [x], false = [ ], undefined = not a task
+}
+
+function parseListItem(raw: string): ListItem {
+  const taskMatch = raw.match(/^\[([xX ])\]\s(.*)$/);
+  if (taskMatch) {
+    return { text: taskMatch[2], checked: taskMatch[1].toLowerCase() === 'x' };
+  }
+  return { text: raw };
+}
+
+function parseTableAlignment(cell: string): 'left' | 'center' | 'right' | null {
+  const trimmed = cell.trim();
+  const left = trimmed.startsWith(':');
+  const right = trimmed.endsWith(':');
+  if (left && right) return 'center';
+  if (right) return 'right';
+  if (left) return 'left';
+  return null;
+}
+
+function parseTableRow(line: string): string[] {
+  // Split by | but trim leading/trailing empty cells from outer pipes
+  const cells = line.split('|');
+  // Remove first and last if empty (from leading/trailing |)
+  if (cells.length > 0 && cells[0].trim() === '') cells.shift();
+  if (cells.length > 0 && cells[cells.length - 1].trim() === '') cells.pop();
+  return cells.map(c => c.trim());
+}
+
+function isTableSeparator(line: string): boolean {
+  return /^\|?[\s:-]+\|[\s|:-]+$/.test(line) && line.includes('-');
+}
 
 function parseBlocks(content: string): Block[] {
   const lines = content.split('\n');
@@ -169,6 +207,20 @@ function parseBlocks(content: string): Block[] {
       }
       blocks.push({ type: 'code', lang, lines: codeLines });
       i++; // skip closing ```
+      continue;
+    }
+
+    // Table: detect header | separator | rows pattern
+    if (line.includes('|') && i + 1 < lines.length && isTableSeparator(lines[i + 1])) {
+      const headers = parseTableRow(line);
+      const alignments = parseTableRow(lines[i + 1]).map(parseTableAlignment);
+      const rows: string[][] = [];
+      i += 2;
+      while (i < lines.length && lines[i].includes('|') && lines[i].trim() !== '') {
+        rows.push(parseTableRow(lines[i]));
+        i++;
+      }
+      blocks.push({ type: 'table', headers, alignments, rows });
       continue;
     }
 
@@ -200,9 +252,9 @@ function parseBlocks(content: string): Block[] {
 
     // Unordered list
     if (/^[\s]*[-*+]\s/.test(line)) {
-      const items: string[] = [];
+      const items: ListItem[] = [];
       while (i < lines.length && /^[\s]*[-*+]\s/.test(lines[i])) {
-        items.push(lines[i].replace(/^[\s]*[-*+]\s/, ''));
+        items.push(parseListItem(lines[i].replace(/^[\s]*[-*+]\s/, '')));
         i++;
       }
       blocks.push({ type: 'ul', items });
@@ -211,9 +263,9 @@ function parseBlocks(content: string): Block[] {
 
     // Ordered list
     if (/^[\s]*\d+\.\s/.test(line)) {
-      const items: string[] = [];
+      const items: ListItem[] = [];
       while (i < lines.length && /^[\s]*\d+\.\s/.test(lines[i])) {
-        items.push(lines[i].replace(/^[\s]*\d+\.\s/, ''));
+        items.push(parseListItem(lines[i].replace(/^[\s]*\d+\.\s/, '')));
         i++;
       }
       blocks.push({ type: 'ol', items });
@@ -242,7 +294,9 @@ function parseBlocks(content: string): Block[] {
       lines[i] !== '>' &&
       !/^[\s]*[-*+]\s/.test(lines[i]) &&
       !/^[\s]*\d+\.\s/.test(lines[i]) &&
-      !/^(-{3,}|_{3,}|\*{3,})\s*$/.test(lines[i])
+      !/^(-{3,}|_{3,}|\*{3,})\s*$/.test(lines[i]) &&
+      // Don't eat table rows into paragraphs
+      !(lines[i].includes('|') && i + 1 < lines.length && isTableSeparator(lines[i + 1]))
     ) {
       paraLines.push(lines[i]);
       i++;
@@ -256,7 +310,19 @@ function parseBlocks(content: string): Block[] {
   return blocks;
 }
 
-export function MarkdownRenderer({ content, onFileClick }: MarkdownRendererProps) {
+function renderListItem(item: ListItem, key: string, ri: (text: string, keyPrefix: string) => React.ReactNode) {
+  if (item.checked !== undefined) {
+    return (
+      <li key={key} className="md-task-item">
+        <input type="checkbox" checked={item.checked} readOnly className="md-task-checkbox" />
+        <span>{ri(item.text, key)}</span>
+      </li>
+    );
+  }
+  return <li key={key}>{ri(item.text, key)}</li>;
+}
+
+export function MarkdownRenderer({ content, onFileClick, className }: MarkdownRendererProps) {
   const blocks = useMemo(() => parseBlocks(content), [content]);
   const ri = useCallback(
     (text: string, keyPrefix: string) => renderInline(text, keyPrefix, onFileClick),
@@ -264,7 +330,7 @@ export function MarkdownRenderer({ content, onFileClick }: MarkdownRendererProps
   );
 
   return (
-    <div className="md-render">
+    <div className={`md-render ${className || ''}`}>
       {blocks.map((block, idx) => {
         const key = `b-${idx}`;
         switch (block.type) {
@@ -275,6 +341,7 @@ export function MarkdownRenderer({ content, onFileClick }: MarkdownRendererProps
           case 'code':
             return (
               <pre key={key}>
+                {block.lang && <span className="md-code-lang">{block.lang}</span>}
                 <code>{block.lines.join('\n')}</code>
               </pre>
             );
@@ -289,18 +356,41 @@ export function MarkdownRenderer({ content, onFileClick }: MarkdownRendererProps
           case 'ul':
             return (
               <ul key={key}>
-                {block.items.map((item, li) => (
-                  <li key={`${key}-${li}`}>{ri(item, `${key}-${li}`)}</li>
-                ))}
+                {block.items.map((item, li) => renderListItem(item, `${key}-${li}`, ri))}
               </ul>
             );
           case 'ol':
             return (
               <ol key={key}>
-                {block.items.map((item, li) => (
-                  <li key={`${key}-${li}`}>{ri(item, `${key}-${li}`)}</li>
-                ))}
+                {block.items.map((item, li) => renderListItem(item, `${key}-${li}`, ri))}
               </ol>
+            );
+          case 'table':
+            return (
+              <div key={key} className="md-table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      {block.headers.map((h, hi) => (
+                        <th key={hi} style={block.alignments[hi] ? { textAlign: block.alignments[hi]! } : undefined}>
+                          {ri(h, `${key}-th-${hi}`)}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {block.rows.map((row, ri_idx) => (
+                      <tr key={ri_idx}>
+                        {row.map((cell, ci) => (
+                          <td key={ci} style={block.alignments[ci] ? { textAlign: block.alignments[ci]! } : undefined}>
+                            {ri(cell, `${key}-${ri_idx}-${ci}`)}
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             );
           case 'hr':
             return <hr key={key} />;

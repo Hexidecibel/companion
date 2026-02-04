@@ -2067,6 +2067,23 @@ body {
   color: var(--accent-purple-light);
 }
 
+.msg-artifact-btn {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  color: var(--accent-blue);
+  padding: 4px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+  margin-top: 4px;
+  max-width: 80%;
+  transition: background-color 0.15s;
+}
+
+.msg-artifact-btn:hover {
+  background: var(--bg-hover);
+}
+
 /* ========================================
    File Viewer Modal
    ======================================== */
@@ -2376,6 +2393,111 @@ body {
 
 .md-render em {
   font-style: italic;
+}
+
+/* Tables */
+.md-table-wrap {
+  overflow-x: auto;
+  margin: 8px 0;
+}
+
+.md-render table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 0.9em;
+}
+
+.md-render th,
+.md-render td {
+  border: 1px solid var(--border-color);
+  padding: 6px 10px;
+  text-align: left;
+}
+
+.md-render th {
+  background: var(--bg-tertiary);
+  font-weight: 600;
+}
+
+.md-render tbody tr:nth-child(even) {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+/* Task list checkboxes */
+.md-task-item {
+  list-style: none;
+  margin-left: -20px;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.md-task-checkbox {
+  accent-color: var(--accent-green);
+  margin: 0;
+  pointer-events: none;
+}
+
+/* Code block language label */
+.md-code-lang {
+  display: block;
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-bottom: 4px;
+  font-family: inherit;
+}
+
+/* Markdown in message bubbles -- tighter spacing than file viewer */
+.msg-markdown.md-render {
+  padding: 10px 14px;
+  line-height: 1.5;
+  font-size: var(--fs-content);
+}
+
+.msg-markdown.md-render h1 { font-size: 17px; }
+.msg-markdown.md-render h2 { font-size: 15px; }
+.msg-markdown.md-render h3 { font-size: 14px; }
+.msg-markdown.md-render h4,
+.msg-markdown.md-render h5,
+.msg-markdown.md-render h6 { font-size: 13px; }
+
+.msg-markdown.md-render h1,
+.msg-markdown.md-render h2,
+.msg-markdown.md-render h3 {
+  margin: 14px 0 6px 0;
+}
+
+.msg-markdown.md-render h1:first-child,
+.msg-markdown.md-render h2:first-child,
+.msg-markdown.md-render h3:first-child {
+  margin-top: 0;
+}
+
+.msg-markdown.md-render p {
+  margin: 6px 0;
+}
+
+.msg-markdown.md-render p:first-child {
+  margin-top: 0;
+}
+
+.msg-markdown.md-render p:last-child {
+  margin-bottom: 0;
+}
+
+.msg-markdown.md-render pre {
+  margin: 6px 0;
+  padding: 8px 10px;
+  font-size: 0.88em;
+}
+
+.msg-markdown.md-render ul,
+.msg-markdown.md-render ol {
+  margin: 4px 0;
+}
+
+.msg-markdown.md-render blockquote {
+  margin: 6px 0;
 }
 
 /* ========================================
@@ -4807,6 +4929,28 @@ body {
 
 .settings-action-btn-danger:hover:not(:disabled) {
   background-color: rgba(239, 68, 68, 0.1);
+}
+
+.settings-toggle-btn {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  padding: 4px 14px;
+  border-radius: 6px;
+  font-size: 13px;
+  cursor: pointer;
+  min-width: 48px;
+  transition: all 0.15s;
+}
+
+.settings-toggle-btn.active {
+  background: rgba(16, 185, 129, 0.15);
+  border-color: rgba(16, 185, 129, 0.4);
+  color: var(--accent-green);
+}
+
+.settings-toggle-btn:hover {
+  background-color: var(--bg-hover);
 }
 
 .settings-rotate-result {

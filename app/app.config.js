@@ -17,8 +17,12 @@ export default {
     ios: {
       bundleIdentifier: "com.companion.codeapp",
       googleServicesFile: process.env.GOOGLE_SERVICES_PLIST || "./GoogleService-Info.plist",
+      entitlements: {
+        "aps-environment": "production"
+      },
       infoPlist: {
         ITSAppUsesNonExemptEncryption: false,
+        UIBackgroundModes: ["remote-notification"],
         NSAppTransportSecurity: {
           NSAllowsArbitraryLoads: true,
           NSAllowsLocalNetworking: true

@@ -11,6 +11,8 @@ import { NotificationSettingsModal } from './NotificationSettingsModal';
 import { useSessionMute } from '../hooks/useSessionMute';
 import { useBrowserNotificationListener } from '../hooks/useBrowserNotificationListener';
 
+const isTauri = () => !!(window as any).__TAURI_INTERNALS__;
+
 interface DashboardProps {
   onSettings?: () => void;
 }
@@ -29,6 +31,74 @@ export function Dashboard({ onSettings }: DashboardProps) {
 
   // Browser notification listener (runs at dashboard level so notifications always fire)
   useBrowserNotificationListener(activeSession?.serverId ?? null);
+
+  // Tauri menu event handler
+  useEffect(() => {
+    if (!isTauri()) return;
+    let unlisten: (() => void) | undefined;
+    (async () => {
+      try {
+        const { listen } = await import('@tauri-apps/api/event');
+        unlisten = await listen<string>('menu-event', (event) => {
+          switch (event.payload) {
+            case 'reload':
+              window.location.reload();
+              break;
+            case 'toggle-sidebar': {
+              const sidebar = document.querySelector('.sidebar') as HTMLElement | null;
+              if (sidebar) sidebar.style.display = sidebar.style.display === 'none' ? '' : 'none';
+              break;
+            }
+            case 'zoom-in':
+              document.documentElement.style.fontSize =
+                (parseFloat(getComputedStyle(document.documentElement).fontSize) + 1) + 'px';
+              break;
+            case 'zoom-out':
+              document.documentElement.style.fontSize =
+                Math.max(10, parseFloat(getComputedStyle(document.documentElement).fontSize) - 1) + 'px';
+              break;
+            case 'zoom-reset':
+              document.documentElement.style.fontSize = '';
+              break;
+            case 'new-session':
+              // Focus the input bar — same as '/' shortcut
+              (document.querySelector('.input-bar-textarea') as HTMLElement | null)?.focus();
+              break;
+            case 'fullscreen': {
+              if (document.fullscreenElement) {
+                document.exitFullscreen();
+              } else {
+                document.documentElement.requestFullscreen();
+              }
+              break;
+            }
+          }
+        });
+      } catch {
+        // Not in Tauri
+      }
+    })();
+    return () => { unlisten?.(); };
+  }, []);
+
+  // Update tray tooltip with waiting session count
+  useEffect(() => {
+    if (!isTauri()) return;
+    const waitingCount = Array.from(summaries.values()).reduce((count, serverSummary) => {
+      return count + serverSummary.sessions.filter(s => s.status === 'waiting').length;
+    }, 0);
+    const tooltip = waitingCount > 0
+      ? `Companion - ${waitingCount} session${waitingCount > 1 ? 's' : ''} waiting`
+      : 'Companion';
+    (async () => {
+      try {
+        const { invoke } = await import('@tauri-apps/api/core');
+        await invoke('set_tray_tooltip', { tooltip });
+      } catch {
+        // Not in Tauri
+      }
+    })();
+  }, [summaries]);
 
   // Merge all work groups into a per-server map for sidebar
   const allWorkGroups = useMemo(() => {

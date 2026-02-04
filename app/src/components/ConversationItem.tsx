@@ -758,12 +758,11 @@ function ConversationItemInner({ item, showToolCalls, onSelectOption, onFileTap,
           return null;
         }
 
-        // Match absolute paths (/path/to/file), home paths (~/path), or relative paths with extension (dir/file.ext)
+        // Match absolute paths (/path/to/file), home paths (~/path), or relative paths with directory (dir/file.ext)
         const isFilePath =
           /^\/[\w./-]+$/.test(content) ||  // Absolute path
           content.startsWith('~/') ||       // Home path
-          /^[\w.-]+\/[\w./-]*\.\w+$/.test(content) ||  // Relative path with extension (docs/file.md)
-          /^[\w.-]+\.\w{1,5}$/.test(content);  // Just filename with extension (file.md)
+          /^[\w.-]+\/[\w./-]*\.\w+$/.test(content);  // Relative path with extension (docs/file.md)
 
         if (isFilePath && onFileTap) {
           return (

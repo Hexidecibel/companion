@@ -56,22 +56,26 @@ Quick capture for ideas and tasks. Run `/plan` to process into detailed plans.
 - [done] Remove client-side message queueing - replaced with direct tmux send, removed useMessageQueue/QueuedMessageBar
 
 ## Planned
-- [planned] Persistent file tab bar in web SessionView -- debug browser freeze, wire useOpenFiles hook, memoize FilePathContent (plan.md #6)
-- [planned] Plan viewer -- detect plan file references, render plan cards for ExitPlanMode, plan button in session header (plan.md #7)
-- [planned] Cross-session infinite scroll -- chain JSONL files by creation time, cross-file pagination in parser (plan.md #8)
-- [planned] Interactive terminal mode for mobile -- hidden TextInput + virtual key bar, reuse send_terminal_keys endpoint (plan.md #9)
-- [planned] OpenAI Codex CLI parser -- discover Codex conversation files, parse format, translate to internal types (plan.md #10)
-- [planned] Text search across session history -- search bar with match highlighting, prev/next navigation (plan.md #11)
-- [planned] Remove archive button from web session header (plan.md #12)
-- [planned] Web/mobile parity -- clear history, dynamic version, clear all archives, sub-agents tree view (plan.md #13)
-- [planned] macOS desktop app -- Tauri wrapper around web client, native menus, .dmg packaging (plan.md #14)
-- [planned] Web client keyboard shortcuts -- Cmd/Ctrl+T terminal, Cmd+K palette, Cmd+1-9 sessions, ? help overlay (plan.md #15)
+- [done] Persistent file tab bar in web SessionView -- debug browser freeze, wire useOpenFiles hook, memoize FilePathContent (plan.md #6)
+- [done] Plan viewer -- detect plan file references, render plan cards for ExitPlanMode, plan button in session header (plan.md #7)
+- [done] Cross-session infinite scroll -- chain JSONL files by creation time, cross-file pagination in parser (plan.md #8)
+- [done] Interactive terminal mode for mobile -- hidden TextInput + virtual key bar, reuse send_terminal_keys endpoint (plan.md #9)
+- [deferred] OpenAI Codex CLI parser -- discover Codex conversation files, parse format, translate to internal types (plan.md #10)
+- [done] Text search across session history -- search bar with match highlighting, prev/next navigation (plan.md #11)
+- [done] Remove archive button from web session header (plan.md #12)
+- [partial] Web/mobile parity -- clear history, dynamic version, clear all archives done; remaining: sub-agents tree view, mobile search, mobile plan viewer (plan.md #13)
+- [done] macOS desktop app -- Tauri wrapper around web client (plan.md #14)
+- [done] macOS desktop essential -- file upload in Tauri, native notifications, window state persistence (plan.md #16)
+- [done] macOS desktop native feel -- custom menu bar, system tray icon, auto-launch on login (plan.md #17)
+- [planned] macOS desktop nice-to-have -- global hotkey, deep links, code signing, auto-update (plan.md #18)
+- [done] Web client keyboard shortcuts -- Cmd/Ctrl+T terminal, Cmd+K palette, Cmd+1-9 sessions, ? help overlay (plan.md #15)
 
 ## In Progress
 (none)
 
 ## Upcoming
-(none)
+- File viewer still freezes on open
+- [done] File/artifact viewer & markdown everywhere -- render assistant messages as formatted markdown on web/desktop, enhanced file viewer with breadcrumbs/search/virtualization, mobile file viewer upgrade, large output "view as artifact" button (plan.md #19)
 
 ## Deferred
-(none)
+- OpenAI Codex CLI parser (plan.md #10) -- roadmap item, not prioritized

@@ -1,19 +1,18 @@
 # Companion Features
 
-High-level features of the Companion mobile app and daemon.
+High-level features of the Companion mobile app, web client, desktop app, and daemon.
 
 ## Real-Time Monitoring
 - Live WebSocket updates from CLI coding sessions
 - Multi-server, multi-session support
 - Session status indicators (waiting, working, idle)
-- Sub-agent tracking with real-time status bar
+- Sub-agent tracking with expandable tree view (status icons, activity, duration, message count)
 - Click-to-view sub-agent conversation detail
 - Running/completed agent sections with collapsible completed list
 
 ## Mobile Input
 - Send text and images to the CLI from your phone
 - Quick reply chips and slash commands
-- Message queuing when disconnected
 - Multi-question answering with per-question selection and "Other" freetext
 - Multi-select checkbox UI for questions that allow multiple answers
 
@@ -29,7 +28,8 @@ High-level features of the Companion mobile app and daemon.
 - Server cards disabled when no active sessions
 
 ## Conversation Viewer
-- Markdown rendering with syntax highlighting
+- Markdown rendering in assistant messages (headings, tables, task lists, code blocks with language labels, links)
+- User messages rendered as plain text
 - Expandable tool cards with inputs/outputs
 - Smart tool card collapsing with tool name chips and grouping
 - Line numbers and language labels on Write/Edit views
@@ -38,12 +38,33 @@ High-level features of the Companion mobile app and daemon.
 - Full-screen message viewer for long responses
 - Activity counters (tokens, cache hits)
 - Inline auto-approve toggle in session header
+- Text search across session history with match highlighting and prev/next navigation
+- Cross-session infinite scroll (chains JSONL files by creation time)
+
+## File & Artifact Viewer
+- Open files referenced in conversation with a single tap/click
+- Markdown files rendered with full formatting (headings, tables, lists, code blocks, links)
+- Diff files rendered with color-coded additions/deletions/hunks
+- Code files rendered with line numbers and horizontal scroll
+- Large assistant messages (100+ lines) get "View full output in viewer" button
+- Artifact viewer modal for inline content with copy-to-clipboard
+- Persistent file tab bar (web) with per-session localStorage persistence
+- File path detection in inline code and message text
+- Navigate between files via tappable links within the viewer
+- APK download and install support on Android
+
+## Plan Viewer
+- Detect plan file references in conversation (ExitPlanMode/EnterPlanMode tool calls)
+- Plan cards rendered inline for ExitPlanMode with "View Plan" button
+- Plan button in session header when a plan file is detected
+- Plans open in the file viewer with full markdown rendering
 
 ## Push Notifications
 - FCM-based notifications when the CLI needs input
 - Quiet hours scheduling
 - Per-server notification preferences
 - Instant vs batched notification modes
+- Per-session mute synced between web and mobile via daemon
 
 ## Tmux Session Management
 - Create/list/switch tmux sessions from app
@@ -53,6 +74,8 @@ High-level features of the Companion mobile app and daemon.
 - Session recreation for missing sessions
 - Auto-detect the CLI in tmux
 - Session scoping: only monitors sessions created/adopted by the app (env var tagging)
+- Interactive terminal mode: keyboard capture sends keys directly to tmux (arrow keys, enter, ctrl combos)
+- Faster polling when terminal is active
 
 ## Project Scaffolding (New Project Wizard)
 - Multiple stack templates (React, Node, Python, Go, Next.js, MUI)
@@ -66,6 +89,7 @@ High-level features of the Companion mobile app and daemon.
 - Save completed conversation summaries
 - Browse and search past conversations
 - Per-server archive organization
+- Clear all archives
 
 ## API Usage Analytics
 - Token usage breakdown per session
@@ -87,7 +111,7 @@ High-level features of the Companion mobile app and daemon.
 - Horizontal scroll for long lines
 - Font size zoom controls (mobile)
 - Pull-to-refresh (mobile) and manual refresh button (web)
-- Accessible from session header
+- Accessible from session header via button or Cmd+T shortcut
 
 ## Auto-Approve System
 - Automatic approval of safe tool calls (Read, Glob, Grep, etc.)
@@ -109,6 +133,25 @@ High-level features of the Companion mobile app and daemon.
 - Session state recovery after reconnection
 - Double-connect guard prevents orphaned sockets
 - Exponential backoff reconnection with configurable max attempts
+
+## Web Client Keyboard Shortcuts
+- Cmd/Ctrl+T: Toggle terminal panel
+- Cmd/Ctrl+F: Search messages in session
+- Cmd/Ctrl+1-9: Switch to session by sidebar position
+- Cmd/Ctrl+Shift+A: Toggle auto-approve
+- Cmd/Ctrl+Shift+M: Toggle session mute
+- Escape: Close modal/panel/search (priority-ordered)
+
+## macOS Desktop App (Tauri)
+- Native macOS app wrapping the web client via Tauri v2
+- Custom menu bar: Companion, File, Edit, View, Window menus with keyboard shortcuts
+- System tray icon: click to toggle window, right-click for Show/Quit menu
+- Close-to-tray: closing the window hides to tray instead of quitting
+- Tray tooltip shows count of sessions waiting for input
+- Native macOS notifications via Notification Center (replaces browser notifications)
+- Window state persistence: remembers position and size across launches
+- Auto-launch on login toggle in settings
+- Builds to .app and .dmg
 
 ## Daemon CLI
 - `companion status` — show running state, PID, tmux sessions, config summary

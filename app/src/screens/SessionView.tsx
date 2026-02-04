@@ -1174,6 +1174,7 @@ export function SessionView({ server, onBack, initialSessionId, onNewProject, on
       <FileViewer
         filePath={viewingFile}
         onClose={() => setViewingFile(null)}
+        onFileTap={(path) => setViewingFile(path)}
       />
 
       <MessageViewer

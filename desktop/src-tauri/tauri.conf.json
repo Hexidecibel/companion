@@ -6,8 +6,8 @@
   "build": {
     "frontendDist": "../../web/dist",
     "devUrl": "http://localhost:5173",
-    "beforeBuildCommand": "npm run --prefix ../../web build:desktop",
-    "beforeDevCommand": "cd ../../web && npx vite --base /"
+    "beforeBuildCommand": "cd ../web && npm run build:desktop",
+    "beforeDevCommand": "cd ../web && npx vite --base /"
   },
   "app": {
     "windows": [

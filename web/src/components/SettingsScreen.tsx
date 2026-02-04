@@ -1,9 +1,11 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useConnections } from '../hooks/useConnections';
 import { connectionManager } from '../services/ConnectionManager';
 import { getFontScale, saveFontScale } from '../services/storage';
 import { clearAllArchives } from '../services/archiveService';
 import { NotificationSettingsModal } from './NotificationSettingsModal';
+
+const isTauri = () => !!(window as any).__TAURI_INTERNALS__;
 
 interface SettingsScreenProps {
   onBack: () => void;
@@ -24,6 +26,32 @@ export function SettingsScreen({ onBack }: SettingsScreenProps) {
   const [confirmClearHistory, setConfirmClearHistory] = useState(false);
   const [rotatingServer, setRotatingServer] = useState<string | null>(null);
   const [rotateResult, setRotateResult] = useState<{ serverId: string; token?: string; error?: string } | null>(null);
+  const [autostart, setAutostart] = useState<boolean | null>(null);
+
+  // Load autostart state in Tauri
+  useEffect(() => {
+    if (!isTauri()) return;
+    (async () => {
+      try {
+        const { invoke } = await import('@tauri-apps/api/core');
+        const enabled = await invoke<boolean>('get_autostart_enabled');
+        setAutostart(enabled);
+      } catch {
+        // Not available
+      }
+    })();
+  }, []);
+
+  const handleToggleAutostart = async () => {
+    try {
+      const { invoke } = await import('@tauri-apps/api/core');
+      const newValue = !autostart;
+      await invoke('set_autostart_enabled', { enabled: newValue });
+      setAutostart(newValue);
+    } catch {
+      // Failed
+    }
+  };
 
   const handleFontScale = (value: number) => {
     saveFontScale(value);
@@ -108,6 +136,24 @@ export function SettingsScreen({ onBack }: SettingsScreenProps) {
             </div>
           </div>
         </section>
+
+        {/* Desktop (Tauri only) */}
+        {isTauri() && autostart !== null && (
+          <section className="settings-section">
+            <h3 className="settings-section-title">Desktop</h3>
+            <div className="settings-card settings-card-row">
+              <div className="settings-card-row-info">
+                <span className="settings-card-label">Launch at Login</span>
+              </div>
+              <button
+                className={`settings-toggle-btn ${autostart ? 'active' : ''}`}
+                onClick={handleToggleAutostart}
+              >
+                {autostart ? 'On' : 'Off'}
+              </button>
+            </div>
+          </section>
+        )}
 
         {/* Notifications */}
         <section className="settings-section">

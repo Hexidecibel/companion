@@ -100,7 +100,13 @@ export function useConversation() {
             highlights: ConversationHighlight[];
           };
           setMessages(updatePayload.messages || []);
-          setHighlights(updatePayload.highlights || []);
+          // Push sends ALL highlights from current conversation file —
+          // replace directly (skip if unchanged to avoid re-render)
+          const serverHighlights = updatePayload.highlights || [];
+          setHighlights(prev => {
+            if (highlightsEqual(prev, serverHighlights)) return prev;
+            return serverHighlights;
+          });
           break;
         }
 
@@ -241,12 +247,9 @@ export function useConversation() {
         const olderHighlights = payload.highlights || [];
 
         if (olderHighlights.length > 0) {
-          // Prepend older highlights and update cache
+          // Prepend older highlights (don't cache — only latest page goes in cache)
           setHighlights(prev => {
-            const merged = [...olderHighlights, ...prev];
-            const currentSessionId = sessionGuard.getCurrentSessionId();
-            setCachedHighlights(currentSessionId, merged);
-            return merged;
+            return [...olderHighlights, ...prev];
           });
           totalHighlights.current = payload.total;
           setHasMore(payload.hasMore ?? false);
@@ -315,14 +318,10 @@ export function useConversation() {
               // Update hasMore based on total
               setHasMore(payload.hasMore ?? false);
 
-              // Update cache with current highlights
+              // Cache only the latest page (not scroll-back content)
               const sessionId = sessionGuard.getCurrentSessionId();
               if (sessionId) {
-                // We cache whatever we currently have
-                setHighlights(current => {
-                  setCachedHighlights(sessionId, current);
-                  return current;
-                });
+                setCachedHighlights(sessionId, serverHighlights);
               }
             } else {
               const payload = response.payload as { messages: ConversationMessage[] };

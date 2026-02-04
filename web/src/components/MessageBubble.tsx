@@ -1,11 +1,15 @@
-import { useState, useCallback, useMemo, memo } from 'react';
+import { useState, useCallback } from 'react';
 import { ConversationHighlight, Question } from '../types';
 import { ToolCard } from './ToolCard';
+import { MarkdownRenderer } from './MarkdownRenderer';
+
+const ARTIFACT_THRESHOLD = 100; // lines
 
 interface MessageBubbleProps {
   message: ConversationHighlight;
   onSelectOption?: (label: string) => void;
   onViewFile?: (path: string) => void;
+  onViewArtifact?: (content: string, title?: string) => void;
   searchTerm?: string | null;
   isCurrentMatch?: boolean;
 }
@@ -162,7 +166,7 @@ export function extractPlanFilePath(message: ConversationHighlight): string | nu
   return null;
 }
 
-export function MessageBubble({ message, onSelectOption, onViewFile, searchTerm, isCurrentMatch }: MessageBubbleProps) {
+export function MessageBubble({ message, onSelectOption, onViewFile, onViewArtifact, searchTerm, isCurrentMatch }: MessageBubbleProps) {
   const isUser = message.type === 'user';
   const [allExpanded, setAllExpanded] = useState<boolean | undefined>(undefined);
 
@@ -170,6 +174,7 @@ export function MessageBubble({ message, onSelectOption, onViewFile, searchTerm,
   const hasMultipleTools = toolCalls && toolCalls.length >= 2;
   const trimmedContent = message.content?.trim();
   const hasContent = trimmedContent && trimmedContent.length > 0 && trimmedContent !== '(no content)';
+  const isLargeContent = !isUser && hasContent && (message.content.split('\n').length > ARTIFACT_THRESHOLD);
 
   // Hide completely empty assistant messages that have no text, no tools, and no options
   if (!isUser && !hasContent && (!toolCalls || toolCalls.length === 0) && !message.isWaitingForChoice) {
@@ -183,24 +188,29 @@ export function MessageBubble({ message, onSelectOption, onViewFile, searchTerm,
     >
       {hasContent && (
         <div className={`msg-bubble ${isUser ? 'msg-bubble-user' : 'msg-bubble-assistant'}`}>
-          {!isUser && onViewFile ? (
+          {searchTerm ? (
             <pre className="msg-content">
-              {searchTerm ? (
-                <HighlightedText text={message.content} term={searchTerm} />
-              ) : (
-                <FilePathContent content={message.content} onViewFile={onViewFile} />
-              )}
+              <HighlightedText text={message.content} term={searchTerm} />
             </pre>
+          ) : isUser ? (
+            <pre className="msg-content">{message.content}</pre>
           ) : (
-            <pre className="msg-content">
-              {searchTerm ? (
-                <HighlightedText text={message.content} term={searchTerm} />
-              ) : (
-                message.content
-              )}
-            </pre>
+            <MarkdownRenderer
+              content={message.content}
+              onFileClick={onViewFile}
+              className="msg-markdown"
+            />
           )}
         </div>
+      )}
+
+      {isLargeContent && onViewArtifact && (
+        <button
+          className="msg-artifact-btn"
+          onClick={() => onViewArtifact(message.content, 'Full Output')}
+        >
+          View full output in viewer
+        </button>
       )}
 
       {toolCalls && toolCalls.length > 0 && (
@@ -266,65 +276,3 @@ export function MessageBubble({ message, onSelectOption, onViewFile, searchTerm,
   );
 }
 
-// Path detection for file links in assistant messages
-const FILE_PATH_RE = /(?:^|[\s(["'])(\/?(?:~\/|\/)[^\s)>"'\]]+)/g;
-const URL_RE = /^https?:\/\//;
-
-interface FilePathContentProps {
-  content: string;
-  onViewFile: (path: string) => void;
-}
-
-const FilePathContent = memo(function FilePathContent({ content, onViewFile }: FilePathContentProps) {
-  const segments = useMemo(() => {
-    const result: Array<{ type: 'text' | 'path'; value: string }> = [];
-    let lastIndex = 0;
-
-    const regex = new RegExp(FILE_PATH_RE.source, 'g');
-    let match: RegExpExecArray | null;
-
-    while ((match = regex.exec(content)) !== null) {
-      const path = (match[1] || match[0]).trim();
-      if (URL_RE.test(path) || path.length < 3) continue;
-
-      if (!path.startsWith('/') && !path.startsWith('~/')) continue;
-
-      const fullMatchStart = match.index + (match[0].length - (match[1] || match[0]).trim().length);
-      const fullMatchEnd = fullMatchStart + path.length;
-
-      if (fullMatchStart > lastIndex) {
-        result.push({ type: 'text', value: content.slice(lastIndex, fullMatchStart) });
-      }
-      result.push({ type: 'path', value: path });
-      lastIndex = fullMatchEnd;
-    }
-
-    if (lastIndex < content.length) {
-      result.push({ type: 'text', value: content.slice(lastIndex) });
-    }
-
-    return result;
-  }, [content]);
-
-  if (segments.length === 0 || (segments.length === 1 && segments[0].type === 'text')) {
-    return <>{content}</>;
-  }
-
-  return (
-    <>
-      {segments.map((seg, i) =>
-        seg.type === 'path' ? (
-          <span
-            key={i}
-            className="msg-file-link"
-            onClick={(e) => { e.stopPropagation(); onViewFile(seg.value); }}
-          >
-            {seg.value}
-          </span>
-        ) : (
-          <span key={i}>{seg.value}</span>
-        ),
-      )}
-    </>
-  );
-});

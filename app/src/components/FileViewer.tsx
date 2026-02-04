@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -10,6 +10,7 @@ import {
   Platform,
   Alert,
 } from 'react-native';
+import Markdown from '@ronradtke/react-native-markdown-display';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as IntentLauncher from 'expo-intent-launcher';
 import { wsService } from '../services/websocket';
@@ -17,12 +18,110 @@ import { wsService } from '../services/websocket';
 interface FileViewerProps {
   filePath: string | null;
   onClose: () => void;
+  onFileTap?: (path: string) => void;
 }
 
 // File types that should be downloaded instead of viewed
 const DOWNLOADABLE_EXTENSIONS = ['apk', 'ipa', 'zip', 'tar.gz', 'tgz'];
 
-export function FileViewer({ filePath, onClose }: FileViewerProps) {
+function classifyContent(fileName: string, content: string): 'markdown' | 'diff' | 'code' {
+  const ext = fileName.split('.').pop()?.toLowerCase();
+  if (ext === 'md' || ext === 'mdx' || ext === 'markdown') return 'markdown';
+  if (ext === 'diff' || ext === 'patch') return 'diff';
+  if (content.startsWith('diff --git ') || content.startsWith('--- a/') || content.startsWith('Index: ')) return 'diff';
+  return 'code';
+}
+
+function DiffLine({ line }: { line: string }) {
+  let color = '#e5e7eb';
+  let bg = 'transparent';
+  if (line.startsWith('@@')) { color = '#93c5fd'; bg = 'rgba(59, 130, 246, 0.1)'; }
+  else if (line.startsWith('+++ ') || line.startsWith('--- ') || line.startsWith('diff --git') || line.startsWith('index ') || line.startsWith('Index: ')) { color = '#9ca3af'; }
+  else if (line.startsWith('+')) { color = '#86efac'; bg = 'rgba(16, 185, 129, 0.1)'; }
+  else if (line.startsWith('-')) { color = '#fca5a5'; bg = 'rgba(239, 68, 68, 0.1)'; }
+
+  return (
+    <Text style={[diffStyles.line, { color, backgroundColor: bg }]}>{line || ' '}</Text>
+  );
+}
+
+const diffStyles = StyleSheet.create({
+  line: {
+    fontFamily: 'monospace',
+    fontSize: 12,
+    lineHeight: 18,
+    paddingHorizontal: 12,
+  },
+});
+
+function CodeView({ content }: { content: string }) {
+  const lines = content.split('\n');
+  const gutterWidth = String(lines.length).length * 9 + 16;
+
+  return (
+    <View style={codeStyles.container}>
+      {lines.map((line, i) => (
+        <View key={i} style={codeStyles.row}>
+          <Text style={[codeStyles.lineNum, { width: gutterWidth }]}>{i + 1}</Text>
+          <Text style={codeStyles.lineContent} selectable>{line || ' '}</Text>
+        </View>
+      ))}
+    </View>
+  );
+}
+
+const codeStyles = StyleSheet.create({
+  container: {
+    backgroundColor: '#0d1117',
+    paddingVertical: 8,
+  },
+  row: {
+    flexDirection: 'row',
+  },
+  lineNum: {
+    fontFamily: 'monospace',
+    fontSize: 11,
+    lineHeight: 18,
+    color: '#4b5563',
+    textAlign: 'right',
+    paddingRight: 8,
+    paddingLeft: 8,
+    backgroundColor: 'rgba(255,255,255,0.02)',
+  },
+  lineContent: {
+    flex: 1,
+    fontFamily: 'monospace',
+    fontSize: 12,
+    lineHeight: 18,
+    color: '#e5e7eb',
+    paddingRight: 12,
+  },
+});
+
+const mdStyles = StyleSheet.create({
+  body: { color: '#e5e7eb', fontSize: 14, lineHeight: 22 },
+  heading1: { color: '#f3f4f6', fontSize: 22, fontWeight: '700', marginTop: 16, marginBottom: 8, borderBottomWidth: 1, borderBottomColor: '#374151', paddingBottom: 6 },
+  heading2: { color: '#f3f4f6', fontSize: 18, fontWeight: '600', marginTop: 14, marginBottom: 6, borderBottomWidth: 1, borderBottomColor: '#374151', paddingBottom: 4 },
+  heading3: { color: '#f3f4f6', fontSize: 16, fontWeight: '600', marginTop: 12, marginBottom: 4 },
+  heading4: { color: '#f3f4f6', fontSize: 14, fontWeight: '600', marginTop: 10, marginBottom: 4 },
+  paragraph: { marginTop: 4, marginBottom: 4 },
+  strong: { fontWeight: '700', color: '#f3f4f6' },
+  em: { fontStyle: 'italic' },
+  code_inline: { fontFamily: 'monospace', backgroundColor: '#1f2937', color: '#e5e7eb', paddingHorizontal: 4, borderRadius: 3, fontSize: 13 },
+  code_block: { fontFamily: 'monospace', backgroundColor: '#0d1117', color: '#e5e7eb', padding: 12, borderRadius: 6, fontSize: 12, lineHeight: 18, marginVertical: 6 },
+  fence: { fontFamily: 'monospace', backgroundColor: '#0d1117', color: '#e5e7eb', padding: 12, borderRadius: 6, fontSize: 12, lineHeight: 18, marginVertical: 6 },
+  blockquote: { borderLeftWidth: 3, borderLeftColor: '#4b5563', paddingLeft: 12, marginVertical: 6 },
+  link: { color: '#60a5fa' },
+  list_item: { marginVertical: 2 },
+  bullet_list: { marginVertical: 4 },
+  ordered_list: { marginVertical: 4 },
+  table: { borderWidth: 1, borderColor: '#374151', marginVertical: 8 },
+  th: { borderWidth: 1, borderColor: '#374151', padding: 6, backgroundColor: '#1f2937' },
+  td: { borderWidth: 1, borderColor: '#374151', padding: 6 },
+  hr: { backgroundColor: '#374151', height: 1, marginVertical: 12 },
+});
+
+export function FileViewer({ filePath, onClose, onFileTap }: FileViewerProps) {
   const [content, setContent] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -72,7 +171,7 @@ export function FileViewer({ filePath, onClose }: FileViewerProps) {
     loadFile();
   }, [filePath, isDownloadable]);
 
-  const handleDownload = async () => {
+  const handleDownload = useCallback(async () => {
     if (!filePath) return;
 
     setDownloading(true);
@@ -80,7 +179,6 @@ export function FileViewer({ filePath, onClose }: FileViewerProps) {
     setError(null);
 
     try {
-      // Request file from daemon
       const response = await wsService.sendRequest('download_file', { path: filePath });
 
       if (!response.success || !response.payload) {
@@ -91,12 +189,11 @@ export function FileViewer({ filePath, onClose }: FileViewerProps) {
         fileName: string;
         size: number;
         mimeType: string;
-        data: string; // base64
+        data: string;
       };
 
       setDownloadProgress(`Saving ${payload.fileName} (${Math.round(payload.size / 1024 / 1024)}MB)...`);
 
-      // Save to device
       const localUri = `${FileSystem.cacheDirectory}${payload.fileName}`;
       await FileSystem.writeAsStringAsync(localUri, payload.data, {
         encoding: FileSystem.EncodingType.Base64,
@@ -105,7 +202,6 @@ export function FileViewer({ filePath, onClose }: FileViewerProps) {
       setDownloadProgress(null);
 
       if (isApk && Platform.OS === 'android') {
-        // Trigger install on Android
         Alert.alert(
           'Install APK',
           `${payload.fileName} downloaded. Install now?`,
@@ -115,12 +211,10 @@ export function FileViewer({ filePath, onClose }: FileViewerProps) {
               text: 'Install',
               onPress: async () => {
                 try {
-                  // Get content URI for the file
                   const contentUri = await FileSystem.getContentUriAsync(localUri);
-
                   await IntentLauncher.startActivityAsync('android.intent.action.VIEW', {
                     data: contentUri,
-                    flags: 1, // FLAG_GRANT_READ_URI_PERMISSION
+                    flags: 1,
                     type: 'application/vnd.android.package-archive',
                   });
                 } catch (installErr) {
@@ -139,13 +233,19 @@ export function FileViewer({ filePath, onClose }: FileViewerProps) {
       setDownloading(false);
       setDownloadProgress(null);
     }
-  };
+  }, [filePath, isApk]);
 
   if (!filePath) return null;
 
-  // Determine if it's a code file for syntax styling
-  const isCode = ['ts', 'tsx', 'js', 'jsx', 'py', 'rb', 'go', 'rs', 'java', 'c', 'cpp', 'h', 'hpp', 'css', 'scss', 'json', 'yaml', 'yml', 'toml', 'sh', 'bash', 'zsh'].includes(extension);
-  const isMarkdown = ['md', 'mdx', 'markdown'].includes(extension);
+  const contentType = content ? classifyContent(fileName, content) : 'code';
+
+  const handleLinkPress = (url: string) => {
+    if (onFileTap && !url.startsWith('http')) {
+      onFileTap(url);
+      return false;
+    }
+    return true;
+  };
 
   return (
     <Modal
@@ -166,15 +266,13 @@ export function FileViewer({ filePath, onClose }: FileViewerProps) {
               </Text>
             </View>
             <TouchableOpacity style={styles.closeButton} onPress={onClose}>
-              <Text style={styles.closeText}>×</Text>
+              <Text style={styles.closeText}>{'\u00D7'}</Text>
             </TouchableOpacity>
           </View>
 
           {isDownloadable ? (
-            // Download UI for APK and other binary files
             <View style={styles.downloadContainer}>
               <View style={styles.fileIconContainer}>
-                <Text style={styles.fileIcon}>{isApk ? '📦' : '📁'}</Text>
                 <Text style={styles.fileTypeLabel}>
                   {isApk ? 'Android Package' : extension.toUpperCase()}
                 </Text>
@@ -223,30 +321,29 @@ export function FileViewer({ filePath, onClose }: FileViewerProps) {
             <View style={styles.errorContainer}>
               <Text style={styles.errorText}>{error}</Text>
             </View>
-          ) : (
-            <ScrollView
-              style={styles.contentScroll}
-              horizontal={false}
-              showsVerticalScrollIndicator={true}
-            >
-              <ScrollView
-                horizontal={true}
-                showsHorizontalScrollIndicator={true}
-                contentContainerStyle={styles.horizontalScroll}
-              >
-                <Text
-                  style={[
-                    styles.content,
-                    isCode && styles.codeContent,
-                    isMarkdown && styles.markdownContent,
-                  ]}
-                  selectable
-                >
-                  {content}
-                </Text>
-              </ScrollView>
+          ) : content !== null ? (
+            <ScrollView style={styles.contentScroll} showsVerticalScrollIndicator>
+              {contentType === 'markdown' ? (
+                <View style={styles.markdownWrap}>
+                  <Markdown style={mdStyles} onLinkPress={handleLinkPress}>
+                    {content}
+                  </Markdown>
+                </View>
+              ) : contentType === 'diff' ? (
+                <ScrollView horizontal showsHorizontalScrollIndicator>
+                  <View style={styles.diffWrap}>
+                    {content.split('\n').map((line, i) => (
+                      <DiffLine key={i} line={line} />
+                    ))}
+                  </View>
+                </ScrollView>
+              ) : (
+                <ScrollView horizontal showsHorizontalScrollIndicator>
+                  <CodeView content={content} />
+                </ScrollView>
+              )}
             </ScrollView>
-          )}
+          ) : null}
         </View>
       </View>
     </Modal>
@@ -327,24 +424,12 @@ const styles = StyleSheet.create({
   contentScroll: {
     flex: 1,
   },
-  horizontalScroll: {
-    minWidth: '100%',
-  },
-  content: {
+  markdownWrap: {
     padding: 16,
-    fontSize: 14,
-    lineHeight: 22,
-    color: '#e5e7eb',
   },
-  codeContent: {
-    fontFamily: 'monospace',
-    fontSize: 12,
-    lineHeight: 20,
-    backgroundColor: '#0d1117',
-  },
-  markdownContent: {
-    fontSize: 14,
-    lineHeight: 24,
+  diffWrap: {
+    paddingVertical: 8,
+    minWidth: '100%',
   },
   // Download UI styles
   downloadContainer: {
@@ -356,10 +441,6 @@ const styles = StyleSheet.create({
   fileIconContainer: {
     alignItems: 'center',
     marginBottom: 32,
-  },
-  fileIcon: {
-    fontSize: 64,
-    marginBottom: 12,
   },
   fileTypeLabel: {
     color: '#9ca3af',

@@ -10,6 +10,7 @@ interface MessageListProps {
   onLoadMore: () => void;
   onSelectOption?: (label: string) => void;
   onViewFile?: (path: string) => void;
+  onViewArtifact?: (content: string, title?: string) => void;
   searchTerm?: string | null;
   currentMatchId?: string | null;
 }
@@ -22,6 +23,7 @@ export function MessageList({
   onLoadMore,
   onSelectOption,
   onViewFile,
+  onViewArtifact,
   searchTerm,
   currentMatchId,
 }: MessageListProps) {
@@ -121,6 +123,7 @@ export function MessageList({
           message={msg}
           onSelectOption={onSelectOption}
           onViewFile={onViewFile}
+          onViewArtifact={onViewArtifact}
           searchTerm={searchTerm}
           isCurrentMatch={msg.id === currentMatchId}
         />

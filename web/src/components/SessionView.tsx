@@ -17,6 +17,7 @@ import { SubAgentBar } from './SubAgentBar';
 import { SubAgentModal } from './SubAgentModal';
 import { SubAgentDetail } from './SubAgentDetail';
 import { FileViewerModal } from './FileViewerModal';
+import { ArtifactViewerModal } from './ArtifactViewerModal';
 import { FileTabBar } from './FileTabBar';
 import { extractPlanFilePath } from './MessageBubble';
 import { SearchBar } from './SearchBar';
@@ -78,6 +79,9 @@ export function SessionView({
 
   // Archive state
   const [showArchiveModal, setShowArchiveModal] = useState(false);
+
+  // Artifact viewer state
+  const [artifactContent, setArtifactContent] = useState<{ content: string; title?: string } | null>(null);
 
   // Terminal view state
   const [showTerminal, setShowTerminal] = useState(false);
@@ -219,12 +223,13 @@ export function SessionView({
     { key: 'm', meta: true, shift: true, handler: () => { if (sessionId) sessionMute.toggleMute(sessionId); } },
     { key: 'Escape', handler: () => {
       if (showSearch) handleCloseSearch();
+      else if (artifactContent) setArtifactContent(null);
       else if (viewingFile) setViewingFile(null);
       else if (showArchiveModal) setShowArchiveModal(false);
       else if (showAgentsModal) setShowAgentsModal(false);
       else if (viewingAgentId) setViewingAgentId(null);
     }},
-  ], [tmuxSessionName, showSearch, viewingFile, showArchiveModal, showAgentsModal, viewingAgentId, sessionId, autoApprove, sessionMute, handleCloseSearch]));
+  ], [tmuxSessionName, showSearch, viewingFile, showArchiveModal, showAgentsModal, viewingAgentId, artifactContent, sessionId, autoApprove, sessionMute, handleCloseSearch]));
 
   if (!serverId || !sessionId) {
     return (
@@ -359,6 +364,7 @@ export function SessionView({
             onLoadMore={loadMore}
             onSelectOption={handleSelectOption}
             onViewFile={handleViewFile}
+            onViewArtifact={(content, title) => setArtifactContent({ content, title })}
             searchTerm={searchTerm}
             currentMatchId={searchMatches.length > 0 ? searchMatches[currentMatchIndex]?.id : null}
           />
@@ -407,6 +413,15 @@ export function SessionView({
           serverId={serverId}
           filePath={viewingFile}
           onClose={() => setViewingFile(null)}
+        />
+      )}
+
+      {artifactContent && (
+        <ArtifactViewerModal
+          content={artifactContent.content}
+          title={artifactContent.title}
+          onClose={() => setArtifactContent(null)}
+          onFileClick={handleViewFile}
         />
       )}
 
