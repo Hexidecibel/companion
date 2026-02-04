@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState, useCallback } from 'react';
+import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -21,11 +21,12 @@ import { SubAgentDetailScreen } from './SubAgentDetailScreen';
 import { useConnection } from '../hooks/useConnection';
 import { useConversation } from '../hooks/useConversation';
 // StatusIndicator replaced by inline connection dot in header
-import { ConversationItem } from '../components/ConversationItem';
+import { ConversationItem, extractPlanFilePath } from '../components/ConversationItem';
 import { InputBar } from '../components/InputBar';
 import { SessionPicker } from '../components/SessionPicker';
 import { FileViewer } from '../components/FileViewer';
 import { MessageViewer } from '../components/MessageViewer';
+import { SearchBar } from '../components/SearchBar';
 import { getSessionSettings, saveSessionSettings, SessionSettings } from '../services/storage';
 import { wsService } from '../services/websocket';
 import { messageQueue, QueuedMessage } from '../services/messageQueue';
@@ -151,6 +152,62 @@ export function SessionView({ server, onBack, initialSessionId, onNewProject, on
   const [showAgentsModal, setShowAgentsModal] = useState(false);
   const [viewingAgentDetail, setViewingAgentDetail] = useState<{ agentId: string; agent?: SubAgent } | null>(null);
   const [showCompletedAgents, setShowCompletedAgents] = useState(false);
+
+  // Search state
+  const [showSearch, setShowSearch] = useState(false);
+  const [searchTerm, setSearchTerm] = useState<string | null>(null);
+  const [currentMatchIndex, setCurrentMatchIndex] = useState(0);
+
+  const searchMatches = useMemo(() => {
+    if (!searchTerm) return [];
+    const lower = searchTerm.toLowerCase();
+    return data
+      .map((h, i) => ({ id: h.id, index: i }))
+      .filter(({ index }) => data[index].content?.toLowerCase().includes(lower));
+  }, [data, searchTerm]);
+
+  const handleSearchTerm = useCallback((term: string) => {
+    setSearchTerm(term || null);
+    setCurrentMatchIndex(0);
+  }, []);
+
+  const handleSearchNext = useCallback(() => {
+    if (searchMatches.length === 0) return;
+    setCurrentMatchIndex(prev => (prev + 1) % searchMatches.length);
+  }, [searchMatches.length]);
+
+  const handleSearchPrev = useCallback(() => {
+    if (searchMatches.length === 0) return;
+    setCurrentMatchIndex(prev => (prev - 1 + searchMatches.length) % searchMatches.length);
+  }, [searchMatches.length]);
+
+  const handleSearchClose = useCallback(() => {
+    setShowSearch(false);
+    setSearchTerm(null);
+    setCurrentMatchIndex(0);
+  }, []);
+
+  // Detect latest plan file from conversation
+  const latestPlanFile = useMemo(() => {
+    for (let i = data.length - 1; i >= 0; i--) {
+      const planPath = extractPlanFilePath(data[i]);
+      if (planPath) return planPath;
+    }
+    return null;
+  }, [data]);
+
+  // Auto-scroll to current match
+  const itemRefs = useRef<Map<string, number>>(new Map());
+
+  useEffect(() => {
+    if (searchMatches.length === 0 || !scrollViewRef.current) return;
+    const match = searchMatches[currentMatchIndex];
+    if (!match) return;
+    // Approximate scroll position: each item is roughly 80px tall
+    // Use the index to estimate position
+    const estimatedY = match.index * 80;
+    scrollViewRef.current.scrollTo({ y: Math.max(0, estimatedY - 100), animated: true });
+  }, [currentMatchIndex, searchMatches]);
 
   // Subscribe to message queue updates
   useEffect(() => {
@@ -628,6 +685,22 @@ export function SessionView({ server, onBack, initialSessionId, onNewProject, on
           <Ionicons name="refresh" size={20} color={loading ? '#4b5563' : '#9ca3af'} />
         </TouchableOpacity>
         <TouchableOpacity
+          style={styles.headerIconButton}
+          onPress={() => setShowSearch(prev => !prev)}
+          onLongPress={() => Alert.alert('Search', 'Search conversation messages')}
+        >
+          <Ionicons name="search-outline" size={20} color={showSearch ? '#60a5fa' : '#9ca3af'} />
+        </TouchableOpacity>
+        {latestPlanFile && (
+          <TouchableOpacity
+            style={styles.headerIconButton}
+            onPress={() => setViewingFile(latestPlanFile)}
+            onLongPress={() => Alert.alert('Plan', `View plan: ${latestPlanFile.split('/').pop()}`)}
+          >
+            <Ionicons name="document-text-outline" size={20} color="#c4b5fd" />
+          </TouchableOpacity>
+        )}
+        <TouchableOpacity
           style={[
             styles.autoApproveButton,
             sessionSettings.autoApproveEnabled && styles.autoApproveButtonActive,
@@ -670,6 +743,18 @@ export function SessionView({ server, onBack, initialSessionId, onNewProject, on
           <Ionicons name="settings-outline" size={20} color="#9ca3af" />
         </TouchableOpacity>
       </LinearGradient>
+
+      {/* Search Bar */}
+      {showSearch && (
+        <SearchBar
+          onSearch={handleSearchTerm}
+          matchCount={searchMatches.length}
+          currentMatch={currentMatchIndex}
+          onNext={handleSearchNext}
+          onPrev={handleSearchPrev}
+          onClose={handleSearchClose}
+        />
+      )}
 
       {/* Session Settings Modal */}
       <Modal
@@ -1121,6 +1206,8 @@ export function SessionView({ server, onBack, initialSessionId, onNewProject, on
               onFileTap={setViewingFile}
               onMessageTap={item.type === 'assistant' ? () => setViewingMessage({ content: item.content, timestamp: item.timestamp }) : undefined}
               fontScale={fontScale}
+              searchTerm={searchTerm}
+              isCurrentMatch={searchMatches.length > 0 && searchMatches[currentMatchIndex]?.id === item.id}
             />
           ))
         )}

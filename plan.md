@@ -5,86 +5,74 @@ Completed items have been moved to FEATURES.md.
 ---
 
 ## 13. Web/Mobile Parity
-**Status:** partially done
+**Status:** done
 
-Remaining gaps between web and mobile clients.
+Two remaining gaps between web and mobile clients: conversation search and plan viewer.
 
-### Remaining Items
+### 13a. Mobile Search
+**Status:** done
 
-| Feature | Web | Mobile |
-|---------|-----|--------|
-| Search in conversation | SearchBar | Missing |
-| Plan viewer | PlanCard + header button | Missing |
+Port the web client's SearchBar and match highlighting to React Native.
 
-### Implementation
+#### Requirements
+- Search icon button in session header toggles a search bar below the header
+- Text input with 150ms debounce, case-insensitive substring matching on highlight content
+- Match count display: "3/12"
+- Prev/next navigation (▲/▼ buttons), Enter = next, wrap-around at ends
+- Yellow background highlighting on matching text within messages
+- Current match gets distinct styling (outline or brighter highlight)
+- Auto-scroll to current match
+- Escape or X button closes search bar and clears highlights
 
-**Mobile Search:**
-- `app/src/components/SearchBar.tsx` (new) — Port web SearchBar to React Native
-- Match highlighting in `ConversationItem` (already has `HighlightedText` equivalent)
-- Prev/next navigation controls
-- Header integration in mobile `SessionView`
+#### Implementation Steps
+1. Create `app/src/components/SearchBar.tsx` — TextInput with match count, prev/next buttons, close button
+2. Add search state to `SessionView.tsx` — `showSearch`, `searchTerm`, `currentMatchIndex`, `searchMatches` memo
+3. Add search icon button to session header (Ionicons `search-outline`, between refresh and auto-approve)
+4. Extend `ConversationItem` props with `searchTerm?: string | null` and `isCurrentMatch?: boolean`
+5. Add `HighlightedText` helper inside `ConversationItem` — splits text by search term, wraps matches in yellow `<Text>`
+6. When `searchTerm` is set, render content as plain highlighted text instead of markdown (matching web behavior)
+7. Add `isCurrentMatch` outline style to the message container
+8. Auto-scroll to current match via `scrollToIndex` or `scrollTo` with item measurement in SessionView's FlatList/ScrollView
 
-**Mobile Plan Viewer:**
-- Detect plan file references in conversation highlights
-- Add "Plan" button to mobile session header
-- Open plan file in FileViewer (already supports markdown rendering)
-
----
-
-## 18. macOS Desktop — Nice to Have
-**Status:** planned
-
-Polish features that improve the desktop experience but aren't blockers for release. Can be implemented incrementally post-launch.
-
-### 18a. Global Hotkey
-
-Toggle window visibility from anywhere with Ctrl+Shift+C.
-
-- `tauri-plugin-global-shortcut`
-- Register shortcut in main.rs setup
-- Make shortcut configurable via web settings panel
-- Capability: `"global-shortcut:default"`
-
-### 18b. Deep Links
-
-`companion://server/session-id` URLs open specific sessions from terminal or other apps.
-
-- `tauri-plugin-deep-link`
-- Register URL scheme in tauri.conf.json
-- Handle deep link in Rust, emit event to frontend, navigate to session
-- Capability: `"deep-link:default"`
-
-### 18c. Build Pipeline
-
-- GitHub Actions workflow for Tauri builds
-- Matrix: macOS ARM64 + x86_64
-- Universal binary via `lipo` or Tauri's target config
-- Artifact: .dmg file attached to release
-
-### 18d. Code Signing & Notarization
-
-- Apple Developer certificate
-- `tauri.conf.json` signing config
-- Notarization via `xcrun notarytool`
-- Required for distribution: unsigned .dmg shows Gatekeeper warning
-
-### 18e. Auto-Update
-
-- `tauri-plugin-updater`
-- Host update manifest JSON on GitHub Releases
-- Check for updates on launch + periodic check
-- In-app notification: "Update available — restart to install"
-
-### Files to Modify
+#### Files to Modify
 
 | File | Change |
 |------|--------|
-| `desktop/src-tauri/Cargo.toml` | Add global-shortcut, deep-link, updater plugins |
-| `desktop/src-tauri/src/main.rs` | Global hotkey, deep link handler, updater check |
-| `desktop/src-tauri/tauri.conf.json` | URL scheme, signing config, updater endpoint |
-| `desktop/src-tauri/capabilities/default.json` | Add permissions for new plugins |
-| `.github/workflows/desktop-build.yml` (new) | CI for Tauri builds |
-| `web/src/components/SettingsScreen.tsx` | Global hotkey config, update check button |
+| `app/src/components/SearchBar.tsx` (new) | Search input bar with nav controls |
+| `app/src/screens/SessionView.tsx` | Search state, header button, SearchBar rendering, scroll-to-match |
+| `app/src/components/ConversationItem.tsx` | `searchTerm`/`isCurrentMatch` props, HighlightedText rendering |
+
+---
+
+### 13b. Mobile Plan Viewer
+**Status:** done
+
+Detect plan file references in conversation and add a Plan button to the session header.
+
+#### Requirements
+- Detect plan file paths from `ExitPlanMode`/`EnterPlanMode` tool calls in highlights
+- Show "Plan" icon button in session header when a plan file is detected
+- Tapping opens the plan file in the existing FileViewer (already supports markdown rendering)
+- Render inline PlanCard for `ExitPlanMode` tool calls showing "Plan Ready" with approval status and "View Plan" button
+
+#### Implementation Steps
+1. Add `extractPlanFilePath()` utility — port from web's `MessageBubble.tsx` regex logic, check tool call outputs and message content for `.claude/plans/*.md` or `*plan.md` paths
+2. Add `latestPlanFile` memo to `SessionView.tsx` — scan highlights backwards for plan file reference
+3. Add plan icon button to session header (Ionicons `document-text-outline`), only visible when `latestPlanFile` is set, opens FileViewer
+4. In `ConversationItem.tsx`, detect `ExitPlanMode` tool calls and render a styled PlanCard with "Plan Ready" label, approval status, and "View Plan" button
+
+#### Files to Modify
+
+| File | Change |
+|------|--------|
+| `app/src/screens/SessionView.tsx` | `latestPlanFile` memo, plan header button |
+| `app/src/components/ConversationItem.tsx` | `extractPlanFilePath()`, PlanCard rendering for ExitPlanMode |
+
+---
+
+### File Overlap Analysis
+
+13a and 13b both modify `SessionView.tsx` (header buttons, state) and `ConversationItem.tsx` (rendering). Work sequentially — 13a first (search), then 13b (plan viewer).
 
 ---
 
@@ -94,3 +82,8 @@ Toggle window visibility from anywhere with Ctrl+Shift+C.
 **Status:** deferred (roadmap)
 
 Discover Codex conversation files, parse format, translate to internal types. Not prioritized — focusing on Claude Code integration first.
+
+### 18. macOS Desktop — Nice to Have
+**Status:** deferred
+
+Global hotkey (Ctrl+Shift+C), deep links (`companion://` URL scheme), CI build pipeline, code signing & notarization, auto-update via `tauri-plugin-updater`. Post-launch polish.

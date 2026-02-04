@@ -5,6 +5,30 @@ import Markdown from '@ronradtke/react-native-markdown-display';
 import { ConversationMessage, ConversationHighlight, ToolCall, Question } from '../types';
 import { scaledFont } from '../theme/fonts';
 
+// Detect plan file paths in content text
+const PLAN_PATH_RE = /(?:\/[^\s)>"'\]]*\.claude\/plans\/[^\s)>"'\]]+\.md|\/[^\s)>"'\]]*plan\.md)/g;
+
+export function extractPlanFilePath(item: ConversationMessage | ConversationHighlight): string | null {
+  // Check tool call outputs for plan references
+  const message = item as ConversationMessage;
+  if (message.toolCalls) {
+    for (const tool of message.toolCalls) {
+      if (tool.name === 'ExitPlanMode' || tool.name === 'EnterPlanMode') {
+        if (tool.output) {
+          const match = tool.output.match(PLAN_PATH_RE);
+          if (match) return match[0];
+        }
+      }
+    }
+  }
+  // Check message content
+  if (item.content) {
+    const match = item.content.match(PLAN_PATH_RE);
+    if (match) return match[0];
+  }
+  return null;
+}
+
 // Content that should be treated as empty / not rendered
 function isEmptyContent(content: string): boolean {
   const trimmed = content.trim();
@@ -18,6 +42,8 @@ interface ConversationItemProps {
   onFileTap?: (filePath: string) => void;
   onMessageTap?: () => void;
   fontScale?: number;
+  searchTerm?: string | null;
+  isCurrentMatch?: boolean;
 }
 
 const COLLAPSED_LINES = 12;
@@ -131,8 +157,30 @@ if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental
   UIManager.setLayoutAnimationEnabledExperimental(true);
 }
 
+// Plan card for ExitPlanMode tool calls
+function PlanCard({ tool, onViewPlan }: { tool: ToolCall; onViewPlan?: () => void }) {
+  const statusText = tool.status === 'completed' ? 'Approved' : 'Pending';
+  const statusColor = tool.status === 'completed' ? '#10b981' : '#f59e0b';
+
+  return (
+    <View style={planCardStyles.container}>
+      <View style={planCardStyles.header}>
+        <Text style={planCardStyles.icon}>Plan Ready</Text>
+        <View style={[planCardStyles.statusBadge, { backgroundColor: statusColor }]}>
+          <Text style={planCardStyles.statusText}>{statusText}</Text>
+        </View>
+      </View>
+      {onViewPlan && (
+        <TouchableOpacity style={planCardStyles.viewButton} onPress={onViewPlan}>
+          <Text style={planCardStyles.viewButtonText}>View Plan</Text>
+        </TouchableOpacity>
+      )}
+    </View>
+  );
+}
+
 // Tool calls container with collapse/expand for many tools
-function ToolCallsContainer({ toolCalls }: { toolCalls: ToolCall[] }) {
+function ToolCallsContainer({ toolCalls, onFileTap }: { toolCalls: ToolCall[]; onFileTap?: (path: string) => void }) {
   const [showAll, setShowAll] = useState(false);
   const [allExpanded, setAllExpanded] = useState<boolean | undefined>(undefined);
 
@@ -226,9 +274,19 @@ function ToolCallsContainer({ toolCalls }: { toolCalls: ToolCall[] }) {
           </TouchableOpacity>
         </View>
       )}
-      {toolCalls.map((tool) => (
-        <ToolCard key={tool.id} tool={tool} forceExpanded={allExpanded} />
-      ))}
+      {toolCalls.map((tool) => {
+        if (tool.name === 'ExitPlanMode' && onFileTap) {
+          const planPath = tool.output?.match(PLAN_PATH_RE)?.[0] || null;
+          return (
+            <PlanCard
+              key={tool.id}
+              tool={tool}
+              onViewPlan={planPath ? () => onFileTap(planPath) : undefined}
+            />
+          );
+        }
+        return <ToolCard key={tool.id} tool={tool} forceExpanded={allExpanded} />;
+      })}
     </View>
   );
 }
@@ -474,7 +532,36 @@ function ToolCard({ tool, forceExpanded }: { tool: ToolCall; forceExpanded?: boo
   );
 }
 
-function ConversationItemInner({ item, showToolCalls, onSelectOption, onFileTap, onMessageTap, fontScale = 1 }: ConversationItemProps) {
+// Highlight search term matches in text
+function HighlightedText({ text, term }: { text: string; term: string }) {
+  if (!term) return <Text style={searchStyles.text}>{text}</Text>;
+  const parts: { text: string; match: boolean }[] = [];
+  const lower = text.toLowerCase();
+  const lowerTerm = term.toLowerCase();
+  let lastIdx = 0;
+  let idx = lower.indexOf(lowerTerm, lastIdx);
+  while (idx !== -1) {
+    if (idx > lastIdx) parts.push({ text: text.slice(lastIdx, idx), match: false });
+    parts.push({ text: text.slice(idx, idx + term.length), match: true });
+    lastIdx = idx + term.length;
+    idx = lower.indexOf(lowerTerm, lastIdx);
+  }
+  if (lastIdx < text.length) parts.push({ text: text.slice(lastIdx), match: false });
+  if (parts.length === 0) return <Text style={searchStyles.text}>{text}</Text>;
+  return (
+    <Text style={searchStyles.text}>
+      {parts.map((p, i) =>
+        p.match ? (
+          <Text key={i} style={searchStyles.highlight}>{p.text}</Text>
+        ) : (
+          <Text key={i}>{p.text}</Text>
+        )
+      )}
+    </Text>
+  );
+}
+
+function ConversationItemInner({ item, showToolCalls, onSelectOption, onFileTap, onMessageTap, fontScale = 1, searchTerm, isCurrentMatch }: ConversationItemProps) {
   const [expanded, setExpanded] = useState(false);
   const [selectedOptions, setSelectedOptions] = useState<Set<string>>(new Set());
   // Per-question selections for multi-question mode: Map<questionIndex, Set<optionLabel>>
@@ -799,7 +886,11 @@ function ConversationItemInner({ item, showToolCalls, onSelectOption, onFileTap,
   return (
     <View style={[styles.container, isUser ? styles.userContainer : styles.assistantContainer]}>
       <TouchableOpacity
-        style={[styles.bubble, isUser ? styles.userBubble : styles.assistantBubble]}
+        style={[
+          styles.bubble,
+          isUser ? styles.userBubble : styles.assistantBubble,
+          isCurrentMatch && searchStyles.currentMatch,
+        ]}
         onPress={handleBubbleTap}
         activeOpacity={onMessageTap || needsExpansion ? 0.8 : 1}
       >
@@ -814,12 +905,20 @@ function ConversationItemInner({ item, showToolCalls, onSelectOption, onFileTap,
           )}
         </View>
         {isUser ? (
-          <Text style={[styles.content, styles.userContent]}>{item.content}</Text>
+          searchTerm ? (
+            <HighlightedText text={item.content} term={searchTerm} />
+          ) : (
+            <Text style={[styles.content, styles.userContent]}>{item.content}</Text>
+          )
         ) : (
           <View style={!expanded && needsExpansion ? styles.collapsedContent : undefined}>
-            <Markdown style={scaledMarkdownStyles} rules={rules}>
-              {item.content}
-            </Markdown>
+            {searchTerm ? (
+              <HighlightedText text={item.content} term={searchTerm} />
+            ) : (
+              <Markdown style={scaledMarkdownStyles} rules={rules}>
+                {item.content}
+              </Markdown>
+            )}
             {!expanded && needsExpansion && (
               <View style={styles.fadeOverlay}>
                 <View style={styles.fadeLayer1} />
@@ -983,7 +1082,7 @@ function ConversationItemInner({ item, showToolCalls, onSelectOption, onFileTap,
           </View>
         )}
         {hasToolCalls && (
-          <ToolCallsContainer toolCalls={message.toolCalls!} />
+          <ToolCallsContainer toolCalls={message.toolCalls!} onFileTap={onFileTap} />
         )}
         <Text style={styles.time}>{formatTime(item.timestamp)}</Text>
       </TouchableOpacity>
@@ -1728,6 +1827,68 @@ const styles = StyleSheet.create({
   },
 });
 
+const planCardStyles = StyleSheet.create({
+  container: {
+    backgroundColor: 'rgba(139, 92, 246, 0.1)',
+    borderRadius: 8,
+    marginTop: 8,
+    padding: 12,
+    borderLeftWidth: 3,
+    borderLeftColor: '#8b5cf6',
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  icon: {
+    color: '#c4b5fd',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  statusBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  statusText: {
+    color: '#fff',
+    fontSize: 10,
+    fontWeight: '600',
+    textTransform: 'uppercase',
+  },
+  viewButton: {
+    backgroundColor: '#7c3aed',
+    borderRadius: 6,
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    alignSelf: 'flex-start',
+    marginTop: 10,
+  },
+  viewButtonText: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+});
+
+const searchStyles = StyleSheet.create({
+  text: {
+    color: '#f3f4f6',
+    fontSize: 15,
+    lineHeight: 22,
+  },
+  highlight: {
+    backgroundColor: 'rgba(250, 204, 21, 0.3)',
+    color: '#fef08a',
+    borderRadius: 2,
+  },
+  currentMatch: {
+    borderWidth: 1,
+    borderColor: 'rgba(250, 204, 21, 0.5)',
+  },
+});
+
 // Memoize to prevent re-renders when parent re-renders but props unchanged
 // This is important for FlatList performance during rapid message updates
 export const ConversationItem = memo(ConversationItemInner, (prevProps, nextProps) => {
@@ -1738,6 +1899,8 @@ export const ConversationItem = memo(ConversationItemInner, (prevProps, nextProp
     prevProps.item.timestamp === nextProps.item.timestamp &&
     prevProps.showToolCalls === nextProps.showToolCalls &&
     prevProps.fontScale === nextProps.fontScale &&
+    prevProps.searchTerm === nextProps.searchTerm &&
+    prevProps.isCurrentMatch === nextProps.isCurrentMatch &&
     // For messages with options, check if options changed
     ('options' in prevProps.item ? prevProps.item.options : undefined) ===
     ('options' in nextProps.item ? nextProps.item.options : undefined) &&
