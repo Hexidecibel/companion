@@ -12,6 +12,7 @@ import {
   ScrollView,
   FlatList,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system/legacy';
 
@@ -64,6 +65,7 @@ export function InputBar({
   disabled,
   placeholder,
 }: InputBarProps) {
+  const insets = useSafeAreaInsets();
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
   const [attachedImages, setAttachedImages] = useState<AttachedImage[]>([]);
@@ -199,7 +201,7 @@ export function InputBar({
   );
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { paddingBottom: insets.bottom }]}>
       {/* Slash command menu */}
       {showSlashMenu && (
         <View style={styles.slashMenu}>
