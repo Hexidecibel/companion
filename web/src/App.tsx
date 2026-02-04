@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { ConnectionProvider } from './context/ConnectionContext';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { StatusPage } from './components/StatusPage';
 import { Dashboard } from './components/Dashboard';
 import { SettingsScreen } from './components/SettingsScreen';
@@ -90,29 +91,31 @@ export function App() {
   ], [navigateTo, focusInput]);
 
   return (
-    <ConnectionProvider>
-      <div id="app" className={isDashboard ? 'app-dashboard' : ''}>
-        {screen.name === 'dashboard' && (
-          <Dashboard
-            onSettings={() => setScreen({ name: 'settings' })}
-          />
-        )}
-        {screen.name === 'status' && (
-          <StatusPage />
-        )}
-        {screen.name === 'settings' && (
-          <SettingsScreen
-            onBack={() => setScreen({ name: 'dashboard' })}
-          />
-        )}
+    <ErrorBoundary>
+      <ConnectionProvider>
+        <div id="app" className={isDashboard ? 'app-dashboard' : ''}>
+          {screen.name === 'dashboard' && (
+            <Dashboard
+              onSettings={() => setScreen({ name: 'settings' })}
+            />
+          )}
+          {screen.name === 'status' && (
+            <StatusPage />
+          )}
+          {screen.name === 'settings' && (
+            <SettingsScreen
+              onBack={() => setScreen({ name: 'dashboard' })}
+            />
+          )}
 
-        {showCommandPalette && (
-          <CommandPalette
-            actions={actions}
-            onClose={() => setShowCommandPalette(false)}
-          />
-        )}
-      </div>
-    </ConnectionProvider>
+          {showCommandPalette && (
+            <CommandPalette
+              actions={actions}
+              onClose={() => setShowCommandPalette(false)}
+            />
+          )}
+        </div>
+      </ConnectionProvider>
+    </ErrorBoundary>
   );
 }
