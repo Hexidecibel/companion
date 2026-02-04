@@ -19,4 +19,6 @@ module.exports = {
   moduleFileExtensions: ['ts', 'tsx', 'js', 'jsx', 'json', 'node'],
   clearMocks: true,
   verbose: true,
+  testTimeout: 30000,
+  forceExit: true,
 };
