@@ -1259,6 +1259,7 @@ export function SessionView({
         onScroll={handleScroll}
         onContentSizeChange={handleContentSizeChange}
         scrollEventThrottle={16}
+        keyboardDismissMode="on-drag"
         keyboardShouldPersistTaps="handled"
       >
         {/* Loading indicator at top when fetching older highlights */}
