@@ -2,6 +2,11 @@ import React from 'react';
 import { render, fireEvent, waitFor } from '@testing-library/react-native';
 import { InputBar } from '../../src/components/InputBar';
 
+// Mock safe area context
+jest.mock('react-native-safe-area-context', () => ({
+  useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
+}));
+
 // Mock expo modules
 jest.mock('expo-document-picker', () => ({
   getDocumentAsync: jest.fn(),
