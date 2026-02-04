@@ -20,7 +20,7 @@ import { EditServerScreen } from './src/screens/EditServerScreen';
 import { TaskDetailScreen } from './src/screens/TaskDetailScreen';
 import { TerminalScreen } from './src/screens/TerminalScreen';
 import { ErrorBoundary } from './src/components/ErrorBoundary';
-import { wsService } from './src/services/websocket';
+import { wsService, connectionManager } from './src/services/connectionManager';
 import { archiveService } from './src/services/archive';
 import { fontScaleService } from './src/services/fontScale';
 import {
@@ -62,8 +62,8 @@ function App() {
     const subscription = AppState.addEventListener('change', (state) => {
       if (state === 'active') {
         clearBadge();
-        // OS may have killed the socket while backgrounded - detect and reconnect
-        wsService.checkHealth();
+        // OS may have killed sockets while backgrounded - detect and reconnect all
+        connectionManager.checkHealthAll();
       }
     });
 
@@ -80,8 +80,8 @@ function App() {
       }
     });
 
-    // Listen for compaction events to save archives
-    const unsubscribeCompaction = wsService.onMessage((message) => {
+    // Listen for compaction events from ALL server connections
+    const unsubscribeCompaction = connectionManager.onMessage((serverId, message) => {
       if (message.type === 'compaction' && message.payload) {
         const event = message.payload as {
           sessionId: string;
@@ -90,15 +90,13 @@ function App() {
           summary: string;
           timestamp: number;
         };
-        // Save to archive
-        const serverId = wsService.getServerId();
         archiveService.addArchive({
           sessionId: event.sessionId,
           sessionName: event.sessionName,
           projectPath: event.projectPath,
           summary: event.summary,
           timestamp: event.timestamp,
-          serverId: serverId || 'unknown',
+          serverId: serverId,
           serverName: selectedServer?.name || 'Unknown Server',
         });
         console.log('Saved compaction to archive:', event.sessionName);
@@ -122,14 +120,11 @@ function App() {
     setSelectedServer(server);
     pendingSessionId.current = sessionId || null;
 
-    // Only reconnect if switching to a different server
-    const currentServerId = wsService.getServerId();
-    if (currentServerId !== server.id) {
-      // Disconnect from old server if connected to a different one
-      if (currentServerId) {
-        wsService.disconnect();
-      }
-      wsService.connect(server);
+    // Set this server as the active connection for screen-level wsService usage
+    connectionManager.setActive(server.id);
+    // Ensure connection exists (it should from dashboard sync)
+    if (!connectionManager.getConnection(server.id)) {
+      connectionManager.addConnection(server);
     }
 
     // SessionView will handle switching to the session via initialSessionId prop
@@ -140,13 +135,10 @@ function App() {
   const handleSelectServer = useCallback((server: Server) => {
     setSelectedServer(server);
 
-    // Only reconnect if switching to a different server
-    const currentServerId = wsService.getServerId();
-    if (currentServerId !== server.id) {
-      if (currentServerId) {
-        wsService.disconnect();
-      }
-      wsService.connect(server);
+    // Set this server as the active connection for screen-level wsService usage
+    connectionManager.setActive(server.id);
+    if (!connectionManager.getConnection(server.id)) {
+      connectionManager.addConnection(server);
     }
 
     setCurrentScreen('session');

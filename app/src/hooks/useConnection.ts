@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Platform } from 'react-native';
 import { Server, ConnectionState } from '../types';
-import { wsService } from '../services/websocket';
+import { wsService } from '../services/connectionManager';
 import { registerWithDaemon } from '../services/push';
 
 export function useConnection(server: Server | null) {

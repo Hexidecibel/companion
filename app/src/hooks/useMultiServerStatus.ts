@@ -1,44 +1,38 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Server, ServerStatus, ServerSummary } from '../types';
-import { wsService } from '../services/websocket';
+import { connectionManager } from '../services/connectionManager';
 
-const POLL_INTERVAL = 5000; // 5 seconds
+const POLL_INTERVAL = 5000;
 
-// Module-level cache: survives component unmount/remount
-let cachedSummary: ServerSummary | undefined;
-let cachedConnected = false;
+// Module-level cache: survives component unmount/remount so we don't lose
+// state on re-navigation
+const cachedSummaries = new Map<string, ServerSummary>();
+const cachedStatuses = new Map<string, ServerStatus>();
 
 export function useMultiServerStatus(servers: Server[]) {
-  // Use the first enabled server - don't connect to disabled servers
-  const server = servers.find((s) => s.enabled !== false) || null;
+  const [statusMap, setStatusMap] = useState<Map<string, ServerStatus>>(cachedStatuses);
+  const pollTimers = useRef<Map<string, ReturnType<typeof setInterval>>>(new Map());
 
-  const makeStatus = useCallback(
-    (connected: boolean, connecting: boolean, error?: string): ServerStatus => ({
-      serverId: server?.id || '',
-      serverName: server?.name || '',
-      connected,
-      connecting,
-      error,
-      summary: cachedSummary,
-      lastUpdated: Date.now(),
-    }),
-    [server?.id, server?.name]
-  );
+  const pollSummary = useCallback((serverId: string) => {
+    const conn = connectionManager.getConnection(serverId);
+    if (!conn?.isConnected()) return;
 
-  const [status, setStatus] = useState<ServerStatus>(() => makeStatus(cachedConnected, false));
-
-  const pollTimer = useRef<NodeJS.Timeout | null>(null);
-
-  // Poll for server summary
-  const pollSummary = useCallback(() => {
-    if (!wsService.isConnected()) return;
-
-    wsService
+    conn
       .sendRequest('get_server_summary', undefined, 10000)
       .then((response) => {
         if (response.success && response.payload) {
-          cachedSummary = response.payload as ServerSummary;
-          setStatus((prev) => ({ ...prev, summary: cachedSummary, lastUpdated: Date.now() }));
+          const summary = response.payload as ServerSummary;
+          cachedSummaries.set(serverId, summary);
+          setStatusMap((prev) => {
+            const next = new Map(prev);
+            const existing = next.get(serverId);
+            if (existing) {
+              const updated = { ...existing, summary, lastUpdated: Date.now() };
+              next.set(serverId, updated);
+              cachedStatuses.set(serverId, updated);
+            }
+            return next;
+          });
         }
       })
       .catch(() => {
@@ -46,97 +40,170 @@ export function useMultiServerStatus(servers: Server[]) {
       });
   }, []);
 
-  // Single effect: connect, track state, and poll
+  const startPolling = useCallback(
+    (serverId: string) => {
+      // Clear existing timer for this server
+      const existing = pollTimers.current.get(serverId);
+      if (existing) clearInterval(existing);
+
+      const timer = setInterval(() => pollSummary(serverId), POLL_INTERVAL);
+      pollTimers.current.set(serverId, timer);
+    },
+    [pollSummary]
+  );
+
+  const stopPolling = useCallback((serverId: string) => {
+    const timer = pollTimers.current.get(serverId);
+    if (timer) {
+      clearInterval(timer);
+      pollTimers.current.delete(serverId);
+    }
+  }, []);
+
+  // Sync servers with ConnectionManager and track states
   useEffect(() => {
-    if (!server) {
-      // All servers disabled - disconnect if connected
-      if (wsService.isConnected()) {
-        wsService.disconnect();
+    connectionManager.syncServers(servers);
+
+    const enabledServers = servers.filter((s) => s.enabled !== false);
+
+    // Initialize status for all enabled servers
+    setStatusMap((prev) => {
+      const next = new Map(prev);
+
+      // Remove statuses for servers no longer enabled
+      for (const id of next.keys()) {
+        if (!enabledServers.find((s) => s.id === id)) {
+          next.delete(id);
+          cachedStatuses.delete(id);
+          cachedSummaries.delete(id);
+        }
       }
-      cachedConnected = false;
-      cachedSummary = undefined;
-      return;
-    }
 
-    // Connect if needed
-    if (wsService.getServerId() !== server.id || !wsService.isConnected()) {
-      wsService.connect(server);
-    }
+      // Add statuses for new servers
+      for (const server of enabledServers) {
+        if (!next.has(server.id)) {
+          const conn = connectionManager.getConnection(server.id);
+          const state = conn?.getState();
+          const connected = state?.status === 'connected';
+          const connecting =
+            state?.status === 'connecting' || state?.status === 'reconnecting';
+          const initial: ServerStatus = {
+            serverId: server.id,
+            serverName: server.name,
+            connected,
+            connecting: connecting || (!connected && !state?.error),
+            error: state?.error,
+            summary: cachedSummaries.get(server.id),
+            lastUpdated: Date.now(),
+          };
+          next.set(server.id, initial);
+          cachedStatuses.set(server.id, initial);
+        }
+      }
 
-    // Track connection state
-    const unsubscribe = wsService.onStateChange((state) => {
+      return next;
+    });
+
+    // Listen for state changes from all connections
+    const unsubscribe = connectionManager.onStateChange((serverId, state) => {
+      const server = servers.find((s) => s.id === serverId);
+      if (!server) return;
+
       const connected = state.status === 'connected';
-      const connecting = state.status === 'connecting' || state.status === 'reconnecting';
-      cachedConnected = connected;
+      const connecting =
+        state.status === 'connecting' || state.status === 'reconnecting';
 
-      setStatus({
-        serverId: server.id,
-        serverName: server.name,
-        connected,
-        connecting,
-        error: state.error,
-        summary: cachedSummary,
-        lastUpdated: Date.now(),
+      setStatusMap((prev) => {
+        const next = new Map(prev);
+        const existing = next.get(serverId);
+        const updated: ServerStatus = {
+          serverId,
+          serverName: server.name,
+          connected,
+          connecting,
+          error: state.error,
+          summary: existing?.summary || cachedSummaries.get(serverId),
+          lastUpdated: Date.now(),
+        };
+        next.set(serverId, updated);
+        cachedStatuses.set(serverId, updated);
+        return next;
       });
 
-      // When we become connected, immediately poll for summary
+      // When connected, immediately poll and start recurring poll
       if (connected) {
-        pollSummary();
+        pollSummary(serverId);
+        startPolling(serverId);
+      } else {
+        stopPolling(serverId);
       }
     });
 
-    // If already connected, poll now
-    if (wsService.isConnected()) {
-      pollSummary();
+    // For servers already connected, poll now and start recurring
+    for (const server of enabledServers) {
+      const conn = connectionManager.getConnection(server.id);
+      if (conn?.isConnected()) {
+        pollSummary(server.id);
+        startPolling(server.id);
+      }
     }
-
-    // Set up recurring poll
-    const timer = setInterval(pollSummary, POLL_INTERVAL);
-    pollTimer.current = timer;
 
     return () => {
       unsubscribe();
-      clearInterval(timer);
-      pollTimer.current = null;
-      // Do NOT disconnect wsService - it persists across screens
+      for (const timer of pollTimers.current.values()) {
+        clearInterval(timer);
+      }
+      pollTimers.current.clear();
     };
-  }, [server?.id, server?.name, pollSummary]);
+  }, [servers, pollSummary, startPolling, stopPolling]);
 
-  // Refresh
   const refreshServer = useCallback(
-    (_serverId: string) => {
-      pollSummary();
+    (serverId: string) => {
+      pollSummary(serverId);
     },
     [pollSummary]
   );
 
   const refreshAll = useCallback(() => {
-    pollSummary();
-  }, [pollSummary]);
+    for (const serverId of statusMap.keys()) {
+      pollSummary(serverId);
+    }
+  }, [statusMap, pollSummary]);
 
-  // Send a request through wsService
   const sendRequest = useCallback(
-    (_serverId: string, type: string, payload?: unknown): Promise<any> => {
-      return wsService.sendRequest(type, payload);
+    (serverId: string, type: string, payload?: unknown): Promise<any> => {
+      const conn = connectionManager.getConnection(serverId);
+      if (!conn) return Promise.reject(new Error('No connection for server'));
+      return conn.sendRequest(type, payload);
     },
     []
   );
 
-  const statusArray = server ? [status] : [];
-  const totalWaiting = status.summary?.waitingCount || 0;
-  const totalWorking = status.summary?.workingCount || 0;
-  const connectedCount = status.connected ? 1 : 0;
+  // Compute aggregates
+  const statuses = Array.from(statusMap.values());
+  const totalWaiting = statuses.reduce(
+    (sum, s) => sum + (s.summary?.waitingCount || 0),
+    0
+  );
+  const totalWorking = statuses.reduce(
+    (sum, s) => sum + (s.summary?.workingCount || 0),
+    0
+  );
+  const connectedCount = statuses.filter((s) => s.connected).length;
 
   return {
-    statuses: statusArray,
-    statusMap: new Map(server ? [[server.id, status]] : []),
+    statuses,
+    statusMap,
     totalWaiting,
     totalWorking,
     connectedCount,
     refreshServer,
     refreshAll,
     sendRequest,
-    connectToServer: (s: Server) => wsService.connect(s),
-    disconnectFromServer: (_serverId: string) => wsService.disconnect(),
+    connectToServer: (s: Server) => connectionManager.addConnection(s),
+    disconnectFromServer: (serverId: string) => {
+      const conn = connectionManager.getConnection(serverId);
+      if (conn) conn.disconnect();
+    },
   };
 }

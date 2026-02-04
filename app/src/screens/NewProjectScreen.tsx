@@ -11,7 +11,7 @@ import {
   Alert,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { wsService } from '../services/websocket';
+import { wsService } from '../services/connectionManager';
 import { StackTemplate, ProjectConfig, ScaffoldProgress, ScaffoldResult } from '../types';
 
 interface NewProjectScreenProps {

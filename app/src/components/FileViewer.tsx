@@ -13,7 +13,7 @@ import {
 import Markdown from '@ronradtke/react-native-markdown-display';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as IntentLauncher from 'expo-intent-launcher';
-import { wsService } from '../services/websocket';
+import { wsService } from '../services/connectionManager';
 
 interface FileViewerProps {
   filePath: string | null;

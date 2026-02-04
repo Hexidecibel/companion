@@ -28,7 +28,7 @@ import { FileViewer } from '../components/FileViewer';
 import { MessageViewer } from '../components/MessageViewer';
 import { SearchBar } from '../components/SearchBar';
 import { getSessionSettings, saveSessionSettings, SessionSettings } from '../services/storage';
-import { wsService } from '../services/websocket';
+import { wsService } from '../services/connectionManager';
 import { messageQueue, QueuedMessage } from '../services/messageQueue';
 import { sessionGuard } from '../services/sessionGuard';
 import { useFontScale } from '../hooks/useFontScale';

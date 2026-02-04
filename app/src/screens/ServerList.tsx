@@ -17,7 +17,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Server, ConnectionState } from '../types';
 import { getServers, addServer, updateServer, deleteServer } from '../services/storage';
 import { ServerCard } from '../components/ServerCard';
-import { wsService } from '../services/websocket';
+import { wsService } from '../services/connectionManager';
 import { QRScanner, QRConfig } from '../components/QRScanner';
 
 interface ServerListProps {

@@ -1,10 +1,10 @@
 import { renderHook, act } from '@testing-library/react-native';
 import { useConnection } from '../../src/hooks/useConnection';
-import { wsService } from '../../src/services/websocket';
+import { wsService } from '../../src/services/connectionManager';
 import { Server, ConnectionState } from '../../src/types';
 
 // Mock the websocket service
-jest.mock('../../src/services/websocket', () => ({
+jest.mock('../../src/services/connectionManager', () => ({
   wsService: {
     getState: jest.fn(),
     getServerId: jest.fn(),

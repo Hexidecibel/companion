@@ -9,7 +9,7 @@ import {
   Modal,
   Alert,
 } from 'react-native';
-import { wsService } from '../services/websocket';
+import { wsService } from '../services/connectionManager';
 
 interface EscalationConfig {
   events: {

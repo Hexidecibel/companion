@@ -10,7 +10,7 @@ import {
 } from 'react-native';
 import Constants from 'expo-constants';
 import * as Sentry from '@sentry/react-native';
-import { wsService } from '../services/websocket';
+import { wsService } from '../services/connectionManager';
 
 const GITHUB_REPO = 'Hexidecibel/companion';
 const APP_VERSION = Constants.expoConfig?.version || '0.1.0';

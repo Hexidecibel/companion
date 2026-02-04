@@ -1,5 +1,5 @@
 import { Platform, PermissionsAndroid } from 'react-native';
-import { wsService } from './websocket';
+import { wsService } from './connectionManager';
 
 let pushToken: string | null = null;
 let tokenType: 'fcm' | 'expo' = 'fcm';

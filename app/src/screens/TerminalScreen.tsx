@@ -16,7 +16,7 @@ import {
 } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import { LinearGradient } from 'expo-linear-gradient';
-import { wsService } from '../services/websocket';
+import { wsService } from '../services/connectionManager';
 import { parseAnsiText, AnsiSpan } from '../utils/ansiParser';
 
 interface TerminalScreenProps {

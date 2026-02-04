@@ -20,7 +20,7 @@ const mockSendRequest = jest.fn().mockResolvedValue({
   payload: { output: 'test terminal output\n$ ' },
 });
 
-jest.mock('../../src/services/websocket', () => ({
+jest.mock('../../src/services/connectionManager', () => ({
   wsService: {
     sendRequest: (...args: unknown[]) => mockSendRequest(...args),
   },

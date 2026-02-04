@@ -484,5 +484,5 @@ export class WebSocketService {
   }
 }
 
-// Singleton instance
-export const wsService = new WebSocketService();
+// wsService is now exported from connectionManager.ts for multi-server support.
+// Import { wsService } from './connectionManager' instead.

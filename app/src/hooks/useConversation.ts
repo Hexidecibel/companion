@@ -7,7 +7,7 @@ import {
   OtherSessionActivity,
   TmuxSessionMissing,
 } from '../types';
-import { wsService } from '../services/websocket';
+import { wsService } from '../services/connectionManager';
 import { sessionGuard } from '../services/sessionGuard';
 
 // Page size for paginated highlights

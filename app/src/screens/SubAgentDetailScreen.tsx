@@ -9,7 +9,7 @@ import {
 } from 'react-native';
 import { ConversationItem } from '../components/ConversationItem';
 import { SubAgent, ConversationHighlight } from '../types';
-import { wsService } from '../services/websocket';
+import { wsService } from '../services/connectionManager';
 
 interface SubAgentDetailScreenProps {
   agentId: string;

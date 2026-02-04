@@ -4,7 +4,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import Constants from 'expo-constants';
 import { getSettings, AppSettings, clearAll } from '../services/storage';
 import { historyService } from '../services/history';
-import { wsService } from '../services/websocket';
+import { wsService } from '../services/connectionManager';
 import { fontScaleService } from '../services/fontScale';
 import { scaledFont } from '../theme/fonts';
 

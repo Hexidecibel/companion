@@ -8,7 +8,7 @@ import {
   ActivityIndicator,
   RefreshControl,
 } from 'react-native';
-import { wsService } from '../services/websocket';
+import { wsService } from '../services/connectionManager';
 
 interface SubAgent {
   agentId: string;

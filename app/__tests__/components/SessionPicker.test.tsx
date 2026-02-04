@@ -1,10 +1,10 @@
 import React from 'react';
 import { render, fireEvent, waitFor } from '@testing-library/react-native';
 import { SessionPicker } from '../../src/components/SessionPicker';
-import { wsService } from '../../src/services/websocket';
+import { wsService } from '../../src/services/connectionManager';
 
 // Mock the websocket service
-jest.mock('../../src/services/websocket', () => ({
+jest.mock('../../src/services/connectionManager', () => ({
   wsService: {
     isConnected: jest.fn(),
     sendRequest: jest.fn(),

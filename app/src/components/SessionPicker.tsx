@@ -9,7 +9,7 @@ import {
   ActivityIndicator,
   Alert,
 } from 'react-native';
-import { wsService } from '../services/websocket';
+import { wsService } from '../services/connectionManager';
 import { TmuxSessionInfo, DirectoryEntry } from '../types';
 import { sessionGuard } from '../services/sessionGuard';
 
