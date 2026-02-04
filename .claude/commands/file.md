@@ -12,7 +12,7 @@ Find a file in the project by name or description and output its absolute path.
 
 1. The query: `$ARGUMENTS`
 
-2. Search for the file in `/Users/chriscushman/local/src/claude-companion/`:
+2. Search for the file in the project root:
    - If the query looks like a filename (e.g. `useConversation.ts`, `parser.ts`), search by glob pattern
    - If the query is a description (e.g. "websocket service", "push notifications"), search by grepping for relevant exports/class names or use the file structure knowledge
    - Check all subdirectories: `app/`, `web/`, `daemon/`, `desktop/`, root
@@ -26,13 +26,13 @@ Find a file in the project by name or description and output its absolute path.
 ## Examples
 
 Input: `useConversation`
-Output: `/Users/chriscushman/local/src/claude-companion/app/src/hooks/useConversation.ts`
+Output: `app/src/hooks/useConversation.ts`
 
 Input: `websocket`
 Output:
-`/Users/chriscushman/local/src/claude-companion/app/src/services/websocket.ts`
-`/Users/chriscushman/local/src/claude-companion/daemon/src/websocket.ts`
-`/Users/chriscushman/local/src/claude-companion/web/src/services/ServerConnection.ts`
+`app/src/services/websocket.ts`
+`daemon/src/websocket.ts`
+`web/src/services/ServerConnection.ts`
 
 ## Notes
 

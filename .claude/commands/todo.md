@@ -12,7 +12,7 @@ Quickly capture ideas and tasks to todo.md.
 
 1. The item to add: `$ARGUMENTS`
 
-2. Read or create `/Users/chriscushman/local/src/claude-companion/todo.md`
+2. Read or create `todo.md`
 
 3. Add the item as a bullet point:
    - Format: `- <the text>`

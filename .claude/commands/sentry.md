@@ -5,35 +5,35 @@ Fetch and investigate recent Sentry errors for Companion.
 ## Setup
 Secrets are stored in `.claude/secrets.env`. Source it first:
 ```bash
-source /Users/chriscushman/local/src/claude-companion/.claude/secrets.env
+source .claude/secrets.env
 ```
 
 ## Steps
 
 1. List unresolved issues:
 ```bash
-source /Users/chriscushman/local/src/claude-companion/.claude/secrets.env && \
+source .claude/secrets.env && \
 curl -s -H "Authorization: Bearer $SENTRY_API_TOKEN" \
   "https://sentry.io/api/0/projects/$SENTRY_ORG/$SENTRY_PROJECT/issues/?query=is:unresolved" | jq '.[] | {id, title, culprit, count, lastSeen}'
 ```
 
 2. Get details for a specific issue (replace ISSUE_ID with the id from step 1):
 ```bash
-source /Users/chriscushman/local/src/claude-companion/.claude/secrets.env && \
+source .claude/secrets.env && \
 curl -s -H "Authorization: Bearer $SENTRY_API_TOKEN" \
   "https://sentry.io/api/0/issues/ISSUE_ID/events/latest/" | jq '{message, culprit, tags, contexts, exception}'
 ```
 
 3. Get full stack trace:
 ```bash
-source /Users/chriscushman/local/src/claude-companion/.claude/secrets.env && \
+source .claude/secrets.env && \
 curl -s -H "Authorization: Bearer $SENTRY_API_TOKEN" \
   "https://sentry.io/api/0/issues/ISSUE_ID/events/latest/" | jq '.exception.values[] | {type, value, stacktrace: .stacktrace.frames[-5:] | map({filename, function, lineno, context_line})}'
 ```
 
 4. Mark issue as resolved (after fix is confirmed):
 ```bash
-source /Users/chriscushman/local/src/claude-companion/.claude/secrets.env && \
+source .claude/secrets.env && \
 curl -s -X PUT -H "Authorization: Bearer $SENTRY_API_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"status": "resolved"}' \

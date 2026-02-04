@@ -4,9 +4,9 @@ Process todo.md items into detailed implementation plans.
 
 ## Instructions
 
-1. Read `/Users/chriscushman/local/src/claude-companion/todo.md`
+1. Read `todo.md`
 
-2. Read `/Users/chriscushman/local/src/claude-companion/plan.md` (if exists)
+2. Read `plan.md` (if exists)
 
 3. For each unplanned item in todo.md:
    - Ask clarifying questions using AskUserQuestion
@@ -14,7 +14,7 @@ Process todo.md items into detailed implementation plans.
    - Identify which files need changes
    - Consider edge cases and potential issues
 
-4. Write detailed plan to `/Users/chriscushman/local/src/claude-companion/plan.md`:
+4. Write detailed plan to `plan.md`:
    ```markdown
    # Implementation Plan
 

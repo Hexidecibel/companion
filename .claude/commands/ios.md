@@ -15,7 +15,7 @@ Profile is optional. Defaults to `production`. Options: `development`, `preview`
 
 2. Run the EAS build:
 ```bash
-cd /Users/chriscushman/local/src/claude-companion/app && eas build --platform ios --profile <profile> --non-interactive
+cd app && eas build --platform ios --profile <profile> --non-interactive
 ```
 
 3. Monitor the build output. EAS will print a URL to track the build.

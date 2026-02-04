@@ -4,7 +4,7 @@ Implement items from plan.md using TDD. If multiple items can be parallelized, s
 
 ## Instructions
 
-1. Read `/Users/chriscushman/local/src/claude-companion/plan.md`
+1. Read `plan.md`
 
 2. Find ALL items with **Status: planned** or **Status: in-progress**
 
@@ -34,8 +34,8 @@ Implement items from plan.md using TDD. If multiple items can be parallelized, s
             "name": "<descriptive group name>",
             "foremanSessionId": "<this session ID>",
             "foremanTmuxSession": "<this tmux session>",
-            "parentDir": "/Users/chriscushman/local/src/claude-companion",
-            "planFile": "/Users/chriscushman/local/src/claude-companion/plan.md",
+            "parentDir": ".",
+            "planFile": "plan.md",
             "workers": [
               {
                 "taskSlug": "<item-slug>",
@@ -86,7 +86,7 @@ Implement items from plan.md using TDD. If multiple items can be parallelized, s
       ```
 
    b. **Update FEATURES.md**
-      - Compile completed features into `/Users/chriscushman/local/src/claude-companion/FEATURES.md`
+      - Compile completed features into `FEATURES.md`
       - Format for GitHub README showcase
       ```markdown
       ## <Feature Name>

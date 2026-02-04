@@ -1,17 +1,15 @@
 # Stop Companion Services
 
-Stop the daemon and Expo dev server.
+Stop the daemon via systemd.
 
 ## Steps
 
-1. Kill the daemon process:
+1. Stop the companion service:
 ```bash
-pkill -f "node.*companion-daemon" || true
+systemctl --user stop companion
 ```
 
-2. Kill Expo processes:
+2. Verify it stopped:
 ```bash
-pkill -f "expo start" || true
+systemctl --user status companion --no-pager
 ```
-
-Run both commands to stop all services.
