@@ -226,9 +226,9 @@ export class WebSocketHandler {
       }
     });
 
-    ws.on('close', () => {
+    ws.on('close', (code, reason) => {
       this.clients.delete(clientId);
-      console.log(`WebSocket: Client disconnected (${clientId})`);
+      console.log(`WebSocket: Client disconnected (${clientId}) code=${code} reason=${reason?.toString() || 'none'}`);
     });
 
     ws.on('error', (err) => {
