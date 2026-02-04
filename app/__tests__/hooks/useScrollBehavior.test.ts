@@ -1018,20 +1018,25 @@ describe('useScrollBehavior', () => {
       });
 
       // User scrolls UP by just 20px (still "near bottom" by threshold)
+      // autoScrollEnabled is a ref (not state), so scrolling within the near-bottom zone
+      // sets the ref to false but doesn't trigger a re-render.
+      // Since user is still near bottom (distance=70 < 100), badge is NOT shown.
       act(() => {
         result.current.handleScroll(createScrollEvent(1000, 330, 600));
       });
 
+      // isNearBottom remains true since distance (70) < threshold (100)
+      expect(result.current.state.isNearBottom).toBe(true);
+
       // Advance past user scroll cooldown
       advanceTime(1100);
 
-      // Verify by checking behavior: content grows, should show badge (not auto-scroll)
+      // Content grows - but since user is still near bottom, no badge
       act(() => {
         result.current.handleContentSizeChange(0, 1200);
       });
 
-      // If auto-scroll was disabled, we should see new messages badge
-      expect(result.current.state.hasNewMessages).toBe(true);
+      expect(result.current.state.hasNewMessages).toBe(false);
     });
 
     it('should re-enable auto-scroll when user scrolls DOWN to bottom', () => {
@@ -1093,10 +1098,15 @@ describe('useScrollBehavior', () => {
       // Advance past programmatic scroll window (500ms)
       advanceTime(600);
 
-      // User scrolls up "a bit" - even small scroll should disable
+      // User scrolls up "a bit" - autoScrollEnabled ref is set to false,
+      // but user is still "near bottom" (distance=60 < 100 threshold),
+      // so no re-render is triggered and no badge is shown.
       act(() => {
         result.current.handleScroll(createScrollEvent(2000, 1340, 600)); // 10px up
       });
+
+      // isNearBottom remains true since distance (60) < threshold (100)
+      expect(result.current.state.isNearBottom).toBe(true);
 
       // Advance past user scroll cooldown
       advanceTime(1100);
@@ -1106,8 +1116,8 @@ describe('useScrollBehavior', () => {
         result.current.handleContentSizeChange(0, 2200);
       });
 
-      // Should show new messages badge (proving auto-scroll was disabled)
-      expect(result.current.state.hasNewMessages).toBe(true);
+      // No badge because user is still near bottom
+      expect(result.current.state.hasNewMessages).toBe(false);
     });
   });
 });

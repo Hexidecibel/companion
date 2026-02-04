@@ -61,6 +61,7 @@ describe('ConversationItem', () => {
         { label: 'Option A', description: 'First option' },
         { label: 'Option B', description: 'Second option' },
       ],
+      isWaitingForChoice: true,
     };
 
     const { getByText } = render(<ConversationItem item={messageWithOptions} />);
@@ -76,6 +77,7 @@ describe('ConversationItem', () => {
     const messageWithOptions: ConversationMessage = {
       ...mockAssistantMessage,
       options: [{ label: 'Yes', description: 'Confirm action' }],
+      isWaitingForChoice: true,
     };
 
     const { getByText } = render(
