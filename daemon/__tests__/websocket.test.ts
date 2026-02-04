@@ -35,9 +35,51 @@ mockWatcher.getStatus = jest.fn().mockReturnValue({
 mockWatcher.getSessions = jest.fn().mockReturnValue([]);
 mockWatcher.getActiveSessionId = jest.fn().mockReturnValue('test-session');
 mockWatcher.setActiveSession = jest.fn().mockReturnValue(true);
+mockWatcher.getConversationChain = jest.fn().mockReturnValue([]);
+mockWatcher.getActiveConversation = jest.fn().mockReturnValue(null);
+mockWatcher.checkAndEmitPendingApproval = jest.fn();
+mockWatcher.clearActiveSession = jest.fn();
+mockWatcher.refreshTmuxPaths = jest.fn().mockResolvedValue(undefined);
+mockWatcher.getServerSummary = jest.fn().mockResolvedValue({ sessions: [], totalSessions: 0, waitingCount: 0, workingCount: 0 });
 
 const mockInjector = {
   sendInput: jest.fn().mockResolvedValue(true),
+  getActiveSession: jest.fn().mockReturnValue('claude'),
+  setActiveSession: jest.fn(),
+  checkSessionExists: jest.fn().mockResolvedValue(true),
+} as any;
+
+const mockStore = {
+  getNotifications: jest.fn().mockReturnValue([]),
+  addNotification: jest.fn(),
+  markAsRead: jest.fn(),
+  markAllAsRead: jest.fn(),
+  getUnreadCount: jest.fn().mockReturnValue(0),
+  deleteNotification: jest.fn(),
+  getEscalation: jest.fn().mockReturnValue({
+    events: {
+      waiting_for_input: true,
+      error_detected: true,
+      session_completed: false,
+      worker_waiting: true,
+      worker_error: true,
+      work_group_ready: true,
+    },
+    pushDelaySeconds: 300,
+    rateLimitSeconds: 60,
+    quietHours: { enabled: false, start: '22:00', end: '08:00' },
+    mutedSessions: [],
+  }),
+  setEscalation: jest.fn(),
+  getDevices: jest.fn().mockReturnValue([]),
+  getDevice: jest.fn(),
+  setDevice: jest.fn(),
+  removeDevice: jest.fn(),
+  isSessionMuted: jest.fn().mockReturnValue(false),
+  muteSession: jest.fn(),
+  unmuteSession: jest.fn(),
+  addHistoryEntry: jest.fn(),
+  getHistory: jest.fn().mockReturnValue([]),
 } as any;
 
 const mockPush = {
@@ -47,11 +89,25 @@ const mockPush = {
   setInstantNotify: jest.fn(),
   scheduleWaitingNotification: jest.fn(),
   cancelPendingNotification: jest.fn(),
+  getStore: jest.fn().mockReturnValue(mockStore),
+  sendToAllDevices: jest.fn(),
 } as any;
 
 const mockServer = new EventEmitter() as unknown as Server;
 
 import { WebSocketHandler } from '../src/websocket';
+import { DaemonConfig } from '../src/types';
+
+const mockConfig: DaemonConfig = {
+  port: 9877,
+  token: 'test-token',
+  tls: false,
+  tmuxSession: 'claude',
+  codeHome: '/home/test/.claude',
+  mdnsEnabled: false,
+  pushDelayMs: 60000,
+  autoApproveTools: [],
+};
 
 describe('WebSocketHandler', () => {
   let handler: WebSocketHandler;
@@ -60,7 +116,7 @@ describe('WebSocketHandler', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
-    handler = new WebSocketHandler(mockServer, token, mockWatcher, mockInjector, mockPush);
+    handler = new WebSocketHandler(mockServer, mockConfig, mockWatcher, mockInjector, mockPush);
     // Access the internal WebSocketServer for testing
     mockWss = (handler as any).wss;
   });
@@ -268,7 +324,6 @@ describe('WebSocketHandler', () => {
       await new Promise(resolve => setTimeout(resolve, 10));
 
       expect(mockInjector.sendInput).toHaveBeenCalledWith('test input');
-      expect(mockPush.cancelPendingNotification).toHaveBeenCalled();
     });
 
     it('should handle register_push message', () => {
@@ -284,34 +339,6 @@ describe('WebSocketHandler', () => {
       expect(mockPush.registerDevice).toHaveBeenCalledWith('device-1', 'test-token-123');
       expect(authenticatedClient.send).toHaveBeenCalledWith(
         expect.stringContaining('"type":"push_registered"')
-      );
-    });
-
-    it('should handle set_instant_notify message', () => {
-      // First register push to set deviceId
-      authenticatedClient.emit(
-        'message',
-        JSON.stringify({
-          type: 'register_push',
-          payload: { fcmToken: 'test-token-123', deviceId: 'device-1' },
-          requestId: 'req-1',
-        })
-      );
-
-      authenticatedClient.send.mockClear();
-
-      authenticatedClient.emit(
-        'message',
-        JSON.stringify({
-          type: 'set_instant_notify',
-          payload: { enabled: true },
-          requestId: 'req-2',
-        })
-      );
-
-      expect(mockPush.setInstantNotify).toHaveBeenCalledWith('device-1', true);
-      expect(authenticatedClient.send).toHaveBeenCalledWith(
-        expect.stringContaining('"type":"instant_notify_set"')
       );
     });
 
@@ -412,7 +439,6 @@ describe('WebSocketHandler', () => {
       expect(mockClient.send).toHaveBeenCalledWith(
         expect.stringContaining('"type":"status_change"')
       );
-      expect(mockPush.scheduleWaitingNotification).toHaveBeenCalled();
     });
 
     it('should not forward events to unsubscribed clients', () => {

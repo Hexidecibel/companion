@@ -1,9 +1,12 @@
 import { PushNotificationService } from '../src/push';
+import { NotificationStore } from '../src/notification-store';
 
 // Mock fs
 jest.mock('fs', () => ({
   existsSync: jest.fn().mockReturnValue(false),
   readFileSync: jest.fn(),
+  writeFileSync: jest.fn(),
+  mkdirSync: jest.fn(),
 }));
 
 // Mock firebase-admin
@@ -27,15 +30,12 @@ global.fetch = jest.fn().mockResolvedValue({
 
 describe('PushNotificationService', () => {
   let pushService: PushNotificationService;
+  let store: NotificationStore;
 
   beforeEach(() => {
     jest.clearAllMocks();
-    jest.useFakeTimers();
-    pushService = new PushNotificationService(undefined, 60000);
-  });
-
-  afterEach(() => {
-    jest.useRealTimers();
+    store = new NotificationStore();
+    pushService = new PushNotificationService(undefined, 60000, store);
   });
 
   describe('device registration', () => {
@@ -52,71 +52,28 @@ describe('PushNotificationService', () => {
 
     it('should update device last seen', () => {
       pushService.registerDevice('device-1', 'token-123');
-      // Should not throw
       pushService.updateDeviceLastSeen('device-1');
     });
   });
 
-  describe('instant notify', () => {
-    it('should enable instant notify for a device', () => {
-      pushService.registerDevice('device-1', 'token-123');
-      pushService.setInstantNotify('device-1', true);
-      // No assertion needed - just verify it doesn't throw
-    });
-
-    it('should disable instant notify for a device', () => {
-      pushService.registerDevice('device-1', 'token-123');
-      pushService.setInstantNotify('device-1', true);
-      pushService.setInstantNotify('device-1', false);
-      // No assertion needed - just verify it doesn't throw
-    });
-  });
-
-  describe('notification scheduling', () => {
-    it('should not schedule if no devices registered', () => {
-      pushService.scheduleWaitingNotification('Test message');
-      // No fetch call should be made
+  describe('sendToAllDevices', () => {
+    it('should not send if no devices registered', () => {
+      pushService.sendToAllDevices('Test message', 'waiting_for_input');
       expect(fetch).not.toHaveBeenCalled();
     });
 
-    it('should send instant notification to instant-enabled devices', async () => {
+    it('should send to registered Expo device', async () => {
       pushService.registerDevice('device-1', 'ExponentPushToken[abc123]');
-      pushService.setInstantNotify('device-1', true);
-
-      pushService.scheduleWaitingNotification('Test message');
-
-      // Should send immediately for instant devices
-      await Promise.resolve(); // Let the async operation complete
+      pushService.sendToAllDevices('Test message', 'waiting_for_input');
+      await Promise.resolve();
       expect(fetch).toHaveBeenCalled();
-    });
-
-    it('should batch notifications for non-instant devices', () => {
-      pushService.registerDevice('device-1', 'ExponentPushToken[abc123]');
-      // Not setting instant notify - should batch
-
-      pushService.scheduleWaitingNotification('Test message');
-
-      // Should not send immediately
-      expect(fetch).not.toHaveBeenCalled();
-    });
-
-    it('should cancel pending notifications', () => {
-      pushService.registerDevice('device-1', 'ExponentPushToken[abc123]');
-      pushService.scheduleWaitingNotification('Test message');
-
-      // Cancel should not throw
-      pushService.cancelPendingNotification();
     });
 
     it('should truncate long preview messages', async () => {
       pushService.registerDevice('device-1', 'ExponentPushToken[abc123]');
-      pushService.setInstantNotify('device-1', true);
-
       const longMessage = 'x'.repeat(300);
-      pushService.scheduleWaitingNotification(longMessage);
-
+      pushService.sendToAllDevices(longMessage, 'waiting_for_input');
       await Promise.resolve();
-
       expect(fetch).toHaveBeenCalled();
       const callArgs = (fetch as jest.Mock).mock.calls[0];
       const body = JSON.parse(callArgs[1].body);
@@ -127,54 +84,6 @@ describe('PushNotificationService', () => {
   describe('isEnabled', () => {
     it('should return true', () => {
       expect(pushService.isEnabled()).toBe(true);
-    });
-  });
-
-  describe('batched notifications', () => {
-    it('should send batched notifications after interval', async () => {
-      pushService.registerDevice('device-1', 'ExponentPushToken[abc123]');
-      // Not instant - will batch
-
-      pushService.scheduleWaitingNotification('Message 1');
-      pushService.scheduleWaitingNotification('Message 2');
-      pushService.scheduleWaitingNotification('Message 3');
-
-      // Advance time by 4 hours
-      jest.advanceTimersByTime(4 * 60 * 60 * 1000);
-
-      await Promise.resolve();
-
-      expect(fetch).toHaveBeenCalled();
-    });
-
-    it('should clear batch when user responds', () => {
-      pushService.registerDevice('device-1', 'ExponentPushToken[abc123]');
-
-      pushService.scheduleWaitingNotification('Message 1');
-      pushService.scheduleWaitingNotification('Message 2');
-
-      pushService.cancelPendingNotification();
-
-      // Advance time - should not send since cancelled
-      jest.advanceTimersByTime(4 * 60 * 60 * 1000);
-
-      expect(fetch).not.toHaveBeenCalled();
-    });
-
-    it('should include count in batched notification summary', async () => {
-      pushService.registerDevice('device-1', 'ExponentPushToken[abc123]');
-
-      pushService.scheduleWaitingNotification('Message 1');
-      pushService.scheduleWaitingNotification('Message 2');
-      pushService.scheduleWaitingNotification('Message 3');
-
-      jest.advanceTimersByTime(4 * 60 * 60 * 1000);
-      await Promise.resolve();
-
-      expect(fetch).toHaveBeenCalled();
-      const callArgs = (fetch as jest.Mock).mock.calls[0];
-      const body = JSON.parse(callArgs[1].body);
-      expect(body[0].body).toContain('3 messages');
     });
   });
 });

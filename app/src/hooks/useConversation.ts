@@ -6,6 +6,10 @@ import { sessionGuard } from '../services/sessionGuard';
 // Page size for paginated highlights
 const HIGHLIGHTS_PAGE_SIZE = 30;
 
+// Track how many items were prepended via infinite scroll (loadMore)
+// This is module-level so it persists across re-renders but resets on session switch
+let prependedCount = 0;
+
 // Module-level session cache: sessionId -> { highlights, timestamp }
 const sessionCache = new Map<string, { highlights: ConversationHighlight[]; timestamp: number }>();
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
@@ -100,10 +104,18 @@ export function useConversation() {
             highlights: ConversationHighlight[];
           };
           setMessages(updatePayload.messages || []);
-          // Push sends ALL highlights from current conversation file —
-          // replace directly (skip if unchanged to avoid re-render)
+          // Push sends ALL highlights from current conversation file.
+          // If user scrolled back (loadMore prepended items), preserve those
+          // older items and only replace the current-file portion.
           const serverHighlights = updatePayload.highlights || [];
           setHighlights(prev => {
+            if (prependedCount > 0 && prev.length > serverHighlights.length) {
+              // Keep the prepended (older file) items, replace the rest
+              const olderPart = prev.slice(0, prependedCount);
+              const merged = [...olderPart, ...serverHighlights];
+              if (highlightsEqual(prev, merged)) return prev;
+              return merged;
+            }
             if (highlightsEqual(prev, serverHighlights)) return prev;
             return serverHighlights;
           });
@@ -149,6 +161,7 @@ export function useConversation() {
     let hasData = false;
     if (clearFirst) {
       sessionSwitching.current = true;
+      prependedCount = 0; // Reset infinite scroll tracking on session switch
       setMessages([]);
       setStatus(null);
       // Auto-dismiss other-session notification if we're switching to that session
@@ -247,7 +260,8 @@ export function useConversation() {
         const olderHighlights = payload.highlights || [];
 
         if (olderHighlights.length > 0) {
-          // Prepend older highlights (don't cache — only latest page goes in cache)
+          // Prepend older highlights and track count for conversation_update merging
+          prependedCount += olderHighlights.length;
           setHighlights(prev => {
             return [...olderHighlights, ...prev];
           });

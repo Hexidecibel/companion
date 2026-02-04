@@ -2,6 +2,11 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { EventEmitter } from 'events';
 
+// Mock child_process to prevent real tmux calls
+jest.mock('child_process', () => ({
+  exec: jest.fn((cmd: string, cb: Function) => cb(new Error('no tmux'), '', '')),
+}));
+
 // Mock chokidar
 const mockWatcher = new EventEmitter();
 (mockWatcher as any).close = jest.fn();
@@ -24,15 +29,17 @@ describe('SessionWatcher', () => {
   let watcher: SessionWatcher;
 
   beforeEach(() => {
+    jest.useFakeTimers();
     jest.clearAllMocks();
     mockFs.existsSync.mockReturnValue(true);
     mockFs.readFileSync.mockReturnValue('');
-    mockFs.statSync.mockReturnValue({ mtimeMs: Date.now() } as fs.Stats);
+    mockFs.statSync.mockReturnValue({ mtimeMs: Date.now(), isDirectory: () => false } as any);
     watcher = new SessionWatcher(codeHome);
   });
 
   afterEach(() => {
     watcher.stop();
+    jest.useRealTimers();
   });
 
   it('should initialize watcher for projects directory', () => {
@@ -48,7 +55,7 @@ describe('SessionWatcher', () => {
     );
   });
 
-  it('should emit conversation-update event on file change', (done) => {
+  it('should emit conversation-update event on file change', () => {
     mockFs.existsSync.mockReturnValue(true);
     mockFs.readFileSync.mockReturnValue(
       JSON.stringify({
@@ -59,16 +66,19 @@ describe('SessionWatcher', () => {
     );
 
     watcher.start();
-    watcher.on('conversation-update', (data) => {
-      expect(data.path).toContain('conversation.jsonl');
-      done();
-    });
+    const updateSpy = jest.fn();
+    watcher.on('conversation-update', updateSpy);
 
     // Simulate file change
     mockWatcher.emit('change', '/home/user/.claude/projects/test/conversation.jsonl');
+    jest.advanceTimersByTime(200);
+
+    expect(updateSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ path: expect.stringContaining('conversation.jsonl') })
+    );
   });
 
-  it('should emit conversation-update event on file add', (done) => {
+  it('should emit conversation-update event on file add', () => {
     mockFs.existsSync.mockReturnValue(true);
     mockFs.readFileSync.mockReturnValue(
       JSON.stringify({
@@ -79,13 +89,16 @@ describe('SessionWatcher', () => {
     );
 
     watcher.start();
-    watcher.on('conversation-update', (data) => {
-      expect(data.messages).toBeDefined();
-      done();
-    });
+    const updateSpy = jest.fn();
+    watcher.on('conversation-update', updateSpy);
 
     // Simulate file add
     mockWatcher.emit('add', '/home/user/.claude/projects/test/conversation.jsonl');
+    jest.advanceTimersByTime(200);
+
+    expect(updateSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ messages: expect.anything() })
+    );
   });
 
   it('should only process .jsonl files', () => {
@@ -111,6 +124,7 @@ describe('SessionWatcher', () => {
 
     watcher.start();
     mockWatcher.emit('add', '/home/user/.claude/projects/test/conversation.jsonl');
+    jest.advanceTimersByTime(200);
 
     const messages = watcher.getMessages();
 
@@ -143,6 +157,7 @@ describe('SessionWatcher', () => {
 
     watcher.start();
     mockWatcher.emit('add', '/home/user/.claude/projects/test/conversation.jsonl');
+    jest.advanceTimersByTime(200);
 
     const status = watcher.getStatus();
 
@@ -164,7 +179,9 @@ describe('SessionWatcher', () => {
 
     // Add two different project conversations
     mockWatcher.emit('add', '/home/user/.claude/projects/project-a/conversation.jsonl');
+    jest.advanceTimersByTime(200);
     mockWatcher.emit('add', '/home/user/.claude/projects/project-b/conversation.jsonl');
+    jest.advanceTimersByTime(200);
 
     const sessions = watcher.getSessions();
 
@@ -183,7 +200,9 @@ describe('SessionWatcher', () => {
 
     watcher.start();
     mockWatcher.emit('add', '/home/user/.claude/projects/project-a/conversation.jsonl');
+    jest.advanceTimersByTime(200);
     mockWatcher.emit('add', '/home/user/.claude/projects/project-b/conversation.jsonl');
+    jest.advanceTimersByTime(200);
 
     const sessions = watcher.getSessions();
     if (sessions.length >= 2) {
@@ -211,23 +230,18 @@ describe('SessionWatcher', () => {
 
     watcher.start();
     mockWatcher.emit('add', '/home/user/.claude/projects/test/conversation.jsonl');
+    jest.advanceTimersByTime(200);
 
     expect(watcher.isWaiting()).toBe(true);
   });
 
-  it('should emit status-change when waiting state changes', (done) => {
+  it('should emit status-change when waiting state changes', () => {
     mockFs.existsSync.mockReturnValue(true);
 
     watcher.start();
 
-    let statusChangeCount = 0;
-    watcher.on('status-change', (data) => {
-      statusChangeCount++;
-      if (statusChangeCount === 2) {
-        // Second status change should have different waiting state
-        done();
-      }
-    });
+    const statusSpy = jest.fn();
+    watcher.on('status-change', statusSpy);
 
     // First message - not waiting
     mockFs.readFileSync.mockReturnValue(
@@ -238,6 +252,7 @@ describe('SessionWatcher', () => {
       })
     );
     mockWatcher.emit('add', '/home/user/.claude/projects/test/conversation.jsonl');
+    jest.advanceTimersByTime(200);
 
     // Second message - waiting
     mockFs.readFileSync.mockReturnValue(
@@ -254,5 +269,8 @@ describe('SessionWatcher', () => {
         })
     );
     mockWatcher.emit('change', '/home/user/.claude/projects/test/conversation.jsonl');
+    jest.advanceTimersByTime(200);
+
+    expect(statusSpy).toHaveBeenCalledTimes(2);
   });
 });

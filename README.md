@@ -1,15 +1,89 @@
 # Companion
 
-A mobile companion app for your AI coding CLI. Monitor and interact with your coding sessions from your phone.
+A companion app for your AI coding CLI. Monitor and interact with coding sessions from your phone, browser, or desktop.
+
+## Platforms
+
+- **Android** - React Native / Expo (APK available in Releases)
+- **Web** - React + Vite SPA, served by the daemon at `http://<host>:9877/web`
+- **macOS Desktop** - Native Tauri v2 app with system tray, notifications, menu bar (.dmg in Releases)
 
 ## Features
 
-- **Real-time monitoring** - Watch the CLI work from anywhere
-- **Mobile input** - Send text and images to the CLI
-- **Push notifications** - Get notified when the CLI needs input
-- **Multiple servers** - Connect to multiple machines
-- **Session switching** - Switch between tmux sessions
-- **Secure** - TLS encryption and token authentication
+### Real-Time Monitoring
+- Live WebSocket updates from CLI coding sessions
+- Multi-server, multi-session support with session switching
+- Status indicators (waiting, working, idle)
+- Sub-agent tracking with expandable tree view
+
+### Conversation Viewer
+- Markdown rendering (headings, tables, task lists, code blocks)
+- Expandable tool cards with inputs/outputs and diff views
+- Full-screen message viewer for long responses
+- Text search with match highlighting and prev/next navigation
+- Cross-session infinite scroll
+
+### File & Artifact Viewer
+- Tap any file path to open it in a built-in viewer
+- Markdown, diff, and code rendering with line numbers
+- Large outputs get "View full output" buttons
+- Persistent file tab bar (web) with per-session state
+- APK download and install support on Android
+
+### Plan Viewer
+- Detects plan files from ExitPlanMode/EnterPlanMode tool calls
+- Inline plan cards with "View Plan" button
+- Plan button in session header
+
+### Interactive Terminal
+- Raw tmux output with ANSI color rendering
+- Send keystrokes directly to tmux (arrow keys, ctrl combos)
+- Auto-scroll with scroll-position awareness
+- SSH command display with tap-to-copy
+
+### Parallel Work Groups
+- Spawn multiple Claude Code sessions in parallel
+- Each worker runs in its own git worktree on a dedicated branch
+- Inline question answering for worker sessions
+- Octopus merge of completed branches with conflict detection
+- Dashboard cards with progress tracking and cancel/retry controls
+- Push notifications for worker events
+
+### Tmux Session Management
+- Create, list, and switch sessions from the app
+- Git worktree support for concurrent editing on the same repo
+- Directory browser for project selection
+- Session scoping via env var tagging
+
+### Project Scaffolding
+- Multiple stack templates (React, Node, Python, Go, Next.js, MUI)
+- Auto-generated CLAUDE.md and slash commands per stack
+- Git init and GitHub repo creation
+
+### Push Notifications
+- Expo push notifications when the CLI needs input
+- Escalation model with configurable delays and rate limits
+- Quiet hours scheduling
+- Per-session mute synced between clients
+
+### Auto-Approve
+- Automatic approval of safe tool calls (Read, Glob, Grep, etc.)
+- Configurable per-session
+
+### macOS Desktop
+- System tray with click-to-toggle and session count badge
+- Close-to-tray behavior
+- Native Notification Center integration
+- Window state persistence
+- Auto-launch on login
+- Custom menu bar with keyboard shortcuts
+
+### Web Keyboard Shortcuts
+- `Cmd/Ctrl+T` Toggle terminal
+- `Cmd/Ctrl+F` Search messages
+- `Cmd/Ctrl+1-9` Switch sessions
+- `Cmd/Ctrl+Shift+A` Toggle auto-approve
+- `Cmd/Ctrl+Shift+M` Toggle session mute
 
 ## Architecture
 
@@ -23,19 +97,16 @@ A mobile companion app for your AI coding CLI. Monitor and interact with your co
 │  Web Client     │◄──  WebSocket  ───────┘   │  Coding CLI │
 │  (React + Vite) │                           │  (in tmux)  │
 └─────────────────┘                           └─────────────┘
+
+┌─────────────────┐
+│  macOS Desktop  │  Tauri v2 wrapper around the web client
+│  (.app / .dmg)  │
+└─────────────────┘
 ```
 
 ## Quick Start
 
 ### 1. Install the Daemon
-
-**Option A: npm (recommended)**
-
-```bash
-npm install -g @hexidecibel/companion
-```
-
-**Option B: From source**
 
 ```bash
 git clone https://github.com/Hexidecibel/companion.git
@@ -50,39 +121,14 @@ The installer will:
 - Generate a secure authentication token
 - Set up auto-start (systemd on Linux, launchd on macOS)
 
-**Save the token shown at the end - you'll need it for the app!**
+**Save the token shown at the end - you'll need it for the app.**
 
-### 2. Connect from the App
+### 2. Connect
 
-1. Download the Companion app
-2. Add a new server with your machine's IP address
-3. Enter the token from the installer
-4. Connect and create a new project or session!
-
-## Manual Installation
-
-If the quick install doesn't work:
-
-```bash
-# Install prerequisites
-# macOS:
-brew install node tmux
-
-# Ubuntu/Debian:
-sudo apt install nodejs npm tmux
-
-# Fedora/RHEL:
-sudo dnf install nodejs tmux
-
-# Clone and build
-git clone https://github.com/Hexidecibel/companion.git
-cd companion/daemon
-npm install
-npm run build
-
-# Run installer
-bash scripts/install.sh
-```
+1. Open the web client at `http://<your-server>:9877/web`
+2. Or download the Android APK / macOS .dmg from [Releases](https://github.com/Hexidecibel/companion/releases)
+3. Add your server's IP and authentication token
+4. Create a new tmux session or adopt an existing one
 
 ## Configuration
 
@@ -103,15 +149,13 @@ Config file location:
 }
 ```
 
-### Options
-
 | Option | Default | Description |
 |--------|---------|-------------|
 | `port` | 9877 | WebSocket server port |
 | `token` | (generated) | Authentication token |
 | `tls` | true | Enable TLS encryption |
 | `tmux_session` | "claude" | Default tmux session name |
-| `code_home` | "~/.claude" | CLI config directory (also accepts `claude_home` for backward compatibility) |
+| `code_home` | "~/.claude" | CLI config directory |
 | `mdns_enabled` | true | Enable Bonjour/mDNS discovery |
 | `push_delay_ms` | 60000 | Delay before sending push notifications |
 
@@ -120,33 +164,28 @@ Config file location:
 ### macOS (launchd)
 
 ```bash
-# View logs
-tail -f ~/Library/Logs/companion.log
-
-# Restart
-launchctl kickstart -k gui/$(id -u)/com.companion.daemon
-
-# Stop
-launchctl unload ~/Library/LaunchAgents/com.companion.daemon.plist
-
-# Start
-launchctl load ~/Library/LaunchAgents/com.companion.daemon.plist
+tail -f ~/Library/Logs/companion.log       # View logs
+launchctl kickstart -k gui/$(id -u)/com.companion.daemon  # Restart
+launchctl unload ~/Library/LaunchAgents/com.companion.daemon.plist  # Stop
+launchctl load ~/Library/LaunchAgents/com.companion.daemon.plist    # Start
 ```
 
 ### Linux (systemd)
 
 ```bash
-# System-wide install
 sudo journalctl -u companion -f    # View logs
 sudo systemctl restart companion   # Restart
 sudo systemctl stop companion      # Stop
 sudo systemctl status companion    # Status
+```
 
-# User-level install
-journalctl --user -u companion -f
-systemctl --user restart companion
-systemctl --user stop companion
-systemctl --user status companion
+### CLI
+
+```bash
+companion status   # Show running state, PID, sessions
+companion stop     # Graceful shutdown
+companion config   # View/set config values
+companion logs     # Platform-aware log viewer
 ```
 
 ## Uninstalling
@@ -156,26 +195,6 @@ cd companion/daemon
 bash scripts/uninstall.sh
 ```
 
-## Troubleshooting
-
-### Connection timeout
-- Check that the daemon is running
-- Verify the port isn't blocked by firewall
-- Try connecting with TLS disabled first
-
-### Invalid token
-- Ensure the token in the app matches your config exactly
-- Tokens are case-sensitive
-
-### No messages showing
-- Make sure the CLI is running in the tmux session
-- Check the session name in your config matches
-
-### Daemon won't start
-- Check logs for errors
-- Verify Node.js is installed: `node --version`
-- Ensure port 9877 isn't in use: `lsof -i :9877`
-
 ## Development
 
 ### Daemon
@@ -184,7 +203,7 @@ bash scripts/uninstall.sh
 cd daemon
 npm install
 npm run build
-npm run dev  # Watch mode
+npm test
 ```
 
 ### Mobile App
@@ -204,12 +223,35 @@ npm run dev       # Vite dev server
 npm run build     # Production build to web/dist/
 ```
 
-The daemon serves `web/dist/` at `http://<host>:9877/web` after building.
+### macOS Desktop
+
+```bash
+cd desktop
+npm install
+npm run tauri dev    # Dev mode
+npm run tauri build  # Build .dmg
+```
+
+## Troubleshooting
+
+### Connection timeout
+- Check that the daemon is running
+- Verify the port isn't blocked by firewall
+- Try connecting with TLS disabled first
+
+### Invalid token
+- Ensure the token in the app matches your config exactly
+- Tokens are case-sensitive
+
+### No messages showing
+- Make sure the CLI is running in a tmux session created/adopted by Companion
+- Sessions must be tagged with `COMPANION_APP=1` environment variable
+
+### Daemon won't start
+- Check logs for errors
+- Verify Node.js is installed: `node --version`
+- Ensure port 9877 isn't in use: `lsof -i :9877`
 
 ## License
 
 MIT
-
-## Contributing
-
-Contributions welcome! Please read the contributing guidelines first.
