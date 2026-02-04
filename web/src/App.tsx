@@ -16,6 +16,18 @@ export function App() {
 
   const isDashboard = screen.name === 'dashboard';
 
+  // Prevent browser default file-drop behavior (navigating to the file)
+  // so that only the InputBar drop zone handles file drops
+  useEffect(() => {
+    const preventDrop = (e: DragEvent) => { e.preventDefault(); };
+    document.addEventListener('dragover', preventDrop);
+    document.addEventListener('drop', preventDrop);
+    return () => {
+      document.removeEventListener('dragover', preventDrop);
+      document.removeEventListener('drop', preventDrop);
+    };
+  }, []);
+
   // Cmd+K / Ctrl+K to open command palette
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
