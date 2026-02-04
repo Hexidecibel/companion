@@ -11,7 +11,7 @@ import {
   Alert,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Server, ServerStatus, SessionSummary, TaskSummary, TaskItem, WorkGroup } from '../types';
+import { Server, ServerStatus, SessionSummary, TaskItem, WorkGroup } from '../types';
 import { getServers, updateServer } from '../services/storage';
 import { useMultiServerStatus } from '../hooks/useMultiServerStatus';
 import { NewSessionModal } from '../components/NewSessionModal';
@@ -208,7 +208,7 @@ function ServerCard({
           .filter((s: any) => s.workingDir)
           .map((s: any) => ({ name: s.name, workingDir: s.workingDir }));
       }
-    } catch {}
+    } catch { /* ignore fetch errors */ }
     return [];
   }, [server.id, sendRequest]);
 

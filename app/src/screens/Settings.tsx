@@ -24,7 +24,7 @@ interface SettingsProps {
 }
 
 export function Settings({ onBack, onOpenNotificationSettings, onOpenAgents, onOpenArchive }: SettingsProps) {
-  const [settings, setSettings] = useState<AppSettings>({});
+  const [_settings, setSettings] = useState<AppSettings>({});
   const [loading, setLoading] = useState(true);
   const [currentFontScale, setCurrentFontScale] = useState(fontScaleService.getScale());
   useEffect(() => {

@@ -6,13 +6,7 @@ const HOME_DIR = process.env.HOME || '/root';
 const CONFIG_DIR = path.join(HOME_DIR, '.companion');
 
 // Safe tools that can be auto-approved without user confirmation
-const DEFAULT_AUTO_APPROVE_TOOLS = [
-  'Read',
-  'Glob',
-  'Grep',
-  'WebFetch',
-  'WebSearch',
-];
+const DEFAULT_AUTO_APPROVE_TOOLS = ['Read', 'Glob', 'Grep', 'WebFetch', 'WebSearch'];
 
 const DEFAULT_CONFIG: DaemonConfig = {
   port: 9877,
@@ -62,9 +56,7 @@ export function loadConfig(): DaemonConfig {
   // Merge with defaults
   const config: DaemonConfig = {
     ...DEFAULT_CONFIG,
-    ...Object.fromEntries(
-      Object.entries(fileConfig).filter(([_, v]) => v !== undefined)
-    ),
+    ...Object.fromEntries(Object.entries(fileConfig).filter(([_, v]) => v !== undefined)),
   } as DaemonConfig;
 
   // Validate required fields

@@ -47,7 +47,6 @@ interface ConversationItemProps {
 }
 
 const COLLAPSED_LINES = 12;
-const COLLAPSED_HEIGHT = 250;
 
 // Map file extension to language label
 function getLanguageLabel(filePath: string): string | null {
@@ -583,12 +582,7 @@ function ConversationItemInner({ item, showToolCalls, onSelectOption, onFileTap,
   const allQuestions: Question[] | undefined = 'questions' in message ? (message as ConversationMessage).questions : undefined;
   const hasMultipleQuestions = allQuestions && allQuestions.length > 1 && message.isWaitingForChoice;
 
-  // Skip rendering if assistant message is just "(no content)" with no tools or options
-  if (!isUser && isEmptyContent(item.content) && !hasToolCalls && !hasOptions && !hasMultipleQuestions) {
-    return null;
-  }
-
-  // Build scaled markdown styles when fontScale !== 1
+  // Build scaled markdown styles when fontScale !== 1 (must be before early return)
   const scaledMarkdownStyles = useMemo(() => {
     if (fontScale === 1) return markdownStyles;
     return StyleSheet.create({
@@ -620,6 +614,93 @@ function ConversationItemInner({ item, showToolCalls, onSelectOption, onFileTap,
       },
     });
   }, [fontScale]);
+
+  // Check if multi-question submit is ready (all questions have an answer)
+  const multiQuestionReady = useMemo(() => {
+    if (!allQuestions || !hasMultipleQuestions) return false;
+    for (let i = 0; i < allQuestions.length; i++) {
+      if (otherActive.has(i)) {
+        if (!(otherTexts.get(i)?.trim())) return false;
+      } else {
+        const selected = perQuestionSelections.get(i);
+        if (!selected || selected.size === 0) return false;
+      }
+    }
+    return true;
+  }, [allQuestions, hasMultipleQuestions, perQuestionSelections, otherActive, otherTexts]);
+
+  // Counter for unique keys in markdown rules
+  const keyCounter = useRef(0);
+  const getUniqueKey = (prefix: string) => `${prefix}-${keyCounter.current++}`;
+
+  // Custom rules for code blocks (simple text rendering for reliability)
+  const rules = useMemo(
+    () => ({
+      fence: (node: { content: string; sourceInfo: string }, _children: React.ReactNode, _parent: unknown, _styles: Record<string, unknown>) => {
+        const content = node?.content || '';
+        const sourceInfo = node?.sourceInfo || '';
+        return (
+          <View key={getUniqueKey('fence')} style={codeBlockStyles.container}>
+            {sourceInfo ? (
+              <View style={codeBlockStyles.languageTag}>
+                <Text style={codeBlockStyles.languageText}>{sourceInfo}</Text>
+              </View>
+            ) : null}
+            <ScrollView style={codeBlockStyles.scrollView} nestedScrollEnabled>
+              <Text style={codeBlockStyles.codeText}>{content.trim()}</Text>
+            </ScrollView>
+          </View>
+        );
+      },
+      code_block: (node: { content: string }, _children: React.ReactNode, _parent: unknown, _styles: Record<string, unknown>) => {
+        const content = node?.content || '';
+        return (
+          <View key={getUniqueKey('codeblock')} style={codeBlockStyles.container}>
+            <ScrollView style={codeBlockStyles.scrollView} nestedScrollEnabled>
+              <Text style={codeBlockStyles.codeText}>{content.trim()}</Text>
+            </ScrollView>
+          </View>
+        );
+      },
+      // Make inline code with file paths clickable
+      code_inline: (node: { content: string }, _children: React.ReactNode, _parent: unknown, styles: Record<string, unknown>) => {
+        const content = node?.content || '';
+        if (!content) {
+          return null;
+        }
+
+        // Match absolute paths (/path/to/file), home paths (~/path), or relative paths with directory (dir/file.ext)
+        const isFilePath =
+          /^\/[\w./-]+$/.test(content) ||  // Absolute path
+          content.startsWith('~/') ||       // Home path
+          /^[\w.-]+\/[\w./-]*\.\w+$/.test(content);  // Relative path with extension (docs/file.md)
+
+        if (isFilePath && onFileTap) {
+          return (
+            <Text
+              key={getUniqueKey('code-path')}
+              style={[styles.code_inline as object, filePathStyles.filePath]}
+              onPress={() => onFileTap(content)}
+            >
+              {content}
+            </Text>
+          );
+        }
+
+        return (
+          <Text key={getUniqueKey('code')} style={styles.code_inline as object}>
+            {content}
+          </Text>
+        );
+      },
+    }),
+    [onFileTap]
+  );
+
+  // Skip rendering if assistant message is just "(no content)" with no tools or options
+  if (!isUser && isEmptyContent(item.content) && !hasToolCalls && !hasOptions && !hasMultipleQuestions) {
+    return null;
+  }
 
   // Handle option selection - toggle for multi-select, immediate send for single-select
   const handleOptionPress = (label: string) => {
@@ -728,20 +809,6 @@ function ConversationItemInner({ item, showToolCalls, onSelectOption, onFileTap,
     setOtherActive(new Set());
   };
 
-  // Check if multi-question submit is ready (all questions have an answer)
-  const multiQuestionReady = useMemo(() => {
-    if (!allQuestions || !hasMultipleQuestions) return false;
-    for (let i = 0; i < allQuestions.length; i++) {
-      if (otherActive.has(i)) {
-        if (!(otherTexts.get(i)?.trim())) return false;
-      } else {
-        const selected = perQuestionSelections.get(i);
-        if (!selected || selected.size === 0) return false;
-      }
-    }
-    return true;
-  }, [allQuestions, hasMultipleQuestions, perQuestionSelections, otherActive, otherTexts]);
-
   // Check if content is long enough to need expansion
   const lineCount = item.content.split('\n').length;
   const charCount = item.content.length;
@@ -751,127 +818,6 @@ function ConversationItemInner({ item, showToolCalls, onSelectOption, onFileTap,
     const date = new Date(timestamp);
     return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   };
-
-  // Regex to detect file paths (absolute, home, or relative with extension)
-  const filePathRegex = /(?:^|\s)(\/[\w./-]+|~\/[\w./-]+|[\w.-]+\/[\w./-]*\.\w+)/g;
-
-  // Helper to render text with clickable file paths
-  const renderTextWithFilePaths = (text: string, baseStyle: object) => {
-    if (!text || !onFileTap) {
-      return <Text style={baseStyle}>{text || ''}</Text>;
-    }
-
-    const parts: React.ReactNode[] = [];
-    let lastIndex = 0;
-    let match;
-
-    filePathRegex.lastIndex = 0;
-    while ((match = filePathRegex.exec(text)) !== null) {
-      const filePath = match[1];
-      const matchStart = match.index + (match[0].length - filePath.length);
-
-      // Add text before the match
-      if (matchStart > lastIndex) {
-        parts.push(
-          <Text key={`text-${lastIndex}`} style={baseStyle}>
-            {text.slice(lastIndex, matchStart)}
-          </Text>
-        );
-      }
-
-      // Add the clickable file path
-      parts.push(
-        <Text
-          key={`path-${matchStart}`}
-          style={[baseStyle, filePathStyles.filePath]}
-          onPress={() => onFileTap(filePath)}
-        >
-          {filePath}
-        </Text>
-      );
-
-      lastIndex = matchStart + filePath.length;
-    }
-
-    // Add remaining text
-    if (lastIndex < text.length) {
-      parts.push(
-        <Text key={`text-${lastIndex}`} style={baseStyle}>
-          {text.slice(lastIndex)}
-        </Text>
-      );
-    }
-
-    return parts.length > 0 ? <Text>{parts}</Text> : <Text style={baseStyle}>{text}</Text>;
-  };
-
-  // Counter for unique keys in markdown rules
-  const keyCounter = useRef(0);
-  const getUniqueKey = (prefix: string) => `${prefix}-${keyCounter.current++}`;
-
-  // Custom rules for code blocks (simple text rendering for reliability)
-  const rules = useMemo(
-    () => ({
-      fence: (node: { content: string; sourceInfo: string }, _children: React.ReactNode, _parent: unknown, _styles: Record<string, unknown>) => {
-        const content = node?.content || '';
-        const sourceInfo = node?.sourceInfo || '';
-        return (
-          <View key={getUniqueKey('fence')} style={codeBlockStyles.container}>
-            {sourceInfo ? (
-              <View style={codeBlockStyles.languageTag}>
-                <Text style={codeBlockStyles.languageText}>{sourceInfo}</Text>
-              </View>
-            ) : null}
-            <ScrollView style={codeBlockStyles.scrollView} nestedScrollEnabled>
-              <Text style={codeBlockStyles.codeText}>{content.trim()}</Text>
-            </ScrollView>
-          </View>
-        );
-      },
-      code_block: (node: { content: string }, _children: React.ReactNode, _parent: unknown, _styles: Record<string, unknown>) => {
-        const content = node?.content || '';
-        return (
-          <View key={getUniqueKey('codeblock')} style={codeBlockStyles.container}>
-            <ScrollView style={codeBlockStyles.scrollView} nestedScrollEnabled>
-              <Text style={codeBlockStyles.codeText}>{content.trim()}</Text>
-            </ScrollView>
-          </View>
-        );
-      },
-      // Make inline code with file paths clickable
-      code_inline: (node: { content: string }, _children: React.ReactNode, _parent: unknown, styles: Record<string, unknown>) => {
-        const content = node?.content || '';
-        if (!content) {
-          return null;
-        }
-
-        // Match absolute paths (/path/to/file), home paths (~/path), or relative paths with directory (dir/file.ext)
-        const isFilePath =
-          /^\/[\w./-]+$/.test(content) ||  // Absolute path
-          content.startsWith('~/') ||       // Home path
-          /^[\w.-]+\/[\w./-]*\.\w+$/.test(content);  // Relative path with extension (docs/file.md)
-
-        if (isFilePath && onFileTap) {
-          return (
-            <Text
-              key={getUniqueKey('code-path')}
-              style={[styles.code_inline as object, filePathStyles.filePath]}
-              onPress={() => onFileTap(content)}
-            >
-              {content}
-            </Text>
-          );
-        }
-
-        return (
-          <Text key={getUniqueKey('code')} style={styles.code_inline as object}>
-            {content}
-          </Text>
-        );
-      },
-    }),
-    [onFileTap]
-  );
 
   const handleBubbleTap = () => {
     // If we have a message tap handler (for full viewer), use that

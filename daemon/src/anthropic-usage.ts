@@ -1,7 +1,10 @@
 import { AnthropicUsageResponse, ApiUsageStats } from './types';
 
 // Approximate pricing per million tokens (USD) - update as needed
-const PRICING: Record<string, { input: number; output: number; cacheWrite: number; cacheRead: number }> = {
+const PRICING: Record<
+  string,
+  { input: number; output: number; cacheWrite: number; cacheRead: number }
+> = {
   'claude-opus-4-5-20251101': { input: 15, output: 75, cacheWrite: 18.75, cacheRead: 1.5 },
   'claude-sonnet-4-5-20251101': { input: 3, output: 15, cacheWrite: 3.75, cacheRead: 0.3 },
   'claude-sonnet-4-20250514': { input: 3, output: 15, cacheWrite: 3.75, cacheRead: 0.3 },
@@ -12,7 +15,12 @@ const PRICING: Record<string, { input: number; output: number; cacheWrite: numbe
   'claude-3-haiku-20240307': { input: 0.25, output: 1.25, cacheWrite: 0.3, cacheRead: 0.03 },
 };
 
-function getModelPricing(model: string): { input: number; output: number; cacheWrite: number; cacheRead: number } {
+function getModelPricing(model: string): {
+  input: number;
+  output: number;
+  cacheWrite: number;
+  cacheRead: number;
+} {
   // Try exact match first
   if (PRICING[model]) return PRICING[model];
 
@@ -69,7 +77,7 @@ export async function fetchAnthropicUsage(
       throw new Error(`Anthropic API error: ${response.status} - ${errorText}`);
     }
 
-    const data = await response.json() as AnthropicUsageResponse;
+    const data = (await response.json()) as AnthropicUsageResponse;
 
     for (const bucket of data.data) {
       const model = bucket.model || 'unknown';

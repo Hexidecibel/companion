@@ -73,7 +73,11 @@ async function main(): Promise<void> {
   const subAgentWatcher = new SubAgentWatcher(config.codeHome);
   const injector = new InputInjector(config.tmuxSession);
   const notificationStore = new NotificationStore();
-  const push = new PushNotificationService(config.fcmCredentialsPath, config.pushDelayMs, notificationStore);
+  const push = new PushNotificationService(
+    config.fcmCredentialsPath,
+    config.pushDelayMs,
+    notificationStore
+  );
 
   // Create HTTP/HTTPS server with QR code endpoint
   const qrHandler = createQRRequestHandler(config);
@@ -91,31 +95,49 @@ async function main(): Promise<void> {
   const workGroupManager = new WorkGroupManager(workGroupTmux, injector, watcher);
 
   // Work group push notifications
-  workGroupManager.on('worker-waiting', ({ groupName, worker }: { groupName: string; worker: any }) => {
-    const preview = worker.lastQuestion?.text
-      ? `${worker.taskSlug}: ${worker.lastQuestion.text}`
-      : `Worker "${worker.taskSlug}" needs input`;
-    push.sendToAllDevices(preview, 'worker_waiting', worker.sessionId, groupName);
-  });
+  workGroupManager.on(
+    'worker-waiting',
+    ({ groupName, worker }: { groupName: string; worker: any }) => {
+      const preview = worker.lastQuestion?.text
+        ? `${worker.taskSlug}: ${worker.lastQuestion.text}`
+        : `Worker "${worker.taskSlug}" needs input`;
+      push.sendToAllDevices(preview, 'worker_waiting', worker.sessionId, groupName);
+    }
+  );
 
-  workGroupManager.on('worker-error', ({ groupName, worker }: { groupName: string; worker: any }) => {
-    const preview = worker.error
-      ? `${worker.taskSlug}: ${worker.error}`
-      : `Worker "${worker.taskSlug}" encountered an error`;
-    push.sendToAllDevices(preview, 'worker_error', worker.sessionId, groupName);
-  });
+  workGroupManager.on(
+    'worker-error',
+    ({ groupName, worker }: { groupName: string; worker: any }) => {
+      const preview = worker.error
+        ? `${worker.taskSlug}: ${worker.error}`
+        : `Worker "${worker.taskSlug}" encountered an error`;
+      push.sendToAllDevices(preview, 'worker_error', worker.sessionId, groupName);
+    }
+  );
 
-  workGroupManager.on('group-ready-to-merge', ({ groupId, name }: { groupId: string; name: string }) => {
-    push.sendToAllDevices(
-      `All workers complete. Ready to merge.`,
-      'work_group_ready',
-      undefined,
-      name,
-    );
-  });
+  workGroupManager.on(
+    'group-ready-to-merge',
+    ({ name }: { groupId: string; name: string }) => {
+      push.sendToAllDevices(
+        `All workers complete. Ready to merge.`,
+        'work_group_ready',
+        undefined,
+        name
+      );
+    }
+  );
 
   // Initialize WebSocket handler
-  const wsHandler = new WebSocketHandler(server, config, watcher, injector, push, undefined, subAgentWatcher, workGroupManager);
+  const wsHandler = new WebSocketHandler(
+    server,
+    config,
+    watcher,
+    injector,
+    push,
+    undefined,
+    subAgentWatcher,
+    workGroupManager
+  );
 
   // Start mDNS advertisement
   let mdns: MdnsAdvertiser | null = null;
@@ -130,7 +152,9 @@ async function main(): Promise<void> {
 
   // Auto-approve tools (from config and/or per-session client toggle)
   {
-    console.log(`Auto-approve tools from config: ${config.autoApproveTools.length > 0 ? config.autoApproveTools.join(', ') : '(none - client toggle only)'}`);
+    console.log(
+      `Auto-approve tools from config: ${config.autoApproveTools.length > 0 ? config.autoApproveTools.join(', ') : '(none - client toggle only)'}`
+    );
     const tmux = new TmuxManager('companion');
     // Track recent approvals per session to avoid double-firing for the same prompt.
     // Key: sessionId, Value: timestamp of last approval sent.
@@ -164,7 +188,9 @@ async function main(): Promise<void> {
       const now = Date.now();
       const lastApproval = lastApprovalBySession.get(sessionId);
       if (lastApproval && now - lastApproval < 3000) {
-        console.log(`[AUTO-APPROVE] Dedup: skipping (last approval ${now - lastApproval}ms ago for ${sessionId})`);
+        console.log(
+          `[AUTO-APPROVE] Dedup: skipping (last approval ${now - lastApproval}ms ago for ${sessionId})`
+        );
         return;
       }
       lastApprovalBySession.set(sessionId, now);
@@ -180,24 +206,26 @@ async function main(): Promise<void> {
         if (projectPath) {
           const tmuxSessions = await tmux.listSessions();
           // Try exact match first
-          const exactMatch = tmuxSessions.find(ts => ts.workingDir === projectPath);
+          const exactMatch = tmuxSessions.find((ts) => ts.workingDir === projectPath);
           if (exactMatch) {
             targetTmuxSession = exactMatch.name;
           } else {
             // Try normalized path match (trailing slash differences, symlinks)
             const normalizedPath = projectPath.replace(/\/+$/, '');
-            const fuzzyMatch = tmuxSessions.find(ts =>
-              ts.workingDir?.replace(/\/+$/, '') === normalizedPath
+            const fuzzyMatch = tmuxSessions.find(
+              (ts) => ts.workingDir?.replace(/\/+$/, '') === normalizedPath
             );
             if (fuzzyMatch) {
               targetTmuxSession = fuzzyMatch.name;
-              console.log(`[AUTO-APPROVE] Fuzzy path match: "${fuzzyMatch.name}" for ${projectPath}`);
+              console.log(
+                `[AUTO-APPROVE] Fuzzy path match: "${fuzzyMatch.name}" for ${projectPath}`
+              );
             }
           }
         }
 
         // Wait for terminal to settle before sending approval
-        await new Promise(resolve => setTimeout(resolve, 300));
+        await new Promise((resolve) => setTimeout(resolve, 300));
 
         const sendApproval = async (target?: string): Promise<boolean> => {
           try {
@@ -210,19 +238,23 @@ async function main(): Promise<void> {
         };
 
         if (targetTmuxSession) {
-          console.log(`[AUTO-APPROVE] Sending to tmux="${targetTmuxSession}" for tools [${autoApprovable.join(', ')}] (session: ${sessionId})`);
+          console.log(
+            `[AUTO-APPROVE] Sending to tmux="${targetTmuxSession}" for tools [${autoApprovable.join(', ')}] (session: ${sessionId})`
+          );
           const success = await sendApproval(targetTmuxSession);
           if (!success) {
             console.log(`[AUTO-APPROVE] Retrying after 500ms...`);
-            await new Promise(resolve => setTimeout(resolve, 500));
+            await new Promise((resolve) => setTimeout(resolve, 500));
             await sendApproval(targetTmuxSession);
           }
         } else {
-          console.log(`[AUTO-APPROVE] Sending to active session for tools [${autoApprovable.join(', ')}] (no tmux match for ${projectPath})`);
+          console.log(
+            `[AUTO-APPROVE] Sending to active session for tools [${autoApprovable.join(', ')}] (no tmux match for ${projectPath})`
+          );
           const success = await sendApproval();
           if (!success) {
             console.log(`[AUTO-APPROVE] Retrying after 500ms...`);
-            await new Promise(resolve => setTimeout(resolve, 500));
+            await new Promise((resolve) => setTimeout(resolve, 500));
             await sendApproval();
           }
         }

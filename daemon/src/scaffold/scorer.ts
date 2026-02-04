@@ -2,7 +2,7 @@ import { StackTemplate } from './types';
 
 export interface ScoredTemplate {
   templateId: string;
-  score: number;           // 0.0–1.0 normalized
+  score: number; // 0.0–1.0 normalized
   matchedKeywords: string[];
 }
 
@@ -33,12 +33,9 @@ function tokenize(text: string): Set<string> {
  *  - secondaryKeywords token match: 1
  *  - tags token match: 0.5
  */
-export function scoreTemplates(
-  templates: StackTemplate[],
-  description: string,
-): ScoredTemplate[] {
+export function scoreTemplates(templates: StackTemplate[], description: string): ScoredTemplate[] {
   if (!description || !description.trim()) {
-    return templates.map(t => ({ templateId: t.id, score: 0, matchedKeywords: [] }));
+    return templates.map((t) => ({ templateId: t.id, score: 0, matchedKeywords: [] }));
   }
 
   const descLower = description.toLowerCase();
@@ -102,7 +99,7 @@ export function scoreTemplates(
 
   // Normalize to 0.0–1.0
   return rawScores
-    .map(s => ({
+    .map((s) => ({
       templateId: s.templateId,
       score: maxRaw > 0 ? Math.round((s.raw / maxRaw) * 100) / 100 : 0,
       matchedKeywords: s.matchedKeywords,

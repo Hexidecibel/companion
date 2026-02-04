@@ -18,18 +18,6 @@ interface MessageViewerProps {
 }
 
 export function MessageViewer({ content, timestamp, onClose, fontScale = 1 }: MessageViewerProps) {
-  if (!content) return null;
-
-  const formatTime = (ts: number) => {
-    const date = new Date(ts);
-    return date.toLocaleString(undefined, {
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-    });
-  };
-
   const scaledStyles = useMemo(() => {
     if (fontScale === 1) return markdownStyles;
     return StyleSheet.create({
@@ -62,6 +50,18 @@ export function MessageViewer({ content, timestamp, onClose, fontScale = 1 }: Me
       },
     });
   }, [fontScale]);
+
+  if (!content) return null;
+
+  const formatTime = (ts: number) => {
+    const date = new Date(ts);
+    return date.toLocaleString(undefined, {
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  };
 
   return (
     <Modal

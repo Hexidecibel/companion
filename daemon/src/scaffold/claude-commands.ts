@@ -4,8 +4,8 @@
  */
 
 export interface CommandFile {
-  name: string;   // e.g., 'up', 'test'
-  path: string;   // e.g., '.claude/commands/up.md'
+  name: string; // e.g., 'up', 'test'
+  path: string; // e.g., '.claude/commands/up.md'
   content: string; // The prompt template
 }
 
@@ -56,7 +56,7 @@ const STACK_CONFIGS: Record<string, StackConfig> = {
     devServer: 'uvicorn with hot reload',
     language: 'Python',
   },
-  'nextjs': {
+  nextjs: {
     upCmd: 'npm run dev',
     downCmd: 'Stop the Next.js dev server (Ctrl+C in terminal)',
     testCmd: 'npm test',
@@ -101,7 +101,7 @@ function getStackConfig(templateId: string): StackConfig {
 export function generateClaudeMd(
   projectName: string,
   description: string,
-  templateId: string,
+  templateId: string
 ): string {
   const config = getStackConfig(templateId);
 
@@ -152,10 +152,7 @@ export function generateClaudeMd(
 /**
  * Generate .claude/commands/*.md files for a project.
  */
-export function generateCommandFiles(
-  projectName: string,
-  templateId: string,
-): CommandFile[] {
+export function generateCommandFiles(projectName: string, templateId: string): CommandFile[] {
   const config = getStackConfig(templateId);
 
   const commands: CommandFile[] = [
@@ -304,7 +301,12 @@ Process todo.md items into detailed implementation plans.
 }
 
 function generateWorkCommand(_projectName: string, config: StackConfig): string {
-  const typeCheck = config.language === 'Python' ? 'mypy .' : config.language === 'Go' ? 'go vet ./...' : 'npx tsc --noEmit';
+  const typeCheck =
+    config.language === 'Python'
+      ? 'mypy .'
+      : config.language === 'Go'
+        ? 'go vet ./...'
+        : 'npx tsc --noEmit';
   return `# Work on Planned Items
 
 Implement items from plan.md using TDD. If multiple items can be parallelized, spawn worker sessions.

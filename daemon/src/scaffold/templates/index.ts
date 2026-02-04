@@ -18,9 +18,9 @@ export const templates: StackTemplate[] = [
 ];
 
 export function getTemplate(id: string): StackTemplate | undefined {
-  return templates.find(t => t.id === id);
+  return templates.find((t) => t.id === id);
 }
 
 export function getTemplatesByType(type: StackTemplate['type']): StackTemplate[] {
-  return templates.filter(t => t.type === type);
+  return templates.filter((t) => t.type === type);
 }

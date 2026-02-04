@@ -3,7 +3,7 @@ import * as path from 'path';
 import * as os from 'os';
 import { exec } from 'child_process';
 import { promisify } from 'util';
-import { ProjectConfig, ScaffoldProgress, ScaffoldResult, StackTemplate } from './types';
+import { ProjectConfig, ScaffoldProgress, ScaffoldResult } from './types';
 import { getTemplate } from './templates';
 import { generateClaudeMd, generateCommandFiles } from './claude-commands';
 
@@ -102,7 +102,7 @@ export async function scaffoldProject(
     const claudeMdContent = generateClaudeMd(
       variables.projectName,
       config.description || `A ${template.name} project`,
-      config.stackId,
+      config.stackId
     );
     const claudeMdPath = path.join(projectPath, 'CLAUDE.md');
     await fs.writeFile(claudeMdPath, claudeMdContent, 'utf-8');
@@ -150,7 +150,10 @@ export async function scaffoldProject(
               { cwd: projectPath, timeout: 30000 }
             );
           } catch (ghError) {
-            console.warn('GitHub repo creation failed (gh CLI may not be installed or authenticated):', ghError);
+            console.warn(
+              'GitHub repo creation failed (gh CLI may not be installed or authenticated):',
+              ghError
+            );
             // Non-fatal, continue
           }
         }
@@ -219,7 +222,7 @@ export async function previewScaffold(
   }
 
   const projectPath = path.join(expandPath(config.location), toValidName(config.name));
-  const files = template.files.map(f => f.path);
+  const files = template.files.map((f) => f.path);
 
   // Include CLAUDE.md and commands in preview
   files.push('CLAUDE.md');

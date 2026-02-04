@@ -81,11 +81,16 @@ export class WorkGroupManager extends EventEmitter {
     this.saveState();
     this.emitUpdate(group);
 
-    console.log(`WorkGroupManager: Created group "${group.name}" with ${group.workers.length} workers`);
+    console.log(
+      `WorkGroupManager: Created group "${group.name}" with ${group.workers.length} workers`
+    );
     return group;
   }
 
-  private async spawnWorker(parentDir: string, request: SpawnWorkerRequest): Promise<WorkerSession> {
+  private async spawnWorker(
+    parentDir: string,
+    request: SpawnWorkerRequest
+  ): Promise<WorkerSession> {
     const workerId = uuidv4();
     const branchName = `parallel/${request.taskSlug}`;
 
@@ -154,9 +159,10 @@ export class WorkGroupManager extends EventEmitter {
   }
 
   private buildWorkerPrompt(request: SpawnWorkerRequest): string {
-    const fileList = request.files.length > 0
-      ? request.files.map(f => `- \`${f}\``).join('\n')
-      : '(see plan section below)';
+    const fileList =
+      request.files.length > 0
+        ? request.files.map((f) => `- \`${f}\``).join('\n')
+        : '(see plan section below)';
 
     return [
       'You are implementing one item from a parallel work plan. Other items are being',
@@ -183,11 +189,16 @@ export class WorkGroupManager extends EventEmitter {
   private async waitForCliReady(sessionName: string, maxWaitMs: number = 15000): Promise<void> {
     const startTime = Date.now();
     while (Date.now() - startTime < maxWaitMs) {
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      await new Promise((resolve) => setTimeout(resolve, 1000));
       const output = await this.tmux.capturePane(sessionName, 20);
       // Look for common Claude CLI ready indicators
-      if (output.includes('claude') && (output.includes('>') || output.includes('$') || output.includes('What'))) {
-        console.log(`WorkGroupManager: CLI ready in ${sessionName} after ${Date.now() - startTime}ms`);
+      if (
+        output.includes('claude') &&
+        (output.includes('>') || output.includes('$') || output.includes('What'))
+      ) {
+        console.log(
+          `WorkGroupManager: CLI ready in ${sessionName} after ${Date.now() - startTime}ms`
+        );
         return;
       }
     }
@@ -206,7 +217,8 @@ export class WorkGroupManager extends EventEmitter {
       if (group.status !== 'active') continue;
 
       for (const worker of group.workers) {
-        if (worker.sessionId !== data.sessionId && worker.tmuxSessionName !== data.sessionId) continue;
+        if (worker.sessionId !== data.sessionId && worker.tmuxSessionName !== data.sessionId)
+          continue;
         if (worker.status === 'completed' || worker.status === 'error') continue;
 
         // Update activity
@@ -250,13 +262,13 @@ export class WorkGroupManager extends EventEmitter {
 
   private extractQuestion(content: string): WorkerQuestion {
     // Try to extract question text and options from the message
-    const lines = content.split('\n').filter(l => l.trim());
+    const lines = content.split('\n').filter((l) => l.trim());
     const text = lines[0] || content.substring(0, 200);
 
     // Look for numbered or bulleted options
     const options: { label: string }[] = [];
     for (const line of lines.slice(1)) {
-      const match = line.match(/^\s*(?:\d+[\.\)]\s*|[-*]\s+)(.+)/);
+      const match = line.match(/^\s*(?:\d+[.)]\s*|[-*]\s+)(.+)/);
       if (match) {
         options.push({ label: match[1].trim() });
       }
@@ -277,14 +289,17 @@ export class WorkGroupManager extends EventEmitter {
         'git log --oneline --format="%H" HEAD ^main 2>/dev/null || git log --oneline --format="%H" HEAD ^master 2>/dev/null || true',
         { cwd: worker.worktreePath }
       );
-      worker.commits = stdout.trim().split('\n').filter(l => l.length > 0);
+      worker.commits = stdout
+        .trim()
+        .split('\n')
+        .filter((l) => l.length > 0);
     } catch {
       // Ignore errors
     }
   }
 
   private checkGroupCompletion(group: WorkGroup): void {
-    const allDone = group.workers.every(w => w.status === 'completed' || w.status === 'error');
+    const allDone = group.workers.every((w) => w.status === 'completed' || w.status === 'error');
     if (allDone) {
       console.log(`WorkGroupManager: All workers in group "${group.name}" have finished`);
       this.emit('group-ready-to-merge', { groupId: group.id, name: group.name });
@@ -327,7 +342,7 @@ export class WorkGroupManager extends EventEmitter {
       return { success: false, error: 'Work group not found' };
     }
 
-    const completedWorkers = group.workers.filter(w => w.status === 'completed');
+    const completedWorkers = group.workers.filter((w) => w.status === 'completed');
     if (completedWorkers.length === 0) {
       return { success: false, error: 'No completed workers to merge' };
     }
@@ -340,10 +355,9 @@ export class WorkGroupManager extends EventEmitter {
     const firstWorker = group.workers[0];
     let mainRepoDir: string;
     try {
-      const { stdout } = await execAsync(
-        'git rev-parse --show-toplevel',
-        { cwd: firstWorker.worktreePath }
-      );
+      const { stdout } = await execAsync('git rev-parse --show-toplevel', {
+        cwd: firstWorker.worktreePath,
+      });
       // The worktree's toplevel IS the worktree. We need the main repo.
       // Read the .git file in the worktree to find it.
       const gitFile = path.join(firstWorker.worktreePath, '.git');
@@ -368,7 +382,7 @@ export class WorkGroupManager extends EventEmitter {
     }
 
     // Try octopus merge of completed branches
-    const branches = completedWorkers.map(w => w.branch);
+    const branches = completedWorkers.map((w) => w.branch);
     const branchArgs = branches.join(' ');
 
     try {
@@ -376,10 +390,9 @@ export class WorkGroupManager extends EventEmitter {
       await execAsync('git checkout main 2>/dev/null || git checkout master', { cwd: mainRepoDir });
 
       // Try the merge
-      const { stdout: mergeOutput } = await execAsync(
-        `git merge ${branchArgs} --no-edit`,
-        { cwd: mainRepoDir }
-      );
+      await execAsync(`git merge ${branchArgs} --no-edit`, {
+        cwd: mainRepoDir,
+      });
 
       // Get the merge commit SHA
       const { stdout: sha } = await execAsync('git rev-parse HEAD', { cwd: mainRepoDir });
@@ -412,7 +425,12 @@ export class WorkGroupManager extends EventEmitter {
           'git diff --name-only --diff-filter=U 2>/dev/null || true',
           { cwd: mainRepoDir }
         );
-        conflicts.push(...statusOutput.trim().split('\n').filter(l => l.length > 0));
+        conflicts.push(
+          ...statusOutput
+            .trim()
+            .split('\n')
+            .filter((l) => l.length > 0)
+        );
       } catch {
         // Ignore
       }
@@ -471,15 +489,19 @@ export class WorkGroupManager extends EventEmitter {
     return { success: true };
   }
 
-  async retryWorker(groupId: string, workerId: string): Promise<{ success: boolean; error?: string }> {
+  async retryWorker(
+    groupId: string,
+    workerId: string
+  ): Promise<{ success: boolean; error?: string }> {
     const group = this.groups.get(groupId);
     if (!group) return { success: false, error: 'Work group not found' };
 
-    const workerIndex = group.workers.findIndex(w => w.id === workerId);
+    const workerIndex = group.workers.findIndex((w) => w.id === workerId);
     if (workerIndex < 0) return { success: false, error: 'Worker not found' };
 
     const oldWorker = group.workers[workerIndex];
-    if (oldWorker.status !== 'error') return { success: false, error: 'Worker is not in error state' };
+    if (oldWorker.status !== 'error')
+      return { success: false, error: 'Worker is not in error state' };
 
     // Clean up old worker
     if (oldWorker.tmuxSessionName) {
@@ -530,11 +552,15 @@ export class WorkGroupManager extends EventEmitter {
     return { success: true };
   }
 
-  async sendWorkerInput(groupId: string, workerId: string, text: string): Promise<{ success: boolean; error?: string }> {
+  async sendWorkerInput(
+    groupId: string,
+    workerId: string,
+    text: string
+  ): Promise<{ success: boolean; error?: string }> {
     const group = this.groups.get(groupId);
     if (!group) return { success: false, error: 'Work group not found' };
 
-    const worker = group.workers.find(w => w.id === workerId);
+    const worker = group.workers.find((w) => w.id === workerId);
     if (!worker) return { success: false, error: 'Worker not found' };
 
     if (!worker.tmuxSessionName) return { success: false, error: 'Worker has no tmux session' };
@@ -550,7 +576,11 @@ export class WorkGroupManager extends EventEmitter {
     return { success };
   }
 
-  private async cleanupWorker(mainRepoDir: string, worker: WorkerSession, deleteBranch: boolean = false): Promise<void> {
+  private async cleanupWorker(
+    mainRepoDir: string,
+    worker: WorkerSession,
+    deleteBranch: boolean = false
+  ): Promise<void> {
     // Kill tmux session
     if (worker.tmuxSessionName) {
       try {

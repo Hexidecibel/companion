@@ -16,7 +16,7 @@ import {
   NativeScrollEvent,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Server, ConversationHighlight, AgentTree, SubAgent } from '../types';
+import { Server, AgentTree, SubAgent } from '../types';
 import { SubAgentDetailScreen } from './SubAgentDetailScreen';
 import { useConnection } from '../hooks/useConnection';
 import { useConversation } from '../hooks/useConversation';
@@ -75,7 +75,6 @@ export function SessionView({ server, onBack, initialSessionId, onNewProject, on
   const [isRefreshing, setIsRefreshing] = useState(false);
   const isNearBottom = useRef(true);
   const contentHeight = useRef(0);
-  const scrollViewHeight = useRef(0);
   const lastDataLength = useRef(0);
   const shouldScrollOnLoad = useRef(true); // Scroll to bottom on session enter
 
@@ -197,8 +196,6 @@ export function SessionView({ server, onBack, initialSessionId, onNewProject, on
   }, [data]);
 
   // Auto-scroll to current match
-  const itemRefs = useRef<Map<string, number>>(new Map());
-
   useEffect(() => {
     if (searchMatches.length === 0 || !scrollViewRef.current) return;
     const match = searchMatches[currentMatchIndex];

@@ -199,12 +199,15 @@ export interface ApiUsageStats {
   totalOutputTokens: number;
   totalCacheCreationTokens: number;
   totalCacheReadTokens: number;
-  byModel: Record<string, {
-    inputTokens: number;
-    outputTokens: number;
-    cacheCreationTokens: number;
-    cacheReadTokens: number;
-  }>;
+  byModel: Record<
+    string,
+    {
+      inputTokens: number;
+      outputTokens: number;
+      cacheCreationTokens: number;
+      cacheReadTokens: number;
+    }
+  >;
   // Estimated cost in USD (rough calculation)
   estimatedCostUsd: number;
 }
@@ -233,7 +236,13 @@ export interface AgentTree {
 }
 
 // Notification event types (no longer includes text_match)
-export type NotificationEventType = 'waiting_for_input' | 'error_detected' | 'session_completed' | 'worker_waiting' | 'worker_error' | 'work_group_ready';
+export type NotificationEventType =
+  | 'waiting_for_input'
+  | 'error_detected'
+  | 'session_completed'
+  | 'worker_waiting'
+  | 'worker_error'
+  | 'work_group_ready';
 
 // Escalation config — replaces NotificationRule system
 export interface EscalationConfig {
@@ -245,12 +254,12 @@ export interface EscalationConfig {
     worker_error: boolean;
     work_group_ready: boolean;
   };
-  pushDelaySeconds: number;      // default: 300 (5 min). 0 = immediate push
-  rateLimitSeconds: number;      // default: 60. Min time between notifs per session
+  pushDelaySeconds: number; // default: 300 (5 min). 0 = immediate push
+  rateLimitSeconds: number; // default: 60. Min time between notifs per session
   quietHours: {
     enabled: boolean;
     start: string; // "HH:MM"
-    end: string;   // "HH:MM"
+    end: string; // "HH:MM"
   };
 }
 
@@ -280,7 +289,7 @@ export interface PendingEvent {
   eventType: NotificationEventType;
   preview: string;
   createdAt: number;
-  pushScheduledAt: number;  // createdAt + pushDelaySeconds*1000
+  pushScheduledAt: number; // createdAt + pushDelaySeconds*1000
   pushSent: boolean;
   acknowledgedAt?: number;
 }
@@ -334,17 +343,17 @@ export interface WorkerQuestion {
 
 export interface WorkerSession {
   id: string;
-  sessionId: string;            // Conversation session ID (encoded path)
+  sessionId: string; // Conversation session ID (encoded path)
   tmuxSessionName: string;
   taskSlug: string;
   taskDescription: string;
-  branch: string;               // Git branch: parallel/<slug>
-  worktreePath: string;         // Absolute path to worktree directory
+  branch: string; // Git branch: parallel/<slug>
+  worktreePath: string; // Absolute path to worktree directory
   status: 'spawning' | 'working' | 'waiting' | 'completed' | 'error';
   commits: string[];
   startedAt: number;
   completedAt?: number;
-  lastActivity?: string;        // Current activity text
+  lastActivity?: string; // Current activity text
   lastQuestion?: WorkerQuestion;
   error?: string;
 }

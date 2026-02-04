@@ -59,10 +59,10 @@ function getContentType(filePath: string): string {
 function findWebDir(): string | null {
   // Try built Vite output first (web/dist/), then fall back to source web/
   const bases = [
-    path.join(__dirname, '../../web'),           // From dist/
-    path.join(__dirname, '../../../web'),        // From dist/ in installed location
-    path.join(process.cwd(), '../web'),          // From daemon directory
-    path.join(process.cwd(), 'web'),             // From project root
+    path.join(__dirname, '../../web'), // From dist/
+    path.join(__dirname, '../../../web'), // From dist/ in installed location
+    path.join(process.cwd(), '../web'), // From daemon directory
+    path.join(process.cwd(), 'web'), // From project root
   ];
 
   // Prefer web/dist/ (Vite build output)
@@ -107,8 +107,7 @@ export function createQRRequestHandler(config: DaemonConfig): http.RequestListen
     }
 
     const fullUrl = req.url || '/';
-    const [urlPath, queryString] = fullUrl.split('?');
-    const params = new URLSearchParams(queryString || '');
+    const [urlPath] = fullUrl.split('?');
 
     // HTTP image upload endpoint - more reliable than WebSocket for large payloads
     if (urlPath === '/upload' && req.method === 'POST') {

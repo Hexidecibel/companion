@@ -69,7 +69,9 @@ export class NotificationStore {
           }
         }
 
-        console.log(`NotificationStore: Loaded ${this.devices.size} devices, ${this.mutedSessions.size} muted sessions`);
+        console.log(
+          `NotificationStore: Loaded ${this.devices.size} devices, ${this.mutedSessions.size} muted sessions`
+        );
       } else {
         console.log('NotificationStore: First startup, using default escalation config');
       }
@@ -92,7 +94,8 @@ export class NotificationStore {
           return {
             id: (entry.id as string) || uuidv4(),
             timestamp: (entry.timestamp as number) || Date.now(),
-            eventType: (entry.eventType as NotificationHistoryEntry['eventType']) || 'waiting_for_input',
+            eventType:
+              (entry.eventType as NotificationHistoryEntry['eventType']) || 'waiting_for_input',
             sessionId: entry.sessionId as string | undefined,
             sessionName: entry.sessionName as string | undefined,
             preview: (entry.preview as string) || '',
@@ -228,7 +231,9 @@ export class NotificationStore {
     return { entries, total };
   }
 
-  addHistoryEntry(entry: Omit<NotificationHistoryEntry, 'id' | 'timestamp'>): NotificationHistoryEntry {
+  addHistoryEntry(
+    entry: Omit<NotificationHistoryEntry, 'id' | 'timestamp'>
+  ): NotificationHistoryEntry {
     const full: NotificationHistoryEntry = {
       ...entry,
       id: uuidv4(),

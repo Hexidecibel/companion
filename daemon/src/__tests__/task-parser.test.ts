@@ -1,4 +1,4 @@
-import { extractTasks, TaskItem } from '../parser';
+import { extractTasks } from '../parser';
 
 describe('extractTasks', () => {
   const mockJsonlWithTasks = `
@@ -21,7 +21,7 @@ describe('extractTasks', () => {
   it('should parse task subject and description', () => {
     const tasks = extractTasks(mockJsonlWithTasks);
 
-    const task1 = tasks.find(t => t.subject === 'Fix login bug');
+    const task1 = tasks.find((t) => t.subject === 'Fix login bug');
     expect(task1).toBeDefined();
     expect(task1?.description).toBe("The login button doesn't work on mobile");
   });
@@ -29,8 +29,8 @@ describe('extractTasks', () => {
   it('should apply status updates in order', () => {
     const tasks = extractTasks(mockJsonlWithTasks);
 
-    const task1 = tasks.find(t => t.subject === 'Fix login bug');
-    const task2 = tasks.find(t => t.subject === 'Add tests');
+    const task1 = tasks.find((t) => t.subject === 'Fix login bug');
+    const task2 = tasks.find((t) => t.subject === 'Add tests');
 
     // Task 1 was updated to completed
     expect(task1?.status).toBe('completed');
@@ -42,7 +42,7 @@ describe('extractTasks', () => {
   it('should track activeForm from latest update', () => {
     const tasks = extractTasks(mockJsonlWithTasks);
 
-    const task1 = tasks.find(t => t.subject === 'Fix login bug');
+    const task1 = tasks.find((t) => t.subject === 'Fix login bug');
     // Last update didn't have activeForm, but previous one did
     // Actually the completed update clears activeForm
     expect(task1?.activeForm).toBeUndefined();
@@ -76,7 +76,7 @@ describe('extractTasks', () => {
 `.trim();
 
     const tasks = extractTasks(withBlocking);
-    const taskB = tasks.find(t => t.subject === 'Task B');
+    const taskB = tasks.find((t) => t.subject === 'Task B');
 
     expect(taskB?.blockedBy).toEqual(['1']);
   });

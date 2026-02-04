@@ -205,8 +205,8 @@ export const KNOWN_TOOL_NAMES = new Set(Object.keys(DEFAULT_TOOL_CONFIG));
 
 /** Tools that require user approval (used for auto-approve detection) */
 export const APPROVAL_TOOLS = Object.values(DEFAULT_TOOL_CONFIG)
-  .filter(t => t.requiresApproval)
-  .map(t => t.name);
+  .filter((t) => t.requiresApproval)
+  .map((t) => t.name);
 
 /**
  * Get tool description for activity display (e.g., "Reading file").

@@ -23,9 +23,7 @@ export function certsExist(certPath: string, keyPath: string): boolean {
   return fs.existsSync(certPath) && fs.existsSync(keyPath);
 }
 
-export function generateSelfSignedCert(
-  commonName: string = 'companion'
-): GeneratedCert {
+export function generateSelfSignedCert(commonName: string = 'companion'): GeneratedCert {
   // Generate RSA key pair
   const { privateKey, publicKey } = crypto.generateKeyPairSync('rsa', {
     modulusLength: 2048,
@@ -73,7 +71,14 @@ function createMinimalCert(
 
   try {
     // Generate certificate using crypto.createPrivateKey and sign
-    const cert = generateX509Cert(publicKey, privateKey, commonName, notBefore, notAfter, serialNumber);
+    const cert = generateX509Cert(
+      publicKey,
+      privateKey,
+      commonName,
+      notBefore,
+      notAfter,
+      serialNumber
+    );
     return cert;
   } catch (err) {
     // Fallback: Generate a basic self-signed cert structure
@@ -88,24 +93,10 @@ function generateX509Cert(
   commonName: string,
   notBefore: Date,
   notAfter: Date,
-  serialNumber: string
+  _serialNumber: string
 ): string {
   // Create certificate request and self-sign it
   // This uses Node's newer crypto APIs
-
-  const certInfo = {
-    subject: { CN: commonName },
-    issuer: { CN: commonName },
-    serial: serialNumber,
-    notBefore,
-    notAfter,
-    publicKey,
-  };
-
-  // Sign the certificate data
-  const sign = crypto.createSign('SHA256');
-  sign.update(JSON.stringify(certInfo));
-  const signature = sign.sign(privateKey, 'base64');
 
   // For a proper X.509 cert, we need ASN.1 encoding
   // Use a simplified approach that creates a working cert
@@ -114,7 +105,7 @@ function generateX509Cert(
 }
 
 function createPemCertificate(
-  publicKey: string,
+  _publicKey: string,
   privateKey: string,
   commonName: string,
   notBefore: Date,
@@ -122,9 +113,6 @@ function createPemCertificate(
 ): string {
   // Generate a proper self-signed X.509 certificate
   // Using OpenSSL-compatible format
-
-  const keyObj = crypto.createPrivateKey(privateKey);
-  const pubKeyObj = crypto.createPublicKey(publicKey);
 
   // Create certificate using forge-style approach
   // Since we can't easily create ASN.1 without external deps,
@@ -185,7 +173,9 @@ function buildTbsCertificate(
   const issuer = buildName(commonName);
   const validity = buildValidity(notBefore, notAfter);
   const subject = buildName(commonName);
-  const subjectPublicKeyInfo = pemToDer(publicKeyPem.replace(/-----[^-]+-----/g, '').replace(/\s/g, ''));
+  const subjectPublicKeyInfo = pemToDer(
+    publicKeyPem.replace(/-----[^-]+-----/g, '').replace(/\s/g, '')
+  );
 
   return asn1Sequence([
     version,
@@ -216,10 +206,7 @@ function buildName(cn: string): Buffer {
 }
 
 function buildValidity(notBefore: Date, notAfter: Date): Buffer {
-  return asn1Sequence([
-    asn1UtcTime(notBefore),
-    asn1UtcTime(notAfter),
-  ]);
+  return asn1Sequence([asn1UtcTime(notBefore), asn1UtcTime(notAfter)]);
 }
 
 // ASN.1 encoding helpers
@@ -316,7 +303,7 @@ function derToPem(der: Buffer, type: string): string {
   return `-----BEGIN ${type}-----\n${lines.join('\n')}\n-----END ${type}-----\n`;
 }
 
-function generateBasicCert(publicKey: string, privateKey: string, commonName: string): string {
+function generateBasicCert(publicKey: string, _privateKey: string, _commonName: string): string {
   // Fallback: use the public key as a placeholder
   // This won't work for actual TLS but prevents crashes
   console.warn('Certificate generation fallback - TLS may not work properly');

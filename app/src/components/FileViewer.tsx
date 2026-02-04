@@ -308,7 +308,7 @@ export function FileViewer({ filePath, onClose, onFileTap }: FileViewerProps) {
 
               {isApk && Platform.OS === 'android' && (
                 <Text style={styles.installHint}>
-                  You may need to enable "Install from unknown sources" in settings
+                  You may need to enable &quot;Install from unknown sources&quot; in settings
                 </Text>
               )}
             </View>

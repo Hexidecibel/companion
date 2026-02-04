@@ -129,7 +129,7 @@ export class SubAgentWatcher extends EventEmitter {
     if (!fs.existsSync(filePath)) return null;
 
     const content = fs.readFileSync(filePath, 'utf-8');
-    const lines = content.split('\n').filter(line => line.trim());
+    const lines = content.split('\n').filter((line) => line.trim());
 
     if (lines.length === 0) return null;
 
@@ -139,7 +139,7 @@ export class SubAgentWatcher extends EventEmitter {
     let startedAt = 0;
     let completedAt: number | undefined;
     let description = '';
-    let subagentType = '';
+    const subagentType = '';
     let messageCount = 0;
     let lastActivity = 0;
     let lastContent = '';
@@ -160,9 +160,10 @@ export class SubAgentWatcher extends EventEmitter {
 
         if (entry.type === 'user' && entry.message?.content) {
           messageCount++;
-          const content = typeof entry.message.content === 'string'
-            ? entry.message.content
-            : entry.message.content.map(c => c.text || '').join('');
+          const content =
+            typeof entry.message.content === 'string'
+              ? entry.message.content
+              : entry.message.content.map((c) => c.text || '').join('');
 
           if (!description && content) {
             // Use first 100 chars of first user message as description
@@ -236,7 +237,8 @@ export class SubAgentWatcher extends EventEmitter {
       const isStale = tracked.lastActivity < oneHourAgo;
       const isActuallyComplete = tracked.isComplete || isStale;
       const status = isActuallyComplete ? 'completed' : 'running';
-      const effectiveCompletedAt = tracked.completedAt || (isStale ? tracked.lastActivity : undefined);
+      const effectiveCompletedAt =
+        tracked.completedAt || (isStale ? tracked.lastActivity : undefined);
 
       // Skip old completed agents
       if (status === 'completed' && effectiveCompletedAt && effectiveCompletedAt < twoHoursAgo) {

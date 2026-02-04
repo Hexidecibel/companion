@@ -9,8 +9,24 @@ export const nextjsTemplate: StackTemplate = {
   tags: ['nextjs', 'react', 'typescript', 'fullstack', 'ssr'],
   scoring: {
     primaryKeywords: ['nextjs', 'next', 'ssr', 'ssg', 'vercel'],
-    secondaryKeywords: ['fullstack', 'seo', 'blog', 'cms', 'static', 'hybrid', 'server', 'rendering'],
-    useCases: ['seo blog', 'fullstack app', 'next.js app', 'server rendered', 'static site', 'blog with ssr'],
+    secondaryKeywords: [
+      'fullstack',
+      'seo',
+      'blog',
+      'cms',
+      'static',
+      'hybrid',
+      'server',
+      'rendering',
+    ],
+    useCases: [
+      'seo blog',
+      'fullstack app',
+      'next.js app',
+      'server rendered',
+      'static site',
+      'blog with ssr',
+    ],
     typeSignals: { fullstack: 3, ssr: 3, ssg: 3, seo: 2, blog: 2, cms: 2 },
   },
   files: [

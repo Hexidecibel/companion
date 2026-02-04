@@ -10,7 +10,14 @@ export const reactMuiWebsiteTemplate: StackTemplate = {
   scoring: {
     primaryKeywords: ['mui', 'material', 'website', 'landing', 'portfolio'],
     secondaryKeywords: ['react', 'pages', 'routing', 'navigation', 'design', 'theme', 'multi-page'],
-    useCases: ['marketing website', 'landing page', 'portfolio site', 'multi-page website', 'material ui website', 'company website'],
+    useCases: [
+      'marketing website',
+      'landing page',
+      'portfolio site',
+      'multi-page website',
+      'material ui website',
+      'company website',
+    ],
     typeSignals: { website: 3, landing: 3, portfolio: 3, brochure: 2, marketing: 2 },
   },
   files: [

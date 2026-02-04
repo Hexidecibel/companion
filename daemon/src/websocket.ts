@@ -10,7 +10,12 @@ import { SessionWatcher } from './watcher';
 import { InputInjector } from './input-injector';
 import { PushNotificationService } from './push';
 import { TmuxManager } from './tmux-manager';
-import { extractHighlights, extractUsageFromFile, extractTasks, parseConversationChain } from './parser';
+import {
+  extractHighlights,
+  extractUsageFromFile,
+  extractTasks,
+  parseConversationChain,
+} from './parser';
 import { WebSocketMessage, WebSocketResponse, DaemonConfig, TmuxSessionConfig } from './types';
 import { loadConfig, saveConfig } from './config';
 import { fetchTodayUsage, fetchMonthUsage, fetchAnthropicUsage } from './anthropic-usage';
@@ -125,7 +130,10 @@ export class WebSocketHandler {
     });
 
     // Escalation-based notifications for error-detected and session-completed
-    const handleEscalationEvent = (eventType: NotificationEventType, data: { sessionId: string; sessionName: string; content: string }) => {
+    const handleEscalationEvent = (
+      eventType: NotificationEventType,
+      data: { sessionId: string; sessionName: string; content: string }
+    ) => {
       const event: EscalationEvent = {
         eventType,
         sessionId: data.sessionId,
@@ -141,7 +149,9 @@ export class WebSocketHandler {
     };
 
     this.watcher.on('error-detected', (data) => handleEscalationEvent('error_detected', data));
-    this.watcher.on('session-completed', (data) => handleEscalationEvent('session_completed', data));
+    this.watcher.on('session-completed', (data) =>
+      handleEscalationEvent('session_completed', data)
+    );
 
     // Forward work group updates to clients
     if (this.workGroupManager) {
@@ -195,7 +205,7 @@ export class WebSocketHandler {
     console.log(`WebSocket: Stored tmux session config for "${name}" (${workingDir})`);
   }
 
-  private handleConnection(ws: WebSocket, req: IncomingMessage): void {
+  private handleConnection(ws: WebSocket, _req: IncomingMessage): void {
     const clientId = uuidv4();
     const client: AuthenticatedClient = {
       id: clientId,
@@ -236,7 +246,6 @@ export class WebSocketHandler {
 
   private handleMessage(client: AuthenticatedClient, message: WebSocketMessage): void {
     const { type, token, payload, requestId } = message;
-    const reqStart = Date.now();
     if (type !== 'ping') {
       console.log(`WebSocket: >> recv ${type} (${requestId || 'no-id'}) from ${client.id}`);
     }
@@ -287,7 +296,9 @@ export class WebSocketHandler {
           // Default to current active session
           client.subscribedSessionId = this.watcher.getActiveSessionId() || undefined;
         }
-        console.log(`WebSocket: Client subscribed (${client.id}) to session ${client.subscribedSessionId}`);
+        console.log(
+          `WebSocket: Client subscribed (${client.id}) to session ${client.subscribedSessionId}`
+        );
         this.send(client.ws, {
           type: 'subscribed',
           success: true,
@@ -344,7 +355,9 @@ export class WebSocketHandler {
         }
 
         const t1 = Date.now();
-        console.log(`WebSocket: get_highlights - ${t1-t0}ms, chain: ${chain.length} files, returning ${resultHighlights.length}/${total}`);
+        console.log(
+          `WebSocket: get_highlights - ${t1 - t0}ms, chain: ${chain.length} files, returning ${resultHighlights.length}/${total}`
+        );
         this.send(client.ws, {
           type: 'highlights',
           success: true,
@@ -360,7 +373,7 @@ export class WebSocketHandler {
         const fullMessages = this.watcher.getMessages();
         const t1 = Date.now();
         const fullSessionId = this.watcher.getActiveSessionId();
-        console.log(`WebSocket: get_full - getMessages: ${t1-t0}ms, ${fullMessages.length} msgs`);
+        console.log(`WebSocket: get_full - getMessages: ${t1 - t0}ms, ${fullMessages.length} msgs`);
         this.send(client.ws, {
           type: 'full',
           success: true,
@@ -376,7 +389,9 @@ export class WebSocketHandler {
         const status = this.watcher.getStatus();
         const t1 = Date.now();
         const statusSessionId = this.watcher.getActiveSessionId();
-        console.log(`WebSocket: get_status - ${t1-t0}ms - waiting: ${status.isWaitingForInput}, running: ${status.isRunning}, session: ${statusSessionId}`);
+        console.log(
+          `WebSocket: get_status - ${t1 - t0}ms - waiting: ${status.isWaitingForInput}, running: ${status.isRunning}, session: ${statusSessionId}`
+        );
 
         this.send(client.ws, {
           type: 'status',
@@ -390,23 +405,26 @@ export class WebSocketHandler {
 
       case 'get_server_summary':
         // Get tmux sessions to filter - only show conversations with active tmux sessions
-        this.tmux.listSessions().then(async (tmuxSessions) => {
-          const summary = await this.watcher.getServerSummary(tmuxSessions);
-          this.send(client.ws, {
-            type: 'server_summary',
-            success: true,
-            payload: summary,
-            requestId,
+        this.tmux
+          .listSessions()
+          .then(async (tmuxSessions) => {
+            const summary = await this.watcher.getServerSummary(tmuxSessions);
+            this.send(client.ws, {
+              type: 'server_summary',
+              success: true,
+              payload: summary,
+              requestId,
+            });
+          })
+          .catch((err) => {
+            console.error('Failed to get server summary:', err);
+            this.send(client.ws, {
+              type: 'server_summary',
+              success: false,
+              error: 'Failed to get server summary',
+              requestId,
+            });
           });
-        }).catch((err) => {
-          console.error('Failed to get server summary:', err);
-          this.send(client.ws, {
-            type: 'server_summary',
-            success: false,
-            error: 'Failed to get server summary',
-            requestId,
-          });
-        });
         break;
 
       case 'get_sessions':
@@ -426,7 +444,7 @@ export class WebSocketHandler {
         const tasksSessionId = tasksPayload?.sessionId || this.watcher.getActiveSessionId();
         if (tasksSessionId) {
           const sessionSessions = this.watcher.getSessions();
-          const session = sessionSessions.find(s => s.id === tasksSessionId);
+          const session = sessionSessions.find((s) => s.id === tasksSessionId);
           if (session?.conversationPath) {
             try {
               const fs = require('fs');
@@ -466,7 +484,11 @@ export class WebSocketHandler {
 
       case 'switch_session':
         // Handle switch_session asynchronously but await completion
-        this.handleSwitchSession(client, payload as { sessionId: string; epoch?: number }, requestId);
+        this.handleSwitchSession(
+          client,
+          payload as { sessionId: string; epoch?: number },
+          requestId
+        );
         // Acknowledge session — user is viewing it, cancel push escalation
         {
           const switchPayload = payload as { sessionId: string } | undefined;
@@ -498,14 +520,20 @@ export class WebSocketHandler {
 
       case 'send_with_images':
         // Send message with image paths combined
-        this.handleSendWithImages(client, payload as { imagePaths: string[]; message: string }, requestId);
+        this.handleSendWithImages(
+          client,
+          payload as { imagePaths: string[]; message: string },
+          requestId
+        );
         break;
 
       case 'register_push':
         const pushPayload = payload as { fcmToken: string; deviceId: string; tokenType?: string };
         if (pushPayload?.fcmToken && pushPayload?.deviceId) {
           const isExpoToken = pushPayload.fcmToken.startsWith('ExponentPushToken');
-          console.log(`Push registration: device=${pushPayload.deviceId}, type=${isExpoToken ? 'expo' : 'fcm'}, token=${pushPayload.fcmToken.substring(0, 30)}...`);
+          console.log(
+            `Push registration: device=${pushPayload.deviceId}, type=${isExpoToken ? 'expo' : 'fcm'}, token=${pushPayload.fcmToken.substring(0, 30)}...`
+          );
           // Link deviceId to this client for instant notify
           client.deviceId = pushPayload.deviceId;
           this.push.registerDevice(pushPayload.deviceId, pushPayload.fcmToken);
@@ -549,7 +577,9 @@ export class WebSocketHandler {
           } else {
             this.autoApproveSessions.delete(targetSessionId);
           }
-          console.log(`Auto-approve ${enabled ? 'enabled' : 'disabled'} for session ${targetSessionId} (${this.autoApproveSessions.size} sessions active)`);
+          console.log(
+            `Auto-approve ${enabled ? 'enabled' : 'disabled'} for session ${targetSessionId} (${this.autoApproveSessions.size} sessions active)`
+          );
         }
 
         this.send(client.ws, {
@@ -592,7 +622,8 @@ export class WebSocketHandler {
       case 'get_terminal_output': {
         const termPayload = payload as { sessionName: string; lines?: number } | undefined;
         if (termPayload?.sessionName) {
-          this.tmux.capturePane(termPayload.sessionName, termPayload.lines || 100)
+          this.tmux
+            .capturePane(termPayload.sessionName, termPayload.lines || 100)
             .then((output) => {
               this.send(client.ws, {
                 type: 'terminal_output',
@@ -623,7 +654,8 @@ export class WebSocketHandler {
       case 'send_terminal_keys': {
         const termKeysPayload = payload as { sessionName: string; keys: string[] } | undefined;
         if (termKeysPayload?.sessionName && termKeysPayload.keys?.length) {
-          this.tmux.sendRawKeys(termKeysPayload.sessionName, termKeysPayload.keys)
+          this.tmux
+            .sendRawKeys(termKeysPayload.sessionName, termKeysPayload.keys)
             .then((ok) => {
               this.send(client.ws, {
                 type: 'terminal_keys_sent',
@@ -713,7 +745,15 @@ export class WebSocketHandler {
         break;
 
       case 'get_api_usage':
-        this.handleGetApiUsage(client, payload as { period?: 'today' | 'month' | 'custom'; startDate?: string; endDate?: string }, requestId);
+        this.handleGetApiUsage(
+          client,
+          payload as {
+            period?: 'today' | 'month' | 'custom';
+            startDate?: string;
+            endDate?: string;
+          },
+          requestId
+        );
         break;
 
       case 'get_agent_tree':
@@ -748,14 +788,23 @@ export class WebSocketHandler {
 
       // Work Group endpoints
       case 'spawn_work_group':
-        this.handleSpawnWorkGroup(client, payload as {
-          name: string;
-          foremanSessionId: string;
-          foremanTmuxSession: string;
-          parentDir: string;
-          planFile?: string;
-          workers: { taskSlug: string; taskDescription: string; planSection: string; files: string[] }[];
-        }, requestId);
+        this.handleSpawnWorkGroup(
+          client,
+          payload as {
+            name: string;
+            foremanSessionId: string;
+            foremanTmuxSession: string;
+            parentDir: string;
+            planFile?: string;
+            workers: {
+              taskSlug: string;
+              taskDescription: string;
+              planSection: string;
+              files: string[];
+            }[];
+          },
+          requestId
+        );
         break;
 
       case 'get_work_groups':
@@ -779,7 +828,11 @@ export class WebSocketHandler {
         break;
 
       case 'send_worker_input':
-        this.handleSendWorkerInput(client, payload as { groupId: string; workerId: string; text: string }, requestId);
+        this.handleSendWorkerInput(
+          client,
+          payload as { groupId: string; workerId: string; text: string },
+          requestId
+        );
         break;
 
       case 'dismiss_work_group':
@@ -793,7 +846,7 @@ export class WebSocketHandler {
 
         if (description && description.trim()) {
           const scores = scoreTemplates(scaffoldTemplates, description);
-          const scoreMap = new Map(scores.map(s => [s.templateId, s]));
+          const scoreMap = new Map(scores.map((s) => [s.templateId, s]));
 
           // Sort templates by score descending
           const sorted = [...scaffoldTemplates].sort((a, b) => {
@@ -806,7 +859,7 @@ export class WebSocketHandler {
             type: 'scaffold_templates',
             success: true,
             payload: {
-              templates: sorted.map(t => {
+              templates: sorted.map((t) => {
                 const s = scoreMap.get(t.id);
                 return {
                   id: t.id,
@@ -827,7 +880,7 @@ export class WebSocketHandler {
             type: 'scaffold_templates',
             success: true,
             payload: {
-              templates: scaffoldTemplates.map(t => ({
+              templates: scaffoldTemplates.map((t) => ({
                 id: t.id,
                 name: t.name,
                 description: t.description,
@@ -906,7 +959,12 @@ export class WebSocketHandler {
       case 'remove_device': {
         const removePayload = payload as { deviceId: string };
         if (!removePayload?.deviceId) {
-          this.send(client.ws, { type: 'device_removed', success: false, error: 'Missing deviceId', requestId });
+          this.send(client.ws, {
+            type: 'device_removed',
+            success: false,
+            error: 'Missing deviceId',
+            requestId,
+          });
           break;
         }
         const store = this.push.getStore();
@@ -924,7 +982,12 @@ export class WebSocketHandler {
       case 'set_session_muted': {
         const mutePayload = payload as { sessionId: string; muted: boolean };
         if (!mutePayload?.sessionId || mutePayload.muted === undefined) {
-          this.send(client.ws, { type: 'session_muted_set', success: false, error: 'Missing sessionId or muted', requestId });
+          this.send(client.ws, {
+            type: 'session_muted_set',
+            success: false,
+            error: 'Missing sessionId or muted',
+            requestId,
+          });
           break;
         }
         const store = this.push.getStore();
@@ -936,7 +999,10 @@ export class WebSocketHandler {
           requestId,
         });
         // Broadcast to all clients so mute state is visible everywhere
-        this.broadcast('session_mute_changed', { sessionId: mutePayload.sessionId, muted: mutePayload.muted });
+        this.broadcast('session_mute_changed', {
+          sessionId: mutePayload.sessionId,
+          muted: mutePayload.muted,
+        });
         break;
       }
 
@@ -1002,7 +1068,12 @@ export class WebSocketHandler {
         (async () => {
           try {
             const createConfig = payload as ProjectConfig;
-            console.log('Scaffold: Creating project', createConfig.name, 'at', createConfig.location);
+            console.log(
+              'Scaffold: Creating project',
+              createConfig.name,
+              'at',
+              createConfig.location
+            );
             const createResult = await scaffoldProject(createConfig, (progress) => {
               console.log('Scaffold progress:', progress.step, progress.detail || '');
               // Send progress updates
@@ -1071,10 +1142,12 @@ export class WebSocketHandler {
         payload: {
           sessionName: activeSession,
           canRecreate: !!savedConfig,
-          savedConfig: savedConfig ? {
-            name: savedConfig.name,
-            workingDir: savedConfig.workingDir,
-          } : undefined,
+          savedConfig: savedConfig
+            ? {
+                name: savedConfig.name,
+                workingDir: savedConfig.workingDir,
+              }
+            : undefined,
         },
         requestId,
       });
@@ -1270,10 +1343,10 @@ export class WebSocketHandler {
     // 3. Find and switch to corresponding tmux session
     let tmuxSessionName: string | undefined;
     try {
-      const convSession = this.watcher.getSessions().find(s => s.id === sessionId);
+      const convSession = this.watcher.getSessions().find((s) => s.id === sessionId);
       if (convSession?.projectPath) {
         const tmuxSessions = await this.tmux.listSessions();
-        const matchingTmux = tmuxSessions.find(ts => ts.workingDir === convSession.projectPath);
+        const matchingTmux = tmuxSessions.find((ts) => ts.workingDir === convSession.projectPath);
         if (matchingTmux) {
           this.injector.setActiveSession(matchingTmux.name);
           tmuxSessionName = matchingTmux.name;
@@ -1488,7 +1561,10 @@ export class WebSocketHandler {
       });
 
       // Broadcast to all clients
-      this.broadcast('tmux_sessions_changed', { action: 'killed', sessionName: payload.sessionName });
+      this.broadcast('tmux_sessions_changed', {
+        action: 'killed',
+        sessionName: payload.sessionName,
+      });
     } else {
       this.send(client.ws, {
         type: 'tmux_session_killed',
@@ -1525,7 +1601,9 @@ export class WebSocketHandler {
       return;
     }
 
-    console.log(`WebSocket: Creating worktree session from ${payload.parentDir}, branch: ${payload.branch || 'auto'}`);
+    console.log(
+      `WebSocket: Creating worktree session from ${payload.parentDir}, branch: ${payload.branch || 'auto'}`
+    );
 
     // Create the git worktree
     const wtResult = await this.tmux.createWorktree(payload.parentDir, payload.branch);
@@ -1656,7 +1734,7 @@ export class WebSocketHandler {
     // Try to find and switch to the corresponding conversation session
     // Get the tmux session's working directory
     const sessions = await this.tmux.listSessions();
-    const tmuxSession = sessions.find(s => s.name === payload.sessionName);
+    const tmuxSession = sessions.find((s) => s.name === payload.sessionName);
     let conversationSessionId: string | undefined;
 
     if (tmuxSession?.workingDir) {
@@ -1668,16 +1746,20 @@ export class WebSocketHandler {
 
       // Find conversation session whose ID matches or starts with this encoded path
       const convSessions = this.watcher.getSessions();
-      const matchingConv = convSessions.find(cs => cs.id === encodedPath);
+      const matchingConv = convSessions.find((cs) => cs.id === encodedPath);
 
       if (matchingConv) {
         this.watcher.setActiveSession(matchingConv.id);
         conversationSessionId = matchingConv.id;
-        console.log(`WebSocket: Switched conversation to "${matchingConv.id}" for project ${tmuxSession.workingDir}`);
+        console.log(
+          `WebSocket: Switched conversation to "${matchingConv.id}" for project ${tmuxSession.workingDir}`
+        );
       } else {
         // No conversation yet for this project - clear active session so old data stops flowing
         this.watcher.clearActiveSession();
-        console.log(`WebSocket: No conversation found for ${encodedPath}, cleared active session. Available: ${convSessions.map(c => c.id).join(', ')}`);
+        console.log(
+          `WebSocket: No conversation found for ${encodedPath}, cleared active session. Available: ${convSessions.map((c) => c.id).join(', ')}`
+        );
       }
     } else {
       // No working directory - clear active session
@@ -1880,7 +1962,7 @@ export class WebSocketHandler {
         if (activeSessionId) {
           // The session ID is the encoded path like -Users-foo-project
           // Match it against tmux session working directories
-          const matchingSession = sessions.find(s => {
+          const matchingSession = sessions.find((s) => {
             if (!s.workingDir) return false;
             const encoded = s.workingDir.replace(/\//g, '-');
             return encoded === activeSessionId || s.name === activeSessionId;
@@ -1897,13 +1979,9 @@ export class WebSocketHandler {
       resolvedPath = path.normalize(resolvedPath);
 
       // Security: only allow reading files in certain directories
-      const allowedPaths = [
-        homeDir,
-        '/tmp',
-        '/var/tmp',
-      ];
+      const allowedPaths = [homeDir, '/tmp', '/var/tmp'];
 
-      const isAllowed = allowedPaths.some(allowed => resolvedPath.startsWith(allowed));
+      const isAllowed = allowedPaths.some((allowed) => resolvedPath.startsWith(allowed));
 
       if (!isAllowed) {
         this.send(client.ws, {
@@ -1990,7 +2068,7 @@ export class WebSocketHandler {
 
       // Security: only allow opening files in home directory or /tmp
       const allowedPaths = [homeDir, '/tmp', '/var/tmp'];
-      const isAllowed = allowedPaths.some(allowed => resolvedPath.startsWith(allowed));
+      const isAllowed = allowedPaths.some((allowed) => resolvedPath.startsWith(allowed));
 
       if (!isAllowed) {
         this.send(client.ws, {
@@ -2092,7 +2170,7 @@ export class WebSocketHandler {
 
       // Security: only allow downloading files in certain directories
       const allowedPaths = [homeDir, '/tmp', '/var/tmp'];
-      const isAllowed = allowedPaths.some(allowed => resolvedPath.startsWith(allowed));
+      const isAllowed = allowedPaths.some((allowed) => resolvedPath.startsWith(allowed));
 
       if (!isAllowed) {
         this.send(client.ws, {
@@ -2107,7 +2185,7 @@ export class WebSocketHandler {
       // Only allow specific file types for download
       const allowedExtensions = ['.apk', '.ipa', '.zip', '.tar.gz', '.tgz'];
       const ext = path.extname(resolvedPath).toLowerCase();
-      const isApkOrZip = allowedExtensions.some(e => resolvedPath.toLowerCase().endsWith(e));
+      const isApkOrZip = allowedExtensions.some((e) => resolvedPath.toLowerCase().endsWith(e));
 
       if (!isApkOrZip) {
         this.send(client.ws, {
@@ -2148,7 +2226,9 @@ export class WebSocketHandler {
       const base64 = content.toString('base64');
       const fileName = path.basename(resolvedPath);
 
-      console.log(`WebSocket: Sending file download: ${fileName} (${Math.round(stats.size / 1024)}KB)`);
+      console.log(
+        `WebSocket: Sending file download: ${fileName} (${Math.round(stats.size / 1024)}KB)`
+      );
 
       this.send(client.ws, {
         type: 'file_download',
@@ -2156,7 +2236,8 @@ export class WebSocketHandler {
         payload: {
           fileName,
           size: stats.size,
-          mimeType: ext === '.apk' ? 'application/vnd.android.package-archive' : 'application/octet-stream',
+          mimeType:
+            ext === '.apk' ? 'application/vnd.android.package-archive' : 'application/octet-stream',
           data: base64,
         },
         requestId,
@@ -2173,7 +2254,9 @@ export class WebSocketHandler {
 
   private async handleGetApiUsage(
     client: AuthenticatedClient,
-    payload: { period?: 'today' | 'month' | 'custom'; startDate?: string; endDate?: string } | undefined,
+    payload:
+      | { period?: 'today' | 'month' | 'custom'; startDate?: string; endDate?: string }
+      | undefined,
     requestId?: string
   ): Promise<void> {
     const adminApiKey = this.config.anthropicAdminApiKey;
@@ -2182,7 +2265,8 @@ export class WebSocketHandler {
       this.send(client.ws, {
         type: 'api_usage',
         success: false,
-        error: 'No Anthropic Admin API key configured. Add "anthropicAdminApiKey" to your config.json (key starts with sk-ant-admin-...)',
+        error:
+          'No Anthropic Admin API key configured. Add "anthropicAdminApiKey" to your config.json (key starts with sk-ant-admin-...)',
         requestId,
       });
       return;
@@ -2343,10 +2427,7 @@ export class WebSocketHandler {
     });
   }
 
-  private handleGetClientErrors(
-    client: AuthenticatedClient,
-    requestId?: string
-  ): void {
+  private handleGetClientErrors(client: AuthenticatedClient, requestId?: string): void {
     this.send(client.ws, {
       type: 'client_errors',
       success: true,
@@ -2367,10 +2448,7 @@ export class WebSocketHandler {
     console.log(`[SCROLL] ${payload.event}:`, JSON.stringify(payload));
   }
 
-  private handleGetScrollLogs(
-    client: AuthenticatedClient,
-    requestId?: string
-  ): void {
+  private handleGetScrollLogs(client: AuthenticatedClient, requestId?: string): void {
     this.send(client.ws, {
       type: 'scroll_logs',
       success: true,
@@ -2433,11 +2511,15 @@ export class WebSocketHandler {
     if (ws.readyState === WebSocket.OPEN) {
       const data = JSON.stringify(response);
       if (response.type !== 'pong' && response.requestId) {
-        console.log(`WebSocket: << send ${response.type} (${response.requestId}) ${data.length} bytes`);
+        console.log(
+          `WebSocket: << send ${response.type} (${response.requestId}) ${data.length} bytes`
+        );
       }
       ws.send(data);
     } else {
-      console.log(`WebSocket: !! send FAILED - ws not open (state: ${ws.readyState}) for ${response.type}`);
+      console.log(
+        `WebSocket: !! send FAILED - ws not open (state: ${ws.readyState}) for ${response.type}`
+      );
     }
   }
 
@@ -2453,22 +2535,39 @@ export class WebSocketHandler {
 
   private async handleSpawnWorkGroup(
     client: AuthenticatedClient,
-    payload: {
-      name: string;
-      foremanSessionId: string;
-      foremanTmuxSession: string;
-      parentDir: string;
-      planFile?: string;
-      workers: { taskSlug: string; taskDescription: string; planSection: string; files: string[] }[];
-    } | undefined,
+    payload:
+      | {
+          name: string;
+          foremanSessionId: string;
+          foremanTmuxSession: string;
+          parentDir: string;
+          planFile?: string;
+          workers: {
+            taskSlug: string;
+            taskDescription: string;
+            planSection: string;
+            files: string[];
+          }[];
+        }
+      | undefined,
     requestId?: string
   ): Promise<void> {
     if (!this.workGroupManager) {
-      this.send(client.ws, { type: 'work_group_spawned', success: false, error: 'Work groups not enabled', requestId });
+      this.send(client.ws, {
+        type: 'work_group_spawned',
+        success: false,
+        error: 'Work groups not enabled',
+        requestId,
+      });
       return;
     }
     if (!payload?.name || !payload.workers?.length) {
-      this.send(client.ws, { type: 'work_group_spawned', success: false, error: 'Missing name or workers', requestId });
+      this.send(client.ws, {
+        type: 'work_group_spawned',
+        success: false,
+        error: 'Missing name or workers',
+        requestId,
+      });
       return;
     }
 
@@ -2500,7 +2599,12 @@ export class WebSocketHandler {
 
   private handleGetWorkGroups(client: AuthenticatedClient, requestId?: string): void {
     if (!this.workGroupManager) {
-      this.send(client.ws, { type: 'work_groups', success: true, payload: { groups: [] }, requestId });
+      this.send(client.ws, {
+        type: 'work_groups',
+        success: true,
+        payload: { groups: [] },
+        requestId,
+      });
       return;
     }
     const groups = this.workGroupManager.getWorkGroups();
@@ -2513,7 +2617,12 @@ export class WebSocketHandler {
     requestId?: string
   ): void {
     if (!this.workGroupManager || !payload?.groupId) {
-      this.send(client.ws, { type: 'work_group', success: false, error: 'Missing groupId', requestId });
+      this.send(client.ws, {
+        type: 'work_group',
+        success: false,
+        error: 'Missing groupId',
+        requestId,
+      });
       return;
     }
     const group = this.workGroupManager.getWorkGroup(payload.groupId);
@@ -2530,7 +2639,12 @@ export class WebSocketHandler {
     requestId?: string
   ): Promise<void> {
     if (!this.workGroupManager || !payload?.groupId) {
-      this.send(client.ws, { type: 'work_group_merged', success: false, error: 'Missing groupId', requestId });
+      this.send(client.ws, {
+        type: 'work_group_merged',
+        success: false,
+        error: 'Missing groupId',
+        requestId,
+      });
       return;
     }
     const result = await this.workGroupManager.mergeWorkGroup(payload.groupId);
@@ -2548,7 +2662,12 @@ export class WebSocketHandler {
     requestId?: string
   ): Promise<void> {
     if (!this.workGroupManager || !payload?.groupId) {
-      this.send(client.ws, { type: 'work_group_cancelled', success: false, error: 'Missing groupId', requestId });
+      this.send(client.ws, {
+        type: 'work_group_cancelled',
+        success: false,
+        error: 'Missing groupId',
+        requestId,
+      });
       return;
     }
     const result = await this.workGroupManager.cancelWorkGroup(payload.groupId);
@@ -2566,7 +2685,12 @@ export class WebSocketHandler {
     requestId?: string
   ): Promise<void> {
     if (!this.workGroupManager || !payload?.groupId || !payload?.workerId) {
-      this.send(client.ws, { type: 'worker_retried', success: false, error: 'Missing groupId or workerId', requestId });
+      this.send(client.ws, {
+        type: 'worker_retried',
+        success: false,
+        error: 'Missing groupId or workerId',
+        requestId,
+      });
       return;
     }
     const result = await this.workGroupManager.retryWorker(payload.groupId, payload.workerId);
@@ -2584,10 +2708,19 @@ export class WebSocketHandler {
     requestId?: string
   ): Promise<void> {
     if (!this.workGroupManager || !payload?.groupId || !payload?.workerId || !payload?.text) {
-      this.send(client.ws, { type: 'worker_input_sent', success: false, error: 'Missing groupId, workerId, or text', requestId });
+      this.send(client.ws, {
+        type: 'worker_input_sent',
+        success: false,
+        error: 'Missing groupId, workerId, or text',
+        requestId,
+      });
       return;
     }
-    const result = await this.workGroupManager.sendWorkerInput(payload.groupId, payload.workerId, payload.text);
+    const result = await this.workGroupManager.sendWorkerInput(
+      payload.groupId,
+      payload.workerId,
+      payload.text
+    );
     this.send(client.ws, {
       type: 'worker_input_sent',
       success: result.success,
@@ -2602,7 +2735,12 @@ export class WebSocketHandler {
     requestId?: string
   ): Promise<void> {
     if (!this.workGroupManager || !payload?.groupId) {
-      this.send(client.ws, { type: 'work_group_dismissed', success: false, error: 'Missing groupId', requestId });
+      this.send(client.ws, {
+        type: 'work_group_dismissed',
+        success: false,
+        error: 'Missing groupId',
+        requestId,
+      });
       return;
     }
     const result = await this.workGroupManager.dismissWorkGroup(payload.groupId);

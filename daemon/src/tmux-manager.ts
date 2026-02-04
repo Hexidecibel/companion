@@ -1,4 +1,4 @@
-import { exec, execSync, spawn } from 'child_process';
+import { exec } from 'child_process';
 import { promisify } from 'util';
 import * as path from 'path';
 
@@ -132,26 +132,20 @@ export class TmuxManager {
 
     try {
       // Create detached tmux session in the specified directory
-      await execAsync(
-        `tmux new-session -d -s "${safeName}" -c "${workingDir}"`
-      );
+      await execAsync(`tmux new-session -d -s "${safeName}" -c "${workingDir}"`);
 
       // Tag session as managed by Companion so daemon only monitors our sessions
-      await execAsync(
-        `tmux set-environment -t "${safeName}" COMPANION_APP 1`
-      );
+      await execAsync(`tmux set-environment -t "${safeName}" COMPANION_APP 1`);
 
       console.log(`TmuxManager: Created session "${safeName}" in ${workingDir} (tagged)`);
 
       // Start CLI in the session if requested
       if (startCli) {
         // Small delay to let the session initialize
-        await new Promise(resolve => setTimeout(resolve, 200));
+        await new Promise((resolve) => setTimeout(resolve, 200));
 
         // Send the CLI command
-        await execAsync(
-          `tmux send-keys -t "${safeName}" "claude" Enter`
-        );
+        await execAsync(`tmux send-keys -t "${safeName}" "claude" Enter`);
         console.log(`TmuxManager: Started CLI in session "${safeName}"`);
       }
 
@@ -172,17 +166,17 @@ export class TmuxManager {
       try {
         // Send Ctrl+C to interrupt any running operation
         await execAsync(`tmux send-keys -t "${name}" C-c`);
-        await new Promise(resolve => setTimeout(resolve, 300));
+        await new Promise((resolve) => setTimeout(resolve, 300));
 
         // Send Ctrl+D to exit gracefully (preferred over "exit")
         await execAsync(`tmux send-keys -t "${name}" C-d`);
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        await new Promise((resolve) => setTimeout(resolve, 1000));
 
         // If still alive, try "exit" command
         const stillAlive = await this.sessionExists(name);
         if (stillAlive) {
           await execAsync(`tmux send-keys -t "${name}" "exit" Enter`);
-          await new Promise(resolve => setTimeout(resolve, 500));
+          await new Promise((resolve) => setTimeout(resolve, 500));
         }
       } catch {
         // Ignore errors during graceful shutdown
@@ -216,9 +210,7 @@ export class TmuxManager {
         .replace(/\$/g, '\\$')
         .replace(/`/g, '\\`');
 
-      await execAsync(
-        `tmux send-keys -t "${sessionName}" -l "${escaped}"`
-      );
+      await execAsync(`tmux send-keys -t "${sessionName}" -l "${escaped}"`);
       return true;
     } catch (err) {
       console.error(`TmuxManager: Failed to send keys to "${sessionName}":`, err);
@@ -282,7 +274,10 @@ export class TmuxManager {
       const { stdout } = await execAsync(
         `find "${basePath}" -maxdepth 1 -type d 2>/dev/null | head -50`
       );
-      return stdout.trim().split('\n').filter(d => d && d !== basePath);
+      return stdout
+        .trim()
+        .split('\n')
+        .filter((d) => d && d !== basePath);
     } catch {
       return [];
     }
@@ -338,20 +333,14 @@ export class TmuxManager {
    * Create a git worktree from a repository directory.
    * Returns the path to the new worktree and the branch name.
    */
-  async createWorktree(
-    repoDir: string,
-    branchName?: string
-  ): Promise<WorktreeResult> {
+  async createWorktree(repoDir: string, branchName?: string): Promise<WorktreeResult> {
     // Verify it's a git repo
     if (!(await this.isGitRepo(repoDir))) {
       return { success: false, error: 'not a git repository' };
     }
 
     // Get the git root (in case repoDir is a subdirectory)
-    const { stdout: gitRoot } = await execAsync(
-      'git rev-parse --show-toplevel',
-      { cwd: repoDir }
-    );
+    const { stdout: gitRoot } = await execAsync('git rev-parse --show-toplevel', { cwd: repoDir });
     const rootDir = gitRoot.trim();
 
     // Generate branch name if not provided
@@ -363,10 +352,7 @@ export class TmuxManager {
     const worktreePath = path.join(path.dirname(rootDir), `${repoName}-wt-${safeBranch}`);
 
     try {
-      await execAsync(
-        `git worktree add "${worktreePath}" -b "${safeBranch}"`,
-        { cwd: rootDir }
-      );
+      await execAsync(`git worktree add "${worktreePath}" -b "${safeBranch}"`, { cwd: rootDir });
       return { success: true, worktreePath, branch: safeBranch };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -382,10 +368,7 @@ export class TmuxManager {
     worktreePath: string
   ): Promise<{ success: boolean; error?: string }> {
     try {
-      await execAsync(
-        `git worktree remove "${worktreePath}" --force`,
-        { cwd: repoDir }
-      );
+      await execAsync(`git worktree remove "${worktreePath}" --force`, { cwd: repoDir });
       return { success: true };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -402,10 +385,7 @@ export class TmuxManager {
     }
 
     try {
-      const { stdout } = await execAsync(
-        'git worktree list --porcelain',
-        { cwd: dir }
-      );
+      const { stdout } = await execAsync('git worktree list --porcelain', { cwd: dir });
 
       const worktrees: WorktreeInfo[] = [];
       let current: Partial<WorktreeInfo> = {};

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
@@ -13,7 +13,7 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Server } from '../types';
-import { getServers, addServer, updateServer, deleteServer } from '../services/storage';
+import { addServer, updateServer, deleteServer } from '../services/storage';
 import { QRScanner, QRConfig } from '../components/QRScanner';
 import Ionicons from '@expo/vector-icons/Ionicons';
 
@@ -30,8 +30,8 @@ export function EditServerScreen({ server, onBack, onSaved }: EditServerScreenPr
   const [formToken, setFormToken] = useState(server?.token || '');
   const [formUseTls, setFormUseTls] = useState(server?.useTls || false);
   const [formIsDefault, setFormIsDefault] = useState(server?.isDefault || false);
-  const [formEnabled, setFormEnabled] = useState(server?.enabled !== false);
-  const [formAutoApproveEnabled, setFormAutoApproveEnabled] = useState(server?.autoApproveEnabled || false);
+  const [formEnabled, _setFormEnabled] = useState(server?.enabled !== false);
+  const [formAutoApproveEnabled, _setFormAutoApproveEnabled] = useState(server?.autoApproveEnabled || false);
   const [formSshUser, setFormSshUser] = useState(server?.sshUser || '');
   const [showToken, setShowToken] = useState(false);
   const [saving, setSaving] = useState(false);

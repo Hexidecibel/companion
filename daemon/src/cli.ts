@@ -57,9 +57,7 @@ ${bold('EXAMPLES')}
 
 function getVersion(): string {
   try {
-    const pkg = JSON.parse(
-      fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf-8')
-    );
+    const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf-8'));
     return pkg.version || '0.0.1';
   } catch {
     return '0.0.1';
@@ -157,10 +155,14 @@ async function cmdStatus(): Promise<void> {
 
   // Check tmux sessions
   try {
-    const tmuxOutput = execSync('tmux list-sessions -F "#{session_name}" 2>/dev/null', { encoding: 'utf-8' }).trim();
+    const tmuxOutput = execSync('tmux list-sessions -F "#{session_name}" 2>/dev/null', {
+      encoding: 'utf-8',
+    }).trim();
     const sessions = tmuxOutput.split('\n').filter(Boolean);
     if (sessions.length > 0) {
-      console.log(`  Tmux:     ${green(`${sessions.length} session(s)`)} ${dim(`(${sessions.join(', ')})`)}`);
+      console.log(
+        `  Tmux:     ${green(`${sessions.length} session(s)`)} ${dim(`(${sessions.join(', ')})`)}`
+      );
     } else {
       console.log(`  Tmux:     ${dim('no sessions')}`);
     }
@@ -179,9 +181,11 @@ function cmdStop(): void {
 
     // Try to find by process name
     try {
-      const result = execSync('pgrep -f "node.*dist/index" 2>/dev/null', { encoding: 'utf-8' }).trim();
+      const result = execSync('pgrep -f "node.*dist/index" 2>/dev/null', {
+        encoding: 'utf-8',
+      }).trim();
       if (result) {
-        const pids = result.split('\n').filter(p => p !== String(process.pid));
+        const pids = result.split('\n').filter((p) => p !== String(process.pid));
         if (pids.length > 0) {
           console.log(`Found daemon process(es): ${pids.join(', ')}`);
           for (const p of pids) {
@@ -220,7 +224,9 @@ function cmdConfig(args: string[]): void {
     const value = args[2];
     if (!key || value === undefined) {
       console.error(red('Usage: companion config set KEY VALUE'));
-      console.error('  Keys: port, token, tls, tmux_session, code_home, mdns_enabled, push_delay_ms');
+      console.error(
+        '  Keys: port, token, tls, tmux_session, code_home, mdns_enabled, push_delay_ms'
+      );
       process.exit(1);
     }
 
@@ -274,7 +280,9 @@ function cmdConfig(args: string[]): void {
   console.log(bold('Companion Configuration'));
   console.log('─'.repeat(40));
   console.log(`  port:            ${config.port}`);
-  console.log(`  token:           ${dim(config.token.slice(0, 8) + '...' + config.token.slice(-4))}`);
+  console.log(
+    `  token:           ${dim(config.token.slice(0, 8) + '...' + config.token.slice(-4))}`
+  );
   console.log(`  tls:             ${config.tls}`);
   console.log(`  tmux_session:    ${config.tmuxSession}`);
   console.log(`  code_home:       ${config.codeHome}`);
@@ -284,7 +292,9 @@ function cmdConfig(args: string[]): void {
     console.log(`  auto_approve:    ${config.autoApproveTools.join(', ')}`);
   }
   console.log('');
-  console.log(dim(`Config file: ${process.env.CONFIG_PATH || path.join(CONFIG_DIR, 'config.json')}`));
+  console.log(
+    dim(`Config file: ${process.env.CONFIG_PATH || path.join(CONFIG_DIR, 'config.json')}`)
+  );
 }
 
 function cmdInstall(): void {
@@ -333,9 +343,12 @@ function cmdLogs(): void {
   } else {
     // Linux: try journalctl first
     try {
-      execSync('journalctl --user -u companion --no-pager -n 50 2>/dev/null || journalctl -u companion --no-pager -n 50 2>/dev/null', {
-        stdio: 'inherit',
-      });
+      execSync(
+        'journalctl --user -u companion --no-pager -n 50 2>/dev/null || journalctl -u companion --no-pager -n 50 2>/dev/null',
+        {
+          stdio: 'inherit',
+        }
+      );
     } catch {
       console.log(dim('No logs found via journalctl'));
       console.log(dim('If running manually, check your terminal output'));

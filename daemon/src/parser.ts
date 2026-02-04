@@ -1,5 +1,15 @@
 import * as fs from 'fs';
-import { ConversationMessage, ConversationHighlight, ToolCall, SessionStatus, QuestionOption, Question, SessionUsage, CompactionEvent, TaskItem } from './types';
+import {
+  ConversationMessage,
+  ConversationHighlight,
+  ToolCall,
+  SessionStatus,
+  QuestionOption,
+  Question,
+  SessionUsage,
+  CompactionEvent,
+  TaskItem,
+} from './types';
 import { APPROVAL_TOOLS, KNOWN_TOOL_NAMES, getToolDescription, isKnownTool } from './tool-config';
 
 // Re-export TaskItem for tests
@@ -8,11 +18,11 @@ export { TaskItem } from './types';
 interface ContentBlock {
   type: string;
   text?: string;
-  id?: string;  // For tool_use blocks
-  tool_use_id?: string;  // For tool_result blocks
+  id?: string; // For tool_use blocks
+  tool_use_id?: string; // For tool_result blocks
   name?: string;
   input?: unknown;
-  content?: string | Array<{ type: string; text?: string }>;  // For tool_result blocks
+  content?: string | Array<{ type: string; text?: string }>; // For tool_result blocks
 }
 
 interface JsonlEntry {
@@ -73,7 +83,7 @@ export function detectCurrentActivityFast(filePath: string): string | undefined 
     fs.closeSync(fd);
 
     const tail = buffer.toString('utf-8');
-    const lines = tail.split('\n').filter(line => line.trim());
+    const lines = tail.split('\n').filter((line) => line.trim());
 
     // Collect tool_result IDs from recent lines so we know which tools completed
     const completedToolIds = new Set<string>();
@@ -124,7 +134,8 @@ export function detectCurrentActivityFast(filePath: string): string | undefined 
                     return `Approve? ${cmd}${(input.command as string).length > 40 ? '...' : ''}`;
                   }
                   if ((block.name === 'Edit' || block.name === 'Write') && input?.file_path) {
-                    const fileName = (input.file_path as string).split('/').pop() || input.file_path;
+                    const fileName =
+                      (input.file_path as string).split('/').pop() || input.file_path;
                     return `Approve ${block.name.toLowerCase()}: ${fileName}?`;
                   }
                   return `Approve ${block.name}?`;
@@ -147,13 +158,18 @@ export function detectCurrentActivityFast(filePath: string): string | undefined 
   }
 }
 
-export function parseConversationFile(filePath: string, limit: number = MAX_MESSAGES, preReadContent?: string): ConversationMessage[] {
-  const content = preReadContent ?? (fs.existsSync(filePath) ? fs.readFileSync(filePath, 'utf-8') : '');
+export function parseConversationFile(
+  filePath: string,
+  limit: number = MAX_MESSAGES,
+  preReadContent?: string
+): ConversationMessage[] {
+  const content =
+    preReadContent ?? (fs.existsSync(filePath) ? fs.readFileSync(filePath, 'utf-8') : '');
   if (!content) {
     return [];
   }
 
-  const lines = content.split('\n').filter(line => line.trim());
+  const lines = content.split('\n').filter((line) => line.trim());
 
   // First pass: collect all tool results, start times, and completion times
   const toolResults = new Map<string, string>();
@@ -182,8 +198,8 @@ export function parseConversationFile(filePath: string, limit: number = MAX_MESS
               output = block.content;
             } else if (Array.isArray(block.content)) {
               output = block.content
-                .filter(c => c.type === 'text' && c.text)
-                .map(c => c.text || '')
+                .filter((c) => c.type === 'text' && c.text)
+                .map((c) => c.text || '')
                 .join('\n');
             }
             toolResults.set(block.tool_use_id, output);
@@ -194,8 +210,6 @@ export function parseConversationFile(filePath: string, limit: number = MAX_MESS
       // Skip malformed lines
     }
   }
-  const completedToolIds = new Set(toolResults.keys());
-
   const messages: ConversationMessage[] = [];
 
   // Process from the end to get most recent messages first
@@ -269,13 +283,15 @@ function parseEntry(
         // Extract options from AskUserQuestion tool (only if still pending)
         if (block.name === 'AskUserQuestion' && isPending) {
           const input = block.input as AskUserQuestionInput;
-          console.log(`Parser: Found AskUserQuestion tool, questions count: ${input.questions?.length || 0}`);
+          console.log(
+            `Parser: Found AskUserQuestion tool, questions count: ${input.questions?.length || 0}`
+          );
           if (input.questions && input.questions.length > 0) {
             // Extract all questions
-            questions = input.questions.map(q => ({
+            questions = input.questions.map((q) => ({
               question: q.question,
               header: q.header,
-              options: q.options.map(opt => ({
+              options: q.options.map((opt) => ({
                 label: opt.label,
                 description: opt.description,
               })),
@@ -286,13 +302,15 @@ function parseEntry(
             const firstQuestion = input.questions[0];
             content = firstQuestion.question;
             // Set options from first question for backward compat (single-question case)
-            options = firstQuestion.options.map(opt => ({
+            options = firstQuestion.options.map((opt) => ({
               label: opt.label,
               description: opt.description,
             }));
             isWaitingForChoice = true;
             multiSelect = firstQuestion.multiSelect || false;
-            console.log(`Parser: Extracted ${questions.length} questions, first has ${options.length} options: "${content.substring(0, 50)}..." (multiSelect: ${multiSelect})`);
+            console.log(
+              `Parser: Extracted ${questions.length} questions, first has ${options.length} options: "${content.substring(0, 50)}..." (multiSelect: ${multiSelect})`
+            );
           }
         } else if (block.name === 'AskUserQuestion' && !isPending) {
           // Show the question content but no options (already answered)
@@ -323,7 +341,9 @@ function parseEntry(
             { label: 'no', description: 'Reject this action' },
           ];
           isWaitingForChoice = true;
-          console.log(`Parser: Pending ${block.name} tool needs approval: "${description.substring(0, 50)}..."`);
+          console.log(
+            `Parser: Pending ${block.name} tool needs approval: "${description.substring(0, 50)}..."`
+          );
         }
       } else if (block.type === 'tool_result') {
         // Skip tool results entirely - they're internal assistant responses
@@ -410,16 +430,8 @@ export function parseConversationChain(
 
 export function extractHighlights(messages: ConversationMessage[]): ConversationHighlight[] {
   // Find the index of the last user message - anything before this has been "responded to"
-  let lastUserMessageIndex = -1;
-  for (let i = messages.length - 1; i >= 0; i--) {
-    if (messages[i].type === 'user') {
-      lastUserMessageIndex = i;
-      break;
-    }
-  }
-
   const rawHighlights = messages
-    .filter(msg => {
+    .filter((msg) => {
       // Include user messages with content
       if (msg.type === 'user' && msg.content && msg.content.trim()) return true;
       // Include assistant messages with content OR toolCalls
@@ -436,31 +448,42 @@ export function extractHighlights(messages: ConversationMessage[]): Conversation
       const originalIndex = messages.indexOf(msg);
 
       // Check if this message has pending approval tools
-      const hasPendingApprovalTools = msg.toolCalls?.some(
-        tc => tc.status === 'pending' && APPROVAL_TOOLS.includes(tc.name) && tc.name !== 'Task'
-      ) ?? false;
+      const hasPendingApprovalTools =
+        msg.toolCalls?.some(
+          (tc) => tc.status === 'pending' && APPROVAL_TOOLS.includes(tc.name) && tc.name !== 'Task'
+        ) ?? false;
 
       // Check if all tools in this message are already completed/errored
-      const allToolsCompleted = (msg.toolCalls?.length ?? 0) > 0 && msg.toolCalls?.every(
-        tc => tc.status === 'completed' || tc.status === 'error' || tc.output !== undefined
-      );
+      const allToolsCompleted =
+        (msg.toolCalls?.length ?? 0) > 0 &&
+        msg.toolCalls?.every(
+          (tc) => tc.status === 'completed' || tc.status === 'error' || tc.output !== undefined
+        );
 
       // Check if user already responded after this message (tool is running, not waiting)
-      const userRespondedAfter = originalIndex < messages.length - 1 &&
-        messages.slice(originalIndex + 1).some(m => m.type === 'user');
+      const userRespondedAfter =
+        originalIndex < messages.length - 1 &&
+        messages.slice(originalIndex + 1).some((m) => m.type === 'user');
 
       // Show options if:
       // 1. This message has options AND
       // 2. Either it's the last message OR it has pending approval tools AND
       // 3. Tools haven't all completed AND
       // 4. User hasn't already responded (tool would be running, not waiting)
-      const showOptions = msg.options && msg.options.length > 0 &&
-        (isLastMessage || hasPendingApprovalTools) && !allToolsCompleted && !userRespondedAfter;
+      const showOptions =
+        msg.options &&
+        msg.options.length > 0 &&
+        (isLastMessage || hasPendingApprovalTools) &&
+        !allToolsCompleted &&
+        !userRespondedAfter;
 
       // If user responded after this message, pending tools are now running (not waiting for approval)
-      const toolCalls = userRespondedAfter && msg.toolCalls
-        ? msg.toolCalls.map(tc => tc.status === 'pending' ? { ...tc, status: 'running' as const } : tc)
-        : msg.toolCalls;
+      const toolCalls =
+        userRespondedAfter && msg.toolCalls
+          ? msg.toolCalls.map((tc) =>
+              tc.status === 'pending' ? { ...tc, status: 'running' as const } : tc
+            )
+          : msg.toolCalls;
 
       return {
         id: msg.id,
@@ -480,8 +503,17 @@ export function extractHighlights(messages: ConversationMessage[]): Conversation
   const highlights: ConversationHighlight[] = [];
   for (const h of rawHighlights) {
     const prev = highlights[highlights.length - 1];
-    const isToolOnly = h.type === 'assistant' && (!h.content || !h.content.trim()) && h.toolCalls && h.toolCalls.length > 0;
-    const prevIsToolOnly = prev && prev.type === 'assistant' && (!prev.content || !prev.content.trim()) && prev.toolCalls && prev.toolCalls.length > 0;
+    const isToolOnly =
+      h.type === 'assistant' &&
+      (!h.content || !h.content.trim()) &&
+      h.toolCalls &&
+      h.toolCalls.length > 0;
+    const prevIsToolOnly =
+      prev &&
+      prev.type === 'assistant' &&
+      (!prev.content || !prev.content.trim()) &&
+      prev.toolCalls &&
+      prev.toolCalls.length > 0;
 
     if (isToolOnly && prevIsToolOnly && !h.options && !prev.options) {
       // Merge: append tool calls to previous message
@@ -511,20 +543,23 @@ export function detectWaitingForInput(messages: ConversationMessage[]): boolean 
     // Check for pending tool calls that need approval
     if (lastMessage.toolCalls) {
       const hasPendingApproval = lastMessage.toolCalls.some(
-        tc => tc.status === 'pending' && APPROVAL_TOOLS.includes(tc.name)
+        (tc) => tc.status === 'pending' && APPROVAL_TOOLS.includes(tc.name)
       );
       if (hasPendingApproval) {
         return true;
       }
 
       // If any tools are still running, not waiting yet
-      if (lastMessage.toolCalls.some(tc => tc.status === 'running')) {
+      if (lastMessage.toolCalls.some((tc) => tc.status === 'running')) {
         return false;
       }
     }
 
     // Assistant finished with all tools completed (or no tools) = waiting for next user input
-    if (!lastMessage.toolCalls || lastMessage.toolCalls.every(tc => tc.status === 'completed' || tc.status === 'error')) {
+    if (
+      !lastMessage.toolCalls ||
+      lastMessage.toolCalls.every((tc) => tc.status === 'completed' || tc.status === 'error')
+    ) {
       return true;
     }
   }
@@ -541,12 +576,12 @@ export function detectIdle(messages: ConversationMessage[]): boolean {
   // If the last message is from the assistant with all tools completed and no question
   if (lastMessage.type === 'assistant') {
     // Still has running/pending tools = not idle
-    if (lastMessage.toolCalls?.some(tc => tc.status === 'pending' || tc.status === 'running')) {
+    if (lastMessage.toolCalls?.some((tc) => tc.status === 'pending' || tc.status === 'running')) {
       return false;
     }
 
     // All tools completed, no question pattern = idle (finished task)
-    if (!lastMessage.toolCalls || lastMessage.toolCalls.every(tc => tc.status === 'completed')) {
+    if (!lastMessage.toolCalls || lastMessage.toolCalls.every((tc) => tc.status === 'completed')) {
       return !detectWaitingForInput(messages);
     }
   }
@@ -573,7 +608,11 @@ export function detectCurrentActivity(messages: ConversationMessage[]): string |
   }
 
   // Check for tool calls in the last assistant message
-  if (lastMessage.type === 'assistant' && lastMessage.toolCalls && lastMessage.toolCalls.length > 0) {
+  if (
+    lastMessage.type === 'assistant' &&
+    lastMessage.toolCalls &&
+    lastMessage.toolCalls.length > 0
+  ) {
     const lastTool = lastMessage.toolCalls[lastMessage.toolCalls.length - 1];
 
     // Check if this is a pending approval
@@ -614,7 +653,10 @@ export function detectCurrentActivity(messages: ConversationMessage[]): string |
   return undefined;
 }
 
-export function getRecentActivity(messages: ConversationMessage[], limit: number = 5): ActivityDetail[] {
+export function getRecentActivity(
+  messages: ConversationMessage[],
+  limit: number = 5
+): ActivityDetail[] {
   const activities: ActivityDetail[] = [];
 
   // Go through messages in reverse to get recent activity
@@ -627,7 +669,7 @@ export function getRecentActivity(messages: ConversationMessage[], limit: number
 
         const input = tool.input as Record<string, unknown>;
         let inputStr = '';
-        let outputStr = tool.output || '';
+        const outputStr = tool.output || '';
 
         // Format input based on tool type
         if (input.file_path) {
@@ -682,8 +724,10 @@ export function getPendingApprovalTools(messages: ConversationMessage[]): string
   if (lastMessage.type !== 'assistant' || !lastMessage.toolCalls) return [];
 
   return lastMessage.toolCalls
-    .filter(tc => tc.status === 'pending' && APPROVAL_TOOLS.includes(tc.name) && tc.name !== 'Task')
-    .map(tc => tc.name);
+    .filter(
+      (tc) => tc.status === 'pending' && APPROVAL_TOOLS.includes(tc.name) && tc.name !== 'Task'
+    )
+    .map((tc) => tc.name);
 }
 
 interface UsageData {
@@ -715,12 +759,13 @@ export function detectCompaction(
   lastCheckedLine: number = 0,
   preReadContent?: string
 ): { event: CompactionEvent | null; lastLine: number } {
-  const content = preReadContent ?? (fs.existsSync(filePath) ? fs.readFileSync(filePath, 'utf-8') : '');
+  const content =
+    preReadContent ?? (fs.existsSync(filePath) ? fs.readFileSync(filePath, 'utf-8') : '');
   if (!content) {
     return { event: null, lastLine: 0 };
   }
 
-  const lines = content.split('\n').filter(line => line.trim());
+  const lines = content.split('\n').filter((line) => line.trim());
   let compactionEvent: CompactionEvent | null = null;
 
   // Only check lines after lastCheckedLine to avoid re-detecting old compactions
@@ -767,7 +812,7 @@ export function extractUsageFromFile(filePath: string, sessionName: string): Ses
   }
 
   const content = fs.readFileSync(filePath, 'utf-8');
-  const lines = content.split('\n').filter(line => line.trim());
+  const lines = content.split('\n').filter((line) => line.trim());
   const seenMessageIds = new Set<string>();
 
   for (const line of lines) {
@@ -839,7 +884,7 @@ interface TaskUpdateInput {
  * Extract tasks from JSONL content (from TaskCreate/TaskUpdate tool calls)
  */
 export function extractTasks(content: string): TaskItem[] {
-  const lines = content.split('\n').filter(line => line.trim());
+  const lines = content.split('\n').filter((line) => line.trim());
 
   // Track tasks by temporary ID (toolu_xxx) until we get real ID from result
   const pendingTasks = new Map<string, { task: Partial<TaskItem>; timestamp: number }>();
@@ -910,16 +955,10 @@ export function extractTasks(content: string): TaskItem[] {
                 existingTask.owner = input.owner;
               }
               if (input.addBlockedBy) {
-                existingTask.blockedBy = [
-                  ...(existingTask.blockedBy || []),
-                  ...input.addBlockedBy,
-                ];
+                existingTask.blockedBy = [...(existingTask.blockedBy || []), ...input.addBlockedBy];
               }
               if (input.addBlocks) {
-                existingTask.blocks = [
-                  ...(existingTask.blocks || []),
-                  ...input.addBlocks,
-                ];
+                existingTask.blocks = [...(existingTask.blocks || []), ...input.addBlocks];
               }
               existingTask.updatedAt = timestamp;
             }

@@ -53,7 +53,9 @@ export class EscalationService {
     if (config.rateLimitSeconds > 0) {
       const lastTime = this.lastNotifiedPerSession.get(event.sessionId);
       if (lastTime && Date.now() - lastTime < config.rateLimitSeconds * 1000) {
-        console.log(`Escalation: Rate-limited for session ${event.sessionId} (${config.rateLimitSeconds}s)`);
+        console.log(
+          `Escalation: Rate-limited for session ${event.sessionId} (${config.rateLimitSeconds}s)`
+        );
         return { shouldBroadcast: false };
       }
     }
@@ -103,7 +105,9 @@ export class EscalationService {
       this.timers.set(pendingId, timer);
     }
 
-    console.log(`Escalation: Event ${event.eventType} for session "${event.sessionName}" — push scheduled in ${config.pushDelaySeconds}s`);
+    console.log(
+      `Escalation: Event ${event.eventType} for session "${event.sessionName}" — push scheduled in ${config.pushDelaySeconds}s`
+    );
 
     return { shouldBroadcast: true, pendingEvent };
   }
@@ -131,7 +135,9 @@ export class EscalationService {
     }
 
     if (cancelled > 0) {
-      console.log(`Escalation: Acknowledged session "${sessionId}" — cancelled ${cancelled} pending push(es)`);
+      console.log(
+        `Escalation: Acknowledged session "${sessionId}" — cancelled ${cancelled} pending push(es)`
+      );
     }
   }
 
@@ -139,8 +145,7 @@ export class EscalationService {
    * Get all pending (unacknowledged, unsent) events.
    */
   getPendingEvents(): PendingEvent[] {
-    return Array.from(this.pendingEvents.values())
-      .filter(e => !e.pushSent && !e.acknowledgedAt);
+    return Array.from(this.pendingEvents.values()).filter((e) => !e.pushSent && !e.acknowledgedAt);
   }
 
   /**
@@ -158,7 +163,10 @@ export class EscalationService {
 
     // Check quiet hours
     const config = this.store.getEscalation();
-    if (config.quietHours.enabled && this.isInQuietHours(config.quietHours.start, config.quietHours.end)) {
+    if (
+      config.quietHours.enabled &&
+      this.isInQuietHours(config.quietHours.start, config.quietHours.end)
+    ) {
       console.log(`Escalation: Push suppressed for "${event.sessionName}" — quiet hours`);
       event.pushSent = true; // Mark as handled so it doesn't retry
       this.timers.delete(pendingId);

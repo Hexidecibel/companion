@@ -145,7 +145,7 @@ export function useScrollBehavior(config: ScrollBehaviorConfig = {}): ScrollBeha
     log('Content changed:', { contentGrew, isNearBottom: isNearBottom.current });
   }, [log]);
 
-  const scrollToBottom = useCallback((animated = true) => {
+  const scrollToBottom = useCallback((_animated = true) => {
     setHasNewMessages(false);
     setShowScrollButton(false);
     autoScrollEnabled.current = true;

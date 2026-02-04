@@ -1,6 +1,6 @@
 import * as admin from 'firebase-admin';
 import * as fs from 'fs';
-import { RegisteredDevice, NotificationEventType } from './types';
+import { NotificationEventType } from './types';
 import { NotificationStore } from './notification-store';
 
 interface ExpoPushMessage {
@@ -79,7 +79,7 @@ export class PushNotificationService {
     preview: string,
     eventType: NotificationEventType,
     sessionId?: string,
-    sessionName?: string,
+    sessionName?: string
   ): void {
     const allDevices = this.store.getDevices();
     if (allDevices.length === 0) {
@@ -88,7 +88,7 @@ export class PushNotificationService {
     }
 
     const title = this.getTitleForEvent(eventType);
-    const tokens = allDevices.map(d => d.token);
+    const tokens = allDevices.map((d) => d.token);
 
     console.log(`Push notifications: Sending to ${allDevices.length} device(s) for ${eventType}`);
     this.sendNotifications(preview, tokens, sessionId, sessionName, title);
@@ -96,34 +96,64 @@ export class PushNotificationService {
 
   private getTitleForEvent(eventType: NotificationEventType): string {
     switch (eventType) {
-      case 'waiting_for_input': return 'Waiting for input';
-      case 'error_detected': return 'Error detected';
-      case 'session_completed': return 'Session completed';
-      case 'worker_waiting': return 'Worker needs input';
-      case 'worker_error': return 'Worker error';
-      case 'work_group_ready': return 'Work group ready to merge';
+      case 'waiting_for_input':
+        return 'Waiting for input';
+      case 'error_detected':
+        return 'Error detected';
+      case 'session_completed':
+        return 'Session completed';
+      case 'worker_waiting':
+        return 'Worker needs input';
+      case 'worker_error':
+        return 'Worker error';
+      case 'work_group_ready':
+        return 'Work group ready to merge';
     }
   }
 
-  private async sendNotifications(preview: string, tokens: string[], sessionId?: string, sessionName?: string, title?: string): Promise<void> {
+  private async sendNotifications(
+    preview: string,
+    tokens: string[],
+    sessionId?: string,
+    sessionName?: string,
+    title?: string
+  ): Promise<void> {
     if (tokens.length === 0) return;
 
     const truncatedPreview = preview.length > 200 ? preview.substring(0, 197) + '...' : preview;
     const notificationTitle = title || 'Waiting for input';
 
-    const fcmTokens = tokens.filter(t => !t.startsWith('ExponentPushToken'));
-    const expoTokens = tokens.filter(t => t.startsWith('ExponentPushToken'));
+    const fcmTokens = tokens.filter((t) => !t.startsWith('ExponentPushToken'));
+    const expoTokens = tokens.filter((t) => t.startsWith('ExponentPushToken'));
 
     if (fcmTokens.length > 0 && this.firebaseInitialized) {
-      await this.sendViaFirebase(truncatedPreview, fcmTokens, sessionId, sessionName, notificationTitle);
+      await this.sendViaFirebase(
+        truncatedPreview,
+        fcmTokens,
+        sessionId,
+        sessionName,
+        notificationTitle
+      );
     }
 
     if (expoTokens.length > 0) {
-      await this.sendViaExpo(truncatedPreview, expoTokens, sessionId, sessionName, notificationTitle);
+      await this.sendViaExpo(
+        truncatedPreview,
+        expoTokens,
+        sessionId,
+        sessionName,
+        notificationTitle
+      );
     }
   }
 
-  private async sendViaFirebase(preview: string, tokens: string[], sessionId?: string, sessionName?: string, title?: string): Promise<void> {
+  private async sendViaFirebase(
+    preview: string,
+    tokens: string[],
+    sessionId?: string,
+    sessionName?: string,
+    title?: string
+  ): Promise<void> {
     const data: Record<string, string> = {
       type: 'waiting_for_input',
       preview,
@@ -150,14 +180,18 @@ export class PushNotificationService {
 
     try {
       const response = await admin.messaging().sendEachForMulticast(message);
-      console.log(`Push notifications (FCM): Sent to ${response.successCount}/${tokens.length} devices`);
+      console.log(
+        `Push notifications (FCM): Sent to ${response.successCount}/${tokens.length} devices`
+      );
 
       response.responses.forEach((resp, idx) => {
         if (!resp.success) {
-          console.error(`Push notifications (FCM): Failed for token ${tokens[idx].substring(0, 20)}...: ${resp.error?.code} - ${resp.error?.message}`);
+          console.error(
+            `Push notifications (FCM): Failed for token ${tokens[idx].substring(0, 20)}...: ${resp.error?.code} - ${resp.error?.message}`
+          );
           if (resp.error?.code === 'messaging/registration-token-not-registered') {
             const allDevices = this.store.getDevices();
-            const device = allDevices.find(d => d.token === tokens[idx]);
+            const device = allDevices.find((d) => d.token === tokens[idx]);
             if (device) {
               this.unregisterDevice(device.deviceId);
             }
@@ -169,7 +203,13 @@ export class PushNotificationService {
     }
   }
 
-  private async sendViaExpo(preview: string, tokens: string[], sessionId?: string, sessionName?: string, title?: string): Promise<void> {
+  private async sendViaExpo(
+    preview: string,
+    tokens: string[],
+    sessionId?: string,
+    sessionName?: string,
+    title?: string
+  ): Promise<void> {
     const notifData: Record<string, string> = {
       type: 'waiting_for_input',
       preview,
@@ -193,7 +233,7 @@ export class PushNotificationService {
       const response = await fetch('https://exp.host/--/api/v2/push/send', {
         method: 'POST',
         headers: {
-          'Accept': 'application/json',
+          Accept: 'application/json',
           'Accept-Encoding': 'gzip, deflate',
           'Content-Type': 'application/json',
         },
@@ -208,7 +248,7 @@ export class PushNotificationService {
           successCount++;
         } else if (ticket.details?.error === 'DeviceNotRegistered') {
           const allDevices = this.store.getDevices();
-          const device = allDevices.find(d => d.token === tokens[idx]);
+          const device = allDevices.find((d) => d.token === tokens[idx]);
           if (device) {
             this.unregisterDevice(device.deviceId);
           }
@@ -228,12 +268,12 @@ export class PushNotificationService {
     const devices = this.store.getDevices();
     if (devices.length === 0) return { sent: 0, failed: 0 };
 
-    const tokens = devices.map(d => d.token);
+    const tokens = devices.map((d) => d.token);
     const preview = 'This is a test notification from Companion.';
     const title = 'Test Notification';
 
-    const fcmTokens = tokens.filter(t => !t.startsWith('ExponentPushToken'));
-    const expoTokens = tokens.filter(t => t.startsWith('ExponentPushToken'));
+    const fcmTokens = tokens.filter((t) => !t.startsWith('ExponentPushToken'));
+    const expoTokens = tokens.filter((t) => t.startsWith('ExponentPushToken'));
 
     let sent = 0;
     let failed = 0;

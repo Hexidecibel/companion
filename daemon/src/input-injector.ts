@@ -1,4 +1,4 @@
-import { spawn, execSync } from 'child_process';
+import { spawn } from 'child_process';
 
 export class InputInjector {
   private defaultSession: string;
@@ -18,7 +18,7 @@ export class InputInjector {
     // Wait for any pending send to complete before starting this one
     const previousLock = this.sendLock;
     let releaseLock: () => void;
-    this.sendLock = new Promise<void>(resolve => {
+    this.sendLock = new Promise<void>((resolve) => {
       releaseLock = resolve;
     });
 
@@ -49,7 +49,9 @@ export class InputInjector {
       const { spawnSync } = require('child_process');
 
       // Send the text using spawnSync (avoids shell interpretation)
-      const textResult = spawnSync('tmux', ['send-keys', '-t', session, '-l', '--', input], { timeout: 5000 });
+      const textResult = spawnSync('tmux', ['send-keys', '-t', session, '-l', '--', input], {
+        timeout: 5000,
+      });
       if (textResult.status !== 0) {
         console.error('Failed to send text:', textResult.stderr?.toString());
         return false;
@@ -57,10 +59,12 @@ export class InputInjector {
       console.log('Text sent to tmux');
 
       // Wait for tmux to process the text before sending Enter
-      await new Promise(resolve => setTimeout(resolve, 150));
+      await new Promise((resolve) => setTimeout(resolve, 150));
 
       // Send Enter
-      const enterResult = spawnSync('tmux', ['send-keys', '-t', session, 'Enter'], { timeout: 5000 });
+      const enterResult = spawnSync('tmux', ['send-keys', '-t', session, 'Enter'], {
+        timeout: 5000,
+      });
       if (enterResult.status !== 0) {
         console.error('Failed to send Enter:', enterResult.stderr?.toString());
         return false;
@@ -68,7 +72,7 @@ export class InputInjector {
       console.log('Enter sent to tmux');
 
       // Small delay after Enter to ensure tmux processes it before next message
-      await new Promise(resolve => setTimeout(resolve, 50));
+      await new Promise((resolve) => setTimeout(resolve, 50));
 
       console.log(`Input sent successfully to tmux session '${session}'`);
       return true;

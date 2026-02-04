@@ -7,6 +7,7 @@ let messagingModule: any = null;
 
 // Try to load Firebase messaging (only works in standalone builds, not Expo Go)
 try {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
   messagingModule = require('@react-native-firebase/messaging').default;
   console.log('Push notifications: Firebase messaging loaded');
 } catch (e) {

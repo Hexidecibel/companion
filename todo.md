@@ -14,3 +14,4 @@ Quick capture for ideas and tasks. Run `/plan` to process into detailed plans.
 ## Deferred
 - OpenAI Codex CLI parser (plan.md #10) -- roadmap item, not prioritized
 - macOS desktop nice-to-have -- global hotkey, deep links, code signing, auto-update (plan.md #18)
+- Windows and Linux releases -- Tauri already cross-compiles, need CI/CD pipeline for all platforms

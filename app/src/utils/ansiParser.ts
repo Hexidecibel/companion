@@ -156,6 +156,7 @@ function parseSGR(params: number[], state: AnsiState): void {
 // SGR: \x1b[ ... m  (we parse these)
 // Other CSI: \x1b[ ... <letter>  (we strip these)
 // OSC: \x1b] ... \x07 or \x1b] ... \x1b\\  (we strip these)
+// eslint-disable-next-line no-control-regex
 const ANSI_RE = /\x1b\[([0-9;]*)m|\x1b\[[0-9;]*[A-HJKSTfhlnr]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)?/g;
 
 /**

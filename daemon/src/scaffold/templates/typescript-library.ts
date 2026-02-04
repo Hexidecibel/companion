@@ -10,7 +10,14 @@ export const typescriptLibraryTemplate: StackTemplate = {
   scoring: {
     primaryKeywords: ['npm', 'package', 'library', 'module', 'tsup'],
     secondaryKeywords: ['publish', 'bundle', 'sdk', 'utility', 'reusable', 'export'],
-    useCases: ['npm package', 'typescript library', 'utility package', 'npm utility', 'shared library', 'sdk package'],
+    useCases: [
+      'npm package',
+      'typescript library',
+      'utility package',
+      'npm utility',
+      'shared library',
+      'sdk package',
+    ],
     typeSignals: { library: 3, package: 3, npm: 3, sdk: 2, module: 2, utility: 1 },
   },
   files: [

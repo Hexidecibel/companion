@@ -5,7 +5,17 @@ import { EventEmitter } from 'events';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import { ConversationFile, ConversationMessage, SessionStatus, TmuxSession } from './types';
-import { parseConversationFile, extractHighlights, detectWaitingForInput, detectCurrentActivity, detectCurrentActivityFast, getRecentActivity, getPendingApprovalTools, detectCompaction, extractTasks } from './parser';
+import {
+  parseConversationFile,
+  extractHighlights,
+  detectWaitingForInput,
+  detectCurrentActivity,
+  detectCurrentActivityFast,
+  getRecentActivity,
+  getPendingApprovalTools,
+  detectCompaction,
+  extractTasks,
+} from './parser';
 
 const execAsync = promisify(exec);
 
@@ -60,7 +70,10 @@ export class SessionWatcher extends EventEmitter {
       const { stdout: sessionList } = await execAsync(
         'tmux list-sessions -F "#{session_name}" 2>/dev/null'
       );
-      const sessionNames = sessionList.trim().split('\n').filter(s => s);
+      const sessionNames = sessionList
+        .trim()
+        .split('\n')
+        .filter((s) => s);
 
       // Check which sessions are tagged as managed by Companion
       const taggedSessions: string[] = [];
@@ -84,7 +97,10 @@ export class SessionWatcher extends EventEmitter {
           const { stdout: paneOut } = await execAsync(
             `tmux list-panes -t "${name}" -F "#{pane_current_path}" 2>/dev/null`
           );
-          const paths = paneOut.trim().split('\n').filter(p => p);
+          const paths = paneOut
+            .trim()
+            .split('\n')
+            .filter((p) => p);
           for (const p of paths) {
             const projectPath = p.replace(/\//g, '-').replace(/^-/, '-');
             this.tmuxProjectPaths.add(projectPath);
@@ -95,7 +111,9 @@ export class SessionWatcher extends EventEmitter {
       }
 
       if (this.tmuxProjectPaths.size > 0) {
-        console.log(`Watcher: Tracking ${this.tmuxProjectPaths.size} paths from ${taggedSessions.length} managed session(s)`);
+        console.log(
+          `Watcher: Tracking ${this.tmuxProjectPaths.size} paths from ${taggedSessions.length} managed session(s)`
+        );
       }
     } catch {
       // tmux not running or no sessions
@@ -184,10 +202,13 @@ export class SessionWatcher extends EventEmitter {
     if (existingTimer) {
       clearTimeout(existingTimer);
     }
-    this.debounceTimers.set(sessionId, setTimeout(() => {
-      this.debounceTimers.delete(sessionId);
-      this.processFileChange(filePath, sessionId);
-    }, SessionWatcher.DEBOUNCE_MS));
+    this.debounceTimers.set(
+      sessionId,
+      setTimeout(() => {
+        this.debounceTimers.delete(sessionId);
+        this.processFileChange(filePath, sessionId);
+      }, SessionWatcher.DEBOUNCE_MS)
+    );
   }
 
   private processFileChange(filePath: string, sessionId: string): void {
@@ -204,7 +225,9 @@ export class SessionWatcher extends EventEmitter {
     const highlights = extractHighlights(messages);
     const t2 = Date.now();
     if (t2 - t0 > 50) {
-      console.log(`Watcher: processFileChange parse took ${t1-t0}ms + highlights ${t2-t1}ms = ${t2-t0}ms (${messages.length} msgs) for ${sessionId}`);
+      console.log(
+        `Watcher: processFileChange parse took ${t1 - t0}ms + highlights ${t2 - t1}ms = ${t2 - t0}ms (${messages.length} msgs) for ${sessionId}`
+      );
     }
     const wasWaiting = this.isWaitingForInput;
     const conversationWaiting = detectWaitingForInput(messages);
@@ -234,9 +257,9 @@ export class SessionWatcher extends EventEmitter {
     try {
       const tasks = extractTasks(content);
       if (tasks.length > 0) {
-        const pending = tasks.filter(t => t.status === 'pending').length;
-        const inProgressTasks = tasks.filter(t => t.status === 'in_progress');
-        const completed = tasks.filter(t => t.status === 'completed').length;
+        const pending = tasks.filter((t) => t.status === 'pending').length;
+        const inProgressTasks = tasks.filter((t) => t.status === 'in_progress');
+        const completed = tasks.filter((t) => t.status === 'completed').length;
         cachedTaskSummary = {
           total: tasks.length,
           pending,
@@ -283,8 +306,8 @@ export class SessionWatcher extends EventEmitter {
     // Emit error-detected when new errors appear
     if (errorCount > prevErrorCount) {
       const lastErrorTool = messages
-        .flatMap(m => m.toolCalls || [])
-        .filter(tc => tc.status === 'error')
+        .flatMap((m) => m.toolCalls || [])
+        .filter((tc) => tc.status === 'error')
         .pop();
       this.emit('error-detected', {
         sessionId,
@@ -650,9 +673,10 @@ export class SessionWatcher extends EventEmitter {
 
     const dir = path.dirname(tracked.path);
     try {
-      const files = fs.readdirSync(dir)
-        .filter(f => f.endsWith('.jsonl') && !f.includes('subagents'))
-        .map(f => {
+      const files = fs
+        .readdirSync(dir)
+        .filter((f) => f.endsWith('.jsonl') && !f.includes('subagents'))
+        .map((f) => {
           const fullPath = path.join(dir, f);
           try {
             const stats = fs.statSync(fullPath);
@@ -667,7 +691,7 @@ export class SessionWatcher extends EventEmitter {
       files.sort((a, b) => a.birthtime - b.birthtime);
 
       // Limit to last 20 files to prevent memory issues
-      const chain = files.map(f => f.path);
+      const chain = files.map((f) => f.path);
       return chain.length > 20 ? chain.slice(-20) : chain;
     } catch {
       // Directory read failed — fall back to just the tracked file
@@ -759,7 +783,9 @@ export class SessionWatcher extends EventEmitter {
 
       // Use cached messages for activity detection instead of re-reading large files
       const messages = conv.cachedMessages;
-      const currentActivity = messages ? detectCurrentActivity(messages) : detectCurrentActivityFast(conv.path);
+      const currentActivity = messages
+        ? detectCurrentActivity(messages)
+        : detectCurrentActivityFast(conv.path);
 
       // Determine status
       let status: 'idle' | 'working' | 'waiting' | 'error' = 'idle';

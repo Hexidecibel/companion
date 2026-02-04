@@ -14,9 +14,9 @@ export interface ScaffoldFile {
 
 // Scoring metadata for template recommendation
 export interface TemplateScoring {
-  primaryKeywords: string[];    // Weight 3 - core technology terms
-  secondaryKeywords: string[];  // Weight 1 - related but less specific terms
-  useCases: string[];           // Weight 5 - substring match against full description
+  primaryKeywords: string[]; // Weight 3 - core technology terms
+  secondaryKeywords: string[]; // Weight 1 - related but less specific terms
+  useCases: string[]; // Weight 5 - substring match against full description
   typeSignals: Record<string, number>; // Weight 2 - synonym-based type matching
 }
 
