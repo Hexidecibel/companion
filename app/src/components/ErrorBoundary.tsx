@@ -80,9 +80,7 @@ export class ErrorBoundary extends Component<Props, State> {
 
     // Truncate title to 80 chars
     const titleMessage =
-      errorMessage.length > 80
-        ? errorMessage.substring(0, 77) + '...'
-        : errorMessage;
+      errorMessage.length > 80 ? errorMessage.substring(0, 77) + '...' : errorMessage;
     const title = `Bug Report: ${titleMessage}`;
 
     // Build component stack excerpt (truncated)
@@ -90,9 +88,7 @@ export class ErrorBoundary extends Component<Props, State> {
       ? errorInfo.componentStack.trim().substring(0, 500)
       : 'N/A';
 
-    const osVersion = Platform.Version
-      ? `${Platform.OS} ${Platform.Version}`
-      : Platform.OS;
+    const osVersion = Platform.Version ? `${Platform.OS} ${Platform.Version}` : Platform.OS;
 
     const body = `## Error
 \`\`\`
@@ -150,10 +146,7 @@ ${componentStack}
 
       return (
         <View style={styles.container}>
-          <ScrollView
-            style={styles.scrollView}
-            contentContainerStyle={styles.scrollContent}
-          >
+          <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
             {/* Error icon */}
             <View style={styles.iconContainer}>
               <View style={styles.iconCircle}>
@@ -163,22 +156,16 @@ ${componentStack}
 
             {/* Heading */}
             <Text style={styles.heading}>Something went wrong</Text>
-            <Text style={styles.subheading}>
-              The app encountered an unexpected error.
-            </Text>
+            <Text style={styles.subheading}>The app encountered an unexpected error.</Text>
 
             {/* Error message card */}
             <View style={styles.errorCard}>
               <Text style={styles.errorLabel}>Error</Text>
-              <Text style={styles.errorMessage}>
-                {error?.message || 'Unknown error'}
-              </Text>
+              <Text style={styles.errorMessage}>{error?.message || 'Unknown error'}</Text>
             </View>
 
             {sentToDaemon && (
-              <Text style={styles.sentText}>
-                Error report sent to daemon automatically.
-              </Text>
+              <Text style={styles.sentText}>Error report sent to daemon automatically.</Text>
             )}
 
             {/* Buttons */}
