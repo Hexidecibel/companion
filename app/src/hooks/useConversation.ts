@@ -1,5 +1,12 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { ConversationMessage, ConversationHighlight, SessionStatus, ViewMode, OtherSessionActivity, TmuxSessionMissing } from '../types';
+import {
+  ConversationMessage,
+  ConversationHighlight,
+  SessionStatus,
+  ViewMode,
+  OtherSessionActivity,
+  TmuxSessionMissing,
+} from '../types';
 import { wsService } from '../services/websocket';
 import { sessionGuard } from '../services/sessionGuard';
 
@@ -65,7 +72,9 @@ export function useConversation() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isConnected, setIsConnected] = useState(wsService.isConnected());
-  const [otherSessionActivity, setOtherSessionActivity] = useState<OtherSessionActivity | null>(null);
+  const [otherSessionActivity, setOtherSessionActivity] = useState<OtherSessionActivity | null>(
+    null
+  );
   const [tmuxSessionMissing, setTmuxSessionMissing] = useState<TmuxSessionMissing | null>(null);
   const [hasMore, setHasMore] = useState(false);
   const hasSubscribed = useRef(false);
@@ -96,7 +105,9 @@ export function useConversation() {
         case 'conversation_update': {
           // CRITICAL: Reject updates for wrong session
           if (!sessionGuard.isValid(messageSessionId)) {
-            console.log(`useConversation: Rejecting conversation_update for session ${messageSessionId}`);
+            console.log(
+              `useConversation: Rejecting conversation_update for session ${messageSessionId}`
+            );
             return;
           }
           const updatePayload = message.payload as {
@@ -108,7 +119,7 @@ export function useConversation() {
           // If user scrolled back (loadMore prepended items), preserve those
           // older items and only replace the current-file portion.
           const serverHighlights = updatePayload.highlights || [];
-          setHighlights(prev => {
+          setHighlights((prev) => {
             if (prependedCount > 0 && prev.length > serverHighlights.length) {
               // Keep the prepended (older file) items, replace the rest
               const olderPart = prev.slice(0, prependedCount);
@@ -152,89 +163,107 @@ export function useConversation() {
 
   // Fetch initial data when connected
   // clearFirst: if true, clears existing data before fetching (useful for session switch)
-  const refresh = useCallback(async (clearFirst: boolean = false) => {
-    if (!wsService.isConnected()) {
-      return;
-    }
-
-    // Clear old data first to prevent showing stale content during switch
-    let hasData = false;
-    if (clearFirst) {
-      sessionSwitching.current = true;
-      prependedCount = 0; // Reset infinite scroll tracking on session switch
-      setMessages([]);
-      setStatus(null);
-      // Auto-dismiss other-session notification if we're switching to that session
-      setOtherSessionActivity(prev => {
-        if (prev && prev.sessionId === sessionGuard.getCurrentSessionId()) {
-          return null;
-        }
-        return prev;
-      });
-
-      // Check session cache for instant display
-      const cachedSessionId = sessionGuard.getCurrentSessionId();
-      const cached = getCachedHighlights(cachedSessionId);
-      if (cached) {
-        setHighlights(cached);
-        hasData = true;
-      } else {
-        setHighlights([]);
+  const refresh = useCallback(
+    async (clearFirst: boolean = false) => {
+      if (!wsService.isConnected()) {
+        return;
       }
-    } else {
-      // Non-clear refresh: check if we already have highlights showing
-      hasData = highlightsCountRef.current > 0;
-    }
 
-    // Only show loading spinner when we have nothing to display
-    if (!hasData) {
-      setLoading(true);
-    }
-    setError(null);
+      // Clear old data first to prevent showing stale content during switch
+      let hasData = false;
+      if (clearFirst) {
+        sessionSwitching.current = true;
+        prependedCount = 0; // Reset infinite scroll tracking on session switch
+        setMessages([]);
+        setStatus(null);
+        // Auto-dismiss other-session notification if we're switching to that session
+        setOtherSessionActivity((prev) => {
+          if (prev && prev.sessionId === sessionGuard.getCurrentSessionId()) {
+            return null;
+          }
+          return prev;
+        });
 
-    // Get current session context for validation
-    const { sessionId: expectedSessionId } = sessionGuard.getContext();
-
-    try {
-      // Fire subscribe in background (don't block on it)
-      wsService.sendRequest('subscribe', { sessionId: expectedSessionId }).catch(() => {});
-
-      // Fire data and status in parallel
-      const dataRequest = viewMode === 'highlights'
-        ? wsService.sendRequest('get_highlights', { limit: HIGHLIGHTS_PAGE_SIZE }, 30000)
-        : wsService.sendRequest('get_full', undefined, 30000);
-      const statusRequest = wsService.sendRequest('get_status', undefined, 30000);
-
-      const [dataResponse, statusResponse] = await Promise.all([dataRequest, statusRequest]);
-
-      // Apply data response
-      if (dataResponse.success && dataResponse.payload && sessionGuard.isValid(dataResponse.sessionId)) {
-        if (viewMode === 'highlights') {
-          const payload = dataResponse.payload as { highlights: ConversationHighlight[]; total: number; hasMore: boolean };
-          setHighlights(payload.highlights || []);
-          totalHighlights.current = payload.total ?? (payload.highlights?.length || 0);
-          setHasMore(payload.hasMore ?? false);
-          // Update cache
-          setCachedHighlights(sessionGuard.getCurrentSessionId(), payload.highlights || []);
+        // Check session cache for instant display
+        const cachedSessionId = sessionGuard.getCurrentSessionId();
+        const cached = getCachedHighlights(cachedSessionId);
+        if (cached) {
+          setHighlights(cached);
+          hasData = true;
         } else {
-          const payload = dataResponse.payload as { messages: ConversationMessage[] };
-          setMessages(payload.messages || []);
+          setHighlights([]);
         }
-      } else if (dataResponse.sessionId && !sessionGuard.isValid(dataResponse.sessionId)) {
-        console.log(`useConversation: Discarding data response for wrong session ${dataResponse.sessionId}`);
+      } else {
+        // Non-clear refresh: check if we already have highlights showing
+        hasData = highlightsCountRef.current > 0;
       }
 
-      // Apply status response
-      if (statusResponse.success && statusResponse.payload && sessionGuard.isValid(statusResponse.sessionId)) {
-        setStatus(statusResponse.payload as SessionStatus);
+      // Only show loading spinner when we have nothing to display
+      if (!hasData) {
+        setLoading(true);
       }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load conversation');
-    } finally {
-      setLoading(false);
-      sessionSwitching.current = false;
-    }
-  }, [viewMode]);
+      setError(null);
+
+      // Get current session context for validation
+      const { sessionId: expectedSessionId } = sessionGuard.getContext();
+
+      try {
+        // Fire subscribe in background (don't block on it)
+        wsService.sendRequest('subscribe', { sessionId: expectedSessionId }).catch(() => {});
+
+        // Fire data and status in parallel
+        const dataRequest =
+          viewMode === 'highlights'
+            ? wsService.sendRequest('get_highlights', { limit: HIGHLIGHTS_PAGE_SIZE }, 30000)
+            : wsService.sendRequest('get_full', undefined, 30000);
+        const statusRequest = wsService.sendRequest('get_status', undefined, 30000);
+
+        const [dataResponse, statusResponse] = await Promise.all([dataRequest, statusRequest]);
+
+        // Apply data response
+        if (
+          dataResponse.success &&
+          dataResponse.payload &&
+          sessionGuard.isValid(dataResponse.sessionId)
+        ) {
+          if (viewMode === 'highlights') {
+            const payload = dataResponse.payload as {
+              highlights: ConversationHighlight[];
+              total: number;
+              hasMore: boolean;
+            };
+            setHighlights(payload.highlights || []);
+            totalHighlights.current = payload.total ?? (payload.highlights?.length || 0);
+            setHasMore(payload.hasMore ?? false);
+            // Update cache
+            setCachedHighlights(sessionGuard.getCurrentSessionId(), payload.highlights || []);
+          } else {
+            const payload = dataResponse.payload as { messages: ConversationMessage[] };
+            setMessages(payload.messages || []);
+          }
+        } else if (dataResponse.sessionId && !sessionGuard.isValid(dataResponse.sessionId)) {
+          console.log(
+            `useConversation: Discarding data response for wrong session ${dataResponse.sessionId}`
+          );
+        }
+
+        // Apply status response
+        if (
+          statusResponse.success &&
+          statusResponse.payload &&
+          sessionGuard.isValid(statusResponse.sessionId)
+        ) {
+          setStatus(statusResponse.payload as SessionStatus);
+        }
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to load conversation');
+      } finally {
+        setLoading(false);
+        sessionSwitching.current = false;
+      }
+    },
+    [viewMode]
+  );
 
   // Load older highlights (pagination - scroll up)
   // Use a ref for highlights count to avoid re-creating this callback on every poll
@@ -247,22 +276,30 @@ export function useConversation() {
     setLoadingMore(true);
     try {
       const currentCount = highlightsCountRef.current;
-      const response = await wsService.sendRequest('get_highlights', {
-        limit: HIGHLIGHTS_PAGE_SIZE,
-        offset: currentCount,
-      }, 30000);
+      const response = await wsService.sendRequest(
+        'get_highlights',
+        {
+          limit: HIGHLIGHTS_PAGE_SIZE,
+          offset: currentCount,
+        },
+        30000
+      );
 
       if (sessionSwitching.current) return;
       if (!sessionGuard.isValid(response.sessionId)) return;
 
       if (response.success && response.payload) {
-        const payload = response.payload as { highlights: ConversationHighlight[]; total: number; hasMore: boolean };
+        const payload = response.payload as {
+          highlights: ConversationHighlight[];
+          total: number;
+          hasMore: boolean;
+        };
         const olderHighlights = payload.highlights || [];
 
         if (olderHighlights.length > 0) {
           // Prepend older highlights and track count for conversation_update merging
           prependedCount += olderHighlights.length;
-          setHighlights(prev => {
+          setHighlights((prev) => {
             return [...olderHighlights, ...prev];
           });
           totalHighlights.current = payload.total;
@@ -294,29 +331,36 @@ export function useConversation() {
       if (sessionSwitching.current || !wsService.isConnected()) return;
 
       // Poll conversation data - always request latest page
-      const pollRequest = viewMode === 'highlights'
-        ? wsService.sendRequest('get_highlights', { limit: HIGHLIGHTS_PAGE_SIZE })
-        : wsService.sendRequest('get_full');
+      const pollRequest =
+        viewMode === 'highlights'
+          ? wsService.sendRequest('get_highlights', { limit: HIGHLIGHTS_PAGE_SIZE })
+          : wsService.sendRequest('get_full');
 
       pollRequest
-        .then(response => {
+        .then((response) => {
           // Skip if session switch started during request
           if (sessionSwitching.current) return;
 
           // CRITICAL: Validate response is for current session
           if (!sessionGuard.isValid(response.sessionId)) {
-            console.log(`useConversation: Discarding poll response for wrong session ${response.sessionId}`);
+            console.log(
+              `useConversation: Discarding poll response for wrong session ${response.sessionId}`
+            );
             return;
           }
 
           if (response.success && response.payload) {
             if (viewMode === 'highlights') {
-              const payload = response.payload as { highlights: ConversationHighlight[]; total: number; hasMore: boolean };
+              const payload = response.payload as {
+                highlights: ConversationHighlight[];
+                total: number;
+                hasMore: boolean;
+              };
               const serverHighlights = payload.highlights || [];
               totalHighlights.current = payload.total ?? serverHighlights.length;
 
               // Only update the tail (most recent) portion of highlights
-              setHighlights(prev => {
+              setHighlights((prev) => {
                 if (prev.length <= HIGHLIGHTS_PAGE_SIZE) {
                   // We only have one page - replace entirely if changed
                   if (highlightsEqual(prev, serverHighlights)) return prev;
@@ -343,11 +387,14 @@ export function useConversation() {
             }
           }
         })
-        .catch(() => { /* silent fail on poll */ });
+        .catch(() => {
+          /* silent fail on poll */
+        });
 
       // Also poll status for real-time activity updates
-      wsService.sendRequest('get_status')
-        .then(response => {
+      wsService
+        .sendRequest('get_status')
+        .then((response) => {
           if (sessionSwitching.current) return;
 
           // CRITICAL: Validate response is for current session
@@ -358,18 +405,22 @@ export function useConversation() {
           if (response.success && response.payload) {
             const newStatus = response.payload as SessionStatus;
             // Only update if status actually changed
-            setStatus(prev => {
-              if (prev &&
-                  prev.isWaitingForInput === newStatus.isWaitingForInput &&
-                  prev.currentActivity === newStatus.currentActivity &&
-                  prev.lastActivity === newStatus.lastActivity) {
+            setStatus((prev) => {
+              if (
+                prev &&
+                prev.isWaitingForInput === newStatus.isWaitingForInput &&
+                prev.currentActivity === newStatus.currentActivity &&
+                prev.lastActivity === newStatus.lastActivity
+              ) {
                 return prev; // No change
               }
               return newStatus;
             });
           }
         })
-        .catch(() => { /* silent fail on poll */ });
+        .catch(() => {
+          /* silent fail on poll */
+        });
     }, 5000); // 5 seconds to reduce re-renders
 
     return () => clearInterval(pollInterval);
@@ -423,64 +474,70 @@ export function useConversation() {
   }, []);
 
   // Upload image via HTTP POST (more reliable than WebSocket for large payloads)
-  const uploadImage = useCallback(async (base64: string, mimeType: string): Promise<string | null> => {
-    const serverInfo = wsService.getServerInfo();
-    if (!serverInfo) {
-      setError('Not connected');
-      return null;
-    }
-
-    try {
-      const protocol = serverInfo.useTls ? 'https' : 'http';
-      const url = `${protocol}://${serverInfo.host}:${serverInfo.port}/upload`;
-
-      // Convert base64 to binary for HTTP upload
-      const binaryString = atob(base64);
-      const bytes = new Uint8Array(binaryString.length);
-      for (let i = 0; i < binaryString.length; i++) {
-        bytes[i] = binaryString.charCodeAt(i);
-      }
-
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': mimeType,
-          'Authorization': `Bearer ${serverInfo.token}`,
-        },
-        body: bytes,
-      });
-
-      const result = await response.json();
-      if (!result.success) {
-        setError(result.error || 'Failed to upload image');
+  const uploadImage = useCallback(
+    async (base64: string, mimeType: string): Promise<string | null> => {
+      const serverInfo = wsService.getServerInfo();
+      if (!serverInfo) {
+        setError('Not connected');
         return null;
       }
-      return result.filepath;
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to upload image');
-      return null;
-    }
-  }, []);
+
+      try {
+        const protocol = serverInfo.useTls ? 'https' : 'http';
+        const url = `${protocol}://${serverInfo.host}:${serverInfo.port}/upload`;
+
+        // Convert base64 to binary for HTTP upload
+        const binaryString = atob(base64);
+        const bytes = new Uint8Array(binaryString.length);
+        for (let i = 0; i < binaryString.length; i++) {
+          bytes[i] = binaryString.charCodeAt(i);
+        }
+
+        const response = await fetch(url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': mimeType,
+            Authorization: `Bearer ${serverInfo.token}`,
+          },
+          body: bytes,
+        });
+
+        const result = await response.json();
+        if (!result.success) {
+          setError(result.error || 'Failed to upload image');
+          return null;
+        }
+        return result.filepath;
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to upload image');
+        return null;
+      }
+    },
+    []
+  );
 
   // Send message with image paths combined
-  const sendWithImages = useCallback(async (imagePaths: string[], message: string): Promise<boolean> => {
-    if (!wsService.isConnected()) {
-      setError('Not connected');
-      return false;
-    }
-
-    try {
-      const response = await wsService.sendRequest('send_with_images', { imagePaths, message });
-      if (!response.success) {
-        setError(response.error || 'Failed to send message with images');
+  const sendWithImages = useCallback(
+    async (imagePaths: string[], message: string): Promise<boolean> => {
+      if (!wsService.isConnected()) {
+        setError('Not connected');
         return false;
       }
-      return true;
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to send message with images');
-      return false;
-    }
-  }, []);
+
+      try {
+        const response = await wsService.sendRequest('send_with_images', { imagePaths, message });
+        if (!response.success) {
+          setError(response.error || 'Failed to send message with images');
+          return false;
+        }
+        return true;
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to send message with images');
+        return false;
+      }
+    },
+    []
+  );
 
   const toggleViewMode = useCallback(() => {
     setViewMode((prev) => (prev === 'highlights' ? 'full' : 'highlights'));

@@ -1,11 +1,5 @@
 import React from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  TouchableOpacity,
-} from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { TaskItem } from '../types';
 
@@ -17,13 +11,9 @@ interface TaskDetailScreenProps {
 
 function StatusBadge({ status }: { status: TaskItem['status'] }) {
   const color =
-    status === 'completed' ? '#10b981' :
-    status === 'in_progress' ? '#6366f1' :
-    '#6b7280';
+    status === 'completed' ? '#10b981' : status === 'in_progress' ? '#6366f1' : '#6b7280';
   const label =
-    status === 'completed' ? 'Completed' :
-    status === 'in_progress' ? 'In Progress' :
-    'Pending';
+    status === 'completed' ? 'Completed' : status === 'in_progress' ? 'In Progress' : 'Pending';
 
   return (
     <View style={[styles.statusBadge, { backgroundColor: color + '20', borderColor: color }]}>
@@ -51,7 +41,12 @@ function formatTimestamp(ts: number): string {
 export function TaskDetailScreen({ task, sessionName, onBack }: TaskDetailScreenProps) {
   return (
     <View style={styles.container}>
-      <LinearGradient colors={['#1a2744', '#1f1a3d']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.header}>
+      <LinearGradient
+        colors={['#1a2744', '#1f1a3d']}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 0 }}
+        style={styles.header}
+      >
         <TouchableOpacity onPress={onBack} style={styles.backButton}>
           <Text style={styles.backButtonText}>&#8249; Back</Text>
         </TouchableOpacity>
@@ -82,23 +77,22 @@ export function TaskDetailScreen({ task, sessionName, onBack }: TaskDetailScreen
           </View>
         )}
 
-        {((task.blockedBy && task.blockedBy.length > 0) || (task.blocks && task.blocks.length > 0)) && (
+        {((task.blockedBy && task.blockedBy.length > 0) ||
+          (task.blocks && task.blocks.length > 0)) && (
           <View style={styles.card}>
             <Text style={styles.sectionTitle}>Dependencies</Text>
             {task.blockedBy && task.blockedBy.length > 0 && (
               <View style={styles.depRow}>
                 <Text style={styles.depLabel}>Blocked by:</Text>
                 <Text style={styles.depValue}>
-                  {task.blockedBy.map(id => `#${id}`).join(', ')}
+                  {task.blockedBy.map((id) => `#${id}`).join(', ')}
                 </Text>
               </View>
             )}
             {task.blocks && task.blocks.length > 0 && (
               <View style={styles.depRow}>
                 <Text style={styles.depLabel}>Blocks:</Text>
-                <Text style={styles.depValue}>
-                  {task.blocks.map(id => `#${id}`).join(', ')}
-                </Text>
+                <Text style={styles.depValue}>{task.blocks.map((id) => `#${id}`).join(', ')}</Text>
               </View>
             )}
           </View>

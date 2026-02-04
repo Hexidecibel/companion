@@ -60,9 +60,7 @@ export function ServerList({ onSelectServer, onOpenSetup, onBack }: ServerListPr
       // Update connection state for the connected server
       setConnectionStates((prev) => {
         const newMap = new Map(prev);
-        const connectedServer = servers.find(
-          () => wsService.getState().status !== 'disconnected'
-        );
+        const connectedServer = servers.find(() => wsService.getState().status !== 'disconnected');
         if (connectedServer) {
           newMap.set(connectedServer.id, state);
         }
@@ -107,7 +105,9 @@ export function ServerList({ onSelectServer, onOpenSetup, onBack }: ServerListPr
 
   const [saving, setSaving] = useState(false);
 
-  const validateConnection = async (server: Server): Promise<{ success: boolean; error?: string }> => {
+  const validateConnection = async (
+    server: Server
+  ): Promise<{ success: boolean; error?: string }> => {
     return new Promise((resolve) => {
       const protocol = server.useTls ? 'wss' : 'ws';
       const url = `${protocol}://${server.host}:${server.port}`;
@@ -201,7 +201,10 @@ export function ServerList({ onSelectServer, onOpenSetup, onBack }: ServerListPr
     setSaving(false);
 
     if (!validation.success) {
-      Alert.alert('Connection Failed', validation.error || 'Could not connect to server. Please check your settings.');
+      Alert.alert(
+        'Connection Failed',
+        validation.error || 'Could not connect to server. Please check your settings.'
+      );
       return;
     }
 
@@ -226,21 +229,17 @@ export function ServerList({ onSelectServer, onOpenSetup, onBack }: ServerListPr
   };
 
   const handleDelete = (server: Server) => {
-    Alert.alert(
-      'Delete Server',
-      `Are you sure you want to delete "${server.name}"?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            await deleteServer(server.id);
-            loadServers();
-          },
+    Alert.alert('Delete Server', `Are you sure you want to delete "${server.name}"?`, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: async () => {
+          await deleteServer(server.id);
+          loadServers();
         },
-      ]
-    );
+      },
+    ]);
   };
 
   const handleServerPress = (server: Server) => {
@@ -256,7 +255,9 @@ export function ServerList({ onSelectServer, onOpenSetup, onBack }: ServerListPr
     setFormUseTls(config.tls);
     // Suggest a name based on host
     if (!formName) {
-      setFormName(config.host.includes('.local') ? config.host.replace('.local', '') : `Server ${config.host}`);
+      setFormName(
+        config.host.includes('.local') ? config.host.replace('.local', '') : `Server ${config.host}`
+      );
     }
   };
 
@@ -271,7 +272,12 @@ export function ServerList({ onSelectServer, onOpenSetup, onBack }: ServerListPr
   return (
     <View style={styles.container}>
       {onBack && (
-        <LinearGradient colors={['#1a2744', '#1f1a3d']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.header}>
+        <LinearGradient
+          colors={['#1a2744', '#1f1a3d']}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 0 }}
+          style={styles.header}
+        >
           <TouchableOpacity onPress={onBack} style={styles.backButton}>
             <Text style={styles.backButtonText}>‹ Back</Text>
           </TouchableOpacity>
@@ -298,9 +304,7 @@ export function ServerList({ onSelectServer, onOpenSetup, onBack }: ServerListPr
         ListEmptyComponent={
           <View style={styles.emptyContainer}>
             <Text style={styles.emptyTitle}>No Servers</Text>
-            <Text style={styles.emptyText}>
-              Add a server to connect to your coding sessions
-            </Text>
+            <Text style={styles.emptyText}>Add a server to connect to your coding sessions</Text>
             {onOpenSetup && (
               <TouchableOpacity style={styles.setupButton} onPress={onOpenSetup}>
                 <Text style={styles.setupButtonText}>View Setup Guide</Text>
@@ -318,7 +322,12 @@ export function ServerList({ onSelectServer, onOpenSetup, onBack }: ServerListPr
       />
 
       <TouchableOpacity onPress={openAddModal} activeOpacity={0.8}>
-        <LinearGradient colors={['#3b82f6', '#7c3aed']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.addButton}>
+        <LinearGradient
+          colors={['#3b82f6', '#7c3aed']}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 0 }}
+          style={styles.addButton}
+        >
           <Text style={styles.addButtonText}>+ Add Server</Text>
         </LinearGradient>
       </TouchableOpacity>
@@ -334,9 +343,7 @@ export function ServerList({ onSelectServer, onOpenSetup, onBack }: ServerListPr
             <TouchableOpacity onPress={() => setModalVisible(false)}>
               <Text style={styles.cancelButton}>Cancel</Text>
             </TouchableOpacity>
-            <Text style={styles.modalTitle}>
-              {editingServer ? 'Edit Server' : 'Add Server'}
-            </Text>
+            <Text style={styles.modalTitle}>{editingServer ? 'Edit Server' : 'Add Server'}</Text>
             <TouchableOpacity onPress={handleSave} disabled={saving}>
               <Text style={[styles.saveButton, saving && styles.saveButtonDisabled]}>
                 {saving ? 'Validating...' : 'Save'}
@@ -345,10 +352,7 @@ export function ServerList({ onSelectServer, onOpenSetup, onBack }: ServerListPr
           </View>
 
           <ScrollView style={styles.form}>
-            <TouchableOpacity
-              style={styles.qrButton}
-              onPress={() => setShowQRScanner(true)}
-            >
+            <TouchableOpacity style={styles.qrButton} onPress={() => setShowQRScanner(true)}>
               <Text style={styles.qrButtonText}>Scan QR Code</Text>
             </TouchableOpacity>
 
@@ -431,8 +435,8 @@ export function ServerList({ onSelectServer, onOpenSetup, onBack }: ServerListPr
             </View>
 
             <Text style={styles.hint}>
-              Tip: Visit http://your-server:9877 in a browser to see a QR code for easy setup.
-              The token can also be found in /etc/companion/config.json
+              Tip: Visit http://your-server:9877 in a browser to see a QR code for easy setup. The
+              token can also be found in /etc/companion/config.json
             </Text>
           </ScrollView>
         </SafeAreaView>
@@ -444,10 +448,7 @@ export function ServerList({ onSelectServer, onOpenSetup, onBack }: ServerListPr
         presentationStyle="fullScreen"
         onRequestClose={() => setShowQRScanner(false)}
       >
-        <QRScanner
-          onScan={handleQRScan}
-          onClose={() => setShowQRScanner(false)}
-        />
+        <QRScanner onScan={handleQRScan} onClose={() => setShowQRScanner(false)} />
       </Modal>
     </View>
   );

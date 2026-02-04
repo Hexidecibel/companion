@@ -75,7 +75,9 @@ export function SubAgentDetailScreen({ agentId, initialAgent, onBack }: SubAgent
             {agent?.slug || agent?.agentId?.slice(0, 8) || 'Agent'}
           </Text>
           <View style={styles.headerStatusRow}>
-            <View style={[styles.statusDot, { backgroundColor: isRunning ? '#22c55e' : '#3b82f6' }]} />
+            <View
+              style={[styles.statusDot, { backgroundColor: isRunning ? '#22c55e' : '#3b82f6' }]}
+            />
             <Text style={styles.headerStatus}>
               {isRunning ? 'Running' : 'Completed'}
               {agent ? ` · ${formatDuration(agent.startedAt, agent.completedAt)}` : ''}
@@ -114,11 +116,7 @@ export function SubAgentDetailScreen({ agentId, initialAgent, onBack }: SubAgent
           }}
         >
           {highlights.map((item) => (
-            <ConversationItem
-              key={item.id}
-              item={item}
-              showToolCalls={true}
-            />
+            <ConversationItem key={item.id} item={item} showToolCalls={true} />
           ))}
           {isRunning && (
             <View style={styles.runningIndicator}>

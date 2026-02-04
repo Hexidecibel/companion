@@ -10,7 +10,13 @@ interface ServerCardProps {
   onDelete: () => void;
 }
 
-export function ServerCard({ server, connectionState, onPress, onEdit, onDelete }: ServerCardProps) {
+export function ServerCard({
+  server,
+  connectionState,
+  onPress,
+  onEdit,
+  onDelete,
+}: ServerCardProps) {
   const getStatusColor = () => {
     if (!connectionState) return '#6b7280';
 
@@ -46,11 +52,7 @@ export function ServerCard({ server, connectionState, onPress, onEdit, onDelete 
 
   return (
     <View style={styles.container}>
-      <TouchableOpacity
-        style={styles.content}
-        onPress={onPress}
-        activeOpacity={0.7}
-      >
+      <TouchableOpacity style={styles.content} onPress={onPress} activeOpacity={0.7}>
         <View style={styles.header}>
           <Text style={styles.name} numberOfLines={1}>
             {server.name}

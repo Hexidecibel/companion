@@ -60,16 +60,19 @@ function InlineQuestionInput({
   const [customText, setCustomText] = useState('');
   const [sending, setSending] = useState(false);
 
-  const handleSend = useCallback(async (text: string) => {
-    if (!onSendInput || sending) return;
-    setSending(true);
-    try {
-      await onSendInput(groupId, worker.id, text);
-      setCustomText('');
-    } finally {
-      setSending(false);
-    }
-  }, [onSendInput, groupId, worker.id, sending]);
+  const handleSend = useCallback(
+    async (text: string) => {
+      if (!onSendInput || sending) return;
+      setSending(true);
+      try {
+        await onSendInput(groupId, worker.id, text);
+        setCustomText('');
+      } finally {
+        setSending(false);
+      }
+    },
+    [onSendInput, groupId, worker.id, sending]
+  );
 
   if (!worker.lastQuestion) return null;
 
@@ -87,7 +90,9 @@ function InlineQuestionInput({
               onPress={() => handleSend(opt.label)}
               disabled={sending}
             >
-              <Text style={styles.optionButtonText} numberOfLines={1}>{opt.label}</Text>
+              <Text style={styles.optionButtonText} numberOfLines={1}>
+                {opt.label}
+              </Text>
             </TouchableOpacity>
           ))}
         </View>
@@ -140,23 +145,26 @@ function WorkerRow({
       <View style={styles.workerContent}>
         <View style={styles.workerHeader}>
           <WorkerStatusDot status={worker.status} />
-          <Text style={styles.workerSlug} numberOfLines={1}>{worker.taskSlug}</Text>
+          <Text style={styles.workerSlug} numberOfLines={1}>
+            {worker.taskSlug}
+          </Text>
           <WorkerStatusLabel status={worker.status} />
           {onView && worker.sessionId && (
-            <TouchableOpacity
-              style={styles.viewButton}
-              onPress={() => onView(worker.sessionId)}
-            >
+            <TouchableOpacity style={styles.viewButton} onPress={() => onView(worker.sessionId)}>
               <Text style={styles.viewButtonText}>View</Text>
             </TouchableOpacity>
           )}
         </View>
         {worker.lastActivity && worker.status === 'working' && (
-          <Text style={styles.workerActivity} numberOfLines={1}>{worker.lastActivity}</Text>
+          <Text style={styles.workerActivity} numberOfLines={1}>
+            {worker.lastActivity}
+          </Text>
         )}
         {worker.error && worker.status === 'error' && (
           <View style={styles.errorRow}>
-            <Text style={styles.workerError} numberOfLines={2}>{worker.error}</Text>
+            <Text style={styles.workerError} numberOfLines={2}>
+              {worker.error}
+            </Text>
             {onRetry && (
               <TouchableOpacity
                 style={styles.retryButton}
@@ -173,11 +181,7 @@ function WorkerRow({
           </Text>
         )}
         {worker.status === 'waiting' && (
-          <InlineQuestionInput
-            worker={worker}
-            groupId={groupId}
-            onSendInput={onSendInput}
-          />
+          <InlineQuestionInput worker={worker} groupId={groupId} onSendInput={onSendInput} />
         )}
       </View>
     </View>
@@ -207,8 +211,8 @@ export function WorkGroupCard({
   const [expanded, setExpanded] = useState(true);
   const [merging, setMerging] = useState(false);
 
-  const completedCount = group.workers.filter(w => w.status === 'completed').length;
-  const waitingCount = group.workers.filter(w => w.status === 'waiting').length;
+  const completedCount = group.workers.filter((w) => w.status === 'completed').length;
+  const waitingCount = group.workers.filter((w) => w.status === 'waiting').length;
   const totalCount = group.workers.length;
 
   const handleMerge = useCallback(async () => {
@@ -229,7 +233,7 @@ export function WorkGroupCard({
             }
           },
         },
-      ],
+      ]
     );
   }, [onMerge, group.id, completedCount]);
 
@@ -245,7 +249,7 @@ export function WorkGroupCard({
           style: 'destructive',
           onPress: () => onCancel(group.id),
         },
-      ],
+      ]
     );
   }, [onCancel, group.id]);
 
@@ -260,19 +264,15 @@ export function WorkGroupCard({
       >
         <Text style={styles.chevron}>{expanded ? '\u25BC' : '\u25B6'}</Text>
         <View style={styles.cardTitleArea}>
-          <Text style={styles.cardTitle} numberOfLines={1}>{group.name}</Text>
+          <Text style={styles.cardTitle} numberOfLines={1}>
+            {group.name}
+          </Text>
           <View style={styles.cardMeta}>
             <Text style={styles.cardMetaText}>
               {completedCount}/{totalCount} complete
             </Text>
-            {waitingCount > 0 && (
-              <Text style={styles.cardWaiting}>
-                {waitingCount} waiting
-              </Text>
-            )}
-            {group.status === 'merging' && (
-              <Text style={styles.cardMerging}>Merging...</Text>
-            )}
+            {waitingCount > 0 && <Text style={styles.cardWaiting}>{waitingCount} waiting</Text>}
+            {group.status === 'merging' && <Text style={styles.cardMerging}>Merging...</Text>}
           </View>
         </View>
       </TouchableOpacity>
@@ -280,7 +280,12 @@ export function WorkGroupCard({
       {/* Progress bar */}
       <View style={styles.progressBar}>
         <View style={[styles.progressFill, { flex: completedCount || 0 }]} />
-        <View style={[styles.progressRemaining, { flex: Math.max(totalCount - completedCount, 0) || 1 }]} />
+        <View
+          style={[
+            styles.progressRemaining,
+            { flex: Math.max(totalCount - completedCount, 0) || 1 },
+          ]}
+        />
       </View>
 
       {expanded && (
@@ -323,15 +328,11 @@ export function WorkGroupCard({
 
           {group.status === 'completed' && group.mergeCommit && (
             <View style={styles.completedBanner}>
-              <Text style={styles.completedText}>
-                Merged: {group.mergeCommit.substring(0, 8)}
-              </Text>
+              <Text style={styles.completedText}>Merged: {group.mergeCommit.substring(0, 8)}</Text>
             </View>
           )}
 
-          {group.error && (
-            <Text style={styles.groupError}>{group.error}</Text>
-          )}
+          {group.error && <Text style={styles.groupError}>{group.error}</Text>}
         </View>
       )}
     </View>

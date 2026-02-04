@@ -1,12 +1,5 @@
 import React, { useMemo } from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  Modal,
-  TouchableOpacity,
-  ScrollView,
-} from 'react-native';
+import { View, Text, StyleSheet, Modal, TouchableOpacity, ScrollView } from 'react-native';
 import Markdown from '@ronradtke/react-native-markdown-display';
 import { scaledFont } from '../theme/fonts';
 
@@ -64,33 +57,21 @@ export function MessageViewer({ content, timestamp, onClose, fontScale = 1 }: Me
   };
 
   return (
-    <Modal
-      visible={!!content}
-      transparent
-      animationType="slide"
-      onRequestClose={onClose}
-    >
+    <Modal visible={!!content} transparent animationType="slide" onRequestClose={onClose}>
       <View style={styles.overlay}>
         <View style={styles.container}>
           <View style={styles.header}>
             <View style={styles.headerInfo}>
               <Text style={styles.headerTitle}>Assistant</Text>
-              {timestamp && (
-                <Text style={styles.headerTime}>{formatTime(timestamp)}</Text>
-              )}
+              {timestamp && <Text style={styles.headerTime}>{formatTime(timestamp)}</Text>}
             </View>
             <TouchableOpacity style={styles.closeButton} onPress={onClose}>
               <Text style={styles.closeText}>×</Text>
             </TouchableOpacity>
           </View>
 
-          <ScrollView
-            style={styles.contentScroll}
-            contentContainerStyle={styles.contentContainer}
-          >
-            <Markdown style={scaledStyles}>
-              {content}
-            </Markdown>
+          <ScrollView style={styles.contentScroll} contentContainerStyle={styles.contentContainer}>
+            <Markdown style={scaledStyles}>{content}</Markdown>
           </ScrollView>
         </View>
       </View>

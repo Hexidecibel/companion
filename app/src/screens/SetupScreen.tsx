@@ -74,10 +74,7 @@ export function SetupScreen({ onBack }: SetupScreenProps) {
         <Text style={styles.description}>
           Run these commands on your server (macOS, Ubuntu, Fedora, Arch, or Alpine):
         </Text>
-        <TouchableOpacity
-          style={styles.codeBlock}
-          onPress={() => copyToClipboard(INSTALL_SCRIPT)}
-        >
+        <TouchableOpacity style={styles.codeBlock} onPress={() => copyToClipboard(INSTALL_SCRIPT)}>
           <Text style={styles.code}>{INSTALL_SCRIPT}</Text>
           <Text style={styles.copyHint}>Tap to copy</Text>
         </TouchableOpacity>
@@ -86,10 +83,7 @@ export function SetupScreen({ onBack }: SetupScreenProps) {
         <Text style={styles.description}>
           If the quick install doesn&apos;t work, follow these steps:
         </Text>
-        <TouchableOpacity
-          style={styles.codeBlock}
-          onPress={() => copyToClipboard(MANUAL_STEPS)}
-        >
+        <TouchableOpacity style={styles.codeBlock} onPress={() => copyToClipboard(MANUAL_STEPS)}>
           <Text style={styles.code}>{MANUAL_STEPS}</Text>
           <Text style={styles.copyHint}>Tap to copy</Text>
         </TouchableOpacity>
@@ -132,13 +126,16 @@ export function SetupScreen({ onBack }: SetupScreenProps) {
 
         <Text style={styles.sectionTitle}>Troubleshooting</Text>
         <Text style={styles.troubleItem}>
-          <Text style={styles.troubleLabel}>Connection timeout:</Text> Make sure the daemon is running and the port is not blocked by firewall
+          <Text style={styles.troubleLabel}>Connection timeout:</Text> Make sure the daemon is
+          running and the port is not blocked by firewall
         </Text>
         <Text style={styles.troubleItem}>
-          <Text style={styles.troubleLabel}>Invalid token:</Text> Check that the token in the app matches your config.json exactly
+          <Text style={styles.troubleLabel}>Invalid token:</Text> Check that the token in the app
+          matches your config.json exactly
         </Text>
         <Text style={styles.troubleItem}>
-          <Text style={styles.troubleLabel}>No messages:</Text> Ensure a coding session is running in the tmux session specified in config
+          <Text style={styles.troubleLabel}>No messages:</Text> Ensure a coding session is running
+          in the tmux session specified in config
         </Text>
 
         <View style={styles.bottomPadding} />

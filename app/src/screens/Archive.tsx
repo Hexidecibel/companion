@@ -41,22 +41,14 @@ function ArchiveItem({
   onDelete: () => void;
 }) {
   const handleLongPress = () => {
-    Alert.alert(
-      'Delete Archive',
-      'Are you sure you want to delete this archived conversation?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Delete', style: 'destructive', onPress: onDelete },
-      ]
-    );
+    Alert.alert('Delete Archive', 'Are you sure you want to delete this archived conversation?', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Delete', style: 'destructive', onPress: onDelete },
+    ]);
   };
 
   return (
-    <TouchableOpacity
-      style={styles.archiveItem}
-      onLongPress={handleLongPress}
-      activeOpacity={0.8}
-    >
+    <TouchableOpacity style={styles.archiveItem} onLongPress={handleLongPress} activeOpacity={0.8}>
       <View style={styles.archiveHeader}>
         <Text style={styles.archiveName} numberOfLines={1}>
           {archive.sessionName}
@@ -69,9 +61,7 @@ function ArchiveItem({
       <Text style={styles.archiveSummary} numberOfLines={4}>
         {archive.summary}
       </Text>
-      <Text style={styles.archiveServer}>
-        {archive.serverName}
-      </Text>
+      <Text style={styles.archiveServer}>{archive.serverName}</Text>
     </TouchableOpacity>
   );
 }
@@ -99,7 +89,7 @@ export function Archive({ onBack }: ArchiveProps) {
 
   const handleDelete = useCallback(async (id: string) => {
     await archiveService.deleteArchive(id);
-    setArchives(prev => prev.filter(a => a.id !== id));
+    setArchives((prev) => prev.filter((a) => a.id !== id));
   }, []);
 
   const handleClearAll = useCallback(() => {
@@ -123,7 +113,12 @@ export function Archive({ onBack }: ArchiveProps) {
   if (loading) {
     return (
       <View style={styles.container}>
-        <LinearGradient colors={['#1a2744', '#1f1a3d']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.header}>
+        <LinearGradient
+          colors={['#1a2744', '#1f1a3d']}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 0 }}
+          style={styles.header}
+        >
           <TouchableOpacity onPress={onBack} style={styles.backButton}>
             <Text style={styles.backButtonText}>Back</Text>
           </TouchableOpacity>
@@ -139,7 +134,12 @@ export function Archive({ onBack }: ArchiveProps) {
 
   return (
     <View style={styles.container}>
-      <LinearGradient colors={['#1a2744', '#1f1a3d']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.header}>
+      <LinearGradient
+        colors={['#1a2744', '#1f1a3d']}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 0 }}
+        style={styles.header}
+      >
         <TouchableOpacity onPress={onBack} style={styles.backButton}>
           <Text style={styles.backButtonText}>Back</Text>
         </TouchableOpacity>
@@ -165,18 +165,11 @@ export function Archive({ onBack }: ArchiveProps) {
           data={archives}
           keyExtractor={(item) => item.id}
           renderItem={({ item }) => (
-            <ArchiveItem
-              archive={item}
-              onDelete={() => handleDelete(item.id)}
-            />
+            <ArchiveItem archive={item} onDelete={() => handleDelete(item.id)} />
           )}
           contentContainerStyle={styles.listContent}
           refreshControl={
-            <RefreshControl
-              refreshing={refreshing}
-              onRefresh={handleRefresh}
-              tintColor="#3b82f6"
-            />
+            <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor="#3b82f6" />
           }
         />
       )}

@@ -68,9 +68,7 @@ export async function setupNotificationChannel(): Promise<void> {
   // Firebase handles this automatically
 }
 
-export function addNotificationReceivedListener(
-  callback: (notification: unknown) => void
-) {
+export function addNotificationReceivedListener(callback: (notification: unknown) => void) {
   if (!messagingModule) {
     return { remove: () => {} };
   }
@@ -84,9 +82,7 @@ export function addNotificationReceivedListener(
   return { remove: unsubscribe };
 }
 
-export function addNotificationResponseReceivedListener(
-  callback: (response: unknown) => void
-) {
+export function addNotificationResponseReceivedListener(callback: (response: unknown) => void) {
   if (!messagingModule) {
     return { remove: () => {} };
   }

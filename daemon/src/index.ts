@@ -115,17 +115,14 @@ async function main(): Promise<void> {
     }
   );
 
-  workGroupManager.on(
-    'group-ready-to-merge',
-    ({ name }: { groupId: string; name: string }) => {
-      push.sendToAllDevices(
-        `All workers complete. Ready to merge.`,
-        'work_group_ready',
-        undefined,
-        name
-      );
-    }
-  );
+  workGroupManager.on('group-ready-to-merge', ({ name }: { groupId: string; name: string }) => {
+    push.sendToAllDevices(
+      `All workers complete. Ready to merge.`,
+      'work_group_ready',
+      undefined,
+      name
+    );
+  });
 
   // Initialize WebSocket handler
   const wsHandler = new WebSocketHandler(

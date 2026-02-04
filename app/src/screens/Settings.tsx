@@ -1,13 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  TouchableOpacity,
-  Alert,
-  Linking,
-} from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, Linking } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import Constants from 'expo-constants';
 import { getSettings, AppSettings, clearAll } from '../services/storage';
@@ -23,7 +15,12 @@ interface SettingsProps {
   onOpenArchive?: () => void;
 }
 
-export function Settings({ onBack, onOpenNotificationSettings, onOpenAgents, onOpenArchive }: SettingsProps) {
+export function Settings({
+  onBack,
+  onOpenNotificationSettings,
+  onOpenAgents,
+  onOpenArchive,
+}: SettingsProps) {
   const [_settings, setSettings] = useState<AppSettings>({});
   const [loading, setLoading] = useState(true);
   const [currentFontScale, setCurrentFontScale] = useState(fontScaleService.getScale());
@@ -107,7 +104,12 @@ export function Settings({ onBack, onOpenNotificationSettings, onOpenAgents, onO
 
   return (
     <View style={styles.container}>
-      <LinearGradient colors={['#1a2744', '#1f1a3d']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.header}>
+      <LinearGradient
+        colors={['#1a2744', '#1f1a3d']}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 0 }}
+        style={styles.header}
+      >
         <TouchableOpacity onPress={onBack} style={styles.backButton}>
           <Text style={styles.backButtonText}>‹ Back</Text>
         </TouchableOpacity>
@@ -122,9 +124,7 @@ export function Settings({ onBack, onOpenNotificationSettings, onOpenAgents, onO
           <TouchableOpacity style={styles.linkRow} onPress={onOpenNotificationSettings}>
             <View style={styles.settingInfo}>
               <Text style={styles.settingLabel}>Notification Settings</Text>
-              <Text style={styles.settingDescription}>
-                Configure alerts and quiet hours
-              </Text>
+              <Text style={styles.settingDescription}>Configure alerts and quiet hours</Text>
             </View>
             <Text style={styles.linkArrow}>›</Text>
           </TouchableOpacity>
@@ -133,9 +133,7 @@ export function Settings({ onBack, onOpenNotificationSettings, onOpenAgents, onO
             <TouchableOpacity style={styles.linkRow} onPress={onOpenAgents}>
               <View style={styles.settingInfo}>
                 <Text style={styles.settingLabel}>Sub-Agents</Text>
-                <Text style={styles.settingDescription}>
-                  View spawned background agents
-                </Text>
+                <Text style={styles.settingDescription}>View spawned background agents</Text>
               </View>
               <Text style={styles.linkArrow}>›</Text>
             </TouchableOpacity>
@@ -147,12 +145,14 @@ export function Settings({ onBack, onOpenNotificationSettings, onOpenAgents, onO
           <View style={styles.fontScaleRow}>
             <Text style={styles.settingLabel}>Text Size</Text>
             <View style={styles.fontScaleButtons}>
-              {([
-                { label: 'S', value: 0.85 },
-                { label: 'M', value: 1.0 },
-                { label: 'L', value: 1.15 },
-                { label: 'XL', value: 1.3 },
-              ] as const).map((preset) => (
+              {(
+                [
+                  { label: 'S', value: 0.85 },
+                  { label: 'M', value: 1.0 },
+                  { label: 'L', value: 1.15 },
+                  { label: 'XL', value: 1.3 },
+                ] as const
+              ).map((preset) => (
                 <TouchableOpacity
                   key={preset.label}
                   style={[
@@ -162,10 +162,12 @@ export function Settings({ onBack, onOpenNotificationSettings, onOpenAgents, onO
                   onPress={() => fontScaleService.setScale(preset.value)}
                   activeOpacity={0.7}
                 >
-                  <Text style={[
-                    styles.fontScaleButtonText,
-                    currentFontScale === preset.value && styles.fontScaleButtonTextActive,
-                  ]}>
+                  <Text
+                    style={[
+                      styles.fontScaleButtonText,
+                      currentFontScale === preset.value && styles.fontScaleButtonTextActive,
+                    ]}
+                  >
                     {preset.label}
                   </Text>
                 </TouchableOpacity>
@@ -173,7 +175,9 @@ export function Settings({ onBack, onOpenNotificationSettings, onOpenAgents, onO
             </View>
           </View>
           <View style={styles.fontScalePreview}>
-            <Text style={[styles.fontScalePreviewText, { fontSize: scaledFont(15, currentFontScale) }]}>
+            <Text
+              style={[styles.fontScalePreviewText, { fontSize: scaledFont(15, currentFontScale) }]}
+            >
               The quick brown fox jumps over the lazy dog.
             </Text>
           </View>
@@ -185,17 +189,15 @@ export function Settings({ onBack, onOpenNotificationSettings, onOpenAgents, onO
           <TouchableOpacity style={styles.linkRow} onPress={openTermux}>
             <View style={styles.settingInfo}>
               <Text style={styles.settingLabel}>Get Termux</Text>
-              <Text style={styles.settingDescription}>
-                For full terminal access via Mosh
-              </Text>
+              <Text style={styles.settingDescription}>For full terminal access via Mosh</Text>
             </View>
             <Text style={styles.linkArrow}>›</Text>
           </TouchableOpacity>
 
           <View style={styles.hintBox}>
             <Text style={styles.hintText}>
-              For full terminal access, install Termux and Mosh. You can then
-              connect directly to your server&apos;s tmux session.
+              For full terminal access, install Termux and Mosh. You can then connect directly to
+              your server&apos;s tmux session.
             </Text>
           </View>
         </View>
@@ -221,9 +223,7 @@ export function Settings({ onBack, onOpenNotificationSettings, onOpenAgents, onO
             <TouchableOpacity style={styles.linkRow} onPress={onOpenArchive}>
               <View style={styles.settingInfo}>
                 <Text style={styles.settingLabel}>Conversation Archive</Text>
-                <Text style={styles.settingDescription}>
-                  View saved conversation summaries
-                </Text>
+                <Text style={styles.settingDescription}>View saved conversation summaries</Text>
               </View>
               <Text style={styles.linkArrow}>&gt;</Text>
             </TouchableOpacity>
@@ -251,9 +251,7 @@ export function Settings({ onBack, onOpenNotificationSettings, onOpenAgents, onO
           >
             <View style={styles.settingInfo}>
               <Text style={styles.settingLabel}>Clear History</Text>
-              <Text style={styles.settingDescription}>
-                Delete all saved session history
-              </Text>
+              <Text style={styles.settingDescription}>Delete all saved session history</Text>
             </View>
             <Text style={styles.linkArrow}>›</Text>
           </TouchableOpacity>
@@ -270,12 +268,17 @@ export function Settings({ onBack, onOpenNotificationSettings, onOpenAgents, onO
           </Text>
           {Constants.expoConfig?.extra?.buildDate && (
             <Text style={styles.aboutBuildDate}>
-              Built {new Date(Constants.expoConfig.extra.buildDate).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })}
+              Built{' '}
+              {new Date(Constants.expoConfig.extra.buildDate).toLocaleDateString(undefined, {
+                year: 'numeric',
+                month: 'short',
+                day: 'numeric',
+              })}
             </Text>
           )}
           <Text style={styles.aboutDescription}>
-            A companion app for AI coding sessions that lets you monitor sessions
-            and respond from your mobile device.
+            A companion app for AI coding sessions that lets you monitor sessions and respond from
+            your mobile device.
           </Text>
         </View>
       </ScrollView>

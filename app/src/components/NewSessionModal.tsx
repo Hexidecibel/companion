@@ -26,7 +26,13 @@ interface NewSessionModalProps {
   onFetchRecents: () => Promise<RecentProject[]>;
 }
 
-export function NewSessionModal({ visible, onClose, onCreate, onCreateWorktree, onFetchRecents }: NewSessionModalProps) {
+export function NewSessionModal({
+  visible,
+  onClose,
+  onCreate,
+  onCreateWorktree,
+  onFetchRecents,
+}: NewSessionModalProps) {
   const [path, setPath] = useState('');
   const [startSession, setStartSession] = useState(true);
   const [branchMode, setBranchMode] = useState(false);
@@ -149,8 +155,12 @@ export function NewSessionModal({ visible, onClose, onCreate, onCreateWorktree, 
                     onPress={() => setPath(project.workingDir)}
                     activeOpacity={0.7}
                   >
-                    <Text style={styles.recentName} numberOfLines={1}>{project.name}</Text>
-                    <Text style={styles.recentPath} numberOfLines={1}>{project.workingDir}</Text>
+                    <Text style={styles.recentName} numberOfLines={1}>
+                      {project.name}
+                    </Text>
+                    <Text style={styles.recentPath} numberOfLines={1}>
+                      {project.workingDir}
+                    </Text>
                   </TouchableOpacity>
                 ))}
               </ScrollView>
@@ -169,7 +179,9 @@ export function NewSessionModal({ visible, onClose, onCreate, onCreateWorktree, 
             {creating ? (
               <ActivityIndicator size="small" color="#fff" />
             ) : (
-              <Text style={styles.createButtonText}>{branchMode ? 'Create Branch Session' : 'Create Session'}</Text>
+              <Text style={styles.createButtonText}>
+                {branchMode ? 'Create Branch Session' : 'Create Session'}
+              </Text>
             )}
           </TouchableOpacity>
         </View>

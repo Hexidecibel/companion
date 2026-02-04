@@ -23,7 +23,13 @@ export interface ScrollBehaviorResult {
   listRef: React.RefObject<FlatList | null>;
 
   /** Call when scroll event fires */
-  handleScroll: (event: { nativeEvent: { layoutMeasurement: { height: number }; contentOffset: { y: number }; contentSize: { height: number } } }) => void;
+  handleScroll: (event: {
+    nativeEvent: {
+      layoutMeasurement: { height: number };
+      contentOffset: { y: number };
+      contentSize: { height: number };
+    };
+  }) => void;
 
   /** Call when content size changes */
   handleContentSizeChange: (width: number, height: number) => void;
@@ -67,95 +73,110 @@ export function useScrollBehavior(config: ScrollBehaviorConfig = {}): ScrollBeha
   const autoScrollEnabled = useRef(true);
   const initialScrollDone = useRef(false);
 
-  const handleScroll = useCallback((event: { nativeEvent: { layoutMeasurement: { height: number }; contentOffset: { y: number }; contentSize: { height: number } } }) => {
-    const { layoutMeasurement, contentOffset, contentSize } = event.nativeEvent;
-    const distanceFromBottom = contentSize.height - layoutMeasurement.height - contentOffset.y;
-    const currentOffset = contentOffset.y;
-    const prevOffset = lastScrollOffset.current;
-    lastScrollOffset.current = currentOffset;
+  const handleScroll = useCallback(
+    (event: {
+      nativeEvent: {
+        layoutMeasurement: { height: number };
+        contentOffset: { y: number };
+        contentSize: { height: number };
+      };
+    }) => {
+      const { layoutMeasurement, contentOffset, contentSize } = event.nativeEvent;
+      const distanceFromBottom = contentSize.height - layoutMeasurement.height - contentOffset.y;
+      const currentOffset = contentOffset.y;
+      const prevOffset = lastScrollOffset.current;
+      lastScrollOffset.current = currentOffset;
 
-    // Check if we're in a programmatic scroll window (ignore user input detection)
-    const now = Date.now();
-    const isProgrammaticScroll = now < programmaticScrollUntil.current;
+      // Check if we're in a programmatic scroll window (ignore user input detection)
+      const now = Date.now();
+      const isProgrammaticScroll = now < programmaticScrollUntil.current;
 
-    // Detect manual scroll direction (negative = scrolling up toward top)
-    const scrollDelta = currentOffset - prevOffset;
-    const isScrollingUp = scrollDelta < -3; // Smaller threshold for more responsiveness
-    const isUserScrolling = Math.abs(scrollDelta) > 2;
+      // Detect manual scroll direction (negative = scrolling up toward top)
+      const scrollDelta = currentOffset - prevOffset;
+      const isScrollingUp = scrollDelta < -3; // Smaller threshold for more responsiveness
+      const isUserScrolling = Math.abs(scrollDelta) > 2;
 
-    const nearBottom = distanceFromBottom < nearBottomThreshold;
-    isNearBottom.current = nearBottom;
+      const nearBottom = distanceFromBottom < nearBottomThreshold;
+      isNearBottom.current = nearBottom;
 
-    // Show/hide scroll button based on distance
-    const shouldShowButton = distanceFromBottom > showButtonThreshold;
-    setShowScrollButton(prev => prev !== shouldShowButton ? shouldShowButton : prev);
+      // Show/hide scroll button based on distance
+      const shouldShowButton = distanceFromBottom > showButtonThreshold;
+      setShowScrollButton((prev) => (prev !== shouldShowButton ? shouldShowButton : prev));
 
-    // Set cooldown on ANY user scroll to prevent fighting with auto-scroll
-    // Use longer cooldown during active tooling/streaming
-    if (!isProgrammaticScroll && isUserScrolling) {
-      userScrollCooldownUntil.current = now + 1000; // 1 second cooldown
-    }
-
-    // Update auto-scroll state
-    // IMPORTANT: Check scroll direction FIRST - if user scrolls up, disable immediately
-    if (!isProgrammaticScroll && isScrollingUp) {
-      // User manually scrolled UP - immediately disable auto-scroll
-      log('User scrolled UP, disabling auto-scroll');
-      autoScrollEnabled.current = false;
-    } else if (nearBottom && !isProgrammaticScroll) {
-      // At bottom and not in programmatic scroll - re-enable auto-scroll
-      if (!autoScrollEnabled.current) {
-        log('At bottom, re-enabling auto-scroll');
+      // Set cooldown on ANY user scroll to prevent fighting with auto-scroll
+      // Use longer cooldown during active tooling/streaming
+      if (!isProgrammaticScroll && isUserScrolling) {
+        userScrollCooldownUntil.current = now + 1000; // 1 second cooldown
       }
-      autoScrollEnabled.current = true;
+
+      // Update auto-scroll state
+      // IMPORTANT: Check scroll direction FIRST - if user scrolls up, disable immediately
+      if (!isProgrammaticScroll && isScrollingUp) {
+        // User manually scrolled UP - immediately disable auto-scroll
+        log('User scrolled UP, disabling auto-scroll');
+        autoScrollEnabled.current = false;
+      } else if (nearBottom && !isProgrammaticScroll) {
+        // At bottom and not in programmatic scroll - re-enable auto-scroll
+        if (!autoScrollEnabled.current) {
+          log('At bottom, re-enabling auto-scroll');
+        }
+        autoScrollEnabled.current = true;
+        setHasNewMessages(false);
+      } else if (distanceFromBottom > showButtonThreshold && !isProgrammaticScroll) {
+        // Far from bottom - disable auto-scroll
+        if (autoScrollEnabled.current) {
+          log('Far from bottom, disabling auto-scroll');
+        }
+        autoScrollEnabled.current = false;
+      }
+      // Between thresholds: keep current state (hysteresis)
+    },
+    [nearBottomThreshold, showButtonThreshold, log]
+  );
+
+  const handleContentSizeChange = useCallback(
+    (_width: number, height: number) => {
+      const prevHeight = lastContentHeight.current;
+      lastContentHeight.current = height;
+      const now = Date.now();
+
+      // Initial load - scroll to bottom immediately (once)
+      if (!initialScrollDone.current && height > 0) {
+        initialScrollDone.current = true;
+        // Mark as programmatic scroll
+        programmaticScrollUntil.current = now + 500;
+        listRef.current?.scrollToEnd({ animated: false });
+        return;
+      }
+
+      // Content grew - show new message indicator if not at bottom
+      const contentGrew = height > prevHeight + 50;
+      if (contentGrew && !isNearBottom.current) {
+        setHasNewMessages(true);
+      }
+
+      // DISABLED: Auto-scroll on content change causes too much jumping
+      // User must explicitly tap scroll button or send a message to scroll
+      // The prepareForSend() function handles scrolling after user sends
+      log('Content changed:', { contentGrew, isNearBottom: isNearBottom.current });
+    },
+    [log]
+  );
+
+  const scrollToBottom = useCallback(
+    (_animated = true) => {
       setHasNewMessages(false);
-    } else if (distanceFromBottom > showButtonThreshold && !isProgrammaticScroll) {
-      // Far from bottom - disable auto-scroll
-      if (autoScrollEnabled.current) {
-        log('Far from bottom, disabling auto-scroll');
-      }
-      autoScrollEnabled.current = false;
-    }
-    // Between thresholds: keep current state (hysteresis)
-  }, [nearBottomThreshold, showButtonThreshold, log]);
-
-  const handleContentSizeChange = useCallback((_width: number, height: number) => {
-    const prevHeight = lastContentHeight.current;
-    lastContentHeight.current = height;
-    const now = Date.now();
-
-    // Initial load - scroll to bottom immediately (once)
-    if (!initialScrollDone.current && height > 0) {
-      initialScrollDone.current = true;
+      setShowScrollButton(false);
+      autoScrollEnabled.current = true;
+      isNearBottom.current = true;
       // Mark as programmatic scroll
-      programmaticScrollUntil.current = now + 500;
+      programmaticScrollUntil.current = Date.now() + 500;
+      // Use non-animated scroll to avoid stutter during streaming
       listRef.current?.scrollToEnd({ animated: false });
-      return;
-    }
-
-    // Content grew - show new message indicator if not at bottom
-    const contentGrew = height > prevHeight + 50;
-    if (contentGrew && !isNearBottom.current) {
-      setHasNewMessages(true);
-    }
-
-    // DISABLED: Auto-scroll on content change causes too much jumping
-    // User must explicitly tap scroll button or send a message to scroll
-    // The prepareForSend() function handles scrolling after user sends
-    log('Content changed:', { contentGrew, isNearBottom: isNearBottom.current });
-  }, [log]);
-
-  const scrollToBottom = useCallback((_animated = true) => {
-    setHasNewMessages(false);
-    setShowScrollButton(false);
-    autoScrollEnabled.current = true;
-    isNearBottom.current = true;
-    // Mark as programmatic scroll
-    programmaticScrollUntil.current = Date.now() + 500;
-    // Use non-animated scroll to avoid stutter during streaming
-    listRef.current?.scrollToEnd({ animated: false });
-    log('scrollToBottom called, autoScrollEnabled set to true');
-  }, [log]);
+      log('scrollToBottom called, autoScrollEnabled set to true');
+    },
+    [log]
+  );
 
   const prepareForSend = useCallback(() => {
     // When user sends a message, ensure we scroll to see it

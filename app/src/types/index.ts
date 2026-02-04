@@ -234,8 +234,8 @@ export interface StackTemplate {
   type: 'frontend' | 'backend' | 'fullstack' | 'library' | 'cli';
   icon: string;
   tags: string[];
-  score?: number;              // 0.0–1.0 recommendation score (when description provided)
-  matchedKeywords?: string[];  // Keywords that matched from user description
+  score?: number; // 0.0–1.0 recommendation score (when description provided)
+  matchedKeywords?: string[]; // Keywords that matched from user description
 }
 
 export interface ProjectConfig {

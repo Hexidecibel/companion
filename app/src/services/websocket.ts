@@ -22,7 +22,10 @@ export class WebSocketService {
   private messageHandlers: Set<MessageHandler> = new Set();
   private stateChangeHandlers: Set<StateChangeHandler> = new Set();
   private queueFlushHandlers: Set<QueueFlushHandler> = new Set();
-  private pendingRequests: Map<string, { resolve: (r: WebSocketResponse) => void; reject: (e: Error) => void }> = new Map();
+  private pendingRequests: Map<
+    string,
+    { resolve: (r: WebSocketResponse) => void; reject: (e: Error) => void }
+  > = new Map();
   private isFlushingQueue: boolean = false;
 
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -40,10 +43,12 @@ export class WebSocketService {
     // Guard against double-connect: if already connecting/connected to same server, skip
     // For 'connected' status, also verify the WebSocket is actually open - WiFi drops
     // can leave status as 'connected' while the socket is dead
-    if (this.server?.id === server.id &&
-        (this.connectionState.status === 'connecting' ||
-         this.connectionState.status === 'reconnecting' ||
-         (this.connectionState.status === 'connected' && this.ws?.readyState === WebSocket.OPEN))) {
+    if (
+      this.server?.id === server.id &&
+      (this.connectionState.status === 'connecting' ||
+        this.connectionState.status === 'reconnecting' ||
+        (this.connectionState.status === 'connected' && this.ws?.readyState === WebSocket.OPEN))
+    ) {
       console.log(`Already ${this.connectionState.status} to ${server.id}, skipping connect`);
       return;
     }
@@ -78,7 +83,10 @@ export class WebSocketService {
 
       // Set connection timeout
       this.connectionTimer = setTimeout(() => {
-        if (this.connectionState.status === 'connecting' || this.connectionState.status === 'reconnecting') {
+        if (
+          this.connectionState.status === 'connecting' ||
+          this.connectionState.status === 'reconnecting'
+        ) {
           console.log('Connection timeout');
           this.ws?.close();
           this.handleDisconnect('Connection timeout');
@@ -117,8 +125,14 @@ export class WebSocketService {
           reject(new Error('Auth timeout'));
         }, 10000);
         this.pendingRequests.set(requestId, {
-          resolve: (r) => { clearTimeout(timeout); resolve(r); },
-          reject: (e) => { clearTimeout(timeout); reject(e); },
+          resolve: (r) => {
+            clearTimeout(timeout);
+            resolve(r);
+          },
+          reject: (e) => {
+            clearTimeout(timeout);
+            reject(e);
+          },
         });
         this.send({ type: 'authenticate', token, requestId } as any).catch(reject);
       });
@@ -195,7 +209,11 @@ export class WebSocketService {
     this.pendingRequests.clear();
 
     // Attempt reconnection if we have an enabled server and haven't exceeded attempts
-    if (this.server && this.server.enabled !== false && this.connectionState.reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+    if (
+      this.server &&
+      this.server.enabled !== false &&
+      this.connectionState.reconnectAttempts < MAX_RECONNECT_ATTEMPTS
+    ) {
       const attempts = this.connectionState.reconnectAttempts + 1;
       const delay = Math.min(
         INITIAL_RECONNECT_DELAY * Math.pow(2, attempts - 1),
@@ -285,7 +303,11 @@ export class WebSocketService {
     });
   }
 
-  async sendRequest(type: string, payload?: unknown, timeoutMs: number = 10000): Promise<WebSocketResponse> {
+  async sendRequest(
+    type: string,
+    payload?: unknown,
+    timeoutMs: number = 10000
+  ): Promise<WebSocketResponse> {
     const requestId = `req_${++this.requestCounter}`;
 
     return new Promise((resolve, reject) => {
@@ -388,7 +410,12 @@ export class WebSocketService {
   // Get current server connection info for HTTP requests
   getServerInfo(): { host: string; port: number; token: string; useTls: boolean } | null {
     if (!this.server) return null;
-    return { host: this.server.host, port: this.server.port, token: this.server.token, useTls: this.server.useTls };
+    return {
+      host: this.server.host,
+      port: this.server.port,
+      token: this.server.token,
+      useTls: this.server.useTls,
+    };
   }
 
   // Flush queued messages when connected

@@ -58,12 +58,12 @@ class ArchiveService {
 
   async getArchivesByServer(serverId: string): Promise<ArchivedConversation[]> {
     await this.load();
-    return this.archives.filter(a => a.serverId === serverId);
+    return this.archives.filter((a) => a.serverId === serverId);
   }
 
   async deleteArchive(id: string): Promise<void> {
     await this.load();
-    this.archives = this.archives.filter(a => a.id !== id);
+    this.archives = this.archives.filter((a) => a.id !== id);
     await this.save();
   }
 

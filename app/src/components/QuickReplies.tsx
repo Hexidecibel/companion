@@ -26,11 +26,7 @@ export function QuickReplies({ onSelect, disabled }: QuickRepliesProps) {
         {QUICK_REPLIES.map((reply) => (
           <TouchableOpacity
             key={reply.label}
-            style={[
-              styles.chip,
-              { borderColor: reply.color },
-              disabled && styles.chipDisabled,
-            ]}
+            style={[styles.chip, { borderColor: reply.color }, disabled && styles.chipDisabled]}
             onPress={() => onSelect(reply.label)}
             disabled={disabled}
             activeOpacity={0.7}

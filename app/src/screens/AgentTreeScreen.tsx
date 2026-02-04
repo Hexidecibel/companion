@@ -81,7 +81,7 @@ export function AgentTreeScreen({ onBack, sessionId }: AgentTreeScreenProps) {
   };
 
   const toggleExpanded = (agentId: string) => {
-    setExpandedAgents(prev => {
+    setExpandedAgents((prev) => {
       const next = new Set(prev);
       if (next.has(agentId)) {
         next.delete(agentId);
@@ -109,19 +109,27 @@ export function AgentTreeScreen({ onBack, sessionId }: AgentTreeScreenProps) {
 
   const getStatusColor = (status: SubAgent['status']): string => {
     switch (status) {
-      case 'running': return '#22c55e';
-      case 'completed': return '#3b82f6';
-      case 'error': return '#ef4444';
-      default: return '#6b7280';
+      case 'running':
+        return '#22c55e';
+      case 'completed':
+        return '#3b82f6';
+      case 'error':
+        return '#ef4444';
+      default:
+        return '#6b7280';
     }
   };
 
   const getStatusIcon = (status: SubAgent['status']): string => {
     switch (status) {
-      case 'running': return '●';
-      case 'completed': return '✓';
-      case 'error': return '✕';
-      default: return '○';
+      case 'running':
+        return '●';
+      case 'completed':
+        return '✓';
+      case 'error':
+        return '✕';
+      default:
+        return '○';
     }
   };
 
@@ -148,11 +156,7 @@ export function AgentTreeScreen({ onBack, sessionId }: AgentTreeScreenProps) {
         style={styles.content}
         contentContainerStyle={styles.contentContainer}
         refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={onRefresh}
-            tintColor="#3b82f6"
-          />
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#3b82f6" />
         }
       >
         {error ? (
@@ -172,9 +176,7 @@ export function AgentTreeScreen({ onBack, sessionId }: AgentTreeScreenProps) {
               </View>
               <View style={styles.summaryDivider} />
               <View style={styles.summaryItem}>
-                <Text style={[styles.summaryValue, { color: '#22c55e' }]}>
-                  {tree.runningCount}
-                </Text>
+                <Text style={[styles.summaryValue, { color: '#22c55e' }]}>{tree.runningCount}</Text>
                 <Text style={styles.summaryLabel}>Running</Text>
               </View>
               <View style={styles.summaryDivider} />
@@ -218,9 +220,9 @@ export function AgentTreeScreen({ onBack, sessionId }: AgentTreeScreenProps) {
                           <Text style={styles.agentMeta}>
                             {agent.status === 'running'
                               ? `Running for ${formatDuration(agent.startedAt)}`
-                              : `Completed in ${formatDuration(agent.startedAt, agent.completedAt)}`
-                            }
-                            {' • '}{agent.messageCount} msgs
+                              : `Completed in ${formatDuration(agent.startedAt, agent.completedAt)}`}
+                            {' • '}
+                            {agent.messageCount} msgs
                           </Text>
                         </View>
                         <Text style={styles.expandIcon}>{isExpanded ? '▼' : '▶'}</Text>
@@ -276,8 +278,8 @@ export function AgentTreeScreen({ onBack, sessionId }: AgentTreeScreenProps) {
             <View style={styles.section}>
               <View style={styles.infoBox}>
                 <Text style={styles.infoText}>
-                  Sub-agents are spawned when the Task tool is used to run background work.
-                  Tap an agent to see more details.
+                  Sub-agents are spawned when the Task tool is used to run background work. Tap an
+                  agent to see more details.
                 </Text>
               </View>
             </View>

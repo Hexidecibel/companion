@@ -31,7 +31,9 @@ export function EditServerScreen({ server, onBack, onSaved }: EditServerScreenPr
   const [formUseTls, setFormUseTls] = useState(server?.useTls || false);
   const [formIsDefault, setFormIsDefault] = useState(server?.isDefault || false);
   const [formEnabled, _setFormEnabled] = useState(server?.enabled !== false);
-  const [formAutoApproveEnabled, _setFormAutoApproveEnabled] = useState(server?.autoApproveEnabled || false);
+  const [formAutoApproveEnabled, _setFormAutoApproveEnabled] = useState(
+    server?.autoApproveEnabled || false
+  );
   const [formSshUser, setFormSshUser] = useState(server?.sshUser || '');
   const [showToken, setShowToken] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -48,7 +50,9 @@ export function EditServerScreen({ server, onBack, onSaved }: EditServerScreenPr
     setShowQRScanner(false);
   };
 
-  const validateConnection = async (testServer: Server): Promise<{ success: boolean; error?: string }> => {
+  const validateConnection = async (
+    testServer: Server
+  ): Promise<{ success: boolean; error?: string }> => {
     return new Promise((resolve) => {
       const protocol = testServer.useTls ? 'wss' : 'ws';
       const url = `${protocol}://${testServer.host}:${testServer.port}`;
@@ -72,7 +76,10 @@ export function EditServerScreen({ server, onBack, onSaved }: EditServerScreenPr
           if (data.type === 'authenticated') {
             clearTimeout(timeout);
             ws.close();
-            resolve({ success: data.success, error: data.success ? undefined : (data.error || 'Invalid token') });
+            resolve({
+              success: data.success,
+              error: data.success ? undefined : data.error || 'Invalid token',
+            });
             return;
           }
           if (data.type === 'error') {
@@ -147,35 +154,31 @@ export function EditServerScreen({ server, onBack, onSaved }: EditServerScreenPr
 
   const handleDelete = () => {
     if (!server) return;
-    Alert.alert(
-      'Delete Server',
-      `Are you sure you want to delete "${server.name}"?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            await deleteServer(server.id);
-            onSaved();
-          },
+    Alert.alert('Delete Server', `Are you sure you want to delete "${server.name}"?`, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: async () => {
+          await deleteServer(server.id);
+          onSaved();
         },
-      ]
-    );
+      },
+    ]);
   };
 
   if (showQRScanner) {
-    return (
-      <QRScanner
-        onScan={handleQRScan}
-        onClose={() => setShowQRScanner(false)}
-      />
-    );
+    return <QRScanner onScan={handleQRScan} onClose={() => setShowQRScanner(false)} />;
   }
 
   return (
     <SafeAreaView style={styles.container} edges={['bottom']}>
-      <LinearGradient colors={['#1a2744', '#1f1a3d']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.header}>
+      <LinearGradient
+        colors={['#1a2744', '#1f1a3d']}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 0 }}
+        style={styles.header}
+      >
         <TouchableOpacity onPress={onBack} style={styles.backButton}>
           <Text style={styles.backButtonText}>Cancel</Text>
         </TouchableOpacity>
@@ -245,10 +248,7 @@ export function EditServerScreen({ server, onBack, onSaved }: EditServerScreenPr
               autoCorrect={false}
               secureTextEntry={!showToken}
             />
-            <TouchableOpacity
-              style={styles.tokenToggle}
-              onPress={() => setShowToken(!showToken)}
-            >
+            <TouchableOpacity style={styles.tokenToggle} onPress={() => setShowToken(!showToken)}>
               <Ionicons
                 name={showToken ? 'eye-off-outline' : 'eye-outline'}
                 size={22}

@@ -37,7 +37,12 @@ const SLASH_COMMANDS: SlashCommand[] = [
   { command: '/skip', label: 'skip', description: 'Send "skip"', action: 'send' },
   { command: '/cancel', label: 'cancel', description: 'Send interrupt (Ctrl+C)', action: 'send' },
   { command: '/switch', label: 'switch', description: 'Switch session', action: 'callback' },
-  { command: '/refresh', label: 'refresh', description: 'Refresh conversation', action: 'callback' },
+  {
+    command: '/refresh',
+    label: 'refresh',
+    description: 'Refresh conversation',
+    action: 'callback',
+  },
 ];
 
 interface InputBarProps {
@@ -72,9 +77,10 @@ export function InputBar({
     // Show slash menu when typing "/" at start
     if (newText.startsWith('/')) {
       const query = newText.toLowerCase();
-      const filtered = SLASH_COMMANDS.filter(cmd =>
-        cmd.command.toLowerCase().startsWith(query) ||
-        cmd.label.toLowerCase().includes(query.slice(1))
+      const filtered = SLASH_COMMANDS.filter(
+        (cmd) =>
+          cmd.command.toLowerCase().startsWith(query) ||
+          cmd.label.toLowerCase().includes(query.slice(1))
       );
       setFilteredCommands(filtered);
       setShowSlashMenu(filtered.length > 0);
@@ -83,17 +89,20 @@ export function InputBar({
     }
   }, []);
 
-  const handleSelectCommand = useCallback(async (cmd: SlashCommand) => {
-    setShowSlashMenu(false);
-    setText('');
+  const handleSelectCommand = useCallback(
+    async (cmd: SlashCommand) => {
+      setShowSlashMenu(false);
+      setText('');
 
-    if (cmd.action === 'send') {
-      const message = cmd.command === '/cancel' ? '\x03' : cmd.label;
-      await onSend(message);
-    } else if (cmd.action === 'callback' && onSlashCommand) {
-      onSlashCommand(cmd.command);
-    }
-  }, [onSend, onSlashCommand]);
+      if (cmd.action === 'send') {
+        const message = cmd.command === '/cancel' ? '\x03' : cmd.label;
+        await onSend(message);
+      } else if (cmd.action === 'callback' && onSlashCommand) {
+        onSlashCommand(cmd.command);
+      }
+    },
+    [onSend, onSlashCommand]
+  );
 
   const handleSend = async () => {
     // Use ref for synchronous check to prevent double-sends
@@ -183,10 +192,7 @@ export function InputBar({
   const canSend = text.trim() || attachedImages.length > 0;
 
   const renderCommandItem = ({ item }: { item: SlashCommand }) => (
-    <TouchableOpacity
-      style={styles.commandItem}
-      onPress={() => handleSelectCommand(item)}
-    >
+    <TouchableOpacity style={styles.commandItem} onPress={() => handleSelectCommand(item)}>
       <Text style={styles.commandName}>{item.command}</Text>
       <Text style={styles.commandDesc}>{item.description}</Text>
     </TouchableOpacity>
@@ -208,18 +214,11 @@ export function InputBar({
       )}
 
       {attachedImages.length > 0 && (
-        <ScrollView
-          horizontal
-          style={styles.attachmentsRow}
-          showsHorizontalScrollIndicator={false}
-        >
+        <ScrollView horizontal style={styles.attachmentsRow} showsHorizontalScrollIndicator={false}>
           {attachedImages.map((img, index) => (
             <View key={index} style={styles.attachmentContainer}>
               <Image source={{ uri: img.uri }} style={styles.attachmentThumb} />
-              <TouchableOpacity
-                style={styles.removeButton}
-                onPress={() => removeImage(index)}
-              >
+              <TouchableOpacity style={styles.removeButton} onPress={() => removeImage(index)}>
                 <Text style={styles.removeButtonText}>x</Text>
               </TouchableOpacity>
             </View>

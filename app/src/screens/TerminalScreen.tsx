@@ -90,31 +90,39 @@ export function TerminalScreen({ sessionName, serverHost, sshUser, onBack }: Ter
   }, [sshCommand]);
 
   // Buffer and debounce raw key sends (50ms)
-  const sendRawKey = useCallback((key: string) => {
-    keyBufferRef.current.push(key);
-    if (keyFlushTimerRef.current) clearTimeout(keyFlushTimerRef.current);
-    keyFlushTimerRef.current = setTimeout(() => {
-      const batch = keyBufferRef.current.splice(0);
-      if (batch.length > 0) {
-        wsService.sendRequest('send_terminal_keys', {
-          sessionName,
-          keys: batch,
-        }).catch(() => {
-          // Silently fail on key send errors
-        });
-      }
-    }, KEY_DEBOUNCE_MS);
-  }, [sessionName]);
+  const sendRawKey = useCallback(
+    (key: string) => {
+      keyBufferRef.current.push(key);
+      if (keyFlushTimerRef.current) clearTimeout(keyFlushTimerRef.current);
+      keyFlushTimerRef.current = setTimeout(() => {
+        const batch = keyBufferRef.current.splice(0);
+        if (batch.length > 0) {
+          wsService
+            .sendRequest('send_terminal_keys', {
+              sessionName,
+              keys: batch,
+            })
+            .catch(() => {
+              // Silently fail on key send errors
+            });
+        }
+      }, KEY_DEBOUNCE_MS);
+    },
+    [sessionName]
+  );
 
   // Send a printable character as a raw key
-  const sendLiteralChar = useCallback((ch: string) => {
-    if (ch === ' ') {
-      sendRawKey('Space');
-    } else if (/^[a-zA-Z0-9\-+]$/.test(ch)) {
-      sendRawKey(ch);
-    }
-    // Punctuation that fails daemon validation regex is dropped
-  }, [sendRawKey]);
+  const sendLiteralChar = useCallback(
+    (ch: string) => {
+      if (ch === ' ') {
+        sendRawKey('Space');
+      } else if (/^[a-zA-Z0-9\-+]$/.test(ch)) {
+        sendRawKey(ch);
+      }
+      // Punctuation that fails daemon validation regex is dropped
+    },
+    [sendRawKey]
+  );
 
   const fetchOutput = useCallback(async () => {
     try {
@@ -158,32 +166,38 @@ export function TerminalScreen({ sessionName, serverHost, sshUser, onBack }: Ter
   }, [autoRefresh, interactive, fetchOutput]);
 
   // Handle character input via onChangeText (most reliable cross-platform)
-  const handleChangeText = useCallback((text: string) => {
-    const prev = prevTextRef.current;
-    if (text.length > prev.length) {
-      const added = text.slice(prev.length);
-      for (const ch of added) {
-        sendLiteralChar(ch);
+  const handleChangeText = useCallback(
+    (text: string) => {
+      const prev = prevTextRef.current;
+      if (text.length > prev.length) {
+        const added = text.slice(prev.length);
+        for (const ch of added) {
+          sendLiteralChar(ch);
+        }
       }
-    }
-    prevTextRef.current = text;
-    // Prevent text accumulation
-    if (text.length > 50) {
-      prevTextRef.current = '';
-      hiddenInputRef.current?.clear();
-    }
-  }, [sendLiteralChar]);
+      prevTextRef.current = text;
+      // Prevent text accumulation
+      if (text.length > 50) {
+        prevTextRef.current = '';
+        hiddenInputRef.current?.clear();
+      }
+    },
+    [sendLiteralChar]
+  );
 
   // Handle Backspace via onKeyPress (not captured by onChangeText when input is empty)
-  const handleKeyPress = useCallback((e: NativeSyntheticEvent<{ key: string }>) => {
-    const { key } = e.nativeEvent;
-    if (key === 'Backspace') {
-      sendRawKey('BSpace');
-      if (prevTextRef.current.length > 0) {
-        prevTextRef.current = prevTextRef.current.slice(0, -1);
+  const handleKeyPress = useCallback(
+    (e: NativeSyntheticEvent<{ key: string }>) => {
+      const { key } = e.nativeEvent;
+      if (key === 'Backspace') {
+        sendRawKey('BSpace');
+        if (prevTextRef.current.length > 0) {
+          prevTextRef.current = prevTextRef.current.slice(0, -1);
+        }
       }
-    }
-  }, [sendRawKey]);
+    },
+    [sendRawKey]
+  );
 
   // Handle Enter via onSubmitEditing (most reliable for Return key)
   const handleSubmitEditing = useCallback(() => {
@@ -192,10 +206,13 @@ export function TerminalScreen({ sessionName, serverHost, sshUser, onBack }: Ter
   }, [sendRawKey]);
 
   // Handle virtual key press - send key and refocus input
-  const handleVirtualKey = useCallback((key: string) => {
-    sendRawKey(key);
-    setTimeout(() => hiddenInputRef.current?.focus(), 50);
-  }, [sendRawKey]);
+  const handleVirtualKey = useCallback(
+    (key: string) => {
+      sendRawKey(key);
+      setTimeout(() => hiddenInputRef.current?.focus(), 50);
+    },
+    [sendRawKey]
+  );
 
   // Focus hidden input when interactive mode is toggled on
   useEffect(() => {
@@ -221,7 +238,7 @@ export function TerminalScreen({ sessionName, serverHost, sshUser, onBack }: Ter
 
   // Toggle interactive mode
   const toggleInteractive = useCallback(() => {
-    setInteractive(prev => {
+    setInteractive((prev) => {
       if (!prev) {
         setAutoRefresh(true); // Ensure auto-refresh when going interactive
       }
@@ -251,11 +268,11 @@ export function TerminalScreen({ sessionName, serverHost, sshUser, onBack }: Ter
   const lineHeight = Math.round(fontSize * 1.45);
 
   const zoomIn = useCallback(() => {
-    setFontSize(s => Math.min(s + 1, MAX_FONT_SIZE));
+    setFontSize((s) => Math.min(s + 1, MAX_FONT_SIZE));
   }, []);
 
   const zoomOut = useCallback(() => {
-    setFontSize(s => Math.max(s - 1, MIN_FONT_SIZE));
+    setFontSize((s) => Math.max(s - 1, MIN_FONT_SIZE));
   }, []);
 
   const renderSpan = useCallback((span: AnsiSpan, index: number, currentFontSize: number) => {
@@ -285,7 +302,12 @@ export function TerminalScreen({ sessionName, serverHost, sshUser, onBack }: Ter
 
   return (
     <View style={styles.container}>
-      <LinearGradient colors={['#1a2744', '#1f1a3d']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.header}>
+      <LinearGradient
+        colors={['#1a2744', '#1f1a3d']}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 0 }}
+        style={styles.header}
+      >
         <TouchableOpacity onPress={onBack} style={styles.backButton}>
           <Text style={styles.backButtonText}>&#8249; Back</Text>
         </TouchableOpacity>
@@ -298,7 +320,14 @@ export function TerminalScreen({ sessionName, serverHost, sshUser, onBack }: Ter
             onPress={zoomOut}
             disabled={fontSize <= MIN_FONT_SIZE}
           >
-            <Text style={[styles.zoomButtonText, fontSize <= MIN_FONT_SIZE && styles.zoomButtonTextDisabled]}>-</Text>
+            <Text
+              style={[
+                styles.zoomButtonText,
+                fontSize <= MIN_FONT_SIZE && styles.zoomButtonTextDisabled,
+              ]}
+            >
+              -
+            </Text>
           </TouchableOpacity>
           <Text style={styles.zoomLabel}>{fontSize}</Text>
           <TouchableOpacity
@@ -306,13 +335,25 @@ export function TerminalScreen({ sessionName, serverHost, sshUser, onBack }: Ter
             onPress={zoomIn}
             disabled={fontSize >= MAX_FONT_SIZE}
           >
-            <Text style={[styles.zoomButtonText, fontSize >= MAX_FONT_SIZE && styles.zoomButtonTextDisabled]}>+</Text>
+            <Text
+              style={[
+                styles.zoomButtonText,
+                fontSize >= MAX_FONT_SIZE && styles.zoomButtonTextDisabled,
+              ]}
+            >
+              +
+            </Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.interactiveToggle, interactive && styles.interactiveToggleActive]}
             onPress={toggleInteractive}
           >
-            <Text style={[styles.interactiveToggleText, interactive && styles.interactiveToggleTextActive]}>
+            <Text
+              style={[
+                styles.interactiveToggleText,
+                interactive && styles.interactiveToggleTextActive,
+              ]}
+            >
               Keys
             </Text>
           </TouchableOpacity>
@@ -351,11 +392,7 @@ export function TerminalScreen({ sessionName, serverHost, sshUser, onBack }: Ter
           onScroll={handleScroll}
           scrollEventThrottle={100}
           refreshControl={
-            <RefreshControl
-              refreshing={false}
-              onRefresh={fetchOutput}
-              tintColor="#3b82f6"
-            />
+            <RefreshControl refreshing={false} onRefresh={fetchOutput} tintColor="#3b82f6" />
           }
         >
           <ScrollView horizontal showsHorizontalScrollIndicator nestedScrollEnabled>

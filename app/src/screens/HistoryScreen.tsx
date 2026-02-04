@@ -84,12 +84,8 @@ export function HistoryScreen({ onBack }: HistoryScreenProps) {
         </Text>
       )}
       <View style={styles.sessionFooter}>
-        <Text style={styles.sessionStats}>
-          {item.messages.length} messages
-        </Text>
-        <Text style={styles.sessionDuration}>
-          {formatDuration(item.startTime, item.endTime)}
-        </Text>
+        <Text style={styles.sessionStats}>{item.messages.length} messages</Text>
+        <Text style={styles.sessionDuration}>{formatDuration(item.startTime, item.endTime)}</Text>
       </View>
     </TouchableOpacity>
   );

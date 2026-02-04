@@ -55,7 +55,9 @@ class SessionGuard {
     // STRICT: Response must include matching sessionId
     // This prevents old session data from leaking through when switching
     if (!sessionId || sessionId !== this.currentSessionId) {
-      console.log(`SessionGuard: Rejecting message (got "${sessionId}", expected "${this.currentSessionId}")`);
+      console.log(
+        `SessionGuard: Rejecting message (got "${sessionId}", expected "${this.currentSessionId}")`
+      );
       return false;
     }
 

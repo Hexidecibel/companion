@@ -26,7 +26,14 @@ interface SessionPickerProps {
   isConnected?: boolean;
 }
 
-export function SessionPicker({ currentSessionId, onSessionChange, isOpen, onClose, onNewProject, isConnected }: SessionPickerProps) {
+export function SessionPicker({
+  currentSessionId,
+  onSessionChange,
+  isOpen,
+  onClose,
+  onNewProject,
+  isConnected,
+}: SessionPickerProps) {
   const [visible, setVisible] = useState(false);
 
   // Sync with external isOpen prop
@@ -129,7 +136,9 @@ export function SessionPicker({ currentSessionId, onSessionChange, isOpen, onClo
         ? session.workingDir.replace(/\//g, '-')
         : session.name;
       const epoch = sessionGuard.beginSwitch(expectedSessionId);
-      console.log(`SessionPicker: Switching to ${session.name} (session: ${expectedSessionId}, epoch: ${epoch})`);
+      console.log(
+        `SessionPicker: Switching to ${session.name} (session: ${expectedSessionId}, epoch: ${epoch})`
+      );
 
       const response = await wsService.sendRequest('switch_tmux_session', {
         sessionName: session.name,
@@ -167,7 +176,9 @@ export function SessionPicker({ currentSessionId, onSessionChange, isOpen, onClo
       // Begin switch in sessionGuard - use encoded path as session ID
       const expectedSessionId = dirPath.replace(/\//g, '-');
       const epoch = sessionGuard.beginSwitch(expectedSessionId);
-      console.log(`SessionPicker: Creating session for ${dirPath} (session: ${expectedSessionId}, epoch: ${epoch})`);
+      console.log(
+        `SessionPicker: Creating session for ${dirPath} (session: ${expectedSessionId}, epoch: ${epoch})`
+      );
 
       const response = await wsService.sendRequest('create_tmux_session', {
         workingDir: dirPath,
@@ -245,10 +256,11 @@ export function SessionPicker({ currentSessionId, onSessionChange, isOpen, onClo
 
   // Display the folder name from workingDir, or fallback to tmux session name
   // Don't show the encoded path (currentSessionId) - it's not user-friendly
-  const displayName = currentSession?.workingDir?.split('/').pop()
-    || currentSession?.name
-    || (sessions.length > 0 ? activeSession : null)
-    || 'Sessions';
+  const displayName =
+    currentSession?.workingDir?.split('/').pop() ||
+    currentSession?.name ||
+    (sessions.length > 0 ? activeSession : null) ||
+    'Sessions';
 
   const renderSessionItem = ({ item }: { item: TmuxSessionInfo }) => {
     // Check if this is the active session by name or by encoded working dir
@@ -268,9 +280,7 @@ export function SessionPicker({ currentSessionId, onSessionChange, isOpen, onClo
         onLongPress={() => handleKillSession(item)}
       >
         <View style={styles.sessionInfo}>
-          <Text style={[styles.sessionName, isActive && styles.sessionNameActive]}>
-            {dirName}
-          </Text>
+          <Text style={[styles.sessionName, isActive && styles.sessionNameActive]}>{dirName}</Text>
           <Text style={styles.sessionPath} numberOfLines={1}>
             {item.workingDir || item.name}
           </Text>
@@ -328,9 +338,7 @@ export function SessionPicker({ currentSessionId, onSessionChange, isOpen, onClo
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>
-                {showBrowser ? 'Select Directory' : 'Sessions'}
-              </Text>
+              <Text style={styles.modalTitle}>{showBrowser ? 'Select Directory' : 'Sessions'}</Text>
               <TouchableOpacity
                 style={styles.closeButton}
                 onPress={() => {

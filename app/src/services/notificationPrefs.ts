@@ -7,7 +7,7 @@ export interface NotificationPreferences {
   instantNotify: boolean;
   quietHoursEnabled: boolean;
   quietHoursStart: string; // "HH:MM" format, e.g., "22:00"
-  quietHoursEnd: string;   // "HH:MM" format, e.g., "08:00"
+  quietHoursEnd: string; // "HH:MM" format, e.g., "08:00"
   throttleMinutes: number; // Minimum minutes between notifications (0 = no throttle)
 }
 

@@ -44,7 +44,8 @@ export function useConnection(server: Server | null) {
   return {
     connectionState,
     isConnected: connectionState.status === 'connected',
-    isConnecting: connectionState.status === 'connecting' || connectionState.status === 'reconnecting',
+    isConnecting:
+      connectionState.status === 'connecting' || connectionState.status === 'reconnecting',
     hasError: connectionState.status === 'error',
     error: connectionState.error,
     reconnectAttempts: connectionState.reconnectAttempts,

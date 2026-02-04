@@ -1,5 +1,16 @@
 import React, { useMemo, useState, useRef, memo } from 'react';
-import { View, Text, TextInput, StyleSheet, TouchableOpacity, ScrollView, Alert, LayoutAnimation, Platform, UIManager } from 'react-native';
+import {
+  View,
+  Text,
+  TextInput,
+  StyleSheet,
+  TouchableOpacity,
+  ScrollView,
+  Alert,
+  LayoutAnimation,
+  Platform,
+  UIManager,
+} from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import Markdown from '@ronradtke/react-native-markdown-display';
 import { ConversationMessage, ConversationHighlight, ToolCall, Question } from '../types';
@@ -8,7 +19,9 @@ import { scaledFont } from '../theme/fonts';
 // Detect plan file paths in content text
 const PLAN_PATH_RE = /(?:\/[^\s)>"'\]]*\.claude\/plans\/[^\s)>"'\]]+\.md|\/[^\s)>"'\]]*plan\.md)/g;
 
-export function extractPlanFilePath(item: ConversationMessage | ConversationHighlight): string | null {
+export function extractPlanFilePath(
+  item: ConversationMessage | ConversationHighlight
+): string | null {
   // Check tool call outputs for plan references
   const message = item as ConversationMessage;
   if (message.toolCalls) {
@@ -52,14 +65,39 @@ const COLLAPSED_LINES = 12;
 function getLanguageLabel(filePath: string): string | null {
   const ext = filePath.split('.').pop()?.toLowerCase();
   const map: Record<string, string> = {
-    ts: 'TypeScript', tsx: 'TypeScript React', js: 'JavaScript', jsx: 'JavaScript React',
-    py: 'Python', rs: 'Rust', go: 'Go', rb: 'Ruby', java: 'Java', kt: 'Kotlin',
-    swift: 'Swift', c: 'C', cpp: 'C++', h: 'C Header', cs: 'C#',
-    json: 'JSON', yaml: 'YAML', yml: 'YAML', toml: 'TOML', xml: 'XML',
-    html: 'HTML', css: 'CSS', scss: 'SCSS', md: 'Markdown',
-    sh: 'Shell', bash: 'Bash', zsh: 'Zsh', fish: 'Fish',
-    sql: 'SQL', graphql: 'GraphQL', proto: 'Protocol Buffers',
-    dockerfile: 'Dockerfile', makefile: 'Makefile',
+    ts: 'TypeScript',
+    tsx: 'TypeScript React',
+    js: 'JavaScript',
+    jsx: 'JavaScript React',
+    py: 'Python',
+    rs: 'Rust',
+    go: 'Go',
+    rb: 'Ruby',
+    java: 'Java',
+    kt: 'Kotlin',
+    swift: 'Swift',
+    c: 'C',
+    cpp: 'C++',
+    h: 'C Header',
+    cs: 'C#',
+    json: 'JSON',
+    yaml: 'YAML',
+    yml: 'YAML',
+    toml: 'TOML',
+    xml: 'XML',
+    html: 'HTML',
+    css: 'CSS',
+    scss: 'SCSS',
+    md: 'Markdown',
+    sh: 'Shell',
+    bash: 'Bash',
+    zsh: 'Zsh',
+    fish: 'Fish',
+    sql: 'SQL',
+    graphql: 'GraphQL',
+    proto: 'Protocol Buffers',
+    dockerfile: 'Dockerfile',
+    makefile: 'Makefile',
   };
   if (!ext) return null;
   return map[ext] || null;
@@ -92,7 +130,9 @@ function getToolSummary(tool: ToolCall): string {
       const firstStringValue = Object.values(input).find(
         (v) => typeof v === 'string' && v.length > 0 && v.length < 200
       );
-      return firstStringValue ? `${tool.name}: ${String(firstStringValue).substring(0, 60)}` : tool.name;
+      return firstStringValue
+        ? `${tool.name}: ${String(firstStringValue).substring(0, 60)}`
+        : tool.name;
     }
   }
 }
@@ -100,16 +140,26 @@ function getToolSummary(tool: ToolCall): string {
 // Get tool icon based on type
 function getToolIcon(toolName: string): string {
   switch (toolName) {
-    case 'Bash': return '⌨️';
-    case 'Read': return '📖';
-    case 'Edit': return '✏️';
-    case 'Write': return '📝';
-    case 'Glob': return '🔍';
-    case 'Grep': return '🔎';
-    case 'Task': return '🤖';
-    case 'WebFetch': return '🌐';
-    case 'WebSearch': return '🔍';
-    default: return '⚙️';
+    case 'Bash':
+      return '⌨️';
+    case 'Read':
+      return '📖';
+    case 'Edit':
+      return '✏️';
+    case 'Write':
+      return '📝';
+    case 'Glob':
+      return '🔍';
+    case 'Grep':
+      return '🔎';
+    case 'Task':
+      return '🤖';
+    case 'WebFetch':
+      return '🌐';
+    case 'WebSearch':
+      return '🔍';
+    default:
+      return '⚙️';
   }
 }
 
@@ -179,15 +229,23 @@ function PlanCard({ tool, onViewPlan }: { tool: ToolCall; onViewPlan?: () => voi
 }
 
 // Tool calls container with collapse/expand for many tools
-function ToolCallsContainer({ toolCalls, onFileTap }: { toolCalls: ToolCall[]; onFileTap?: (path: string) => void }) {
+function ToolCallsContainer({
+  toolCalls,
+  onFileTap,
+}: {
+  toolCalls: ToolCall[];
+  onFileTap?: (path: string) => void;
+}) {
   const [showAll, setShowAll] = useState(false);
   const [allExpanded, setAllExpanded] = useState<boolean | undefined>(undefined);
 
   if (toolCalls.length === 0) return null;
 
-  const completedCount = toolCalls.filter(t => t.status === 'completed').length;
-  const runningCount = toolCalls.filter(t => t.status === 'running' || t.status === 'pending').length;
-  const errorCount = toolCalls.filter(t => t.status === 'error').length;
+  const completedCount = toolCalls.filter((t) => t.status === 'completed').length;
+  const runningCount = toolCalls.filter(
+    (t) => t.status === 'running' || t.status === 'pending'
+  ).length;
+  const errorCount = toolCalls.filter((t) => t.status === 'error').length;
   const toolGroups = groupToolNames(toolCalls);
 
   const animatedSetShowAll = (value: boolean) => {
@@ -212,7 +270,8 @@ function ToolCallsContainer({ toolCalls, onFileTap }: { toolCalls: ToolCall[]; o
               {toolGroups.map((g, i) => (
                 <View key={i} style={toolGroupStyles.toolChip}>
                   <Text style={toolGroupStyles.toolChipText}>
-                    {g.name}{g.count > 1 ? ` x${g.count}` : ''}
+                    {g.name}
+                    {g.count > 1 ? ` x${g.count}` : ''}
                   </Text>
                 </View>
               ))}
@@ -220,17 +279,23 @@ function ToolCallsContainer({ toolCalls, onFileTap }: { toolCalls: ToolCall[]; o
             <View style={toolGroupStyles.summaryStats}>
               {completedCount > 0 && (
                 <View style={[toolGroupStyles.statBadge, { backgroundColor: '#065f46' }]}>
-                  <Text style={[toolGroupStyles.statText, { color: '#6ee7b7' }]}>{completedCount} done</Text>
+                  <Text style={[toolGroupStyles.statText, { color: '#6ee7b7' }]}>
+                    {completedCount} done
+                  </Text>
                 </View>
               )}
               {runningCount > 0 && (
                 <View style={[toolGroupStyles.statBadge, { backgroundColor: '#713f12' }]}>
-                  <Text style={[toolGroupStyles.statText, { color: '#fde68a' }]}>{runningCount} active</Text>
+                  <Text style={[toolGroupStyles.statText, { color: '#fde68a' }]}>
+                    {runningCount} active
+                  </Text>
                 </View>
               )}
               {errorCount > 0 && (
                 <View style={[toolGroupStyles.statBadge, { backgroundColor: '#7f1d1d' }]}>
-                  <Text style={[toolGroupStyles.statText, { color: '#fca5a5' }]}>{errorCount} error</Text>
+                  <Text style={[toolGroupStyles.statText, { color: '#fca5a5' }]}>
+                    {errorCount} error
+                  </Text>
                 </View>
               )}
             </View>
@@ -243,7 +308,9 @@ function ToolCallsContainer({ toolCalls, onFileTap }: { toolCalls: ToolCall[]; o
         {toolCalls.length > 1 && (
           <>
             {toolCalls.length > 2 && (
-              <Text style={toolGroupStyles.ellipsis}>... {toolCalls.length - 2} more tools ...</Text>
+              <Text style={toolGroupStyles.ellipsis}>
+                ... {toolCalls.length - 2} more tools ...
+              </Text>
             )}
             <ToolCard key={lastTool.id} tool={lastTool} forceExpanded={undefined} />
           </>
@@ -254,7 +321,7 @@ function ToolCallsContainer({ toolCalls, onFileTap }: { toolCalls: ToolCall[]; o
 
   const toggleAll = () => {
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-    setAllExpanded(prev => prev === true ? false : true);
+    setAllExpanded((prev) => (prev === true ? false : true));
   };
 
   return (
@@ -380,7 +447,10 @@ function WriteContentView({ filePath, content }: { filePath: string; content: st
             )}
           </ScrollView>
           {isTruncated && (
-            <TouchableOpacity style={diffStyles.showMoreButton} onPress={() => setShowAll(!showAll)}>
+            <TouchableOpacity
+              style={diffStyles.showMoreButton}
+              onPress={() => setShowAll(!showAll)}
+            >
               <Text style={diffStyles.showMoreText}>{showAll ? 'Show less' : 'Show all'}</Text>
             </TouchableOpacity>
           )}
@@ -397,8 +467,10 @@ function ToolCard({ tool, forceExpanded }: { tool: ToolCall; forceExpanded?: boo
   const summary = getToolSummary(tool);
   const icon = getToolIcon(tool.name);
   const hasOutput = tool.output && tool.output.length > 0;
-  const statusColor = tool.status === 'completed' ? '#10b981' : tool.status === 'error' ? '#ef4444' : '#f59e0b';
-  const statusText = tool.status === 'completed' ? 'done' : tool.status === 'error' ? 'error' : 'running';
+  const statusColor =
+    tool.status === 'completed' ? '#10b981' : tool.status === 'error' ? '#ef4444' : '#f59e0b';
+  const statusText =
+    tool.status === 'completed' ? 'done' : tool.status === 'error' ? 'error' : 'running';
 
   // Extract input values safely
   const input = tool.input || {};
@@ -408,9 +480,7 @@ function ToolCard({ tool, forceExpanded }: { tool: ToolCall; forceExpanded?: boo
   const newString = input.new_string ? String(input.new_string) : '';
 
   // Calculate duration if timestamps available
-  const duration = tool.startedAt
-    ? formatDuration(tool.startedAt, tool.completedAt)
-    : null;
+  const duration = tool.startedAt ? formatDuration(tool.startedAt, tool.completedAt) : null;
 
   // Get preview of output (first 2 lines)
   const outputPreview = hasOutput
@@ -436,10 +506,14 @@ function ToolCard({ tool, forceExpanded }: { tool: ToolCall; forceExpanded?: boo
         </View>
         <Text style={toolCardStyles.expandIcon}>{isExpanded ? '▼' : '▶'}</Text>
       </View>
-      <Text style={toolCardStyles.summaryLine} numberOfLines={1}>{summary}</Text>
+      <Text style={toolCardStyles.summaryLine} numberOfLines={1}>
+        {summary}
+      </Text>
       {!isExpanded && outputPreview ? (
         <View style={toolCardStyles.preview}>
-          <Text style={toolCardStyles.previewText} numberOfLines={2}>{outputPreview}</Text>
+          <Text style={toolCardStyles.previewText} numberOfLines={2}>
+            {outputPreview}
+          </Text>
         </View>
       ) : null}
 
@@ -463,7 +537,7 @@ function ToolCard({ tool, forceExpanded }: { tool: ToolCall; forceExpanded?: boo
             </View>
           ) : null}
 
-          {(tool.name === 'Edit') && filePath && oldString ? (
+          {tool.name === 'Edit' && filePath && oldString ? (
             <View style={toolCardStyles.section}>
               <View style={toolCardStyles.sectionHeader}>
                 <Text style={toolCardStyles.sectionLabel}>File:</Text>
@@ -476,24 +550,35 @@ function ToolCard({ tool, forceExpanded }: { tool: ToolCall; forceExpanded?: boo
             </View>
           ) : null}
 
-          {(tool.name === 'Write') && filePath ? (
+          {tool.name === 'Write' && filePath ? (
             <WriteContentView filePath={filePath} content={newString} />
           ) : null}
 
           {/* Generic fallback for unknown tools */}
-          {!['Bash', 'Edit', 'Write', 'Read', 'Glob', 'Grep', 'Task', 'WebFetch', 'WebSearch'].includes(tool.name) && Object.keys(tool.input || {}).length > 0 && (
-            <View style={toolCardStyles.section}>
-              <Text style={toolCardStyles.sectionLabel}>Input:</Text>
-              {Object.entries(tool.input || {}).map(([key, value]) => (
-                <View key={key} style={toolCardStyles.genericField}>
-                  <Text style={toolCardStyles.genericFieldKey}>{key}:</Text>
-                  <Text style={toolCardStyles.genericFieldValue} numberOfLines={4}>
-                    {typeof value === 'string' ? value.substring(0, 500) : JSON.stringify(value)}
-                  </Text>
-                </View>
-              ))}
-            </View>
-          )}
+          {![
+            'Bash',
+            'Edit',
+            'Write',
+            'Read',
+            'Glob',
+            'Grep',
+            'Task',
+            'WebFetch',
+            'WebSearch',
+          ].includes(tool.name) &&
+            Object.keys(tool.input || {}).length > 0 && (
+              <View style={toolCardStyles.section}>
+                <Text style={toolCardStyles.sectionLabel}>Input:</Text>
+                {Object.entries(tool.input || {}).map(([key, value]) => (
+                  <View key={key} style={toolCardStyles.genericField}>
+                    <Text style={toolCardStyles.genericFieldKey}>{key}:</Text>
+                    <Text style={toolCardStyles.genericFieldValue} numberOfLines={4}>
+                      {typeof value === 'string' ? value.substring(0, 500) : JSON.stringify(value)}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+            )}
 
           {/* Show output */}
           {hasOutput ? (
@@ -551,7 +636,9 @@ function HighlightedText({ text, term }: { text: string; term: string }) {
     <Text style={searchStyles.text}>
       {parts.map((p, i) =>
         p.match ? (
-          <Text key={i} style={searchStyles.highlight}>{p.text}</Text>
+          <Text key={i} style={searchStyles.highlight}>
+            {p.text}
+          </Text>
         ) : (
           <Text key={i}>{p.text}</Text>
         )
@@ -560,11 +647,22 @@ function HighlightedText({ text, term }: { text: string; term: string }) {
   );
 }
 
-function ConversationItemInner({ item, showToolCalls, onSelectOption, onFileTap, onMessageTap, fontScale = 1, searchTerm, isCurrentMatch }: ConversationItemProps) {
+function ConversationItemInner({
+  item,
+  showToolCalls,
+  onSelectOption,
+  onFileTap,
+  onMessageTap,
+  fontScale = 1,
+  searchTerm,
+  isCurrentMatch,
+}: ConversationItemProps) {
   const [expanded, setExpanded] = useState(false);
   const [selectedOptions, setSelectedOptions] = useState<Set<string>>(new Set());
   // Per-question selections for multi-question mode: Map<questionIndex, Set<optionLabel>>
-  const [perQuestionSelections, setPerQuestionSelections] = useState<Map<number, Set<string>>>(new Map());
+  const [perQuestionSelections, setPerQuestionSelections] = useState<Map<number, Set<string>>>(
+    new Map()
+  );
   // Per-question "Other" freetext values
   const [otherTexts, setOtherTexts] = useState<Map<number, string>>(new Map());
   // Per-question "Other" active state
@@ -576,11 +674,17 @@ function ConversationItemInner({ item, showToolCalls, onSelectOption, onFileTap,
   const hasToolCalls = showToolCalls && 'toolCalls' in message && message.toolCalls?.length;
   // Only show options if there are options AND we're actually waiting for a choice
   // (auto-approved tools will have options but isWaitingForChoice will be false)
-  const hasOptions = 'options' in message && message.options && message.options.length > 0 && message.isWaitingForChoice;
+  const hasOptions =
+    'options' in message &&
+    message.options &&
+    message.options.length > 0 &&
+    message.isWaitingForChoice;
   const isMultiSelect = 'multiSelect' in message && message.multiSelect === true;
   // Check for multiple questions
-  const allQuestions: Question[] | undefined = 'questions' in message ? (message as ConversationMessage).questions : undefined;
-  const hasMultipleQuestions = allQuestions && allQuestions.length > 1 && message.isWaitingForChoice;
+  const allQuestions: Question[] | undefined =
+    'questions' in message ? (message as ConversationMessage).questions : undefined;
+  const hasMultipleQuestions =
+    allQuestions && allQuestions.length > 1 && message.isWaitingForChoice;
 
   // Build scaled markdown styles when fontScale !== 1 (must be before early return)
   const scaledMarkdownStyles = useMemo(() => {
@@ -620,7 +724,7 @@ function ConversationItemInner({ item, showToolCalls, onSelectOption, onFileTap,
     if (!allQuestions || !hasMultipleQuestions) return false;
     for (let i = 0; i < allQuestions.length; i++) {
       if (otherActive.has(i)) {
-        if (!(otherTexts.get(i)?.trim())) return false;
+        if (!otherTexts.get(i)?.trim()) return false;
       } else {
         const selected = perQuestionSelections.get(i);
         if (!selected || selected.size === 0) return false;
@@ -636,7 +740,12 @@ function ConversationItemInner({ item, showToolCalls, onSelectOption, onFileTap,
   // Custom rules for code blocks (simple text rendering for reliability)
   const rules = useMemo(
     () => ({
-      fence: (node: { content: string; sourceInfo: string }, _children: React.ReactNode, _parent: unknown, _styles: Record<string, unknown>) => {
+      fence: (
+        node: { content: string; sourceInfo: string },
+        _children: React.ReactNode,
+        _parent: unknown,
+        _styles: Record<string, unknown>
+      ) => {
         const content = node?.content || '';
         const sourceInfo = node?.sourceInfo || '';
         return (
@@ -652,7 +761,12 @@ function ConversationItemInner({ item, showToolCalls, onSelectOption, onFileTap,
           </View>
         );
       },
-      code_block: (node: { content: string }, _children: React.ReactNode, _parent: unknown, _styles: Record<string, unknown>) => {
+      code_block: (
+        node: { content: string },
+        _children: React.ReactNode,
+        _parent: unknown,
+        _styles: Record<string, unknown>
+      ) => {
         const content = node?.content || '';
         return (
           <View key={getUniqueKey('codeblock')} style={codeBlockStyles.container}>
@@ -663,7 +777,12 @@ function ConversationItemInner({ item, showToolCalls, onSelectOption, onFileTap,
         );
       },
       // Make inline code with file paths clickable
-      code_inline: (node: { content: string }, _children: React.ReactNode, _parent: unknown, styles: Record<string, unknown>) => {
+      code_inline: (
+        node: { content: string },
+        _children: React.ReactNode,
+        _parent: unknown,
+        styles: Record<string, unknown>
+      ) => {
         const content = node?.content || '';
         if (!content) {
           return null;
@@ -671,9 +790,9 @@ function ConversationItemInner({ item, showToolCalls, onSelectOption, onFileTap,
 
         // Match absolute paths (/path/to/file), home paths (~/path), or relative paths with directory (dir/file.ext)
         const isFilePath =
-          /^\/[\w./-]+$/.test(content) ||  // Absolute path
-          content.startsWith('~/') ||       // Home path
-          /^[\w.-]+\/[\w./-]*\.\w+$/.test(content);  // Relative path with extension (docs/file.md)
+          /^\/[\w./-]+$/.test(content) || // Absolute path
+          content.startsWith('~/') || // Home path
+          /^[\w.-]+\/[\w./-]*\.\w+$/.test(content); // Relative path with extension (docs/file.md)
 
         if (isFilePath && onFileTap) {
           return (
@@ -698,14 +817,20 @@ function ConversationItemInner({ item, showToolCalls, onSelectOption, onFileTap,
   );
 
   // Skip rendering if assistant message is just "(no content)" with no tools or options
-  if (!isUser && isEmptyContent(item.content) && !hasToolCalls && !hasOptions && !hasMultipleQuestions) {
+  if (
+    !isUser &&
+    isEmptyContent(item.content) &&
+    !hasToolCalls &&
+    !hasOptions &&
+    !hasMultipleQuestions
+  ) {
     return null;
   }
 
   // Handle option selection - toggle for multi-select, immediate send for single-select
   const handleOptionPress = (label: string) => {
     if (isMultiSelect) {
-      setSelectedOptions(prev => {
+      setSelectedOptions((prev) => {
         const newSet = new Set(prev);
         if (newSet.has(label)) {
           newSet.delete(label);
@@ -720,10 +845,14 @@ function ConversationItemInner({ item, showToolCalls, onSelectOption, onFileTap,
   };
 
   // Handle per-question option selection (multi-question mode)
-  const handleQuestionOptionPress = (questionIdx: number, label: string, questionMultiSelect: boolean) => {
+  const handleQuestionOptionPress = (
+    questionIdx: number,
+    label: string,
+    questionMultiSelect: boolean
+  ) => {
     if (questionMultiSelect) {
       // Toggle in per-question set
-      setPerQuestionSelections(prev => {
+      setPerQuestionSelections((prev) => {
         const next = new Map(prev);
         const current = new Set(next.get(questionIdx) || []);
         if (current.has(label)) {
@@ -735,20 +864,20 @@ function ConversationItemInner({ item, showToolCalls, onSelectOption, onFileTap,
         return next;
       });
       // Deactivate "Other" if selecting a regular option
-      setOtherActive(prev => {
+      setOtherActive((prev) => {
         const next = new Set(prev);
         next.delete(questionIdx);
         return next;
       });
     } else {
       // Single-select: set to just this one
-      setPerQuestionSelections(prev => {
+      setPerQuestionSelections((prev) => {
         const next = new Map(prev);
         next.set(questionIdx, new Set([label]));
         return next;
       });
       // Deactivate "Other"
-      setOtherActive(prev => {
+      setOtherActive((prev) => {
         const next = new Set(prev);
         next.delete(questionIdx);
         return next;
@@ -758,7 +887,7 @@ function ConversationItemInner({ item, showToolCalls, onSelectOption, onFileTap,
 
   // Toggle "Other" freetext for a question
   const handleOtherToggle = (questionIdx: number) => {
-    setOtherActive(prev => {
+    setOtherActive((prev) => {
       const next = new Set(prev);
       if (next.has(questionIdx)) {
         next.delete(questionIdx);
@@ -766,7 +895,7 @@ function ConversationItemInner({ item, showToolCalls, onSelectOption, onFileTap,
         next.add(questionIdx);
         // Clear regular selections for single-select questions
         if (allQuestions && !allQuestions[questionIdx].multiSelect) {
-          setPerQuestionSelections(p => {
+          setPerQuestionSelections((p) => {
             const n = new Map(p);
             n.delete(questionIdx);
             return n;
@@ -846,7 +975,7 @@ function ConversationItemInner({ item, showToolCalls, onSelectOption, onFileTap,
           </Text>
           {(needsExpansion || onMessageTap) && !isUser && (
             <Text style={styles.expandHint}>
-              {onMessageTap ? 'tap to view full' : (expanded ? '▼ collapse' : '▶ expand')}
+              {onMessageTap ? 'tap to view full' : expanded ? '▼ collapse' : '▶ expand'}
             </Text>
           )}
         </View>
@@ -885,14 +1014,15 @@ function ConversationItemInner({ item, showToolCalls, onSelectOption, onFileTap,
               const qSelections = perQuestionSelections.get(qIdx) || new Set<string>();
               const isOtherActive = otherActive.has(qIdx);
               return (
-                <View key={qIdx} style={[styles.questionSection, qIdx > 0 && styles.questionSectionSpacing]}>
+                <View
+                  key={qIdx}
+                  style={[styles.questionSection, qIdx > 0 && styles.questionSectionSpacing]}
+                >
                   <View style={styles.questionHeaderChip}>
                     <Text style={styles.questionHeaderText}>{q.header}</Text>
                   </View>
                   <Text style={styles.questionText}>{q.question}</Text>
-                  {q.multiSelect && (
-                    <Text style={styles.multiSelectHint}>Select one or more:</Text>
-                  )}
+                  {q.multiSelect && <Text style={styles.multiSelectHint}>Select one or more:</Text>}
                   {q.options.map((option, oIdx) => {
                     const isSelected = !isOtherActive && qSelections.has(option.label);
                     return (
@@ -910,7 +1040,9 @@ function ConversationItemInner({ item, showToolCalls, onSelectOption, onFileTap,
                           <View style={[styles.checkbox, isSelected && styles.checkboxSelected]}>
                             {isSelected && <Text style={styles.checkmark}>✓</Text>}
                           </View>
-                          <Text style={[styles.optionLabel, isSelected && styles.optionLabelSelected]}>
+                          <Text
+                            style={[styles.optionLabel, isSelected && styles.optionLabelSelected]}
+                          >
                             {option.label}
                           </Text>
                         </View>
@@ -934,7 +1066,9 @@ function ConversationItemInner({ item, showToolCalls, onSelectOption, onFileTap,
                       <View style={[styles.checkbox, isOtherActive && styles.checkboxSelected]}>
                         {isOtherActive && <Text style={styles.checkmark}>✓</Text>}
                       </View>
-                      <Text style={[styles.optionLabel, isOtherActive && styles.optionLabelSelected]}>
+                      <Text
+                        style={[styles.optionLabel, isOtherActive && styles.optionLabelSelected]}
+                      >
                         Other
                       </Text>
                     </View>
@@ -945,11 +1079,13 @@ function ConversationItemInner({ item, showToolCalls, onSelectOption, onFileTap,
                       placeholder="Type your answer..."
                       placeholderTextColor="#6b7280"
                       value={otherTexts.get(qIdx) || ''}
-                      onChangeText={(text) => setOtherTexts(prev => {
-                        const next = new Map(prev);
-                        next.set(qIdx, text);
-                        return next;
-                      })}
+                      onChangeText={(text) =>
+                        setOtherTexts((prev) => {
+                          const next = new Map(prev);
+                          next.set(qIdx, text);
+                          return next;
+                        })
+                      }
                       autoFocus
                     />
                   )}
@@ -957,75 +1093,78 @@ function ConversationItemInner({ item, showToolCalls, onSelectOption, onFileTap,
               );
             })}
             <TouchableOpacity
-              style={[
-                styles.submitButton,
-                !multiQuestionReady && styles.submitButtonDisabled,
-              ]}
+              style={[styles.submitButton, !multiQuestionReady && styles.submitButtonDisabled]}
               onPress={handleMultiQuestionSubmit}
               disabled={!multiQuestionReady}
               activeOpacity={0.7}
             >
-              <Text style={[
-                styles.submitButtonText,
-                !multiQuestionReady && styles.submitButtonTextDisabled,
-              ]}>
+              <Text
+                style={[
+                  styles.submitButtonText,
+                  !multiQuestionReady && styles.submitButtonTextDisabled,
+                ]}
+              >
                 Submit Answers
               </Text>
             </TouchableOpacity>
           </View>
-        ) : hasOptions && (
-          <View style={styles.optionsContainer}>
-            {isMultiSelect && (
-              <Text style={styles.multiSelectHint}>Select one or more options:</Text>
-            )}
-            {message.options!.map((option, index) => {
-              const isSelected = selectedOptions.has(option.label);
-              return (
+        ) : (
+          hasOptions && (
+            <View style={styles.optionsContainer}>
+              {isMultiSelect && (
+                <Text style={styles.multiSelectHint}>Select one or more options:</Text>
+              )}
+              {message.options!.map((option, index) => {
+                const isSelected = selectedOptions.has(option.label);
+                return (
+                  <TouchableOpacity
+                    key={index}
+                    style={[
+                      styles.optionButton,
+                      index > 0 && styles.optionButtonSpacing,
+                      isMultiSelect && isSelected && styles.optionButtonSelected,
+                    ]}
+                    onPress={() => handleOptionPress(option.label)}
+                    activeOpacity={0.7}
+                  >
+                    <View style={styles.optionLabelRow}>
+                      {isMultiSelect && (
+                        <View style={[styles.checkbox, isSelected && styles.checkboxSelected]}>
+                          {isSelected && <Text style={styles.checkmark}>✓</Text>}
+                        </View>
+                      )}
+                      <Text style={[styles.optionLabel, isSelected && styles.optionLabelSelected]}>
+                        {option.label}
+                      </Text>
+                    </View>
+                    {option.description && (
+                      <Text style={styles.optionDescription}>{option.description}</Text>
+                    )}
+                  </TouchableOpacity>
+                );
+              })}
+              {isMultiSelect && (
                 <TouchableOpacity
-                  key={index}
                   style={[
-                    styles.optionButton,
-                    index > 0 && styles.optionButtonSpacing,
-                    isMultiSelect && isSelected && styles.optionButtonSelected,
+                    styles.submitButton,
+                    selectedOptions.size === 0 && styles.submitButtonDisabled,
                   ]}
-                  onPress={() => handleOptionPress(option.label)}
+                  onPress={handleMultiSelectSubmit}
+                  disabled={selectedOptions.size === 0}
                   activeOpacity={0.7}
                 >
-                  <View style={styles.optionLabelRow}>
-                    {isMultiSelect && (
-                      <View style={[styles.checkbox, isSelected && styles.checkboxSelected]}>
-                        {isSelected && <Text style={styles.checkmark}>✓</Text>}
-                      </View>
-                    )}
-                    <Text style={[styles.optionLabel, isSelected && styles.optionLabelSelected]}>
-                      {option.label}
-                    </Text>
-                  </View>
-                  {option.description && (
-                    <Text style={styles.optionDescription}>{option.description}</Text>
-                  )}
+                  <Text
+                    style={[
+                      styles.submitButtonText,
+                      selectedOptions.size === 0 && styles.submitButtonTextDisabled,
+                    ]}
+                  >
+                    Submit ({selectedOptions.size} selected)
+                  </Text>
                 </TouchableOpacity>
-              );
-            })}
-            {isMultiSelect && (
-              <TouchableOpacity
-                style={[
-                  styles.submitButton,
-                  selectedOptions.size === 0 && styles.submitButtonDisabled,
-                ]}
-                onPress={handleMultiSelectSubmit}
-                disabled={selectedOptions.size === 0}
-                activeOpacity={0.7}
-              >
-                <Text style={[
-                  styles.submitButtonText,
-                  selectedOptions.size === 0 && styles.submitButtonTextDisabled,
-                ]}>
-                  Submit ({selectedOptions.size} selected)
-                </Text>
-              </TouchableOpacity>
-            )}
-          </View>
+              )}
+            </View>
+          )
         )}
         {hasToolCalls && (
           <ToolCallsContainer toolCalls={message.toolCalls!} onFileTap={onFileTap} />
@@ -1849,10 +1988,10 @@ export const ConversationItem = memo(ConversationItemInner, (prevProps, nextProp
     prevProps.isCurrentMatch === nextProps.isCurrentMatch &&
     // For messages with options, check if options changed
     ('options' in prevProps.item ? prevProps.item.options : undefined) ===
-    ('options' in nextProps.item ? nextProps.item.options : undefined) &&
+      ('options' in nextProps.item ? nextProps.item.options : undefined) &&
     ('questions' in prevProps.item ? prevProps.item.questions : undefined) ===
-    ('questions' in nextProps.item ? nextProps.item.questions : undefined) &&
+      ('questions' in nextProps.item ? nextProps.item.questions : undefined) &&
     ('isWaitingForChoice' in prevProps.item ? prevProps.item.isWaitingForChoice : undefined) ===
-    ('isWaitingForChoice' in nextProps.item ? nextProps.item.isWaitingForChoice : undefined)
+      ('isWaitingForChoice' in nextProps.item ? nextProps.item.isWaitingForChoice : undefined)
   );
 });

@@ -3,32 +3,32 @@
 
 // === Core Backgrounds ===
 export const bg = {
-  primary: '#111827',       // Main app background
-  card: '#1f2937',          // Standard card background
-  cardTinted: '#111c33',    // Blue-tinted card background
-  cardPurple: '#1a1033',    // Purple-tinted card background
-  subtle: '#374151',        // Tertiary elements, borders
-  element: '#4b5563',       // Lighter subtle elements
-  terminal: '#0d1117',      // Terminal background (GitHub dark)
+  primary: '#111827', // Main app background
+  card: '#1f2937', // Standard card background
+  cardTinted: '#111c33', // Blue-tinted card background
+  cardPurple: '#1a1033', // Purple-tinted card background
+  subtle: '#374151', // Tertiary elements, borders
+  element: '#4b5563', // Lighter subtle elements
+  terminal: '#0d1117', // Terminal background (GitHub dark)
   terminalHeader: '#161b22',
   terminalBorder: '#21262d',
 };
 
 // === Text Colors ===
 export const text = {
-  primary: '#f3f4f6',       // Main text
-  secondary: '#d1d5db',     // Secondary text
-  muted: '#9ca3af',         // Muted/tertiary text
-  dim: '#6b7280',           // Very subtle text
-  accent: '#60a5fa',        // Blue accent text
-  accentPurple: '#a78bfa',  // Purple accent text
+  primary: '#f3f4f6', // Main text
+  secondary: '#d1d5db', // Secondary text
+  muted: '#9ca3af', // Muted/tertiary text
+  dim: '#6b7280', // Very subtle text
+  accent: '#60a5fa', // Blue accent text
+  accentPurple: '#a78bfa', // Purple accent text
 };
 
 // === Borders ===
 export const border = {
-  default: '#374151',       // Standard border
-  accent: '#3b4f8a',        // Blue-tinted border for accent cards
-  subtle: '#4b5563',        // Subtle borders
+  default: '#374151', // Standard border
+  accent: '#3b4f8a', // Blue-tinted border for accent cards
+  subtle: '#4b5563', // Subtle borders
 };
 
 // === Accent Colors ===
@@ -59,14 +59,14 @@ export const status = {
 
 // === Semantic Backgrounds ===
 export const semantic = {
-  blueBg: '#1e3a5f',        // Active/processing background
-  purpleBg: '#2e1065',      // Purple zone background
-  greenBg: '#14532d',       // Success/agents background
-  greenBgAlt: '#065f46',    // Alternative green bg
-  greenBgDark: '#0f291f',   // Very dark green
-  redBg: '#7f1d1d',         // Error/danger background
-  redBorder: '#991b1b',     // Error border
-  amberBg: '#78350f',       // Warning background
+  blueBg: '#1e3a5f', // Active/processing background
+  purpleBg: '#2e1065', // Purple zone background
+  greenBg: '#14532d', // Success/agents background
+  greenBgAlt: '#065f46', // Alternative green bg
+  greenBgDark: '#0f291f', // Very dark green
+  redBg: '#7f1d1d', // Error/danger background
+  redBorder: '#991b1b', // Error border
+  amberBg: '#78350f', // Warning background
 };
 
 // === Gradient Configs (for LinearGradient) ===

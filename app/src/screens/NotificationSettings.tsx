@@ -137,7 +137,12 @@ function TimePicker({
                     style={[pickerStyles.option, hour === h && pickerStyles.optionSelected]}
                     onPress={() => setHour(h)}
                   >
-                    <Text style={[pickerStyles.optionText, hour === h && pickerStyles.optionTextSelected]}>
+                    <Text
+                      style={[
+                        pickerStyles.optionText,
+                        hour === h && pickerStyles.optionTextSelected,
+                      ]}
+                    >
                       {formatHour(h)}
                     </Text>
                   </TouchableOpacity>
@@ -154,7 +159,12 @@ function TimePicker({
                     style={[pickerStyles.option, minute === m && pickerStyles.optionSelected]}
                     onPress={() => setMinute(m)}
                   >
-                    <Text style={[pickerStyles.optionText, minute === m && pickerStyles.optionTextSelected]}>
+                    <Text
+                      style={[
+                        pickerStyles.optionText,
+                        minute === m && pickerStyles.optionTextSelected,
+                      ]}
+                    >
                       :{m.toString().padStart(2, '0')}
                     </Text>
                   </TouchableOpacity>
@@ -202,10 +212,18 @@ function OptionPicker({
             {options.map((option) => (
               <TouchableOpacity
                 key={option.value}
-                style={[pickerStyles.listOption, value === option.value && pickerStyles.optionSelected]}
+                style={[
+                  pickerStyles.listOption,
+                  value === option.value && pickerStyles.optionSelected,
+                ]}
                 onPress={() => onSelect(option.value)}
               >
-                <Text style={[pickerStyles.optionText, value === option.value && pickerStyles.optionTextSelected]}>
+                <Text
+                  style={[
+                    pickerStyles.optionText,
+                    value === option.value && pickerStyles.optionTextSelected,
+                  ]}
+                >
                   {option.label}
                 </Text>
               </TouchableOpacity>
@@ -386,16 +404,18 @@ export function NotificationSettings({ onBack }: NotificationSettingsProps) {
 
             <View style={styles.card}>
               <Text style={styles.cardTitle}>Event Types</Text>
-              {(['waiting_for_input', 'error_detected', 'session_completed'] as const).map((evt) => (
-                <View key={evt} style={styles.settingRow}>
-                  <Text style={styles.settingLabel}>{EVENT_TYPE_LABELS[evt] || evt}</Text>
-                  <Switch
-                    value={config.events[evt]}
-                    onValueChange={(v) => handleEventToggle(evt, v)}
-                    trackColor={{ false: '#374151', true: '#3b82f6' }}
-                  />
-                </View>
-              ))}
+              {(['waiting_for_input', 'error_detected', 'session_completed'] as const).map(
+                (evt) => (
+                  <View key={evt} style={styles.settingRow}>
+                    <Text style={styles.settingLabel}>{EVENT_TYPE_LABELS[evt] || evt}</Text>
+                    <Switch
+                      value={config.events[evt]}
+                      onValueChange={(v) => handleEventToggle(evt, v)}
+                      trackColor={{ false: '#374151', true: '#3b82f6' }}
+                    />
+                  </View>
+                )
+              )}
             </View>
 
             <TouchableOpacity style={styles.card} onPress={() => setShowDelayPicker(true)}>
@@ -432,9 +452,7 @@ export function NotificationSettings({ onBack }: NotificationSettingsProps) {
               <View style={styles.settingRow}>
                 <View style={styles.settingInfo}>
                   <Text style={styles.settingLabel}>Quiet Hours</Text>
-                  <Text style={styles.settingDescription}>
-                    Suppress push during set hours
-                  </Text>
+                  <Text style={styles.settingDescription}>Suppress push during set hours</Text>
                 </View>
                 <Switch
                   value={config.quietHours.enabled}
@@ -444,12 +462,18 @@ export function NotificationSettings({ onBack }: NotificationSettingsProps) {
               </View>
               {config.quietHours.enabled && (
                 <View style={styles.timeRow}>
-                  <TouchableOpacity style={styles.timeButton} onPress={() => setShowStartPicker(true)}>
+                  <TouchableOpacity
+                    style={styles.timeButton}
+                    onPress={() => setShowStartPicker(true)}
+                  >
                     <Text style={styles.timeLabel}>From</Text>
                     <Text style={styles.timeValue}>{formatTime(config.quietHours.start)}</Text>
                   </TouchableOpacity>
                   <Text style={styles.timeSeparator}>to</Text>
-                  <TouchableOpacity style={styles.timeButton} onPress={() => setShowEndPicker(true)}>
+                  <TouchableOpacity
+                    style={styles.timeButton}
+                    onPress={() => setShowEndPicker(true)}
+                  >
                     <Text style={styles.timeLabel}>Until</Text>
                     <Text style={styles.timeValue}>{formatTime(config.quietHours.end)}</Text>
                   </TouchableOpacity>
@@ -472,7 +496,8 @@ export function NotificationSettings({ onBack }: NotificationSettingsProps) {
             <View key={device.deviceId} style={styles.card}>
               <Text style={styles.deviceId}>{device.deviceId}</Text>
               <Text style={styles.settingDescription}>
-                Registered {new Date(device.registeredAt).toLocaleDateString()} | Last seen {formatRelative(device.lastSeen)}
+                Registered {new Date(device.registeredAt).toLocaleDateString()} | Last seen{' '}
+                {formatRelative(device.lastSeen)}
               </Text>
             </View>
           ))
@@ -494,10 +519,19 @@ export function NotificationSettings({ onBack }: NotificationSettingsProps) {
           history.slice(0, 10).map((entry) => (
             <View key={entry.id} style={styles.card}>
               <View style={styles.historyHeader}>
-                <View style={[styles.badge, { backgroundColor: EVENT_TYPE_COLORS[entry.eventType] || '#374151' }]}>
-                  <Text style={styles.badgeText}>{EVENT_TYPE_LABELS[entry.eventType] || entry.eventType}</Text>
+                <View
+                  style={[
+                    styles.badge,
+                    { backgroundColor: EVENT_TYPE_COLORS[entry.eventType] || '#374151' },
+                  ]}
+                >
+                  <Text style={styles.badgeText}>
+                    {EVENT_TYPE_LABELS[entry.eventType] || entry.eventType}
+                  </Text>
                 </View>
-                <View style={[styles.badge, { backgroundColor: TIER_COLORS[entry.tier] || '#374151' }]}>
+                <View
+                  style={[styles.badge, { backgroundColor: TIER_COLORS[entry.tier] || '#374151' }]}
+                >
                   <Text style={styles.badgeText}>{entry.tier}</Text>
                 </View>
                 {entry.acknowledged && (
@@ -507,25 +541,19 @@ export function NotificationSettings({ onBack }: NotificationSettingsProps) {
                 )}
                 <Text style={styles.timestampText}>{formatRelative(entry.timestamp)}</Text>
               </View>
-              <Text style={styles.previewText} numberOfLines={2}>{entry.preview}</Text>
+              <Text style={styles.previewText} numberOfLines={2}>
+                {entry.preview}
+              </Text>
             </View>
           ))
         )}
 
         <View style={styles.helpSection}>
           <Text style={styles.helpTitle}>How it works</Text>
-          <Text style={styles.helpText}>
-            1. Event occurs (waiting, error, completed)
-          </Text>
-          <Text style={styles.helpText}>
-            2. Browser notification fires immediately
-          </Text>
-          <Text style={styles.helpText}>
-            3. If unacknowledged after delay, push sent to phone
-          </Text>
-          <Text style={styles.helpText}>
-            4. Viewing session or sending input cancels push
-          </Text>
+          <Text style={styles.helpText}>1. Event occurs (waiting, error, completed)</Text>
+          <Text style={styles.helpText}>2. Browser notification fires immediately</Text>
+          <Text style={styles.helpText}>3. If unacknowledged after delay, push sent to phone</Text>
+          <Text style={styles.helpText}>4. Viewing session or sending input cancels push</Text>
         </View>
       </ScrollView>
 

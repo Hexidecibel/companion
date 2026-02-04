@@ -1,11 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  TouchableOpacity,
-  Alert,
-} from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Alert } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 
 export interface QRConfig {
@@ -48,10 +42,14 @@ export function QRScanner({ onScan, onClose }: QRScannerProps) {
 
       onScan(config);
     } catch {
-      Alert.alert('Invalid QR Code', 'Could not parse the QR code. Make sure you are scanning a Companion setup QR code.', [
-        { text: 'Try Again', onPress: () => setScanned(false) },
-        { text: 'Cancel', onPress: onClose },
-      ]);
+      Alert.alert(
+        'Invalid QR Code',
+        'Could not parse the QR code. Make sure you are scanning a Companion setup QR code.',
+        [
+          { text: 'Try Again', onPress: () => setScanned(false) },
+          { text: 'Cancel', onPress: onClose },
+        ]
+      );
     }
   };
 
@@ -67,9 +65,7 @@ export function QRScanner({ onScan, onClose }: QRScannerProps) {
     return (
       <View style={styles.container}>
         <Text style={styles.title}>Camera Permission Required</Text>
-        <Text style={styles.message}>
-          To scan QR codes, please grant camera access.
-        </Text>
+        <Text style={styles.message}>To scan QR codes, please grant camera access.</Text>
         <TouchableOpacity style={styles.button} onPress={requestPermission}>
           <Text style={styles.buttonText}>Grant Permission</Text>
         </TouchableOpacity>
@@ -104,12 +100,8 @@ export function QRScanner({ onScan, onClose }: QRScannerProps) {
           </View>
 
           <View style={styles.footer}>
-            <Text style={styles.instruction}>
-              Point the camera at the QR code on your server
-            </Text>
-            <Text style={styles.hint}>
-              Visit http://your-server:9877 to see the QR code
-            </Text>
+            <Text style={styles.instruction}>Point the camera at the QR code on your server</Text>
+            <Text style={styles.hint}>Visit http://your-server:9877 to see the QR code</Text>
           </View>
         </View>
       </CameraView>

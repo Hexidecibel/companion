@@ -8,7 +8,11 @@ interface StatusIndicatorProps {
   onReconnect?: () => void;
 }
 
-export function StatusIndicator({ connectionState, isWaitingForInput, onReconnect }: StatusIndicatorProps) {
+export function StatusIndicator({
+  connectionState,
+  isWaitingForInput,
+  onReconnect,
+}: StatusIndicatorProps) {
   const getStatusColor = () => {
     switch (connectionState.status) {
       case 'connected':
@@ -38,7 +42,8 @@ export function StatusIndicator({ connectionState, isWaitingForInput, onReconnec
     }
   };
 
-  const showReconnectButton = connectionState.status === 'error' || connectionState.status === 'disconnected';
+  const showReconnectButton =
+    connectionState.status === 'error' || connectionState.status === 'disconnected';
 
   return (
     <View style={styles.container}>

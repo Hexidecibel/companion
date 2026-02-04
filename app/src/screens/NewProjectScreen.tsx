@@ -85,7 +85,9 @@ export function NewProjectScreen({ onBack, onComplete }: NewProjectScreenProps) 
     try {
       const config: ProjectConfig = {
         name: projectName,
-        description: projectDescription || `A ${templates.find(t => t.id === selectedTemplate)?.name} project`,
+        description:
+          projectDescription ||
+          `A ${templates.find((t) => t.id === selectedTemplate)?.name} project`,
         location, // Server will expand ~ to home directory
         stackId: selectedTemplate,
         options: {
@@ -132,11 +134,21 @@ export function NewProjectScreen({ onBack, onComplete }: NewProjectScreenProps) 
         error: err instanceof Error ? err.message : 'Unknown error',
       });
     }
-  }, [projectName, projectDescription, selectedTemplate, location, initGit, createGitHubRepo, privateRepo, templates]);
+  }, [
+    projectName,
+    projectDescription,
+    selectedTemplate,
+    location,
+    initGit,
+    createGitHubRepo,
+    privateRepo,
+    templates,
+  ]);
 
   const renderStepIndicator = () => {
     const steps = ['Details', 'Template', 'Options'];
-    const currentIndex = step === 'details' ? 0 : step === 'template' ? 1 : step === 'options' ? 2 : 2;
+    const currentIndex =
+      step === 'details' ? 0 : step === 'template' ? 1 : step === 'options' ? 2 : 2;
 
     return (
       <View style={styles.stepIndicator}>
@@ -147,9 +159,7 @@ export function NewProjectScreen({ onBack, onComplete }: NewProjectScreenProps) 
                 {i + 1}
               </Text>
             </View>
-            <Text style={[styles.stepLabel, i <= currentIndex && styles.stepLabelActive]}>
-              {s}
-            </Text>
+            <Text style={[styles.stepLabel, i <= currentIndex && styles.stepLabelActive]}>{s}</Text>
           </View>
         ))}
       </View>
@@ -215,7 +225,10 @@ export function NewProjectScreen({ onBack, onComplete }: NewProjectScreenProps) 
       ) : error ? (
         <View style={styles.errorBox}>
           <Text style={styles.errorText}>{error}</Text>
-          <TouchableOpacity style={styles.retryButton} onPress={() => loadTemplates(projectDescription)}>
+          <TouchableOpacity
+            style={styles.retryButton}
+            onPress={() => loadTemplates(projectDescription)}
+          >
             <Text style={styles.retryButtonText}>Retry</Text>
           </TouchableOpacity>
         </View>
@@ -242,15 +255,18 @@ export function NewProjectScreen({ onBack, onComplete }: NewProjectScreenProps) 
                     <Text style={styles.recommendedText}>Recommended</Text>
                   </View>
                 )}
-                {selectedTemplate === template.id && (
-                  <Text style={styles.checkmark}>✓</Text>
-                )}
+                {selectedTemplate === template.id && <Text style={styles.checkmark}>✓</Text>}
               </View>
               <Text style={styles.templateDescription}>{template.description}</Text>
               {template.score != null && template.score > 0 && (
                 <View style={styles.scoreBarContainer}>
                   <View style={styles.scoreBar}>
-                    <View style={[styles.scoreBarFill, { width: `${Math.round(template.score * 100)}%` }]} />
+                    <View
+                      style={[
+                        styles.scoreBarFill,
+                        { width: `${Math.round(template.score * 100)}%` },
+                      ]}
+                    />
                   </View>
                   <Text style={styles.scoreLabel}>{Math.round(template.score * 100)}% match</Text>
                 </View>
@@ -299,7 +315,8 @@ export function NewProjectScreen({ onBack, onComplete }: NewProjectScreenProps) 
           autoCorrect={false}
         />
         <Text style={styles.inputHint}>
-          Project will be created at: {location}/{projectName.toLowerCase().replace(/[^a-z0-9-]/g, '-')}
+          Project will be created at: {location}/
+          {projectName.toLowerCase().replace(/[^a-z0-9-]/g, '-')}
         </Text>
       </View>
 
@@ -352,7 +369,7 @@ export function NewProjectScreen({ onBack, onComplete }: NewProjectScreenProps) 
         <View style={styles.summaryRow}>
           <Text style={styles.summaryLabel}>Template:</Text>
           <Text style={styles.summaryValue}>
-            {templates.find(t => t.id === selectedTemplate)?.name}
+            {templates.find((t) => t.id === selectedTemplate)?.name}
           </Text>
         </View>
         <View style={styles.summaryRow}>
@@ -381,13 +398,9 @@ export function NewProjectScreen({ onBack, onComplete }: NewProjectScreenProps) 
   const renderCreatingStep = () => (
     <View style={styles.creatingContainer}>
       <ActivityIndicator size="large" color="#3b82f6" />
-      <Text style={styles.creatingTitle}>
-        {progress?.error ? 'Error' : 'Creating Project...'}
-      </Text>
+      <Text style={styles.creatingTitle}>{progress?.error ? 'Error' : 'Creating Project...'}</Text>
       <Text style={styles.creatingStep}>{progress?.step}</Text>
-      {progress?.detail && (
-        <Text style={styles.creatingDetail}>{progress.detail}</Text>
-      )}
+      {progress?.detail && <Text style={styles.creatingDetail}>{progress.detail}</Text>}
       {!progress?.error && (
         <View style={styles.progressBar}>
           <View style={[styles.progressFill, { width: `${progress?.progress || 0}%` }]} />
@@ -410,12 +423,12 @@ export function NewProjectScreen({ onBack, onComplete }: NewProjectScreenProps) 
       <View style={styles.filesCreated}>
         <Text style={styles.filesTitle}>Files created:</Text>
         {result?.filesCreated.slice(0, 8).map((file) => (
-          <Text key={file} style={styles.fileName}>• {file}</Text>
+          <Text key={file} style={styles.fileName}>
+            • {file}
+          </Text>
         ))}
         {(result?.filesCreated.length || 0) > 8 && (
-          <Text style={styles.filesMore}>
-            +{(result?.filesCreated.length || 0) - 8} more files
-          </Text>
+          <Text style={styles.filesMore}>+{(result?.filesCreated.length || 0) - 8} more files</Text>
         )}
       </View>
 
@@ -435,7 +448,12 @@ export function NewProjectScreen({ onBack, onComplete }: NewProjectScreenProps) 
 
   return (
     <View style={styles.container}>
-      <LinearGradient colors={['#1a2744', '#1f1a3d']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.header}>
+      <LinearGradient
+        colors={['#1a2744', '#1f1a3d']}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 0 }}
+        style={styles.header}
+      >
         <TouchableOpacity onPress={onBack} style={styles.backButton}>
           <Text style={styles.backButtonText}>‹ Back</Text>
         </TouchableOpacity>

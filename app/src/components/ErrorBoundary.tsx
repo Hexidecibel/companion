@@ -146,9 +146,7 @@ export class ErrorBoundary extends Component<Props, State> {
           </ScrollView>
 
           <View style={styles.footer}>
-            {sent && (
-              <Text style={styles.sentText}>Error sent to daemon</Text>
-            )}
+            {sent && <Text style={styles.sentText}>Error sent to daemon</Text>}
 
             <Text style={styles.feedbackLabel}>What were you doing when this happened?</Text>
             <TextInput

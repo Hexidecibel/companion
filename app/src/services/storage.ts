@@ -15,8 +15,7 @@ export interface SessionSettings {
   showAgentsBar: boolean;
 }
 
-const DEFAULT_SETTINGS: AppSettings = {
-};
+const DEFAULT_SETTINGS: AppSettings = {};
 
 export async function getServers(): Promise<Server[]> {
   try {
@@ -102,7 +101,10 @@ export async function getSessionSettings(serverId: string): Promise<SessionSetti
   return DEFAULT_SESSION_SETTINGS;
 }
 
-export async function saveSessionSettings(serverId: string, settings: SessionSettings): Promise<void> {
+export async function saveSessionSettings(
+  serverId: string,
+  settings: SessionSettings
+): Promise<void> {
   try {
     const json = await AsyncStorage.getItem(SESSION_SETTINGS_KEY);
     const all = json ? JSON.parse(json) : {};

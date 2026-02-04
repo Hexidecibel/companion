@@ -10,21 +10,22 @@ let cachedConnected = false;
 
 export function useMultiServerStatus(servers: Server[]) {
   // Use the first enabled server - don't connect to disabled servers
-  const server = servers.find(s => s.enabled !== false) || null;
+  const server = servers.find((s) => s.enabled !== false) || null;
 
-  const makeStatus = useCallback((connected: boolean, connecting: boolean, error?: string): ServerStatus => ({
-    serverId: server?.id || '',
-    serverName: server?.name || '',
-    connected,
-    connecting,
-    error,
-    summary: cachedSummary,
-    lastUpdated: Date.now(),
-  }), [server?.id, server?.name]);
-
-  const [status, setStatus] = useState<ServerStatus>(() =>
-    makeStatus(cachedConnected, false)
+  const makeStatus = useCallback(
+    (connected: boolean, connecting: boolean, error?: string): ServerStatus => ({
+      serverId: server?.id || '',
+      serverName: server?.name || '',
+      connected,
+      connecting,
+      error,
+      summary: cachedSummary,
+      lastUpdated: Date.now(),
+    }),
+    [server?.id, server?.name]
   );
+
+  const [status, setStatus] = useState<ServerStatus>(() => makeStatus(cachedConnected, false));
 
   const pollTimer = useRef<NodeJS.Timeout | null>(null);
 
@@ -32,14 +33,17 @@ export function useMultiServerStatus(servers: Server[]) {
   const pollSummary = useCallback(() => {
     if (!wsService.isConnected()) return;
 
-    wsService.sendRequest('get_server_summary', undefined, 10000)
-      .then(response => {
+    wsService
+      .sendRequest('get_server_summary', undefined, 10000)
+      .then((response) => {
         if (response.success && response.payload) {
           cachedSummary = response.payload as ServerSummary;
-          setStatus(prev => ({ ...prev, summary: cachedSummary, lastUpdated: Date.now() }));
+          setStatus((prev) => ({ ...prev, summary: cachedSummary, lastUpdated: Date.now() }));
         }
       })
-      .catch(() => { /* silent fail on poll */ });
+      .catch(() => {
+        /* silent fail on poll */
+      });
   }, []);
 
   // Single effect: connect, track state, and poll
@@ -99,18 +103,24 @@ export function useMultiServerStatus(servers: Server[]) {
   }, [server?.id, server?.name, pollSummary]);
 
   // Refresh
-  const refreshServer = useCallback((_serverId: string) => {
-    pollSummary();
-  }, [pollSummary]);
+  const refreshServer = useCallback(
+    (_serverId: string) => {
+      pollSummary();
+    },
+    [pollSummary]
+  );
 
   const refreshAll = useCallback(() => {
     pollSummary();
   }, [pollSummary]);
 
   // Send a request through wsService
-  const sendRequest = useCallback((_serverId: string, type: string, payload?: unknown): Promise<any> => {
-    return wsService.sendRequest(type, payload);
-  }, []);
+  const sendRequest = useCallback(
+    (_serverId: string, type: string, payload?: unknown): Promise<any> => {
+      return wsService.sendRequest(type, payload);
+    },
+    []
+  );
 
   const statusArray = server ? [status] : [];
   const totalWaiting = status.summary?.waitingCount || 0;

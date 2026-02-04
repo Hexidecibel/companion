@@ -10,7 +10,14 @@ interface SearchBarProps {
   onClose: () => void;
 }
 
-export function SearchBar({ onSearch, matchCount, currentMatch, onNext, onPrev, onClose }: SearchBarProps) {
+export function SearchBar({
+  onSearch,
+  matchCount,
+  currentMatch,
+  onNext,
+  onPrev,
+  onClose,
+}: SearchBarProps) {
   const [value, setValue] = useState('');
   const inputRef = useRef<TextInput>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -25,13 +32,16 @@ export function SearchBar({ onSearch, matchCount, currentMatch, onNext, onPrev, 
     };
   }, []);
 
-  const handleChange = useCallback((text: string) => {
-    setValue(text);
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => {
-      onSearch(text.trim());
-    }, 150);
-  }, [onSearch]);
+  const handleChange = useCallback(
+    (text: string) => {
+      setValue(text);
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      debounceRef.current = setTimeout(() => {
+        onSearch(text.trim());
+      }, 150);
+    },
+    [onSearch]
+  );
 
   const handleSubmit = useCallback(() => {
     onNext();

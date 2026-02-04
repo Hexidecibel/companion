@@ -28,21 +28,38 @@ function classifyContent(fileName: string, content: string): 'markdown' | 'diff'
   const ext = fileName.split('.').pop()?.toLowerCase();
   if (ext === 'md' || ext === 'mdx' || ext === 'markdown') return 'markdown';
   if (ext === 'diff' || ext === 'patch') return 'diff';
-  if (content.startsWith('diff --git ') || content.startsWith('--- a/') || content.startsWith('Index: ')) return 'diff';
+  if (
+    content.startsWith('diff --git ') ||
+    content.startsWith('--- a/') ||
+    content.startsWith('Index: ')
+  )
+    return 'diff';
   return 'code';
 }
 
 function DiffLine({ line }: { line: string }) {
   let color = '#e5e7eb';
   let bg = 'transparent';
-  if (line.startsWith('@@')) { color = '#93c5fd'; bg = 'rgba(59, 130, 246, 0.1)'; }
-  else if (line.startsWith('+++ ') || line.startsWith('--- ') || line.startsWith('diff --git') || line.startsWith('index ') || line.startsWith('Index: ')) { color = '#9ca3af'; }
-  else if (line.startsWith('+')) { color = '#86efac'; bg = 'rgba(16, 185, 129, 0.1)'; }
-  else if (line.startsWith('-')) { color = '#fca5a5'; bg = 'rgba(239, 68, 68, 0.1)'; }
+  if (line.startsWith('@@')) {
+    color = '#93c5fd';
+    bg = 'rgba(59, 130, 246, 0.1)';
+  } else if (
+    line.startsWith('+++ ') ||
+    line.startsWith('--- ') ||
+    line.startsWith('diff --git') ||
+    line.startsWith('index ') ||
+    line.startsWith('Index: ')
+  ) {
+    color = '#9ca3af';
+  } else if (line.startsWith('+')) {
+    color = '#86efac';
+    bg = 'rgba(16, 185, 129, 0.1)';
+  } else if (line.startsWith('-')) {
+    color = '#fca5a5';
+    bg = 'rgba(239, 68, 68, 0.1)';
+  }
 
-  return (
-    <Text style={[diffStyles.line, { color, backgroundColor: bg }]}>{line || ' '}</Text>
-  );
+  return <Text style={[diffStyles.line, { color, backgroundColor: bg }]}>{line || ' '}</Text>;
 }
 
 const diffStyles = StyleSheet.create({
@@ -63,7 +80,9 @@ function CodeView({ content }: { content: string }) {
       {lines.map((line, i) => (
         <View key={i} style={codeStyles.row}>
           <Text style={[codeStyles.lineNum, { width: gutterWidth }]}>{i + 1}</Text>
-          <Text style={codeStyles.lineContent} selectable>{line || ' '}</Text>
+          <Text style={codeStyles.lineContent} selectable>
+            {line || ' '}
+          </Text>
         </View>
       ))}
     </View>
@@ -100,17 +119,65 @@ const codeStyles = StyleSheet.create({
 
 const mdStyles = StyleSheet.create({
   body: { color: '#e5e7eb', fontSize: 14, lineHeight: 22 },
-  heading1: { color: '#f3f4f6', fontSize: 22, fontWeight: '700', marginTop: 16, marginBottom: 8, borderBottomWidth: 1, borderBottomColor: '#374151', paddingBottom: 6 },
-  heading2: { color: '#f3f4f6', fontSize: 18, fontWeight: '600', marginTop: 14, marginBottom: 6, borderBottomWidth: 1, borderBottomColor: '#374151', paddingBottom: 4 },
+  heading1: {
+    color: '#f3f4f6',
+    fontSize: 22,
+    fontWeight: '700',
+    marginTop: 16,
+    marginBottom: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#374151',
+    paddingBottom: 6,
+  },
+  heading2: {
+    color: '#f3f4f6',
+    fontSize: 18,
+    fontWeight: '600',
+    marginTop: 14,
+    marginBottom: 6,
+    borderBottomWidth: 1,
+    borderBottomColor: '#374151',
+    paddingBottom: 4,
+  },
   heading3: { color: '#f3f4f6', fontSize: 16, fontWeight: '600', marginTop: 12, marginBottom: 4 },
   heading4: { color: '#f3f4f6', fontSize: 14, fontWeight: '600', marginTop: 10, marginBottom: 4 },
   paragraph: { marginTop: 4, marginBottom: 4 },
   strong: { fontWeight: '700', color: '#f3f4f6' },
   em: { fontStyle: 'italic' },
-  code_inline: { fontFamily: 'monospace', backgroundColor: '#1f2937', color: '#e5e7eb', paddingHorizontal: 4, borderRadius: 3, fontSize: 13 },
-  code_block: { fontFamily: 'monospace', backgroundColor: '#0d1117', color: '#e5e7eb', padding: 12, borderRadius: 6, fontSize: 12, lineHeight: 18, marginVertical: 6 },
-  fence: { fontFamily: 'monospace', backgroundColor: '#0d1117', color: '#e5e7eb', padding: 12, borderRadius: 6, fontSize: 12, lineHeight: 18, marginVertical: 6 },
-  blockquote: { borderLeftWidth: 3, borderLeftColor: '#4b5563', paddingLeft: 12, marginVertical: 6 },
+  code_inline: {
+    fontFamily: 'monospace',
+    backgroundColor: '#1f2937',
+    color: '#e5e7eb',
+    paddingHorizontal: 4,
+    borderRadius: 3,
+    fontSize: 13,
+  },
+  code_block: {
+    fontFamily: 'monospace',
+    backgroundColor: '#0d1117',
+    color: '#e5e7eb',
+    padding: 12,
+    borderRadius: 6,
+    fontSize: 12,
+    lineHeight: 18,
+    marginVertical: 6,
+  },
+  fence: {
+    fontFamily: 'monospace',
+    backgroundColor: '#0d1117',
+    color: '#e5e7eb',
+    padding: 12,
+    borderRadius: 6,
+    fontSize: 12,
+    lineHeight: 18,
+    marginVertical: 6,
+  },
+  blockquote: {
+    borderLeftWidth: 3,
+    borderLeftColor: '#4b5563',
+    paddingLeft: 12,
+    marginVertical: 6,
+  },
   link: { color: '#60a5fa' },
   list_item: { marginVertical: 2 },
   bullet_list: { marginVertical: 4 },
@@ -130,8 +197,8 @@ export function FileViewer({ filePath, onClose, onFileTap }: FileViewerProps) {
 
   const fileName = filePath?.split('/').pop() || '';
   const extension = fileName.split('.').pop()?.toLowerCase() || '';
-  const isDownloadable = DOWNLOADABLE_EXTENSIONS.some(ext =>
-    fileName.toLowerCase().endsWith(`.${ext}`) || extension === ext
+  const isDownloadable = DOWNLOADABLE_EXTENSIONS.some(
+    (ext) => fileName.toLowerCase().endsWith(`.${ext}`) || extension === ext
   );
   const isApk = extension === 'apk';
 
@@ -192,7 +259,9 @@ export function FileViewer({ filePath, onClose, onFileTap }: FileViewerProps) {
         data: string;
       };
 
-      setDownloadProgress(`Saving ${payload.fileName} (${Math.round(payload.size / 1024 / 1024)}MB)...`);
+      setDownloadProgress(
+        `Saving ${payload.fileName} (${Math.round(payload.size / 1024 / 1024)}MB)...`
+      );
 
       const localUri = `${FileSystem.cacheDirectory}${payload.fileName}`;
       await FileSystem.writeAsStringAsync(localUri, payload.data, {
@@ -202,28 +271,24 @@ export function FileViewer({ filePath, onClose, onFileTap }: FileViewerProps) {
       setDownloadProgress(null);
 
       if (isApk && Platform.OS === 'android') {
-        Alert.alert(
-          'Install APK',
-          `${payload.fileName} downloaded. Install now?`,
-          [
-            { text: 'Cancel', style: 'cancel' },
-            {
-              text: 'Install',
-              onPress: async () => {
-                try {
-                  const contentUri = await FileSystem.getContentUriAsync(localUri);
-                  await IntentLauncher.startActivityAsync('android.intent.action.VIEW', {
-                    data: contentUri,
-                    flags: 1,
-                    type: 'application/vnd.android.package-archive',
-                  });
-                } catch (installErr) {
-                  Alert.alert('Install Error', String(installErr));
-                }
-              },
+        Alert.alert('Install APK', `${payload.fileName} downloaded. Install now?`, [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Install',
+            onPress: async () => {
+              try {
+                const contentUri = await FileSystem.getContentUriAsync(localUri);
+                await IntentLauncher.startActivityAsync('android.intent.action.VIEW', {
+                  data: contentUri,
+                  flags: 1,
+                  type: 'application/vnd.android.package-archive',
+                });
+              } catch (installErr) {
+                Alert.alert('Install Error', String(installErr));
+              }
             },
-          ]
-        );
+          },
+        ]);
       } else {
         Alert.alert('Downloaded', `File saved to cache:\n${localUri}`);
       }
@@ -248,12 +313,7 @@ export function FileViewer({ filePath, onClose, onFileTap }: FileViewerProps) {
   };
 
   return (
-    <Modal
-      visible={!!filePath}
-      transparent
-      animationType="slide"
-      onRequestClose={onClose}
-    >
+    <Modal visible={!!filePath} transparent animationType="slide" onRequestClose={onClose}>
       <View style={styles.overlay}>
         <View style={styles.container}>
           <View style={styles.header}>
@@ -281,25 +341,17 @@ export function FileViewer({ filePath, onClose, onFileTap }: FileViewerProps) {
               {error ? (
                 <View style={styles.downloadError}>
                   <Text style={styles.errorText}>{error}</Text>
-                  <TouchableOpacity
-                    style={styles.retryButton}
-                    onPress={handleDownload}
-                  >
+                  <TouchableOpacity style={styles.retryButton} onPress={handleDownload}>
                     <Text style={styles.retryButtonText}>Retry</Text>
                   </TouchableOpacity>
                 </View>
               ) : downloading ? (
                 <View style={styles.downloadingState}>
                   <ActivityIndicator size="large" color="#3b82f6" />
-                  <Text style={styles.downloadingText}>
-                    {downloadProgress || 'Downloading...'}
-                  </Text>
+                  <Text style={styles.downloadingText}>{downloadProgress || 'Downloading...'}</Text>
                 </View>
               ) : (
-                <TouchableOpacity
-                  style={styles.downloadButton}
-                  onPress={handleDownload}
-                >
+                <TouchableOpacity style={styles.downloadButton} onPress={handleDownload}>
                   <Text style={styles.downloadButtonText}>
                     {isApk && Platform.OS === 'android' ? 'Download & Install' : 'Download'}
                   </Text>

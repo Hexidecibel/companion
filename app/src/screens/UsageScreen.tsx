@@ -125,11 +125,7 @@ export function UsageScreen({ onBack }: UsageScreenProps) {
         style={styles.content}
         contentContainerStyle={styles.contentContainer}
         refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={onRefresh}
-            tintColor="#3b82f6"
-          />
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#3b82f6" />
         }
       >
         {error ? (
@@ -143,18 +139,17 @@ export function UsageScreen({ onBack }: UsageScreenProps) {
           <>
             {/* Weekly Warning */}
             {weeklyWarning !== 'none' && (
-              <View style={[
-                styles.warningBanner,
-                weeklyWarning === 'critical' ? styles.warningCritical : styles.warningAmber
-              ]}>
-                <Text style={styles.warningIcon}>
-                  {weeklyWarning === 'critical' ? '⚠️' : '⏳'}
-                </Text>
+              <View
+                style={[
+                  styles.warningBanner,
+                  weeklyWarning === 'critical' ? styles.warningCritical : styles.warningAmber,
+                ]}
+              >
+                <Text style={styles.warningIcon}>{weeklyWarning === 'critical' ? '⚠️' : '⏳'}</Text>
                 <Text style={styles.warningText}>
                   {weeklyWarning === 'critical'
                     ? `Approaching weekly limit (${weeklyPercentage.toFixed(0)}%)`
-                    : `${weeklyPercentage.toFixed(0)}% of weekly limit used`
-                  }
+                    : `${weeklyPercentage.toFixed(0)}% of weekly limit used`}
                 </Text>
               </View>
             )}
@@ -173,8 +168,8 @@ export function UsageScreen({ onBack }: UsageScreenProps) {
                       styles.progressBar,
                       {
                         width: `${weeklyPercentage}%`,
-                        backgroundColor: getBarColor(weeklyPercentage)
-                      }
+                        backgroundColor: getBarColor(weeklyPercentage),
+                      },
                     ]}
                   />
                 </View>
@@ -196,7 +191,9 @@ export function UsageScreen({ onBack }: UsageScreenProps) {
                   <View style={styles.tokenRow}>
                     <View style={[styles.tokenDot, { backgroundColor: '#06b6d4' }]} />
                     <Text style={styles.tokenLabel}>Cache Read</Text>
-                    <Text style={styles.tokenValue}>{formatNumber(usage.totalCacheReadTokens)}</Text>
+                    <Text style={styles.tokenValue}>
+                      {formatNumber(usage.totalCacheReadTokens)}
+                    </Text>
                   </View>
                 </View>
               </View>
@@ -211,16 +208,26 @@ export function UsageScreen({ onBack }: UsageScreenProps) {
                 </View>
               ) : (
                 usage.sessions
-                  .sort((a, b) => (b.totalInputTokens + b.totalOutputTokens) - (a.totalInputTokens + a.totalOutputTokens))
+                  .sort(
+                    (a, b) =>
+                      b.totalInputTokens +
+                      b.totalOutputTokens -
+                      (a.totalInputTokens + a.totalOutputTokens)
+                  )
                   .map((session, index) => {
                     const sessionTotal = session.totalInputTokens + session.totalOutputTokens;
-                    const sessionPercentage = Math.min((sessionTotal / SESSION_TOKEN_LIMIT) * 100, 100);
+                    const sessionPercentage = Math.min(
+                      (sessionTotal / SESSION_TOKEN_LIMIT) * 100,
+                      100
+                    );
                     const sessionWarning = getWarningLevel(sessionPercentage);
 
                     return (
                       <View key={session.sessionId || index} style={styles.sessionCard}>
                         <View style={styles.sessionHeader}>
-                          <Text style={styles.sessionName} numberOfLines={1}>{session.sessionName}</Text>
+                          <Text style={styles.sessionName} numberOfLines={1}>
+                            {session.sessionName}
+                          </Text>
                           {sessionWarning !== 'none' && (
                             <Text style={styles.sessionWarningBadge}>
                               {sessionWarning === 'critical' ? '⚠️' : '⏳'}
@@ -233,8 +240,8 @@ export function UsageScreen({ onBack }: UsageScreenProps) {
                               styles.sessionBar,
                               {
                                 width: `${sessionPercentage}%`,
-                                backgroundColor: getBarColor(sessionPercentage)
-                              }
+                                backgroundColor: getBarColor(sessionPercentage),
+                              },
                             ]}
                           />
                         </View>
@@ -257,8 +264,8 @@ export function UsageScreen({ onBack }: UsageScreenProps) {
             <View style={styles.section}>
               <View style={styles.infoBox}>
                 <Text style={styles.infoText}>
-                  Token counts are from conversation files. Limits are approximate
-                  and may vary based on your plan.
+                  Token counts are from conversation files. Limits are approximate and may vary
+                  based on your plan.
                 </Text>
               </View>
             </View>

@@ -78,9 +78,7 @@ function formatRelativeTime(timestamp: number): string {
 
 function TaskStatusDot({ status }: { status: TaskItem['status'] }) {
   const color =
-    status === 'completed' ? '#10b981' :
-    status === 'in_progress' ? '#3b82f6' :
-    '#6b7280';
+    status === 'completed' ? '#10b981' : status === 'in_progress' ? '#3b82f6' : '#6b7280';
   return <View style={[styles.taskStatusDot, { backgroundColor: color }]} />;
 }
 
@@ -121,12 +119,14 @@ function ServerCard({
   useEffect(() => {
     if (!sendRequest || !status.connected) return;
     const fetchGroups = () => {
-      sendRequest(server.id, 'get_work_groups').then(response => {
-        if (response.success && response.payload) {
-          const groups = (response.payload as { groups: WorkGroup[] }).groups || [];
-          setWorkGroups(groups.filter(g => g.status === 'active' || g.status === 'merging'));
-        }
-      }).catch(() => {});
+      sendRequest(server.id, 'get_work_groups')
+        .then((response) => {
+          if (response.success && response.payload) {
+            const groups = (response.payload as { groups: WorkGroup[] }).groups || [];
+            setWorkGroups(groups.filter((g) => g.status === 'active' || g.status === 'merging'));
+          }
+        })
+        .catch(() => {});
     };
     fetchGroups();
     const timer = setInterval(fetchGroups, 5000);
@@ -153,138 +153,172 @@ function ServerCard({
     return ids;
   }, [workGroups]);
 
-  const handleWorkGroupSendInput = useCallback(async (groupId: string, workerId: string, text: string) => {
-    if (!sendRequest) return;
-    await sendRequest(server.id, 'send_worker_input', { groupId, workerId, text });
-  }, [server.id, sendRequest]);
+  const handleWorkGroupSendInput = useCallback(
+    async (groupId: string, workerId: string, text: string) => {
+      if (!sendRequest) return;
+      await sendRequest(server.id, 'send_worker_input', { groupId, workerId, text });
+    },
+    [server.id, sendRequest]
+  );
 
-  const handleWorkGroupMerge = useCallback(async (groupId: string) => {
-    if (!sendRequest) return;
-    const response = await sendRequest(server.id, 'merge_work_group', { groupId });
-    if (!response.success) {
-      Alert.alert('Merge Failed', response.error || 'Unknown error');
-    }
-  }, [server.id, sendRequest]);
+  const handleWorkGroupMerge = useCallback(
+    async (groupId: string) => {
+      if (!sendRequest) return;
+      const response = await sendRequest(server.id, 'merge_work_group', { groupId });
+      if (!response.success) {
+        Alert.alert('Merge Failed', response.error || 'Unknown error');
+      }
+    },
+    [server.id, sendRequest]
+  );
 
-  const handleWorkGroupCancel = useCallback(async (groupId: string) => {
-    if (!sendRequest) return;
-    await sendRequest(server.id, 'cancel_work_group', { groupId });
-  }, [server.id, sendRequest]);
+  const handleWorkGroupCancel = useCallback(
+    async (groupId: string) => {
+      if (!sendRequest) return;
+      await sendRequest(server.id, 'cancel_work_group', { groupId });
+    },
+    [server.id, sendRequest]
+  );
 
-  const handleWorkGroupRetry = useCallback(async (groupId: string, workerId: string) => {
-    if (!sendRequest) return;
-    await sendRequest(server.id, 'retry_worker', { groupId, workerId });
-  }, [server.id, sendRequest]);
+  const handleWorkGroupRetry = useCallback(
+    async (groupId: string, workerId: string) => {
+      if (!sendRequest) return;
+      await sendRequest(server.id, 'retry_worker', { groupId, workerId });
+    },
+    [server.id, sendRequest]
+  );
 
-  const handleCreateSession = useCallback(async (workingDir: string, startSession: boolean) => {
-    if (!sendRequest) return;
-    const response = await sendRequest(server.id, 'create_tmux_session', { workingDir, startCli: startSession });
-    if (!response.success) {
-      throw new Error(response.error || 'Failed to create session');
-    }
-    onRefresh?.();
-  }, [server.id, sendRequest, onRefresh]);
+  const handleCreateSession = useCallback(
+    async (workingDir: string, startSession: boolean) => {
+      if (!sendRequest) return;
+      const response = await sendRequest(server.id, 'create_tmux_session', {
+        workingDir,
+        startCli: startSession,
+      });
+      if (!response.success) {
+        throw new Error(response.error || 'Failed to create session');
+      }
+      onRefresh?.();
+    },
+    [server.id, sendRequest, onRefresh]
+  );
 
-  const handleCreateWorktree = useCallback(async (parentDir: string, branch: string, startSession: boolean) => {
-    if (!sendRequest) return;
-    const response = await sendRequest(server.id, 'create_worktree_session', {
-      parentDir,
-      branch: branch || undefined,
-      startCli: startSession,
-    });
-    if (!response.success) {
-      throw new Error(response.error || 'Failed to create worktree session');
-    }
-    onRefresh?.();
-  }, [server.id, sendRequest, onRefresh]);
+  const handleCreateWorktree = useCallback(
+    async (parentDir: string, branch: string, startSession: boolean) => {
+      if (!sendRequest) return;
+      const response = await sendRequest(server.id, 'create_worktree_session', {
+        parentDir,
+        branch: branch || undefined,
+        startCli: startSession,
+      });
+      if (!response.success) {
+        throw new Error(response.error || 'Failed to create worktree session');
+      }
+      onRefresh?.();
+    },
+    [server.id, sendRequest, onRefresh]
+  );
 
   const fetchRecents = useCallback(async () => {
     if (!sendRequest) return [];
     try {
       const response = await sendRequest(server.id, 'list_tmux_sessions');
       if (response.success && response.payload) {
-        const payload = response.payload as { sessions: Array<{ name: string; workingDir?: string }> };
+        const payload = response.payload as {
+          sessions: Array<{ name: string; workingDir?: string }>;
+        };
         return (payload.sessions || [])
           .filter((s: any) => s.workingDir)
           .map((s: any) => ({ name: s.name, workingDir: s.workingDir }));
       }
-    } catch { /* ignore fetch errors */ }
+    } catch {
+      /* ignore fetch errors */
+    }
     return [];
   }, [server.id, sendRequest]);
 
-  const fetchTasks = useCallback(async (sessionId: string) => {
-    if (!sendRequest) return;
-    setLoadingTasks(prev => new Set(prev).add(sessionId));
-    try {
-      const response = await sendRequest(server.id, 'get_tasks', { sessionId });
-      if (response.success && response.payload) {
-        const tasks = (response.payload as { tasks: TaskItem[] }).tasks || [];
-        setTasksBySession(prev => {
-          const next = new Map(prev);
-          next.set(sessionId, tasks);
+  const fetchTasks = useCallback(
+    async (sessionId: string) => {
+      if (!sendRequest) return;
+      setLoadingTasks((prev) => new Set(prev).add(sessionId));
+      try {
+        const response = await sendRequest(server.id, 'get_tasks', { sessionId });
+        if (response.success && response.payload) {
+          const tasks = (response.payload as { tasks: TaskItem[] }).tasks || [];
+          setTasksBySession((prev) => {
+            const next = new Map(prev);
+            next.set(sessionId, tasks);
+            return next;
+          });
+        }
+      } catch (err) {
+        console.error('Failed to fetch tasks:', err);
+      } finally {
+        setLoadingTasks((prev) => {
+          const next = new Set(prev);
+          next.delete(sessionId);
           return next;
         });
       }
-    } catch (err) {
-      console.error('Failed to fetch tasks:', err);
-    } finally {
-      setLoadingTasks(prev => {
+    },
+    [server.id, sendRequest]
+  );
+
+  const handleKillSession = useCallback(
+    (sessionName: string) => {
+      Alert.alert(
+        'Kill Session',
+        `Kill session "${sessionName}"? This will terminate the coding process.`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Kill',
+            style: 'destructive',
+            onPress: async () => {
+              if (!sendRequest) return;
+              try {
+                const response = await sendRequest(server.id, 'kill_tmux_session', { sessionName });
+                if (response.success) {
+                  onRefresh?.();
+                } else {
+                  Alert.alert('Error', response.error || 'Failed to kill session');
+                }
+              } catch (err) {
+                Alert.alert('Error', 'Failed to kill session');
+              }
+            },
+          },
+        ]
+      );
+    },
+    [server.id, sendRequest, onRefresh]
+  );
+
+  const toggleTaskExpansion = useCallback(
+    (sessionId: string) => {
+      setExpandedSessions((prev) => {
         const next = new Set(prev);
-        next.delete(sessionId);
+        if (next.has(sessionId)) {
+          next.delete(sessionId);
+        } else {
+          next.add(sessionId);
+          if (!tasksBySession.has(sessionId)) {
+            fetchTasks(sessionId);
+          }
+        }
         return next;
       });
-    }
-  }, [server.id, sendRequest]);
-
-  const handleKillSession = useCallback((sessionName: string) => {
-    Alert.alert(
-      'Kill Session',
-      `Kill session "${sessionName}"? This will terminate the coding process.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Kill',
-          style: 'destructive',
-          onPress: async () => {
-            if (!sendRequest) return;
-            try {
-              const response = await sendRequest(server.id, 'kill_tmux_session', { sessionName });
-              if (response.success) {
-                onRefresh?.();
-              } else {
-                Alert.alert('Error', response.error || 'Failed to kill session');
-              }
-            } catch (err) {
-              Alert.alert('Error', 'Failed to kill session');
-            }
-          },
-        },
-      ]
-    );
-  }, [server.id, sendRequest, onRefresh]);
-
-  const toggleTaskExpansion = useCallback((sessionId: string) => {
-    setExpandedSessions(prev => {
-      const next = new Set(prev);
-      if (next.has(sessionId)) {
-        next.delete(sessionId);
-      } else {
-        next.add(sessionId);
-        if (!tasksBySession.has(sessionId)) {
-          fetchTasks(sessionId);
-        }
-      }
-      return next;
-    });
-  }, [tasksBySession, fetchTasks]);
+    },
+    [tasksBySession, fetchTasks]
+  );
   const isEnabled = server.enabled !== false;
   const connectionColor = !isEnabled
     ? '#6b7280'
     : status.connected
-    ? '#10b981'
-    : status.connecting
-    ? '#f59e0b'
-    : '#ef4444';
+      ? '#10b981'
+      : status.connecting
+        ? '#f59e0b'
+        : '#ef4444';
 
   const hasSessions = (status.summary?.sessions.length ?? 0) > 0;
 
@@ -297,7 +331,9 @@ function ServerCard({
     >
       <View style={styles.serverHeader}>
         <View style={[styles.connectionDot, { backgroundColor: connectionColor }]} />
-        <Text style={[styles.serverName, !isEnabled && styles.serverNameDisabled]}>{server.name}</Text>
+        <Text style={[styles.serverName, !isEnabled && styles.serverNameDisabled]}>
+          {server.name}
+        </Text>
         {status.summary && status.summary.waitingCount > 0 && (
           <View style={styles.badge}>
             <Text style={styles.badgeText}>{status.summary.waitingCount}</Text>
@@ -331,16 +367,14 @@ function ServerCard({
         </View>
       )}
 
-      {status.error && !status.connecting && (
-        <Text style={styles.errorText}>{status.error}</Text>
-      )}
+      {status.error && !status.connecting && <Text style={styles.errorText}>{status.error}</Text>}
 
       {status.connected && status.summary && (
         <View style={styles.sessionsContainer}>
           {/* Work Groups */}
           {workGroups.length > 0 && (
             <View style={styles.workGroupsContainer}>
-              {workGroups.map(group => (
+              {workGroups.map((group) => (
                 <WorkGroupCard
                   key={group.id}
                   group={group}
@@ -358,112 +392,138 @@ function ServerCard({
             <Text style={styles.noSessionsText}>No active sessions</Text>
           ) : (
             sortSessions(status.summary.sessions)
-              .filter(s => !workerSessionIds.has(s.id))
-              .slice(0, 5).map((session) => (
-              <TouchableOpacity
-                key={session.id}
-                style={[styles.sessionRow, session.status === 'idle' && styles.sessionRowIdle]}
-                onPress={() => onSessionPress(session.id)}
-                activeOpacity={0.7}
-              >
-                <SessionStatusIcon status={session.status} />
-                <View style={styles.sessionInfo}>
-                  <View style={styles.sessionHeader}>
-                    <Text style={[styles.sessionName, session.status === 'idle' && styles.sessionNameIdle]} numberOfLines={1}>
-                      {session.name}
-                      {foremanSessionIds.has(session.id) && (
-                        <Text style={styles.foremanLabel}> (foreman)</Text>
-                      )}
-                    </Text>
-                    <Text style={styles.sessionTime}>
-                      {formatRelativeTime(session.lastActivity)}
-                    </Text>
-                    <TouchableOpacity
-                      style={styles.killButton}
-                      onPress={() => handleKillSession(session.name)}
-                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                    >
-                      <Text style={styles.killButtonText}>x</Text>
-                    </TouchableOpacity>
-                  </View>
-                  <Text style={styles.sessionPath} numberOfLines={1}>
-                    {session.projectPath}
-                  </Text>
-                  {session.currentActivity && (
-                    <Text style={styles.sessionActivity} numberOfLines={1}>
-                      {session.currentActivity}
-                    </Text>
-                  )}
-                  {session.taskSummary && session.taskSummary.total > 0 && (
-                    <>
-                      <TouchableOpacity
-                        style={styles.taskBar}
-                        onPress={() => toggleTaskExpansion(session.id)}
-                        activeOpacity={0.7}
+              .filter((s) => !workerSessionIds.has(s.id))
+              .slice(0, 5)
+              .map((session) => (
+                <TouchableOpacity
+                  key={session.id}
+                  style={[styles.sessionRow, session.status === 'idle' && styles.sessionRowIdle]}
+                  onPress={() => onSessionPress(session.id)}
+                  activeOpacity={0.7}
+                >
+                  <SessionStatusIcon status={session.status} />
+                  <View style={styles.sessionInfo}>
+                    <View style={styles.sessionHeader}>
+                      <Text
+                        style={[
+                          styles.sessionName,
+                          session.status === 'idle' && styles.sessionNameIdle,
+                        ]}
+                        numberOfLines={1}
                       >
-                        <View style={styles.taskProgress}>
-                          <View style={[styles.taskProgressFill, {
-                            flex: session.taskSummary.completed,
-                            backgroundColor: '#8b5cf6',
-                          }]} />
-                          <View style={[styles.taskProgressFill, {
-                            flex: session.taskSummary.inProgress,
-                            backgroundColor: '#3b82f6',
-                          }]} />
-                          <View style={[styles.taskProgressFill, {
-                            flex: session.taskSummary.pending,
-                            backgroundColor: '#374151',
-                          }]} />
-                        </View>
-                        <View style={styles.taskLabelRow}>
-                          <Text style={styles.taskLabel}>
-                            {session.taskSummary.completed}/{session.taskSummary.total} tasks
-                            {session.taskSummary.activeTask ? ` - ${session.taskSummary.activeTask}` : ''}
-                          </Text>
-                          <Text style={styles.taskChevron}>
-                            {expandedSessions.has(session.id) ? '\u25B4' : '\u25BE'}
-                          </Text>
-                        </View>
+                        {session.name}
+                        {foremanSessionIds.has(session.id) && (
+                          <Text style={styles.foremanLabel}> (foreman)</Text>
+                        )}
+                      </Text>
+                      <Text style={styles.sessionTime}>
+                        {formatRelativeTime(session.lastActivity)}
+                      </Text>
+                      <TouchableOpacity
+                        style={styles.killButton}
+                        onPress={() => handleKillSession(session.name)}
+                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                      >
+                        <Text style={styles.killButtonText}>x</Text>
                       </TouchableOpacity>
-                      {expandedSessions.has(session.id) && (
-                        <View style={styles.expandedTasks}>
-                          {loadingTasks.has(session.id) ? (
-                            <ActivityIndicator size="small" color="#3b82f6" style={{ paddingVertical: 8 }} />
-                          ) : (
-                            (tasksBySession.get(session.id) || []).map((task) => (
-                              <TouchableOpacity
-                                key={task.id}
-                                style={styles.taskRow}
-                                onPress={() => onOpenTaskDetail?.(task, session.id)}
-                                activeOpacity={0.7}
-                              >
-                                <TaskStatusDot status={task.status} />
-                                <View style={styles.taskInfo}>
-                                  <Text style={styles.taskSubject} numberOfLines={1}>
-                                    {task.subject}
-                                  </Text>
-                                  {task.status === 'in_progress' && task.activeForm && (
-                                    <Text style={styles.taskActiveForm} numberOfLines={1}>
-                                      {task.activeForm}
+                    </View>
+                    <Text style={styles.sessionPath} numberOfLines={1}>
+                      {session.projectPath}
+                    </Text>
+                    {session.currentActivity && (
+                      <Text style={styles.sessionActivity} numberOfLines={1}>
+                        {session.currentActivity}
+                      </Text>
+                    )}
+                    {session.taskSummary && session.taskSummary.total > 0 && (
+                      <>
+                        <TouchableOpacity
+                          style={styles.taskBar}
+                          onPress={() => toggleTaskExpansion(session.id)}
+                          activeOpacity={0.7}
+                        >
+                          <View style={styles.taskProgress}>
+                            <View
+                              style={[
+                                styles.taskProgressFill,
+                                {
+                                  flex: session.taskSummary.completed,
+                                  backgroundColor: '#8b5cf6',
+                                },
+                              ]}
+                            />
+                            <View
+                              style={[
+                                styles.taskProgressFill,
+                                {
+                                  flex: session.taskSummary.inProgress,
+                                  backgroundColor: '#3b82f6',
+                                },
+                              ]}
+                            />
+                            <View
+                              style={[
+                                styles.taskProgressFill,
+                                {
+                                  flex: session.taskSummary.pending,
+                                  backgroundColor: '#374151',
+                                },
+                              ]}
+                            />
+                          </View>
+                          <View style={styles.taskLabelRow}>
+                            <Text style={styles.taskLabel}>
+                              {session.taskSummary.completed}/{session.taskSummary.total} tasks
+                              {session.taskSummary.activeTask
+                                ? ` - ${session.taskSummary.activeTask}`
+                                : ''}
+                            </Text>
+                            <Text style={styles.taskChevron}>
+                              {expandedSessions.has(session.id) ? '\u25B4' : '\u25BE'}
+                            </Text>
+                          </View>
+                        </TouchableOpacity>
+                        {expandedSessions.has(session.id) && (
+                          <View style={styles.expandedTasks}>
+                            {loadingTasks.has(session.id) ? (
+                              <ActivityIndicator
+                                size="small"
+                                color="#3b82f6"
+                                style={{ paddingVertical: 8 }}
+                              />
+                            ) : (
+                              (tasksBySession.get(session.id) || []).map((task) => (
+                                <TouchableOpacity
+                                  key={task.id}
+                                  style={styles.taskRow}
+                                  onPress={() => onOpenTaskDetail?.(task, session.id)}
+                                  activeOpacity={0.7}
+                                >
+                                  <TaskStatusDot status={task.status} />
+                                  <View style={styles.taskInfo}>
+                                    <Text style={styles.taskSubject} numberOfLines={1}>
+                                      {task.subject}
                                     </Text>
-                                  )}
-                                </View>
-                                <Text style={styles.taskRowChevron}>{'\u203A'}</Text>
-                              </TouchableOpacity>
-                            ))
-                          )}
-                        </View>
-                      )}
-                    </>
-                  )}
-                </View>
-              </TouchableOpacity>
-            ))
+                                    {task.status === 'in_progress' && task.activeForm && (
+                                      <Text style={styles.taskActiveForm} numberOfLines={1}>
+                                        {task.activeForm}
+                                      </Text>
+                                    )}
+                                  </View>
+                                  <Text style={styles.taskRowChevron}>{'\u203A'}</Text>
+                                </TouchableOpacity>
+                              ))
+                            )}
+                          </View>
+                        )}
+                      </>
+                    )}
+                  </View>
+                </TouchableOpacity>
+              ))
           )}
           {status.summary.sessions.length > 5 && (
-            <Text style={styles.moreText}>
-              +{status.summary.sessions.length - 5} more
-            </Text>
+            <Text style={styles.moreText}>+{status.summary.sessions.length - 5} more</Text>
           )}
         </View>
       )}
@@ -552,7 +612,12 @@ export function DashboardScreen({
 
   return (
     <View style={styles.container}>
-      <LinearGradient colors={['#1a2744', '#1f1a3d']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.header}>
+      <LinearGradient
+        colors={['#1a2744', '#1f1a3d']}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 0 }}
+        style={styles.header}
+      >
         <Text style={styles.headerTitle}>Companion</Text>
         <TouchableOpacity style={styles.headerButton} onPress={onOpenSetup}>
           <Text style={styles.headerButtonText}>?</Text>
@@ -562,7 +627,9 @@ export function DashboardScreen({
       {/* Summary bar */}
       <View style={styles.summaryBar}>
         <View style={styles.summaryItem}>
-          <Text style={styles.summaryValue}>{connectedCount}/{servers.length}</Text>
+          <Text style={styles.summaryValue}>
+            {connectedCount}/{servers.length}
+          </Text>
           <Text style={styles.summaryLabel}>Connected</Text>
         </View>
         <View style={styles.summaryDivider} />
@@ -583,11 +650,7 @@ export function DashboardScreen({
         style={styles.content}
         contentContainerStyle={styles.contentContainer}
         refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={handleRefresh}
-            tintColor="#3b82f6"
-          />
+          <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor="#3b82f6" />
         }
       >
         {servers.length === 0 ? (
@@ -629,7 +692,11 @@ export function DashboardScreen({
                   }}
                   onNewProject={onOpenNewProject}
                   sendRequest={resolvedSendRequest}
-                  onOpenTaskDetail={onOpenTaskDetail ? (task, sessionId) => onOpenTaskDetail(server, sessionId, task) : undefined}
+                  onOpenTaskDetail={
+                    onOpenTaskDetail
+                      ? (task, sessionId) => onOpenTaskDetail(server, sessionId, task)
+                      : undefined
+                  }
                   onRefresh={() => refreshServer(server.id)}
                 />
               );

@@ -42,7 +42,13 @@ interface SessionViewProps {
   onOpenTerminal?: (sessionName: string) => void;
 }
 
-export function SessionView({ server, onBack, initialSessionId, onNewProject, onOpenTerminal }: SessionViewProps) {
+export function SessionView({
+  server,
+  onBack,
+  initialSessionId,
+  onNewProject,
+  onOpenTerminal,
+}: SessionViewProps) {
   const { connectionState, isConnected, isConnecting, reconnect } = useConnection(server);
   const {
     highlights,
@@ -83,24 +89,27 @@ export function SessionView({ server, onBack, initialSessionId, onNewProject, on
   const isLoadingMoreRef = useRef(false);
 
   // Track scroll position to show/hide scroll button and trigger load-more
-  const handleScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
-    const { layoutMeasurement, contentOffset, contentSize } = event.nativeEvent;
-    const distanceFromBottom = contentSize.height - layoutMeasurement.height - contentOffset.y;
-    isNearBottom.current = distanceFromBottom < 100;
-    setShowScrollButton(distanceFromBottom > 150);
-    if (isNearBottom.current) {
-      setHasNewMessages(false);
-    }
+  const handleScroll = useCallback(
+    (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+      const { layoutMeasurement, contentOffset, contentSize } = event.nativeEvent;
+      const distanceFromBottom = contentSize.height - layoutMeasurement.height - contentOffset.y;
+      isNearBottom.current = distanceFromBottom < 100;
+      setShowScrollButton(distanceFromBottom > 150);
+      if (isNearBottom.current) {
+        setHasNewMessages(false);
+      }
 
-    // Detect scroll near top to trigger load-more
-    if (contentOffset.y < 200 && hasMore && !isLoadingMoreRef.current) {
-      isLoadingMoreRef.current = true;
-      prevContentHeight.current = contentSize.height;
-      loadMore().finally(() => {
-        isLoadingMoreRef.current = false;
-      });
-    }
-  }, [hasMore, loadMore]);
+      // Detect scroll near top to trigger load-more
+      if (contentOffset.y < 200 && hasMore && !isLoadingMoreRef.current) {
+        isLoadingMoreRef.current = true;
+        prevContentHeight.current = contentSize.height;
+        loadMore().finally(() => {
+          isLoadingMoreRef.current = false;
+        });
+      }
+    },
+    [hasMore, loadMore]
+  );
 
   // Scroll to bottom helper
   const scrollToBottom = useCallback((animated = true) => {
@@ -140,16 +149,26 @@ export function SessionView({ server, onBack, initialSessionId, onNewProject, on
   const [mutedSessions, setMutedSessions] = useState<Set<string>>(new Set());
 
   const [showSettings, setShowSettings] = useState(false);
-  const [sessionSettings, setSessionSettings] = useState<SessionSettings>({ instantNotify: false, autoApproveEnabled: false, showAgentsBar: false });
+  const [sessionSettings, setSessionSettings] = useState<SessionSettings>({
+    instantNotify: false,
+    autoApproveEnabled: false,
+    showAgentsBar: false,
+  });
   const [showActivityModal, setShowActivityModal] = useState(false);
   const [showSessionPicker, setShowSessionPicker] = useState(false);
   const [viewingFile, setViewingFile] = useState<string | null>(null);
-  const [viewingMessage, setViewingMessage] = useState<{ content: string; timestamp: number } | null>(null);
+  const [viewingMessage, setViewingMessage] = useState<{
+    content: string;
+    timestamp: number;
+  } | null>(null);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const [queuedMessages, setQueuedMessages] = useState<QueuedMessage[]>([]);
   const [agentTree, setAgentTree] = useState<AgentTree | null>(null);
   const [showAgentsModal, setShowAgentsModal] = useState(false);
-  const [viewingAgentDetail, setViewingAgentDetail] = useState<{ agentId: string; agent?: SubAgent } | null>(null);
+  const [viewingAgentDetail, setViewingAgentDetail] = useState<{
+    agentId: string;
+    agent?: SubAgent;
+  } | null>(null);
   const [showCompletedAgents, setShowCompletedAgents] = useState(false);
 
   // Search state
@@ -172,12 +191,12 @@ export function SessionView({ server, onBack, initialSessionId, onNewProject, on
 
   const handleSearchNext = useCallback(() => {
     if (searchMatches.length === 0) return;
-    setCurrentMatchIndex(prev => (prev + 1) % searchMatches.length);
+    setCurrentMatchIndex((prev) => (prev + 1) % searchMatches.length);
   }, [searchMatches.length]);
 
   const handleSearchPrev = useCallback(() => {
     if (searchMatches.length === 0) return;
-    setCurrentMatchIndex(prev => (prev - 1 + searchMatches.length) % searchMatches.length);
+    setCurrentMatchIndex((prev) => (prev - 1 + searchMatches.length) % searchMatches.length);
   }, [searchMatches.length]);
 
   const handleSearchClose = useCallback(() => {
@@ -290,7 +309,7 @@ export function SessionView({ server, onBack, initialSessionId, onNewProject, on
     const unsubscribe = wsService.onMessage((msg) => {
       if (msg.type === 'session_mute_changed' && msg.payload) {
         const payload = msg.payload as { sessionId: string; muted: boolean };
-        setMutedSessions(prev => {
+        setMutedSessions((prev) => {
           const next = new Set(prev);
           if (payload.muted) {
             next.add(payload.sessionId);
@@ -305,35 +324,38 @@ export function SessionView({ server, onBack, initialSessionId, onNewProject, on
     return unsubscribe;
   }, [isConnected]);
 
-  const handleToggleMute = useCallback(async (sessionId: string) => {
-    const currentlyMuted = mutedSessions.has(sessionId);
-    const newMuted = !currentlyMuted;
+  const handleToggleMute = useCallback(
+    async (sessionId: string) => {
+      const currentlyMuted = mutedSessions.has(sessionId);
+      const newMuted = !currentlyMuted;
 
-    // Optimistic update
-    setMutedSessions(prev => {
-      const next = new Set(prev);
-      if (newMuted) next.add(sessionId);
-      else next.delete(sessionId);
-      return next;
-    });
-
-    if (wsService.isConnected()) {
-      const response = await wsService.sendRequest('set_session_muted', {
-        sessionId,
-        muted: newMuted,
+      // Optimistic update
+      setMutedSessions((prev) => {
+        const next = new Set(prev);
+        if (newMuted) next.add(sessionId);
+        else next.delete(sessionId);
+        return next;
       });
 
-      if (!response.success) {
-        // Revert on failure
-        setMutedSessions(prev => {
-          const next = new Set(prev);
-          if (currentlyMuted) next.add(sessionId);
-          else next.delete(sessionId);
-          return next;
+      if (wsService.isConnected()) {
+        const response = await wsService.sendRequest('set_session_muted', {
+          sessionId,
+          muted: newMuted,
         });
+
+        if (!response.success) {
+          // Revert on failure
+          setMutedSessions((prev) => {
+            const next = new Set(prev);
+            if (currentlyMuted) next.add(sessionId);
+            else next.delete(sessionId);
+            return next;
+          });
+        }
       }
-    }
-  }, [mutedSessions]);
+    },
+    [mutedSessions]
+  );
 
   // Show alert when tmux session is missing
   useEffect(() => {
@@ -371,33 +393,41 @@ export function SessionView({ server, onBack, initialSessionId, onNewProject, on
     }
   }, [tmuxSessionMissing, dismissTmuxSessionMissing, recreateTmuxSession]);
 
-  const handleInstantNotifyChange = useCallback(async (value: boolean) => {
-    const newSettings = { ...sessionSettings, instantNotify: value };
-    setSessionSettings(newSettings);
-    await saveSessionSettings(server.id, newSettings);
+  const handleInstantNotifyChange = useCallback(
+    async (value: boolean) => {
+      const newSettings = { ...sessionSettings, instantNotify: value };
+      setSessionSettings(newSettings);
+      await saveSessionSettings(server.id, newSettings);
 
-    // Tell daemon about the preference
-    if (wsService.isConnected()) {
-      wsService.sendRequest('set_instant_notify', { enabled: value });
-    }
-  }, [server.id, sessionSettings]);
+      // Tell daemon about the preference
+      if (wsService.isConnected()) {
+        wsService.sendRequest('set_instant_notify', { enabled: value });
+      }
+    },
+    [server.id, sessionSettings]
+  );
 
-  const handleAutoApproveChange = useCallback(async (value: boolean) => {
-    const newSettings = { ...sessionSettings, autoApproveEnabled: value };
-    setSessionSettings(newSettings);
-    await saveSessionSettings(server.id, newSettings);
+  const handleAutoApproveChange = useCallback(
+    async (value: boolean) => {
+      const newSettings = { ...sessionSettings, autoApproveEnabled: value };
+      setSessionSettings(newSettings);
+      await saveSessionSettings(server.id, newSettings);
 
-    // Tell daemon to enable/disable auto-approve
-    if (wsService.isConnected()) {
-      wsService.sendRequest('set_auto_approve', { enabled: value });
-    }
-  }, [server.id, sessionSettings]);
+      // Tell daemon to enable/disable auto-approve
+      if (wsService.isConnected()) {
+        wsService.sendRequest('set_auto_approve', { enabled: value });
+      }
+    },
+    [server.id, sessionSettings]
+  );
 
   // Auto-scroll disabled - was too aggressive and prevented reading history
   // User can tap the scroll-to-bottom button when needed
 
   const lastSwitchedSessionId = useRef<string | null>(null);
-  const [currentSessionId, setCurrentSessionId] = useState<string | undefined>(initialSessionId || undefined);
+  const [currentSessionId, setCurrentSessionId] = useState<string | undefined>(
+    initialSessionId || undefined
+  );
 
   // Reset switch tracking when connection drops so we re-switch on reconnect
   useEffect(() => {
@@ -423,10 +453,12 @@ export function SessionView({ server, onBack, initialSessionId, onNewProject, on
           // Fire switch_session without awaiting - the daemon sets the active
           // session synchronously before yielding for tmux lookup, so by the
           // time get_highlights is processed the session is already switched.
-          wsService.sendRequest('switch_session', {
-            sessionId: initialSessionId,
-            epoch,
-          }).catch(e => console.error('Failed to switch session:', e));
+          wsService
+            .sendRequest('switch_session', {
+              sessionId: initialSessionId,
+              epoch,
+            })
+            .catch((e) => console.error('Failed to switch session:', e));
         } else if (initialSessionId && !sessionGuard.getCurrentSessionId()) {
           // First load - set session in guard without incrementing epoch
           sessionGuard.beginSwitch(initialSessionId);
@@ -436,7 +468,7 @@ export function SessionView({ server, onBack, initialSessionId, onNewProject, on
         // Fetch data immediately - don't wait for switch_session response
         refresh(!!isSwitching);
         // Sync session preferences with daemon (fire-and-forget)
-        getSessionSettings(server.id).then(settings => {
+        getSessionSettings(server.id).then((settings) => {
           if (settings.instantNotify) {
             wsService.sendRequest('set_instant_notify', { enabled: true });
           }
@@ -463,31 +495,37 @@ export function SessionView({ server, onBack, initialSessionId, onNewProject, on
     return sendInput(text);
   };
 
-  const handleSessionChange = useCallback((newSessionId?: string) => {
-    // If a new session ID is provided, update the guard
-    if (newSessionId) {
-      const epoch = sessionGuard.beginSwitch(newSessionId);
-      console.log(`SessionView: Session changed to ${newSessionId} (epoch ${epoch})`);
-      lastSwitchedSessionId.current = newSessionId;
-      setCurrentSessionId(newSessionId);
-    }
-    lastDataLength.current = 0;
-    shouldScrollOnLoad.current = true;
-    setShowScrollButton(false);
-    setHasNewMessages(false);
-    refresh(true);
-  }, [refresh]);
+  const handleSessionChange = useCallback(
+    (newSessionId?: string) => {
+      // If a new session ID is provided, update the guard
+      if (newSessionId) {
+        const epoch = sessionGuard.beginSwitch(newSessionId);
+        console.log(`SessionView: Session changed to ${newSessionId} (epoch ${epoch})`);
+        lastSwitchedSessionId.current = newSessionId;
+        setCurrentSessionId(newSessionId);
+      }
+      lastDataLength.current = 0;
+      shouldScrollOnLoad.current = true;
+      setShowScrollButton(false);
+      setHasNewMessages(false);
+      refresh(true);
+    },
+    [refresh]
+  );
 
-  const handleSlashCommand = useCallback((command: string) => {
-    switch (command) {
-      case '/switch':
-        setShowSessionPicker(true);
-        break;
-      case '/refresh':
-        refresh(true);
-        break;
-    }
-  }, [refresh]);
+  const handleSlashCommand = useCallback(
+    (command: string) => {
+      switch (command) {
+        case '/switch':
+          setShowSessionPicker(true);
+          break;
+        case '/refresh':
+          refresh(true);
+          break;
+      }
+    },
+    [refresh]
+  );
 
   const handleSwitchToOtherSession = useCallback(async () => {
     if (!otherSessionActivity) return;
@@ -526,14 +564,10 @@ export function SessionView({ server, onBack, initialSessionId, onNewProject, on
   };
 
   const handleCancel = () => {
-    Alert.alert(
-      'Cancel Request',
-      'Send interrupt signal to session?',
-      [
-        { text: 'No', style: 'cancel' },
-        { text: 'Yes', onPress: () => sendInput('\x03') }, // Ctrl+C
-      ]
-    );
+    Alert.alert('Cancel Request', 'Send interrupt signal to session?', [
+      { text: 'No', style: 'cancel' },
+      { text: 'Yes', onPress: () => sendInput('\x03') }, // Ctrl+C
+    ]);
   };
 
   const formatDuration = (start: number, end?: number): string => {
@@ -552,9 +586,7 @@ export function SessionView({ server, onBack, initialSessionId, onNewProject, on
         <View style={styles.emptyContainer}>
           <ActivityIndicator size="large" color="#3b82f6" />
           <Text style={styles.emptyTitle}>Connecting...</Text>
-          <Text style={styles.emptyText}>
-            Establishing connection to {server.name}
-          </Text>
+          <Text style={styles.emptyText}>Establishing connection to {server.name}</Text>
         </View>
       );
     }
@@ -594,18 +626,25 @@ export function SessionView({ server, onBack, initialSessionId, onNewProject, on
   };
 
   // On Android, use manual keyboard padding
-  const androidPadding = Platform.OS === 'android'
-    ? keyboardHeight > 0
-      ? keyboardHeight + 30  // When keyboard open
-      : 20                    // When keyboard closed
-    : 0;
-  const containerStyle = Platform.OS === 'android'
-    ? [styles.container, { paddingBottom: androidPadding }]
-    : styles.container;
+  const androidPadding =
+    Platform.OS === 'android'
+      ? keyboardHeight > 0
+        ? keyboardHeight + 30 // When keyboard open
+        : 20 // When keyboard closed
+      : 0;
+  const containerStyle =
+    Platform.OS === 'android'
+      ? [styles.container, { paddingBottom: androidPadding }]
+      : styles.container;
 
   return (
     <View style={containerStyle}>
-      <LinearGradient colors={['#1a2744', '#1f1a3d']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.header}>
+      <LinearGradient
+        colors={['#1a2744', '#1f1a3d']}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 0 }}
+        style={styles.header}
+      >
         <TouchableOpacity onPress={onBack} style={styles.backButton}>
           <Text style={styles.backButtonText}>‹ Back</Text>
         </TouchableOpacity>
@@ -617,16 +656,24 @@ export function SessionView({ server, onBack, initialSessionId, onNewProject, on
             }
           }}
         >
-          <View style={[styles.connectionDotInner, {
-            backgroundColor:
-              connectionState.status === 'connected'
-                ? (status?.isWaitingForInput ? '#eab308' : '#22c55e')
-                : connectionState.status === 'connecting' || connectionState.status === 'reconnecting'
-                  ? '#f97316'
-                  : connectionState.status === 'error'
-                    ? '#ef4444'
-                    : '#6b7280',
-          }]} />
+          <View
+            style={[
+              styles.connectionDotInner,
+              {
+                backgroundColor:
+                  connectionState.status === 'connected'
+                    ? status?.isWaitingForInput
+                      ? '#eab308'
+                      : '#22c55e'
+                    : connectionState.status === 'connecting' ||
+                        connectionState.status === 'reconnecting'
+                      ? '#f97316'
+                      : connectionState.status === 'error'
+                        ? '#ef4444'
+                        : '#6b7280',
+              },
+            ]}
+          />
         </TouchableOpacity>
         <View style={styles.headerCenter}>
           <Text style={styles.headerTitle} numberOfLines={1}>
@@ -683,7 +730,7 @@ export function SessionView({ server, onBack, initialSessionId, onNewProject, on
         </TouchableOpacity>
         <TouchableOpacity
           style={styles.headerIconButton}
-          onPress={() => setShowSearch(prev => !prev)}
+          onPress={() => setShowSearch((prev) => !prev)}
           onLongPress={() => Alert.alert('Search', 'Search conversation messages')}
         >
           <Ionicons name="search-outline" size={20} color={showSearch ? '#60a5fa' : '#9ca3af'} />
@@ -703,7 +750,14 @@ export function SessionView({ server, onBack, initialSessionId, onNewProject, on
             sessionSettings.autoApproveEnabled && styles.autoApproveButtonActive,
           ]}
           onPress={() => handleAutoApproveChange(!sessionSettings.autoApproveEnabled)}
-          onLongPress={() => Alert.alert('Auto-Approve', sessionSettings.autoApproveEnabled ? 'Tool calls are auto-approved. Tap to disable.' : 'Tool calls require manual approval. Tap to enable auto-approve.')}
+          onLongPress={() =>
+            Alert.alert(
+              'Auto-Approve',
+              sessionSettings.autoApproveEnabled
+                ? 'Tool calls are auto-approved. Tap to disable.'
+                : 'Tool calls require manual approval. Tap to enable auto-approve.'
+            )
+          }
         >
           <Ionicons
             name={sessionSettings.autoApproveEnabled ? 'shield-checkmark' : 'shield-outline'}
@@ -718,15 +772,19 @@ export function SessionView({ server, onBack, initialSessionId, onNewProject, on
               mutedSessions.has(currentSessionId) && styles.muteButtonActive,
             ]}
             onPress={() => handleToggleMute(currentSessionId)}
-            onLongPress={() => Alert.alert(
-              'Mute',
-              mutedSessions.has(currentSessionId)
-                ? 'Notifications are muted for this session. Tap to unmute.'
-                : 'Notifications are enabled for this session. Tap to mute.'
-            )}
+            onLongPress={() =>
+              Alert.alert(
+                'Mute',
+                mutedSessions.has(currentSessionId)
+                  ? 'Notifications are muted for this session. Tap to unmute.'
+                  : 'Notifications are enabled for this session. Tap to mute.'
+              )
+            }
           >
             <Ionicons
-              name={mutedSessions.has(currentSessionId) ? 'notifications-off' : 'notifications-outline'}
+              name={
+                mutedSessions.has(currentSessionId) ? 'notifications-off' : 'notifications-outline'
+              }
               size={18}
               color={mutedSessions.has(currentSessionId) ? '#ef4444' : '#9ca3af'}
             />
@@ -828,21 +886,27 @@ export function SessionView({ server, onBack, initialSessionId, onNewProject, on
 
       {/* Connection issue banner - only show when NOT connected */}
       {data.length > 0 && connectionState.status !== 'connected' && (
-        <TouchableOpacity
-          style={styles.connectionBanner}
-          onPress={reconnect}
-          activeOpacity={0.8}
-        >
-          <View style={[styles.connectionBannerDot, {
-            backgroundColor:
-              connectionState.status === 'connecting' || connectionState.status === 'reconnecting'
-                ? '#f97316' : '#ef4444',
-          }]} />
+        <TouchableOpacity style={styles.connectionBanner} onPress={reconnect} activeOpacity={0.8}>
+          <View
+            style={[
+              styles.connectionBannerDot,
+              {
+                backgroundColor:
+                  connectionState.status === 'connecting' ||
+                  connectionState.status === 'reconnecting'
+                    ? '#f97316'
+                    : '#ef4444',
+              },
+            ]}
+          />
           <Text style={styles.connectionBannerText}>
-            {connectionState.status === 'connecting' ? 'Connecting...'
-              : connectionState.status === 'reconnecting' ? `Reconnecting (${connectionState.reconnectAttempts})...`
-              : connectionState.status === 'error' ? (connectionState.error || 'Connection error')
-              : 'Disconnected'}
+            {connectionState.status === 'connecting'
+              ? 'Connecting...'
+              : connectionState.status === 'reconnecting'
+                ? `Reconnecting (${connectionState.reconnectAttempts})...`
+                : connectionState.status === 'error'
+                  ? connectionState.error || 'Connection error'
+                  : 'Disconnected'}
           </Text>
           {(connectionState.status === 'error' || connectionState.status === 'disconnected') && (
             <Text style={styles.connectionBannerRetry}>Retry</Text>
@@ -862,9 +926,7 @@ export function SessionView({ server, onBack, initialSessionId, onNewProject, on
               {otherSessionActivity.isWaitingForInput ? '⏳' : '💬'}
             </Text>
             <View style={styles.otherSessionInfo}>
-              <Text style={styles.otherSessionName}>
-                {otherSessionActivity.sessionName}
-              </Text>
+              <Text style={styles.otherSessionName}>{otherSessionActivity.sessionName}</Text>
               <Text style={styles.otherSessionMessage} numberOfLines={1}>
                 {otherSessionActivity.isWaitingForInput
                   ? 'Waiting for input'
@@ -889,7 +951,7 @@ export function SessionView({ server, onBack, initialSessionId, onNewProject, on
       {/* Unified activity bar - combines processing status and agents */}
       {(() => {
         const hasActivity = isConnected && status?.currentActivity;
-        const runningAgents = agentTree?.agents.filter(a => a.status === 'running') || [];
+        const runningAgents = agentTree?.agents.filter((a) => a.status === 'running') || [];
         const hasAgents = isConnected && runningAgents.length > 0 && sessionSettings.showAgentsBar;
         if (!hasActivity && !hasAgents) return null;
 
@@ -921,8 +983,14 @@ export function SessionView({ server, onBack, initialSessionId, onNewProject, on
                 <View style={styles.subAgentsDot} />
                 <Text style={styles.subAgentsText} numberOfLines={1}>
                   {runningAgents.length === 1
-                    ? (runningAgents[0].currentActivity || runningAgents[0].description || runningAgents[0].slug || 'Sub-agent running')
-                    : `${runningAgents.length} agents` + (runningAgents[0].currentActivity ? ` · ${runningAgents[0].currentActivity}` : '')}
+                    ? runningAgents[0].currentActivity ||
+                      runningAgents[0].description ||
+                      runningAgents[0].slug ||
+                      'Sub-agent running'
+                    : `${runningAgents.length} agents` +
+                      (runningAgents[0].currentActivity
+                        ? ` · ${runningAgents[0].currentActivity}`
+                        : '')}
                 </Text>
                 <Ionicons name="chevron-forward" size={14} color="#86efac" />
               </TouchableOpacity>
@@ -975,9 +1043,7 @@ export function SessionView({ server, onBack, initialSessionId, onNewProject, on
                     )}
                     {activity.output && (
                       <View style={styles.activityOutputBox}>
-                        <Text style={styles.activityOutputText}>
-                          {activity.output}
-                        </Text>
+                        <Text style={styles.activityOutputText}>{activity.output}</Text>
                       </View>
                     )}
                   </View>
@@ -1046,51 +1112,53 @@ export function SessionView({ server, onBack, initialSessionId, onNewProject, on
               {agentTree && agentTree.agents.length > 0 ? (
                 <>
                   {/* Running agents section */}
-                  {agentTree.agents.filter(a => a.status === 'running').length > 0 && (
+                  {agentTree.agents.filter((a) => a.status === 'running').length > 0 && (
                     <>
                       <Text style={styles.agentSectionTitle}>Running</Text>
-                      {agentTree.agents.filter(a => a.status === 'running').map((agent) => (
-                        <TouchableOpacity
-                          key={agent.agentId}
-                          style={styles.agentCard}
-                          onPress={() => {
-                            setViewingAgentDetail({ agentId: agent.agentId, agent });
-                            setShowAgentsModal(false);
-                          }}
-                          activeOpacity={0.7}
-                        >
-                          <View style={styles.agentCardHeader}>
-                            <Text style={[styles.agentStatusDot, { color: '#22c55e' }]}>
-                              {'●'}
-                            </Text>
-                            <View style={styles.agentCardInfo}>
-                              <Text style={styles.agentSlug} numberOfLines={1}>
-                                {agent.slug || agent.agentId.slice(0, 8)}
+                      {agentTree.agents
+                        .filter((a) => a.status === 'running')
+                        .map((agent) => (
+                          <TouchableOpacity
+                            key={agent.agentId}
+                            style={styles.agentCard}
+                            onPress={() => {
+                              setViewingAgentDetail({ agentId: agent.agentId, agent });
+                              setShowAgentsModal(false);
+                            }}
+                            activeOpacity={0.7}
+                          >
+                            <View style={styles.agentCardHeader}>
+                              <Text style={[styles.agentStatusDot, { color: '#22c55e' }]}>
+                                {'●'}
                               </Text>
-                              <Text style={styles.agentMeta}>
-                                Running for {formatDuration(agent.startedAt)}
-                                {' '}{agent.messageCount} msgs
-                              </Text>
+                              <View style={styles.agentCardInfo}>
+                                <Text style={styles.agentSlug} numberOfLines={1}>
+                                  {agent.slug || agent.agentId.slice(0, 8)}
+                                </Text>
+                                <Text style={styles.agentMeta}>
+                                  Running for {formatDuration(agent.startedAt)} {agent.messageCount}{' '}
+                                  msgs
+                                </Text>
+                              </View>
+                              <Ionicons name="chevron-forward" size={16} color="#6b7280" />
                             </View>
-                            <Ionicons name="chevron-forward" size={16} color="#6b7280" />
-                          </View>
-                          {agent.description && (
-                            <Text style={styles.agentDescription} numberOfLines={3}>
-                              {agent.description}
-                            </Text>
-                          )}
-                          {agent.currentActivity && (
-                            <Text style={styles.agentActivity} numberOfLines={1}>
-                              {agent.currentActivity}
-                            </Text>
-                          )}
-                        </TouchableOpacity>
-                      ))}
+                            {agent.description && (
+                              <Text style={styles.agentDescription} numberOfLines={3}>
+                                {agent.description}
+                              </Text>
+                            )}
+                            {agent.currentActivity && (
+                              <Text style={styles.agentActivity} numberOfLines={1}>
+                                {agent.currentActivity}
+                              </Text>
+                            )}
+                          </TouchableOpacity>
+                        ))}
                     </>
                   )}
 
                   {/* Completed agents section */}
-                  {agentTree.agents.filter(a => a.status !== 'running').length > 0 && (
+                  {agentTree.agents.filter((a) => a.status !== 'running').length > 0 && (
                     <>
                       <TouchableOpacity
                         style={styles.agentSectionHeader}
@@ -1098,7 +1166,8 @@ export function SessionView({ server, onBack, initialSessionId, onNewProject, on
                         activeOpacity={0.7}
                       >
                         <Text style={styles.agentSectionTitle}>
-                          Completed ({agentTree.agents.filter(a => a.status !== 'running').length})
+                          Completed ({agentTree.agents.filter((a) => a.status !== 'running').length}
+                          )
                         </Text>
                         <Ionicons
                           name={showCompletedAgents ? 'chevron-down' : 'chevron-forward'}
@@ -1106,38 +1175,45 @@ export function SessionView({ server, onBack, initialSessionId, onNewProject, on
                           color="#6b7280"
                         />
                       </TouchableOpacity>
-                      {showCompletedAgents && agentTree.agents.filter(a => a.status !== 'running').map((agent) => (
-                        <TouchableOpacity
-                          key={agent.agentId}
-                          style={[styles.agentCard, styles.agentCardCompleted]}
-                          onPress={() => {
-                            setViewingAgentDetail({ agentId: agent.agentId, agent });
-                            setShowAgentsModal(false);
-                          }}
-                          activeOpacity={0.7}
-                        >
-                          <View style={styles.agentCardHeader}>
-                            <Text style={[styles.agentStatusDot, { color: '#3b82f6' }]}>
-                              {'✓'}
-                            </Text>
-                            <View style={styles.agentCardInfo}>
-                              <Text style={[styles.agentSlug, { color: '#9ca3af' }]} numberOfLines={1}>
-                                {agent.slug || agent.agentId.slice(0, 8)}
-                              </Text>
-                              <Text style={styles.agentMeta}>
-                                Completed in {formatDuration(agent.startedAt, agent.completedAt)}
-                                {' '}{agent.messageCount} msgs
-                              </Text>
-                            </View>
-                            <Ionicons name="chevron-forward" size={16} color="#6b7280" />
-                          </View>
-                          {agent.description && (
-                            <Text style={styles.agentDescription} numberOfLines={2}>
-                              {agent.description}
-                            </Text>
-                          )}
-                        </TouchableOpacity>
-                      ))}
+                      {showCompletedAgents &&
+                        agentTree.agents
+                          .filter((a) => a.status !== 'running')
+                          .map((agent) => (
+                            <TouchableOpacity
+                              key={agent.agentId}
+                              style={[styles.agentCard, styles.agentCardCompleted]}
+                              onPress={() => {
+                                setViewingAgentDetail({ agentId: agent.agentId, agent });
+                                setShowAgentsModal(false);
+                              }}
+                              activeOpacity={0.7}
+                            >
+                              <View style={styles.agentCardHeader}>
+                                <Text style={[styles.agentStatusDot, { color: '#3b82f6' }]}>
+                                  {'✓'}
+                                </Text>
+                                <View style={styles.agentCardInfo}>
+                                  <Text
+                                    style={[styles.agentSlug, { color: '#9ca3af' }]}
+                                    numberOfLines={1}
+                                  >
+                                    {agent.slug || agent.agentId.slice(0, 8)}
+                                  </Text>
+                                  <Text style={styles.agentMeta}>
+                                    Completed in{' '}
+                                    {formatDuration(agent.startedAt, agent.completedAt)}{' '}
+                                    {agent.messageCount} msgs
+                                  </Text>
+                                </View>
+                                <Ionicons name="chevron-forward" size={16} color="#6b7280" />
+                              </View>
+                              {agent.description && (
+                                <Text style={styles.agentDescription} numberOfLines={2}>
+                                  {agent.description}
+                                </Text>
+                              )}
+                            </TouchableOpacity>
+                          ))}
                     </>
                   )}
                 </>
@@ -1165,16 +1241,17 @@ export function SessionView({ server, onBack, initialSessionId, onNewProject, on
       <ScrollView
         ref={scrollViewRef}
         style={styles.list}
-        contentContainerStyle={[
-          styles.listContent,
-          data.length === 0 && styles.listContentEmpty,
-        ]}
+        contentContainerStyle={[styles.listContent, data.length === 0 && styles.listContentEmpty]}
         refreshControl={
           <RefreshControl
             refreshing={isRefreshing}
             onRefresh={async () => {
               setIsRefreshing(true);
-              try { await refresh(); } finally { setIsRefreshing(false); }
+              try {
+                await refresh();
+              } finally {
+                setIsRefreshing(false);
+              }
             }}
             tintColor="#ffffff"
           />
@@ -1191,32 +1268,33 @@ export function SessionView({ server, onBack, initialSessionId, onNewProject, on
             <Text style={styles.loadMoreText}>Loading older messages...</Text>
           </View>
         )}
-        {data.length === 0 ? (
-          renderEmptyContent()
-        ) : (
-          data.map((item) => (
-            <ConversationItem
-              key={item.id}
-              item={item}
-              showToolCalls={true}
-              onSelectOption={handleSelectOption}
-              onFileTap={setViewingFile}
-              onMessageTap={item.type === 'assistant' ? () => setViewingMessage({ content: item.content, timestamp: item.timestamp }) : undefined}
-              fontScale={fontScale}
-              searchTerm={searchTerm}
-              isCurrentMatch={searchMatches.length > 0 && searchMatches[currentMatchIndex]?.id === item.id}
-            />
-          ))
-        )}
+        {data.length === 0
+          ? renderEmptyContent()
+          : data.map((item) => (
+              <ConversationItem
+                key={item.id}
+                item={item}
+                showToolCalls={true}
+                onSelectOption={handleSelectOption}
+                onFileTap={setViewingFile}
+                onMessageTap={
+                  item.type === 'assistant'
+                    ? () => setViewingMessage({ content: item.content, timestamp: item.timestamp })
+                    : undefined
+                }
+                fontScale={fontScale}
+                searchTerm={searchTerm}
+                isCurrentMatch={
+                  searchMatches.length > 0 && searchMatches[currentMatchIndex]?.id === item.id
+                }
+              />
+            ))}
       </ScrollView>
 
       {/* Floating action buttons */}
       {showScrollButton && (
         <TouchableOpacity
-          style={[
-            styles.scrollButton,
-            hasNewMessages && styles.scrollButtonNew,
-          ]}
+          style={[styles.scrollButton, hasNewMessages && styles.scrollButtonNew]}
           onPress={() => scrollToBottom()}
         >
           <Text style={styles.scrollButtonText}>↓</Text>
@@ -1250,8 +1328,8 @@ export function SessionView({ server, onBack, initialSessionId, onNewProject, on
           !isConnected
             ? 'Not connected'
             : status?.isWaitingForInput
-            ? 'Type a response...'
-            : 'Type to queue message...'
+              ? 'Type a response...'
+              : 'Type to queue message...'
         }
       />
 
@@ -1607,7 +1685,7 @@ const styles = StyleSheet.create({
   },
   listContent: {
     paddingTop: 12,
-    paddingBottom: 100,  // Extra space for InputBar
+    paddingBottom: 100, // Extra space for InputBar
   },
   loadMoreIndicator: {
     flexDirection: 'row',
