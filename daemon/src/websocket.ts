@@ -1125,7 +1125,7 @@ export class WebSocketHandler {
 
   private async handleSendInput(
     client: AuthenticatedClient,
-    payload: { input: string } | undefined,
+    payload: { input: string; sessionId?: string } | undefined,
     requestId?: string
   ): Promise<void> {
     if (!payload?.input) {
@@ -1138,20 +1138,36 @@ export class WebSocketHandler {
       return;
     }
 
+    // Resolve the target tmux session:
+    // If a sessionId (encoded project path) is provided, find the matching tmux session
+    let targetTmuxSession: string | undefined;
+    if (payload.sessionId) {
+      const convSession = this.watcher.getSessions().find((s) => s.id === payload.sessionId);
+      if (convSession?.projectPath) {
+        const tmuxSessions = await this.tmux.listSessions();
+        const match = tmuxSessions.find((ts) => ts.workingDir === convSession.projectPath);
+        if (match) {
+          targetTmuxSession = match.name;
+        }
+      }
+    }
+
+    // Fall back to the global active session
+    const sessionToUse = targetTmuxSession || this.injector.getActiveSession();
+
     // Check if the target session exists before trying to send
-    const activeSession = this.injector.getActiveSession();
-    const sessionExists = await this.injector.checkSessionExists(activeSession);
+    const sessionExists = await this.injector.checkSessionExists(sessionToUse);
 
     if (!sessionExists) {
       // Check if we have a stored config for this session
-      const savedConfig = this.tmuxSessionConfigs.get(activeSession);
+      const savedConfig = this.tmuxSessionConfigs.get(sessionToUse);
 
       this.send(client.ws, {
         type: 'input_sent',
         success: false,
         error: 'tmux_session_not_found',
         payload: {
-          sessionName: activeSession,
+          sessionName: sessionToUse,
           canRecreate: !!savedConfig,
           savedConfig: savedConfig
             ? {
@@ -1165,7 +1181,7 @@ export class WebSocketHandler {
       return;
     }
 
-    const success = await this.injector.sendInput(payload.input);
+    const success = await this.injector.sendInput(payload.input, sessionToUse);
     this.send(client.ws, {
       type: 'input_sent',
       success,

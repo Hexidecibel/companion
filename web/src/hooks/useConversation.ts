@@ -214,7 +214,7 @@ export function useConversation(
       if (!conn || !conn.isConnected()) return false;
 
       try {
-        const response = await conn.sendRequest('send_input', { input: text });
+        const response = await conn.sendRequest('send_input', { input: text, sessionId });
         return response.success;
       } catch {
         return false;
