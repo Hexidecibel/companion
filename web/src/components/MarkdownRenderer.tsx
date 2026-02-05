@@ -1,5 +1,29 @@
 import { useMemo, useCallback } from 'react';
 
+/**
+ * Check if running in Tauri desktop app
+ */
+function isTauri(): boolean {
+  return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+}
+
+/**
+ * Open external URL - uses Tauri shell.open when in desktop app
+ */
+async function openExternalUrl(url: string): Promise<void> {
+  if (isTauri()) {
+    try {
+      const { open } = await import('@tauri-apps/plugin-shell');
+      await open(url);
+    } catch {
+      // Fallback if plugin not available
+      window.open(url, '_blank');
+    }
+  } else {
+    window.open(url, '_blank');
+  }
+}
+
 interface MarkdownRendererProps {
   content: string;
   onFileClick?: (path: string) => void;
@@ -121,7 +145,22 @@ function renderInline(text: string, keyPrefix: string, onFileClick?: (path: stri
       case 'code':
         return <code key={key}>{node.text}</code>;
       case 'link':
-        return <a key={key} href={node.href} target="_blank" rel="noopener noreferrer">{node.text}</a>;
+        return (
+          <a
+            key={key}
+            href={node.href}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={(e) => {
+              if (isTauri()) {
+                e.preventDefault();
+                openExternalUrl(node.href);
+              }
+            }}
+          >
+            {node.text}
+          </a>
+        );
       case 'fileLink':
         return (
           <a

@@ -48,6 +48,7 @@ fn main() {
             MacosLauncher::LaunchAgent,
             None,
         ))
+        .plugin(tauri_plugin_shell::init())
         .invoke_handler(tauri::generate_handler![
             set_tray_tooltip,
             get_autostart_enabled,
