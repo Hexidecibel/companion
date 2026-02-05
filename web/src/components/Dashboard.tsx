@@ -29,8 +29,8 @@ export function Dashboard({ onSettings }: DashboardProps) {
   // Use work groups for the active server
   const activeWorkGroups = useWorkGroups(activeSession?.serverId ?? null);
 
-  // Browser notification listener (runs at dashboard level so notifications always fire)
-  useBrowserNotificationListener(activeSession?.serverId ?? null);
+  // Browser notification listener - listens on ALL connected servers
+  useBrowserNotificationListener();
 
   // Tauri menu event handler
   useEffect(() => {

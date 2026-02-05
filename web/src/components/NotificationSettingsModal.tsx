@@ -151,9 +151,12 @@ function EscalationTab({
 
   return (
     <div className="notif-section">
-      {/* Event type checkboxes */}
+      {/* Push escalation event types (server-side) */}
       <div className="notif-card">
-        <div className="notif-card-name" style={{ marginBottom: 8 }}>Event Types</div>
+        <div className="notif-card-name" style={{ marginBottom: 4 }}>Push Escalation Events</div>
+        <div className="notif-card-detail" style={{ marginBottom: 8 }}>
+          Which events trigger push notifications to mobile devices
+        </div>
         {(['waiting_for_input', 'error_detected', 'session_completed', 'worker_waiting', 'worker_error', 'work_group_ready'] as const).map((evt) => (
           <div key={evt} className="notif-browser-event-row">
             <span>{EVENT_TYPE_LABELS[evt]}</span>
@@ -169,7 +172,7 @@ function EscalationTab({
         ))}
       </div>
 
-      {/* Browser notification permission */}
+      {/* Browser notification permission + per-event toggles */}
       <div className="notif-card">
         <div className="notif-card-top">
           <span className="notif-card-name">Browser Notifications</span>
@@ -186,6 +189,41 @@ function EscalationTab({
           <div className="notif-card-detail" style={{ marginTop: 4 }}>
             Notifications are blocked. Enable them in your browser settings.
           </div>
+        )}
+        {browserNotifications.permission === 'granted' && (
+          <>
+            <div className="notif-card-detail" style={{ marginTop: 8, marginBottom: 8 }}>
+              Which events show desktop/browser notifications
+            </div>
+            <div className="notif-browser-event-row">
+              <span style={{ fontWeight: 500 }}>All Notifications</span>
+              <label className="notif-toggle">
+                <input
+                  type="checkbox"
+                  checked={browserNotifications.prefs.enabled}
+                  onChange={(e) => browserNotifications.updatePrefs({ enabled: e.target.checked })}
+                />
+                <span className="notif-toggle-slider" />
+              </label>
+            </div>
+            {browserNotifications.prefs.enabled && (
+              <>
+                {(['waiting_for_input', 'error_detected', 'session_completed', 'worker_waiting', 'worker_error', 'work_group_ready'] as const).map((evt) => (
+                  <div key={evt} className="notif-browser-event-row">
+                    <span>{EVENT_TYPE_LABELS[evt]}</span>
+                    <label className="notif-toggle">
+                      <input
+                        type="checkbox"
+                        checked={browserNotifications.prefs[evt]}
+                        onChange={(e) => browserNotifications.updatePrefs({ [evt]: e.target.checked })}
+                      />
+                      <span className="notif-toggle-slider" />
+                    </label>
+                  </div>
+                ))}
+              </>
+            )}
+          </>
         )}
       </div>
 
