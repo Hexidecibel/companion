@@ -10,6 +10,7 @@ export interface TmuxSessionInfo {
   attached: boolean;
   windows: number;
   workingDir?: string;
+  tagged?: boolean;
 }
 
 export interface WorktreeInfo {
@@ -56,7 +57,7 @@ export class TmuxManager {
         });
       }
 
-      // Get working directory for each session
+      // Get working directory and tagged status for each session
       for (const session of sessions) {
         try {
           const { stdout: pwd } = await execAsync(
@@ -66,6 +67,7 @@ export class TmuxManager {
         } catch {
           // Ignore errors getting working dir
         }
+        session.tagged = await this.isTagged(session.name);
       }
 
       return sessions;
