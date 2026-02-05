@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { loadConfig } from './config';
+import { loadConfig, displayFirstRunWelcome } from './config';
 import { SessionWatcher } from './watcher';
 import { SubAgentWatcher } from './subagent-watcher';
 import { InputInjector } from './input-injector';
@@ -31,6 +31,13 @@ async function main(): Promise<void> {
 
   // Load configuration
   const config = loadConfig();
+
+  // Display welcome message with QR code on first run
+  const configAny = config as typeof config & { _isFirstRun?: boolean; _configPath?: string };
+  if (configAny._isFirstRun && configAny._configPath) {
+    await displayFirstRunWelcome(config, configAny._configPath);
+  }
+
   const listenerPorts = config.listeners.map((l) => l.port).join(', ');
   console.log(`Config: Listeners on ports [${listenerPorts}], mDNS: ${config.mdnsEnabled}`);
 
