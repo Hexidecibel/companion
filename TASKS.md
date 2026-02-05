@@ -183,6 +183,13 @@ The Tauri-based desktop app wraps the web client in a native shell. These tasks 
 - Could use commander.js or similar for CLI parsing
 - Auto-detect platform for service installation
 
+### Containerization
+- Docker image for daemon - bundle Node.js, daemon, and web client
+- docker-compose for easy deployment with config volume mount
+- Environment variable support for config (PORT, TOKEN, TLS, etc.)
+- Pre-built images on Docker Hub / GitHub Container Registry
+- One-liner: `docker run -v ~/.companion:/config hexidecibel/companion`
+
 ### Advanced Features
 - Historical usage graphs
 - Team collaboration - share agents, approval workflows

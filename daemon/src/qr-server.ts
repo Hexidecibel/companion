@@ -392,7 +392,7 @@ export function createQRRequestHandler(config: DaemonConfig): http.RequestListen
     <img id="qr-img" alt="QR Code" width="300" height="300">
     <div class="info">
       <p>Server: <code class="server-addr">${displayHost}:${config.port}</code></p>
-      <p>TLS: <code>${config.tls ? 'Enabled' : 'Disabled'}</code></p>
+      <p>TLS: <code id="tls-status">${config.tls ? 'Enabled' : 'Disabled'}</code></p>
     </div>
     ${webClientPath ? `<a id="web-link" href="${webClientPath}" class="web-link">Open Web Client</a>` : ''}
   </div>
@@ -415,10 +415,14 @@ export function createQRRequestHandler(config: DaemonConfig): http.RequestListen
             document.getElementById('qr-section').style.flexDirection = 'column';
             document.getElementById('qr-section').style.alignItems = 'center';
             document.getElementById('qr-img').src = '/qr.png?' + qrParams;
-            // Update server info to show actual host
+            // Update server info to show actual host and TLS status
             document.querySelectorAll('.server-addr').forEach(function(el) {
               el.textContent = location.host;
             });
+            var tlsStatus = document.getElementById('tls-status');
+            if (tlsStatus) {
+              tlsStatus.textContent = location.protocol === 'https:' ? 'Enabled' : 'Disabled';
+            }
             // Update web client link to pass token so it auto-connects
             var webLink = document.getElementById('web-link');
             if (webLink) {
