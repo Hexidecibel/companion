@@ -134,7 +134,8 @@ export class WorkGroupManager extends EventEmitter {
       worker.tmuxSessionName = sessionName;
 
       // Derive sessionId from worktree path (same encoding as watcher uses)
-      worker.sessionId = wtResult.worktreePath.replace(/\//g, '-').replace(/^-/, '-');
+      // Encode path the same way Claude CLI does: replace / and _ with -
+      worker.sessionId = wtResult.worktreePath.replace(/[\/_]/g, '-');
 
       // Wait for Claude CLI to start up
       await this.waitForCliReady(sessionName);
