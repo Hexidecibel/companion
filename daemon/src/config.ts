@@ -69,7 +69,10 @@ export async function displayFirstRunWelcome(config: DaemonConfig, configPath: s
   console.log('');
   console.log(`    ${listener.token}`);
   console.log('');
-  console.log(`  Server: ${localIP}:${listener.port}`);
+  const serverUrl = `http://${localIP}:${listener.port}`;
+  // OSC 8 hyperlink escape sequence for clickable terminal links
+  const clickableUrl = `\x1b]8;;${serverUrl}\x07${serverUrl}\x1b]8;;\x07`;
+  console.log(`  Server: ${clickableUrl}`);
   console.log('');
   console.log(`  Config: ${configPath}`);
   console.log('  Edit this file to change settings.');
