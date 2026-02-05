@@ -2371,6 +2371,16 @@ body {
   text-decoration: none;
 }
 
+.md-render code.md-file-link-code {
+  cursor: pointer;
+  border-bottom: 1px dashed var(--accent-purple);
+}
+
+.md-render code.md-file-link-code:hover {
+  color: var(--accent-purple-light);
+  border-bottom-style: solid;
+}
+
 .md-render hr {
   border: none;
   border-top: 1px solid var(--border-color);

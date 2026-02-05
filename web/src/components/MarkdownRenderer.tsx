@@ -49,9 +49,19 @@ function isFilePath(href: string): boolean {
   return false;
 }
 
-// Matches bare file paths like src/foo.ts, ./bar.md, ../baz/qux.tsx
+// Matches bare file paths like src/foo.ts, ./bar.md, ../baz/qux.tsx, /home/user/file.ts
 // Must contain a / and end with a file extension
-const BARE_PATH_RE = /(?:^|\s)((?:\.\.?\/)?(?:[\w.-]+\/)+[\w.-]+\.\w{1,10})(?=[\s,;:!?)}\]]|$)/g;
+// Supports: relative paths, ./ paths, ../ paths, and absolute paths starting with /
+const BARE_PATH_RE = /(?:^|\s)((?:\/|\.\.?\/)?(?:[\w.-]+\/)+[\w.-]+\.\w{1,10})(?=[\s,;:!?)}\]]|$)/g;
+
+// Check if a string looks like a file path (for code spans)
+function looksLikeFilePath(text: string): boolean {
+  // Absolute path with extension
+  if (/^\/(?:[\w.-]+\/)*[\w.-]+\.\w{1,10}$/.test(text)) return true;
+  // Relative path with extension
+  if (/^(?:\.\.?\/)?(?:[\w.-]+\/)*[\w.-]+\.\w{1,10}$/.test(text)) return true;
+  return false;
+}
 
 function parseInline(text: string): InlineNode[] {
   const nodes: InlineNode[] = [];
@@ -143,6 +153,18 @@ function renderInline(text: string, keyPrefix: string, onFileClick?: (path: stri
       case 'italic':
         return <em key={key}>{node.text}</em>;
       case 'code':
+        // Make code spans clickable if they look like file paths
+        if (looksLikeFilePath(node.text) && onFileClick) {
+          return (
+            <code
+              key={key}
+              className="md-file-link-code"
+              onClick={() => onFileClick(node.text)}
+            >
+              {node.text}
+            </code>
+          );
+        }
         return <code key={key}>{node.text}</code>;
       case 'link':
         return (
