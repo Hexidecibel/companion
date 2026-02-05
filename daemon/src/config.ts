@@ -1,9 +1,17 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import * as crypto from 'crypto';
 import { DaemonConfig, ListenerConfig } from './types';
 
 const HOME_DIR = process.env.HOME || '/root';
 const CONFIG_DIR = path.join(HOME_DIR, '.companion');
+
+/**
+ * Generate a random authentication token
+ */
+function generateToken(): string {
+  return crypto.randomBytes(16).toString('hex');
+}
 
 // Safe tools that can be auto-approved without user confirmation
 const DEFAULT_AUTO_APPROVE_TOOLS = ['Read', 'Glob', 'Grep', 'WebFetch', 'WebSearch'];
@@ -26,6 +34,8 @@ export function loadConfig(): DaemonConfig {
 
   let fileConfig: Partial<DaemonConfig> & { listeners?: ListenerConfig[] } = {};
   let parsedListeners: ListenerConfig[] | undefined;
+
+  let isFirstRun = false;
 
   if (fs.existsSync(configPath)) {
     try {
@@ -62,7 +72,14 @@ export function loadConfig(): DaemonConfig {
       console.error(`Error loading config from ${configPath}:`, err);
     }
   } else {
-    console.warn(`Config file not found at ${configPath}, using defaults`);
+    // First run - generate config with random token
+    isFirstRun = true;
+    const newToken = generateToken();
+    fileConfig = {
+      port: DEFAULT_CONFIG.port,
+      token: newToken,
+      tls: DEFAULT_CONFIG.tls,
+    };
   }
 
   // Merge with defaults
@@ -87,6 +104,33 @@ export function loadConfig(): DaemonConfig {
         keyPath: config.keyPath,
       },
     ];
+  }
+
+  // First run: save generated config and display welcome message
+  if (isFirstRun && config.listeners.length > 0) {
+    // Ensure config directory exists
+    if (!fs.existsSync(CONFIG_DIR)) {
+      fs.mkdirSync(CONFIG_DIR, { recursive: true });
+    }
+    saveConfig(config);
+
+    const token = config.listeners[0].token;
+    console.log('');
+    console.log('═'.repeat(50));
+    console.log('  Welcome to Companion!');
+    console.log('═'.repeat(50));
+    console.log('');
+    console.log('  Your authentication token:');
+    console.log('');
+    console.log(`    ${token}`);
+    console.log('');
+    console.log('  Enter this token in the Companion app to connect.');
+    console.log('');
+    console.log(`  Config saved to: ${configPath}`);
+    console.log('  Edit this file to change settings.');
+    console.log('');
+    console.log('═'.repeat(50));
+    console.log('');
   }
 
   // Validate: must have at least one listener with port and token
