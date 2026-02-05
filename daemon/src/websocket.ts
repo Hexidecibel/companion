@@ -16,7 +16,7 @@ import {
   extractTasks,
   parseConversationChain,
 } from './parser';
-import { WebSocketMessage, WebSocketResponse, DaemonConfig, TmuxSessionConfig } from './types';
+import { WebSocketMessage, WebSocketResponse, DaemonConfig, TmuxSessionConfig, ListenerConfig } from './types';
 import { loadConfig, saveConfig } from './config';
 import { fetchTodayUsage, fetchMonthUsage, fetchAnthropicUsage } from './anthropic-usage';
 import { DEFAULT_TOOL_CONFIG } from './tool-config';
@@ -39,6 +39,7 @@ interface AuthenticatedClient {
   deviceId?: string;
   subscribed: boolean;
   subscribedSessionId?: string; // Track which session client is subscribed to
+  listenerPort?: number; // Track which listener this client connected through
 }
 
 interface ClientError {
@@ -50,9 +51,9 @@ interface ClientError {
 }
 
 export class WebSocketHandler {
-  private wss: WebSocketServer;
+  private wssMap: Map<number, WebSocketServer> = new Map(); // port -> WebSocketServer
+  private tokenMap: Map<number, string> = new Map(); // port -> token
   private clients: Map<string, AuthenticatedClient> = new Map();
-  private token: string;
   private watcher: SessionWatcher;
   private subAgentWatcher: SubAgentWatcher | null;
   private injector: InputInjector;
@@ -69,7 +70,7 @@ export class WebSocketHandler {
   private workGroupManager: WorkGroupManager | null;
 
   constructor(
-    server: Server,
+    servers: { server: Server; listener: ListenerConfig }[],
     config: DaemonConfig,
     watcher: SessionWatcher,
     injector: InputInjector,
@@ -79,7 +80,6 @@ export class WebSocketHandler {
     workGroupManager?: WorkGroupManager
   ) {
     this.config = config;
-    this.token = config.token;
     this.watcher = watcher;
     this.subAgentWatcher = subAgentWatcher || null;
     this.workGroupManager = workGroupManager || null;
@@ -89,9 +89,14 @@ export class WebSocketHandler {
 
     this.escalation = new EscalationService(this.push.getStore(), this.push);
 
-    this.wss = new WebSocketServer({ server });
-
-    this.wss.on('connection', (ws, req) => this.handleConnection(ws, req));
+    // Create a WebSocketServer for each listener
+    for (const { server, listener } of servers) {
+      const wss = new WebSocketServer({ server });
+      this.wssMap.set(listener.port, wss);
+      this.tokenMap.set(listener.port, listener.token);
+      wss.on('connection', (ws, req) => this.handleConnection(ws, req, listener.port));
+      console.log(`WebSocket: Listener initialized on port ${listener.port}`);
+    }
 
     // Forward watcher events to subscribed clients
     this.watcher.on('conversation-update', (data) => {
@@ -205,13 +210,14 @@ export class WebSocketHandler {
     console.log(`WebSocket: Stored tmux session config for "${name}" (${workingDir})`);
   }
 
-  private handleConnection(ws: WebSocket, _req: IncomingMessage): void {
+  private handleConnection(ws: WebSocket, _req: IncomingMessage, listenerPort: number): void {
     const clientId = uuidv4();
     const client: AuthenticatedClient = {
       id: clientId,
       ws,
       authenticated: false,
       subscribed: false,
+      listenerPort,
     };
 
     this.clients.set(clientId, client);
@@ -252,7 +258,12 @@ export class WebSocketHandler {
 
     // Authenticate first
     if (type === 'authenticate') {
-      if (token === this.token) {
+      // Get the expected token for this client's listener
+      const expectedToken = client.listenerPort
+        ? this.tokenMap.get(client.listenerPort)
+        : undefined;
+
+      if (expectedToken && token === expectedToken) {
         client.authenticated = true;
         client.deviceId = (payload as { deviceId?: string })?.deviceId;
 
@@ -261,7 +272,7 @@ export class WebSocketHandler {
           success: true,
           requestId,
         });
-        console.log(`WebSocket: Client authenticated (${client.id})`);
+        console.log(`WebSocket: Client authenticated (${client.id}) on port ${client.listenerPort}`);
       } else {
         this.send(client.ws, {
           type: 'authenticated',
@@ -1373,16 +1384,24 @@ export class WebSocketHandler {
 
   private handleRotateToken(client: AuthenticatedClient, requestId?: string): void {
     try {
+      if (!client.listenerPort) {
+        throw new Error('Client has no listener port');
+      }
+
       // Generate new token
       const newToken = crypto.randomBytes(32).toString('hex');
 
-      // Update config file
+      // Update config file - find and update the listener for this port
       const config = loadConfig();
-      config.token = newToken;
+      const listenerIndex = config.listeners.findIndex((l) => l.port === client.listenerPort);
+      if (listenerIndex === -1) {
+        throw new Error(`Listener not found for port ${client.listenerPort}`);
+      }
+      config.listeners[listenerIndex].token = newToken;
       saveConfig(config);
 
-      // Update in-memory token
-      this.token = newToken;
+      // Update in-memory token for this listener
+      this.tokenMap.set(client.listenerPort, newToken);
 
       // Notify the requesting client of the new token
       this.send(client.ws, {
@@ -1392,11 +1411,11 @@ export class WebSocketHandler {
         requestId,
       });
 
-      console.log('WebSocket: Token rotated successfully');
+      console.log(`WebSocket: Token rotated successfully for port ${client.listenerPort}`);
 
-      // Disconnect all other clients (they need to re-authenticate)
+      // Disconnect other clients on the same listener (they need to re-authenticate)
       for (const [id, c] of this.clients) {
-        if (id !== client.id && c.authenticated) {
+        if (id !== client.id && c.authenticated && c.listenerPort === client.listenerPort) {
           this.send(c.ws, {
             type: 'token_invalidated',
             success: true,

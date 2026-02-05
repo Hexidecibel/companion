@@ -31,39 +31,42 @@ async function main(): Promise<void> {
 
   // Load configuration
   const config = loadConfig();
-  console.log(`Config: Port ${config.port}, TLS: ${config.tls}, mDNS: ${config.mdnsEnabled}`);
+  const listenerPorts = config.listeners.map((l) => l.port).join(', ');
+  console.log(`Config: Listeners on ports [${listenerPorts}], mDNS: ${config.mdnsEnabled}`);
 
-  // Auto-generate TLS certificates if enabled and missing
-  if (config.tls) {
-    const certPath = config.certPath || getDefaultCertPaths().certPath;
-    const keyPath = config.keyPath || getDefaultCertPaths().keyPath;
+  // Process each listener for TLS setup
+  for (const listener of config.listeners) {
+    if (listener.tls) {
+      const certPath = listener.certPath || getDefaultCertPaths().certPath;
+      const keyPath = listener.keyPath || getDefaultCertPaths().keyPath;
 
-    if (!certsExist(certPath, keyPath)) {
-      console.log('TLS certificates not found, generating self-signed certificates...');
-      try {
-        const paths = generateAndSaveCerts(certPath, keyPath);
-        config.certPath = paths.certPath;
-        config.keyPath = paths.keyPath;
-        console.log('Self-signed certificates generated successfully');
-        console.log('Note: Clients may need to accept the self-signed certificate');
-      } catch (err) {
-        console.error('Failed to generate TLS certificates:', err);
-        console.error('Falling back to non-TLS mode');
-        config.tls = false;
+      if (!certsExist(certPath, keyPath)) {
+        console.log(`TLS certificates not found for port ${listener.port}, generating self-signed certificates...`);
+        try {
+          const paths = generateAndSaveCerts(certPath, keyPath);
+          listener.certPath = paths.certPath;
+          listener.keyPath = paths.keyPath;
+          console.log('Self-signed certificates generated successfully');
+          console.log('Note: Clients may need to accept the self-signed certificate');
+        } catch (err) {
+          console.error('Failed to generate TLS certificates:', err);
+          console.error(`Falling back to non-TLS mode for port ${listener.port}`);
+          listener.tls = false;
+        }
       }
-    }
 
-    // Validate TLS config
-    if (config.tls) {
-      const tlsErrors = validateTlsConfig({
-        enabled: config.tls,
-        certPath: config.certPath,
-        keyPath: config.keyPath,
-      });
-      if (tlsErrors.length > 0) {
-        console.error('TLS configuration errors:');
-        tlsErrors.forEach((e) => console.error(`  - ${e}`));
-        process.exit(1);
+      // Validate TLS config
+      if (listener.tls) {
+        const tlsErrors = validateTlsConfig({
+          enabled: listener.tls,
+          certPath: listener.certPath,
+          keyPath: listener.keyPath,
+        });
+        if (tlsErrors.length > 0) {
+          console.error(`TLS configuration errors for port ${listener.port}:`);
+          tlsErrors.forEach((e) => console.error(`  - ${e}`));
+          process.exit(1);
+        }
       }
     }
   }
@@ -79,16 +82,21 @@ async function main(): Promise<void> {
     notificationStore
   );
 
-  // Create HTTP/HTTPS server with QR code endpoint
+  // Create HTTP/HTTPS servers for each listener
   const qrHandler = createQRRequestHandler(config);
-  const server = createServer(
-    {
-      enabled: config.tls,
-      certPath: config.certPath,
-      keyPath: config.keyPath,
-    },
-    qrHandler
-  );
+  const servers: { server: ReturnType<typeof createServer>; listener: typeof config.listeners[0] }[] = [];
+
+  for (const listener of config.listeners) {
+    const server = createServer(
+      {
+        enabled: listener.tls || false,
+        certPath: listener.certPath,
+        keyPath: listener.keyPath,
+      },
+      qrHandler
+    );
+    servers.push({ server, listener });
+  }
 
   // Initialize work group manager for parallel /work orchestration
   const workGroupTmux = new TmuxManager('companion');
@@ -124,9 +132,9 @@ async function main(): Promise<void> {
     );
   });
 
-  // Initialize WebSocket handler
+  // Initialize WebSocket handler with all servers
   const wsHandler = new WebSocketHandler(
-    server,
+    servers,
     config,
     watcher,
     injector,
@@ -136,10 +144,11 @@ async function main(): Promise<void> {
     workGroupManager
   );
 
-  // Start mDNS advertisement
+  // Start mDNS advertisement (advertise first listener)
   let mdns: MdnsAdvertiser | null = null;
-  if (config.mdnsEnabled) {
-    mdns = new MdnsAdvertiser(config.port, config.tls);
+  if (config.mdnsEnabled && config.listeners.length > 0) {
+    const primaryListener = config.listeners[0];
+    mdns = new MdnsAdvertiser(primaryListener.port, primaryListener.tls || false);
     mdns.start();
   }
 
@@ -264,12 +273,15 @@ async function main(): Promise<void> {
   // Write PID file for CLI management
   writePidFile();
 
-  // Start HTTP server
-  server.listen(config.port, () => {
-    console.log(`Server listening on port ${config.port}`);
-    console.log(`WebSocket endpoint: ws${config.tls ? 's' : ''}://localhost:${config.port}`);
-    console.log(`QR code setup: http${config.tls ? 's' : ''}://localhost:${config.port}/qr`);
-  });
+  // Start HTTP servers for all listeners
+  for (const { server, listener } of servers) {
+    server.listen(listener.port, () => {
+      const protocol = listener.tls ? 's' : '';
+      console.log(`Server listening on port ${listener.port}`);
+      console.log(`WebSocket endpoint: ws${protocol}://localhost:${listener.port}`);
+      console.log(`QR code setup: http${protocol}://localhost:${listener.port}/qr`);
+    });
+  }
 
   // Graceful shutdown
   const shutdown = async (): Promise<void> => {
@@ -282,10 +294,17 @@ async function main(): Promise<void> {
     subAgentWatcher.stop();
     if (mdns) mdns.stop();
 
-    server.close(() => {
-      console.log('Server closed');
-      process.exit(0);
-    });
+    // Close all servers
+    let closedCount = 0;
+    for (const { server } of servers) {
+      server.close(() => {
+        closedCount++;
+        if (closedCount === servers.length) {
+          console.log('All servers closed');
+          process.exit(0);
+        }
+      });
+    }
 
     // Force exit after 5 seconds
     setTimeout(() => {

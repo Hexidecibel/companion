@@ -1,9 +1,21 @@
-export interface DaemonConfig {
+export interface ListenerConfig {
   port: number;
   token: string;
-  tls: boolean;
+  tls?: boolean;
   certPath?: string;
   keyPath?: string;
+}
+
+export interface DaemonConfig {
+  // Legacy single-listener fields (for backward compatibility)
+  port?: number;
+  token?: string;
+  tls?: boolean;
+  certPath?: string;
+  keyPath?: string;
+  // New multi-listener support
+  listeners: ListenerConfig[];
+  // Other config
   tmuxSession: string;
   codeHome: string;
   mdnsEnabled: boolean;

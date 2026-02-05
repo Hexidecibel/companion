@@ -28,8 +28,10 @@ ${bold('USAGE')}
 ${bold('COMMANDS')}
   start       Start the daemon (default if no command given)
   stop        Stop a running daemon
+  restart     Restart the daemon (via systemctl)
   status      Show daemon status
   config      View or modify configuration
+  token       Generate a new authentication token
   install     Run the installation script
   logs        Show recent daemon logs
   help        Show this help message
@@ -47,9 +49,11 @@ ${bold('EXAMPLES')}
   companion                    Start the daemon
   companion start              Start the daemon
   companion stop               Stop the daemon
+  companion restart            Restart the daemon
   companion status             Check if daemon is running
   companion config             Show configuration
   companion config set port 8080
+  companion token              Generate new auth token
   companion logs               Show recent logs
   companion install            Run installation setup
 `);
@@ -279,11 +283,11 @@ function cmdConfig(args: string[]): void {
 
   console.log(bold('Companion Configuration'));
   console.log('─'.repeat(40));
-  console.log(`  port:            ${config.port}`);
-  console.log(
-    `  token:           ${dim(config.token.slice(0, 8) + '...' + config.token.slice(-4))}`
-  );
-  console.log(`  tls:             ${config.tls}`);
+  console.log(`  listeners:`);
+  for (const listener of config.listeners) {
+    const tokenPreview = listener.token.slice(0, 8) + '...' + listener.token.slice(-4);
+    console.log(`    - port: ${listener.port}, token: ${dim(tokenPreview)}, tls: ${listener.tls || false}`);
+  }
   console.log(`  tmux_session:    ${config.tmuxSession}`);
   console.log(`  code_home:       ${config.codeHome}`);
   console.log(`  mdns_enabled:    ${config.mdnsEnabled}`);
@@ -356,6 +360,67 @@ function cmdLogs(): void {
   }
 }
 
+function cmdRestart(): void {
+  const platform = os.platform();
+
+  console.log('Restarting companion daemon...');
+
+  if (platform === 'darwin') {
+    try {
+      execSync('launchctl kickstart -k gui/$(id -u)/com.companion.daemon', { stdio: 'inherit' });
+      console.log(green('Daemon restarted'));
+    } catch {
+      console.error(red('Failed to restart via launchctl'));
+      console.log('Try: launchctl unload ~/Library/LaunchAgents/com.companion.daemon.plist');
+      console.log('     launchctl load ~/Library/LaunchAgents/com.companion.daemon.plist');
+    }
+  } else {
+    // Linux: try user systemctl first, then system
+    try {
+      execSync('systemctl --user restart companion', { stdio: 'inherit' });
+      console.log(green('Daemon restarted'));
+    } catch {
+      try {
+        execSync('sudo systemctl restart companion', { stdio: 'inherit' });
+        console.log(green('Daemon restarted (system service)'));
+      } catch {
+        console.error(red('Failed to restart via systemctl'));
+        console.log('Try manually: systemctl --user restart companion');
+      }
+    }
+  }
+}
+
+function cmdToken(): void {
+  const crypto = require('crypto');
+
+  let config: DaemonConfig;
+  try {
+    config = loadConfig();
+  } catch {
+    console.error(red('Cannot load config. Run "companion install" first.'));
+    process.exit(1);
+  }
+
+  const newToken = crypto.randomBytes(16).toString('hex');
+
+  // Update all listeners with the new token
+  for (const listener of config.listeners) {
+    listener.token = newToken;
+  }
+
+  saveConfig(config);
+
+  console.log(bold('New authentication token generated'));
+  console.log('─'.repeat(40));
+  console.log('');
+  console.log(`  ${yellow(newToken)}`);
+  console.log('');
+  console.log(dim('Token saved to config. Restart daemon to apply:'));
+  console.log(dim('  companion restart'));
+  console.log('');
+}
+
 /**
  * Parse CLI arguments and dispatch to the appropriate command.
  * Returns true if a command was handled, false if the daemon should start.
@@ -386,6 +451,14 @@ export async function dispatchCli(args: string[]): Promise<boolean> {
 
     case 'stop':
       cmdStop();
+      return true;
+
+    case 'restart':
+      cmdRestart();
+      return true;
+
+    case 'token':
+      cmdToken();
       return true;
 
     case 'config':

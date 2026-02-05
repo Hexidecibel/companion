@@ -111,10 +111,11 @@ export function createQRRequestHandler(config: DaemonConfig): http.RequestListen
 
     // HTTP image upload endpoint - more reliable than WebSocket for large payloads
     if (urlPath === '/upload' && req.method === 'POST') {
-      // Verify auth token
+      // Verify auth token against any listener's token
       const authHeader = req.headers['authorization'];
       const token = authHeader?.replace('Bearer ', '');
-      if (token !== config.token) {
+      const isValidToken = config.listeners.some((l) => l.token === token);
+      if (!isValidToken) {
         res.writeHead(401, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ success: false, error: 'Unauthorized' }));
         return;
@@ -208,7 +209,7 @@ export function createQRRequestHandler(config: DaemonConfig): http.RequestListen
     // QR and JSON endpoints require token auth via query param
     const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
     const queryToken = url.searchParams.get('token');
-    const isAuthed = queryToken === config.token;
+    const isAuthed = config.listeners.some((l) => l.token === queryToken);
 
     if (urlPath === '/qr' || urlPath === '/qr.png') {
       if (!isAuthed) {
@@ -218,15 +219,18 @@ export function createQRRequestHandler(config: DaemonConfig): http.RequestListen
       }
 
       try {
-        // Prefer host/port sent by the client (from document.location) since
+        // Prefer host/port/tls sent by the client (from document.location) since
         // reverse proxies like HAProxy may strip the Host header
         const clientHost = url.searchParams.get('host');
         const clientPort = url.searchParams.get('port');
+        const clientTls = url.searchParams.get('tls');
+        // Use primary (first) listener for QR code defaults
+        const primaryListener = config.listeners[0];
         const qrConfig: QRConfig = {
           host: clientHost || (req.headers.host || '').split(':')[0] || getLocalIP(),
-          port: clientPort ? parseInt(clientPort, 10) : config.port,
-          token: config.token,
-          tls: config.tls,
+          port: clientPort ? parseInt(clientPort, 10) : primaryListener.port,
+          token: primaryListener.token,
+          tls: clientTls !== null ? clientTls === '1' : (primaryListener.tls || false),
         };
 
         const qrData = JSON.stringify(qrConfig);
@@ -263,11 +267,14 @@ export function createQRRequestHandler(config: DaemonConfig): http.RequestListen
 
       const clientHost = url.searchParams.get('host');
       const clientPort = url.searchParams.get('port');
+      const clientTls = url.searchParams.get('tls');
+      // Use primary (first) listener for QR JSON defaults
+      const primaryListener = config.listeners[0];
       const qrConfig: QRConfig = {
         host: clientHost || (req.headers.host || '').split(':')[0] || getLocalIP(),
-        port: clientPort ? parseInt(clientPort, 10) : config.port,
-        token: config.token,
-        tls: config.tls,
+        port: clientPort ? parseInt(clientPort, 10) : primaryListener.port,
+        token: primaryListener.token,
+        tls: clientTls !== null ? clientTls === '1' : (primaryListener.tls || false),
       };
 
       res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -398,7 +405,8 @@ export function createQRRequestHandler(config: DaemonConfig): http.RequestListen
       // correct address even behind reverse proxies that strip the Host header
       var qrParams = 'token=' + encodeURIComponent(token)
         + '&host=' + encodeURIComponent(location.hostname)
-        + '&port=' + encodeURIComponent(location.port || (location.protocol === 'https:' ? '443' : '80'));
+        + '&port=' + encodeURIComponent(location.port || (location.protocol === 'https:' ? '443' : '80'))
+        + '&tls=' + (location.protocol === 'https:' ? '1' : '0');
       fetch('/qr.png?' + qrParams)
         .then(function(res) {
           if (res.ok) {

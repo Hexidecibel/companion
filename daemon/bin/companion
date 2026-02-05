@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# Companion CLI wrapper - works whether installed via npm or cloned from repo
+set -e
+
+# Find the daemon directory (handles symlinks)
+SOURCE="${BASH_SOURCE[0]}"
+while [ -L "$SOURCE" ]; do
+  DIR=$(cd -P "$(dirname "$SOURCE")" && pwd)
+  SOURCE=$(readlink "$SOURCE")
+  [[ $SOURCE != /* ]] && SOURCE="$DIR/$SOURCE"
+done
+SCRIPT_DIR=$(cd -P "$(dirname "$SOURCE")" && pwd)
+DAEMON_DIR=$(cd "$SCRIPT_DIR/.." && pwd)
+
+# Check if built
+if [[ ! -f "$DAEMON_DIR/dist/index.js" ]]; then
+  echo "Daemon not built. Building now..."
+  cd "$DAEMON_DIR"
+  npm install --silent 2>/dev/null || npm install
+  npm run build --silent 2>/dev/null || npm run build
+fi
+
+# Run the daemon CLI
+exec node "$DAEMON_DIR/dist/index.js" "$@"
