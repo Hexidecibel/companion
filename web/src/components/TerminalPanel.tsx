@@ -166,6 +166,7 @@ export function TerminalPanel({ serverId, tmuxSessionName }: TerminalPanelProps)
       const mapped = CTRL_KEY_MAP[e.key.toLowerCase()];
       if (mapped) {
         e.preventDefault();
+        e.stopPropagation();
         sendRawKey(mapped);
         return;
       }
@@ -175,6 +176,7 @@ export function TerminalPanel({ serverId, tmuxSessionName }: TerminalPanelProps)
     const specialKey = SPECIAL_KEY_MAP[e.key];
     if (specialKey) {
       e.preventDefault();
+      e.stopPropagation();
       sendRawKey(specialKey);
       return;
     }
@@ -182,6 +184,7 @@ export function TerminalPanel({ serverId, tmuxSessionName }: TerminalPanelProps)
     // Printable characters (single char, no meta/ctrl/alt modifiers)
     if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
       e.preventDefault();
+      e.stopPropagation();
       sendLiteralChar(e.key);
       return;
     }
