@@ -987,6 +987,19 @@ body {
   color: white;
 }
 
+.msg-option-btn.always {
+  background: rgba(59, 130, 246, 0.1);
+  border-color: rgba(59, 130, 246, 0.3);
+  color: var(--accent-blue);
+  font-size: 12px;
+}
+
+.msg-option-btn.always:hover {
+  background: var(--accent-blue);
+  border-color: var(--accent-blue);
+  color: white;
+}
+
 .msg-approval-prompt {
   margin-top: 8px;
   max-width: 90%;

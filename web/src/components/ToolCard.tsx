@@ -126,7 +126,8 @@ function ElapsedTimer({ startedAt }: { startedAt: number }) {
 export function ToolCard({ tool, forceExpanded }: ToolCardProps) {
   const [localExpanded, setLocalExpanded] = useState(false);
 
-  const expanded = forceExpanded !== undefined ? forceExpanded : localExpanded;
+  // Auto-expand pending tools so user can see what needs approval
+  const expanded = forceExpanded !== undefined ? forceExpanded : (localExpanded || tool.status === 'pending');
 
   const hasEditDiff = isEditTool(tool.name) &&
     typeof tool.input.old_string === 'string' &&

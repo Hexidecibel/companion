@@ -339,6 +339,7 @@ function parseEntry(
           options = [
             { label: 'yes', description: `Approve: ${description}` },
             { label: 'no', description: 'Reject this action' },
+            { label: 'yes, and don\'t ask again for this session', description: `Always allow: ${description}` },
           ];
           isWaitingForChoice = true;
           console.log(

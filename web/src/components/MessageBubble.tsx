@@ -264,16 +264,21 @@ export function MessageBubble({ message, onSelectOption, onViewFile, onViewArtif
             <div className="msg-approval-description">{message.options[0].description}</div>
           )}
           <div className="msg-options">
-            {message.options.map((opt) => (
-              <button
-                key={opt.label}
-                className={`msg-option-btn ${opt.label === 'yes' ? 'approve' : opt.label === 'no' ? 'reject' : ''}`}
-                onClick={() => onSelectOption(opt.label)}
-                title={opt.description}
-              >
-                {opt.label === 'yes' ? 'Approve' : opt.label === 'no' ? 'Reject' : opt.label}
-              </button>
-            ))}
+            {message.options.map((opt) => {
+              const isApprove = opt.label === 'yes';
+              const isReject = opt.label === 'no';
+              const isAlways = opt.label.startsWith('yes, and don');
+              return (
+                <button
+                  key={opt.label}
+                  className={`msg-option-btn ${isApprove ? 'approve' : isReject ? 'reject' : isAlways ? 'always' : ''}`}
+                  onClick={() => onSelectOption(opt.label)}
+                  title={opt.description}
+                >
+                  {isApprove ? 'Approve' : isReject ? 'Reject' : isAlways ? 'Always Allow' : opt.label}
+                </button>
+              );
+            })}
           </div>
         </div>
       )}
