@@ -287,9 +287,9 @@ function parseBlocks(content: string): Block[] {
     }
 
     // Heading
-    const headingMatch = line.match(/^(#{1,6})\s+(.+)$/);
+    const headingMatch = line.match(/^(#{1,6})\s+(.*)/);
     if (headingMatch) {
-      blocks.push({ type: 'heading', level: headingMatch[1].length, text: headingMatch[2] });
+      blocks.push({ type: 'heading', level: headingMatch[1].length, text: headingMatch[2] || '' });
       i++;
       continue;
     }
@@ -359,6 +359,9 @@ function parseBlocks(content: string): Block[] {
 
     if (paraLines.length > 0) {
       blocks.push({ type: 'paragraph', text: paraLines.join('\n') });
+    } else {
+      // Safety: skip unhandled line to prevent infinite loop
+      i++;
     }
   }
 
