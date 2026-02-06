@@ -7,6 +7,7 @@ interface TerminalPanelProps {
   serverId: string;
   tmuxSessionName: string;
   fastPoll?: boolean;
+  onClose?: () => void;
 }
 
 const POLL_INTERVAL = 2000;
@@ -33,7 +34,7 @@ function spanStyle(span: AnsiSpan): React.CSSProperties {
   return style;
 }
 
-export function TerminalPanel({ serverId, tmuxSessionName, fastPoll }: TerminalPanelProps) {
+export function TerminalPanel({ serverId, tmuxSessionName, fastPoll, onClose }: TerminalPanelProps) {
   const [lines, setLines] = useState<AnsiSpan[][]>([]);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
@@ -109,6 +110,15 @@ export function TerminalPanel({ serverId, tmuxSessionName, fastPoll }: TerminalP
     <div className="terminal-panel">
       <div className="terminal-toolbar">
         <div className="terminal-toolbar-left">
+          {onClose && (
+            <button
+              className="terminal-toolbar-btn terminal-close-btn"
+              onClick={onClose}
+              title="Back to conversation"
+            >
+              ←
+            </button>
+          )}
           <span className="terminal-toolbar-label">
             tmux: {tmuxSessionName}
           </span>
@@ -147,6 +157,11 @@ export function TerminalPanel({ serverId, tmuxSessionName, fastPoll }: TerminalP
         className="terminal-output"
         ref={outputRef}
         onScroll={handleScroll}
+        onClick={() => {
+          if ('ontouchstart' in window && document.activeElement instanceof HTMLElement) {
+            document.activeElement.blur();
+          }
+        }}
       >
         {lines.map((spans, i) => (
           <div key={i} className="terminal-line">

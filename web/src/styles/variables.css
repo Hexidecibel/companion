@@ -35,6 +35,9 @@
   --focus-glow: 0 0 0 2px rgba(139, 92, 246, 0.3);
   --focus-glow-blue: 0 0 0 2px rgba(59, 130, 246, 0.3);
 
+  /* Keyboard height (set by JS visualViewport listener) */
+  --keyboard-height: 0px;
+
   /* Font scaling */
   --font-scale: 1;
   --fs-content: calc(14px * var(--font-scale));

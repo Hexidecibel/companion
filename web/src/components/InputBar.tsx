@@ -91,9 +91,9 @@ export function InputBar({ onSend, onSendWithImages, disabled, skills = [], term
   }, [text, images, sending, disabled, onSend, onSendWithImages, resetHistory]);
 
   const handleTerminalSend = useCallback(async () => {
-    const trimmed = text.trim();
-    if (!trimmed || sending || !onTerminalSend) return;
+    if (sending || !onTerminalSend) return;
 
+    const trimmed = text.trim();
     const savedText = text;
     resetHistory();
     setSending(true);
@@ -102,6 +102,7 @@ export function InputBar({ onSend, onSendWithImages, disabled, skills = [], term
       textareaRef.current.style.height = 'auto';
     }
 
+    // Send the trimmed text, or empty string for bare Enter (accepts prompts)
     const success = await onTerminalSend(trimmed);
 
     if (!success) {

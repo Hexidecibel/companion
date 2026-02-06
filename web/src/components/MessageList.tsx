@@ -112,6 +112,11 @@ export function MessageList({
     const target = e.target as HTMLElement;
     if (target.closest('button, a, code, pre, .option-btn, .tool-card')) return;
     if (window.getSelection()?.toString()) return;
+    // On mobile/touch, dismiss keyboard instead of focusing input
+    if ('ontouchstart' in window && document.activeElement instanceof HTMLElement) {
+      document.activeElement.blur();
+      return;
+    }
     const textarea = document.querySelector('.input-bar-textarea') as HTMLElement | null;
     textarea?.focus();
   };

@@ -49,3 +49,22 @@ export function applySafeAreaInsets(): void {
     style.setProperty('--safe-bottom', '24px');
   }
 }
+
+/**
+ * Track keyboard height via visualViewport API and expose as CSS variable.
+ * When the virtual keyboard opens on mobile, the visual viewport shrinks
+ * but the layout viewport stays the same. We compute the difference and
+ * set --keyboard-height so CSS can adjust bottom-fixed elements.
+ */
+export function initKeyboardHeightListener(): void {
+  const vv = window.visualViewport;
+  if (!vv) return;
+
+  const update = () => {
+    const keyboardHeight = Math.max(0, window.innerHeight - vv.height);
+    document.documentElement.style.setProperty('--keyboard-height', `${keyboardHeight}px`);
+  };
+
+  vv.addEventListener('resize', update);
+  vv.addEventListener('scroll', update);
+}

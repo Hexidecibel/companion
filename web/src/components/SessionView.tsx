@@ -384,6 +384,7 @@ export function SessionView({
           serverId={serverId}
           tmuxSessionName={tmuxSessionName}
           fastPoll
+          onClose={() => setShowTerminal(false)}
         />
       )}
 

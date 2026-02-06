@@ -8,18 +8,18 @@ body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Inter', sans-serif;
   background-color: var(--bg-primary);
   color: var(--text-primary);
-  min-height: 100vh;
+  min-height: 100dvh;
   line-height: 1.5;
 }
 
 #root {
-  min-height: 100vh;
+  min-height: 100dvh;
 }
 
 #app {
   max-width: 960px;
   margin: 0 auto;
-  min-height: 100vh;
+  min-height: 100dvh;
   display: flex;
   flex-direction: column;
 }
@@ -412,7 +412,7 @@ body {
 
 .dashboard {
   display: flex;
-  height: 100vh;
+  height: 100dvh;
   overflow: hidden;
 }
 
@@ -1725,10 +1725,10 @@ body {
     max-width: 95%;
   }
 
-  /* Input bar flush with safe area */
+  /* Input bar flush with safe area; keyboard-height overrides safe-bottom when keyboard is open */
   .input-bar {
     padding: 8px 12px;
-    padding-bottom: calc(8px + var(--safe-bottom));
+    padding-bottom: calc(8px + max(var(--safe-bottom), var(--keyboard-height)));
     gap: 6px;
   }
 
@@ -1843,7 +1843,10 @@ html {
 /* Fix iOS momentum scrolling */
 .msg-list,
 .sidebar-sessions,
-.server-list {
+.server-list,
+.terminal-output,
+.skill-browser-content,
+.modal-body {
   -webkit-overflow-scrolling: touch;
 }
 
@@ -2237,7 +2240,7 @@ html {
   top: 0;
   left: 0;
   right: 0;
-  bottom: 0;
+  bottom: var(--keyboard-height);
   background-color: rgba(0, 0, 0, 0.6);
   display: flex;
   align-items: center;
@@ -2252,7 +2255,7 @@ html {
   border-radius: 12px;
   width: 90%;
   max-width: 640px;
-  max-height: 80vh;
+  max-height: 80dvh;
   display: flex;
   flex-direction: column;
   box-shadow: var(--shadow-lg);
@@ -2616,7 +2619,7 @@ html {
 
 .file-viewer-image {
   max-width: 100%;
-  max-height: 80vh;
+  max-height: 80dvh;
   object-fit: contain;
   border-radius: 4px;
 }
@@ -3030,7 +3033,7 @@ html {
   border: 1px solid var(--border-color);
   border-radius: 12px;
   width: 400px;
-  max-height: 80vh;
+  max-height: 80dvh;
   overflow-y: auto;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
 }
@@ -3352,7 +3355,7 @@ html {
   box-shadow: var(--shadow-lg);
   display: flex;
   flex-direction: column;
-  max-height: 70vh;
+  max-height: 70dvh;
   animation: fadeIn 0.1s ease-out;
 }
 
@@ -3440,7 +3443,7 @@ html {
 
 .conversation-search-viewer-mode {
   max-width: 720px;
-  max-height: 80vh;
+  max-height: 80dvh;
 }
 
 .conversation-search-header {
@@ -3913,11 +3916,11 @@ html {
   top: 0;
   left: 0;
   right: 0;
-  bottom: 0;
+  bottom: var(--keyboard-height);
   background-color: rgba(0, 0, 0, 0.5);
   display: flex;
   justify-content: center;
-  padding-top: 20vh;
+  padding-top: 20dvh;
   z-index: 2000;
   animation: fadeIn 0.1s ease-out;
 }
@@ -4160,7 +4163,7 @@ html {
 
 .notif-modal {
   max-width: 580px;
-  max-height: 85vh;
+  max-height: 85dvh;
 }
 
 .notif-tabs {
@@ -4620,6 +4623,12 @@ html {
   background-color: rgba(245, 158, 11, 0.15);
   color: var(--accent-amber);
   border-color: rgba(245, 158, 11, 0.3);
+}
+
+.terminal-close-btn {
+  font-size: 16px;
+  padding: 3px 8px;
+  line-height: 1;
 }
 
 /* Terminal arrow buttons for mobile InputBar */
@@ -6251,7 +6260,7 @@ html {
   background: var(--bg-primary);
   width: 100%;
   max-width: 540px;
-  max-height: 90vh;
+  max-height: 90dvh;
   border-radius: 12px;
   display: flex;
   flex-direction: column;
@@ -6261,9 +6270,13 @@ html {
 @media (max-width: 768px) {
   .skill-browser {
     max-width: 100%;
-    max-height: 100vh;
-    height: 100vh;
+    max-height: 100dvh;
+    height: 100dvh;
     border-radius: 0;
+  }
+
+  .skill-browser-header {
+    padding-top: calc(12px + var(--safe-top));
   }
 }
 
