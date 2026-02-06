@@ -172,6 +172,48 @@ export interface PendingImage {
 
 // Work Group types (parallel /work orchestration)
 
+// Scaffold/New Project types
+export interface StackTemplate {
+  id: string;
+  name: string;
+  description: string;
+  type: 'frontend' | 'backend' | 'fullstack' | 'library' | 'cli';
+  icon: string;
+  tags: string[];
+  score?: number;
+  matchedKeywords?: string[];
+}
+
+export interface ProjectConfig {
+  name: string;
+  description: string;
+  location: string;
+  stackId: string;
+  options: {
+    initGit: boolean;
+    createGitHubRepo: boolean;
+    privateRepo: boolean;
+    includeDocker: boolean;
+    includeCI: boolean;
+    includeLinter: boolean;
+  };
+}
+
+export interface ScaffoldProgress {
+  step: string;
+  detail?: string;
+  progress: number;
+  complete: boolean;
+  error?: string;
+}
+
+export interface ScaffoldResult {
+  success: boolean;
+  projectPath: string;
+  filesCreated: string[];
+  error?: string;
+}
+
 export interface WorkerQuestion {
   text: string;
   options?: { label: string }[];
