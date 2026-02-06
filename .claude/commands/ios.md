@@ -30,7 +30,7 @@ cd desktop && cargo tauri ios init
 
 4. Configure signing in Xcode:
    - Open `desktop/src-tauri/gen/apple/Companion.xcodeproj`
-   - Set team and bundle identifier (`com.hexidecibel.companion`)
+   - Set team and bundle identifier (`com.companion.codeapp`)
    - Enable Push Notifications capability
 
 ## Steps

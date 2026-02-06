@@ -1,6 +1,6 @@
 [package]
 name = "companion-desktop"
-version = "0.2.0"
+version = "0.2.1"
 description = "Companion — desktop & mobile app"
 edition = "2021"
 

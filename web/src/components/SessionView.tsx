@@ -261,22 +261,6 @@ export function SessionView({
     }},
   ], [tmuxSessionName, showSearch, showFileFinder, viewingFile, showConversationSearch, showAgentsModal, viewingAgentId, artifactContent, sessionId, autoApprove, sessionMute, handleCloseSearch]));
 
-  if (!serverId || !sessionId) {
-    return (
-      <div className="session-view-empty">
-        <p>Select a session from the sidebar</p>
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="session-view-empty">
-        <p className="session-view-error">{error}</p>
-      </div>
-    );
-  }
-
   const sendTerminalText = useCallback(async (text: string): Promise<boolean> => {
     if (!serverId || !tmuxSessionName) return false;
     const conn = connectionManager.getConnection(serverId);
@@ -301,6 +285,22 @@ export function SessionView({
       keys: [key],
     });
   }, [serverId, tmuxSessionName]);
+
+  if (!serverId || !sessionId) {
+    return (
+      <div className="session-view-empty">
+        <p>Select a session from the sidebar</p>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="session-view-empty">
+        <p className="session-view-error">{error}</p>
+      </div>
+    );
+  }
 
   const handleSelectOption = (label: string) => {
     sendInput(label);

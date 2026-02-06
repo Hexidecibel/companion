@@ -64,9 +64,9 @@ fi
 
 # 4b. Ensure google-services.json has the right package name
 if [ -f "$GOOGLE_SERVICES_DST" ]; then
-  if ! grep -q "com.hexidecibel.companion" "$GOOGLE_SERVICES_DST"; then
-    echo "WARNING: google-services.json does not contain package 'com.hexidecibel.companion'"
-    echo "  Add a new Android app in Firebase Console with package name: com.hexidecibel.companion"
+  if ! grep -q "com.companion.codeapp" "$GOOGLE_SERVICES_DST"; then
+    echo "WARNING: google-services.json does not contain package 'com.companion.codeapp'"
+    echo "  Add a new Android app in Firebase Console with package name: com.companion.codeapp"
     echo "  Or download an updated google-services.json that includes this package"
   fi
 fi

@@ -73,7 +73,7 @@ jobs:
       - name: Patch Android project (FCM, cleartext, back nav)
         run: cd desktop && bash scripts/setup-android.sh
       - name: Build APK
-        run: cd desktop && cargo tauri android build --target aarch64
+        run: cd desktop && npx tauri android build --target aarch64
       - name: Sign and rename APK
         run: |
           APK=$(find desktop/src-tauri/gen/android/app/build/outputs/apk -name '*.apk' | head -1)
@@ -104,12 +104,115 @@ jobs:
       - run: cd desktop && npm ci
       - name: Initialize iOS project
         run: cd desktop && npx tauri ios init
+      - name: Import Apple Distribution certificate
+        env:
+          APPLE_CERTIFICATE_P12_B64: ${{ secrets.APPLE_CERTIFICATE_P12_B64 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          CERT_PATH=$RUNNER_TEMP/certificate.p12
+          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
+          KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
+          echo "$APPLE_CERTIFICATE_P12_B64" | base64 --decode > "$CERT_PATH"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$CERT_PATH" -P "$APPLE_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security list-keychain -d user -s "$KEYCHAIN_PATH"
+      - name: Install provisioning profile
+        env:
+          APPLE_PROVISIONING_PROFILE_B64: ${{ secrets.APPLE_PROVISIONING_PROFILE_B64 }}
+        run: |
+          mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
+          echo "$APPLE_PROVISIONING_PROFILE_B64" | base64 --decode > ~/Library/MobileDevice/Provisioning\ Profiles/companion.mobileprovision
+      - name: Configure manual code signing
+        env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          PBXPROJ="desktop/src-tauri/gen/apple/companion-desktop.xcodeproj/project.pbxproj"
+          PROFILE_UUID=$(/usr/libexec/PlistBuddy -c "Print UUID" /dev/stdin <<< $(security cms -D -i ~/Library/MobileDevice/Provisioning\ Profiles/companion.mobileprovision))
+          PROFILE_NAME=$(/usr/libexec/PlistBuddy -c "Print Name" /dev/stdin <<< $(security cms -D -i ~/Library/MobileDevice/Provisioning\ Profiles/companion.mobileprovision))
+          # Disable automatic signing and set manual provisioning
+          sed -i '' "s/CODE_SIGN_IDENTITY = .*/CODE_SIGN_IDENTITY = \"Apple Distribution\";/" "$PBXPROJ"
+          sed -i '' "s/DEVELOPMENT_TEAM = .*/DEVELOPMENT_TEAM = \"$APPLE_TEAM_ID\";/" "$PBXPROJ"
+          sed -i '' '/CODE_SIGN_IDENTITY/a\'$'\n\t\t\t\t'"PROVISIONING_PROFILE_SPECIFIER = \"$PROFILE_NAME\";" "$PBXPROJ"
+          sed -i '' 's/CODE_SIGN_STYLE = Automatic/CODE_SIGN_STYLE = Manual/' "$PBXPROJ"
+      - name: Decode GoogleService-Info.plist
+        env:
+          GOOGLE_SERVICE_INFO_PLIST_B64: ${{ secrets.GOOGLE_SERVICE_INFO_PLIST_B64 }}
+        run: |
+          IOS_DIR=$(find desktop/src-tauri/gen/apple -maxdepth 1 -name '*_iOS' -type d | head -1)
+          if [ -z "$IOS_DIR" ]; then
+            IOS_DIR="desktop/src-tauri/gen/apple/Companion_iOS"
+            mkdir -p "$IOS_DIR"
+          fi
+          echo "$GOOGLE_SERVICE_INFO_PLIST_B64" | base64 --decode > "$IOS_DIR/GoogleService-Info.plist"
+      - name: Write App Store Connect API key
+        env:
+          APPLE_API_KEY_B64: ${{ secrets.APPLE_API_KEY_B64 }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+        run: |
+          mkdir -p ~/private_keys
+          echo "$APPLE_API_KEY_B64" | base64 --decode > ~/private_keys/AuthKey_${APPLE_API_KEY_ID}.p8
       - name: Build iOS
-        run: cd desktop && cargo tauri ios build --export-method app-store-connect
-        continue-on-error: true
-      - name: Upload IPA
+        env:
+          APPLE_DEVELOPMENT_TEAM: ${{ secrets.APPLE_TEAM_ID }}
+        run: cd desktop && npx tauri ios build --export-method app-store-connect || true
+      - name: Export IPA manually
+        env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        run: |
+          PROFILE_NAME=$(/usr/libexec/PlistBuddy -c "Print Name" /dev/stdin <<< $(security cms -D -i ~/Library/MobileDevice/Provisioning\ Profiles/companion.mobileprovision))
+          # Find the .xcarchive produced by tauri
+          ARCHIVE=$(find ~/Library/Developer/Xcode/DerivedData -name '*.xcarchive' -type d | head -1)
+          if [ -z "$ARCHIVE" ]; then
+            echo "No archive found, checking alternative paths..."
+            ARCHIVE=$(find desktop/src-tauri/gen/apple/build -name '*.xcarchive' -type d | head -1)
+          fi
+          echo "Using archive: $ARCHIVE"
+          # Write ExportOptions.plist with manual signing
+          cat > /tmp/ExportOptions.plist << EOPLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key>
+            <string>app-store-connect</string>
+            <key>teamID</key>
+            <string>${APPLE_TEAM_ID}</string>
+            <key>signingStyle</key>
+            <string>manual</string>
+            <key>provisioningProfiles</key>
+            <dict>
+              <key>com.companion.codeapp</key>
+              <string>${PROFILE_NAME}</string>
+            </dict>
+          </dict>
+          </plist>
+          EOPLIST
+          mkdir -p desktop/src-tauri/gen/apple/build/arm64
+          xcodebuild -exportArchive \
+            -archivePath "$ARCHIVE" \
+            -exportOptionsPlist /tmp/ExportOptions.plist \
+            -exportPath desktop/src-tauri/gen/apple/build/arm64 \
+            -authenticationKeyPath ~/private_keys/AuthKey_${APPLE_API_KEY_ID}.p8 \
+            -authenticationKeyID "$APPLE_API_KEY_ID" \
+            -authenticationKeyIssuerID "$APPLE_API_ISSUER" \
+            -allowProvisioningUpdates
+      - name: Upload IPA to TestFlight
+        env:
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        run: |
+          IPA=$(find desktop/src-tauri/gen/apple/build -name '*.ipa' | head -1)
+          xcrun altool --upload-app --type ios \
+            --file "$IPA" \
+            --apiKey "$APPLE_API_KEY_ID" \
+            --apiIssuer "$APPLE_API_ISSUER"
+      - name: Upload IPA artifact
         uses: actions/upload-artifact@v4
-        if: success()
         with:
           name: ios-ipa
           path: desktop/src-tauri/gen/apple/build/arm64/*.ipa
