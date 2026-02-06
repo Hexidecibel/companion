@@ -1,13 +1,13 @@
 # Companion
 
-A mobile companion for your AI coding CLI. Daemon runs on a Linux server, watches coding sessions, and exposes a WebSocket API. React Native app connects to monitor and respond from your phone.
+A mobile companion for your AI coding CLI. Daemon runs on a Linux server, watches coding sessions, and exposes a WebSocket API. Web client + Tauri wrapper provides desktop, Android, and iOS apps from a single codebase.
 
 ## Project Structure
 
 ```
 daemon/         # Node.js/TypeScript daemon (runs on server)
-app/            # React Native/Expo mobile app
-web/            # React + Vite + TypeScript web client
+web/            # React + Vite + TypeScript client (shared by all platforms)
+desktop/        # Tauri 2.0 wrapper (desktop + mobile native builds)
 ```
 
 ## Daemon
@@ -23,6 +23,7 @@ web/            # React + Vite + TypeScript web client
 - `src/input-injector.ts` - Sends responses via `tmux send-keys`
 - `src/websocket.ts` - WebSocket server, auth, message routing
 - `src/push.ts` - Firebase push notifications (optional)
+- `src/escalation.ts` - 2-tier notification escalation (browser -> push)
 - `src/mdns.ts` - Bonjour/mDNS discovery
 
 ### Commands
@@ -52,37 +53,21 @@ sudo journalctl -u companion -f   # View logs
 }
 ```
 
-## Mobile App
-
-React Native + Expo app. Connects to daemon via WebSocket.
-
-### Key files
-- `src/services/websocket.ts` - WebSocket client, reconnection logic
-- `src/services/storage.ts` - AsyncStorage for servers/settings
-- `src/hooks/useConnection.ts` - Connection state management
-- `src/screens/ServerList.tsx` - Server management UI
-- `src/screens/SessionView.tsx` - Conversation view
-
-### Commands
-```bash
-cd app && npm install
-npx expo start          # Dev mode
-eas build --platform ios    # Production build
-```
-
 ## Web Client
 
-React + Vite + TypeScript SPA. Connects to multiple daemons simultaneously via WebSocket.
+React + Vite + TypeScript SPA. Connects to multiple daemons simultaneously via WebSocket. Serves as the UI for all platforms (browser, desktop, Android, iOS).
 
 ### Key files
 - `src/App.tsx` - Screen routing (status | servers | editServer)
 - `src/services/ServerConnection.ts` - Single server WS connection
 - `src/services/ConnectionManager.ts` - Multi-server orchestrator
 - `src/services/storage.ts` - localStorage CRUD for servers
+- `src/services/push.ts` - FCM push notification registration
 - `src/context/ConnectionContext.tsx` - React context wrapping ConnectionManager
-- `src/components/StatusPage.tsx` - Dashboard with live connection badges
-- `src/components/ServerList.tsx` - Server management list
-- `src/components/ServerForm.tsx` - Add/edit server form
+- `src/components/Dashboard.tsx` - Main dashboard (responsive: sidebar on desktop, card list on mobile)
+- `src/components/MobileDashboard.tsx` - Mobile-optimized server/session list
+- `src/components/SessionView.tsx` - Conversation view with bottom toolbar on mobile
+- `src/utils/platform.ts` - Platform detection (browser, Tauri desktop, Tauri mobile)
 
 ### Commands
 ```bash
@@ -95,6 +80,42 @@ npm run typecheck       # Type check only
 ### Serving
 The daemon serves `web/dist/` at `http://<host>:9877/web`. After building, restart the daemon or it will pick up the dist directory on next start. During development, use `npm run dev` and access via the Vite dev server directly.
 
+## Desktop / Mobile (Tauri)
+
+Tauri 2.0 wraps the web client as a native app for desktop (Linux, macOS, Windows) and mobile (Android, iOS).
+
+### Key files
+- `desktop/src-tauri/tauri.conf.json` - Tauri configuration
+- `desktop/src-tauri/src/lib.rs` - Rust entry point, plugin registration
+- `desktop/src-tauri/plugins/tauri-plugin-fcm/` - Custom FCM/APNs plugin
+- `desktop/scripts/setup-android.sh` - Android project patches (FCM, cleartext, back nav)
+- `desktop/google-services.json` - Firebase config (gitignored, place manually)
+- `desktop/debug.keystore` - APK signing key (gitignored)
+
+### Commands
+```bash
+# Desktop
+cd desktop && npm run dev       # Dev with hot reload
+cd desktop && npm run build     # Release build (.deb, .dmg, etc.)
+
+# Android
+cd desktop && cargo tauri android init          # One-time setup
+cd desktop && bash scripts/setup-android.sh     # Patch for FCM
+cd desktop && cargo tauri android build --target aarch64  # Build APK
+
+# iOS (requires macOS + Xcode)
+cd desktop && cargo tauri ios init              # One-time setup
+cd desktop && cargo tauri ios build             # Build for device
+cd desktop && cargo tauri ios build --export-method app-store-connect  # TestFlight
+```
+
+### APK Signing
+```bash
+apksigner sign --ks desktop/debug.keystore --ks-pass pass:android --key-pass pass:android \
+  --out /tmp/companion-tauri.apk \
+  desktop/src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release-unsigned.apk
+```
+
 ## Architecture
 
 1. User runs the CLI in tmux: `tmux new -s claude && claude`
@@ -102,6 +123,7 @@ The daemon serves `web/dist/` at `http://<host>:9877/web`. After building, resta
 3. Parses conversations, detects when the CLI is waiting for input
 4. Broadcasts updates via WebSocket to connected apps
 5. App can send text/images back, daemon injects via tmux
+6. Escalation: browser notification (immediate) -> push notification (after configurable delay)
 
 ## WebSocket Protocol
 
@@ -136,73 +158,6 @@ wscat -c ws://localhost:9877
 
 ## Implementation Patterns
 
-### Adding a New Screen (App)
-
-1. Create screen file in `app/src/screens/`:
-```typescript
-import React, { useState, useEffect, useCallback } from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  TouchableOpacity,
-} from 'react-native';
-
-interface MyScreenProps {
-  onBack: () => void;
-  // other props
-}
-
-export function MyScreen({ onBack }: MyScreenProps) {
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    // Load data
-  }, []);
-
-  return (
-    <View style={styles.container}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={onBack} style={styles.backButton}>
-          <Text style={styles.backButtonText}>‹ Back</Text>
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>My Screen</Text>
-        <View style={styles.placeholder} />
-      </View>
-      <ScrollView style={styles.content}>
-        {/* Content */}
-      </ScrollView>
-    </View>
-  );
-}
-
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#111827' },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 12,
-    paddingVertical: 12,
-    backgroundColor: '#1f2937',
-    borderBottomWidth: 1,
-    borderBottomColor: '#374151',
-  },
-  backButton: { paddingHorizontal: 4, paddingVertical: 4, minWidth: 60 },
-  backButtonText: { color: '#3b82f6', fontSize: 17 },
-  headerTitle: { color: '#f3f4f6', fontSize: 17, fontWeight: '600' },
-  placeholder: { minWidth: 60 },
-  content: { flex: 1 },
-});
-```
-
-2. Add navigation in `App.tsx`:
-```typescript
-const [screen, setScreen] = useState<'dashboard' | 'myscreen'>('dashboard');
-// Then render conditionally
-```
-
 ### Adding a Daemon Endpoint
 
 1. Add message handler in `daemon/src/websocket.ts` switch statement:
@@ -225,14 +180,13 @@ private async handleMyEndpoint(payload: unknown): Promise<{ success: boolean; pa
 }
 ```
 
-3. Call from app via `wsService.sendRequest('my_endpoint', { data })`.
+3. Call from web client via `connectionManager.sendRequest(serverId, 'my_endpoint', { data })`.
 
 ### Adding Types
 
-- **App types:** `app/src/types/index.ts`
 - **Web types:** `web/src/types/index.ts`
 - **Daemon types:** `daemon/src/types.ts`
-- Keep types in sync between app, web, and daemon for shared interfaces
+- Keep types in sync between web and daemon for shared interfaces
 
 ### Code Style
 
@@ -240,30 +194,12 @@ private async handleMyEndpoint(payload: unknown): Promise<{ success: boolean; pa
 - **Accent colors:** `#3b82f6` (blue), `#10b981` (green), `#f59e0b` (amber), `#ef4444` (red)
 - **No emojis** in code unless user requests
 - **Functional components** with hooks, no class components
-- **AsyncStorage** for persistence in app
+- **localStorage** for persistence in web (with tauri-plugin-store write-through on mobile)
 - **Console.log** for daemon logging (gets captured by journalctl)
 
-### Services Pattern (App)
+### Hooks Pattern
 
-Services in `app/src/services/` are singletons:
-```typescript
-class MyService {
-  private data: Map<string, Value> = new Map();
-
-  async load(): Promise<void> { /* from AsyncStorage */ }
-  async save(): Promise<void> { /* to AsyncStorage */ }
-
-  getData(key: string): Value | undefined {
-    return this.data.get(key);
-  }
-}
-
-export const myService = new MyService();
-```
-
-### Hooks Pattern (App)
-
-Hooks in `app/src/hooks/`:
+Hooks in `web/src/hooks/`:
 ```typescript
 export function useMyHook(param: string) {
   const [state, setState] = useState<MyType | null>(null);
@@ -284,16 +220,18 @@ export function useMyHook(param: string) {
 
 ### Testing Changes
 
-1. **App:** Run `npx expo start` in `app/`, test on device/emulator
-2. **Daemon:** Run `npm run build && node dist/index.js` in `daemon/`
-3. **Web:** Run `npm run dev` in `web/`, or `npm run build` for production
-4. **Type check:** `npx tsc --noEmit` in any project directory
+1. **Daemon:** Run `npm run build && node dist/index.js` in `daemon/`
+2. **Web:** Run `npm run dev` in `web/`, or `npm run build` for production
+3. **Desktop:** Run `npm run dev` in `desktop/`
+4. **Android:** `/apk` skill to build, sign, and install
+5. **Type check:** `cd web && npx tsc --noEmit`
 
 ### Building
 
-- **No EAS builds without explicit user approval**
-- Local testing: `npx expo start`
-- APK build: `/apk` skill or `eas build --platform android --profile preview`
+- **No builds without explicit user approval**
+- APK build: `/apk` skill
+- iOS build: `/ios` skill (requires macOS)
+- Desktop: `cd desktop && npm run build`
 
 ---
 

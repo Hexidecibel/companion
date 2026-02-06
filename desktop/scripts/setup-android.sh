@@ -48,8 +48,8 @@ else
   echo "Firebase dependencies already in app build.gradle.kts"
 fi
 
-# 4. Copy google-services.json if it exists in app/ (React Native project)
-GOOGLE_SERVICES_SRC="$PROJECT_DIR/../app/android/app/google-services.json"
+# 4. Copy google-services.json if it exists
+GOOGLE_SERVICES_SRC="$PROJECT_DIR/google-services.json"
 GOOGLE_SERVICES_DST="$GEN_ANDROID/app/google-services.json"
 if [ -f "$GOOGLE_SERVICES_SRC" ] && [ ! -f "$GOOGLE_SERVICES_DST" ]; then
   echo "Copying google-services.json from RN app..."

@@ -46,3 +46,12 @@ coverage/
 tmp/
 temp/
 app/google-services.json
+desktop/google-services.json
+desktop/GoogleService-Info.plist
+desktop/debug.keystore
+
+# Legacy React Native app (replaced by Tauri mobile)
+app/
+
+# Tauri generated
+desktop/src-tauri/gen/

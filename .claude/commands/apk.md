@@ -1,27 +1,41 @@
-# Build Android APK Locally
+# Build Android APK (Tauri)
 
-Build the Companion Android APK without EAS and install it to the connected device.
+Build the Companion Android APK using Tauri and install it to the connected device.
 
 ## Steps
 
-1. Clean and regenerate android folder:
+1. Build the web frontend and Tauri Android APK:
 ```bash
-cd app && rm -rf android && npx expo prebuild --platform android
+cd desktop && cargo tauri android build --target aarch64
 ```
 
-2. Build the release APK:
+The APK will be at:
+```
+desktop/src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release-unsigned.apk
+```
+
+2. Sign the APK with the debug keystore:
 ```bash
-cd app/android && ./gradlew assembleRelease
+apksigner sign --ks desktop/debug.keystore --ks-pass pass:android --key-pass pass:android --out /tmp/companion-tauri.apk desktop/src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release-unsigned.apk
 ```
 
-3. The APK will be at:
-```
-app/android/app/build/outputs/apk/release/app-release.apk
-```
-
-4. Install to connected device via ADB:
+3. Install to connected device via ADB:
 ```bash
-adb install -r app/android/app/build/outputs/apk/release/app-release.apk
+adb install -r /tmp/companion-tauri.apk
 ```
 
-Run all commands and report the APK location when done. If the build fails, show the error. If ADB install fails (no device connected), report the APK path so the user can install manually.
+## Prerequisites
+
+If the Android project hasn't been initialized yet:
+```bash
+cd desktop && cargo tauri android init && bash scripts/setup-android.sh
+```
+
+The setup script patches Firebase/FCM, cleartext traffic, and back navigation. Only needed once after `android init`.
+
+## Troubleshooting
+
+- **google-services.json missing**: Place it at `desktop/src-tauri/gen/android/app/google-services.json` (get from Firebase Console)
+- **ADB not connected**: Report the signed APK path at `/tmp/companion-tauri.apk` so the user can install manually
+- **Build fails on Rust**: Ensure Android NDK is installed and `ANDROID_HOME` / `ANDROID_NDK_HOME` are set
+- **Cleartext traffic error**: Run `bash desktop/scripts/setup-android.sh` to re-patch

@@ -44,7 +44,7 @@ jobs:
           path: web/dist/
 
   build-android:
-    name: Build Android APK
+    name: Build Android APK (Tauri)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -52,24 +52,67 @@ jobs:
         with:
           node-version: '20'
           cache: 'npm'
-          cache-dependency-path: app/package-lock.json
+          cache-dependency-path: web/package-lock.json
       - uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: '17'
-      - run: cd app && npm ci
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+      - name: Install Android NDK
+        run: sdkmanager "ndk;27.0.12077973"
+      - run: cd web && npm ci
+      - run: cd desktop && npm ci
+      - name: Initialize Android project
+        run: cd desktop && npx tauri android init
       - name: Decode google-services.json
-        run: echo "${{ secrets.GOOGLE_SERVICES_JSON_B64 }}" | base64 --decode > app/google-services.json
-      - run: cd app && npx expo prebuild --platform android
-      - run: cd app/android && ./gradlew assembleRelease
-        env:
-          SENTRY_DISABLE_AUTO_UPLOAD: 'true'
-      - name: Rename APK
-        run: mv app/android/app/build/outputs/apk/release/app-release.apk app/android/app/build/outputs/apk/release/companion-${{ github.ref_name }}-android.apk
+        run: echo "${{ secrets.GOOGLE_SERVICES_JSON_B64 }}" | base64 --decode > desktop/src-tauri/gen/android/app/google-services.json
+      - name: Patch Android project (FCM, cleartext, back nav)
+        run: cd desktop && bash scripts/setup-android.sh
+      - name: Build APK
+        run: cd desktop && cargo tauri android build --target aarch64
+      - name: Sign and rename APK
+        run: |
+          APK=$(find desktop/src-tauri/gen/android/app/build/outputs/apk -name '*.apk' | head -1)
+          $ANDROID_HOME/build-tools/$(ls $ANDROID_HOME/build-tools | tail -1)/apksigner sign \
+            --ks desktop/src-tauri/gen/android/app/debug.keystore \
+            --ks-pass pass:android --key-pass pass:android \
+            --out companion-${{ github.ref_name }}-android.apk "$APK" || \
+          cp "$APK" companion-${{ github.ref_name }}-android.apk
       - uses: actions/upload-artifact@v4
         with:
           name: android-apk
-          path: app/android/app/build/outputs/apk/release/companion-*-android.apk
+          path: companion-*-android.apk
+
+  build-ios:
+    name: Build iOS (Tauri)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: web/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios
+      - run: cd web && npm ci
+      - run: cd desktop && npm ci
+      - name: Initialize iOS project
+        run: cd desktop && npx tauri ios init
+      - name: Build iOS
+        run: cd desktop && cargo tauri ios build --export-method app-store-connect
+        continue-on-error: true
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: ios-ipa
+          path: desktop/src-tauri/gen/apple/build/arm64/*.ipa
 
   build-desktop:
     name: Build Desktop (${{ matrix.os_name }})
@@ -113,7 +156,7 @@ jobs:
 
   create-release:
     name: Create GitHub Release
-    needs: [build-daemon, build-web, build-android, build-desktop]
+    needs: [build-daemon, build-web, build-android, build-ios, build-desktop]
     if: always() && needs.build-daemon.result == 'success'
     runs-on: ubuntu-latest
     steps:
@@ -130,6 +173,7 @@ jobs:
           draft: true
           files: |
             artifacts/android-apk/*
+            artifacts/ios-ipa/*
             artifacts/desktop-macos/*
             artifacts/desktop-windows/*
             artifacts/desktop-linux/*

@@ -1,28 +1,68 @@
-# Build iOS via EAS
+# Build iOS via Tauri
 
-Build the Companion iOS app using EAS Build.
+Build the Companion iOS app using Tauri for TestFlight or device testing.
+
+**Requires macOS with Xcode installed.** Cannot build on Linux.
 
 ## Usage
 ```
-/ios [profile]
+/ios [target]
 ```
 
-Profile is optional. Defaults to `production`. Options: `development`, `preview`, `production`.
+Target is optional. Options: `device` (default), `simulator`, `testflight`.
+
+## Prerequisites (one-time)
+
+1. Install Rust iOS targets:
+```bash
+rustup target add aarch64-apple-ios x86_64-apple-ios aarch64-apple-ios-sim
+```
+
+2. Install CocoaPods:
+```bash
+brew install cocoapods
+```
+
+3. Initialize iOS project:
+```bash
+cd desktop && cargo tauri ios init
+```
+
+4. Configure signing in Xcode:
+   - Open `desktop/src-tauri/gen/apple/Companion.xcodeproj`
+   - Set team and bundle identifier (`com.hexidecibel.companion`)
+   - Enable Push Notifications capability
 
 ## Steps
 
-1. Determine the build profile from `$ARGUMENTS`. If empty or not provided, default to `production`.
-
-2. Run the EAS build:
+### Device / Development Build
 ```bash
-cd app && eas build --platform ios --profile <profile> --non-interactive
+cd desktop && cargo tauri ios build
 ```
 
-3. Monitor the build output. EAS will print a URL to track the build.
+### TestFlight / App Store Build
+```bash
+cd desktop && cargo tauri ios build --export-method app-store-connect
+```
 
-4. Report the build URL and status when the command completes or when the build is submitted to EAS servers.
+The IPA will be at:
+```
+desktop/src-tauri/gen/apple/build/arm64/Companion.ipa
+```
 
-If the build fails, show the full error output. Common issues:
-- **Pod install failures**: Check `app.config.js` `expo-build-properties` iOS settings (`useFrameworks`, `useModularHeaders`)
-- **Signing issues**: May need to run `eas credentials` to configure certificates
-- **Missing GoogleService-Info.plist**: Ensure the file exists in the `app/` directory
+### Upload to TestFlight
+```bash
+xcrun altool --upload-app --type ios \
+  --file "desktop/src-tauri/gen/apple/build/arm64/Companion.ipa" \
+  --apiKey $APPLE_API_KEY_ID \
+  --apiIssuer $APPLE_API_ISSUER
+```
+
+Or use the Transporter app from the Mac App Store.
+
+## Troubleshooting
+
+- **Not on macOS**: iOS builds require macOS + Xcode. Use GitHub Actions macOS runner for CI.
+- **Signing errors**: Open Xcode project and configure team/provisioning manually.
+- **CocoaPods issues**: Run `cd desktop/src-tauri/gen/apple && pod install`
+- **Push notifications**: Ensure APNs key is uploaded to Firebase Console, and Push Notifications capability is enabled in Xcode.
