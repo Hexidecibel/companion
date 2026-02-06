@@ -13,6 +13,8 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tauri-plugin-notification = "2"
 tauri-plugin-shell = "2"
+tauri-plugin-fcm = { path = "plugins/tauri-plugin-fcm" }
+log = "0.4"
 
 # Desktop-only plugins (tray, menu, window state, autostart)
 [target.'cfg(not(target_os = "android"))'.dependencies]

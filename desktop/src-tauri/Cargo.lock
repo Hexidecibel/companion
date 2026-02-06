@@ -472,11 +472,13 @@ dependencies = [
 name = "companion-desktop"
 version = "0.1.0"
 dependencies = [
+ "log",
  "serde",
  "serde_json",
  "tauri",
  "tauri-build",
  "tauri-plugin-autostart",
+ "tauri-plugin-fcm",
  "tauri-plugin-notification",
  "tauri-plugin-shell",
  "tauri-plugin-window-state",
@@ -3800,6 +3802,19 @@ dependencies = [
  "tauri",
  "tauri-plugin",
  "thiserror 2.0.18",
+]
+
+[[package]]
+name = "tauri-plugin-fcm"
+version = "0.1.0"
+dependencies = [
+ "jni",
+ "log",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-plugin",
+ "thiserror 1.0.69",
 ]
 
 [[package]]

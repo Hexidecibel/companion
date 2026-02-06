@@ -1,0 +1,7 @@
+[default]
+description = "Allows access to FCM push notification commands"
+permissions = [
+  "allow-get-fcm-token",
+  "allow-request-notification-permission",
+  "allow-is-notification-permission-granted",
+]

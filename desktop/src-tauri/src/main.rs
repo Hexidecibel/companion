@@ -217,6 +217,9 @@ fn main() {
         ]);
     }
 
+    // FCM push notifications (no-op on desktop, active on mobile)
+    builder = builder.plugin(tauri_plugin_fcm::init());
+
     builder = builder.setup(|app| {
         #[cfg(desktop)]
         desktop::setup_desktop(app)?;
