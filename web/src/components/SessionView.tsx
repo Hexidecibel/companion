@@ -362,7 +362,7 @@ export function SessionView({
         />
       )}
 
-      <div className="session-conversation" style={{ display: showTerminal || showWorkGroupPanel ? 'none' : 'contents' }}>
+      <div className="session-conversation" style={{ display: showTerminal || showWorkGroupPanel ? 'none' : undefined }}>
           <WaitingIndicator status={status} />
 
           <SubAgentBar

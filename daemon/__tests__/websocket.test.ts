@@ -40,7 +40,9 @@ mockWatcher.getActiveConversation = jest.fn().mockReturnValue(null);
 mockWatcher.checkAndEmitPendingApproval = jest.fn();
 mockWatcher.clearActiveSession = jest.fn();
 mockWatcher.refreshTmuxPaths = jest.fn().mockResolvedValue(undefined);
-mockWatcher.getServerSummary = jest.fn().mockResolvedValue({ sessions: [], totalSessions: 0, waitingCount: 0, workingCount: 0 });
+mockWatcher.getServerSummary = jest
+  .fn()
+  .mockResolvedValue({ sessions: [], totalSessions: 0, waitingCount: 0, workingCount: 0 });
 
 const mockInjector = {
   sendInput: jest.fn().mockResolvedValue(true),
@@ -98,10 +100,12 @@ const mockServer = new EventEmitter() as unknown as Server;
 import { WebSocketHandler } from '../src/websocket';
 import { DaemonConfig } from '../src/types';
 
+const mockListener = { port: 9877, token: 'test-token', tls: false };
 const mockConfig: DaemonConfig = {
   port: 9877,
   token: 'test-token',
   tls: false,
+  listeners: [mockListener],
   tmuxSession: 'claude',
   codeHome: '/home/test/.claude',
   mdnsEnabled: false,
@@ -116,9 +120,15 @@ describe('WebSocketHandler', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
-    handler = new WebSocketHandler(mockServer, mockConfig, mockWatcher, mockInjector, mockPush);
-    // Access the internal WebSocketServer for testing
-    mockWss = (handler as any).wss;
+    handler = new WebSocketHandler(
+      [{ server: mockServer, listener: mockListener }],
+      mockConfig,
+      mockWatcher,
+      mockInjector,
+      mockPush
+    );
+    // Access the internal WebSocketServer for testing (multi-listener: get the one for port 9877)
+    mockWss = (handler as any).wssMap.get(9877);
   });
 
   describe('authentication', () => {
@@ -142,9 +152,7 @@ describe('WebSocketHandler', () => {
         })
       );
 
-      expect(mockClient.send).toHaveBeenCalledWith(
-        expect.stringContaining('"success":true')
-      );
+      expect(mockClient.send).toHaveBeenCalledWith(expect.stringContaining('"success":true'));
     });
 
     it('should reject invalid token', () => {
@@ -163,9 +171,7 @@ describe('WebSocketHandler', () => {
         })
       );
 
-      expect(mockClient.send).toHaveBeenCalledWith(
-        expect.stringContaining('"success":false')
-      );
+      expect(mockClient.send).toHaveBeenCalledWith(expect.stringContaining('"success":false'));
     });
 
     it('should reject messages before authentication', () => {
@@ -183,9 +189,7 @@ describe('WebSocketHandler', () => {
         })
       );
 
-      expect(mockClient.send).toHaveBeenCalledWith(
-        expect.stringContaining('Not authenticated')
-      );
+      expect(mockClient.send).toHaveBeenCalledWith(expect.stringContaining('Not authenticated'));
     });
   });
 
@@ -321,9 +325,9 @@ describe('WebSocketHandler', () => {
       );
 
       // Wait for async handling
-      await new Promise(resolve => setTimeout(resolve, 10));
+      await new Promise((resolve) => setTimeout(resolve, 10));
 
-      expect(mockInjector.sendInput).toHaveBeenCalledWith('test input');
+      expect(mockInjector.sendInput).toHaveBeenCalledWith('test input', expect.anything());
     });
 
     it('should handle register_push message', () => {
@@ -365,10 +369,7 @@ describe('WebSocketHandler', () => {
       mockWss.emit('connection', mockClient, {});
 
       // Authenticate and subscribe
-      mockClient.emit(
-        'message',
-        JSON.stringify({ type: 'authenticate', token: 'test-token' })
-      );
+      mockClient.emit('message', JSON.stringify({ type: 'authenticate', token: 'test-token' }));
       mockClient.emit('message', JSON.stringify({ type: 'subscribe' }));
 
       // Close connection
@@ -389,9 +390,7 @@ describe('WebSocketHandler', () => {
       // Send malformed JSON
       mockClient.emit('message', 'not valid json');
 
-      expect(mockClient.send).toHaveBeenCalledWith(
-        expect.stringContaining('Invalid JSON')
-      );
+      expect(mockClient.send).toHaveBeenCalledWith(expect.stringContaining('Invalid JSON'));
     });
   });
 
@@ -402,10 +401,7 @@ describe('WebSocketHandler', () => {
       mockWss.emit('connection', mockClient, {});
 
       // Authenticate and subscribe
-      mockClient.emit(
-        'message',
-        JSON.stringify({ type: 'authenticate', token: 'test-token' })
-      );
+      mockClient.emit('message', JSON.stringify({ type: 'authenticate', token: 'test-token' }));
       mockClient.emit('message', JSON.stringify({ type: 'subscribe' }));
       mockClient.send.mockClear();
 
@@ -423,10 +419,7 @@ describe('WebSocketHandler', () => {
       mockWss.emit('connection', mockClient, {});
 
       // Authenticate and subscribe
-      mockClient.emit(
-        'message',
-        JSON.stringify({ type: 'authenticate', token: 'test-token' })
-      );
+      mockClient.emit('message', JSON.stringify({ type: 'authenticate', token: 'test-token' }));
       mockClient.emit('message', JSON.stringify({ type: 'subscribe' }));
       mockClient.send.mockClear();
 
@@ -447,10 +440,7 @@ describe('WebSocketHandler', () => {
       mockWss.emit('connection', mockClient, {});
 
       // Authenticate but don't subscribe
-      mockClient.emit(
-        'message',
-        JSON.stringify({ type: 'authenticate', token: 'test-token' })
-      );
+      mockClient.emit('message', JSON.stringify({ type: 'authenticate', token: 'test-token' }));
       mockClient.send.mockClear();
 
       // Simulate watcher event
@@ -485,10 +475,7 @@ describe('WebSocketHandler', () => {
       mockWss.emit('connection', mockClient2, {});
 
       // Only authenticate one
-      mockClient1.emit(
-        'message',
-        JSON.stringify({ type: 'authenticate', token: 'test-token' })
-      );
+      mockClient1.emit('message', JSON.stringify({ type: 'authenticate', token: 'test-token' }));
 
       expect(handler.getAuthenticatedClientCount()).toBe(1);
     });
