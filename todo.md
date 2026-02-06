@@ -19,9 +19,10 @@ Quick capture for ideas and tasks. Run `/plan` to process into detailed plans.
 - Mobile app icons -- logos not displaying correctly on Android (Tauri vector override) and iOS; need proper icon pipeline for both platforms
 
 ## In Progress
-- Unify terminal and chat input
 
 ## Done
+- [done] Unify terminal and chat input
+- [done] Add back button from session view to server dashboard
 - [done] Replace archive/history with cross-session conversation search
 - [done] Mac desktop app: file path links should open in file viewer
 - [done] Parse task-notification XML messages properly and show a tool result card

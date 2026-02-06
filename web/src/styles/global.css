@@ -1728,7 +1728,7 @@ body {
   /* Input bar flush with safe area; keyboard-height overrides safe-bottom when keyboard is open */
   .input-bar {
     padding: 8px 12px;
-    padding-bottom: calc(8px + max(var(--safe-bottom), var(--keyboard-height)));
+    padding-bottom: max(8px, var(--safe-bottom), var(--keyboard-height));
     gap: 6px;
   }
 
