@@ -16,7 +16,13 @@ import {
   extractTasks,
   parseConversationChain,
 } from './parser';
-import { WebSocketMessage, WebSocketResponse, DaemonConfig, TmuxSessionConfig, ListenerConfig } from './types';
+import {
+  WebSocketMessage,
+  WebSocketResponse,
+  DaemonConfig,
+  TmuxSessionConfig,
+  ListenerConfig,
+} from './types';
 import { loadConfig, saveConfig } from './config';
 import { fetchTodayUsage, fetchMonthUsage, fetchAnthropicUsage } from './anthropic-usage';
 import { DEFAULT_TOOL_CONFIG } from './tool-config';
@@ -234,7 +240,9 @@ export class WebSocketHandler {
 
     ws.on('close', (code, reason) => {
       this.clients.delete(clientId);
-      console.log(`WebSocket: Client disconnected (${clientId}) code=${code} reason=${reason?.toString() || 'none'}`);
+      console.log(
+        `WebSocket: Client disconnected (${clientId}) code=${code} reason=${reason?.toString() || 'none'}`
+      );
     });
 
     ws.on('error', (err) => {
@@ -272,7 +280,9 @@ export class WebSocketHandler {
           success: true,
           requestId,
         });
-        console.log(`WebSocket: Client authenticated (${client.id}) on port ${client.listenerPort}`);
+        console.log(
+          `WebSocket: Client authenticated (${client.id}) on port ${client.listenerPort}`
+        );
       } else {
         this.send(client.ws, {
           type: 'authenticated',

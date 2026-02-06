@@ -225,12 +225,13 @@ export function createQRRequestHandler(config: DaemonConfig): http.RequestListen
         const clientPort = url.searchParams.get('port');
         const clientTls = url.searchParams.get('tls');
         // Find listener matching the authenticated token, fall back to primary
-        const matchedListener = config.listeners.find((l) => l.token === queryToken) || config.listeners[0];
+        const matchedListener =
+          config.listeners.find((l) => l.token === queryToken) || config.listeners[0];
         const qrConfig: QRConfig = {
           host: clientHost || (req.headers.host || '').split(':')[0] || getLocalIP(),
           port: clientPort ? parseInt(clientPort, 10) : matchedListener.port,
           token: matchedListener.token,
-          tls: clientTls !== null ? clientTls === '1' : (matchedListener.tls || false),
+          tls: clientTls !== null ? clientTls === '1' : matchedListener.tls || false,
         };
 
         const qrData = JSON.stringify(qrConfig);
@@ -269,12 +270,13 @@ export function createQRRequestHandler(config: DaemonConfig): http.RequestListen
       const clientPort = url.searchParams.get('port');
       const clientTls = url.searchParams.get('tls');
       // Find listener matching the authenticated token, fall back to primary
-      const matchedListener = config.listeners.find((l) => l.token === queryToken) || config.listeners[0];
+      const matchedListener =
+        config.listeners.find((l) => l.token === queryToken) || config.listeners[0];
       const qrConfig: QRConfig = {
         host: clientHost || (req.headers.host || '').split(':')[0] || getLocalIP(),
         port: clientPort ? parseInt(clientPort, 10) : matchedListener.port,
         token: matchedListener.token,
-        tls: clientTls !== null ? clientTls === '1' : (matchedListener.tls || false),
+        tls: clientTls !== null ? clientTls === '1' : matchedListener.tls || false,
       };
 
       res.writeHead(200, { 'Content-Type': 'application/json' });

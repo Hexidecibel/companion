@@ -35,7 +35,10 @@ function getLocalIP(): string {
 /**
  * Display welcome message with QR code for first-run setup
  */
-export async function displayFirstRunWelcome(config: DaemonConfig, configPath: string): Promise<void> {
+export async function displayFirstRunWelcome(
+  config: DaemonConfig,
+  configPath: string
+): Promise<void> {
   const listener = config.listeners[0];
   const localIP = getLocalIP();
 
@@ -183,7 +186,8 @@ export function loadConfig(): DaemonConfig {
     saveConfig(config);
     // Mark for welcome display
     (config as DaemonConfig & { _isFirstRun?: boolean; _configPath?: string })._isFirstRun = true;
-    (config as DaemonConfig & { _isFirstRun?: boolean; _configPath?: string })._configPath = configPath;
+    (config as DaemonConfig & { _isFirstRun?: boolean; _configPath?: string })._configPath =
+      configPath;
   }
 
   // Validate: must have at least one listener with port and token

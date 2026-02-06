@@ -286,7 +286,9 @@ function cmdConfig(args: string[]): void {
   console.log(`  listeners:`);
   for (const listener of config.listeners) {
     const tokenPreview = listener.token.slice(0, 8) + '...' + listener.token.slice(-4);
-    console.log(`    - port: ${listener.port}, token: ${dim(tokenPreview)}, tls: ${listener.tls || false}`);
+    console.log(
+      `    - port: ${listener.port}, token: ${dim(tokenPreview)}, tls: ${listener.tls || false}`
+    );
   }
   console.log(`  tmux_session:    ${config.tmuxSession}`);
   console.log(`  code_home:       ${config.codeHome}`);

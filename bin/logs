@@ -1,0 +1,12 @@
+#!/bin/bash
+# View daemon logs (follows)
+if systemctl --user is-active companion &>/dev/null; then
+  journalctl --user -u companion -f "$@"
+elif command -v systemctl &>/dev/null && systemctl is-active companion &>/dev/null; then
+  sudo journalctl -u companion -f "$@"
+elif [[ "$OSTYPE" == "darwin"* ]]; then
+  tail -f ~/Library/Logs/companion.log
+else
+  echo "Daemon service not found. Check manually."
+  exit 1
+fi

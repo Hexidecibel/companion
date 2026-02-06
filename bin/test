@@ -1,0 +1,34 @@
+#!/bin/bash
+# Run all tests and type checks
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+ROOT="$(dirname "$SCRIPT_DIR")"
+FAILED=0
+
+echo "=== Daemon: Typecheck ==="
+cd "$ROOT/daemon" && npm run typecheck || FAILED=1
+
+echo ""
+echo "=== Daemon: Lint ==="
+cd "$ROOT/daemon" && npm run lint || FAILED=1
+
+echo ""
+echo "=== Daemon: Tests ==="
+cd "$ROOT/daemon" && npm test || FAILED=1
+
+echo ""
+echo "=== Web: Typecheck ==="
+cd "$ROOT/web" && npx tsc --noEmit || FAILED=1
+
+echo ""
+echo "=== Web: Build ==="
+cd "$ROOT/web" && npm run build || FAILED=1
+
+echo ""
+if [ $FAILED -eq 0 ]; then
+  echo "=== All checks passed ==="
+else
+  echo "=== Some checks FAILED ==="
+  exit 1
+fi

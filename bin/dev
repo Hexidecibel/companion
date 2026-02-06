@@ -1,0 +1,33 @@
+#!/bin/bash
+# Start development servers (daemon + web dev server)
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+ROOT="$(dirname "$SCRIPT_DIR")"
+
+echo "Starting development servers..."
+echo "  Web: http://localhost:5173"
+echo "  Daemon: ws://localhost:9877"
+echo ""
+
+# Start web dev server in background
+cd "$ROOT/web" && npm run dev &
+WEB_PID=$!
+
+# Start daemon (builds first if needed)
+cd "$ROOT/daemon"
+if [ ! -f dist/index.js ] || [ src/index.ts -nt dist/index.js ]; then
+  echo "Building daemon..."
+  npm run build
+fi
+
+echo "Starting daemon..."
+node dist/index.js &
+DAEMON_PID=$!
+
+# Cleanup on exit
+trap "kill $WEB_PID $DAEMON_PID 2>/dev/null; exit" INT TERM
+
+echo ""
+echo "Press Ctrl+C to stop all servers"
+wait

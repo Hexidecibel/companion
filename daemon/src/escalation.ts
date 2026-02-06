@@ -191,9 +191,13 @@ export class EscalationService {
     if (allPending.length === 0) return;
 
     // Build consolidated notification
-    const uniqueSessions = new Set(allPending.map(e => e.sessionName));
-    const waitingCount = allPending.filter(e => e.eventType === 'waiting_for_input' || e.eventType === 'worker_waiting').length;
-    const errorCount = allPending.filter(e => e.eventType === 'error_detected' || e.eventType === 'worker_error').length;
+    const uniqueSessions = new Set(allPending.map((e) => e.sessionName));
+    const waitingCount = allPending.filter(
+      (e) => e.eventType === 'waiting_for_input' || e.eventType === 'worker_waiting'
+    ).length;
+    const errorCount = allPending.filter(
+      (e) => e.eventType === 'error_detected' || e.eventType === 'worker_error'
+    ).length;
 
     let title: string;
     let body: string;
@@ -230,7 +234,9 @@ export class EscalationService {
       });
     }
 
-    console.log(`Escalation: Consolidated push sent — ${allPending.length} event(s) across ${uniqueSessions.size} session(s)`);
+    console.log(
+      `Escalation: Consolidated push sent — ${allPending.length} event(s) across ${uniqueSessions.size} session(s)`
+    );
   }
 
   private isInQuietHours(start: string, end: string): boolean {

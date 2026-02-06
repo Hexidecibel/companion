@@ -273,7 +273,9 @@ export class PushNotificationService {
     }
 
     const tokens = allDevices.map((d) => d.token);
-    console.log(`Push notifications: Sending consolidated to ${allDevices.length} device(s): ${title}`);
+    console.log(
+      `Push notifications: Sending consolidated to ${allDevices.length} device(s): ${title}`
+    );
     this.sendNotifications(body, tokens, undefined, undefined, title);
   }
 

@@ -48,7 +48,9 @@ async function main(): Promise<void> {
       const keyPath = listener.keyPath || getDefaultCertPaths().keyPath;
 
       if (!certsExist(certPath, keyPath)) {
-        console.log(`TLS certificates not found for port ${listener.port}, generating self-signed certificates...`);
+        console.log(
+          `TLS certificates not found for port ${listener.port}, generating self-signed certificates...`
+        );
         try {
           const paths = generateAndSaveCerts(certPath, keyPath);
           listener.certPath = paths.certPath;
@@ -91,7 +93,10 @@ async function main(): Promise<void> {
 
   // Create HTTP/HTTPS servers for each listener
   const qrHandler = createQRRequestHandler(config);
-  const servers: { server: ReturnType<typeof createServer>; listener: typeof config.listeners[0] }[] = [];
+  const servers: {
+    server: ReturnType<typeof createServer>;
+    listener: (typeof config.listeners)[0];
+  }[] = [];
 
   for (const listener of config.listeners) {
     const server = createServer(

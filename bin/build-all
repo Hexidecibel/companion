@@ -1,0 +1,16 @@
+#!/bin/bash
+# Build all components: daemon, web client, and optionally desktop/mobile
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+ROOT="$(dirname "$SCRIPT_DIR")"
+
+echo "=== Building Daemon ==="
+cd "$ROOT/daemon" && npm run build
+
+echo ""
+echo "=== Building Web Client ==="
+cd "$ROOT/web" && npm run build
+
+echo ""
+echo "=== All builds complete ==="

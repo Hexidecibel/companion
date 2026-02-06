@@ -4,9 +4,14 @@ import { PushNotificationService } from '../push';
 import { NotificationEventType, DEFAULT_ESCALATION_CONFIG } from '../types';
 
 // Mock NotificationStore — in-memory, no filesystem
-function createMockStore(overrides?: Partial<ReturnType<NotificationStore['getEscalation']>>): NotificationStore {
+function createMockStore(
+  overrides?: Partial<ReturnType<NotificationStore['getEscalation']>>
+): NotificationStore {
   const config = { ...DEFAULT_ESCALATION_CONFIG, ...overrides };
-  const devices = new Map<string, { token: string; deviceId: string; registeredAt: number; lastSeen: number }>();
+  const devices = new Map<
+    string,
+    { token: string; deviceId: string; registeredAt: number; lastSeen: number }
+  >();
   const mutedSessions = new Set<string>();
   const history: unknown[] = [];
 
@@ -14,16 +19,23 @@ function createMockStore(overrides?: Partial<ReturnType<NotificationStore['getEs
     getEscalation: () => ({ ...config }),
     setEscalation: jest.fn(),
     getDevices: () => Array.from(devices.values()),
-    setDevice: (d: { token: string; deviceId: string; registeredAt: number; lastSeen: number }) => { devices.set(d.deviceId, d); },
+    setDevice: (d: { token: string; deviceId: string; registeredAt: number; lastSeen: number }) => {
+      devices.set(d.deviceId, d);
+    },
     removeDevice: (id: string) => devices.delete(id),
     getDeviceCount: () => devices.size,
     updateDeviceLastSeen: jest.fn(),
     getMutedSessions: () => Array.from(mutedSessions),
     isSessionMuted: (id: string) => mutedSessions.has(id),
-    setSessionMuted: (id: string, muted: boolean) => { if (muted) mutedSessions.add(id); else mutedSessions.delete(id); },
+    setSessionMuted: (id: string, muted: boolean) => {
+      if (muted) mutedSessions.add(id);
+      else mutedSessions.delete(id);
+    },
     addHistoryEntry: jest.fn((entry) => ({ ...entry, id: 'test-id', timestamp: Date.now() })),
     getHistory: () => ({ entries: history as any[], total: history.length }),
-    clearHistory: () => { history.length = 0; },
+    clearHistory: () => {
+      history.length = 0;
+    },
     flush: jest.fn(),
     getDevice: jest.fn(),
   } as unknown as NotificationStore;
@@ -31,10 +43,20 @@ function createMockStore(overrides?: Partial<ReturnType<NotificationStore['getEs
 
 // Mock PushNotificationService
 function createMockPush(): PushNotificationService & {
-  sendToAllDevicesCalls: Array<{ preview: string; eventType: NotificationEventType; sessionId?: string; sessionName?: string }>;
+  sendToAllDevicesCalls: Array<{
+    preview: string;
+    eventType: NotificationEventType;
+    sessionId?: string;
+    sessionName?: string;
+  }>;
   consolidatedCalls: Array<{ title: string; body: string }>;
 } {
-  const sendToAllDevicesCalls: Array<{ preview: string; eventType: NotificationEventType; sessionId?: string; sessionName?: string }> = [];
+  const sendToAllDevicesCalls: Array<{
+    preview: string;
+    eventType: NotificationEventType;
+    sessionId?: string;
+    sessionName?: string;
+  }> = [];
   const consolidatedCalls: Array<{ title: string; body: string }> = [];
   return {
     sendToAllDevicesCalls,
@@ -63,7 +85,10 @@ function createMockPush(): PushNotificationService & {
       };
       return map[eventType];
     },
-  } as unknown as PushNotificationService & { sendToAllDevicesCalls: typeof sendToAllDevicesCalls; consolidatedCalls: typeof consolidatedCalls };
+  } as unknown as PushNotificationService & {
+    sendToAllDevicesCalls: typeof sendToAllDevicesCalls;
+    consolidatedCalls: typeof consolidatedCalls;
+  };
 }
 
 function makeEvent(overrides?: Partial<EscalationEvent>): EscalationEvent {
@@ -263,11 +288,13 @@ describe('EscalationService', () => {
       // Multiple events from different sessions
       service.handleEvent(makeEvent({ sessionId: 's1', sessionName: 'Project A' }));
       service.handleEvent(makeEvent({ sessionId: 's2', sessionName: 'Project B' }));
-      service.handleEvent(makeEvent({
-        sessionId: 's3',
-        sessionName: 'Project C',
-        eventType: 'error_detected',
-      }));
+      service.handleEvent(
+        makeEvent({
+          sessionId: 's3',
+          sessionName: 'Project C',
+          eventType: 'error_detected',
+        })
+      );
 
       // First timer fires — should consolidate all pending
       jest.advanceTimersByTime(300_000);
@@ -431,18 +458,22 @@ describe('EscalationService', () => {
       ];
 
       for (const eventType of enabledTypes) {
-        const result = service.handleEvent(makeEvent({
-          eventType,
-          sessionId: `session-${eventType}`,
-        }));
+        const result = service.handleEvent(
+          makeEvent({
+            eventType,
+            sessionId: `session-${eventType}`,
+          })
+        );
         expect(result.shouldBroadcast).toBe(true);
       }
 
       // session_completed is disabled by default
-      const result = service.handleEvent(makeEvent({
-        eventType: 'session_completed',
-        sessionId: 'session-completed',
-      }));
+      const result = service.handleEvent(
+        makeEvent({
+          eventType: 'session_completed',
+          sessionId: 'session-completed',
+        })
+      );
       expect(result.shouldBroadcast).toBe(false);
 
       service.destroy();

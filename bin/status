@@ -1,0 +1,31 @@
+#!/bin/bash
+# Show status of all companion services
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+ROOT="$(dirname "$SCRIPT_DIR")"
+
+echo "=== Daemon ==="
+if systemctl --user is-active companion &>/dev/null; then
+  systemctl --user status companion --no-pager
+elif command -v systemctl &>/dev/null && systemctl is-active companion &>/dev/null; then
+  systemctl status companion --no-pager
+elif [[ "$OSTYPE" == "darwin"* ]]; then
+  launchctl print "gui/$(id -u)/com.companion.daemon" 2>/dev/null || echo "Not running"
+else
+  echo "Not running (no service found)"
+fi
+
+echo ""
+echo "=== Port 9877 ==="
+if command -v ss &>/dev/null; then
+  ss -tlnp 2>/dev/null | grep 9877 || echo "Not listening"
+elif command -v lsof &>/dev/null; then
+  lsof -i :9877 2>/dev/null || echo "Not listening"
+fi
+
+echo ""
+echo "=== Git ==="
+cd "$ROOT" && git log --oneline -3
+
+echo ""
+echo "=== Tmux Sessions ==="
+tmux list-sessions 2>/dev/null || echo "No tmux sessions"
