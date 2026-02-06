@@ -1,6 +1,6 @@
 {
   "name": "@hexidecibel/companion",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "Server daemon for Companion - watches coding sessions and serves data to mobile app",
   "main": "dist/index.js",
   "bin": {
