@@ -1,6 +1,14 @@
 # Companion Features
 
-High-level features of the Companion mobile app, web client, desktop app, and daemon.
+High-level features of the Companion daemon, web client, and desktop/mobile apps.
+
+## Cross-Platform Apps
+- Single web codebase (React + Vite + TypeScript) powers all client platforms
+- **Android** and **iOS** via Tauri 2.0 mobile (native WebView wrapper)
+- **macOS**, **Linux**, and **Windows** desktop via Tauri 2.0
+- **Web** — served directly by the daemon at `http://<host>:9877/web`
+- Mobile-optimized layout with full-screen session list, bottom toolbar, safe area insets
+- Desktop layout with sidebar + session view side-by-side
 
 ## Real-Time Monitoring
 - Live WebSocket updates from CLI coding sessions
@@ -15,6 +23,17 @@ High-level features of the Companion mobile app, web client, desktop app, and da
 - Quick reply chips and slash commands
 - Multi-question answering with per-question selection and "Other" freetext
 - Multi-select checkbox UI for questions that allow multiple answers
+- Undo history for recovering cleared or sent input
+
+## Skill Browser & Slash Commands
+- Type `/` in the input bar to see an autocomplete menu of skills, quick actions, and CLI built-ins
+- Three sections: **Skills** (from `.claude/commands/`), **Quick Actions** (/yes, /no, /continue, /approve, /reject, /skip, /cancel), **CLI Built-ins** (/help, /clear, /compact, /status, /review)
+- Keyboard navigation: Arrow keys, Enter/Tab to select, Escape to dismiss
+- Quick actions send immediately; skills and built-ins insert the command for confirmation
+- Skill Browser accessible from Settings: browse a catalog of 14 universal skills across 5 categories
+- Install skills to project (`.claude/commands/`) or globally (`~/.claude/commands/`)
+- Daemon scans installed skills and merges with built-in catalog
+- Categories: Workflow, Development, Git, Operations, Search
 
 ## Dashboard
 - Multi-server overview with connection status
@@ -26,6 +45,8 @@ High-level features of the Companion mobile app, web client, desktop app, and da
 - Quick navigation to any session
 - Server enable/disable toggles
 - Server cards disabled when no active sessions
+- Mobile: full-screen scrollable server/session list with status badges
+- Desktop: sidebar with session list + session view side-by-side
 
 ## Conversation Viewer
 - Markdown rendering in assistant messages (headings, tables, task lists, code blocks with language labels, links)
@@ -60,11 +81,13 @@ High-level features of the Companion mobile app, web client, desktop app, and da
 - Plans open in the file viewer with full markdown rendering
 
 ## Push Notifications
-- FCM-based notifications when the CLI needs input
+- FCM-based push notifications when the CLI needs input
+- 2-tier escalation: browser notifications immediately, push after configurable delay
+- Consolidated notifications batching multiple pending events into one push
 - Quiet hours scheduling
 - Per-server notification preferences
-- Instant vs batched notification modes
 - Per-session mute synced between web and mobile via daemon
+- Rate limiting to prevent notification storms
 
 ## Tmux Session Management
 - Create/list/switch tmux sessions from app
@@ -115,6 +138,8 @@ High-level features of the Companion mobile app, web client, desktop app, and da
 
 ## Auto-Approve System
 - Automatic approval of safe tool calls (Read, Glob, Grep, etc.)
+- "Always Allow" option on pending approval prompts
+- Auto-expand pending tool approval cards
 - Composite key deduplication to prevent duplicate approvals
 - Fuzzy tmux session path matching
 - Retry logic for failed approval sends
@@ -142,16 +167,25 @@ High-level features of the Companion mobile app, web client, desktop app, and da
 - Cmd/Ctrl+Shift+M: Toggle session mute
 - Escape: Close modal/panel/search (priority-ordered)
 
-## macOS Desktop App (Tauri)
-- Native macOS app wrapping the web client via Tauri v2
+## Desktop App (Tauri 2.0)
+- Native apps for macOS, Linux, and Windows wrapping the web client
 - Custom menu bar: Companion, File, Edit, View, Window menus with keyboard shortcuts
 - System tray icon: click to toggle window, right-click for Show/Quit menu
 - Close-to-tray: closing the window hides to tray instead of quitting
 - Tray tooltip shows count of sessions waiting for input
-- Native macOS notifications via Notification Center (replaces browser notifications)
+- Native OS notifications (macOS Notification Center, Linux libnotify)
 - Window state persistence: remembers position and size across launches
 - Auto-launch on login toggle in settings
-- Builds to .app and .dmg
+- Builds to .app/.dmg (macOS), .deb/.AppImage (Linux), .msi (Windows)
+
+## Mobile App (Tauri 2.0)
+- Android APK and iOS IPA built from the same web codebase
+- FCM push notifications via custom Tauri plugin (tauri-plugin-fcm)
+- Safe area insets for edge-to-edge display on Android
+- Android back gesture support (navigates session -> dashboard -> settings)
+- Bottom action toolbar on mobile (terminal, auto-approve, mute, plan, history)
+- Full-screen mobile dashboard replacing sidebar navigation
+- Camera access for QR code scanning
 
 ## Daemon CLI
 - `companion status` — show running state, PID, tmux sessions, config summary
@@ -182,7 +216,7 @@ High-level features of the Companion mobile app, web client, desktop app, and da
 - Purple focus glow on input fields (web)
 - Gradient progress bars for tasks and work groups
 - Purple accent text and gradient headings
-- Centralized color system (app/src/theme/colors.ts, web CSS variables)
+- Centralized color system (web CSS variables)
 - Consistent dark theme with vibrant accent hierarchy
 
 ## Developer Tools
@@ -193,3 +227,4 @@ High-level features of the Companion mobile app, web client, desktop app, and da
 - Build date and version info in settings
 - Scroll behavior analytics
 - Client error reporting
+- Management scripts in `bin/` (build-all, build-apk, deploy, dev, test, logs, status)

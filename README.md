@@ -4,9 +4,14 @@ A companion app for your AI coding CLI. Monitor and interact with coding session
 
 ## Platforms
 
-- **Android** - React Native / Expo (APK available in Releases)
-- **Web** - React + Vite SPA, served by the daemon at `http://<host>:9877/web`
-- **macOS Desktop** - Native Tauri v2 app with system tray, notifications, menu bar (.dmg in Releases)
+- **Android** — Tauri 2.0 mobile (APK in Releases)
+- **iOS** — Tauri 2.0 mobile (TestFlight / IPA in Releases)
+- **Web** — React + Vite SPA, served by the daemon at `http://<host>:9877/web`
+- **macOS** — Tauri 2.0 desktop (.dmg in Releases)
+- **Linux** — Tauri 2.0 desktop (.deb / .AppImage in Releases)
+- **Windows** — Tauri 2.0 desktop (.msi in Releases)
+
+All native apps share a single web codebase — one React + Vite + TypeScript project wrapped by Tauri for each platform.
 
 ## Features
 
@@ -27,8 +32,7 @@ A companion app for your AI coding CLI. Monitor and interact with coding session
 - Tap any file path to open it in a built-in viewer
 - Markdown, diff, and code rendering with line numbers
 - Large outputs get "View full output" buttons
-- Persistent file tab bar (web) with per-session state
-- APK download and install support on Android
+- Persistent file tab bar with per-session state
 
 ### Plan Viewer
 - Detects plan files from ExitPlanMode/EnterPlanMode tool calls
@@ -61,22 +65,29 @@ A companion app for your AI coding CLI. Monitor and interact with coding session
 - Git init and GitHub repo creation
 
 ### Push Notifications
-- Expo push notifications when the CLI needs input
-- Escalation model with configurable delays and rate limits
-- Quiet hours scheduling
-- Per-session mute synced between clients
+- FCM push notifications when the CLI needs input
+- 2-tier escalation: browser notifications immediately, push after configurable delay
+- Consolidated batching of multiple pending events
+- Quiet hours, per-session mute, rate limiting
 
 ### Auto-Approve
 - Automatic approval of safe tool calls (Read, Glob, Grep, etc.)
+- "Always Allow" option on pending approval prompts
 - Configurable per-session
 
-### macOS Desktop
+### Desktop App
 - System tray with click-to-toggle and session count badge
 - Close-to-tray behavior
-- Native Notification Center integration
-- Window state persistence
-- Auto-launch on login
+- Native OS notifications
+- Window state persistence and auto-launch on login
 - Custom menu bar with keyboard shortcuts
+
+### Mobile App
+- Full-screen mobile dashboard with server/session cards
+- Bottom action toolbar (terminal, auto-approve, mute, plan, history)
+- Android back gesture navigation
+- Safe area insets for edge-to-edge display
+- FCM push via custom Tauri plugin
 
 ### Web Keyboard Shortcuts
 - `Cmd/Ctrl+T` Toggle terminal
@@ -88,20 +99,23 @@ A companion app for your AI coding CLI. Monitor and interact with coding session
 ## Architecture
 
 ```
-┌─────────────────┐                    ┌─────────────────┐
-│  Mobile App     │◄──  WebSocket  ───►│     Daemon      │
-│  (React Native) │                    │    (Node.js)    │
-└─────────────────┘                    └──┬──────────┬───┘
-                                          │          │
-┌─────────────────┐                       │   ┌──────▼──────┐
-│  Web Client     │◄──  WebSocket  ───────┘   │  Coding CLI │
-│  (React + Vite) │                           │  (in tmux)  │
-└─────────────────┘                           └─────────────┘
-
 ┌─────────────────┐
-│  macOS Desktop  │  Tauri v2 wrapper around the web client
-│  (.app / .dmg)  │
-└─────────────────┘
+│  Mobile App     │◄──┐
+│  (Tauri Android │   │
+│   / iOS)        │   │                  ┌─────────────────┐
+└─────────────────┘   │                  │     Daemon      │
+                      ├── WebSocket ────►│    (Node.js)    │
+┌─────────────────┐   │                  └──┬──────────┬───┘
+│  Web Client     │◄──┤                     │          │
+│  (React + Vite) │   │                     │   ┌──────▼──────┐
+└─────────────────┘   │                     │   │  Coding CLI │
+                      │                     │   │  (in tmux)  │
+┌─────────────────┐   │                     │   └─────────────┘
+│  Desktop App    │◄──┘                     │
+│  (Tauri macOS / │                         │
+│   Linux / Win)  │    Tauri wraps the      │
+└─────────────────┘    web client for all   │
+                       native platforms     │
 ```
 
 ## Quick Start
@@ -121,12 +135,12 @@ The installer will:
 - Generate a secure authentication token
 - Set up auto-start (systemd on Linux, launchd on macOS)
 
-**Save the token shown at the end - you'll need it for the app.**
+**Save the token shown at the end — you'll need it for the app.**
 
 ### 2. Connect
 
 1. Open the web client at `http://<your-server>:9877/web`
-2. Or download the Android APK / macOS .dmg from [Releases](https://github.com/Hexidecibel/companion/releases)
+2. Or download the Android APK / iOS IPA / desktop app from [Releases](https://github.com/Hexidecibel/companion/releases)
 3. Add your server's IP and authentication token
 4. Create a new tmux session or adopt an existing one
 
@@ -197,6 +211,15 @@ bash scripts/uninstall.sh
 
 ## Development
 
+### Project Structure
+
+```
+daemon/         # Node.js/TypeScript daemon (runs on server)
+web/            # React + Vite + TypeScript client (all platforms)
+desktop/        # Tauri 2.0 wrapper (desktop + Android + iOS)
+bin/            # Management scripts (build, deploy, test, dev)
+```
+
 ### Daemon
 
 ```bash
@@ -206,14 +229,6 @@ npm run build
 npm test
 ```
 
-### Mobile App
-
-```bash
-cd app
-npm install
-npx expo start
-```
-
 ### Web Client
 
 ```bash
@@ -221,15 +236,45 @@ cd web
 npm install
 npm run dev       # Vite dev server
 npm run build     # Production build to web/dist/
+npx tsc --noEmit  # Type check
 ```
 
-### macOS Desktop
+### Desktop App
 
 ```bash
 cd desktop
 npm install
 npm run tauri dev    # Dev mode
-npm run tauri build  # Build .dmg
+npm run tauri build  # Build for current platform
+```
+
+### Android APK
+
+```bash
+cd desktop
+bash scripts/setup-android.sh          # First-time Android setup
+cargo tauri android build --target aarch64
+# Sign: apksigner sign --ks debug.keystore --out /tmp/companion.apk <unsigned-apk>
+```
+
+### iOS (requires macOS + Xcode)
+
+```bash
+cd desktop
+cargo tauri ios init
+cargo tauri ios build --export-method app-store-connect
+```
+
+### Management Scripts
+
+```bash
+bin/build-all    # Build daemon + web
+bin/deploy       # Build + restart daemon service
+bin/dev          # Start daemon + Vite dev server
+bin/test         # Run all tests, lint, typecheck
+bin/logs         # View daemon logs (platform-aware)
+bin/status       # Show daemon status and info
+bin/build-apk    # Full Android APK pipeline
 ```
 
 ## Troubleshooting
@@ -251,6 +296,11 @@ npm run tauri build  # Build .dmg
 - Check logs for errors
 - Verify Node.js is installed: `node --version`
 - Ensure port 9877 isn't in use: `lsof -i :9877`
+
+### Windows
+- The daemon requires tmux, which runs on Linux/macOS
+- On Windows, install WSL 2 and run the daemon inside it
+- Desktop/mobile apps connect to the daemon over the network
 
 ## License
 
