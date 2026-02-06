@@ -74,14 +74,15 @@ jobs:
         run: cd desktop && bash scripts/setup-android.sh
       - name: Build APK
         run: cd desktop && npx tauri android build --target aarch64
+      - name: Decode signing keystore
+        run: echo "${{ secrets.ANDROID_KEYSTORE_B64 }}" | base64 --decode > /tmp/companion.keystore
       - name: Sign and rename APK
         run: |
           APK=$(find desktop/src-tauri/gen/android/app/build/outputs/apk -name '*.apk' | head -1)
           $ANDROID_HOME/build-tools/$(ls $ANDROID_HOME/build-tools | tail -1)/apksigner sign \
-            --ks desktop/src-tauri/gen/android/app/debug.keystore \
+            --ks /tmp/companion.keystore \
             --ks-pass pass:android --key-pass pass:android \
-            --out companion-${{ github.ref_name }}-android.apk "$APK" || \
-          cp "$APK" companion-${{ github.ref_name }}-android.apk
+            --out companion-${{ github.ref_name }}-android.apk "$APK"
       - uses: actions/upload-artifact@v4
         with:
           name: android-apk
