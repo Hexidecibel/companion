@@ -43,7 +43,7 @@ class FcmPlugin(private val activity: android.app.Activity) : Plugin(activity) {
             .addOnFailureListener { e ->
                 Log.e(TAG, "Failed to get FCM token", e)
                 val ret = JSObject()
-                ret.put("token", JSObject.NULL)
+                ret.put("token", org.json.JSONObject.NULL)
                 invoke.resolve(ret)
             }
     }
