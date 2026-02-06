@@ -3,10 +3,10 @@ import { Server, ConnectionState, WebSocketMessage, WebSocketResponse } from '..
 type MessageHandler = (message: WebSocketResponse) => void;
 type StateChangeHandler = (state: ConnectionState) => void;
 
-const MAX_RECONNECT_ATTEMPTS = 3;
-const INITIAL_RECONNECT_DELAY = 2000;
-const MAX_RECONNECT_DELAY = 10000;
-const PING_INTERVAL = 30000;
+const MAX_RECONNECT_ATTEMPTS = Infinity;
+const INITIAL_RECONNECT_DELAY = 1000;
+const MAX_RECONNECT_DELAY = 30000;
+const PING_INTERVAL = 25000;
 const CONNECTION_TIMEOUT = 10000;
 
 export class ServerConnection {

@@ -11,6 +11,7 @@ import { ShortcutHelpOverlay } from './ShortcutHelpOverlay';
 import { NotificationSettingsModal } from './NotificationSettingsModal';
 import { useSessionMute } from '../hooks/useSessionMute';
 import { useBrowserNotificationListener } from '../hooks/useBrowserNotificationListener';
+import { initPush, registerWithAllServers } from '../services/push';
 import { isTauri, isTauriDesktop, isMobileViewport } from '../utils/platform';
 
 interface DashboardProps {
@@ -33,6 +34,19 @@ export function Dashboard({ onSettings }: DashboardProps) {
 
   // Browser notification listener - listens on ALL connected servers
   useBrowserNotificationListener();
+
+  // Initialize push notifications on mobile (request permission, register FCM token)
+  useEffect(() => {
+    initPush();
+  }, []);
+
+  // Re-register push token when connections change (new server connected)
+  useEffect(() => {
+    const connected = snapshots.filter(s => s.state.status === 'connected');
+    if (connected.length > 0) {
+      registerWithAllServers();
+    }
+  }, [snapshots]);
 
   // Track viewport width for mobile/desktop layout switching
   useEffect(() => {
@@ -163,14 +177,17 @@ export function Dashboard({ onSettings }: DashboardProps) {
     }
   }, []);
 
-  // Handle popstate (Android back gesture) — close overlay first, then deselect session
+  // Handle popstate (Android back gesture) — close overlays first, then deselect session
   useEffect(() => {
     if (!isMobile) return;
     const handler = (_e: PopStateEvent) => {
-      if (document.body.dataset.overlay === 'true') {
+      if (showNotifSettings) {
+        // Close notification settings modal first
+        setShowNotifSettings(false);
+        history.pushState({ session: true }, '');
+      } else if (document.body.dataset.overlay === 'true') {
         // An overlay panel (terminal, work group) is open — close it first
         window.dispatchEvent(new CustomEvent('close-overlay'));
-        // Re-push session history entry so next back goes to dashboard
         history.pushState({ session: true }, '');
       } else if (activeSession) {
         setActiveSession(null);
@@ -178,7 +195,7 @@ export function Dashboard({ onSettings }: DashboardProps) {
     };
     window.addEventListener('popstate', handler);
     return () => window.removeEventListener('popstate', handler);
-  }, [isMobile, activeSession]);
+  }, [isMobile, activeSession, showNotifSettings]);
 
   const handleSessionCreated = useCallback((_serverId: string, sessionName: string) => {
     setActiveSession({ serverId: _serverId, sessionId: sessionName });

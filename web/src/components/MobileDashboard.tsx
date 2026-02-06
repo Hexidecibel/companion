@@ -51,17 +51,17 @@ export function MobileDashboard({
   onSettings,
 }: MobileDashboardProps) {
   const { snapshots } = useConnections();
-  const { toggleEnabled } = useServers();
+  const { servers, toggleEnabled, deleteServer } = useServers();
   const [addingServer, setAddingServer] = useState(false);
   const [editingServerId, setEditingServerId] = useState<string | undefined>();
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
 
-  // Count total waiting sessions across all servers
-  const waitingCount = useMemo(() => {
-    let count = 0;
+  // Check if any session across all servers needs attention
+  const hasWaiting = useMemo(() => {
     for (const summary of summaries.values()) {
-      count += summary.waitingCount;
+      if (summary.waitingCount > 0) return true;
     }
-    return count;
+    return false;
   }, [summaries]);
 
   return (
@@ -69,8 +69,8 @@ export function MobileDashboard({
       <header className="mobile-dashboard-header">
         <h1 className="mobile-dashboard-title">Companion</h1>
         <div className="mobile-dashboard-header-actions">
-          {waitingCount > 0 && (
-            <span className="mobile-waiting-badge">{waitingCount}</span>
+          {hasWaiting && (
+            <span className="mobile-attention-dot" title="Sessions need attention" />
           )}
           {onSettings && (
             <button
@@ -99,16 +99,38 @@ export function MobileDashboard({
           </div>
         )}
 
-        {snapshots.map((snap) => (
-          <ServerCard
-            key={snap.serverId}
-            snap={snap}
-            summary={summaries.get(snap.serverId)}
-            onSelectSession={onSelectSession}
-            onToggleEnabled={() => toggleEnabled(snap.serverId)}
-            onEdit={() => setEditingServerId(snap.serverId)}
-          />
-        ))}
+        {snapshots.map((snap) => {
+          const server = servers.find(s => s.id === snap.serverId);
+          const isEnabled = server?.enabled !== false;
+          return (
+            <div key={snap.serverId}>
+              <ServerCard
+                snap={snap}
+                summary={summaries.get(snap.serverId)}
+                onSelectSession={onSelectSession}
+                onToggleEnabled={() => toggleEnabled(snap.serverId)}
+                onDelete={() => {
+                  if (confirmDelete === snap.serverId) {
+                    deleteServer(snap.serverId);
+                    setConfirmDelete(null);
+                  } else {
+                    setConfirmDelete(snap.serverId);
+                  }
+                }}
+                onEdit={() => setEditingServerId(snap.serverId)}
+                isEnabled={isEnabled}
+              />
+              {confirmDelete === snap.serverId && (
+                <div className="mobile-confirm-delete">
+                  Tap delete again to confirm, or{' '}
+                  <button className="mobile-confirm-cancel" onClick={() => setConfirmDelete(null)}>
+                    cancel
+                  </button>
+                </div>
+              )}
+            </div>
+          );
+        })}
 
         {snapshots.length > 0 && !addingServer && (
           <button
@@ -145,10 +167,12 @@ interface ServerCardProps {
   summary: ServerSummary | undefined;
   onSelectSession: (serverId: string, sessionId: string) => void;
   onToggleEnabled: () => void;
+  onDelete: () => void;
   onEdit: () => void;
+  isEnabled: boolean;
 }
 
-function ServerCard({ snap, summary, onSelectSession, onEdit }: ServerCardProps) {
+function ServerCard({ snap, summary, onSelectSession, onToggleEnabled, onDelete, onEdit, isEnabled }: ServerCardProps) {
   const isConnected = snap.state.status === 'connected';
   const isConnecting = snap.state.status === 'connecting' || snap.state.status === 'reconnecting';
   const sessions = summary ? sortSessions(summary.sessions) : [];
@@ -168,11 +192,23 @@ function ServerCard({ snap, summary, onSelectSession, onEdit }: ServerCardProps)
         <span className={`status-dot ${dotClass}`} />
         <span className="mobile-server-name">{snap.serverName}</span>
         {waitingCount > 0 && (
-          <span className="mobile-server-waiting-badge">{waitingCount}</span>
+          <span className="mobile-attention-dot" />
         )}
-        <button className="mobile-server-edit-btn" onClick={onEdit} title="Edit server">
-          &#x270E;
-        </button>
+        <div className="mobile-server-actions">
+          <button
+            className={`mobile-server-toggle-btn ${isEnabled ? 'active' : ''}`}
+            onClick={onToggleEnabled}
+            title={isEnabled ? 'Disable server' : 'Enable server'}
+          >
+            {isEnabled ? 'On' : 'Off'}
+          </button>
+          <button className="mobile-server-edit-btn" onClick={onEdit} title="Edit server">
+            &#x270E;
+          </button>
+          <button className="mobile-server-delete-btn" onClick={onDelete} title="Delete server">
+            &#x2715;
+          </button>
+        </div>
       </div>
 
       {!isConnected && (
@@ -188,10 +224,16 @@ function ServerCard({ snap, summary, onSelectSession, onEdit }: ServerCardProps)
       {isConnected && sessions.map((session) => (
         <div
           key={session.id}
-          className="mobile-session-item"
+          className={`mobile-session-item ${session.status === 'waiting' ? 'mobile-session-waiting' : ''}`}
           onClick={() => onSelectSession(snap.serverId, session.id)}
         >
-          <span className={`status-dot ${STATUS_DOT_CLASS[session.status]}`} />
+          {session.status === 'working' ? (
+            <span className="mobile-session-spinner" />
+          ) : session.status === 'waiting' ? (
+            <span className="mobile-attention-dot" />
+          ) : (
+            <span className={`status-dot ${STATUS_DOT_CLASS[session.status]}`} />
+          )}
           <div className="mobile-session-info">
             <div className="mobile-session-name">{session.name}</div>
             {session.currentActivity && (

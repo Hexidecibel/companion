@@ -1,11 +1,11 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useConnections } from '../hooks/useConnections';
 import { connectionManager } from '../services/ConnectionManager';
 import { getFontScale, saveFontScale } from '../services/storage';
 import { clearAllArchives } from '../services/archiveService';
 import { clearStore } from '../services/persistentStorage';
 import { NotificationSettingsModal } from './NotificationSettingsModal';
-import { isTauriDesktop } from '../utils/platform';
+import { isTauriDesktop, isMobileViewport } from '../utils/platform';
 
 interface SettingsScreenProps {
   onBack: () => void;
@@ -100,6 +100,28 @@ export function SettingsScreen({ onBack }: SettingsScreenProps) {
     }
   };
 
+  // Push history when opening notification modal so back gesture closes it
+  const openNotifSettings = useCallback((serverId: string) => {
+    if (isMobileViewport()) {
+      history.pushState({ modal: 'notif' }, '');
+    }
+    setNotifServerId(serverId);
+  }, []);
+
+  const closeNotifSettings = useCallback(() => {
+    setNotifServerId(null);
+  }, []);
+
+  // Handle back gesture to close notification modal
+  useEffect(() => {
+    if (!notifServerId || !isMobileViewport()) return;
+    const handler = () => {
+      setNotifServerId(null);
+    };
+    window.addEventListener('popstate', handler);
+    return () => window.removeEventListener('popstate', handler);
+  }, [notifServerId]);
+
   const connectedServers = snapshots.filter((s) => s.state.status === 'connected');
 
   return (
@@ -174,7 +196,7 @@ export function SettingsScreen({ onBack }: SettingsScreenProps) {
                 </div>
                 <button
                   className="settings-action-btn"
-                  onClick={() => setNotifServerId(snap.serverId)}
+                  onClick={() => openNotifSettings(snap.serverId)}
                 >
                   Configure
                 </button>
@@ -277,7 +299,7 @@ export function SettingsScreen({ onBack }: SettingsScreenProps) {
       {notifServerId && (
         <NotificationSettingsModal
           serverId={notifServerId}
-          onClose={() => setNotifServerId(null)}
+          onClose={closeNotifSettings}
         />
       )}
     </div>

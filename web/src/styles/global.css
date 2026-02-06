@@ -5828,15 +5828,38 @@ html {
   gap: 12px;
 }
 
-.mobile-waiting-badge {
+/* Pulsing amber dot — needs attention */
+.mobile-attention-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
   background: var(--accent-amber);
-  color: #000;
-  font-size: 12px;
-  font-weight: 700;
-  padding: 2px 8px;
-  border-radius: 10px;
-  min-width: 20px;
-  text-align: center;
+  flex-shrink: 0;
+  animation: attention-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes attention-pulse {
+  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.5); }
+  50% { opacity: 0.7; box-shadow: 0 0 0 6px rgba(245, 158, 11, 0); }
+}
+
+/* Spinning loader — session working */
+.mobile-session-spinner {
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--border-color);
+  border-top-color: var(--accent-blue);
+  border-radius: 50%;
+  flex-shrink: 0;
+  animation: session-spin 0.8s linear infinite;
+}
+
+@keyframes session-spin {
+  to { transform: rotate(360deg); }
+}
+
+.mobile-session-waiting {
+  background: rgba(245, 158, 11, 0.06);
 }
 
 .mobile-settings-btn {
@@ -5883,14 +5906,31 @@ html {
   text-overflow: ellipsis;
 }
 
-.mobile-server-waiting-badge {
-  background: var(--accent-amber);
-  color: #000;
-  font-size: 11px;
-  font-weight: 700;
-  padding: 1px 6px;
-  border-radius: 8px;
+
+
+.mobile-server-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
   flex-shrink: 0;
+  margin-left: auto;
+}
+
+.mobile-server-toggle-btn {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 3px 10px;
+  border-radius: 6px;
+}
+
+.mobile-server-toggle-btn.active {
+  background: rgba(16, 185, 129, 0.15);
+  color: var(--accent-green);
+  border-color: rgba(16, 185, 129, 0.3);
 }
 
 .mobile-server-edit-btn {
@@ -5901,12 +5941,45 @@ html {
   cursor: pointer;
   padding: 4px 6px;
   border-radius: 6px;
-  flex-shrink: 0;
 }
 
 .mobile-server-edit-btn:hover {
   background: var(--bg-tertiary);
   color: var(--text-secondary);
+}
+
+.mobile-server-delete-btn {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 14px;
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: 6px;
+}
+
+.mobile-server-delete-btn:hover {
+  background: rgba(239, 68, 68, 0.15);
+  color: var(--accent-red);
+}
+
+.mobile-confirm-delete {
+  text-align: center;
+  padding: 8px 16px;
+  font-size: 13px;
+  color: var(--accent-red);
+  background: rgba(239, 68, 68, 0.08);
+  border-radius: 0 0 12px 12px;
+  margin-top: -8px;
+}
+
+.mobile-confirm-cancel {
+  background: none;
+  border: none;
+  color: var(--accent-blue);
+  cursor: pointer;
+  font-size: 13px;
+  text-decoration: underline;
 }
 
 .mobile-server-status {

@@ -262,6 +262,22 @@ export class PushNotificationService {
   }
 
   /**
+   * Send a consolidated notification to all devices with custom title/body.
+   * Used by escalation service to batch multiple events into one push.
+   */
+  sendConsolidatedNotification(title: string, body: string): void {
+    const allDevices = this.store.getDevices();
+    if (allDevices.length === 0) {
+      console.log('Push notifications: No devices registered, skipping consolidated');
+      return;
+    }
+
+    const tokens = allDevices.map((d) => d.token);
+    console.log(`Push notifications: Sending consolidated to ${allDevices.length} device(s): ${title}`);
+    this.sendNotifications(body, tokens, undefined, undefined, title);
+  }
+
+  /**
    * Send a test push notification to all registered devices.
    */
   async sendTestNotification(): Promise<{ sent: number; failed: number }> {

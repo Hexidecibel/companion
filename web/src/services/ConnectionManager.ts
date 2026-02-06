@@ -14,6 +14,20 @@ export class ConnectionManager {
   private changeHandlers: Set<ChangeHandler> = new Set();
   private cleanupFns: Map<string, () => void> = new Map();
 
+  constructor() {
+    // Reconnect dropped connections when app returns from background
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') {
+        for (const conn of this.connections.values()) {
+          const state = conn.getState();
+          if (conn.getServer().enabled !== false && state.status !== 'connected' && state.status !== 'connecting') {
+            conn.reconnect();
+          }
+        }
+      }
+    });
+  }
+
   connectServer(server: Server): void {
     let conn = this.connections.get(server.id);
     if (conn) {

@@ -150,6 +150,7 @@ export class EscalationService {
 
   /**
    * Fire push notification for a pending event (Tier 2 escalation).
+   * Consolidates all pending events into a single summary notification.
    */
   private firePush(pendingId: string): void {
     const event = this.pendingEvents.get(pendingId);
@@ -168,28 +169,68 @@ export class EscalationService {
       this.isInQuietHours(config.quietHours.start, config.quietHours.end)
     ) {
       console.log(`Escalation: Push suppressed for "${event.sessionName}" — quiet hours`);
-      event.pushSent = true; // Mark as handled so it doesn't retry
+      event.pushSent = true;
       this.timers.delete(pendingId);
       return;
     }
 
-    // Send push to all registered devices
-    event.pushSent = true;
-    this.timers.delete(pendingId);
+    // Collect ALL pending (unacknowledged, unsent) events for consolidation
+    const allPending: PendingEvent[] = [];
+    for (const [id, pe] of this.pendingEvents) {
+      if (!pe.pushSent && !pe.acknowledgedAt) {
+        allPending.push(pe);
+        pe.pushSent = true;
+        const timer = this.timers.get(id);
+        if (timer) {
+          clearTimeout(timer);
+          this.timers.delete(id);
+        }
+      }
+    }
 
-    this.push.sendToAllDevices(event.preview, event.eventType, event.sessionId, event.sessionName);
+    if (allPending.length === 0) return;
 
-    // Update history: add a push tier entry
-    this.store.addHistoryEntry({
-      eventType: event.eventType,
-      sessionId: event.sessionId,
-      sessionName: event.sessionName,
-      preview: event.preview,
-      tier: 'push',
-      acknowledged: false,
-    });
+    // Build consolidated notification
+    const uniqueSessions = new Set(allPending.map(e => e.sessionName));
+    const waitingCount = allPending.filter(e => e.eventType === 'waiting_for_input' || e.eventType === 'worker_waiting').length;
+    const errorCount = allPending.filter(e => e.eventType === 'error_detected' || e.eventType === 'worker_error').length;
 
-    console.log(`Escalation: Push sent for "${event.sessionName}" (${event.eventType})`);
+    let title: string;
+    let body: string;
+
+    if (allPending.length === 1) {
+      // Single event — use specific message
+      const e = allPending[0];
+      title = this.push['getTitleForEvent'](e.eventType);
+      body = `${e.sessionName}: ${e.preview}`;
+    } else {
+      // Multiple events — consolidated summary
+      const parts: string[] = [];
+      if (waitingCount > 0) parts.push(`${waitingCount} waiting`);
+      if (errorCount > 0) parts.push(`${errorCount} error${errorCount > 1 ? 's' : ''}`);
+      const otherCount = allPending.length - waitingCount - errorCount;
+      if (otherCount > 0) parts.push(`${otherCount} other`);
+
+      title = `${uniqueSessions.size} session${uniqueSessions.size > 1 ? 's' : ''} need attention`;
+      body = parts.join(', ') + ' — ' + Array.from(uniqueSessions).slice(0, 3).join(', ');
+      if (uniqueSessions.size > 3) body += ` +${uniqueSessions.size - 3} more`;
+    }
+
+    this.push.sendConsolidatedNotification(title, body);
+
+    // Log to history
+    for (const e of allPending) {
+      this.store.addHistoryEntry({
+        eventType: e.eventType,
+        sessionId: e.sessionId,
+        sessionName: e.sessionName,
+        preview: e.preview,
+        tier: 'push',
+        acknowledged: false,
+      });
+    }
+
+    console.log(`Escalation: Consolidated push sent — ${allPending.length} event(s) across ${uniqueSessions.size} session(s)`);
   }
 
   private isInQuietHours(start: string, end: string): boolean {

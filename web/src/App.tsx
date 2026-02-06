@@ -41,6 +41,13 @@ export function App() {
     return () => window.removeEventListener('keydown', handler);
   }, []);
 
+  // Ensure there's always a base history entry so back gesture doesn't exit the app
+  useEffect(() => {
+    if (!history.state?.screen) {
+      history.replaceState({ screen: 'dashboard' }, '');
+    }
+  }, []);
+
   // Navigate with history.pushState for Android back gesture support
   const navigateTo = useCallback((name: Screen['name']) => {
     if (name !== 'dashboard') {
@@ -110,7 +117,7 @@ export function App() {
         <div id="app" className={isDashboard ? 'app-dashboard' : ''}>
           {screen.name === 'dashboard' && (
             <Dashboard
-              onSettings={() => setScreen({ name: 'settings' })}
+              onSettings={() => navigateTo('settings')}
             />
           )}
           {screen.name === 'status' && (
