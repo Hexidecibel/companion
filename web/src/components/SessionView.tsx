@@ -114,6 +114,23 @@ export function SessionView({
     return null;
   }, [highlights]);
 
+  // Signal to Dashboard that an overlay is open (for back gesture coordination)
+  useEffect(() => {
+    const isOverlay = showTerminal || showWorkGroupPanel;
+    document.body.dataset.overlay = isOverlay ? 'true' : '';
+    return () => { document.body.dataset.overlay = ''; };
+  }, [showTerminal, showWorkGroupPanel]);
+
+  // Listen for close-overlay event from Dashboard's back gesture handler
+  useEffect(() => {
+    const handler = () => {
+      if (showTerminal) setShowTerminal(false);
+      else if (showWorkGroupPanel) setShowWorkGroupPanel(false);
+    };
+    window.addEventListener('close-overlay', handler);
+    return () => window.removeEventListener('close-overlay', handler);
+  }, [showTerminal, showWorkGroupPanel]);
+
   // Auto-focus input and reset views when session changes
   useEffect(() => {
     setShowTerminal(false);
@@ -254,70 +271,77 @@ export function SessionView({
     sendInput(label);
   };
 
+  const mobile = isMobileViewport();
+
+  const actionButtons = (
+    <div className="session-header-actions">
+      {sessionId && (
+        <button
+          className={`auto-approve-btn ${!sessionMute.isMuted(sessionId) ? 'auto-approve-btn-active' : ''}`}
+          onClick={() => sessionMute.toggleMute(sessionId)}
+          title={sessionMute.isMuted(sessionId) ? 'Unmute notifications' : 'Mute notifications'}
+        >
+          {sessionMute.isMuted(sessionId) ? 'Notify: OFF' : 'Notify: ON'}
+        </button>
+      )}
+      <button
+        className={`auto-approve-btn ${autoApprove.enabled ? 'auto-approve-btn-active' : ''}`}
+        onClick={autoApprove.toggle}
+        disabled={autoApprove.loading}
+        title={autoApprove.enabled ? 'Auto-approve enabled' : 'Auto-approve disabled'}
+      >
+        {autoApprove.enabled ? 'Auto: ON' : 'Auto: OFF'}
+      </button>
+      {tmuxSessionName && (
+        <button
+          className={`session-header-btn ${showTerminal ? 'terminal-active' : ''}`}
+          onClick={() => setShowTerminal(!showTerminal)}
+          title={showTerminal ? 'Show conversation' : 'Show terminal output'}
+        >
+          Terminal
+        </button>
+      )}
+      {latestPlanFile && (
+        <button
+          className="session-header-btn plan-btn"
+          onClick={() => handleViewFile(latestPlanFile)}
+          title={`View plan: ${latestPlanFile}`}
+        >
+          Plan
+        </button>
+      )}
+      <button
+        className="session-header-btn"
+        onClick={() => setShowArchiveModal(true)}
+        title="View saved archives"
+      >
+        History
+      </button>
+    </div>
+  );
+
   return (
     <div className="session-view">
-      {/* Session header with actions */}
-      <div className="session-header">
+      {/* Top header: back arrow on mobile, full header on desktop */}
+      <div className={`session-header ${mobile ? 'session-header-mobile' : ''}`}>
         {onToggleSidebar && (
           <button
             className="mobile-menu-btn"
             onClick={onToggleSidebar}
-            title={isMobileViewport() ? 'Back' : 'Toggle sidebar'}
-            aria-label={isMobileViewport() ? 'Back' : 'Toggle sidebar'}
+            title={mobile ? 'Back' : 'Toggle sidebar'}
+            aria-label={mobile ? 'Back' : 'Toggle sidebar'}
           >
-            {isMobileViewport() ? '\u2190' : '\u2630'}
+            {mobile ? '\u2190' : '\u2630'}
           </button>
         )}
-        <div className="session-header-actions">
-          {sessionId && (
-            <button
-              className={`session-mute-btn ${sessionMute.isMuted(sessionId) ? 'muted' : ''}`}
-              onClick={() => sessionMute.toggleMute(sessionId)}
-              title={sessionMute.isMuted(sessionId) ? 'Unmute notifications' : 'Mute notifications'}
-            >
-              {sessionMute.isMuted(sessionId) ? '\u{1F515} Muted' : '\u{1F514} Notify'}
-            </button>
-          )}
-          <button
-            className={`auto-approve-btn ${autoApprove.enabled ? 'auto-approve-btn-active' : ''}`}
-            onClick={autoApprove.toggle}
-            disabled={autoApprove.loading}
-            title={autoApprove.enabled ? 'Auto-approve enabled' : 'Auto-approve disabled'}
-          >
-            {autoApprove.enabled ? 'Auto: ON' : 'Auto: OFF'}
-          </button>
-          {tmuxSessionName && (
-            <button
-              className={`session-header-btn ${showTerminal ? 'terminal-active' : ''}`}
-              onClick={() => setShowTerminal(!showTerminal)}
-              title={showTerminal ? 'Show conversation' : 'Show terminal output'}
-            >
-              Terminal
-            </button>
-          )}
-          {latestPlanFile && (
-            <button
-              className="session-header-btn plan-btn"
-              onClick={() => handleViewFile(latestPlanFile)}
-              title={`View plan: ${latestPlanFile}`}
-            >
-              Plan
-            </button>
-          )}
-          <button
-            className="session-header-btn"
-            onClick={() => setShowArchiveModal(true)}
-            title="View saved archives"
-          >
-            History
-          </button>
-        </div>
+        {!mobile && actionButtons}
       </div>
 
       {showTerminal && tmuxSessionName && serverId && (
         <TerminalPanel
           serverId={serverId}
           tmuxSessionName={tmuxSessionName}
+          toolbarBottom={mobile}
         />
       )}
 
@@ -392,6 +416,12 @@ export function SessionView({
             onCloseFile={handleCloseFileTab}
             onCloseAll={handleCloseAllFileTabs}
           />
+
+          {mobile && (
+            <div className="session-bottom-bar">
+              {actionButtons}
+            </div>
+          )}
 
           <InputBar
             onSend={handleSend}

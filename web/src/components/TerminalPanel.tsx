@@ -6,6 +6,7 @@ import { useServers } from '../hooks/useServers';
 interface TerminalPanelProps {
   serverId: string;
   tmuxSessionName: string;
+  toolbarBottom?: boolean;
 }
 
 const POLL_INTERVAL = 2000;
@@ -64,7 +65,7 @@ function spanStyle(span: AnsiSpan): React.CSSProperties {
   return style;
 }
 
-export function TerminalPanel({ serverId, tmuxSessionName }: TerminalPanelProps) {
+export function TerminalPanel({ serverId, tmuxSessionName, toolbarBottom }: TerminalPanelProps) {
   const [lines, setLines] = useState<AnsiSpan[][]>([]);
   const [paused, setPaused] = useState(false);
   const [interactive, setInteractive] = useState(false);
@@ -234,53 +235,59 @@ export function TerminalPanel({ serverId, tmuxSessionName }: TerminalPanelProps)
     });
   }, []);
 
-  return (
-    <div className="terminal-panel">
-      <div className="terminal-toolbar">
+  const toolbar = (
+    <div className={`terminal-toolbar ${toolbarBottom ? 'terminal-toolbar-bottom' : ''}`}>
+      {!toolbarBottom && (
         <div className="terminal-toolbar-left">
           <span className="terminal-toolbar-label">
             tmux: {tmuxSessionName}
           </span>
         </div>
-        <div className="terminal-toolbar-right">
-          {sshCommand ? (
-            <div className="ssh-command">
-              <code className="ssh-command-text">{sshCommand}</code>
-              <button
-                className={`ssh-command-copy ${copied ? 'copied' : ''}`}
-                onClick={handleCopy}
-              >
-                {copied ? 'Copied' : 'Copy'}
-              </button>
-            </div>
-          ) : (
-            <span className="ssh-command-hint">
-              Set SSH user in server settings for connect command
-            </span>
-          )}
-          <button
-            className={`terminal-toolbar-btn ${interactive ? 'interactive-active' : ''}`}
-            onClick={toggleInteractive}
-            title={interactive ? 'Disable keyboard capture' : 'Enable keyboard capture (sends keys to tmux)'}
-          >
-            Interactive
-          </button>
-          <button
-            className={`terminal-toolbar-btn ${paused ? 'active' : ''}`}
-            onClick={() => setPaused(!paused)}
-            title={paused ? 'Resume auto-refresh' : 'Pause auto-refresh'}
-          >
-            {paused ? 'Resume' : 'Pause'}
-          </button>
-          <button
-            className="terminal-toolbar-btn"
-            onClick={fetchOutput}
-            title="Refresh now"
-          >
-            Refresh
-          </button>
-        </div>
+      )}
+      <div className="terminal-toolbar-right">
+        {!toolbarBottom && sshCommand ? (
+          <div className="ssh-command">
+            <code className="ssh-command-text">{sshCommand}</code>
+            <button
+              className={`ssh-command-copy ${copied ? 'copied' : ''}`}
+              onClick={handleCopy}
+            >
+              {copied ? 'Copied' : 'Copy'}
+            </button>
+          </div>
+        ) : !toolbarBottom ? (
+          <span className="ssh-command-hint">
+            Set SSH user in server settings for connect command
+          </span>
+        ) : null}
+        <button
+          className={`terminal-toolbar-btn ${interactive ? 'interactive-active' : ''}`}
+          onClick={toggleInteractive}
+          title={interactive ? 'Disable keyboard capture' : 'Enable keyboard capture (sends keys to tmux)'}
+        >
+          Interactive
+        </button>
+        <button
+          className={`terminal-toolbar-btn ${paused ? 'active' : ''}`}
+          onClick={() => setPaused(!paused)}
+          title={paused ? 'Resume auto-refresh' : 'Pause auto-refresh'}
+        >
+          {paused ? 'Resume' : 'Pause'}
+        </button>
+        <button
+          className="terminal-toolbar-btn"
+          onClick={fetchOutput}
+          title="Refresh now"
+        >
+          Refresh
+        </button>
       </div>
+    </div>
+  );
+
+  return (
+    <div className="terminal-panel">
+      {!toolbarBottom && toolbar}
 
       {error && (
         <div className="terminal-error">{error}</div>
@@ -303,6 +310,8 @@ export function TerminalPanel({ serverId, tmuxSessionName }: TerminalPanelProps)
           </div>
         ))}
       </div>
+
+      {toolbarBottom && toolbar}
     </div>
   );
 }

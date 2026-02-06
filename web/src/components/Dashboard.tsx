@@ -163,11 +163,16 @@ export function Dashboard({ onSettings }: DashboardProps) {
     }
   }, []);
 
-  // Handle popstate (Android back gesture) — deselect session on mobile
+  // Handle popstate (Android back gesture) — close overlay first, then deselect session
   useEffect(() => {
     if (!isMobile) return;
     const handler = (_e: PopStateEvent) => {
-      if (activeSession) {
+      if (document.body.dataset.overlay === 'true') {
+        // An overlay panel (terminal, work group) is open — close it first
+        window.dispatchEvent(new CustomEvent('close-overlay'));
+        // Re-push session history entry so next back goes to dashboard
+        history.pushState({ session: true }, '');
+      } else if (activeSession) {
         setActiveSession(null);
       }
     };

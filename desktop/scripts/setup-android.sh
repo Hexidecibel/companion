@@ -71,13 +71,30 @@ if [ -f "$GOOGLE_SERVICES_DST" ]; then
   fi
 fi
 
-# 5. Ensure AndroidManifest has required permissions
+# 5. Enable cleartext traffic for release builds (WS connections to local servers)
+if grep -q 'manifestPlaceholders\["usesCleartextTraffic"\] = "false"' "$APP_GRADLE"; then
+  echo "Enabling cleartext traffic for release builds..."
+  sed -i 's/manifestPlaceholders\["usesCleartextTraffic"\] = "false"/manifestPlaceholders["usesCleartextTraffic"] = "true"/' "$APP_GRADLE"
+else
+  echo "Cleartext traffic already enabled for release builds"
+fi
+
+# 6. Ensure AndroidManifest has required permissions
 MANIFEST="$GEN_ANDROID/app/src/main/AndroidManifest.xml"
 if ! grep -q "POST_NOTIFICATIONS" "$MANIFEST"; then
   echo "Adding POST_NOTIFICATIONS permission to AndroidManifest.xml..."
   sed -i '/<uses-permission android:name="android.permission.INTERNET"/a\    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />' "$MANIFEST"
 else
   echo "POST_NOTIFICATIONS permission already in manifest"
+fi
+
+# 7. Enable back gesture handling in MainActivity
+MAIN_ACTIVITY="$GEN_ANDROID/app/src/main/java/com/hexidecibel/companion/MainActivity.kt"
+if [ -f "$MAIN_ACTIVITY" ] && ! grep -q "handleBackNavigation" "$MAIN_ACTIVITY"; then
+  echo "Enabling back navigation in MainActivity..."
+  sed -i 's/class MainActivity : TauriActivity() {/class MainActivity : TauriActivity() {\n  override val handleBackNavigation: Boolean = true\n/' "$MAIN_ACTIVITY"
+else
+  echo "Back navigation already configured in MainActivity"
 fi
 
 echo ""
