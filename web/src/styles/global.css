@@ -5617,8 +5617,19 @@ html {
   max-width: 480px;
 }
 
+@media (max-width: 480px) {
+  .server-form-modal {
+    width: 100%;
+    max-height: 100dvh;
+    height: 100dvh;
+    border-radius: 0;
+  }
+}
+
 .server-form-modal .form-container {
   padding: 16px 24px 24px;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .server-form-modal .server-form {
@@ -5631,6 +5642,7 @@ html {
 
 .server-form-modal .btn-primary {
   margin-top: 16px;
+  margin-bottom: calc(16px + var(--safe-bottom));
 }
 
 /* ========================================
