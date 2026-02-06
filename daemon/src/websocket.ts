@@ -28,6 +28,8 @@ import { fetchTodayUsage, fetchMonthUsage, fetchAnthropicUsage } from './anthrop
 import { DEFAULT_TOOL_CONFIG } from './tool-config';
 import { SubAgentWatcher } from './subagent-watcher';
 import { WorkGroupManager } from './work-group-manager';
+import { scanProjectSkills, scanGlobalSkills } from './skill-scanner';
+import { SkillCatalog } from './skill-catalog';
 import { templates as scaffoldTemplates } from './scaffold/templates';
 import { scaffoldProject, previewScaffold } from './scaffold/generator';
 import { ProjectConfig } from './scaffold/types';
@@ -74,6 +76,7 @@ export class WebSocketHandler {
   public autoApproveSessions: Set<string> = new Set();
   private escalation: EscalationService;
   private workGroupManager: WorkGroupManager | null;
+  private skillCatalog: SkillCatalog;
 
   constructor(
     servers: { server: Server; listener: ListenerConfig }[],
@@ -94,6 +97,7 @@ export class WebSocketHandler {
     this.tmux = tmux || new TmuxManager('companion');
 
     this.escalation = new EscalationService(this.push.getStore(), this.push);
+    this.skillCatalog = new SkillCatalog();
 
     // Create a WebSocketServer for each listener
     for (const { server, listener } of servers) {
@@ -1121,6 +1125,30 @@ export class WebSocketHandler {
             });
           }
         })();
+        break;
+
+      case 'list_skills':
+        this.handleListSkills(client, requestId);
+        break;
+
+      case 'install_skill':
+        this.handleInstallSkill(
+          client,
+          payload as { skillId: string; target: 'project' | 'global' },
+          requestId
+        );
+        break;
+
+      case 'uninstall_skill':
+        this.handleUninstallSkill(
+          client,
+          payload as { skillId: string; source: 'project' | 'global' },
+          requestId
+        );
+        break;
+
+      case 'get_skill_content':
+        this.handleGetSkillContent(client, payload as { skillId: string }, requestId);
         break;
 
       default:
@@ -2824,5 +2852,188 @@ export class WebSocketHandler {
 
   getAuthenticatedClientCount(): number {
     return Array.from(this.clients.values()).filter((c) => c.authenticated).length;
+  }
+
+  // --- Skill management endpoints ---
+
+  private handleListSkills(client: AuthenticatedClient, requestId?: string): void {
+    try {
+      // Scan installed skills from project and global
+      const projectRoot = this.getProjectRoot();
+      const projectSkills = projectRoot ? scanProjectSkills(projectRoot) : [];
+      const globalSkills = scanGlobalSkills();
+
+      // Get catalog skills
+      const catalogSkills = this.skillCatalog.getAvailableSkills();
+
+      // Build installed set for lookup
+      const installedIds = new Set([
+        ...projectSkills.map((s) => s.id),
+        ...globalSkills.map((s) => s.id),
+      ]);
+
+      // Merge: installed skills + catalog skills not yet installed
+      const skills = [
+        ...projectSkills.map((s) => ({
+          id: s.id,
+          name: s.name,
+          description: s.description,
+          category: 'installed',
+          scope: 'universal' as const,
+          installed: true,
+          source: s.source,
+        })),
+        ...globalSkills
+          .filter((s) => !projectSkills.some((p) => p.id === s.id))
+          .map((s) => ({
+            id: s.id,
+            name: s.name,
+            description: s.description,
+            category: 'installed',
+            scope: 'universal' as const,
+            installed: true,
+            source: s.source,
+          })),
+        ...catalogSkills
+          .filter((s) => !installedIds.has(s.id))
+          .map((s) => ({
+            id: s.id,
+            name: s.name,
+            description: s.description,
+            category: s.category,
+            scope: s.scope,
+            installed: false,
+            source: 'catalog' as const,
+          })),
+      ];
+
+      this.send(client.ws, {
+        type: 'skills_list',
+        success: true,
+        payload: { skills },
+        requestId,
+      });
+    } catch (err) {
+      this.send(client.ws, {
+        type: 'skills_list',
+        success: false,
+        error: String(err),
+        requestId,
+      });
+    }
+  }
+
+  private handleInstallSkill(
+    client: AuthenticatedClient,
+    payload: { skillId: string; target: 'project' | 'global' } | undefined,
+    requestId?: string
+  ): void {
+    try {
+      if (!payload?.skillId) {
+        this.send(client.ws, {
+          type: 'skill_installed',
+          success: false,
+          error: 'Missing skillId',
+          requestId,
+        });
+        return;
+      }
+
+      const projectRoot = this.getProjectRoot() || os.homedir();
+      this.skillCatalog.installSkill(payload.skillId, payload.target, projectRoot);
+
+      this.send(client.ws, {
+        type: 'skill_installed',
+        success: true,
+        payload: { skillId: payload.skillId, target: payload.target },
+        requestId,
+      });
+    } catch (err) {
+      this.send(client.ws, {
+        type: 'skill_installed',
+        success: false,
+        error: String(err),
+        requestId,
+      });
+    }
+  }
+
+  private handleUninstallSkill(
+    client: AuthenticatedClient,
+    payload: { skillId: string; source: 'project' | 'global' } | undefined,
+    requestId?: string
+  ): void {
+    try {
+      if (!payload?.skillId) {
+        this.send(client.ws, {
+          type: 'skill_uninstalled',
+          success: false,
+          error: 'Missing skillId',
+          requestId,
+        });
+        return;
+      }
+
+      const projectRoot = this.getProjectRoot() || os.homedir();
+      this.skillCatalog.uninstallSkill(payload.skillId, payload.source, projectRoot);
+
+      this.send(client.ws, {
+        type: 'skill_uninstalled',
+        success: true,
+        payload: { skillId: payload.skillId },
+        requestId,
+      });
+    } catch (err) {
+      this.send(client.ws, {
+        type: 'skill_uninstalled',
+        success: false,
+        error: String(err),
+        requestId,
+      });
+    }
+  }
+
+  private handleGetSkillContent(
+    client: AuthenticatedClient,
+    payload: { skillId: string } | undefined,
+    requestId?: string
+  ): void {
+    if (!payload?.skillId) {
+      this.send(client.ws, {
+        type: 'skill_content',
+        success: false,
+        error: 'Missing skillId',
+        requestId,
+      });
+      return;
+    }
+
+    const content = this.skillCatalog.getSkillContent(payload.skillId);
+    if (content) {
+      this.send(client.ws, {
+        type: 'skill_content',
+        success: true,
+        payload: { skillId: payload.skillId, content },
+        requestId,
+      });
+    } else {
+      this.send(client.ws, {
+        type: 'skill_content',
+        success: false,
+        error: `Skill not found: ${payload.skillId}`,
+        requestId,
+      });
+    }
+  }
+
+  private getProjectRoot(): string | null {
+    // Try to get project root from active tmux session's working directory
+    const activeSessionId = this.watcher.getActiveSessionId();
+    if (activeSessionId) {
+      // Use the code_home parent as a heuristic, or fall back to home dir
+      const codeHome = this.config.codeHome || path.join(os.homedir(), '.claude');
+      return path.dirname(codeHome);
+    }
+    return null;
   }
 }

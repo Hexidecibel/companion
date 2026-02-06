@@ -257,3 +257,14 @@ export interface ActiveSession {
   serverId: string;
   sessionId: string;
 }
+
+export interface Skill {
+  id: string;
+  name: string;
+  description: string;
+  category: string;
+  scope: 'universal' | 'project-specific';
+  installed: boolean;
+  source?: 'project' | 'global' | 'catalog';
+  prerequisites?: string[];
+}

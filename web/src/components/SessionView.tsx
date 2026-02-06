@@ -10,6 +10,7 @@ import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
 import { connectionManager } from '../services/ConnectionManager';
 import { isMobileViewport } from '../utils/platform';
 import { useSessionMute } from '../hooks/useSessionMute';
+import { useSkills } from '../hooks/useSkills';
 import { WaitingIndicator } from './WaitingIndicator';
 import { TaskList } from './TaskList';
 import { MessageList } from './MessageList';
@@ -71,6 +72,7 @@ export function SessionView({
   const { agents, runningCount, completedCount, totalAgents } = useSubAgents(serverId, sessionId);
   const autoApprove = useAutoApprove(serverId, sessionId);
   const sessionMute = useSessionMute(serverId);
+  const { skills } = useSkills(serverId);
   // Sub-agent state
   const [showAgentsModal, setShowAgentsModal] = useState(false);
   const [viewingAgentId, setViewingAgentId] = useState<string | null>(null);
@@ -427,6 +429,7 @@ export function SessionView({
             onSend={handleSend}
             onSendWithImages={handleSendWithImages}
             disabled={false}
+            skills={skills}
           />
       </div>
 

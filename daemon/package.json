@@ -30,7 +30,7 @@
   "license": "MIT",
   "scripts": {
     "postinstall": "node scripts/postinstall.js",
-    "build": "tsc",
+    "build": "tsc && mkdir -p dist/skills && cp src/skills/catalog.json dist/skills/catalog.json",
     "start": "node dist/index.js",
     "dev": "ts-node src/index.ts",
     "pkg": "pkg dist/index.js --targets node18-linux-x64 --output daemon-linux-x64",

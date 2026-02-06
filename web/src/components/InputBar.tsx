@@ -1,11 +1,13 @@
-import { useState, useRef, useCallback, type KeyboardEvent, type ClipboardEvent, type DragEvent } from 'react';
-import { PendingImage } from '../types';
+import { useState, useRef, useCallback, useMemo, type KeyboardEvent, type ClipboardEvent, type DragEvent } from 'react';
+import { PendingImage, Skill } from '../types';
 import { useUndoHistory } from '../hooks/useUndoHistory';
+import { SlashMenu, SlashMenuItem } from './SlashMenu';
 
 interface InputBarProps {
   onSend: (text: string) => Promise<boolean>;
   onSendWithImages?: (text: string, images: PendingImage[]) => Promise<boolean>;
   disabled?: boolean;
+  skills?: Skill[];
 }
 
 let imageIdCounter = 0;
@@ -18,16 +20,24 @@ function fileToPreview(file: File): PendingImage {
   };
 }
 
-export function InputBar({ onSend, onSendWithImages, disabled }: InputBarProps) {
+export function InputBar({ onSend, onSendWithImages, disabled, skills = [] }: InputBarProps) {
   const { value: text, onChange: setText, undo, redo, reset: resetHistory } = useUndoHistory();
   const [sending, setSending] = useState(false);
   const [images, setImages] = useState<PendingImage[]>([]);
   const [dragging, setDragging] = useState(false);
+  const [showSlashMenu, setShowSlashMenu] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
 
   const hasContent = text.trim().length > 0 || images.length > 0;
+
+  // Detect slash command query
+  const slashQuery = useMemo(() => {
+    if (!showSlashMenu) return '';
+    const match = text.match(/^\/(\S*)$/);
+    return match ? match[1] : '';
+  }, [text, showSlashMenu]);
 
   const addImages = useCallback((files: File[]) => {
     const imageFiles = files.filter((f) => f.type.startsWith('image/'));
@@ -52,6 +62,7 @@ export function InputBar({ onSend, onSendWithImages, disabled }: InputBarProps) 
     resetHistory();
     setImages([]);
     setSending(true);
+    setShowSlashMenu(false);
 
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto';
@@ -75,7 +86,46 @@ export function InputBar({ onSend, onSendWithImages, disabled }: InputBarProps) 
     textareaRef.current?.focus();
   }, [text, images, sending, disabled, onSend, onSendWithImages, resetHistory]);
 
+  const handleSlashSelect = useCallback(
+    (item: SlashMenuItem) => {
+      setShowSlashMenu(false);
+      if (item.action === 'send' && item.sendText) {
+        // Quick actions: send immediately
+        setText('');
+        onSend(item.sendText);
+      } else {
+        // Skills and built-ins: insert /<name> and let user press Enter
+        setText(`/${item.name}`);
+        requestAnimationFrame(() => textareaRef.current?.focus());
+      }
+    },
+    [onSend, setText]
+  );
+
+  const handleTextChange = useCallback(
+    (value: string) => {
+      setText(value);
+      // Show slash menu when typing / at the start
+      if (value.match(/^\/\S*$/) && !value.includes(' ')) {
+        setShowSlashMenu(true);
+      } else {
+        setShowSlashMenu(false);
+      }
+    },
+    [setText]
+  );
+
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    // When slash menu is open, let it handle navigation keys
+    if (showSlashMenu && (e.key === 'ArrowDown' || e.key === 'ArrowUp' || e.key === 'Tab')) {
+      return; // SlashMenu's keydown listener will handle these
+    }
+    if (showSlashMenu && e.key === 'Escape') {
+      e.preventDefault();
+      setShowSlashMenu(false);
+      return;
+    }
+
     const mod = e.metaKey || e.ctrlKey;
     if (mod && e.key === 'z' && !e.shiftKey) {
       e.preventDefault();
@@ -88,6 +138,8 @@ export function InputBar({ onSend, onSendWithImages, disabled }: InputBarProps) 
       return;
     }
     if (e.key === 'Enter' && !e.shiftKey) {
+      // If slash menu is open and has items, Enter selects from menu (handled by SlashMenu)
+      if (showSlashMenu) return;
       e.preventDefault();
       handleSend();
     }
@@ -154,6 +206,14 @@ export function InputBar({ onSend, onSendWithImages, disabled }: InputBarProps) 
       onDrop={handleDrop}
       style={{ position: 'relative' }}
     >
+      {showSlashMenu && (
+        <SlashMenu
+          query={slashQuery}
+          skills={skills}
+          onSelect={handleSlashSelect}
+          onClose={() => setShowSlashMenu(false)}
+        />
+      )}
       {images.length > 0 && (
         <div className="input-bar-images">
           {images.map((img) => (
@@ -191,7 +251,7 @@ export function InputBar({ onSend, onSendWithImages, disabled }: InputBarProps) 
           ref={textareaRef}
           className="input-bar-textarea"
           value={text}
-          onChange={(e) => { setText(e.target.value); handleInput(); }}
+          onChange={(e) => { handleTextChange(e.target.value); handleInput(); }}
           onKeyDown={handleKeyDown}
           onPaste={handlePaste}
           placeholder="Send a message..."

@@ -1,0 +1,128 @@
+[
+  {
+    "id": "todo",
+    "name": "Add Todo Item",
+    "description": "Quick capture ideas and tasks to todo.md for later planning.",
+    "category": "workflow",
+    "scope": "universal",
+    "prerequisites": [],
+    "content": "# Add Todo Item\n\nQuickly capture ideas and tasks to todo.md.\n\n## Usage\n\n```\n/todo <description>\n```\n\n## Instructions\n\n1. The item to add: `$ARGUMENTS`\n\n2. Read or create `todo.md`\n\n3. Add the item as a bullet point:\n   - Format: `- <the text>`\n   - Add under the \"Upcoming\" section, or at the end of the file\n\n4. Confirm what was added\n\n## Notes\n\n- This is for quick capture - don't overthink it\n- Use `/plan` later to process these into detailed plans\n- Use `/work` to implement from the plan\n"
+  },
+  {
+    "id": "plan",
+    "name": "Plan from Todo",
+    "description": "Process todo items into detailed implementation plans with file lists, steps, and tests.",
+    "category": "workflow",
+    "scope": "universal",
+    "prerequisites": ["todo.md"],
+    "content": "# Plan from Todo\n\nProcess todo.md items into detailed implementation plans.\n\n## Instructions\n\n1. Read `todo.md`\n\n2. Read `plan.md` (if exists)\n\n3. For each unplanned item in todo.md:\n   - Ask clarifying questions\n   - Understand the scope and requirements\n   - Identify which files need changes\n   - Consider edge cases and potential issues\n\n4. Write detailed plan to `plan.md`:\n   ```markdown\n   ## Item: <title>\n   **Status:** planned\n\n   ### Requirements\n   - <bullet points>\n\n   ### Files to Modify\n   - `path/to/file.ts` - <what changes>\n\n   ### Implementation Steps\n   1. <step>\n\n   ### Tests Needed\n   - <test case>\n   ```\n\n5. Mark items as planned in todo.md\n\n## Rules\n\n- NO CODING in this phase\n- Ask questions if anything is unclear\n- Keep plans focused and actionable\n"
+  },
+  {
+    "id": "work",
+    "name": "Work on Planned Items",
+    "description": "Implement items from plan.md using TDD. Supports parallel worker spawning for non-overlapping tasks.",
+    "category": "workflow",
+    "scope": "universal",
+    "prerequisites": ["plan.md"],
+    "content": "# Work on Planned Items\n\nImplement items from plan.md using TDD.\n\n## Instructions\n\n1. Read `plan.md`\n\n2. Find items with **Status: planned** or **Status: in-progress**\n\n3. For each item, follow TDD:\n\n   a. **Write tests first**\n      - Create/update test files based on \"Tests Needed\" section\n      - Run tests - they should fail (red)\n\n   b. **Implement the feature**\n      - Follow the \"Implementation Steps\" from plan\n      - Make tests pass (green)\n      - Run type checks\n\n   c. **Refactor if needed**\n      - Clean up code while keeping tests green\n\n   d. **Commit**\n      - Commit with descriptive message\n      - Update plan.md status to \"done\"\n\n## Rules\n\n- Tests first, always\n- Commit after each completed item\n- NO push without explicit approval\n- Ask if stuck or unclear\n"
+  },
+  {
+    "id": "file",
+    "name": "Find File",
+    "description": "Search the project for files by name or description and output tappable absolute paths.",
+    "category": "search",
+    "scope": "universal",
+    "prerequisites": [],
+    "content": "# Find File\n\nFind a file in the project by name or description and output its absolute path.\n\n## Usage\n\n```\n/file <filename or description>\n```\n\n## Instructions\n\n1. The query: `$ARGUMENTS`\n\n2. Search for the file:\n   - If the query looks like a filename, search by glob pattern\n   - If the query is a description, search by grepping for relevant exports/class names\n   - Check all subdirectories\n\n3. If multiple matches found, list all as absolute paths\n\n4. If single match, output just the absolute path\n\n5. Output each path wrapped in backticks (inline code) for tappable links\n\n## Notes\n\n- ALWAYS wrap paths in backticks\n- Output absolute paths\n- Keep output minimal\n"
+  },
+  {
+    "id": "test",
+    "name": "Run Tests",
+    "description": "Detect test framework and run tests intelligently. Supports Jest, Vitest, pytest, Go test, and more.",
+    "category": "dev",
+    "scope": "universal",
+    "prerequisites": [],
+    "content": "# Run Tests\n\nDetect the project's test framework and run tests.\n\n## Instructions\n\n1. Detect the test framework:\n   - Check `package.json` for jest, vitest, mocha\n   - Check for `pytest.ini`, `setup.cfg`, `pyproject.toml` for pytest\n   - Check for `*_test.go` files for Go\n   - Check for `Cargo.toml` for Rust\n\n2. Run the appropriate test command:\n   - Jest: `npx jest`\n   - Vitest: `npx vitest run`\n   - pytest: `python -m pytest`\n   - Go: `go test ./...`\n   - Rust: `cargo test`\n\n3. If `$ARGUMENTS` specified, run only matching tests\n\n4. Report results: passed, failed, skipped counts\n\n5. If tests fail, analyze the failures and suggest fixes\n\n## Fault Detection\n\n- If no test framework found, suggest installing one appropriate for the project\n- If dependencies missing, run install command first\n"
+  },
+  {
+    "id": "lint-fix",
+    "name": "Lint and Fix",
+    "description": "Auto-fix lint and formatting issues. Detects ESLint, Prettier, Black, gofmt, rustfmt.",
+    "category": "dev",
+    "scope": "universal",
+    "prerequisites": [],
+    "content": "# Lint and Fix\n\nAuto-fix lint and formatting issues across the project.\n\n## Instructions\n\n1. Detect linter/formatter:\n   - Check for `.eslintrc*`, `eslint.config.*` → run `npx eslint --fix`\n   - Check for `.prettierrc*`, `prettier` in package.json → run `npx prettier --write`\n   - Check for `pyproject.toml` with black/ruff → run appropriate tool\n   - Check for Go files → run `gofmt -w`\n   - Check for Rust → run `cargo fmt`\n\n2. Run the fixer on `$ARGUMENTS` (specific files) or entire project\n\n3. Report what was changed\n\n4. If both linter and formatter exist, run formatter last\n\n## Fault Detection\n\n- If no linter config found, suggest setting one up\n- If linter has errors that can't be auto-fixed, list them\n"
+  },
+  {
+    "id": "debug",
+    "name": "Debug Issue",
+    "description": "Investigate a bug: read logs, trace errors, analyze stack traces, and suggest fixes.",
+    "category": "dev",
+    "scope": "universal",
+    "prerequisites": [],
+    "content": "# Debug Issue\n\nInvestigate a bug or error and suggest fixes.\n\n## Instructions\n\n1. The issue: `$ARGUMENTS`\n\n2. Gather context:\n   - Read recent logs (if available)\n   - Search for error messages in the codebase\n   - Find the relevant source files\n   - Check git log for recent changes to affected files\n\n3. Analyze:\n   - Trace the error from symptom to root cause\n   - Identify the specific line(s) causing the issue\n   - Check for common patterns (null checks, async issues, type mismatches)\n\n4. Suggest fix:\n   - Explain the root cause\n   - Propose a specific code change\n   - Note any edge cases to watch for\n\n5. If `$ARGUMENTS` is empty, ask what the symptom is\n"
+  },
+  {
+    "id": "refactor",
+    "name": "Refactor Code",
+    "description": "Analyze a file or function and suggest refactoring improvements with safety checks.",
+    "category": "dev",
+    "scope": "universal",
+    "prerequisites": [],
+    "content": "# Refactor Code\n\nAnalyze code and suggest refactoring improvements.\n\n## Instructions\n\n1. Target: `$ARGUMENTS` (file path, function name, or description)\n\n2. Read the target code\n\n3. Analyze for:\n   - Code duplication\n   - Long functions that should be split\n   - Poor naming\n   - Missing error handling at boundaries\n   - Unnecessary complexity\n   - Dead code\n\n4. Propose changes:\n   - List each refactoring with before/after\n   - Explain why each change improves the code\n   - Flag any behavioral changes\n\n5. Apply changes only after user approval\n\n## Rules\n\n- Never change behavior without flagging it\n- Run existing tests after refactoring\n- Keep changes minimal and focused\n"
+  },
+  {
+    "id": "commit",
+    "name": "Smart Commit",
+    "description": "Generate a descriptive commit message from staged changes and create the commit.",
+    "category": "git",
+    "scope": "universal",
+    "prerequisites": [],
+    "content": "# Smart Commit\n\nGenerate a commit message from staged changes and commit.\n\n## Instructions\n\n1. Run `git status` and `git diff --staged`\n\n2. If nothing is staged, stage all modified files (ask first if many files)\n\n3. Analyze the changes:\n   - What was added/modified/deleted\n   - The purpose of the changes\n   - Whether it's a feature, fix, refactor, etc.\n\n4. Generate a commit message:\n   - First line: concise summary (50 chars max)\n   - Blank line\n   - Body: explain the \"why\" not the \"what\"\n   - Use conventional commit format if the repo uses it\n\n5. Show the message and ask for confirmation\n\n6. Create the commit\n\n## Rules\n\n- Never commit .env, credentials, or secrets\n- Never amend without explicit request\n- Never push without explicit request\n"
+  },
+  {
+    "id": "pr",
+    "name": "Create Pull Request",
+    "description": "Create a well-formatted PR with summary, test plan, and proper labels.",
+    "category": "git",
+    "scope": "universal",
+    "prerequisites": [],
+    "content": "# Create Pull Request\n\nCreate a well-formatted pull request.\n\n## Instructions\n\n1. Check current branch and commits:\n   - `git log main..HEAD` to see all commits\n   - `git diff main...HEAD` to see full diff\n\n2. Draft PR content:\n   - Title: concise, under 70 chars\n   - Body with:\n     - ## Summary (1-3 bullet points)\n     - ## Changes (key files/areas changed)\n     - ## Test plan (how to verify)\n\n3. Push branch if needed: `git push -u origin <branch>`\n\n4. Create PR: `gh pr create --title \"...\" --body \"...\"`\n\n5. Report the PR URL\n\n## Rules\n\n- Always push before creating PR\n- Never create PR to main without asking\n- Include test plan in every PR\n"
+  },
+  {
+    "id": "changelog",
+    "name": "Generate Changelog",
+    "description": "Generate a changelog from git history since the last tag or release.",
+    "category": "git",
+    "scope": "universal",
+    "prerequisites": [],
+    "content": "# Generate Changelog\n\nGenerate a changelog from git history.\n\n## Instructions\n\n1. Find the last tag: `git describe --tags --abbrev=0`\n\n2. Get commits since last tag: `git log <tag>..HEAD --oneline`\n\n3. Categorize commits:\n   - Features (feat:, add, new)\n   - Bug Fixes (fix:, bug)\n   - Improvements (refactor:, improve, update)\n   - Documentation (docs:)\n   - Other\n\n4. Format as markdown:\n   ```markdown\n   ## [Unreleased]\n\n   ### Features\n   - Description of feature\n\n   ### Bug Fixes\n   - Description of fix\n   ```\n\n5. If `$ARGUMENTS` specifies a version, use that as the heading\n\n6. Output the changelog (don't write to file unless asked)\n"
+  },
+  {
+    "id": "up",
+    "name": "Start Project",
+    "description": "Detect and start your project's development services (dev server, database, workers, etc.).",
+    "category": "ops",
+    "scope": "universal",
+    "prerequisites": [],
+    "content": "# Start Project\n\nStart your project's development services.\n\n## Instructions\n\n1. Detect the project type and services:\n   - Check `package.json` scripts for `dev`, `start`, `serve`\n   - Check for `docker-compose.yml` or `compose.yml`\n   - Check for `Procfile` or `Procfile.dev`\n   - Check for `Makefile` with `run` or `dev` targets\n   - Check for framework-specific files (next.config.*, vite.config.*, etc.)\n\n2. Start services in order:\n   - Databases/infrastructure first (docker-compose up -d)\n   - Then application server (npm run dev, etc.)\n\n3. Report what was started and on which ports\n\n## Fault Detection\n\n- If no start script found, ask what the project needs\n- If a port is already in use, report it and suggest alternatives\n- If dependencies aren't installed, run install first\n"
+  },
+  {
+    "id": "down",
+    "name": "Stop Project",
+    "description": "Stop your project's running development services gracefully.",
+    "category": "ops",
+    "scope": "universal",
+    "prerequisites": [],
+    "content": "# Stop Project\n\nStop your project's running development services.\n\n## Instructions\n\n1. Detect running services:\n   - Check for running docker-compose services\n   - Check for node/python/go processes in the project directory\n   - Check for processes on common dev ports (3000, 5173, 8080, etc.)\n\n2. Stop services gracefully:\n   - docker-compose down (if applicable)\n   - Send SIGTERM to application processes\n\n3. Report what was stopped\n\n## Fault Detection\n\n- If no services found running, report that\n- If a service won't stop, suggest force kill\n"
+  },
+  {
+    "id": "deploy",
+    "name": "Deploy",
+    "description": "Deploy your project using detected deployment method (Vercel, AWS, systemd, Docker, etc.).",
+    "category": "ops",
+    "scope": "universal",
+    "prerequisites": [],
+    "content": "# Deploy\n\nDeploy your project to production or staging.\n\n## Instructions\n\n1. Detect deployment method:\n   - Check for `vercel.json` → `vercel --prod`\n   - Check for `netlify.toml` → `netlify deploy --prod`\n   - Check for `fly.toml` → `fly deploy`\n   - Check for `Dockerfile` → build and push\n   - Check for systemd service → build and restart\n   - Check for `serverless.yml` → `serverless deploy`\n\n2. Pre-deploy checks:\n   - Run tests if available\n   - Run type checker if available\n   - Build the project\n\n3. Deploy using the detected method\n\n4. Report the deployment URL or status\n\n## Fault Detection\n\n- If no deployment config found, ask where to deploy\n- If build fails, report errors before deploying\n- If not logged in to deploy service, help authenticate\n"
+  }
+]

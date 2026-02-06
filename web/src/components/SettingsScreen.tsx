@@ -5,6 +5,7 @@ import { getFontScale, saveFontScale } from '../services/storage';
 import { clearAllArchives } from '../services/archiveService';
 import { clearStore } from '../services/persistentStorage';
 import { NotificationSettingsModal } from './NotificationSettingsModal';
+import { SkillBrowser } from './SkillBrowser';
 import { isTauriDesktop, isMobileViewport } from '../utils/platform';
 
 interface SettingsScreenProps {
@@ -27,6 +28,7 @@ export function SettingsScreen({ onBack }: SettingsScreenProps) {
   const [rotatingServer, setRotatingServer] = useState<string | null>(null);
   const [rotateResult, setRotateResult] = useState<{ serverId: string; token?: string; error?: string } | null>(null);
   const [autostart, setAutostart] = useState<boolean | null>(null);
+  const [skillBrowserServerId, setSkillBrowserServerId] = useState<string | null>(null);
 
   // Load autostart state in Tauri desktop only
   useEffect(() => {
@@ -178,6 +180,33 @@ export function SettingsScreen({ onBack }: SettingsScreenProps) {
           </section>
         )}
 
+        {/* Skills */}
+        <section className="settings-section">
+          <h3 className="settings-section-title">Skills</h3>
+          {connectedServers.length === 0 ? (
+            <div className="settings-card">
+              <div className="settings-card-detail">
+                No connected servers. Connect to a server to browse skills.
+              </div>
+            </div>
+          ) : (
+            connectedServers.map((snap) => (
+              <div key={snap.serverId} className="settings-card settings-card-row">
+                <div className="settings-card-row-info">
+                  <span className="status-dot status-dot-green" />
+                  <span className="settings-card-label">{snap.serverName}</span>
+                </div>
+                <button
+                  className="settings-action-btn"
+                  onClick={() => setSkillBrowserServerId(snap.serverId)}
+                >
+                  Browse
+                </button>
+              </div>
+            ))
+          )}
+        </section>
+
         {/* Notifications */}
         <section className="settings-section">
           <h3 className="settings-section-title">Notifications</h3>
@@ -300,6 +329,13 @@ export function SettingsScreen({ onBack }: SettingsScreenProps) {
         <NotificationSettingsModal
           serverId={notifServerId}
           onClose={closeNotifSettings}
+        />
+      )}
+
+      {skillBrowserServerId && (
+        <SkillBrowser
+          serverId={skillBrowserServerId}
+          onClose={() => setSkillBrowserServerId(null)}
         />
       )}
     </div>
