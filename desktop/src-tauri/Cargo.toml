@@ -1,7 +1,7 @@
 [package]
 name = "companion-desktop"
 version = "0.1.0"
-description = "Companion desktop app"
+description = "Companion — desktop & mobile app"
 edition = "2021"
 
 [build-dependencies]
@@ -11,7 +11,10 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = ["tray-icon", "image-png"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-tauri-plugin-window-state = "2"
 tauri-plugin-notification = "2"
-tauri-plugin-autostart = "2"
 tauri-plugin-shell = "2"
+
+# Desktop-only plugins (tray, menu, window state, autostart)
+[target.'cfg(not(target_os = "android"))'.dependencies]
+tauri-plugin-window-state = "2"
+tauri-plugin-autostart = "2"

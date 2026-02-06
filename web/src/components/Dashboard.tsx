@@ -10,7 +10,7 @@ import { ShortcutHelpOverlay } from './ShortcutHelpOverlay';
 import { NotificationSettingsModal } from './NotificationSettingsModal';
 import { useSessionMute } from '../hooks/useSessionMute';
 import { useBrowserNotificationListener } from '../hooks/useBrowserNotificationListener';
-import { isTauri, isMobileViewport } from '../utils/platform';
+import { isTauri, isTauriDesktop, isMobileViewport } from '../utils/platform';
 
 interface DashboardProps {
   onSettings?: () => void;
@@ -79,9 +79,9 @@ export function Dashboard({ onSettings }: DashboardProps) {
     return () => { unlisten?.(); };
   }, []);
 
-  // Update tray tooltip with waiting session count
+  // Update tray tooltip with waiting session count (desktop only)
   useEffect(() => {
-    if (!isTauri()) return;
+    if (!isTauriDesktop()) return;
     const waitingCount = Array.from(summaries.values()).reduce((count, serverSummary) => {
       return count + serverSummary.sessions.filter(s => s.status === 'waiting').length;
     }, 0);

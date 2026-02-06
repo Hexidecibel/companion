@@ -4,7 +4,7 @@ import { connectionManager } from '../services/ConnectionManager';
 import { getFontScale, saveFontScale } from '../services/storage';
 import { clearAllArchives } from '../services/archiveService';
 import { NotificationSettingsModal } from './NotificationSettingsModal';
-import { isTauri } from '../utils/platform';
+import { isTauriDesktop } from '../utils/platform';
 
 interface SettingsScreenProps {
   onBack: () => void;
@@ -27,9 +27,9 @@ export function SettingsScreen({ onBack }: SettingsScreenProps) {
   const [rotateResult, setRotateResult] = useState<{ serverId: string; token?: string; error?: string } | null>(null);
   const [autostart, setAutostart] = useState<boolean | null>(null);
 
-  // Load autostart state in Tauri
+  // Load autostart state in Tauri desktop only
   useEffect(() => {
-    if (!isTauri()) return;
+    if (!isTauriDesktop()) return;
     (async () => {
       try {
         const { invoke } = await import('@tauri-apps/api/core');
@@ -137,7 +137,7 @@ export function SettingsScreen({ onBack }: SettingsScreenProps) {
         </section>
 
         {/* Desktop (Tauri only) */}
-        {isTauri() && autostart !== null && (
+        {isTauriDesktop() && autostart !== null && (
           <section className="settings-section">
             <h3 className="settings-section-title">Desktop</h3>
             <div className="settings-card settings-card-row">
