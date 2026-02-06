@@ -27,6 +27,7 @@ import { ArchiveModal } from './ArchiveModal';
 import { TerminalPanel } from './TerminalPanel';
 import { WorkGroupBar } from './WorkGroupBar';
 import { WorkGroupPanel } from './WorkGroupPanel';
+import { FileFinder } from './FileFinder';
 
 interface SessionViewProps {
   serverId: string | null;
@@ -99,6 +100,9 @@ export function SessionView({
   const [showSearch, setShowSearch] = useState(false);
   const [currentMatchIndex, setCurrentMatchIndex] = useState(0);
 
+  // File finder state
+  const [showFileFinder, setShowFileFinder] = useState(false);
+
   const searchMatches = useMemo(() => {
     if (!searchTerm) return [];
     const lower = searchTerm.toLowerCase();
@@ -107,7 +111,7 @@ export function SessionView({
       .filter(({ index }) => highlights[index].content?.toLowerCase().includes(lower));
   }, [highlights, searchTerm]);
 
-  // Detect plan file from conversation
+  // Detect plan file from conversation (Claude-generated plans)
   const latestPlanFile = useMemo(() => {
     for (let i = highlights.length - 1; i >= 0; i--) {
       const planPath = extractPlanFilePath(highlights[i]);
@@ -240,18 +244,20 @@ export function SessionView({
   // Session-specific keyboard shortcuts
   useKeyboardShortcuts(useMemo(() => [
     { key: 'f', meta: true, handler: () => setShowSearch(true) },
+    { key: 'p', meta: true, handler: () => setShowFileFinder(true) },
     { key: 't', meta: true, handler: () => { if (tmuxSessionName) setShowTerminal(prev => !prev); } },
     { key: 'a', meta: true, shift: true, handler: () => autoApprove.toggle() },
     { key: 'm', meta: true, shift: true, handler: () => { if (sessionId) sessionMute.toggleMute(sessionId); } },
     { key: 'Escape', handler: () => {
-      if (showSearch) handleCloseSearch();
+      if (showFileFinder) setShowFileFinder(false);
+      else if (showSearch) handleCloseSearch();
       else if (artifactContent) setArtifactContent(null);
       else if (viewingFile) setViewingFile(null);
       else if (showArchiveModal) setShowArchiveModal(false);
       else if (showAgentsModal) setShowAgentsModal(false);
       else if (viewingAgentId) setViewingAgentId(null);
     }},
-  ], [tmuxSessionName, showSearch, viewingFile, showArchiveModal, showAgentsModal, viewingAgentId, artifactContent, sessionId, autoApprove, sessionMute, handleCloseSearch]));
+  ], [tmuxSessionName, showSearch, showFileFinder, viewingFile, showArchiveModal, showAgentsModal, viewingAgentId, artifactContent, sessionId, autoApprove, sessionMute, handleCloseSearch]));
 
   if (!serverId || !sessionId) {
     return (
@@ -303,6 +309,13 @@ export function SessionView({
           Terminal
         </button>
       )}
+      <button
+        className="session-header-btn"
+        onClick={() => setShowFileFinder(true)}
+        title="Search files (Cmd+P)"
+      >
+        Files
+      </button>
       {latestPlanFile && (
         <button
           className="session-header-btn plan-btn"
@@ -475,6 +488,14 @@ export function SessionView({
 
       {showArchiveModal && (
         <ArchiveModal onClose={() => setShowArchiveModal(false)} />
+      )}
+
+      {showFileFinder && serverId && (
+        <FileFinder
+          serverId={serverId}
+          onSelectFile={handleViewFile}
+          onClose={() => setShowFileFinder(false)}
+        />
       )}
     </div>
   );

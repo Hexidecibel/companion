@@ -757,6 +757,14 @@ export class WebSocketHandler {
         this.handleReadFile(client, payload as { path: string }, requestId);
         break;
 
+      case 'search_files':
+        this.handleSearchFiles(client, payload as { query: string; limit?: number }, requestId);
+        break;
+
+      case 'check_files_exist':
+        this.handleCheckFilesExist(client, payload as { paths: string[] }, requestId);
+        break;
+
       case 'open_in_editor':
         this.handleOpenInEditor(client, payload as { path: string }, requestId);
         break;
@@ -2079,12 +2087,59 @@ export class WebSocketHandler {
         return;
       }
 
-      // Limit file size to 1MB
-      if (stats.size > 1024 * 1024) {
+      // Limit file size (5MB for images, 1MB for text)
+      const IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'ico', 'bmp']);
+      const ext = path.extname(resolvedPath).slice(1).toLowerCase();
+      const isImageExt = IMAGE_EXTS.has(ext);
+      const maxSize = isImageExt ? 5 * 1024 * 1024 : 1024 * 1024;
+
+      if (stats.size > maxSize) {
         this.send(client.ws, {
           type: 'file_content',
           success: false,
-          error: 'File too large (max 1MB)',
+          error: `File too large (max ${isImageExt ? '5MB' : '1MB'})`,
+          requestId,
+        });
+        return;
+      }
+
+      // Detect binary: read first 8KB and check for null bytes
+      const MIME_TYPES: Record<string, string> = {
+        png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg',
+        gif: 'image/gif', svg: 'image/svg+xml', webp: 'image/webp',
+        ico: 'image/x-icon', bmp: 'image/bmp',
+      };
+
+      if (isImageExt) {
+        // Return base64-encoded image
+        const buf = fs.readFileSync(resolvedPath);
+        const base64 = buf.toString('base64');
+        this.send(client.ws, {
+          type: 'file_content',
+          success: true,
+          payload: {
+            content: base64,
+            path: resolvedPath,
+            encoding: 'base64',
+            mimeType: MIME_TYPES[ext] || 'application/octet-stream',
+          },
+          requestId,
+        });
+        return;
+      }
+
+      // Check for binary content (null bytes in first 8KB)
+      const probe = Buffer.alloc(Math.min(8192, stats.size));
+      const fd = fs.openSync(resolvedPath, 'r');
+      fs.readSync(fd, probe, 0, probe.length, 0);
+      fs.closeSync(fd);
+      const isBinary = probe.includes(0);
+
+      if (isBinary) {
+        this.send(client.ws, {
+          type: 'file_content',
+          success: true,
+          payload: { binary: true, size: stats.size, path: resolvedPath },
           requestId,
         });
         return;
@@ -3024,6 +3079,171 @@ export class WebSocketHandler {
         requestId,
       });
     }
+  }
+
+  // --- File search ---
+
+  private fileTreeCache: { files: string[]; projectRoot: string; timestamp: number } | null = null;
+  private static FILE_TREE_TTL = 30_000; // 30s cache
+
+  private static IGNORE_DIRS = new Set([
+    '.git', 'node_modules', 'dist', '__pycache__', 'target', '.next',
+    '.turbo', '.nuxt', 'build', 'coverage', '.cache', '.expo', 'venv',
+    '.venv', 'env', '.tox', '.mypy_cache', '.pytest_cache',
+  ]);
+
+  private walkDirectory(dir: string, root: string, files: string[], depth: number = 0): void {
+    if (depth > 10) return; // Max depth
+    try {
+      const entries = fs.readdirSync(dir, { withFileTypes: true });
+      for (const entry of entries) {
+        if (entry.name.startsWith('.') && entry.isDirectory()) continue;
+        if (WebSocketHandler.IGNORE_DIRS.has(entry.name) && entry.isDirectory()) continue;
+        const fullPath = path.join(dir, entry.name);
+        if (entry.isDirectory()) {
+          this.walkDirectory(fullPath, root, files, depth + 1);
+        } else {
+          files.push(fullPath);
+        }
+      }
+    } catch {
+      // Permission errors, etc.
+    }
+  }
+
+  private getFileTree(projectRoot: string): string[] {
+    const now = Date.now();
+    if (
+      this.fileTreeCache &&
+      this.fileTreeCache.projectRoot === projectRoot &&
+      now - this.fileTreeCache.timestamp < WebSocketHandler.FILE_TREE_TTL
+    ) {
+      return this.fileTreeCache.files;
+    }
+
+    const files: string[] = [];
+    this.walkDirectory(projectRoot, projectRoot, files);
+    this.fileTreeCache = { files, projectRoot, timestamp: now };
+    return files;
+  }
+
+  private fuzzyScore(query: string, filePath: string, projectRoot: string): number {
+    const relativePath = path.relative(projectRoot, filePath).toLowerCase();
+    const basename = path.basename(filePath).toLowerCase();
+    const q = query.toLowerCase();
+
+    // Exact basename match scores highest
+    if (basename === q) return 1000;
+    // Basename starts with query
+    if (basename.startsWith(q)) return 500 + (q.length / basename.length) * 100;
+    // Basename contains query
+    const basenameIdx = basename.indexOf(q);
+    if (basenameIdx >= 0) return 300 + (q.length / basename.length) * 100 - basenameIdx;
+    // Path contains query
+    const pathIdx = relativePath.indexOf(q);
+    if (pathIdx >= 0) return 100 - pathIdx * 0.1;
+
+    // Subsequence match on basename
+    let qi = 0;
+    let consecutive = 0;
+    let maxConsecutive = 0;
+    for (let i = 0; i < basename.length && qi < q.length; i++) {
+      if (basename[i] === q[qi]) {
+        qi++;
+        consecutive++;
+        maxConsecutive = Math.max(maxConsecutive, consecutive);
+      } else {
+        consecutive = 0;
+      }
+    }
+    if (qi === q.length) return 50 + maxConsecutive * 10;
+
+    return -1; // No match
+  }
+
+  private handleSearchFiles(
+    client: AuthenticatedClient,
+    payload: { query: string; limit?: number } | undefined,
+    requestId?: string
+  ): void {
+    const query = payload?.query?.trim();
+    if (!query) {
+      this.send(client.ws, {
+        type: 'search_files_result',
+        success: true,
+        payload: { files: [] },
+        requestId,
+      });
+      return;
+    }
+
+    const projectRoot = this.getProjectRoot();
+    if (!projectRoot) {
+      this.send(client.ws, {
+        type: 'search_files_result',
+        success: false,
+        error: 'No active project',
+        requestId,
+      });
+      return;
+    }
+
+    try {
+      const allFiles = this.getFileTree(projectRoot);
+      const limit = payload?.limit || 20;
+
+      const scored = allFiles
+        .map((f) => ({ path: f, relativePath: path.relative(projectRoot, f), score: this.fuzzyScore(query, f, projectRoot) }))
+        .filter((f) => f.score > 0)
+        .sort((a, b) => b.score - a.score)
+        .slice(0, limit);
+
+      this.send(client.ws, {
+        type: 'search_files_result',
+        success: true,
+        payload: { files: scored.map((f) => ({ path: f.path, relativePath: f.relativePath })) },
+        requestId,
+      });
+    } catch (err) {
+      this.send(client.ws, {
+        type: 'search_files_result',
+        success: false,
+        error: `Search failed: ${err instanceof Error ? err.message : 'Unknown error'}`,
+        requestId,
+      });
+    }
+  }
+
+  private handleCheckFilesExist(
+    client: AuthenticatedClient,
+    payload: { paths: string[] } | undefined,
+    requestId?: string
+  ): void {
+    const paths = payload?.paths;
+    if (!paths || !Array.isArray(paths)) {
+      this.send(client.ws, {
+        type: 'files_exist_result',
+        success: true,
+        payload: { results: {} },
+        requestId,
+      });
+      return;
+    }
+
+    const projectRoot = this.getProjectRoot();
+    const results: Record<string, boolean> = {};
+
+    for (const p of paths) {
+      const resolved = projectRoot ? path.resolve(projectRoot, p) : null;
+      results[p] = resolved ? fs.existsSync(resolved) : false;
+    }
+
+    this.send(client.ws, {
+      type: 'files_exist_result',
+      success: true,
+      payload: { results },
+      requestId,
+    });
   }
 
   private getProjectRoot(): string | null {
