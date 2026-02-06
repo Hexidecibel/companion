@@ -1,5 +1,6 @@
 import { useState, useRef, useCallback, type KeyboardEvent, type ClipboardEvent, type DragEvent } from 'react';
 import { PendingImage } from '../types';
+import { useUndoHistory } from '../hooks/useUndoHistory';
 
 interface InputBarProps {
   onSend: (text: string) => Promise<boolean>;
@@ -18,7 +19,7 @@ function fileToPreview(file: File): PendingImage {
 }
 
 export function InputBar({ onSend, onSendWithImages, disabled }: InputBarProps) {
-  const [text, setText] = useState('');
+  const { value: text, onChange: setText, undo, redo, reset: resetHistory } = useUndoHistory();
   const [sending, setSending] = useState(false);
   const [images, setImages] = useState<PendingImage[]>([]);
   const [dragging, setDragging] = useState(false);
@@ -48,7 +49,7 @@ export function InputBar({ onSend, onSendWithImages, disabled }: InputBarProps) 
 
     const savedText = text;
     const savedImages = [...images];
-    setText('');
+    resetHistory();
     setImages([]);
     setSending(true);
 
@@ -72,9 +73,20 @@ export function InputBar({ onSend, onSendWithImages, disabled }: InputBarProps) 
     }
     setSending(false);
     textareaRef.current?.focus();
-  }, [text, images, sending, disabled, onSend, onSendWithImages]);
+  }, [text, images, sending, disabled, onSend, onSendWithImages, resetHistory]);
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    const mod = e.metaKey || e.ctrlKey;
+    if (mod && e.key === 'z' && !e.shiftKey) {
+      e.preventDefault();
+      if (undo() !== null) requestAnimationFrame(handleInput);
+      return;
+    }
+    if ((mod && e.key === 'z' && e.shiftKey) || (e.ctrlKey && e.key === 'y')) {
+      e.preventDefault();
+      if (redo() !== null) requestAnimationFrame(handleInput);
+      return;
+    }
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSend();

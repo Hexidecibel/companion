@@ -1,4 +1,4 @@
-import { useRef, useEffect, useLayoutEffect, useCallback } from 'react';
+import { useRef, useState, useEffect, useLayoutEffect, useCallback } from 'react';
 import { ConversationHighlight } from '../types';
 import { MessageBubble } from './MessageBubble';
 
@@ -32,6 +32,7 @@ export function MessageList({
   const isNearBottomRef = useRef(true);
   const prevScrollHeightRef = useRef(0);
   const isPrependRef = useRef(false);
+  const [showScrollButton, setShowScrollButton] = useState(false);
 
   // Track near-bottom state on every scroll
   const updateNearBottom = useCallback(() => {
@@ -40,6 +41,11 @@ export function MessageList({
     const threshold = 120;
     isNearBottomRef.current =
       el.scrollHeight - el.scrollTop - el.clientHeight < threshold;
+    setShowScrollButton(!isNearBottomRef.current);
+  }, []);
+
+  const scrollToBottom = useCallback(() => {
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, []);
 
   // Auto-scroll to bottom whenever highlights change (new messages OR content updates)
@@ -129,6 +135,18 @@ export function MessageList({
         />
       ))}
       <div ref={bottomRef} />
+      {showScrollButton && (
+        <button
+          className="scroll-to-bottom-btn"
+          onClick={scrollToBottom}
+          title="Scroll to bottom"
+          aria-label="Scroll to bottom"
+        >
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+            <path d="M8 3v10M4 9l4 4 4-4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+          </svg>
+        </button>
+      )}
     </div>
   );
 }
