@@ -4,8 +4,7 @@ import { connectionManager } from '../services/ConnectionManager';
 import { getFontScale, saveFontScale } from '../services/storage';
 import { clearAllArchives } from '../services/archiveService';
 import { NotificationSettingsModal } from './NotificationSettingsModal';
-
-const isTauri = () => !!(window as any).__TAURI_INTERNALS__;
+import { isTauri } from '../utils/platform';
 
 interface SettingsScreenProps {
   onBack: () => void;

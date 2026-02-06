@@ -10,8 +10,7 @@ import { ShortcutHelpOverlay } from './ShortcutHelpOverlay';
 import { NotificationSettingsModal } from './NotificationSettingsModal';
 import { useSessionMute } from '../hooks/useSessionMute';
 import { useBrowserNotificationListener } from '../hooks/useBrowserNotificationListener';
-
-const isTauri = () => !!(window as any).__TAURI_INTERNALS__;
+import { isTauri, isMobileViewport } from '../utils/platform';
 
 interface DashboardProps {
   onSettings?: () => void;
@@ -22,6 +21,7 @@ export function Dashboard({ onSettings }: DashboardProps) {
   const [showNotifSettings, setShowNotifSettings] = useState(false);
   const [showShortcutHelp, setShowShortcutHelp] = useState(false);
   const [merging, setMerging] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const summaries = useAllServerSummaries();
   const sessionMute = useSessionMute(activeSession?.serverId ?? null);
   const { snapshots } = useConnections();
@@ -44,11 +44,9 @@ export function Dashboard({ onSettings }: DashboardProps) {
             case 'reload':
               window.location.reload();
               break;
-            case 'toggle-sidebar': {
-              const sidebar = document.querySelector('.sidebar') as HTMLElement | null;
-              if (sidebar) sidebar.style.display = sidebar.style.display === 'none' ? '' : 'none';
+            case 'toggle-sidebar':
+              setSidebarOpen(prev => !prev);
               break;
-            }
             case 'zoom-in':
               document.documentElement.style.fontSize =
                 (parseFloat(getComputedStyle(document.documentElement).fontSize) + 1) + 'px';
@@ -148,6 +146,8 @@ export function Dashboard({ onSettings }: DashboardProps) {
 
   const handleSelectSession = useCallback((serverId: string, sessionId: string) => {
     setActiveSession({ serverId, sessionId });
+    // Close sidebar on mobile after selecting
+    if (isMobileViewport()) setSidebarOpen(false);
   }, []);
 
   const handleSessionCreated = useCallback((_serverId: string, sessionName: string) => {
@@ -244,8 +244,14 @@ export function Dashboard({ onSettings }: DashboardProps) {
     sessionMute.toggleMute(sessionId);
   }, [sessionMute]);
 
+  const toggleSidebar = useCallback(() => setSidebarOpen(prev => !prev), []);
+
   return (
     <div className="dashboard">
+      <div
+        className={`sidebar-backdrop${sidebarOpen ? ' visible' : ''}`}
+        onClick={() => setSidebarOpen(false)}
+      />
       <SessionSidebar
         summaries={summaries}
         activeSession={activeSession}
@@ -256,6 +262,7 @@ export function Dashboard({ onSettings }: DashboardProps) {
         mutedSessions={sessionMute.mutedSessions}
         onToggleMute={handleToggleMute}
         workGroups={allWorkGroups}
+        mobileOpen={sidebarOpen}
       />
       <main className="dashboard-main">
         <SessionView
@@ -270,6 +277,7 @@ export function Dashboard({ onSettings }: DashboardProps) {
           onRetryWorker={handleRetryWorker}
           onDismissGroup={handleDismissGroup}
           merging={merging}
+          onToggleSidebar={toggleSidebar}
         />
       </main>
 

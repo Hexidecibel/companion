@@ -22,6 +22,7 @@ interface SessionSidebarProps {
   mutedSessions?: Set<string>;
   onToggleMute?: (serverId: string, sessionId: string) => void;
   workGroups?: Map<string, WorkGroup[]>;
+  mobileOpen?: boolean;
 }
 
 const STATUS_DOT_CLASS: Record<SessionSummary['status'], string> = {
@@ -95,6 +96,7 @@ export function SessionSidebar({
   mutedSessions,
   onToggleMute,
   workGroups,
+  mobileOpen,
 }: SessionSidebarProps) {
   const { snapshots } = useConnections();
   const { getServer, toggleEnabled, deleteServer } = useServers();
@@ -285,7 +287,7 @@ export function SessionSidebar({
   }, [mutedSessions, onToggleMute]);
 
   return (
-    <aside className="sidebar">
+    <aside className={`sidebar${mobileOpen ? ' sidebar-open' : ''}`}>
       <div className="sidebar-header">
         <span className="sidebar-title">Companion</span>
         <div className="sidebar-header-actions">

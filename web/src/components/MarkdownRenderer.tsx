@@ -1,11 +1,5 @@
 import { useMemo, useCallback } from 'react';
-
-/**
- * Check if running in Tauri desktop app
- */
-function isTauri(): boolean {
-  return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
-}
+import { isTauri } from '../utils/platform';
 
 /**
  * Open external URL - uses Tauri shell.open when in desktop app

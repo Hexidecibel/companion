@@ -38,6 +38,7 @@ interface SessionViewProps {
   onRetryWorker?: (workerId: string) => void;
   onDismissGroup?: () => void;
   merging?: boolean;
+  onToggleSidebar?: () => void;
 }
 
 export function SessionView({
@@ -52,6 +53,7 @@ export function SessionView({
   onRetryWorker,
   onDismissGroup,
   merging,
+  onToggleSidebar,
 }: SessionViewProps) {
   const {
     highlights,
@@ -255,6 +257,16 @@ export function SessionView({
     <div className="session-view">
       {/* Session header with actions */}
       <div className="session-header">
+        {onToggleSidebar && (
+          <button
+            className="mobile-menu-btn"
+            onClick={onToggleSidebar}
+            title="Toggle sidebar"
+            aria-label="Toggle sidebar"
+          >
+            &#9776;
+          </button>
+        )}
         <div className="session-header-actions">
           {sessionId && (
             <button
@@ -301,12 +313,14 @@ export function SessionView({
         </div>
       </div>
 
-      {showTerminal && tmuxSessionName && serverId ? (
+      {showTerminal && tmuxSessionName && serverId && (
         <TerminalPanel
           serverId={serverId}
           tmuxSessionName={tmuxSessionName}
         />
-      ) : showWorkGroupPanel && workGroup && onViewWorker && onSendWorkerInput && onMergeGroup && onCancelGroup && onRetryWorker ? (
+      )}
+
+      {showWorkGroupPanel && workGroup && onViewWorker && onSendWorkerInput && onMergeGroup && onCancelGroup && onRetryWorker && (
         <WorkGroupPanel
           group={workGroup}
           onBack={() => setShowWorkGroupPanel(false)}
@@ -321,8 +335,9 @@ export function SessionView({
           onDismiss={onDismissGroup}
           merging={merging}
         />
-      ) : (
-        <>
+      )}
+
+      <div className="session-conversation" style={{ display: showTerminal || showWorkGroupPanel ? 'none' : 'contents' }}>
           <WaitingIndicator status={status} />
 
           <SubAgentBar
@@ -382,8 +397,7 @@ export function SessionView({
             onSendWithImages={handleSendWithImages}
             disabled={false}
           />
-        </>
-      )}
+      </div>
 
       {/* Modals */}
       {showAgentsModal && (

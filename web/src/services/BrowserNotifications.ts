@@ -20,7 +20,7 @@ const DEFAULT_PREFS: BrowserNotifPrefs = {
   work_group_ready: true,
 };
 
-const isTauri = () => !!(window as any).__TAURI_INTERNALS__;
+import { isTauri } from '../utils/platform';
 
 class BrowserNotificationService {
   private permission: NotificationPermission = 'default';

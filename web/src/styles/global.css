@@ -849,6 +849,32 @@ body {
   display: flex;
   flex-direction: column;
   gap: 12px;
+  position: relative;
+}
+
+.scroll-to-bottom-btn {
+  position: sticky;
+  bottom: 8px;
+  align-self: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: none;
+  background: #3b82f6;
+  color: #ffffff;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  transition: background-color 0.15s, color 0.15s;
+  z-index: 5;
+  flex-shrink: 0;
+}
+
+.scroll-to-bottom-btn:hover {
+  background: #2563eb;
+  color: #ffffff;
 }
 
 .msg-list-empty {
@@ -1522,8 +1548,85 @@ body {
   cursor: default;
 }
 
-/* Responsive */
-@media (max-width: 600px) {
+/* ========================================
+   Responsive — Mobile
+   ======================================== */
+
+/* Safe-area insets for notched devices (iPhone X+, etc.) */
+:root {
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+}
+
+/* Tablet breakpoint */
+@media (max-width: 768px) {
+  /* Sidebar becomes a toggleable overlay */
+  .sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    z-index: 100;
+    width: 280px;
+    transform: translateX(-100%);
+    transition: transform 0.25s ease;
+    box-shadow: none;
+  }
+
+  .sidebar.sidebar-open {
+    transform: translateX(0);
+    box-shadow: 4px 0 24px rgba(0, 0, 0, 0.4);
+  }
+
+  /* Overlay backdrop when sidebar is open */
+  .sidebar-backdrop {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    z-index: 99;
+  }
+
+  .sidebar-backdrop.visible {
+    display: block;
+  }
+
+  /* Dashboard takes full width */
+  .dashboard-main {
+    width: 100%;
+  }
+
+  /* Mobile hamburger button (shown via JS) */
+  .mobile-menu-btn {
+    display: flex;
+  }
+
+  /* Message bubbles wider on tablet */
+  .msg-bubble {
+    max-width: 90%;
+  }
+
+  .msg-tools,
+  .msg-options {
+    max-width: 90%;
+  }
+
+  /* Session header actions wrap */
+  .session-header {
+    padding: 6px 12px;
+    gap: 4px;
+    flex-wrap: wrap;
+  }
+
+  .session-header-actions {
+    gap: 4px;
+  }
+}
+
+/* Phone breakpoint */
+@media (max-width: 480px) {
   .form-header {
     padding: 12px 16px;
   }
@@ -1545,8 +1648,173 @@ body {
   }
 
   .server-form {
-    padding: 24px;
+    padding: 20px;
+    border-radius: 0;
+    max-width: none;
   }
+
+  .form-container {
+    padding: 0;
+  }
+
+  /* Message list tighter on phone */
+  .msg-list {
+    padding: 8px;
+    gap: 8px;
+  }
+
+  /* Bubbles nearly full width */
+  .msg-bubble {
+    max-width: 95%;
+  }
+
+  .msg-tools,
+  .msg-options,
+  .msg-approval-prompt {
+    max-width: 95%;
+  }
+
+  /* Input bar flush with safe area */
+  .input-bar {
+    padding: 8px 12px;
+    padding-bottom: calc(8px + var(--safe-bottom));
+    gap: 6px;
+  }
+
+  .input-bar-textarea {
+    font-size: 16px; /* Prevents iOS zoom on focus */
+    padding: 8px 12px;
+  }
+
+  /* Send button touch-friendly */
+  .input-bar-send {
+    width: 44px;
+    height: 44px;
+    border-radius: 22px;
+  }
+
+  /* Session header compact */
+  .session-header {
+    padding: 4px 8px;
+  }
+
+  .session-header-btn {
+    padding: 6px 8px;
+    font-size: 11px;
+  }
+
+  .auto-approve-btn {
+    padding: 6px 8px;
+    font-size: 11px;
+  }
+
+  /* Sidebar header with safe area */
+  .sidebar-header {
+    padding-top: calc(16px + var(--safe-top));
+  }
+
+  /* Tool cards compact */
+  .tool-card-header {
+    padding: 4px 8px;
+  }
+
+  .tool-card-pre {
+    font-size: 10px;
+    max-height: 120px;
+  }
+}
+
+/* Touch target enforcement — applies when touch is primary input */
+@media (pointer: coarse) {
+  .icon-btn {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  .session-header-btn {
+    min-height: 36px;
+    padding: 6px 12px;
+  }
+
+  .auto-approve-btn {
+    min-height: 36px;
+  }
+
+  .sidebar-session {
+    padding: 10px 16px 10px 24px;
+    min-height: 44px;
+  }
+
+  .sidebar-filter-btn {
+    min-height: 36px;
+    font-size: 12px;
+  }
+
+  .msg-option-btn {
+    min-height: 44px;
+    padding: 10px 16px;
+    font-size: 14px;
+  }
+
+  .context-menu-item {
+    padding: 10px 14px;
+    min-height: 44px;
+  }
+
+  .sidebar-font-btn {
+    min-height: 36px;
+  }
+
+  .sidebar-add-server-btn {
+    min-height: 44px;
+  }
+}
+
+/* Mobile hamburger button — hidden by default, shown on mobile */
+.mobile-menu-btn {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-tertiary);
+  border: none;
+  color: var(--text-primary);
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 18px;
+  flex-shrink: 0;
+  transition: background-color 0.15s;
+}
+
+.mobile-menu-btn:hover {
+  background-color: var(--bg-hover);
+}
+
+/* WebKit-specific fixes */
+
+/* Prevent iOS rubber-band scrolling on the body */
+html {
+  overscroll-behavior: none;
+}
+
+/* Fix iOS momentum scrolling */
+.msg-list,
+.sidebar-sessions,
+.server-list {
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Fix textarea on iOS — prevent zoom, ensure proper rendering */
+.input-bar-textarea {
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+/* Prevent text size adjustment in landscape */
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
 }
 
 /* ========================================
@@ -1561,6 +1829,7 @@ body {
   background: var(--gradient-header);
   border-bottom: 1px solid var(--border-color);
   flex-shrink: 0;
+  gap: 8px;
 }
 
 .session-header-actions {
