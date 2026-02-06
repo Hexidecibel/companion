@@ -4,13 +4,6 @@ Completed items have been moved to FEATURES.md.
 
 ---
 
-## 20. Skill Browser/Installer + Slash Command Autocomplete
-**Status:** done
-
-Implemented skill scanner, catalog, WebSocket endpoints, slash command autocomplete in InputBar, and SkillBrowser page accessible from Settings. Steps 1-7 complete; Step 8 (prerequisites/fault detection) deferred to future work.
-
----
-
 ## Deferred
 
 ### OpenAI Codex CLI Parser

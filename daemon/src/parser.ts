@@ -222,8 +222,13 @@ export function parseConversationFile(
         if (message) {
           messages.unshift(message); // Add to beginning to maintain order
         }
+      } else if (entry.type === 'queue-operation') {
+        const notification = parseQueueOperation(entry);
+        if (notification) {
+          messages.unshift(notification);
+        }
       } else if (entry.type && entry.type !== 'summary') {
-        logParserWarning('unknown_entry_type', `Unexpected JSONL entry type: ${entry.type}`);
+        // Silently ignore unknown types
       }
     } catch {
       // Skip malformed lines
@@ -232,6 +237,35 @@ export function parseConversationFile(
 
   // Return only the limit number of messages
   return messages.slice(-limit);
+}
+
+function parseQueueOperation(entry: JsonlEntry): ConversationMessage | null {
+  const content = (entry as { content?: string }).content;
+  if (!content || !content.includes('<task-notification>')) return null;
+
+  // Parse XML fields with simple regex (no XML library needed for this structure)
+  const taskId = content.match(/<task-id>([^<]+)<\/task-id>/)?.[1] || '';
+  const outputFile = content.match(/<output-file>([^<]+)<\/output-file>/)?.[1] || '';
+  const status = content.match(/<status>([^<]+)<\/status>/)?.[1] || '';
+  const summary = content.match(/<summary>([^<]+)<\/summary>/)?.[1] || '';
+
+  if (!summary) return null;
+
+  const timestamp = entry.timestamp ? new Date(entry.timestamp).getTime() : Date.now();
+
+  return {
+    id: `task-${taskId}-${timestamp}`,
+    type: 'system',
+    content: summary,
+    timestamp,
+    toolCalls: outputFile ? [{
+      id: `task-output-${taskId}`,
+      name: 'TaskOutput',
+      input: { taskId, outputFile },
+      output: outputFile,
+      status: status === 'completed' ? 'completed' : status === 'error' ? 'error' : 'running',
+    }] : undefined,
+  };
 }
 
 function parseEntry(

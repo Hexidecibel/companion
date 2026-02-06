@@ -66,7 +66,13 @@ High-level features of the Companion daemon, web client, and desktop/mobile apps
 - Open files referenced in conversation with a single tap/click
 - Markdown files rendered with full formatting (headings, tables, lists, code blocks, links)
 - Diff files rendered with color-coded additions/deletions/hunks
-- Code files rendered with line numbers and horizontal scroll
+- Syntax highlighting for 22 languages via highlight.js (GitHub Dark theme)
+- Code files rendered with line numbers, horizontal scroll, and sticky line numbers
+- Progressive rendering for large files (3000 lines at a time with "Show more")
+- Image file rendering (PNG, JPG, GIF, SVG, WebP, ICO) via base64
+- Binary file detection with size display
+- Fuzzy file finder (Cmd+P) with debounced search, keyboard navigation, match highlighting
+- "Files" button in session header for quick access to file finder
 - Large assistant messages (100+ lines) get "View full output in viewer" button
 - Artifact viewer modal for inline content with copy-to-clipboard
 - Persistent file tab bar (web) with per-session localStorage persistence
@@ -160,6 +166,7 @@ High-level features of the Companion daemon, web client, and desktop/mobile apps
 - Exponential backoff reconnection with configurable max attempts
 
 ## Web Client Keyboard Shortcuts
+- Cmd/Ctrl+P: Fuzzy file finder
 - Cmd/Ctrl+T: Toggle terminal panel
 - Cmd/Ctrl+F: Search messages in session
 - Cmd/Ctrl+1-9: Switch to session by sidebar position

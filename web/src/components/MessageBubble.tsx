@@ -168,7 +168,31 @@ export function extractPlanFilePath(message: ConversationHighlight): string | nu
 
 export function MessageBubble({ message, onSelectOption, onViewFile, onViewArtifact, searchTerm, isCurrentMatch }: MessageBubbleProps) {
   const isUser = message.type === 'user';
+  const isSystem = message.type === 'system';
   const [allExpanded, setAllExpanded] = useState<boolean | undefined>(undefined);
+
+  // Render system messages (task notifications) as compact cards
+  if (isSystem) {
+    const outputFile = message.toolCalls?.[0]?.output;
+    const status = message.toolCalls?.[0]?.status || 'completed';
+    return (
+      <div className="msg-row msg-row-system" data-highlight-id={message.id}>
+        <div className={`system-notification system-notification-${status}`}>
+          <span className={`system-notification-dot system-dot-${status}`} />
+          <span className="system-notification-text">{message.content}</span>
+          {outputFile && onViewFile && (
+            <span
+              className="system-notification-link"
+              role="button"
+              onClick={() => onViewFile(outputFile)}
+            >
+              View Output
+            </span>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   const toolCalls = !isUser ? message.toolCalls : undefined;
   const hasMultipleTools = toolCalls && toolCalls.length >= 2;

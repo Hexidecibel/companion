@@ -932,6 +932,51 @@ body {
   align-items: flex-start;
 }
 
+.msg-row-system {
+  align-items: center;
+}
+
+/* System notification (task completion, background commands) */
+.system-notification {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-radius: 6px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  font-size: 12px;
+  color: var(--text-secondary);
+  max-width: 90%;
+}
+
+.system-notification-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.system-dot-completed { background: var(--accent-green); }
+.system-dot-error { background: var(--accent-red); }
+.system-dot-running { background: var(--accent-amber); }
+
+.system-notification-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.system-notification-link {
+  color: var(--accent-blue);
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.system-notification-link:hover {
+  text-decoration: underline;
+}
+
 /* Message bubbles */
 .msg-bubble {
   max-width: 80%;
@@ -2755,14 +2800,14 @@ html {
   text-decoration: underline;
 }
 
-.md-render a.md-file-link {
+.md-render .md-file-link {
   color: var(--accent-purple-light);
   border-bottom: 1px dashed var(--accent-purple);
   text-decoration: none;
   cursor: pointer;
 }
 
-.md-render a.md-file-link:hover {
+.md-render .md-file-link:hover {
   color: var(--accent-purple);
   border-bottom-style: solid;
   text-decoration: none;

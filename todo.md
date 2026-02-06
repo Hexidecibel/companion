@@ -5,15 +5,17 @@ Quick capture for ideas and tasks. Run `/plan` to process into detailed plans.
 ---
 
 ## Upcoming
-- Mac desktop app: file path links should open in file viewer (tappable paths don't work in Tauri WebView)
-- Parse task-notification XML messages properly and show a tool result card (with link to output file)
 - Desktop dashboard mode -- toggleable card-based dashboard view alongside current sidebar (for monitoring)
 
 ## In Progress
 (none)
 
+## Done
+- [done] Mac desktop app: file path links should open in file viewer
+- [done] Parse task-notification XML messages properly and show a tool result card
+
 ## Deferred
 - OpenAI Codex CLI parser -- roadmap item, not prioritized
-- macOS desktop nice-to-have -- global hotkey, deep links, code signing, auto-update
-- Windows and Linux releases -- Tauri already cross-compiles, need CI/CD pipeline for all platforms
+- macOS desktop polish -- global hotkey, deep links, code signing, auto-update
+- Windows release -- Tauri cross-compiles, need CI/CD pipeline
 - Make parallel worker agent spawning optional (sometimes might not make sense)

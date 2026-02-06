@@ -179,17 +179,14 @@ function renderInline(text: string, keyPrefix: string, onFileClick?: (path: stri
         );
       case 'fileLink':
         return (
-          <a
+          <span
             key={key}
             className="md-file-link"
-            href="#"
-            onClick={(e) => {
-              e.preventDefault();
-              onFileClick?.(node.path);
-            }}
+            role="button"
+            onClick={() => onFileClick?.(node.path)}
           >
             {node.text}
-          </a>
+          </span>
         );
       default:
         return <span key={key}>{node.text}</span>;

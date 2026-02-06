@@ -58,7 +58,7 @@ export interface ToolCall {
 
 export interface ConversationHighlight {
   id: string;
-  type: 'user' | 'assistant';
+  type: 'user' | 'assistant' | 'system';
   content: string;
   timestamp: number;
   options?: QuestionOption[];
