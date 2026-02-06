@@ -1746,8 +1746,8 @@ body {
 
   /* Session header compact — only back arrow on mobile */
   .session-header-mobile {
-    padding: 4px 8px;
-    padding-top: calc(4px + var(--safe-top));
+    padding: 8px;
+    padding-top: calc(14px + var(--safe-top));
   }
 
   /* Sidebar header with safe area */
@@ -1831,6 +1831,18 @@ body {
 
 .mobile-menu-btn:hover {
   background-color: var(--bg-hover);
+}
+
+.mobile-back-btn {
+  width: auto;
+  padding: 6px 12px;
+  font-size: 14px;
+  font-weight: 500;
+  gap: 4px;
+}
+
+.mobile-back-btn .back-arrow {
+  font-size: 16px;
 }
 
 /* WebKit-specific fixes */
@@ -5647,7 +5659,7 @@ html {
 
 .server-form-modal .btn-primary {
   margin-top: 16px;
-  margin-bottom: calc(16px + var(--safe-bottom));
+  margin-bottom: 16px;
 }
 
 /* ========================================
