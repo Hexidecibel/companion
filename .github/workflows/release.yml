@@ -111,6 +111,8 @@ jobs:
             /usr/libexec/PlistBuddy -c "Add :CFBundleDisplayName string Hexi\'s Companion" "$INFO_PLIST" 2>/dev/null || \
               /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName Hexi\'s Companion" "$INFO_PLIST"
             /usr/libexec/PlistBuddy -c "Set :CFBundleName Hexi\'s Companion" "$INFO_PLIST"
+            /usr/libexec/PlistBuddy -c "Add :ITSAppUsesNonExemptEncryption bool false" "$INFO_PLIST" 2>/dev/null || \
+              /usr/libexec/PlistBuddy -c "Set :ITSAppUsesNonExemptEncryption false" "$INFO_PLIST"
           fi
       - name: Import Apple Distribution certificate
         env:
