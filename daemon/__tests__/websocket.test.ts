@@ -361,6 +361,143 @@ describe('WebSocketHandler', () => {
     });
   });
 
+  describe('send_terminal_text', () => {
+    let authenticatedClient: MockWebSocket;
+    let mockTmux: any;
+    let handlerWithTmux: WebSocketHandler;
+    let tmuxWss: MockWebSocketServer;
+
+    beforeEach(() => {
+      mockTmux = {
+        sendKeys: jest.fn().mockResolvedValue(true),
+        sendRawKeys: jest.fn().mockResolvedValue(true),
+        listSessions: jest.fn().mockResolvedValue([]),
+        capturePane: jest.fn().mockResolvedValue(''),
+        getHomeDir: jest.fn().mockReturnValue('/home/test'),
+        sessionExists: jest.fn().mockResolvedValue(true),
+        createSession: jest.fn().mockResolvedValue({ success: true }),
+        killSession: jest.fn().mockResolvedValue(true),
+        generateSessionName: jest.fn().mockReturnValue('test-session'),
+        isGitRepo: jest.fn().mockResolvedValue(false),
+        tagSession: jest.fn().mockResolvedValue(undefined),
+      } as any;
+
+      handlerWithTmux = new WebSocketHandler(
+        [{ server: mockServer, listener: mockListener }],
+        mockConfig,
+        mockWatcher,
+        mockInjector,
+        mockPush,
+        mockTmux
+      );
+      tmuxWss = (handlerWithTmux as any).wssMap.get(9877);
+
+      authenticatedClient = new MockWebSocket();
+      tmuxWss.clients.add(authenticatedClient);
+      tmuxWss.emit('connection', authenticatedClient, {});
+      authenticatedClient.emit(
+        'message',
+        JSON.stringify({ type: 'authenticate', token: 'test-token', requestId: 'auth-1' })
+      );
+      authenticatedClient.send.mockClear();
+    });
+
+    it('should send text and Enter to tmux', async () => {
+      authenticatedClient.emit(
+        'message',
+        JSON.stringify({
+          type: 'send_terminal_text',
+          payload: { sessionName: 'claude', text: 'ls -la' },
+          requestId: 'req-1',
+        })
+      );
+
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      expect(mockTmux.sendKeys).toHaveBeenCalledWith('claude', 'ls -la');
+      expect(mockTmux.sendRawKeys).toHaveBeenCalledWith('claude', ['Enter']);
+      expect(authenticatedClient.send).toHaveBeenCalledWith(
+        expect.stringContaining('"success":true')
+      );
+    });
+
+    it('should not send Enter if sendKeys fails', async () => {
+      mockTmux.sendKeys.mockResolvedValue(false);
+
+      authenticatedClient.emit(
+        'message',
+        JSON.stringify({
+          type: 'send_terminal_text',
+          payload: { sessionName: 'claude', text: 'echo hello' },
+          requestId: 'req-2',
+        })
+      );
+
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      expect(mockTmux.sendKeys).toHaveBeenCalledWith('claude', 'echo hello');
+      expect(mockTmux.sendRawKeys).not.toHaveBeenCalled();
+      expect(authenticatedClient.send).toHaveBeenCalledWith(
+        expect.stringContaining('"success":false')
+      );
+    });
+
+    it('should reject missing sessionName', async () => {
+      authenticatedClient.emit(
+        'message',
+        JSON.stringify({
+          type: 'send_terminal_text',
+          payload: { text: 'ls' },
+          requestId: 'req-3',
+        })
+      );
+
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      expect(mockTmux.sendKeys).not.toHaveBeenCalled();
+      expect(authenticatedClient.send).toHaveBeenCalledWith(
+        expect.stringContaining('Missing sessionName or text')
+      );
+    });
+
+    it('should reject missing text', async () => {
+      authenticatedClient.emit(
+        'message',
+        JSON.stringify({
+          type: 'send_terminal_text',
+          payload: { sessionName: 'claude' },
+          requestId: 'req-4',
+        })
+      );
+
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      expect(mockTmux.sendKeys).not.toHaveBeenCalled();
+      expect(authenticatedClient.send).toHaveBeenCalledWith(
+        expect.stringContaining('Missing sessionName or text')
+      );
+    });
+
+    it('should handle text with special characters', async () => {
+      authenticatedClient.emit(
+        'message',
+        JSON.stringify({
+          type: 'send_terminal_text',
+          payload: { sessionName: 'claude', text: 'echo "hello world!" | grep -i \'hello\'' },
+          requestId: 'req-5',
+        })
+      );
+
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      expect(mockTmux.sendKeys).toHaveBeenCalledWith(
+        'claude',
+        'echo "hello world!" | grep -i \'hello\''
+      );
+      expect(mockTmux.sendRawKeys).toHaveBeenCalledWith('claude', ['Enter']);
+    });
+  });
+
   describe('connection management', () => {
     it('should clean up on client close', () => {
       const mockClient = new MockWebSocket();
