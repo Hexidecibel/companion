@@ -277,6 +277,31 @@ export function SessionView({
     );
   }
 
+  const sendTerminalText = useCallback(async (text: string): Promise<boolean> => {
+    if (!serverId || !tmuxSessionName) return false;
+    const conn = connectionManager.getConnection(serverId);
+    if (!conn?.isConnected()) return false;
+    try {
+      const response = await conn.sendRequest('send_terminal_text', {
+        sessionName: tmuxSessionName,
+        text,
+      });
+      return response.success;
+    } catch {
+      return false;
+    }
+  }, [serverId, tmuxSessionName]);
+
+  const sendTerminalKey = useCallback((key: string) => {
+    if (!serverId || !tmuxSessionName) return;
+    const conn = connectionManager.getConnection(serverId);
+    if (!conn?.isConnected()) return;
+    conn.sendRequest('send_terminal_keys', {
+      sessionName: tmuxSessionName,
+      keys: [key],
+    });
+  }, [serverId, tmuxSessionName]);
+
   const handleSelectOption = (label: string) => {
     sendInput(label);
   };
@@ -358,7 +383,7 @@ export function SessionView({
         <TerminalPanel
           serverId={serverId}
           tmuxSessionName={tmuxSessionName}
-          toolbarBottom={mobile}
+          fastPoll
         />
       )}
 
@@ -439,14 +464,17 @@ export function SessionView({
               {actionButtons}
             </div>
           )}
-
-          <InputBar
-            onSend={handleSend}
-            onSendWithImages={handleSendWithImages}
-            disabled={false}
-            skills={skills}
-          />
       </div>
+
+      <InputBar
+        onSend={handleSend}
+        onSendWithImages={handleSendWithImages}
+        disabled={false}
+        skills={skills}
+        terminalMode={showTerminal}
+        onTerminalSend={sendTerminalText}
+        onTerminalKey={sendTerminalKey}
+      />
 
       {/* Modals */}
       {showAgentsModal && (

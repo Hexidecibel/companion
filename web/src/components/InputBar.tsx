@@ -2,12 +2,16 @@ import { useState, useRef, useCallback, useMemo, type KeyboardEvent, type Clipbo
 import { PendingImage, Skill } from '../types';
 import { useUndoHistory } from '../hooks/useUndoHistory';
 import { SlashMenu, SlashMenuItem } from './SlashMenu';
+import { isMobileViewport } from '../utils/platform';
 
 interface InputBarProps {
   onSend: (text: string) => Promise<boolean>;
   onSendWithImages?: (text: string, images: PendingImage[]) => Promise<boolean>;
   disabled?: boolean;
   skills?: Skill[];
+  terminalMode?: boolean;
+  onTerminalSend?: (text: string) => Promise<boolean>;
+  onTerminalKey?: (key: string) => void;
 }
 
 let imageIdCounter = 0;
@@ -20,7 +24,7 @@ function fileToPreview(file: File): PendingImage {
   };
 }
 
-export function InputBar({ onSend, onSendWithImages, disabled, skills = [] }: InputBarProps) {
+export function InputBar({ onSend, onSendWithImages, disabled, skills = [], terminalMode, onTerminalSend, onTerminalKey }: InputBarProps) {
   const { value: text, onChange: setText, undo, redo, reset: resetHistory } = useUndoHistory();
   const [sending, setSending] = useState(false);
   const [images, setImages] = useState<PendingImage[]>([]);
@@ -86,6 +90,27 @@ export function InputBar({ onSend, onSendWithImages, disabled, skills = [] }: In
     textareaRef.current?.focus();
   }, [text, images, sending, disabled, onSend, onSendWithImages, resetHistory]);
 
+  const handleTerminalSend = useCallback(async () => {
+    const trimmed = text.trim();
+    if (!trimmed || sending || !onTerminalSend) return;
+
+    const savedText = text;
+    resetHistory();
+    setSending(true);
+
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+    }
+
+    const success = await onTerminalSend(trimmed);
+
+    if (!success) {
+      setText(savedText);
+    }
+    setSending(false);
+    textareaRef.current?.focus();
+  }, [text, sending, onTerminalSend, resetHistory, setText]);
+
   const handleSlashSelect = useCallback(
     (item: SlashMenuItem) => {
       setShowSlashMenu(false);
@@ -105,17 +130,47 @@ export function InputBar({ onSend, onSendWithImages, disabled, skills = [] }: In
   const handleTextChange = useCallback(
     (value: string) => {
       setText(value);
-      // Show slash menu when typing / at the start
-      if (value.match(/^\/\S*$/) && !value.includes(' ')) {
+      // Show slash menu when typing / at the start (only in chat mode)
+      if (!terminalMode && value.match(/^\/\S*$/) && !value.includes(' ')) {
         setShowSlashMenu(true);
       } else {
         setShowSlashMenu(false);
       }
     },
-    [setText]
+    [setText, terminalMode]
   );
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    // Terminal mode key handling
+    if (terminalMode) {
+      // Ctrl+C sends interrupt
+      if (e.ctrlKey && e.key === 'c') {
+        e.preventDefault();
+        onTerminalKey?.('C-c');
+        return;
+      }
+      // Up arrow when input is empty -> navigate tmux history
+      if (e.key === 'ArrowUp' && text.trim() === '') {
+        e.preventDefault();
+        onTerminalKey?.('Up');
+        return;
+      }
+      // Down arrow when input is empty -> navigate tmux history
+      if (e.key === 'ArrowDown' && text.trim() === '') {
+        e.preventDefault();
+        onTerminalKey?.('Down');
+        return;
+      }
+      // Enter (no shift) -> send to terminal
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        handleTerminalSend();
+        return;
+      }
+      return;
+    }
+
+    // Chat mode key handling (unchanged)
     // When slash menu is open, let it handle navigation keys
     if (showSlashMenu && (e.key === 'ArrowDown' || e.key === 'ArrowUp' || e.key === 'Tab')) {
       return; // SlashMenu's keydown listener will handle these
@@ -153,6 +208,7 @@ export function InputBar({ onSend, onSendWithImages, disabled, skills = [] }: In
   };
 
   const handlePaste = useCallback((e: ClipboardEvent<HTMLTextAreaElement>) => {
+    if (terminalMode) return; // No image paste in terminal mode
     const items = e.clipboardData?.items;
     if (!items) return;
     const files: File[] = [];
@@ -166,12 +222,13 @@ export function InputBar({ onSend, onSendWithImages, disabled, skills = [] }: In
       e.preventDefault();
       addImages(files);
     }
-  }, [addImages]);
+  }, [addImages, terminalMode]);
 
   const handleDragOver = useCallback((e: DragEvent<HTMLDivElement>) => {
+    if (terminalMode) return;
     e.preventDefault();
     setDragging(true);
-  }, []);
+  }, [terminalMode]);
 
   const handleDragLeave = useCallback((e: DragEvent<HTMLDivElement>) => {
     e.preventDefault();
@@ -183,9 +240,10 @@ export function InputBar({ onSend, onSendWithImages, disabled, skills = [] }: In
   const handleDrop = useCallback((e: DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     setDragging(false);
+    if (terminalMode) return;
     const files = Array.from(e.dataTransfer.files);
     addImages(files);
-  }, [addImages]);
+  }, [addImages, terminalMode]);
 
   const handleFileSelect = useCallback(() => {
     fileInputRef.current?.click();
@@ -197,6 +255,8 @@ export function InputBar({ onSend, onSendWithImages, disabled, skills = [] }: In
     if (fileInputRef.current) fileInputRef.current.value = '';
   }, [addImages]);
 
+  const mobile = isMobileViewport();
+
   return (
     <div
       ref={wrapperRef}
@@ -206,7 +266,7 @@ export function InputBar({ onSend, onSendWithImages, disabled, skills = [] }: In
       onDrop={handleDrop}
       style={{ position: 'relative' }}
     >
-      {showSlashMenu && (
+      {!terminalMode && showSlashMenu && (
         <SlashMenu
           query={slashQuery}
           skills={skills}
@@ -214,7 +274,7 @@ export function InputBar({ onSend, onSendWithImages, disabled, skills = [] }: In
           onClose={() => setShowSlashMenu(false)}
         />
       )}
-      {images.length > 0 && (
+      {!terminalMode && images.length > 0 && (
         <div className="input-bar-images">
           {images.map((img) => (
             <div key={img.id} className="input-bar-image-preview">
@@ -230,23 +290,27 @@ export function InputBar({ onSend, onSendWithImages, disabled, skills = [] }: In
         </div>
       )}
       <div className="input-bar">
-        <button
-          className="input-bar-attach-btn"
-          onClick={handleFileSelect}
-          title="Attach image"
-        >
-          <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
-            <path d="M17.5 9.31l-7.12 7.12a4.5 4.5 0 01-6.36-6.36l7.12-7.12a3 3 0 014.24 4.24l-7.12 7.13a1.5 1.5 0 01-2.12-2.13L13.26 5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-          </svg>
-        </button>
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept="image/*"
-          multiple
-          style={{ display: 'none' }}
-          onChange={handleFileChange}
-        />
+        {!terminalMode && (
+          <>
+            <button
+              className="input-bar-attach-btn"
+              onClick={handleFileSelect}
+              title="Attach image"
+            >
+              <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+                <path d="M17.5 9.31l-7.12 7.12a4.5 4.5 0 01-6.36-6.36l7.12-7.12a3 3 0 014.24 4.24l-7.12 7.13a1.5 1.5 0 01-2.12-2.13L13.26 5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+            </button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              multiple
+              style={{ display: 'none' }}
+              onChange={handleFileChange}
+            />
+          </>
+        )}
         <textarea
           ref={textareaRef}
           className="input-bar-textarea"
@@ -254,15 +318,37 @@ export function InputBar({ onSend, onSendWithImages, disabled, skills = [] }: In
           onChange={(e) => { handleTextChange(e.target.value); handleInput(); }}
           onKeyDown={handleKeyDown}
           onPaste={handlePaste}
-          placeholder="Send a message..."
+          placeholder={terminalMode ? 'Type a command...' : 'Send a message...'}
           disabled={disabled || sending}
           rows={1}
         />
+        {terminalMode && mobile && (
+          <div className="input-bar-terminal-arrows">
+            <button
+              className="input-bar-terminal-arrow-btn"
+              onClick={() => onTerminalKey?.('Up')}
+              title="Up arrow"
+            >
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                <path d="M8 3L3 9h10L8 3z" fill="currentColor"/>
+              </svg>
+            </button>
+            <button
+              className="input-bar-terminal-arrow-btn"
+              onClick={() => onTerminalKey?.('Down')}
+              title="Down arrow"
+            >
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                <path d="M8 13L3 7h10L8 13z" fill="currentColor"/>
+              </svg>
+            </button>
+          </div>
+        )}
         <button
           className="input-bar-send"
-          onClick={handleSend}
+          onClick={terminalMode ? handleTerminalSend : handleSend}
           disabled={!hasContent || sending || disabled}
-          title="Send (Enter)"
+          title={terminalMode ? 'Send command (Enter)' : 'Send (Enter)'}
         >
           {sending ? (
             <div className="spinner small" />
@@ -273,7 +359,7 @@ export function InputBar({ onSend, onSendWithImages, disabled, skills = [] }: In
           )}
         </button>
       </div>
-      {dragging && (
+      {!terminalMode && dragging && (
         <div className="input-bar-drop-overlay">
           Drop images here
         </div>

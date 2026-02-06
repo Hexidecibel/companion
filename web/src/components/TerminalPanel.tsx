@@ -6,44 +6,12 @@ import { useServers } from '../hooks/useServers';
 interface TerminalPanelProps {
   serverId: string;
   tmuxSessionName: string;
-  toolbarBottom?: boolean;
+  fastPoll?: boolean;
 }
 
 const POLL_INTERVAL = 2000;
-const INTERACTIVE_POLL_INTERVAL = 500;
+const FAST_POLL_INTERVAL = 500;
 const LINE_COUNT = 150;
-const KEY_DEBOUNCE_MS = 50;
-
-/** Map browser KeyboardEvent.key to tmux send-keys argument (raw mode, no -l). */
-const SPECIAL_KEY_MAP: Record<string, string> = {
-  ArrowUp: 'Up',
-  ArrowDown: 'Down',
-  ArrowLeft: 'Left',
-  ArrowRight: 'Right',
-  Enter: 'Enter',
-  Backspace: 'BSpace',
-  Tab: 'Tab',
-  Escape: 'Escape',
-  Home: 'Home',
-  End: 'End',
-  PageUp: 'PageUp',
-  PageDown: 'PageDown',
-  Delete: 'DC',
-};
-
-/** Ctrl+key combos that should be sent as raw tmux keys. */
-const CTRL_KEY_MAP: Record<string, string> = {
-  c: 'C-c',
-  d: 'C-d',
-  z: 'C-z',
-  l: 'C-l',
-  a: 'C-a',
-  e: 'C-e',
-  r: 'C-r',
-  u: 'C-u',
-  k: 'C-k',
-  w: 'C-w',
-};
 
 function spanStyle(span: AnsiSpan): React.CSSProperties {
   const style: React.CSSProperties = {};
@@ -65,48 +33,15 @@ function spanStyle(span: AnsiSpan): React.CSSProperties {
   return style;
 }
 
-export function TerminalPanel({ serverId, tmuxSessionName, toolbarBottom }: TerminalPanelProps) {
+export function TerminalPanel({ serverId, tmuxSessionName, fastPoll }: TerminalPanelProps) {
   const [lines, setLines] = useState<AnsiSpan[][]>([]);
-  const [paused, setPaused] = useState(false);
-  const [interactive, setInteractive] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const outputRef = useRef<HTMLDivElement>(null);
   const autoScrollRef = useRef(true);
-  const keyBufferRef = useRef<string[]>([]);
-  const keyFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const { getServer } = useServers();
 
   const server = getServer(serverId);
-
-  // Buffer and debounce raw key sends
-  const sendRawKey = useCallback((key: string) => {
-    keyBufferRef.current.push(key);
-    if (keyFlushTimerRef.current) clearTimeout(keyFlushTimerRef.current);
-    keyFlushTimerRef.current = setTimeout(() => {
-      const batch = keyBufferRef.current.splice(0);
-      if (batch.length > 0) {
-        const conn = connectionManager.getConnection(serverId);
-        if (conn?.isConnected()) {
-          conn.sendRequest('send_terminal_keys', {
-            sessionName: tmuxSessionName,
-            keys: batch,
-          });
-        }
-      }
-    }, KEY_DEBOUNCE_MS);
-  }, [serverId, tmuxSessionName]);
-
-  // Send a printable character as a raw key (tmux interprets single chars as keystrokes)
-  const sendLiteralChar = useCallback((ch: string) => {
-    if (ch === ' ') {
-      sendRawKey('Space');
-    } else if (/^[a-zA-Z0-9\-+]$/.test(ch)) {
-      sendRawKey(ch);
-    }
-    // Punctuation chars that fail the daemon's validation regex are dropped.
-    // For full text entry, use the main input box instead.
-  }, [sendRawKey]);
 
   const fetchOutput = useCallback(async () => {
     const conn = connectionManager.getConnection(serverId);
@@ -132,16 +67,13 @@ export function TerminalPanel({ serverId, tmuxSessionName, toolbarBottom }: Term
     }
   }, [serverId, tmuxSessionName]);
 
-  // Poll for terminal output - faster when interactive
+  // Poll for terminal output
   useEffect(() => {
     fetchOutput();
-
-    if (paused && !interactive) return;
-
-    const interval = interactive ? INTERACTIVE_POLL_INTERVAL : POLL_INTERVAL;
+    const interval = fastPoll ? FAST_POLL_INTERVAL : POLL_INTERVAL;
     const timer = setInterval(fetchOutput, interval);
     return () => clearInterval(timer);
-  }, [fetchOutput, paused, interactive]);
+  }, [fetchOutput, fastPoll]);
 
   // Auto-scroll to bottom
   useEffect(() => {
@@ -156,58 +88,6 @@ export function TerminalPanel({ serverId, tmuxSessionName, toolbarBottom }: Term
     const el = outputRef.current;
     const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
     autoScrollRef.current = atBottom;
-  }, []);
-
-  // Keyboard handler for interactive mode
-  const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
-    if (!interactive) return;
-
-    // Ctrl + key combos
-    if (e.ctrlKey && !e.metaKey && !e.altKey) {
-      const mapped = CTRL_KEY_MAP[e.key.toLowerCase()];
-      if (mapped) {
-        e.preventDefault();
-        e.stopPropagation();
-        sendRawKey(mapped);
-        return;
-      }
-    }
-
-    // Special keys
-    const specialKey = SPECIAL_KEY_MAP[e.key];
-    if (specialKey) {
-      e.preventDefault();
-      e.stopPropagation();
-      sendRawKey(specialKey);
-      return;
-    }
-
-    // Printable characters (single char, no meta/ctrl/alt modifiers)
-    if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
-      e.preventDefault();
-      e.stopPropagation();
-      sendLiteralChar(e.key);
-      return;
-    }
-  }, [interactive, sendRawKey, sendLiteralChar]);
-
-  // Focus the terminal output when interactive mode is toggled on
-  useEffect(() => {
-    if (interactive && outputRef.current) {
-      outputRef.current.focus();
-    }
-  }, [interactive]);
-
-  // Reset interactive mode when session changes
-  useEffect(() => {
-    setInteractive(false);
-  }, [tmuxSessionName]);
-
-  // Cleanup key flush timer on unmount
-  useEffect(() => {
-    return () => {
-      if (keyFlushTimerRef.current) clearTimeout(keyFlushTimerRef.current);
-    };
   }, []);
 
   // Build SSH command
@@ -225,80 +105,48 @@ export function TerminalPanel({ serverId, tmuxSessionName, toolbarBottom }: Term
     });
   }, [sshCommand]);
 
-  const toggleInteractive = useCallback(() => {
-    setInteractive(prev => {
-      if (!prev) {
-        // Turning on: also unpause
-        setPaused(false);
-      }
-      return !prev;
-    });
-  }, []);
-
-  const toolbar = (
-    <div className={`terminal-toolbar ${toolbarBottom ? 'terminal-toolbar-bottom' : ''}`}>
-      {!toolbarBottom && (
+  return (
+    <div className="terminal-panel">
+      <div className="terminal-toolbar">
         <div className="terminal-toolbar-left">
           <span className="terminal-toolbar-label">
             tmux: {tmuxSessionName}
           </span>
         </div>
-      )}
-      <div className="terminal-toolbar-right">
-        {!toolbarBottom && sshCommand ? (
-          <div className="ssh-command">
-            <code className="ssh-command-text">{sshCommand}</code>
-            <button
-              className={`ssh-command-copy ${copied ? 'copied' : ''}`}
-              onClick={handleCopy}
-            >
-              {copied ? 'Copied' : 'Copy'}
-            </button>
-          </div>
-        ) : !toolbarBottom ? (
-          <span className="ssh-command-hint">
-            Set SSH user in server settings for connect command
-          </span>
-        ) : null}
-        <button
-          className={`terminal-toolbar-btn ${interactive ? 'interactive-active' : ''}`}
-          onClick={toggleInteractive}
-          title={interactive ? 'Disable keyboard capture' : 'Enable keyboard capture (sends keys to tmux)'}
-        >
-          Interactive
-        </button>
-        <button
-          className={`terminal-toolbar-btn ${paused ? 'active' : ''}`}
-          onClick={() => setPaused(!paused)}
-          title={paused ? 'Resume auto-refresh' : 'Pause auto-refresh'}
-        >
-          {paused ? 'Resume' : 'Pause'}
-        </button>
-        <button
-          className="terminal-toolbar-btn"
-          onClick={fetchOutput}
-          title="Refresh now"
-        >
-          Refresh
-        </button>
+        <div className="terminal-toolbar-right">
+          {sshCommand ? (
+            <div className="ssh-command">
+              <code className="ssh-command-text">{sshCommand}</code>
+              <button
+                className={`ssh-command-copy ${copied ? 'copied' : ''}`}
+                onClick={handleCopy}
+              >
+                {copied ? 'Copied' : 'Copy'}
+              </button>
+            </div>
+          ) : (
+            <span className="ssh-command-hint">
+              Set SSH user in server settings for connect command
+            </span>
+          )}
+          <button
+            className="terminal-toolbar-btn"
+            onClick={fetchOutput}
+            title="Refresh now"
+          >
+            Refresh
+          </button>
+        </div>
       </div>
-    </div>
-  );
-
-  return (
-    <div className="terminal-panel">
-      {!toolbarBottom && toolbar}
 
       {error && (
         <div className="terminal-error">{error}</div>
       )}
 
       <div
-        className={`terminal-output ${interactive ? 'terminal-interactive-active' : ''}`}
+        className="terminal-output"
         ref={outputRef}
         onScroll={handleScroll}
-        onKeyDown={handleKeyDown}
-        tabIndex={interactive ? 0 : undefined}
       >
         {lines.map((spans, i) => (
           <div key={i} className="terminal-line">
@@ -310,8 +158,6 @@ export function TerminalPanel({ serverId, tmuxSessionName, toolbarBottom }: Term
           </div>
         ))}
       </div>
-
-      {toolbarBottom && toolbar}
     </div>
   );
 }

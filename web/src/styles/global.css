@@ -4622,23 +4622,37 @@ html {
   border-color: rgba(245, 158, 11, 0.3);
 }
 
-.terminal-toolbar-bottom {
-  border-bottom: none;
-  border-top: 1px solid #30363d;
-  padding: 6px 8px;
-  padding-bottom: calc(6px + var(--safe-bottom, 0px));
-}
-
-.terminal-toolbar-bottom .terminal-toolbar-right {
+/* Terminal arrow buttons for mobile InputBar */
+.input-bar-terminal-arrows {
   display: flex;
-  width: 100%;
-  gap: 6px;
+  flex-direction: column;
+  gap: 2px;
+  flex-shrink: 0;
 }
 
-.terminal-toolbar-bottom .terminal-toolbar-right > button {
-  flex: 1;
-  text-align: center;
-  padding: 8px 4px;
+.input-bar-terminal-arrow-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 18px;
+  background: #21262d;
+  border: 1px solid #30363d;
+  border-radius: 4px;
+  color: #8b949e;
+  cursor: pointer;
+  padding: 0;
+  transition: background-color 0.15s, color 0.15s;
+}
+
+.input-bar-terminal-arrow-btn:hover {
+  background: #30363d;
+  color: #c9d1d9;
+}
+
+.input-bar-terminal-arrow-btn:active {
+  background: #3b82f6;
+  color: #fff;
 }
 
 .terminal-error {
@@ -4665,25 +4679,6 @@ html {
   min-height: 1em;
 }
 
-.terminal-interactive-active {
-  outline: 1px solid var(--accent-purple);
-  outline-offset: -1px;
-}
-
-.terminal-interactive-active:focus {
-  outline: 2px solid var(--accent-purple);
-  outline-offset: -2px;
-}
-
-.terminal-toolbar-btn.interactive-active {
-  background: rgba(139, 92, 246, 0.2);
-  color: var(--accent-purple);
-  border-color: var(--accent-purple);
-}
-
-.terminal-toolbar-btn.interactive-active:hover {
-  background: rgba(139, 92, 246, 0.3);
-}
 
 /* SSH command display */
 .ssh-command {

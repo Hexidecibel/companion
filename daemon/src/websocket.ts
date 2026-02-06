@@ -680,6 +680,44 @@ export class WebSocketHandler {
         break;
       }
 
+      case 'send_terminal_text': {
+        const termTextPayload = payload as { sessionName: string; text: string } | undefined;
+        if (termTextPayload?.sessionName && typeof termTextPayload.text === 'string') {
+          this.tmux
+            .sendKeys(termTextPayload.sessionName, termTextPayload.text)
+            .then((ok) => {
+              if (ok) {
+                return this.tmux.sendRawKeys(termTextPayload.sessionName, ['Enter']);
+              }
+              return false;
+            })
+            .then((ok) => {
+              this.send(client.ws, {
+                type: 'terminal_text_sent',
+                success: ok,
+                error: ok ? undefined : 'Failed to send text',
+                requestId,
+              });
+            })
+            .catch(() => {
+              this.send(client.ws, {
+                type: 'terminal_text_sent',
+                success: false,
+                error: 'Failed to send terminal text',
+                requestId,
+              });
+            });
+        } else {
+          this.send(client.ws, {
+            type: 'terminal_text_sent',
+            success: false,
+            error: 'Missing sessionName or text',
+            requestId,
+          });
+        }
+        break;
+      }
+
       case 'send_terminal_keys': {
         const termKeysPayload = payload as { sessionName: string; keys: string[] } | undefined;
         if (termKeysPayload?.sessionName && termKeysPayload.keys?.length) {
