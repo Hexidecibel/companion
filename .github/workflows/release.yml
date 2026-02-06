@@ -104,6 +104,14 @@ jobs:
       - run: cd desktop && npm ci
       - name: Initialize iOS project
         run: cd desktop && npx tauri ios init
+      - name: Set iOS display name
+        run: |
+          INFO_PLIST=$(find desktop/src-tauri/gen/apple -name 'Info.plist' -path '*_iOS*' | head -1)
+          if [ -n "$INFO_PLIST" ]; then
+            /usr/libexec/PlistBuddy -c "Add :CFBundleDisplayName string Hexi\'s Companion" "$INFO_PLIST" 2>/dev/null || \
+              /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName Hexi\'s Companion" "$INFO_PLIST"
+            /usr/libexec/PlistBuddy -c "Set :CFBundleName Hexi\'s Companion" "$INFO_PLIST"
+          fi
       - name: Import Apple Distribution certificate
         env:
           APPLE_CERTIFICATE_P12_B64: ${{ secrets.APPLE_CERTIFICATE_P12_B64 }}
@@ -186,7 +194,7 @@ jobs:
             <string>manual</string>
             <key>provisioningProfiles</key>
             <dict>
-              <key>com.companion.codeapp</key>
+              <key>com.hexidecibel.companion</key>
               <string>${PROFILE_NAME}</string>
             </dict>
           </dict>

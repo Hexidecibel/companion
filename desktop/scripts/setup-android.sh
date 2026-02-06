@@ -64,9 +64,9 @@ fi
 
 # 4b. Ensure google-services.json has the right package name
 if [ -f "$GOOGLE_SERVICES_DST" ]; then
-  if ! grep -q "com.companion.codeapp" "$GOOGLE_SERVICES_DST"; then
-    echo "WARNING: google-services.json does not contain package 'com.companion.codeapp'"
-    echo "  Add a new Android app in Firebase Console with package name: com.companion.codeapp"
+  if ! grep -q "com.hexidecibel.companion" "$GOOGLE_SERVICES_DST"; then
+    echo "WARNING: google-services.json does not contain package 'com.hexidecibel.companion'"
+    echo "  Add a new Android app in Firebase Console with package name: com.hexidecibel.companion"
     echo "  Or download an updated google-services.json that includes this package"
   fi
 fi
@@ -89,12 +89,22 @@ else
 fi
 
 # 7. Enable back gesture handling in MainActivity
-MAIN_ACTIVITY="$GEN_ANDROID/app/src/main/java/com/hexidecibel/companion/MainActivity.kt"
+MAIN_ACTIVITY=$(find "$GEN_ANDROID/app/src/main/java" -name 'MainActivity.kt' | head -1)
 if [ -f "$MAIN_ACTIVITY" ] && ! grep -q "handleBackNavigation" "$MAIN_ACTIVITY"; then
   echo "Enabling back navigation in MainActivity..."
   sed -i 's/class MainActivity : TauriActivity() {/class MainActivity : TauriActivity() {\n  override val handleBackNavigation: Boolean = true\n/' "$MAIN_ACTIVITY"
 else
   echo "Back navigation already configured in MainActivity"
+fi
+
+# 8. Remove Tauri vector icon that overrides PNG mipmap icons on API 24+
+VECTOR_ICON="$GEN_ANDROID/app/src/main/res/drawable-v24/ic_launcher_foreground.xml"
+if [ -f "$VECTOR_ICON" ]; then
+  echo "Removing Tauri vector icon (would override PNG icons on API 24+)..."
+  rm "$VECTOR_ICON"
+  rmdir "$GEN_ANDROID/app/src/main/res/drawable-v24" 2>/dev/null || true
+else
+  echo "Tauri vector icon already removed"
 fi
 
 echo ""
