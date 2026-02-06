@@ -380,9 +380,9 @@ export class WebSocketHandler {
         }
 
         const t1 = Date.now();
-        console.log(
-          `WebSocket: get_highlights - ${t1 - t0}ms, chain: ${chain.length} files, returning ${resultHighlights.length}/${total}`
-        );
+        if (t1 - t0 > 100) {
+          console.log(`WebSocket: get_highlights - ${t1 - t0}ms (slow), chain: ${chain.length} files, returning ${resultHighlights.length}/${total}`);
+        }
         this.send(client.ws, {
           type: 'highlights',
           success: true,
@@ -3027,12 +3027,10 @@ export class WebSocketHandler {
   }
 
   private getProjectRoot(): string | null {
-    // Try to get project root from active tmux session's working directory
-    const activeSessionId = this.watcher.getActiveSessionId();
-    if (activeSessionId) {
-      // Use the code_home parent as a heuristic, or fall back to home dir
-      const codeHome = this.config.codeHome || path.join(os.homedir(), '.claude');
-      return path.dirname(codeHome);
+    // Get the actual project root from the active session's decoded project path
+    const conv = this.watcher.getActiveConversation();
+    if (conv?.projectPath) {
+      return conv.projectPath;
     }
     return null;
   }

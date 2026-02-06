@@ -674,6 +674,9 @@ export class SessionWatcher extends EventEmitter {
 
     const dir = path.dirname(tracked.path);
     try {
+      // Get birthtime of the tracked file to exclude newer unrelated sessions
+      const trackedBirthtime = fs.statSync(tracked.path).birthtimeMs;
+
       const files = fs
         .readdirSync(dir)
         .filter((f) => f.endsWith('.jsonl') && !f.includes('subagents'))
@@ -686,7 +689,10 @@ export class SessionWatcher extends EventEmitter {
             return null;
           }
         })
-        .filter((f): f is { path: string; birthtime: number } => f !== null);
+        .filter((f): f is { path: string; birthtime: number } => f !== null)
+        // Only include files born at or before the tracked file — newer files
+        // are separate conversations, not part of this session's chain
+        .filter((f) => f.birthtime <= trackedBirthtime);
 
       // Sort oldest-first so index 0 is the oldest file
       files.sort((a, b) => a.birthtime - b.birthtime);
