@@ -1879,7 +1879,8 @@ html {
 
 .session-header-mobile {
   justify-content: flex-start;
-  padding-top: calc(6px + var(--safe-top));
+  padding-top: calc(14px + var(--safe-top));
+  min-height: calc(48px + var(--safe-top));
 }
 
 .session-header-actions {
@@ -5623,6 +5624,10 @@ html {
     max-height: 100dvh;
     height: 100dvh;
     border-radius: 0;
+  }
+
+  .server-form-modal .modal-header {
+    padding-top: calc(14px + var(--safe-top));
   }
 }
 

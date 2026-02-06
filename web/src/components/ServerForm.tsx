@@ -68,7 +68,13 @@ export function ServerForm({ serverId, onClose }: ServerFormProps) {
           <button className="modal-close" onClick={onClose}>&times;</button>
         </div>
 
-        <div className="form-container">
+        <div className="form-container" onFocus={(e) => {
+          // Scroll focused input into view on mobile when keyboard opens
+          const target = e.target as HTMLElement;
+          if (target.tagName === 'INPUT') {
+            setTimeout(() => target.scrollIntoView({ block: 'center', behavior: 'smooth' }), 300);
+          }
+        }}>
           <form onSubmit={handleSubmit} className="server-form">
             <div className="form-group">
               <label htmlFor="name">Name</label>
