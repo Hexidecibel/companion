@@ -1777,7 +1777,7 @@ export class WebSocketHandler {
       this.storeTmuxSessionConfig(payload.sessionName, tmuxSession.workingDir, true);
 
       // Encode the working directory the same way the CLI does: /a/b_c -> -a-b-c
-      const encodedPath = tmuxSession.workingDir.replace(/[\/_]/g, '-');
+      const encodedPath = tmuxSession.workingDir.replace(/[/_]/g, '-');
 
       // Find conversation session whose ID matches or starts with this encoded path
       const convSessions = this.watcher.getSessions();
@@ -1999,7 +1999,7 @@ export class WebSocketHandler {
           // Match it against tmux session working directories
           const matchingSession = sessions.find((s) => {
             if (!s.workingDir) return false;
-            const encoded = s.workingDir.replace(/[\/_]/g, '-');
+            const encoded = s.workingDir.replace(/[/_]/g, '-');
             return encoded === activeSessionId || s.name === activeSessionId;
           });
           if (matchingSession?.workingDir) {

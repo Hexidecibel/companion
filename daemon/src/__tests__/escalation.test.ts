@@ -134,6 +134,7 @@ describe('EscalationService', () => {
 
       service.handleEvent(makeEvent());
 
+      // eslint-disable-next-line @typescript-eslint/unbound-method
       expect(store.addHistoryEntry).toHaveBeenCalledWith(
         expect.objectContaining({
           eventType: 'waiting_for_input',

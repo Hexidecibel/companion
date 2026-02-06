@@ -135,7 +135,7 @@ export class WorkGroupManager extends EventEmitter {
 
       // Derive sessionId from worktree path (same encoding as watcher uses)
       // Encode path the same way Claude CLI does: replace / and _ with -
-      worker.sessionId = wtResult.worktreePath.replace(/[\/_]/g, '-');
+      worker.sessionId = wtResult.worktreePath.replace(/[/_]/g, '-');
 
       // Wait for Claude CLI to start up
       await this.waitForCliReady(sessionName);

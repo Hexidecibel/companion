@@ -103,7 +103,7 @@ export class SessionWatcher extends EventEmitter {
             .filter((p) => p);
           for (const p of paths) {
             // Encode path the same way Claude CLI does: replace / and _ with -
-            const projectPath = p.replace(/[\/_]/g, '-');
+            const projectPath = p.replace(/[/_]/g, '-');
             this.tmuxProjectPaths.add(projectPath);
           }
         } catch {
@@ -748,7 +748,7 @@ export class SessionWatcher extends EventEmitter {
     const activeTmuxEncodedPaths = new Map<string, string>();
     if (tmuxSessions) {
       for (const s of tmuxSessions) {
-        const encoded = s.workingDir?.replace(/[\/_]/g, '-');
+        const encoded = s.workingDir?.replace(/[/_]/g, '-');
         if (encoded) {
           activeTmuxEncodedPaths.set(encoded, s.name);
         }
