@@ -41,8 +41,22 @@ export function App() {
     return () => window.removeEventListener('keydown', handler);
   }, []);
 
+  // Navigate with history.pushState for Android back gesture support
   const navigateTo = useCallback((name: Screen['name']) => {
+    if (name !== 'dashboard') {
+      history.pushState({ screen: name }, '');
+    }
     setScreen({ name } as Screen);
+  }, []);
+
+  // Handle browser back (Android back gesture triggers popstate via WebView goBack)
+  useEffect(() => {
+    const handler = (_e: PopStateEvent) => {
+      // Always go back to dashboard on popstate at this level
+      setScreen({ name: 'dashboard' });
+    };
+    window.addEventListener('popstate', handler);
+    return () => window.removeEventListener('popstate', handler);
   }, []);
 
   const focusInput = useCallback(() => {

@@ -1,4 +1,5 @@
 import { Server } from '../types';
+import { syncToStore } from './persistentStorage';
 
 const SERVERS_KEY = 'companion_servers';
 const FONT_SCALE_KEY = 'companion_font_scale';
@@ -17,7 +18,9 @@ export function getServers(): Server[] {
 
 export function saveServers(servers: Server[]): void {
   try {
-    localStorage.setItem(SERVERS_KEY, JSON.stringify(servers));
+    const json = JSON.stringify(servers);
+    localStorage.setItem(SERVERS_KEY, json);
+    syncToStore(SERVERS_KEY, json);
   } catch (error) {
     console.error('Error saving servers:', error);
   }
@@ -56,8 +59,10 @@ export function getFontScale(): number {
 
 export function saveFontScale(scale: number): void {
   try {
-    localStorage.setItem(FONT_SCALE_KEY, String(scale));
-    document.documentElement.style.setProperty('--font-scale', String(scale));
+    const val = String(scale);
+    localStorage.setItem(FONT_SCALE_KEY, val);
+    syncToStore(FONT_SCALE_KEY, val);
+    document.documentElement.style.setProperty('--font-scale', val);
   } catch {
     // ignore
   }

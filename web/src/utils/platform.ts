@@ -28,3 +28,24 @@ export function isTauriMobile(): boolean {
 export function isTauriDesktop(): boolean {
   return isTauri() && !isTauriMobile();
 }
+
+/**
+ * Apply safe area insets for Tauri mobile.
+ * On Android, env(safe-area-inset-top) often returns 0 even with edge-to-edge,
+ * so we set CSS custom properties with a JS fallback.
+ */
+export function applySafeAreaInsets(): void {
+  if (!isTauriMobile()) return;
+  const style = document.documentElement.style;
+  // Android status bar is typically 24dp; with edge-to-edge on high-DPI
+  // devices this is around 48px. Check if env() already provides a value.
+  const test = getComputedStyle(document.documentElement).getPropertyValue('--safe-top').trim();
+  if (!test || test === '0px') {
+    style.setProperty('--safe-top', '48px');
+  }
+  // Navigation bar (gesture pill) height — usually 48px on gesture nav
+  const testBottom = getComputedStyle(document.documentElement).getPropertyValue('--safe-bottom').trim();
+  if (!testBottom || testBottom === '0px') {
+    style.setProperty('--safe-bottom', '24px');
+  }
+}

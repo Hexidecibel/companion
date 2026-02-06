@@ -7,7 +7,8 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_shell::init())
         // FCM push notifications (no-op on desktop, active on mobile)
-        .plugin(tauri_plugin_fcm::init());
+        .plugin(tauri_plugin_fcm::init())
+        .plugin(tauri_plugin_store::Builder::default().build());
 
     // Desktop-only plugins
     #[cfg(desktop)]

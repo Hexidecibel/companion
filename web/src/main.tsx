@@ -2,13 +2,20 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { App } from './App';
 import { applyFontScale } from './services/storage';
+import { initStorage } from './services/persistentStorage';
+import { applySafeAreaInsets } from './utils/platform';
 import './styles/variables.css';
 import './styles/global.css';
 
-applyFontScale();
+applySafeAreaInsets();
 
-ReactDOM.createRoot(document.getElementById('root')!).render(
-  <React.StrictMode>
-    <App />
-  </React.StrictMode>,
-);
+// Initialize persistent storage (restores Tauri store to localStorage),
+// then apply settings and render.
+initStorage().then(() => {
+  applyFontScale();
+  ReactDOM.createRoot(document.getElementById('root')!).render(
+    <React.StrictMode>
+      <App />
+    </React.StrictMode>,
+  );
+});

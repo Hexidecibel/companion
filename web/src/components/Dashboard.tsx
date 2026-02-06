@@ -6,6 +6,7 @@ import { useConnections } from '../hooks/useConnections';
 import { useWorkGroups } from '../hooks/useWorkGroups';
 import { SessionSidebar } from './SessionSidebar';
 import { SessionView } from './SessionView';
+import { MobileDashboard } from './MobileDashboard';
 import { ShortcutHelpOverlay } from './ShortcutHelpOverlay';
 import { NotificationSettingsModal } from './NotificationSettingsModal';
 import { useSessionMute } from '../hooks/useSessionMute';
@@ -22,6 +23,7 @@ export function Dashboard({ onSettings }: DashboardProps) {
   const [showShortcutHelp, setShowShortcutHelp] = useState(false);
   const [merging, setMerging] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [isMobile, setIsMobile] = useState(isMobileViewport());
   const summaries = useAllServerSummaries();
   const sessionMute = useSessionMute(activeSession?.serverId ?? null);
   const { snapshots } = useConnections();
@@ -31,6 +33,14 @@ export function Dashboard({ onSettings }: DashboardProps) {
 
   // Browser notification listener - listens on ALL connected servers
   useBrowserNotificationListener();
+
+  // Track viewport width for mobile/desktop layout switching
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 768px)');
+    const handler = (e: MediaQueryListEvent) => setIsMobile(e.matches);
+    mq.addEventListener('change', handler);
+    return () => mq.removeEventListener('change', handler);
+  }, []);
 
   // Tauri menu event handler
   useEffect(() => {
@@ -146,9 +156,24 @@ export function Dashboard({ onSettings }: DashboardProps) {
 
   const handleSelectSession = useCallback((serverId: string, sessionId: string) => {
     setActiveSession({ serverId, sessionId });
-    // Close sidebar on mobile after selecting
-    if (isMobileViewport()) setSidebarOpen(false);
+    if (isMobileViewport()) {
+      setSidebarOpen(false);
+      // Push history so Android back gesture returns to dashboard
+      history.pushState({ session: true }, '');
+    }
   }, []);
+
+  // Handle popstate (Android back gesture) — deselect session on mobile
+  useEffect(() => {
+    if (!isMobile) return;
+    const handler = (_e: PopStateEvent) => {
+      if (activeSession) {
+        setActiveSession(null);
+      }
+    };
+    window.addEventListener('popstate', handler);
+    return () => window.removeEventListener('popstate', handler);
+  }, [isMobile, activeSession]);
 
   const handleSessionCreated = useCallback((_serverId: string, sessionName: string) => {
     setActiveSession({ serverId: _serverId, sessionId: sessionName });
@@ -245,7 +270,51 @@ export function Dashboard({ onSettings }: DashboardProps) {
   }, [sessionMute]);
 
   const toggleSidebar = useCallback(() => setSidebarOpen(prev => !prev), []);
+  const handleMobileBack = useCallback(() => setActiveSession(null), []);
 
+  // --- Mobile layout: MobileDashboard or full-screen SessionView ---
+  if (isMobile) {
+    if (activeSession) {
+      return (
+        <div className="dashboard">
+          <main className="dashboard-main" style={{ width: '100%' }}>
+            <SessionView
+              serverId={activeSession.serverId}
+              sessionId={activeSession.sessionId}
+              tmuxSessionName={activeSessionSummary?.tmuxSessionName}
+              workGroup={isForemanView ? activeWorkGroup : undefined}
+              onViewWorker={handleViewWorker}
+              onSendWorkerInput={handleSendWorkerInput}
+              onMergeGroup={handleMergeGroup}
+              onCancelGroup={handleCancelGroup}
+              onRetryWorker={handleRetryWorker}
+              onDismissGroup={handleDismissGroup}
+              merging={merging}
+              onToggleSidebar={handleMobileBack}
+            />
+          </main>
+
+          {showNotifSettings && (
+            <NotificationSettingsModal
+              serverId={activeSession.serverId}
+              onClose={() => setShowNotifSettings(false)}
+            />
+          )}
+        </div>
+      );
+    }
+
+    return (
+      <MobileDashboard
+        summaries={summaries}
+        activeSession={activeSession}
+        onSelectSession={handleSelectSession}
+        onSettings={onSettings}
+      />
+    );
+  }
+
+  // --- Desktop layout: Sidebar + SessionView ---
   return (
     <div className="dashboard">
       <div

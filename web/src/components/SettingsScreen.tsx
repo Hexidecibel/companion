@@ -3,6 +3,7 @@ import { useConnections } from '../hooks/useConnections';
 import { connectionManager } from '../services/ConnectionManager';
 import { getFontScale, saveFontScale } from '../services/storage';
 import { clearAllArchives } from '../services/archiveService';
+import { clearStore } from '../services/persistentStorage';
 import { NotificationSettingsModal } from './NotificationSettingsModal';
 import { isTauriDesktop } from '../utils/platform';
 
@@ -71,6 +72,7 @@ export function SettingsScreen({ onBack }: SettingsScreenProps) {
       setConfirmClear(true);
       return;
     }
+    clearStore();
     localStorage.clear();
     window.location.reload();
   };

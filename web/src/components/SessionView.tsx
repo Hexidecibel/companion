@@ -8,6 +8,7 @@ import { useAutoApprove } from '../hooks/useAutoApprove';
 import { useOpenFiles } from '../hooks/useOpenFiles';
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
 import { connectionManager } from '../services/ConnectionManager';
+import { isMobileViewport } from '../utils/platform';
 import { useSessionMute } from '../hooks/useSessionMute';
 import { WaitingIndicator } from './WaitingIndicator';
 import { TaskList } from './TaskList';
@@ -261,10 +262,10 @@ export function SessionView({
           <button
             className="mobile-menu-btn"
             onClick={onToggleSidebar}
-            title="Toggle sidebar"
-            aria-label="Toggle sidebar"
+            title={isMobileViewport() ? 'Back' : 'Toggle sidebar'}
+            aria-label={isMobileViewport() ? 'Back' : 'Toggle sidebar'}
           >
-            &#9776;
+            {isMobileViewport() ? '\u2190' : '\u2630'}
           </button>
         )}
         <div className="session-header-actions">
