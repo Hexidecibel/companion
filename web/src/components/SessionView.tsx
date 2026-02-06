@@ -23,7 +23,7 @@ import { ArtifactViewerModal } from './ArtifactViewerModal';
 import { FileTabBar } from './FileTabBar';
 import { extractPlanFilePath } from './MessageBubble';
 import { SearchBar } from './SearchBar';
-import { ArchiveModal } from './ArchiveModal';
+import { ConversationSearch } from './ConversationSearch';
 import { TerminalPanel } from './TerminalPanel';
 import { WorkGroupBar } from './WorkGroupBar';
 import { WorkGroupPanel } from './WorkGroupPanel';
@@ -83,8 +83,8 @@ export function SessionView({
   const [viewingFile, setViewingFile] = useState<string | null>(null);
   const { openFiles, openFile, closeFile: closeOpenFile, closeAllFiles } = useOpenFiles(serverId, sessionId);
 
-  // Archive state
-  const [showArchiveModal, setShowArchiveModal] = useState(false);
+  // Conversation search state
+  const [showConversationSearch, setShowConversationSearch] = useState(false);
 
   // Artifact viewer state
   const [artifactContent, setArtifactContent] = useState<{ content: string; title?: string } | null>(null);
@@ -122,20 +122,22 @@ export function SessionView({
 
   // Signal to Dashboard that an overlay is open (for back gesture coordination)
   useEffect(() => {
-    const isOverlay = showTerminal || showWorkGroupPanel;
+    const isOverlay = showTerminal || showWorkGroupPanel || showConversationSearch || showFileFinder;
     document.body.dataset.overlay = isOverlay ? 'true' : '';
     return () => { document.body.dataset.overlay = ''; };
-  }, [showTerminal, showWorkGroupPanel]);
+  }, [showTerminal, showWorkGroupPanel, showConversationSearch, showFileFinder]);
 
   // Listen for close-overlay event from Dashboard's back gesture handler
   useEffect(() => {
     const handler = () => {
-      if (showTerminal) setShowTerminal(false);
+      if (showConversationSearch) setShowConversationSearch(false);
+      else if (showFileFinder) setShowFileFinder(false);
+      else if (showTerminal) setShowTerminal(false);
       else if (showWorkGroupPanel) setShowWorkGroupPanel(false);
     };
     window.addEventListener('close-overlay', handler);
     return () => window.removeEventListener('close-overlay', handler);
-  }, [showTerminal, showWorkGroupPanel]);
+  }, [showTerminal, showWorkGroupPanel, showConversationSearch, showFileFinder]);
 
   // Auto-focus input and reset views when session changes
   useEffect(() => {
@@ -253,11 +255,11 @@ export function SessionView({
       else if (showSearch) handleCloseSearch();
       else if (artifactContent) setArtifactContent(null);
       else if (viewingFile) setViewingFile(null);
-      else if (showArchiveModal) setShowArchiveModal(false);
+      else if (showConversationSearch) setShowConversationSearch(false);
       else if (showAgentsModal) setShowAgentsModal(false);
       else if (viewingAgentId) setViewingAgentId(null);
     }},
-  ], [tmuxSessionName, showSearch, showFileFinder, viewingFile, showArchiveModal, showAgentsModal, viewingAgentId, artifactContent, sessionId, autoApprove, sessionMute, handleCloseSearch]));
+  ], [tmuxSessionName, showSearch, showFileFinder, viewingFile, showConversationSearch, showAgentsModal, viewingAgentId, artifactContent, sessionId, autoApprove, sessionMute, handleCloseSearch]));
 
   if (!serverId || !sessionId) {
     return (
@@ -327,10 +329,10 @@ export function SessionView({
       )}
       <button
         className="session-header-btn"
-        onClick={() => setShowArchiveModal(true)}
-        title="View saved archives"
+        onClick={() => setShowConversationSearch(true)}
+        title="Search past conversations"
       >
-        History
+        Search
       </button>
     </div>
   );
@@ -486,8 +488,8 @@ export function SessionView({
         />
       )}
 
-      {showArchiveModal && (
-        <ArchiveModal onClose={() => setShowArchiveModal(false)} />
+      {showConversationSearch && serverId && (
+        <ConversationSearch serverId={serverId} onClose={() => setShowConversationSearch(false)} />
       )}
 
       {showFileFinder && serverId && (

@@ -2,7 +2,6 @@ import { useState, useEffect, useCallback } from 'react';
 import { useConnections } from '../hooks/useConnections';
 import { connectionManager } from '../services/ConnectionManager';
 import { getFontScale, saveFontScale } from '../services/storage';
-import { clearAllArchives } from '../services/archiveService';
 import { clearStore } from '../services/persistentStorage';
 import { NotificationSettingsModal } from './NotificationSettingsModal';
 import { SkillBrowser } from './SkillBrowser';
@@ -24,7 +23,6 @@ export function SettingsScreen({ onBack }: SettingsScreenProps) {
   const [fontScale, setFontScale] = useState(getFontScale);
   const [notifServerId, setNotifServerId] = useState<string | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
-  const [confirmClearHistory, setConfirmClearHistory] = useState(false);
   const [rotatingServer, setRotatingServer] = useState<string | null>(null);
   const [rotateResult, setRotateResult] = useState<{ serverId: string; token?: string; error?: string } | null>(null);
   const [autostart, setAutostart] = useState<boolean | null>(null);
@@ -58,15 +56,6 @@ export function SettingsScreen({ onBack }: SettingsScreenProps) {
   const handleFontScale = (value: number) => {
     saveFontScale(value);
     setFontScale(value);
-  };
-
-  const handleClearHistory = () => {
-    if (!confirmClearHistory) {
-      setConfirmClearHistory(true);
-      return;
-    }
-    clearAllArchives();
-    setConfirmClearHistory(false);
   };
 
   const handleClearData = () => {
@@ -274,23 +263,6 @@ export function SettingsScreen({ onBack }: SettingsScreenProps) {
         {/* Data */}
         <section className="settings-section">
           <h3 className="settings-section-title">Data</h3>
-          <div className="settings-card">
-            <button
-              className={`settings-action-btn ${confirmClearHistory ? 'settings-action-btn-danger' : ''}`}
-              onClick={handleClearHistory}
-              style={{ width: '100%', padding: '10px 14px', fontSize: 14 }}
-            >
-              {confirmClearHistory ? 'Confirm: Clear History' : 'Clear History'}
-            </button>
-            {confirmClearHistory && (
-              <div className="settings-card-detail" style={{ marginTop: 8 }}>
-                This will delete all saved conversation archives.{' '}
-                <button className="settings-cancel-link" onClick={() => setConfirmClearHistory(false)}>
-                  Cancel
-                </button>
-              </div>
-            )}
-          </div>
           <div className="settings-card">
             <button
               className={`settings-danger-btn ${confirmClear ? 'confirming' : ''}`}

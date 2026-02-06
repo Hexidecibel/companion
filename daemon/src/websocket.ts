@@ -5,7 +5,10 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import * as crypto from 'crypto';
-import { spawn } from 'child_process';
+import { spawn, exec } from 'child_process';
+import { promisify } from 'util';
+
+const execAsync = promisify(exec);
 import { SessionWatcher } from './watcher';
 import { InputInjector } from './input-injector';
 import { PushNotificationService } from './push';
@@ -15,6 +18,7 @@ import {
   extractUsageFromFile,
   extractTasks,
   parseConversationChain,
+  parseConversationFile,
 } from './parser';
 import {
   WebSocketMessage,
@@ -1157,6 +1161,14 @@ export class WebSocketHandler {
 
       case 'get_skill_content':
         this.handleGetSkillContent(client, payload as { skillId: string }, requestId);
+        break;
+
+      case 'search_conversations':
+        this.handleSearchConversations(client, payload as { query: string; limit?: number }, requestId);
+        break;
+
+      case 'get_conversation_file':
+        this.handleGetConversationFile(client, payload as { filePath: string; limit?: number; offset?: number }, requestId);
         break;
 
       default:
@@ -3076,6 +3088,243 @@ export class WebSocketHandler {
         type: 'skill_content',
         success: false,
         error: `Skill not found: ${payload.skillId}`,
+        requestId,
+      });
+    }
+  }
+
+  // --- Conversation search ---
+
+  /**
+   * Escape a string for safe use as a shell argument (single-quote wrapping).
+   */
+  private shellEscape(s: string): string {
+    return "'" + s.replace(/'/g, "'\\''") + "'";
+  }
+
+  private async handleSearchConversations(
+    client: AuthenticatedClient,
+    payload: { query: string; limit?: number } | undefined,
+    requestId?: string
+  ): Promise<void> {
+    if (!payload?.query || !payload.query.trim()) {
+      this.send(client.ws, {
+        type: 'search_conversations',
+        success: false,
+        error: 'Missing query',
+        requestId,
+      });
+      return;
+    }
+
+    const query = payload.query.trim();
+    const resultLimit = Math.min(payload.limit || 20, 50);
+
+    try {
+      // Get the project directory from the active session
+      const activeSessionId = this.watcher.getActiveSessionId();
+      if (!activeSessionId) {
+        this.send(client.ws, {
+          type: 'search_conversations',
+          success: true,
+          payload: { results: [] },
+          requestId,
+        });
+        return;
+      }
+
+      const sessions = this.watcher.getSessions();
+      const activeSession = sessions.find(s => s.id === activeSessionId);
+      if (!activeSession?.conversationPath) {
+        this.send(client.ws, {
+          type: 'search_conversations',
+          success: true,
+          payload: { results: [] },
+          requestId,
+        });
+        return;
+      }
+
+      const projectDir = path.dirname(activeSession.conversationPath);
+
+      // List all .jsonl files in the project directory (exclude subagents/)
+      let files: { path: string; name: string; mtime: number }[];
+      try {
+        const entries = fs.readdirSync(projectDir);
+        files = entries
+          .filter(f => f.endsWith('.jsonl'))
+          .map(f => {
+            const fullPath = path.join(projectDir, f);
+            try {
+              const stats = fs.statSync(fullPath);
+              return { path: fullPath, name: f, mtime: stats.mtimeMs };
+            } catch {
+              return null;
+            }
+          })
+          .filter((f): f is { path: string; name: string; mtime: number } => f !== null)
+          .sort((a, b) => b.mtime - a.mtime); // Most recent first
+      } catch {
+        files = [];
+      }
+
+      // Search each file with grep (fast, doesn't load into memory)
+      const escaped = this.shellEscape(query);
+      const results: Array<{
+        filePath: string;
+        fileName: string;
+        lastModified: number;
+        snippet: string;
+        matchCount: number;
+      }> = [];
+
+      for (const file of files) {
+        if (results.length >= resultLimit) break;
+
+        try {
+          // Get match count
+          const { stdout: countOut } = await execAsync(
+            `grep -i -c ${escaped} ${this.shellEscape(file.path)}`,
+            { timeout: 3000 }
+          ).catch(err => {
+            // grep returns exit code 1 for no matches
+            if (err.code === 1) return { stdout: '0' };
+            throw err;
+          });
+          const matchCount = parseInt(countOut.trim(), 10);
+          if (!matchCount || matchCount === 0) continue;
+
+          // Get up to 5 matching lines and pick the first with readable text
+          const { stdout: matchOut } = await execAsync(
+            `grep -i -m 5 ${escaped} ${this.shellEscape(file.path)}`,
+            { timeout: 3000 }
+          ).catch(() => ({ stdout: '' }));
+
+          let snippet = '';
+          const matchLines = matchOut.trim().split('\n').filter(Boolean);
+          const lowerQuery = query.toLowerCase();
+          for (const matchLine of matchLines) {
+            try {
+              const entry = JSON.parse(matchLine);
+              const msg = entry.message;
+              if (!msg?.content) continue;
+              let text = '';
+              if (typeof msg.content === 'string') {
+                text = msg.content;
+              } else if (Array.isArray(msg.content)) {
+                text = msg.content
+                  .filter((b: { type: string; text?: string }) => b.type === 'text' && b.text)
+                  .map((b: { text: string }) => b.text)
+                  .join(' ');
+              }
+              if (!text.trim()) continue;
+              // Find match position and extract surrounding context
+              const lowerText = text.toLowerCase();
+              const idx = lowerText.indexOf(lowerQuery);
+              if (idx >= 0) {
+                const start = Math.max(0, idx - 60);
+                const end = Math.min(text.length, idx + query.length + 60);
+                snippet = (start > 0 ? '...' : '') +
+                  text.slice(start, end).replace(/\n/g, ' ') +
+                  (end < text.length ? '...' : '');
+              } else {
+                snippet = text.slice(0, 120).replace(/\n/g, ' ');
+              }
+              break; // Found a good snippet
+            } catch {
+              continue;
+            }
+          }
+
+          results.push({
+            filePath: file.path,
+            fileName: file.name,
+            lastModified: file.mtime,
+            snippet,
+            matchCount,
+          });
+        } catch {
+          // Skip files that fail
+          continue;
+        }
+      }
+
+      this.send(client.ws, {
+        type: 'search_conversations',
+        success: true,
+        payload: { results },
+        requestId,
+      });
+    } catch (err) {
+      this.send(client.ws, {
+        type: 'search_conversations',
+        success: false,
+        error: String(err),
+        requestId,
+      });
+    }
+  }
+
+  private handleGetConversationFile(
+    client: AuthenticatedClient,
+    payload: { filePath: string; limit?: number; offset?: number } | undefined,
+    requestId?: string
+  ): void {
+    if (!payload?.filePath) {
+      this.send(client.ws, {
+        type: 'conversation_file',
+        success: false,
+        error: 'Missing filePath',
+        requestId,
+      });
+      return;
+    }
+
+    // Security: validate filePath is within ~/.claude/projects/
+    const projectsDir = path.join(this.config.codeHome, 'projects');
+    const resolved = path.resolve(payload.filePath);
+    if (!resolved.startsWith(projectsDir)) {
+      this.send(client.ws, {
+        type: 'conversation_file',
+        success: false,
+        error: 'Invalid file path',
+        requestId,
+      });
+      return;
+    }
+
+    if (!fs.existsSync(resolved)) {
+      this.send(client.ws, {
+        type: 'conversation_file',
+        success: false,
+        error: 'File not found',
+        requestId,
+      });
+      return;
+    }
+
+    try {
+      const messages = parseConversationFile(resolved);
+      const allHighlights = extractHighlights(messages);
+      const total = allHighlights.length;
+      const limit = payload.limit || 50;
+      const offset = payload.offset || 0;
+      const startIdx = Math.max(0, total - offset - limit);
+      const endIdx = Math.max(total - offset, 0);
+      const highlights = allHighlights.slice(startIdx, endIdx);
+      const hasMore = startIdx > 0;
+
+      this.send(client.ws, {
+        type: 'conversation_file',
+        success: true,
+        payload: { highlights, total, hasMore, filePath: resolved },
+        requestId,
+      });
+    } catch (err) {
+      this.send(client.ws, {
+        type: 'conversation_file',
+        success: false,
+        error: String(err),
         requestId,
       });
     }

@@ -3340,95 +3340,119 @@ html {
 }
 
 /* ========================================
-   Archive Modal
+   Conversation Search
    ======================================== */
 
-.archive-list-modal {
-  max-width: 540px;
+.conversation-search {
+  width: 90%;
+  max-width: 680px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  box-shadow: var(--shadow-lg);
+  display: flex;
+  flex-direction: column;
+  max-height: 70vh;
+  animation: fadeIn 0.1s ease-out;
 }
 
-.archive-list-body {
-  flex: 1;
-  overflow-y: auto;
-  padding: 12px 18px;
+.conversation-search-input {
+  width: 100%;
+  padding: 14px 16px;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--border-color);
+  color: var(--text-primary);
+  font-size: 15px;
+  outline: none;
+  font-family: inherit;
 }
 
-.archive-empty {
-  text-align: center;
+.conversation-search-input::placeholder {
   color: var(--text-muted);
-  font-size: 14px;
-  padding: 24px 0;
 }
 
-.archive-item {
+.conversation-search-results {
+  overflow-y: auto;
+  flex: 1;
+  padding: 4px 0;
+}
+
+.conversation-search-item {
+  padding: 10px 16px;
+  cursor: pointer;
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 10px 12px;
-  background-color: var(--bg-primary);
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-  margin-bottom: 6px;
-  transition: border-color 0.15s;
+  gap: 10px;
 }
 
-.archive-item:hover {
-  border-color: var(--bg-hover);
+.conversation-search-item:hover,
+.conversation-search-item-selected {
+  background: var(--bg-hover);
 }
 
-.archive-item-info {
+.conversation-search-item-info {
   flex: 1;
   min-width: 0;
-  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
 }
 
-.archive-item-name {
-  display: block;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text-primary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.archive-item-meta {
-  display: block;
+.conversation-search-date {
   font-size: 11px;
   color: var(--text-muted);
-  margin-top: 2px;
-}
-
-.archive-item-delete {
-  background: none;
-  border: none;
-  color: var(--text-muted);
-  font-size: 12px;
-  cursor: pointer;
-  padding: 4px 6px;
-  border-radius: 4px;
   flex-shrink: 0;
-  transition: color 0.15s, background-color 0.15s;
 }
 
-.archive-item-delete:hover {
-  color: var(--accent-red);
-  background-color: rgba(239, 68, 68, 0.1);
+.conversation-search-snippet {
+  font-size: 13px;
+  color: var(--text-secondary);
+  font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-/* Archive Viewer */
+.conversation-search-match {
+  color: var(--accent-blue);
+  font-weight: 600;
+}
 
-.archive-viewer {
+.conversation-search-count {
+  font-size: 11px;
+  color: var(--text-muted);
+  background: var(--bg-tertiary);
+  border-radius: 10px;
+  padding: 2px 7px;
+  flex-shrink: 0;
+  font-weight: 600;
+}
+
+.conversation-search-empty {
+  padding: 20px 16px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+/* Conversation Search Viewer */
+
+.conversation-search-viewer-mode {
   max-width: 720px;
+  max-height: 80vh;
 }
 
-.archive-viewer-actions {
+.conversation-search-header {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border-color);
+  flex-shrink: 0;
 }
 
-.archive-back-btn {
+.conversation-search-back {
   background: none;
   border: 1px solid var(--border-color);
   color: var(--text-secondary);
@@ -3440,56 +3464,22 @@ html {
   transition: background-color 0.15s, color 0.15s;
 }
 
-.archive-back-btn:hover {
+.conversation-search-back:hover {
   background-color: var(--bg-tertiary);
   color: var(--text-primary);
 }
 
-.archive-viewer-meta {
-  display: flex;
-  gap: 12px;
-  padding: 8px 18px;
-  font-size: 12px;
-  color: var(--text-muted);
-  border-bottom: 1px solid var(--border-color);
-  flex-shrink: 0;
+.conversation-search-header .conversation-search-date {
+  flex: 1;
 }
 
-.archive-viewer-messages {
+.conversation-search-viewer {
   flex: 1;
   overflow-y: auto;
   padding: 12px 18px;
   display: flex;
   flex-direction: column;
   gap: 10px;
-}
-
-.archive-header-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.archive-clear-all-btn {
-  background: none;
-  border: 1px solid rgba(239, 68, 68, 0.3);
-  color: var(--accent-red);
-  font-size: 11px;
-  font-weight: 600;
-  padding: 3px 10px;
-  border-radius: 4px;
-  cursor: pointer;
-  transition: background-color 0.15s, color 0.15s;
-}
-
-.archive-clear-all-btn:hover {
-  background-color: rgba(239, 68, 68, 0.1);
-}
-
-.archive-clear-all-btn.confirming {
-  background-color: var(--accent-red);
-  color: white;
-  border-color: var(--accent-red);
 }
 
 /* ========================================

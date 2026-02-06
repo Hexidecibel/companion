@@ -5,6 +5,7 @@ Quick capture for ideas and tasks. Run `/plan` to process into detailed plans.
 ---
 
 ## Upcoming
+- Unify terminal and chat input: keep InputBar visible when terminal is shown, send Up/Down/Enter as tmux keys when in terminal mode. Remove pause/refresh buttons from terminal toolbar. Just a simple toggle between chat mode and terminal mode sharing the same input bar.
 - Desktop dashboard mode -- toggleable card-based dashboard view alongside current sidebar (for monitoring)
 
 ## In Progress
