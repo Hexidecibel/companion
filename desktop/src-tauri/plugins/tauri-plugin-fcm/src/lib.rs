@@ -47,6 +47,7 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
         .setup(|app, api| {
             #[cfg(mobile)]
             {
+                use tauri::Manager;
                 let fcm = mobile::init(app, api)?;
                 app.manage(fcm);
             }

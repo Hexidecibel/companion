@@ -62,6 +62,15 @@ else
   echo "  Get it from Firebase Console > Project Settings > Android app"
 fi
 
+# 4b. Ensure google-services.json has the right package name
+if [ -f "$GOOGLE_SERVICES_DST" ]; then
+  if ! grep -q "com.hexidecibel.companion" "$GOOGLE_SERVICES_DST"; then
+    echo "WARNING: google-services.json does not contain package 'com.hexidecibel.companion'"
+    echo "  Add a new Android app in Firebase Console with package name: com.hexidecibel.companion"
+    echo "  Or download an updated google-services.json that includes this package"
+  fi
+fi
+
 # 5. Ensure AndroidManifest has required permissions
 MANIFEST="$GEN_ANDROID/app/src/main/AndroidManifest.xml"
 if ! grep -q "POST_NOTIFICATIONS" "$MANIFEST"; then

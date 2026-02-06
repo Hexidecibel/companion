@@ -12,6 +12,13 @@ pub enum Error {
     PluginInvoke(String),
 }
 
+#[cfg(mobile)]
+impl From<tauri::plugin::mobile::PluginInvokeError> for Error {
+    fn from(e: tauri::plugin::mobile::PluginInvokeError) -> Self {
+        Error::PluginInvoke(e.to_string())
+    }
+}
+
 impl Serialize for Error {
     fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
     where

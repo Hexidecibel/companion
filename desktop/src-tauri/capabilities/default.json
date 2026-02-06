@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Companion desktop app capabilities",
+  "description": "Companion shared capabilities (all platforms)",
   "windows": ["main"],
   "permissions": [
     "core:default",
@@ -13,15 +13,10 @@
     "core:window:allow-minimize",
     "core:window:allow-toggle-maximize",
     "core:window:allow-set-fullscreen",
-    "core:menu:default",
     "notification:default",
     "notification:allow-is-permission-granted",
     "notification:allow-request-permission",
     "notification:allow-notify",
-    "autostart:default",
-    "autostart:allow-enable",
-    "autostart:allow-disable",
-    "autostart:allow-is-enabled",
     "shell:allow-open",
     "fcm:default"
   ]
