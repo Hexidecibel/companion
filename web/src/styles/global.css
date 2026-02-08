@@ -1600,6 +1600,46 @@ body {
   cursor: default;
 }
 
+/* Mobile hamburger button — hidden by default, shown on mobile */
+.mobile-menu-btn {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-tertiary);
+  border: none;
+  color: var(--text-primary);
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 18px;
+  flex-shrink: 0;
+  transition: background-color 0.15s;
+}
+
+.mobile-menu-btn:hover {
+  background-color: var(--bg-hover);
+}
+
+.mobile-back-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--bg-tertiary);
+  border: none;
+  color: var(--text-primary);
+  border-radius: 8px;
+  cursor: pointer;
+  padding: 6px 12px;
+  font-size: 14px;
+  font-weight: 500;
+  flex-shrink: 0;
+}
+
+.mobile-back-btn .back-arrow {
+  font-size: 16px;
+}
+
 /* ========================================
    Responsive — Mobile
    ======================================== */
@@ -1812,38 +1852,6 @@ body {
   }
 }
 
-/* Mobile hamburger button — hidden by default, shown on mobile */
-.mobile-menu-btn {
-  display: none;
-  align-items: center;
-  justify-content: center;
-  background: var(--bg-tertiary);
-  border: none;
-  color: var(--text-primary);
-  width: 36px;
-  height: 36px;
-  border-radius: 8px;
-  cursor: pointer;
-  font-size: 18px;
-  flex-shrink: 0;
-  transition: background-color 0.15s;
-}
-
-.mobile-menu-btn:hover {
-  background-color: var(--bg-hover);
-}
-
-.mobile-back-btn {
-  width: auto;
-  padding: 6px 12px;
-  font-size: 14px;
-  font-weight: 500;
-  gap: 4px;
-}
-
-.mobile-back-btn .back-arrow {
-  font-size: 16px;
-}
 
 /* WebKit-specific fixes */
 
@@ -6096,6 +6104,25 @@ html {
   gap: 4px;
   flex-shrink: 0;
   margin-left: auto;
+}
+
+.mobile-server-new-btn,
+.mobile-server-tmux-btn {
+  background: none;
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 3px 8px;
+  border-radius: 6px;
+  line-height: 1;
+}
+
+.mobile-server-new-btn.active {
+  background: var(--gradient-button);
+  color: white;
+  border-color: var(--accent-purple);
 }
 
 .mobile-server-toggle-btn {

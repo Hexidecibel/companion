@@ -3,6 +3,8 @@ import { ServerSummary, SessionSummary, ActiveSession } from '../types';
 import { useConnections } from '../hooks/useConnections';
 import { useServers } from '../hooks/useServers';
 import { ServerForm } from './ServerForm';
+import { NewSessionPanel } from './NewSessionPanel';
+import { TmuxModal } from './TmuxModal';
 import { ConnectionSnapshot } from '../services/ConnectionManager';
 
 const STATUS_DOT_CLASS: Record<SessionSummary['status'], string> = {
@@ -42,12 +44,14 @@ interface MobileDashboardProps {
   summaries: Map<string, ServerSummary>;
   activeSession: ActiveSession | null;
   onSelectSession: (serverId: string, sessionId: string) => void;
+  onSessionCreated?: (serverId: string, sessionName: string) => void;
   onSettings?: () => void;
 }
 
 export function MobileDashboard({
   summaries,
   onSelectSession,
+  onSessionCreated,
   onSettings,
 }: MobileDashboardProps) {
   const { snapshots } = useConnections();
@@ -55,6 +59,8 @@ export function MobileDashboard({
   const [addingServer, setAddingServer] = useState(false);
   const [editingServerId, setEditingServerId] = useState<string | undefined>();
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+  const [newSessionServerId, setNewSessionServerId] = useState<string | null>(null);
+  const [tmuxServerId, setTmuxServerId] = useState<string | null>(null);
 
   // Check if any session across all servers needs attention
   const hasWaiting = useMemo(() => {
@@ -63,6 +69,12 @@ export function MobileDashboard({
     }
     return false;
   }, [summaries]);
+
+  const tmuxServerName = useMemo(() => {
+    if (!tmuxServerId) return '';
+    const snap = snapshots.find((s) => s.serverId === tmuxServerId);
+    return snap?.serverName ?? '';
+  }, [tmuxServerId, snapshots]);
 
   return (
     <div className="mobile-dashboard">
@@ -119,7 +131,29 @@ export function MobileDashboard({
                 }}
                 onEdit={() => setEditingServerId(snap.serverId)}
                 isEnabled={isEnabled}
+                onNewSession={() =>
+                  setNewSessionServerId(
+                    newSessionServerId === snap.serverId ? null : snap.serverId,
+                  )
+                }
+                onTmuxSessions={() =>
+                  setTmuxServerId(
+                    tmuxServerId === snap.serverId ? null : snap.serverId,
+                  )
+                }
+                newSessionOpen={newSessionServerId === snap.serverId}
               />
+              {newSessionServerId === snap.serverId && (
+                <NewSessionPanel
+                  serverId={snap.serverId}
+                  serverName={snap.serverName}
+                  onCreated={(sid, name) => {
+                    setNewSessionServerId(null);
+                    onSessionCreated?.(sid, name);
+                  }}
+                  onClose={() => setNewSessionServerId(null)}
+                />
+              )}
               {confirmDelete === snap.serverId && (
                 <div className="mobile-confirm-delete">
                   Tap delete again to confirm, or{' '}
@@ -156,6 +190,14 @@ export function MobileDashboard({
           </div>
         )}
       </div>
+
+      {tmuxServerId && (
+        <TmuxModal
+          serverId={tmuxServerId}
+          serverName={tmuxServerName}
+          onClose={() => setTmuxServerId(null)}
+        />
+      )}
     </div>
   );
 }
@@ -170,9 +212,12 @@ interface ServerCardProps {
   onDelete: () => void;
   onEdit: () => void;
   isEnabled: boolean;
+  onNewSession: () => void;
+  onTmuxSessions: () => void;
+  newSessionOpen: boolean;
 }
 
-function ServerCard({ snap, summary, onSelectSession, onToggleEnabled, onDelete, onEdit, isEnabled }: ServerCardProps) {
+function ServerCard({ snap, summary, onSelectSession, onToggleEnabled, onDelete, onEdit, isEnabled, onNewSession, onTmuxSessions, newSessionOpen }: ServerCardProps) {
   const isConnected = snap.state.status === 'connected';
   const isConnecting = snap.state.status === 'connecting' || snap.state.status === 'reconnecting';
   const sessions = summary ? sortSessions(summary.sessions) : [];
@@ -195,6 +240,24 @@ function ServerCard({ snap, summary, onSelectSession, onToggleEnabled, onDelete,
           <span className="mobile-attention-dot" />
         )}
         <div className="mobile-server-actions">
+          {isConnected && (
+            <>
+              <button
+                className={`mobile-server-new-btn ${newSessionOpen ? 'active' : ''}`}
+                onClick={onNewSession}
+                title="New session"
+              >
+                +
+              </button>
+              <button
+                className="mobile-server-tmux-btn"
+                onClick={onTmuxSessions}
+                title="Tmux sessions"
+              >
+                T
+              </button>
+            </>
+          )}
           <button
             className={`mobile-server-toggle-btn ${isEnabled ? 'active' : ''}`}
             onClick={onToggleEnabled}

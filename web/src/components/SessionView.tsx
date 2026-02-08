@@ -367,14 +367,25 @@ export function SessionView({
       {/* Top header: back arrow on mobile, full header on desktop */}
       <div className={`session-header ${mobile ? 'session-header-mobile' : ''}`}>
         {onToggleSidebar && (
-          <button
-            className={`mobile-menu-btn ${mobile ? 'mobile-back-btn' : ''}`}
-            onClick={onToggleSidebar}
-            title={mobile ? 'Back' : 'Toggle sidebar'}
-            aria-label={mobile ? 'Back' : 'Toggle sidebar'}
-          >
-            {mobile ? <><span className="back-arrow">{'\u2190'}</span> Back</> : '\u2630'}
-          </button>
+          mobile ? (
+            <button
+              className="mobile-back-btn"
+              onClick={onToggleSidebar}
+              title="Back"
+              aria-label="Back"
+            >
+              <span className="back-arrow">{'\u2190'}</span> Back
+            </button>
+          ) : (
+            <button
+              className="mobile-menu-btn"
+              onClick={onToggleSidebar}
+              title="Toggle sidebar"
+              aria-label="Toggle sidebar"
+            >
+              {'\u2630'}
+            </button>
+          )
         )}
         {!mobile && actionButtons}
       </div>

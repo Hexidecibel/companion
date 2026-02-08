@@ -177,6 +177,14 @@ export function Dashboard({ onSettings }: DashboardProps) {
     }
   }, []);
 
+  // Push a base history entry on mobile so back from dashboard doesn't exit the app
+  useEffect(() => {
+    if (!isMobile) return;
+    if (!history.state?.base) {
+      history.replaceState({ base: true }, '');
+    }
+  }, [isMobile]);
+
   // Handle popstate (Android back gesture) — close overlays first, then deselect session
   useEffect(() => {
     if (!isMobile) return;
@@ -191,6 +199,11 @@ export function Dashboard({ onSettings }: DashboardProps) {
         history.pushState({ session: true }, '');
       } else if (activeSession) {
         setActiveSession(null);
+        // Re-push base entry so next back doesn't exit
+        history.pushState({ base: true }, '');
+      } else {
+        // On dashboard with nowhere to go — re-push to prevent app exit
+        history.pushState({ base: true }, '');
       }
     };
     window.addEventListener('popstate', handler);
@@ -331,6 +344,7 @@ export function Dashboard({ onSettings }: DashboardProps) {
         summaries={summaries}
         activeSession={activeSession}
         onSelectSession={handleSelectSession}
+        onSessionCreated={handleSessionCreated}
         onSettings={onSettings}
       />
     );
