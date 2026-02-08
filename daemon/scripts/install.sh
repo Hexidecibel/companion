@@ -272,6 +272,45 @@ build_daemon() {
   echo -e "  ${GREEN}✓${NC} Build complete"
 }
 
+# Build the web client
+build_web() {
+  echo ""
+  echo -e "${BLUE}Building web client...${NC}"
+
+  WEB_DIR="$SOURCE_DIR/../web"
+
+  if [[ ! -d "$WEB_DIR" ]]; then
+    echo -e "  ${YELLOW}Web directory not found at $WEB_DIR, skipping${NC}"
+    return 0
+  fi
+
+  cd "$WEB_DIR"
+
+  if [[ -f "./dist/index.html" ]]; then
+    echo -e "  ${GREEN}✓${NC} Web build already exists"
+
+    if [[ "./src/main.tsx" -nt "./dist/index.html" ]]; then
+      echo -e "  ${YELLOW}Source is newer than build, rebuilding...${NC}"
+      NODE_ENV=development npm install
+      npm run build
+    fi
+  else
+    echo -e "  Installing npm dependencies..."
+    NODE_ENV=development npm install
+
+    echo -e "  Building web client..."
+    npm run build
+  fi
+
+  if [[ ! -f "./dist/index.html" ]]; then
+    echo -e "  ${YELLOW}Web build failed, web client will not be available${NC}"
+    return 0
+  fi
+
+  echo -e "  ${GREEN}✓${NC} Web client built"
+  cd "$SOURCE_DIR"
+}
+
 # Install to target directory
 install_files() {
   echo ""
@@ -287,6 +326,16 @@ install_files() {
   cp -r "$SOURCE_DIR/dist" "$INSTALL_DIR/"
   cp "$SOURCE_DIR/package.json" "$INSTALL_DIR/"
   cp "$SOURCE_DIR/package-lock.json" "$INSTALL_DIR/" 2>/dev/null || true
+
+  # Copy web client build if available
+  WEB_DIST="$SOURCE_DIR/../web/dist"
+  if [[ -d "$WEB_DIST" ]]; then
+    mkdir -p "$INSTALL_DIR/web/dist"
+    cp -r "$WEB_DIST/." "$INSTALL_DIR/web/dist/"
+    echo -e "  ${GREEN}✓${NC} Web client installed"
+  else
+    echo -e "  ${YELLOW}!${NC} Web client not built, /web will be unavailable"
+  fi
 
   # Install production dependencies
   cd "$INSTALL_DIR"
@@ -542,6 +591,7 @@ main() {
   install_dependencies
   setup_source
   build_daemon
+  build_web
   install_files
   setup_config
   setup_service
