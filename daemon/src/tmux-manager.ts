@@ -295,12 +295,21 @@ export class TmuxManager {
   /**
    * Capture the current terminal output from a tmux pane.
    * Returns the last N lines of visible output.
+   * When offset is provided, captures lines further back in scrollback:
+   *   offset=0 (default): last `lines` lines (-S -lines)
+   *   offset=150: lines 150-300 from bottom (-S -300 -E -150)
    */
-  async capturePane(sessionName: string, lines: number = 100): Promise<string> {
+  async capturePane(sessionName: string, lines: number = 100, offset: number = 0): Promise<string> {
     try {
-      const { stdout } = await execAsync(
-        `tmux capture-pane -p -e -t "${sessionName}" -S -${lines} 2>/dev/null`
-      );
+      let cmd: string;
+      if (offset > 0) {
+        const start = offset + lines;
+        const end = offset;
+        cmd = `tmux capture-pane -p -e -t "${sessionName}" -S -${start} -E -${end} 2>/dev/null`;
+      } else {
+        cmd = `tmux capture-pane -p -e -t "${sessionName}" -S -${lines} 2>/dev/null`;
+      }
+      const { stdout } = await execAsync(cmd);
       return stdout;
     } catch {
       return '';

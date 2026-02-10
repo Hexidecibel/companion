@@ -35,11 +35,15 @@ function spanStyle(span: AnsiSpan): React.CSSProperties {
 }
 
 export function TerminalPanel({ serverId, tmuxSessionName, fastPoll, onClose }: TerminalPanelProps) {
-  const [lines, setLines] = useState<AnsiSpan[][]>([]);
+  const [liveLines, setLiveLines] = useState<AnsiSpan[][]>([]);
+  const [historyLines, setHistoryLines] = useState<AnsiSpan[][]>([]);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(true);
   const outputRef = useRef<HTMLDivElement>(null);
   const autoScrollRef = useRef(true);
+  const totalLoadedRef = useRef(LINE_COUNT);
   const { getServer } = useServers();
 
   const server = getServer(serverId);
@@ -57,7 +61,7 @@ export function TerminalPanel({ serverId, tmuxSessionName, fastPoll, onClose }: 
       if (response.success && response.payload) {
         const payload = response.payload as { output: string };
         if (payload.output) {
-          setLines(parseAnsiText(payload.output));
+          setLiveLines(parseAnsiText(payload.output));
           setError(null);
         }
       } else if (response.error) {
@@ -68,6 +72,61 @@ export function TerminalPanel({ serverId, tmuxSessionName, fastPoll, onClose }: 
     }
   }, [serverId, tmuxSessionName]);
 
+  const loadMore = useCallback(async () => {
+    if (loadingMore || !hasMore) return;
+    setLoadingMore(true);
+
+    const conn = connectionManager.getConnection(serverId);
+    if (!conn || !conn.isConnected()) {
+      setLoadingMore(false);
+      return;
+    }
+
+    try {
+      const offset = totalLoadedRef.current;
+      const response = await conn.sendRequest('get_terminal_output', {
+        sessionName: tmuxSessionName,
+        lines: LINE_COUNT,
+        offset,
+      });
+
+      if (response.success && response.payload) {
+        const payload = response.payload as { output: string };
+        if (payload.output) {
+          const parsed = parseAnsiText(payload.output);
+          if (parsed.length === 0) {
+            setHasMore(false);
+          } else {
+            // Save scroll position
+            const el = outputRef.current;
+            const prevHeight = el?.scrollHeight || 0;
+
+            setHistoryLines(prev => [...parsed, ...prev]);
+            totalLoadedRef.current += parsed.length;
+
+            if (parsed.length < LINE_COUNT) {
+              setHasMore(false);
+            }
+
+            // Restore scroll position after prepend
+            requestAnimationFrame(() => {
+              if (el) {
+                const newHeight = el.scrollHeight;
+                el.scrollTop += newHeight - prevHeight;
+              }
+            });
+          }
+        } else {
+          setHasMore(false);
+        }
+      }
+    } catch {
+      // Silently ignore
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [serverId, tmuxSessionName, loadingMore, hasMore]);
+
   // Poll for terminal output
   useEffect(() => {
     fetchOutput();
@@ -76,12 +135,19 @@ export function TerminalPanel({ serverId, tmuxSessionName, fastPoll, onClose }: 
     return () => clearInterval(timer);
   }, [fetchOutput, fastPoll]);
 
+  // Reset history when session changes
+  useEffect(() => {
+    setHistoryLines([]);
+    setHasMore(true);
+    totalLoadedRef.current = LINE_COUNT;
+  }, [serverId, tmuxSessionName]);
+
   // Auto-scroll to bottom
   useEffect(() => {
     if (autoScrollRef.current && outputRef.current) {
       outputRef.current.scrollTop = outputRef.current.scrollHeight;
     }
-  }, [lines]);
+  }, [liveLines]);
 
   // Track if user has scrolled up
   const handleScroll = useCallback(() => {
@@ -105,6 +171,8 @@ export function TerminalPanel({ serverId, tmuxSessionName, fastPoll, onClose }: 
       setTimeout(() => setCopied(false), 2000);
     });
   }, [sshCommand]);
+
+  const allLines = [...historyLines, ...liveLines];
 
   return (
     <div className="terminal-panel">
@@ -163,7 +231,16 @@ export function TerminalPanel({ serverId, tmuxSessionName, fastPoll, onClose }: 
           }
         }}
       >
-        {lines.map((spans, i) => (
+        {hasMore && (
+          <button
+            className="terminal-load-more"
+            onClick={loadMore}
+            disabled={loadingMore}
+          >
+            {loadingMore ? 'Loading...' : 'Load older output'}
+          </button>
+        )}
+        {allLines.map((spans, i) => (
           <div key={i} className="terminal-line">
             {spans.map((span, j) => (
               <span key={j} style={spanStyle(span)}>

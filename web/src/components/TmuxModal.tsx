@@ -10,11 +10,12 @@ interface TmuxModalProps {
 }
 
 export function TmuxModal({ serverId, serverName, onClose }: TmuxModalProps) {
-  const { sessions, loading, error, refresh, killSession, createSession } = useTmuxSessions(serverId);
+  const { sessions, loading, error, refresh, killSession, killAllManaged, createSession } = useTmuxSessions(serverId);
   const [createDir, setCreateDir] = useState('');
   const [startCli, setStartCli] = useState(true);
   const [creating, setCreating] = useState(false);
   const [killingName, setKillingName] = useState<string | null>(null);
+  const [killingAll, setKillingAll] = useState(false);
 
   useEffect(() => {
     refresh();
@@ -69,7 +70,22 @@ export function TmuxModal({ serverId, serverName, onClose }: TmuxModalProps) {
 
           {tagged.length > 0 && (
             <div className="tmux-section">
-              <div className="tmux-section-title">Companion-managed</div>
+              <div className="tmux-section-title">
+                Companion-managed
+                {tagged.length > 1 && (
+                  <button
+                    className="tmux-kill-all-btn"
+                    disabled={killingAll}
+                    onClick={async () => {
+                      setKillingAll(true);
+                      await killAllManaged();
+                      setKillingAll(false);
+                    }}
+                  >
+                    {killingAll ? 'Killing...' : `Kill All (${tagged.length})`}
+                  </button>
+                )}
+              </div>
               {tagged.map((s) => (
                 <TmuxSessionCard
                   key={s.name}

@@ -164,8 +164,8 @@ async function main(): Promise<void> {
     mdns.start();
   }
 
-  // Start file watchers
-  watcher.start();
+  // Start file watchers (await so tmux paths are loaded before chokidar scans)
+  await watcher.start();
   subAgentWatcher.start();
 
   // Auto-approve tools (from config and/or per-session client toggle)

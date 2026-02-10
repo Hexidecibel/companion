@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { PendingImage, WorkGroup } from '../types';
 import { useConversation } from '../hooks/useConversation';
 import { useTasks } from '../hooks/useTasks';
@@ -10,6 +10,7 @@ import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
 import { connectionManager } from '../services/ConnectionManager';
 import { isMobileViewport } from '../utils/platform';
 import { useSessionMute } from '../hooks/useSessionMute';
+import { useMessageQueue } from '../hooks/useMessageQueue';
 import { useSkills } from '../hooks/useSkills';
 import { WaitingIndicator } from './WaitingIndicator';
 import { TaskList } from './TaskList';
@@ -28,6 +29,7 @@ import { TerminalPanel } from './TerminalPanel';
 import { WorkGroupBar } from './WorkGroupBar';
 import { WorkGroupPanel } from './WorkGroupPanel';
 import { FileFinder } from './FileFinder';
+import { QueuedMessageBar } from './QueuedMessageBar';
 
 interface SessionViewProps {
   serverId: string | null;
@@ -67,13 +69,14 @@ export function SessionView({
     error,
     sendInput,
     loadMore,
-  } = useConversation(serverId, sessionId);
+  } = useConversation(serverId, sessionId, tmuxSessionName);
 
   const { tasks, loading: tasksLoading } = useTasks(serverId, sessionId);
   const { agents, runningCount, completedCount, totalAgents } = useSubAgents(serverId, sessionId);
   const autoApprove = useAutoApprove(serverId, sessionId);
   const sessionMute = useSessionMute(serverId);
   const { skills } = useSkills(serverId);
+  const { queuedMessages, enqueue, cancel: cancelQueued, edit: editQueued, clearAll: clearAllQueued } = useMessageQueue(serverId, sessionId);
   // Sub-agent state
   const [showAgentsModal, setShowAgentsModal] = useState(false);
   const [viewingAgentId, setViewingAgentId] = useState<string | null>(null);
@@ -154,10 +157,29 @@ export function SessionView({
 
   const handleSend = useCallback(
     async (text: string): Promise<boolean> => {
+      // Only queue when we positively know Claude is working (status loaded, not waiting).
+      // When status is null/unknown, send directly to avoid blocking the user.
+      if (status && !status.isWaitingForInput && status.isRunning) {
+        enqueue(text);
+        return true;
+      }
       return sendInput(text);
     },
-    [sendInput],
+    [sendInput, status, enqueue],
   );
+
+  // Auto-send queued messages when Claude becomes ready
+  const drainingRef = useRef(false);
+  useEffect(() => {
+    if (status?.isWaitingForInput && queuedMessages.length > 0 && !drainingRef.current) {
+      drainingRef.current = true;
+      const next = queuedMessages[0];
+      sendInput(next.text).then((ok) => {
+        if (ok) cancelQueued(next.id);
+        drainingRef.current = false;
+      });
+    }
+  }, [status?.isWaitingForInput, queuedMessages, cancelQueued, sendInput]);
 
   const handleSendWithImages = useCallback(
     async (text: string, images: PendingImage[]): Promise<boolean> => {
@@ -201,6 +223,7 @@ export function SessionView({
         const response = await conn.sendRequest('send_with_images', {
           message: text,
           imagePaths,
+          tmuxSessionName,
         });
 
         return response.success;
@@ -477,6 +500,13 @@ export function SessionView({
             </div>
           )}
       </div>
+
+      <QueuedMessageBar
+        messages={queuedMessages}
+        onCancel={cancelQueued}
+        onEdit={editQueued}
+        onClearAll={clearAllQueued}
+      />
 
       <InputBar
         onSend={handleSend}

@@ -8,6 +8,7 @@ interface UseTmuxSessionsReturn {
   error: string | null;
   refresh: () => Promise<void>;
   killSession: (sessionName: string) => Promise<boolean>;
+  killAllManaged: () => Promise<number>;
   createSession: (dir: string, startCli: boolean) => Promise<boolean>;
 }
 
@@ -55,13 +56,30 @@ export function useTmuxSessions(serverId: string | null): UseTmuxSessionsReturn 
     }
   }, [serverId]);
 
+  const killAllManaged = useCallback(async (): Promise<number> => {
+    if (!serverId) return 0;
+    const conn = connectionManager.getConnection(serverId);
+    if (!conn || !conn.isConnected()) return 0;
+
+    const managed = sessions.filter((s) => s.tagged);
+    let killed = 0;
+    for (const s of managed) {
+      try {
+        const response = await conn.sendRequest('kill_tmux_session', { sessionName: s.name });
+        if (response.success) killed++;
+      } catch { /* continue */ }
+    }
+    setSessions((prev) => prev.filter((s) => !s.tagged));
+    return killed;
+  }, [serverId, sessions]);
+
   const createSession = useCallback(async (dir: string, startCli: boolean): Promise<boolean> => {
     if (!serverId) return false;
     const conn = connectionManager.getConnection(serverId);
     if (!conn || !conn.isConnected()) return false;
 
     try {
-      const response = await conn.sendRequest('create_tmux_session', { dir, startCli });
+      const response = await conn.sendRequest('create_tmux_session', { workingDir: dir, startCli });
       if (response.success) {
         await refresh();
         return true;
@@ -72,5 +90,5 @@ export function useTmuxSessions(serverId: string | null): UseTmuxSessionsReturn 
     }
   }, [serverId, refresh]);
 
-  return { sessions, loading, error, refresh, killSession, createSession };
+  return { sessions, loading, error, refresh, killSession, killAllManaged, createSession };
 }

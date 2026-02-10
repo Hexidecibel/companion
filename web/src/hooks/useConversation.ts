@@ -22,9 +22,12 @@ interface UseConversationReturn {
   loadMore: () => void;
 }
 
+let clientMessageCounter = 0;
+
 export function useConversation(
   serverId: string | null,
   sessionId: string | null,
+  tmuxSessionName?: string,
 ): UseConversationReturn {
   const [highlights, setHighlights] = useState<ConversationHighlight[]>([]);
   const [status, setStatus] = useState<SessionStatus | null>(null);
@@ -78,8 +81,8 @@ export function useConversation(
         await conn.sendRequest('switch_session', { sessionId, epoch: guardEpoch });
 
         const [hlResponse, statusResponse] = await Promise.all([
-          conn.sendRequest('get_highlights', { limit: PAGE_SIZE }),
-          conn.sendRequest('get_status'),
+          conn.sendRequest('get_highlights', { limit: PAGE_SIZE, sessionId }),
+          conn.sendRequest('get_status', { sessionId }),
         ]);
 
         if (cancelled || !isValid(serverId!, sessionId!, guardEpoch)) return;
@@ -120,8 +123,8 @@ export function useConversation(
         // Request at least as many items as currently loaded so load-more results aren't wiped
         const pollLimit = Math.max(PAGE_SIZE, highlightsRef.current.length);
         const [hlResponse, statusResponse] = await Promise.all([
-          conn.sendRequest('get_highlights', { limit: pollLimit }),
-          conn.sendRequest('get_status'),
+          conn.sendRequest('get_highlights', { limit: pollLimit, sessionId }),
+          conn.sendRequest('get_status', { sessionId }),
         ]);
 
         if (cancelled || !isValid(serverId!, sessionId!, guardEpoch)) return;
@@ -153,9 +156,12 @@ export function useConversation(
       }
     });
 
-    // Listen for broadcast updates
+    // Listen for broadcast updates — only act on events for THIS session
     const unsubMessage = conn.onMessage((msg) => {
       if (cancelled || !isValid(serverId!, sessionId!, guardEpoch)) return;
+
+      // Filter: only process broadcasts for this session (or unscoped ones)
+      if (msg.sessionId && msg.sessionId !== sessionId) return;
 
       if (msg.type === 'conversation_update' && msg.payload) {
         // Broadcast received, re-fetch highlights
@@ -186,6 +192,7 @@ export function useConversation(
       .sendRequest('get_highlights', {
         limit: PAGE_SIZE,
         offset: highlights.length,
+        sessionId,
       })
       .then((response) => {
         if (!isValid(serverId, sessionId, guardEpoch)) return;
@@ -213,14 +220,36 @@ export function useConversation(
       const conn = connectionManager.getConnection(serverId);
       if (!conn || !conn.isConnected()) return false;
 
+      // Generate a unique client message ID for server-side tracking
+      const clientMessageId = `sent-${Date.now()}-${++clientMessageCounter}`;
+
       try {
-        const response = await conn.sendRequest('send_input', { input: text, sessionId });
+        const response = await conn.sendRequest('send_input', {
+          input: text,
+          sessionId,
+          tmuxSessionName: tmuxSessionName || sessionId,
+          clientMessageId,
+        });
+        if (response.success) {
+          // Optimistic display — server will include this in future get_highlights
+          // via its pendingSentMessages tracking, but show immediately for instant UX
+          setHighlights((prev) => [
+            ...prev,
+            {
+              id: clientMessageId,
+              type: 'user' as const,
+              content: text,
+              timestamp: Date.now(),
+              isWaitingForChoice: false,
+            },
+          ]);
+        }
         return response.success;
       } catch {
         return false;
       }
     },
-    [serverId, sessionId],
+    [serverId, sessionId, tmuxSessionName],
   );
 
   return { highlights, status, loading, loadingMore, hasMore, error, sendInput, loadMore };

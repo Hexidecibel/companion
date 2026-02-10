@@ -466,6 +466,7 @@ WorkingDirectory=$INSTALL_DIR
 ExecStart=$(which node) $INSTALL_DIR/dist/index.js
 Restart=always
 RestartSec=5
+KillMode=process
 Environment=CONFIG_PATH=$CONFIG_DIR/config.json
 Environment=NODE_ENV=production
 

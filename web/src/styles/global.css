@@ -2981,22 +2981,17 @@ html {
    ======================================== */
 
 .queued-bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
   padding: 6px 16px;
   background-color: rgba(245, 158, 11, 0.1);
   border-top: 1px solid rgba(245, 158, 11, 0.15);
   flex-shrink: 0;
 }
 
-.queued-bar-info {
+.queued-bar-header {
   display: flex;
   align-items: center;
-  gap: 8px;
-  min-width: 0;
-  flex: 1;
+  justify-content: space-between;
+  margin-bottom: 4px;
 }
 
 .queued-bar-count {
@@ -3004,21 +2999,50 @@ html {
   font-weight: 600;
   color: var(--accent-amber);
   white-space: nowrap;
-  flex-shrink: 0;
+}
+
+.queued-bar-clear {
+  background: none;
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  color: var(--accent-amber);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.15s;
+}
+
+.queued-bar-clear:hover {
+  background-color: rgba(245, 158, 11, 0.15);
+}
+
+.queued-bar-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 3px 0;
 }
 
 .queued-bar-preview {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--text-muted);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  min-width: 0;
+  flex: 1;
 }
 
 .queued-bar-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
   flex-shrink: 0;
 }
 
+.queued-bar-edit-btn,
 .queued-bar-cancel {
   background: none;
   border: 1px solid rgba(245, 158, 11, 0.3);
@@ -3031,7 +3055,48 @@ html {
   transition: background-color 0.15s;
 }
 
+.queued-bar-edit-btn:hover,
 .queued-bar-cancel:hover {
+  background-color: rgba(245, 158, 11, 0.15);
+}
+
+.queued-bar-edit {
+  flex: 1;
+}
+
+.queued-bar-textarea {
+  width: 100%;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  border: 1px solid var(--accent-amber);
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: 12px;
+  font-family: inherit;
+  resize: none;
+}
+
+.queued-bar-edit-actions {
+  display: flex;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.queued-bar-save,
+.queued-bar-cancel-edit {
+  background: none;
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  color: var(--accent-amber);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.15s;
+}
+
+.queued-bar-save:hover,
+.queued-bar-cancel-edit:hover {
   background-color: rgba(245, 158, 11, 0.15);
 }
 
@@ -3552,6 +3617,33 @@ html {
   letter-spacing: 0.5px;
   color: var(--text-muted);
   margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tmux-kill-all-btn {
+  background: none;
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  color: var(--accent-red);
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  text-transform: none;
+  letter-spacing: 0;
+  margin-left: auto;
+  transition: background-color 0.15s;
+}
+
+.tmux-kill-all-btn:hover:not(:disabled) {
+  background-color: rgba(239, 68, 68, 0.15);
+}
+
+.tmux-kill-all-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
 .tmux-session-card {
@@ -4709,6 +4801,29 @@ html {
   min-height: 1em;
 }
 
+.terminal-load-more {
+  display: block;
+  width: 100%;
+  padding: 8px;
+  margin-bottom: 8px;
+  background: rgba(88, 166, 255, 0.1);
+  border: 1px solid rgba(88, 166, 255, 0.3);
+  border-radius: 4px;
+  color: #58a6ff;
+  font-size: 12px;
+  cursor: pointer;
+  text-align: center;
+}
+
+.terminal-load-more:hover:not(:disabled) {
+  background: rgba(88, 166, 255, 0.2);
+}
+
+.terminal-load-more:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 
 /* SSH command display */
 .ssh-command {
@@ -4791,6 +4906,59 @@ html {
 
 .sidebar-group-toggle:hover {
   color: var(--text-primary);
+}
+
+/* Sidebar: project group header (for multi-session projects) */
+.sidebar-project-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px 2px;
+  cursor: pointer;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.sidebar-project-header:hover {
+  color: var(--text-secondary);
+}
+
+.sidebar-group-toggle-inline {
+  font-size: 9px;
+  line-height: 1;
+}
+
+.sidebar-project-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Mobile: project group header */
+.mobile-project-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px 2px;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.mobile-project-count {
+  background: var(--bg-tertiary);
+  color: var(--text-muted);
+  font-size: 10px;
+  padding: 0 5px;
+  border-radius: 8px;
+  line-height: 16px;
 }
 
 /* Sidebar: mini progress bar under foreman */
@@ -6243,6 +6411,37 @@ html {
   font-size: 12px;
   color: var(--text-muted);
   flex-shrink: 0;
+}
+
+.mobile-session-kill-confirm {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.mobile-kill-btn {
+  background: none;
+  border: 1px solid rgba(239, 68, 68, 0.4);
+  color: var(--accent-red);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.mobile-kill-btn:disabled {
+  opacity: 0.5;
+}
+
+.mobile-kill-cancel-btn {
+  background: none;
+  border: 1px solid var(--border-color);
+  color: var(--text-muted);
+  font-size: 12px;
+  padding: 4px 12px;
+  border-radius: 4px;
+  cursor: pointer;
 }
 
 /* Empty state */

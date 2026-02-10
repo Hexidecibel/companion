@@ -3,6 +3,7 @@ import { useEscalationConfig, EscalationConfig } from '../hooks/useEscalationCon
 import { useDeviceManagement } from '../hooks/useDeviceManagement';
 import { useNotificationHistory } from '../hooks/useNotificationHistory';
 import { useNotifications } from '../hooks/useNotifications';
+import { useServers } from '../hooks/useServers';
 
 type Tab = 'escalation' | 'devices' | 'history';
 
@@ -64,6 +65,7 @@ export function NotificationSettingsModal({ serverId, onClose }: NotificationSet
   const devices = useDeviceManagement(serverId);
   const history = useNotificationHistory(serverId);
   const notifications = useNotifications(serverId);
+  const { isParallelWorkersEnabled, toggleParallelWorkers } = useServers();
 
   // Load data on mount / tab change
   useEffect(() => {
@@ -94,10 +96,30 @@ export function NotificationSettingsModal({ serverId, onClose }: NotificationSet
 
         <div className="notif-tab-content">
           {tab === 'escalation' && (
-            <EscalationTab
-              {...escalation}
-              browserNotifications={notifications}
-            />
+            <>
+              <div className="notif-section">
+                <div className="notif-card">
+                  <div className="notif-card-top">
+                    <div>
+                      <div className="notif-card-name">Parallel Workers</div>
+                      <div className="notif-card-detail">Show work group UI when Claude spawns parallel agents</div>
+                    </div>
+                    <label className="notif-toggle">
+                      <input
+                        type="checkbox"
+                        checked={isParallelWorkersEnabled(serverId)}
+                        onChange={() => toggleParallelWorkers(serverId)}
+                      />
+                      <span className="notif-toggle-slider" />
+                    </label>
+                  </div>
+                </div>
+              </div>
+              <EscalationTab
+                {...escalation}
+                browserNotifications={notifications}
+              />
+            </>
           )}
           {tab === 'devices' && <DevicesTab {...devices} />}
           {tab === 'history' && <HistoryTab {...history} />}

@@ -5,6 +5,7 @@ interface UseMessageQueueReturn {
   queuedMessages: QueuedMessage[];
   enqueue: (text: string) => void;
   cancel: (id: string) => void;
+  edit: (id: string, newText: string) => void;
   clearAll: () => void;
 }
 
@@ -35,9 +36,13 @@ export function useMessageQueue(serverId: string | null, sessionId: string | nul
     messageQueue.cancel(id);
   }, []);
 
+  const edit = useCallback((id: string, newText: string) => {
+    messageQueue.edit(id, newText);
+  }, []);
+
   const clearAll = useCallback(() => {
     if (serverId && sessionId) messageQueue.clearAll(serverId, sessionId);
   }, [serverId, sessionId]);
 
-  return { queuedMessages, enqueue, cancel, clearAll };
+  return { queuedMessages, enqueue, cancel, edit, clearAll };
 }

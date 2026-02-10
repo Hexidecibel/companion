@@ -13,6 +13,7 @@ import { useSessionMute } from '../hooks/useSessionMute';
 import { useBrowserNotificationListener } from '../hooks/useBrowserNotificationListener';
 import { initPush, registerWithAllServers } from '../services/push';
 import { isTauri, isTauriDesktop, isMobileViewport } from '../utils/platform';
+import { useServers } from '../hooks/useServers';
 
 interface DashboardProps {
   onSettings?: () => void;
@@ -28,8 +29,10 @@ export function Dashboard({ onSettings }: DashboardProps) {
   const summaries = useAllServerSummaries();
   const sessionMute = useSessionMute(activeSession?.serverId ?? null);
   const { snapshots } = useConnections();
+  const { isParallelWorkersEnabled } = useServers();
 
-  // Use work groups for the active server
+  // Use work groups for the active server (only if enabled)
+  const workersEnabled = activeSession ? isParallelWorkersEnabled(activeSession.serverId) : true;
   const activeWorkGroups = useWorkGroups(activeSession?.serverId ?? null);
 
   // Browser notification listener - listens on ALL connected servers
@@ -137,8 +140,8 @@ export function Dashboard({ onSettings }: DashboardProps) {
     return activeWorkGroups.getGroupForSession(activeSession.sessionId);
   }, [activeSession, activeWorkGroups]);
 
-  // Is the active session a foreman of the work group?
-  const isForemanView = activeWorkGroup?.foremanSessionId === activeSession?.sessionId;
+  // Is the active session a foreman of the work group? (only show if workers enabled)
+  const isForemanView = workersEnabled && activeWorkGroup?.foremanSessionId === activeSession?.sessionId;
 
   // Build flat session list for j/k navigation
   const flatSessions = useMemo(() => {
@@ -211,7 +214,14 @@ export function Dashboard({ onSettings }: DashboardProps) {
   }, [isMobile, activeSession, showNotifSettings]);
 
   const handleSessionCreated = useCallback((_serverId: string, sessionName: string) => {
-    setActiveSession({ serverId: _serverId, sessionId: sessionName });
+    // If sessionName is empty, the JSONL UUID isn't known yet (session was just created).
+    // Clear active session so the UI doesn't try to load a non-existent session.
+    // The new session will appear in the server summary once the CLI creates its JSONL file.
+    if (!sessionName) {
+      setActiveSession(null);
+    } else {
+      setActiveSession({ serverId: _serverId, sessionId: sessionName });
+    }
   }, []);
 
   // Select session by index (Cmd+1-9)
@@ -258,6 +268,18 @@ export function Dashboard({ onSettings }: DashboardProps) {
     if (!serverSummary) return undefined;
     return serverSummary.sessions.find((s) => s.id === activeSession.sessionId);
   }, [activeSession, summaries]);
+
+  // Auto-switch if active session no longer exists in summaries
+  // (e.g., stale session replaced by a newer one on the daemon)
+  useEffect(() => {
+    if (!activeSession) return;
+    const serverSummary = summaries.get(activeSession.serverId);
+    if (!serverSummary) return;
+    const stillExists = serverSummary.sessions.some((s) => s.id === activeSession.sessionId);
+    if (!stillExists && flatSessions.length > 0) {
+      setActiveSession(flatSessions[0]);
+    }
+  }, [activeSession, summaries, flatSessions]);
 
   // Listen for command palette event to open notification settings
   useEffect(() => {

@@ -37,9 +37,12 @@ export function NewSessionPanel({
   const handleCreate = async () => {
     const ok = branchMode ? await createWorktree() : await create();
     if (ok) {
-      const name = manualPath.trim().split('/').filter(Boolean).pop() || 'session';
       reset();
-      onCreated(serverId, name);
+      // Don't pass a fake sessionId - the new session's JSONL UUID isn't known yet.
+      // Pass empty string so Dashboard knows creation succeeded but doesn't try to
+      // select a non-existent session. The session will appear in server summary
+      // once the CLI creates its JSONL file.
+      onCreated(serverId, '');
     }
   };
 

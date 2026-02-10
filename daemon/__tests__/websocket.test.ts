@@ -298,7 +298,7 @@ describe('WebSocketHandler', () => {
       );
     });
 
-    it('should handle switch_session message', () => {
+    it('should handle switch_session message', async () => {
       authenticatedClient.emit(
         'message',
         JSON.stringify({
@@ -307,6 +307,9 @@ describe('WebSocketHandler', () => {
           requestId: 'req-1',
         })
       );
+
+      // Wait for async handling (resolveTmuxSession calls tmux list-sessions via exec)
+      await new Promise((resolve) => setTimeout(resolve, 100));
 
       expect(mockWatcher.setActiveSession).toHaveBeenCalledWith('test-session');
       expect(authenticatedClient.send).toHaveBeenCalledWith(

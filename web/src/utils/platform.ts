@@ -55,8 +55,16 @@ export function applySafeAreaInsets(): void {
  * When the virtual keyboard opens on mobile, the visual viewport shrinks
  * but the layout viewport stays the same. We compute the difference and
  * set --keyboard-height so CSS can adjust bottom-fixed elements.
+ *
+ * On Tauri mobile (Android/iOS), the WebView resizes via adjustResize,
+ * so the keyboard is already accounted for and we skip the CSS variable
+ * to avoid double-counting (WebView shrink + CSS padding).
  */
 export function initKeyboardHeightListener(): void {
+  // Tauri mobile WebViews handle keyboard resize natively via adjustResize.
+  // Adding CSS padding on top would double-count, pushing the input bar too high.
+  if (isTauriMobile()) return;
+
   const vv = window.visualViewport;
   if (!vv) return;
 

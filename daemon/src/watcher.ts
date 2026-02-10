@@ -44,13 +44,20 @@ interface TrackedConversation {
 export class SessionWatcher extends EventEmitter {
   private codeHome: string;
   private watcher: chokidar.FSWatcher | null = null;
+  // Internal conversation tracking — keyed by JSONL UUID for parse efficiency
   private conversations: Map<string, TrackedConversation> = new Map();
-  private activeSessionId: string | null = null;
+  // Tmux session maps — the public session model
+  // Session IDs exposed to clients are tmux session names, not JSONL UUIDs.
+  private tmuxSessionByPath: Map<string, string> = new Map(); // encodedPath -> tmux session name
+  private tmuxPathBySession: Map<string, string> = new Map(); // tmux session name -> encodedPath
+  private tmuxSessionWorkingDirs: Map<string, string> = new Map(); // tmux session name -> decoded working dir
+  private activeTmuxSession: string | null = null; // public session ID (tmux session name)
+  private activeConversationId: string | null = null; // internal UUID for conversation lookups
   private lastMessageCount: number = 0;
   private isWaitingForInput: boolean = false;
   private initialLoadComplete: boolean = false;
   private startTime: number = Date.now();
-  private tmuxProjectPaths: Set<string> = new Set();
+  private tmuxProjectPaths: Set<string> = new Set(); // encoded paths of tagged sessions only
   private tmuxFilterEnabled: boolean = true;
   private debounceTimers: Map<string, NodeJS.Timeout> = new Map();
   private static readonly DEBOUNCE_MS = 150; // Debounce file changes per session
@@ -65,8 +72,6 @@ export class SessionWatcher extends EventEmitter {
 
   async refreshTmuxPaths(): Promise<void> {
     try {
-      // Get list of tmux sessions - only those tagged with COMPANION_APP=1
-      // First get all session names, then filter to tagged ones
       const { stdout: sessionList } = await execAsync(
         'tmux list-sessions -F "#{session_name}" 2>/dev/null'
       );
@@ -75,50 +80,72 @@ export class SessionWatcher extends EventEmitter {
         .split('\n')
         .filter((s) => s);
 
-      // Check which sessions are tagged as managed by Companion
-      const taggedSessions: string[] = [];
+      // Rebuild maps — only include tagged sessions (COMPANION_APP=1)
+      this.tmuxProjectPaths.clear();
+      this.tmuxSessionByPath.clear();
+      this.tmuxPathBySession.clear();
+      this.tmuxSessionWorkingDirs.clear();
+
       for (const name of sessionNames) {
         try {
+          // Check if this session is tagged with COMPANION_APP=1
           const { stdout: envOut } = await execAsync(
             `tmux show-environment -t "${name}" COMPANION_APP 2>/dev/null`
           );
-          if (envOut.trim().includes('COMPANION_APP=1')) {
-            taggedSessions.push(name);
+          if (!envOut.trim().includes('COMPANION_APP=1')) {
+            continue; // Skip untagged sessions
           }
-        } catch {
-          // Not tagged - skip
-        }
-      }
 
-      // Get pane paths only for tagged sessions
-      this.tmuxProjectPaths.clear();
-      for (const name of taggedSessions) {
-        try {
-          const { stdout: paneOut } = await execAsync(
-            `tmux list-panes -t "${name}" -F "#{pane_current_path}" 2>/dev/null`
+          // Get active pane's working directory
+          const { stdout: pwd } = await execAsync(
+            `tmux display-message -t "${name}" -p "#{pane_current_path}" 2>/dev/null`
           );
-          const paths = paneOut
-            .trim()
-            .split('\n')
-            .filter((p) => p);
-          for (const p of paths) {
-            // Encode path the same way Claude CLI does: replace / and _ with -
-            const projectPath = p.replace(/[/_]/g, '-');
-            this.tmuxProjectPaths.add(projectPath);
-          }
+          const workingDir = pwd.trim();
+          if (!workingDir) continue;
+
+          const encodedPath = workingDir.replace(/[/_]/g, '-');
+          this.tmuxProjectPaths.add(encodedPath);
+          this.tmuxSessionByPath.set(encodedPath, name);
+          this.tmuxPathBySession.set(name, encodedPath);
+          this.tmuxSessionWorkingDirs.set(name, workingDir);
         } catch {
-          // Session may have been killed between list and pane check
+          // Session may have been killed between list and env check
         }
       }
 
       if (this.tmuxProjectPaths.size > 0) {
         console.log(
-          `Watcher: Tracking ${this.tmuxProjectPaths.size} paths from ${taggedSessions.length} managed session(s)`
+          `Watcher: Tracking ${this.tmuxProjectPaths.size} paths from ${this.tmuxPathBySession.size} tagged tmux session(s)`
         );
+      }
+
+      // Prune conversations that no longer match any active tagged tmux path
+      if (this.tmuxFilterEnabled && this.tmuxProjectPaths.size > 0) {
+        let pruned = 0;
+        for (const [id, conv] of this.conversations) {
+          const encodedDir = this.getEncodedDirName(conv.path);
+          if (!this.tmuxProjectPaths.has(encodedDir)) {
+            this.conversations.delete(id);
+            this.debounceTimers.delete(id);
+            pruned++;
+          }
+        }
+        if (pruned > 0) {
+          console.log(`Watcher: Pruned ${pruned} conversations from inactive tmux sessions`);
+        }
+      }
+
+      // Clear active tmux session if it no longer exists
+      if (this.activeTmuxSession && !this.tmuxPathBySession.has(this.activeTmuxSession)) {
+        this.activeTmuxSession = null;
+        this.activeConversationId = null;
       }
     } catch {
       // tmux not running or no sessions
       this.tmuxProjectPaths.clear();
+      this.tmuxSessionByPath.clear();
+      this.tmuxPathBySession.clear();
+      this.tmuxSessionWorkingDirs.clear();
     }
   }
 
@@ -136,7 +163,11 @@ export class SessionWatcher extends EventEmitter {
     return this.tmuxProjectPaths.has(projectDir);
   }
 
-  start(): void {
+  async start(): Promise<void> {
+    // Load tmux paths BEFORE starting chokidar so the initial file scan
+    // is filtered correctly (avoids loading all historical conversation files)
+    await this.refreshTmuxPaths();
+
     const projectsDir = path.join(this.codeHome, 'projects');
 
     // Watch for .jsonl files in the projects directory
@@ -163,6 +194,12 @@ export class SessionWatcher extends EventEmitter {
       this.emit('error', error);
     });
 
+    // Mark initial load complete after 3 seconds so auto-select stabilizes
+    setTimeout(() => {
+      this.initialLoadComplete = true;
+      console.log('Watcher: Initial load complete');
+    }, 3000);
+
     // Also watch the main directory for any root-level conversation files
     const rootPattern = path.join(this.codeHome, '*.jsonl');
     this.watcher.add(rootPattern);
@@ -186,33 +223,54 @@ export class SessionWatcher extends EventEmitter {
       return;
     }
 
-    // Skip conversations not from tmux sessions
+    // Skip conversations not from tagged tmux sessions
     if (!this.isFromTmuxSession(filePath)) {
       return;
     }
 
-    const sessionId = this.generateSessionId(filePath);
+    const convId = this.generateSessionId(filePath);
+
+    // For newly discovered files (not already tracked), skip if the file
+    // hasn't been modified recently. This prevents loading all historical
+    // conversation files during the initial chokidar scan while still
+    // tracking any file that gets actively written to via 'change' events.
+    if (convId && !this.conversations.has(convId)) {
+      try {
+        const stats = fs.statSync(filePath);
+        const ageMs = Date.now() - stats.mtimeMs;
+        const MAX_AGE_MS = 2 * 60 * 1000; // 2 minutes
+        if (ageMs > MAX_AGE_MS) {
+          return;
+        }
+      } catch {
+        return;
+      }
+    }
     // Skip files outside projects directory (like root history.jsonl)
-    if (!sessionId) {
+    if (!convId) {
       return;
     }
 
-    // Debounce per session - avoid blocking the event loop with rapid
+    // Debounce per conversation - avoid blocking the event loop with rapid
     // successive file parses when the CLI is actively writing
-    const existingTimer = this.debounceTimers.get(sessionId);
+    const existingTimer = this.debounceTimers.get(convId);
     if (existingTimer) {
       clearTimeout(existingTimer);
     }
     this.debounceTimers.set(
-      sessionId,
+      convId,
       setTimeout(() => {
-        this.debounceTimers.delete(sessionId);
-        this.processFileChange(filePath, sessionId);
+        this.debounceTimers.delete(convId);
+        this.processFileChange(filePath, convId);
       }, SessionWatcher.DEBOUNCE_MS)
     );
   }
 
-  private processFileChange(filePath: string, sessionId: string): void {
+  /**
+   * Process a JSONL file change. convId is the internal conversation UUID
+   * (JSONL filename). External events use the tmux session name as sessionId.
+   */
+  private processFileChange(filePath: string, convId: string): void {
     const stats = fs.statSync(filePath);
     const projectPath = this.extractProjectPath(filePath);
 
@@ -227,21 +285,25 @@ export class SessionWatcher extends EventEmitter {
     const t2 = Date.now();
     if (t2 - t0 > 50) {
       console.log(
-        `Watcher: processFileChange parse took ${t1 - t0}ms + highlights ${t2 - t1}ms = ${t2 - t0}ms (${messages.length} msgs) for ${sessionId}`
+        `Watcher: processFileChange parse took ${t1 - t0}ms + highlights ${t2 - t1}ms = ${t2 - t0}ms (${messages.length} msgs) for ${convId}`
       );
     }
     const wasWaiting = this.isWaitingForInput;
     const conversationWaiting = detectWaitingForInput(messages);
 
     // Get previous tracking state for compaction detection
-    const prevTracked = this.conversations.get(sessionId);
+    const prevTracked = this.conversations.get(convId);
     const lastCompactionLine = prevTracked?.lastCompactionLine || 0;
 
-    // Check for compaction events using already-read content
-    const sessionName = projectPath.split('/').pop() || sessionId;
+    // Find which tmux session owns this file's project directory
+    const encodedDir = this.getEncodedDirName(filePath);
+    const tmuxName = this.tmuxSessionByPath.get(encodedDir);
+
+    // Use tmux session name as display name, fallback to project dir name
+    const sessionName = tmuxName || projectPath.split('/').pop() || convId;
     const { event: compactionEvent, lastLine: newCompactionLine } = detectCompaction(
       filePath,
-      sessionId,
+      tmuxName || convId,
       sessionName,
       projectPath,
       lastCompactionLine,
@@ -249,7 +311,7 @@ export class SessionWatcher extends EventEmitter {
     );
 
     if (compactionEvent) {
-      console.log(`Watcher: Detected compaction in session ${sessionId}`);
+      console.log(`Watcher: Detected compaction in session ${tmuxName || convId}`);
       this.emit('compaction', compactionEvent);
     }
 
@@ -288,7 +350,7 @@ export class SessionWatcher extends EventEmitter {
     const prevWasRunning = prevTracked?.isRunning ?? false;
     const prevErrorCount = prevTracked?.lastErrorCount ?? 0;
 
-    // Track this conversation with cached parse result
+    // Track this conversation with cached parse result (keyed by UUID internally)
     const tracked: TrackedConversation = {
       path: filePath,
       projectPath,
@@ -302,7 +364,17 @@ export class SessionWatcher extends EventEmitter {
       lastEmittedPendingTools: prevTracked?.lastEmittedPendingTools || '',
       lastErrorCount: errorCount,
     };
-    this.conversations.set(sessionId, tracked);
+    this.conversations.set(convId, tracked);
+
+    // Only emit external events if this file belongs to a tagged tmux session
+    // and is the best (most recently modified) conversation for that session
+    if (!tmuxName) return;
+
+    const best = this.getBestConversationForPath(encodedDir);
+    if (!best || best.id !== convId) return;
+
+    // Use tmux session name as the external session ID for all events
+    const sessionId = tmuxName;
 
     // Emit error-detected when new errors appear
     if (errorCount > prevErrorCount) {
@@ -319,7 +391,6 @@ export class SessionWatcher extends EventEmitter {
     }
 
     // Emit session-completed when running transitions to not-running (idle)
-    // Only emit after initial load to avoid false positives on startup
     if (prevWasRunning && !currentIsRunning && prevTracked) {
       const lastMsg = messages[messages.length - 1];
       this.emit('session-completed', {
@@ -330,33 +401,36 @@ export class SessionWatcher extends EventEmitter {
       });
     }
 
-    // During initial load (first 3 seconds), always pick the most recent session
-    // After that, only auto-select if no active session exists
+    // Auto-select: during initial load pick the most recent; after that only if no active session
     const isInitialLoad = Date.now() - this.startTime < 3000;
-    if (isInitialLoad || !this.activeSessionId || !this.conversations.has(this.activeSessionId)) {
-      // Find most recently active conversation
-      let mostRecent: { id: string; time: number } | null = null;
-      for (const [id, conv] of this.conversations) {
-        if (!mostRecent || conv.lastModified > mostRecent.time) {
-          mostRecent = { id, time: conv.lastModified };
+    if (isInitialLoad || !this.activeTmuxSession || !this.tmuxPathBySession.has(this.activeTmuxSession)) {
+      // Find tmux session with most recently modified best conversation
+      let bestTmux: { name: string; bestConvId: string; time: number } | null = null;
+      for (const [tName, ePath] of this.tmuxPathBySession) {
+        const bestConv = this.getBestConversationForPath(ePath);
+        if (bestConv && (!bestTmux || bestConv.conv.lastModified > bestTmux.time)) {
+          bestTmux = { name: tName, bestConvId: bestConv.id, time: bestConv.conv.lastModified };
         }
       }
-
-      if (mostRecent) {
-        this.activeSessionId = mostRecent.id;
+      if (bestTmux) {
+        this.activeTmuxSession = bestTmux.name;
+        this.activeConversationId = bestTmux.bestConvId;
       }
+    }
+
+    // If this is the active tmux session, update the active conversation ID
+    // (it may have changed if a new JSONL file became the "best")
+    if (this.activeTmuxSession === tmuxName) {
+      this.activeConversationId = convId;
     }
 
     // Update waiting status for the active session
-    if (this.activeSessionId) {
-      const activeConv = this.conversations.get(this.activeSessionId);
-      if (activeConv && sessionId === this.activeSessionId) {
-        this.isWaitingForInput = activeConv.isWaitingForInput;
-      }
+    if (this.activeConversationId === convId) {
+      this.isWaitingForInput = conversationWaiting;
     }
 
     // Emit for the active session
-    if (sessionId === this.activeSessionId) {
+    if (tmuxName === this.activeTmuxSession) {
       // Emit events
       const hasNewMessages = messages.length !== this.lastMessageCount;
       if (hasNewMessages) {
@@ -410,7 +484,7 @@ export class SessionWatcher extends EventEmitter {
         this.emit('other-session-activity', {
           sessionId,
           projectPath,
-          sessionName: projectPath.split('/').pop() || sessionId,
+          sessionName,
           isWaitingForInput: conversationWaiting,
           lastMessage,
           newMessageCount: hasNewMessages ? messages.length - hadMessages : 0,
@@ -498,21 +572,61 @@ export class SessionWatcher extends EventEmitter {
   }
 
   private generateSessionId(filePath: string): string {
-    // Use the directory name as session ID
+    // Use the JSONL filename (UUID) as internal conversation ID
     const projectsDir = path.join(this.codeHome, 'projects');
     const relative = path.relative(projectsDir, filePath);
     const parts = relative.split(path.sep);
-    const sessionId = parts[0] || 'default';
     // Skip files outside the projects directory (like history.jsonl in root)
-    if (sessionId === '..' || sessionId.startsWith('..')) {
+    if (!parts[0] || parts[0] === '..' || parts[0].startsWith('..')) {
       return '';
     }
-    return sessionId;
+    // Use filename without extension as conversation ID (e.g., "abc123def456")
+    const filename = path.basename(filePath, '.jsonl');
+    return filename;
+  }
+
+  /**
+   * Extract the encoded project directory name from a file path.
+   * e.g., ~/.claude/projects/-home-hexi-foo/abc.jsonl -> "-home-hexi-foo"
+   */
+  private getEncodedDirName(filePath: string): string {
+    const projectsDir = path.join(this.codeHome, 'projects');
+    const relative = path.relative(projectsDir, filePath);
+    return relative.split(path.sep)[0] || '';
+  }
+
+  /**
+   * Find the best (most recently modified) conversation for a given encoded project path.
+   * Returns the conversation with the highest lastModified timestamp.
+   */
+  private getBestConversationForPath(encodedPath: string): { id: string; conv: TrackedConversation } | null {
+    let best: { id: string; conv: TrackedConversation } | null = null;
+    for (const [id, conv] of this.conversations) {
+      if (this.getEncodedDirName(conv.path) === encodedPath) {
+        if (!best || conv.lastModified > best.conv.lastModified) {
+          best = { id, conv };
+        }
+      }
+    }
+    return best;
+  }
+
+  /**
+   * Resolve a session ID (tmux session name) to the internal conversation UUID.
+   * If no sessionId provided, returns the active conversation ID.
+   */
+  private resolveToConversationId(sessionId?: string): string | null {
+    if (!sessionId) return this.activeConversationId;
+    // sessionId is a tmux session name — resolve to internal conversation UUID
+    const encodedPath = this.tmuxPathBySession.get(sessionId);
+    if (!encodedPath) return null;
+    const best = this.getBestConversationForPath(encodedPath);
+    return best?.id || null;
   }
 
   getActiveConversation(): ConversationFile | null {
-    if (!this.activeSessionId) return null;
-    const tracked = this.conversations.get(this.activeSessionId);
+    if (!this.activeConversationId) return null;
+    const tracked = this.conversations.get(this.activeConversationId);
     if (!tracked) return null;
 
     return {
@@ -523,7 +637,7 @@ export class SessionWatcher extends EventEmitter {
   }
 
   getMessages(sessionId?: string): ConversationMessage[] {
-    const targetId = sessionId || this.activeSessionId;
+    const targetId = this.resolveToConversationId(sessionId);
     if (!targetId) return [];
 
     const tracked = this.conversations.get(targetId);
@@ -549,7 +663,7 @@ export class SessionWatcher extends EventEmitter {
   }
 
   getStatus(sessionId?: string): SessionStatus {
-    const targetId = sessionId || this.activeSessionId;
+    const targetId = this.resolveToConversationId(sessionId);
     if (!targetId) {
       return {
         isRunning: false,
@@ -582,18 +696,25 @@ export class SessionWatcher extends EventEmitter {
     };
   }
 
+  /**
+   * Return one entry per tagged tmux session (instead of one per JSONL file).
+   * Session ID = tmux session name.
+   */
   getSessions(): TmuxSession[] {
     const sessions: TmuxSession[] = [];
 
-    for (const [id, conv] of this.conversations) {
+    for (const [tmuxName, encodedPath] of this.tmuxPathBySession) {
+      const best = this.getBestConversationForPath(encodedPath);
+      const workingDir = this.tmuxSessionWorkingDirs.get(tmuxName) || '';
+
       sessions.push({
-        id,
-        name: conv.projectPath.split('/').pop() || id,
-        projectPath: conv.projectPath,
-        conversationPath: conv.path,
-        lastActivity: conv.lastModified,
-        isWaitingForInput: conv.isWaitingForInput,
-        messageCount: conv.messageCount,
+        id: tmuxName,
+        name: tmuxName,
+        projectPath: best?.conv.projectPath || workingDir,
+        conversationPath: best?.conv.path,
+        lastActivity: best?.conv.lastModified || 0,
+        isWaitingForInput: best?.conv.isWaitingForInput || false,
+        messageCount: best?.conv.messageCount || 0,
       });
     }
 
@@ -604,42 +725,57 @@ export class SessionWatcher extends EventEmitter {
   }
 
   getActiveSessionId(): string | null {
-    return this.activeSessionId;
+    return this.activeTmuxSession;
   }
 
+  /**
+   * Set the active session by tmux session name.
+   * Resolves to the best (most recent) conversation for that tmux session.
+   */
   setActiveSession(sessionId: string): boolean {
-    if (this.conversations.has(sessionId)) {
-      this.activeSessionId = sessionId;
-      const tracked = this.conversations.get(sessionId);
-      if (tracked) {
-        this.isWaitingForInput = tracked.isWaitingForInput;
-        this.lastMessageCount = tracked.messageCount;
+    // sessionId is a tmux session name
+    const encodedPath = this.tmuxPathBySession.get(sessionId);
+    if (!encodedPath) return false;
 
-        // Use cached messages instead of re-parsing
-        const messages = tracked.cachedMessages || parseConversationFile(tracked.path);
-        const highlights = extractHighlights(messages);
-
-        this.emit('conversation-update', {
-          path: tracked.path,
-          sessionId,
-          messages,
-          highlights,
-        });
-
-        this.emit('status-change', {
-          sessionId,
-          isWaitingForInput: this.isWaitingForInput,
-          currentActivity: detectCurrentActivity(messages),
-          lastMessage: messages[messages.length - 1],
-        });
-      }
+    const best = this.getBestConversationForPath(encodedPath);
+    if (!best) {
+      // Tmux session exists but no conversation yet — still allow selection
+      this.activeTmuxSession = sessionId;
+      this.activeConversationId = null;
+      this.isWaitingForInput = false;
+      this.lastMessageCount = 0;
       return true;
     }
-    return false;
+
+    this.activeTmuxSession = sessionId;
+    this.activeConversationId = best.id;
+    this.isWaitingForInput = best.conv.isWaitingForInput;
+    this.lastMessageCount = best.conv.messageCount;
+
+    // Use cached messages instead of re-parsing
+    const messages = best.conv.cachedMessages || parseConversationFile(best.conv.path);
+    const hlights = extractHighlights(messages);
+
+    this.emit('conversation-update', {
+      path: best.conv.path,
+      sessionId,
+      messages,
+      highlights: hlights,
+    });
+
+    this.emit('status-change', {
+      sessionId,
+      isWaitingForInput: this.isWaitingForInput,
+      currentActivity: detectCurrentActivity(messages),
+      lastMessage: messages[messages.length - 1],
+    });
+
+    return true;
   }
 
   clearActiveSession(): void {
-    this.activeSessionId = null;
+    this.activeTmuxSession = null;
+    this.activeConversationId = null;
     this.isWaitingForInput = false;
     this.lastMessageCount = 0;
 
@@ -664,46 +800,15 @@ export class SessionWatcher extends EventEmitter {
   }
 
   /**
-   * Get all conversation JSONL files for a session, sorted oldest-first.
-   * Used for cross-session infinite scroll — when the client exhausts the
-   * current file's messages, older files in the same project dir are loaded.
+   * Get the conversation file(s) for a session.
+   * sessionId is a tmux session name — resolves to the best conversation.
    */
   getConversationChain(sessionId: string): string[] {
-    const tracked = this.conversations.get(sessionId);
+    const convId = this.resolveToConversationId(sessionId);
+    if (!convId) return [];
+    const tracked = this.conversations.get(convId);
     if (!tracked) return [];
-
-    const dir = path.dirname(tracked.path);
-    try {
-      // Get birthtime of the tracked file to exclude newer unrelated sessions
-      const trackedBirthtime = fs.statSync(tracked.path).birthtimeMs;
-
-      const files = fs
-        .readdirSync(dir)
-        .filter((f) => f.endsWith('.jsonl') && !f.includes('subagents'))
-        .map((f) => {
-          const fullPath = path.join(dir, f);
-          try {
-            const stats = fs.statSync(fullPath);
-            return { path: fullPath, birthtime: stats.birthtimeMs };
-          } catch {
-            return null;
-          }
-        })
-        .filter((f): f is { path: string; birthtime: number } => f !== null)
-        // Only include files born at or before the tracked file — newer files
-        // are separate conversations, not part of this session's chain
-        .filter((f) => f.birthtime <= trackedBirthtime);
-
-      // Sort oldest-first so index 0 is the oldest file
-      files.sort((a, b) => a.birthtime - b.birthtime);
-
-      // Limit to last 20 files to prevent memory issues
-      const chain = files.map((f) => f.path);
-      return chain.length > 20 ? chain.slice(-20) : chain;
-    } catch {
-      // Directory read failed — fall back to just the tracked file
-      return [tracked.path];
-    }
+    return [tracked.path];
   }
 
   /**
@@ -711,24 +816,28 @@ export class SessionWatcher extends EventEmitter {
    * Called externally when auto-approve is toggled on to retroactively approve.
    */
   checkAndEmitPendingApproval(): void {
-    const sessionId = this.activeSessionId;
-    if (!sessionId) return;
+    if (!this.activeTmuxSession || !this.activeConversationId) return;
 
-    const tracked = this.conversations.get(sessionId);
+    const tracked = this.conversations.get(this.activeConversationId);
     if (!tracked) return;
 
     const messages = tracked.cachedMessages || parseConversationFile(tracked.path);
     const pendingTools = getPendingApprovalTools(messages);
     if (pendingTools.length > 0) {
       this.emit('pending-approval', {
-        sessionId,
+        sessionId: this.activeTmuxSession,
         projectPath: tracked.projectPath,
         tools: pendingTools,
       });
     }
   }
 
-  async getServerSummary(tmuxSessions?: Array<{ name: string; workingDir?: string }>): Promise<{
+  /**
+   * Get server summary — one entry per tagged tmux session.
+   * Uses tmuxSessions from TmuxManager for authoritative tagged status,
+   * finds the best conversation for each to determine activity/status.
+   */
+  async getServerSummary(tmuxSessions?: Array<{ name: string; workingDir?: string; tagged?: boolean }>): Promise<{
     sessions: Array<{
       id: string;
       name: string;
@@ -749,18 +858,6 @@ export class SessionWatcher extends EventEmitter {
     waitingCount: number;
     workingCount: number;
   }> {
-    // Get tmux sessions to filter - only show conversations with active tmux sessions
-    // Encode the tmux paths the same way the CLI does: /a/b_c -> -a-b-c
-    const activeTmuxEncodedPaths = new Map<string, string>();
-    if (tmuxSessions) {
-      for (const s of tmuxSessions) {
-        const encoded = s.workingDir?.replace(/[/_]/g, '-');
-        if (encoded) {
-          activeTmuxEncodedPaths.set(encoded, s.name);
-        }
-      }
-    }
-
     const sessions: Array<{
       id: string;
       name: string;
@@ -781,44 +878,54 @@ export class SessionWatcher extends EventEmitter {
     let waitingCount = 0;
     let workingCount = 0;
 
-    for (const [id, conv] of this.conversations) {
-      // Skip if no matching tmux session (unless tmuxSessions wasn't provided)
-      // Compare using the session ID which is the encoded path (e.g., -Users-foo-bar)
-      if (tmuxSessions && !activeTmuxEncodedPaths.has(id)) {
-        continue;
-      }
+    // Iterate tagged tmux sessions — one sidebar entry per session
+    const sessionsToIterate = tmuxSessions
+      ? tmuxSessions.filter((s) => s.tagged)
+      : Array.from(this.tmuxPathBySession.keys()).map((name) => ({
+          name,
+          workingDir: this.tmuxSessionWorkingDirs.get(name),
+          tagged: true as const,
+        }));
 
-      // Use cached messages for activity detection instead of re-reading large files
-      const messages = conv.cachedMessages;
-      const currentActivity = messages
-        ? detectCurrentActivity(messages)
-        : detectCurrentActivityFast(conv.path);
+    for (const ts of sessionsToIterate) {
+      const encodedPath = ts.workingDir?.replace(/[/_]/g, '-');
+      const best = encodedPath ? this.getBestConversationForPath(encodedPath) : null;
 
-      // Determine status
       let status: 'idle' | 'working' | 'waiting' | 'error' = 'idle';
-      if (conv.isWaitingForInput) {
-        status = 'waiting';
-        waitingCount++;
-      } else if (currentActivity) {
-        status = 'working';
-        workingCount++;
+      let currentActivity: string | undefined;
+      let taskSummary: TaskSummary | undefined;
+      let lastActivity = 0;
+      let projectPath = ts.workingDir || '';
+
+      if (best) {
+        const conv = best.conv;
+        projectPath = conv.projectPath;
+        lastActivity = conv.lastModified;
+        taskSummary = conv.cachedTaskSummary;
+
+        // Use cached messages for activity detection instead of re-reading large files
+        const messages = conv.cachedMessages;
+        currentActivity = messages
+          ? detectCurrentActivity(messages)
+          : detectCurrentActivityFast(conv.path);
+
+        if (conv.isWaitingForInput) {
+          status = 'waiting';
+          waitingCount++;
+        } else if (currentActivity) {
+          status = 'working';
+          workingCount++;
+        }
       }
-
-      // Use cached task summary instead of re-reading multi-MB files on every poll.
-      // Task summaries are computed during processFileChange and cached.
-      const taskSummary = conv.cachedTaskSummary;
-
-      // Look up the tmux session name from the encoded path map
-      const tmuxSessionName = activeTmuxEncodedPaths.get(id);
 
       sessions.push({
-        id,
-        name: conv.projectPath.split('/').pop() || id,
-        projectPath: conv.projectPath,
+        id: ts.name,
+        name: ts.name,
+        projectPath,
         status,
-        lastActivity: conv.lastModified,
+        lastActivity,
         currentActivity,
-        tmuxSessionName,
+        tmuxSessionName: ts.name,
         taskSummary,
       });
     }

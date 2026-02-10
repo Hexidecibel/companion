@@ -7,6 +7,7 @@ export interface Server {
   useTls: boolean;
   enabled?: boolean;
   sshUser?: string;
+  parallelWorkersEnabled?: boolean;
 }
 
 export interface ConnectionState {

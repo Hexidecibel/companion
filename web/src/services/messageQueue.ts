@@ -67,6 +67,15 @@ class MessageQueue {
     this.notify();
   }
 
+  edit(id: string, newText: string): void {
+    const msg = this.messages.find((m) => m.id === id);
+    if (msg) {
+      msg.text = newText;
+      this.save();
+      this.notify();
+    }
+  }
+
   clearAll(serverId: string, sessionId: string): void {
     this.messages = this.messages.filter((m) => !(m.serverId === serverId && m.sessionId === sessionId));
     this.save();

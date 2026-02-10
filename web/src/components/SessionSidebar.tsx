@@ -430,7 +430,48 @@ export function SessionSidebar({
               )}
 
               {isConnected &&
-                topLevelSessions.map((session) => {
+                (() => {
+                  // Group sessions by projectPath for multi-session projects
+                  const projectGroups: { path: string; name: string; sessions: SessionSummary[] }[] = [];
+                  const groupMap = new Map<string, SessionSummary[]>();
+                  const groupOrder: string[] = [];
+                  for (const session of topLevelSessions) {
+                    const key = session.projectPath || session.name;
+                    if (!groupMap.has(key)) {
+                      groupMap.set(key, []);
+                      groupOrder.push(key);
+                    }
+                    groupMap.get(key)!.push(session);
+                  }
+                  for (const key of groupOrder) {
+                    const sessions = groupMap.get(key)!;
+                    projectGroups.push({
+                      path: key,
+                      name: key.split('/').pop() || key,
+                      sessions,
+                    });
+                  }
+
+                  return projectGroups.map((group) => {
+                    const showGroupHeader = group.sessions.length > 1;
+                    const isGroupCollapsedProject = collapsedGroups.has(`project:${group.path}`);
+
+                    return (
+                      <div key={group.path}>
+                        {showGroupHeader && (
+                          <div
+                            className="sidebar-project-header"
+                            onClick={() => toggleGroupCollapse(`project:${group.path}`)}
+                          >
+                            <span className="sidebar-group-toggle-inline">
+                              {isGroupCollapsedProject ? '\u25B6' : '\u25BC'}
+                            </span>
+                            <span className="sidebar-project-name">{group.name}</span>
+                            <span className="sidebar-session-count">{group.sessions.length}</span>
+                          </div>
+                        )}
+                        {(!showGroupHeader || !isGroupCollapsedProject) &&
+                          group.sessions.map((session) => {
                   const isActive =
                     activeSession?.serverId === snap.serverId &&
                     activeSession?.sessionId === session.id;
@@ -562,6 +603,10 @@ export function SessionSidebar({
                     </div>
                   );
                 })}
+                      </div>
+                    );
+                  });
+                })()}
             </div>
           );
         })}

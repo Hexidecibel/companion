@@ -46,8 +46,9 @@ export function clearAllCache(): void {
 }
 
 /**
- * Shallow comparison of highlights arrays to skip no-op re-renders.
- * Compares length and the id+content of the last item.
+ * Compare highlights arrays to skip no-op re-renders.
+ * Checks all IDs for structural equality, plus content and tool status
+ * of the last item to catch streaming/status updates.
  */
 export function highlightsEqual(
   a: ConversationHighlight[],
@@ -55,7 +56,20 @@ export function highlightsEqual(
 ): boolean {
   if (a.length !== b.length) return false;
   if (a.length === 0) return true;
+  // Check all IDs — catches inserted, removed, or reordered messages
+  for (let i = 0; i < a.length; i++) {
+    if (a[i].id !== b[i].id) return false;
+  }
+  // Deep check last item for content/status changes
   const lastA = a[a.length - 1];
   const lastB = b[b.length - 1];
-  return lastA.id === lastB.id && lastA.content === lastB.content;
+  if (lastA.content !== lastB.content) return false;
+  if (lastA.isWaitingForChoice !== lastB.isWaitingForChoice) return false;
+  const tcA = lastA.toolCalls || [];
+  const tcB = lastB.toolCalls || [];
+  if (tcA.length !== tcB.length) return false;
+  for (let i = 0; i < tcA.length; i++) {
+    if (tcA[i].status !== tcB[i].status) return false;
+  }
+  return true;
 }

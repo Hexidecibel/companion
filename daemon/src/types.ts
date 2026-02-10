@@ -143,7 +143,7 @@ export interface TmuxSessionConfig {
 
 // Dashboard types
 export interface SessionSummary {
-  id: string;
+  id: string; // tmux session name (not JSONL UUID)
   name: string;
   projectPath: string;
   status: 'idle' | 'working' | 'waiting' | 'error';

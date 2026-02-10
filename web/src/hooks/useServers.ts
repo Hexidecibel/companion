@@ -20,6 +20,24 @@ export function useServers() {
     [servers, updateServer],
   );
 
+  const toggleParallelWorkers = useCallback(
+    (id: string) => {
+      const server = servers.find((s) => s.id === id);
+      if (server) {
+        updateServer({ ...server, parallelWorkersEnabled: server.parallelWorkersEnabled === false });
+      }
+    },
+    [servers, updateServer],
+  );
+
+  const isParallelWorkersEnabled = useCallback(
+    (id: string): boolean => {
+      const server = servers.find((s) => s.id === id);
+      return server?.parallelWorkersEnabled !== false; // default true
+    },
+    [servers],
+  );
+
   return {
     servers,
     getServer,
@@ -27,6 +45,8 @@ export function useServers() {
     updateServer,
     deleteServer,
     toggleEnabled,
+    toggleParallelWorkers,
+    isParallelWorkersEnabled,
     refreshServers,
   };
 }

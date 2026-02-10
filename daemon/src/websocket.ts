@@ -78,6 +78,15 @@ export class WebSocketHandler {
   private scrollLogs: Array<{ event: string; ts: number; [key: string]: unknown }> = [];
   private readonly MAX_SCROLL_LOGS = 200;
   public autoApproveSessions: Set<string> = new Set();
+  // Pending sent messages per session — tracks messages sent via send_input that
+  // haven't yet appeared in the JSONL (because Claude hasn't processed them yet).
+  // Keyed by tmux session name.
+  private pendingSentMessages: Map<string, Array<{
+    clientMessageId: string;
+    content: string;
+    sentAt: number;
+  }>> = new Map();
+  private static readonly PENDING_SENT_TTL = 10 * 60 * 1000; // 10 minute safety valve
   private escalation: EscalationService;
   private workGroupManager: WorkGroupManager | null;
   private skillCatalog: SkillCatalog;
@@ -114,11 +123,11 @@ export class WebSocketHandler {
 
     // Forward watcher events to subscribed clients
     this.watcher.on('conversation-update', (data) => {
-      this.broadcast('conversation_update', data);
+      this.broadcast('conversation_update', data, data.sessionId);
     });
 
     this.watcher.on('status-change', (data) => {
-      this.broadcast('status_change', data);
+      this.broadcast('status_change', data, data.sessionId);
 
       // Escalation for waiting_for_input
       if (data.isWaitingForInput && data.lastMessage) {
@@ -346,9 +355,10 @@ export class WebSocketHandler {
         break;
 
       case 'get_highlights': {
-        const hlParams = payload as { limit?: number; offset?: number } | undefined;
+        const hlParams = payload as { limit?: number; offset?: number; sessionId?: string } | undefined;
         const t0 = Date.now();
-        const hlSessionId = this.watcher.getActiveSessionId();
+        // Use client's subscribed session, payload override, or fall back to global active
+        const hlSessionId = hlParams?.sessionId || client.subscribedSessionId || this.watcher.getActiveSessionId();
 
         const limit = hlParams?.limit && hlParams.limit > 0 ? hlParams.limit : 0;
         const offset = hlParams?.offset || 0;
@@ -368,7 +378,7 @@ export class WebSocketHandler {
           hasMore = result.hasMore;
         } else {
           // Single file or no limit — use existing fast path
-          const messages = this.watcher.getMessages();
+          const messages = this.watcher.getMessages(hlSessionId || undefined);
           const allHighlights = extractHighlights(messages);
           total = allHighlights.length;
 
@@ -380,6 +390,35 @@ export class WebSocketHandler {
           } else {
             resultHighlights = allHighlights;
             hasMore = false;
+          }
+        }
+
+        // Inject pending sent messages that haven't appeared in JSONL yet
+        if (hlSessionId) {
+          const pending = this.pendingSentMessages.get(hlSessionId);
+          if (pending && pending.length > 0) {
+            const now = Date.now();
+            // Filter: remove expired and confirmed messages
+            const unconfirmed = pending.filter(p => {
+              if (now - p.sentAt > WebSocketHandler.PENDING_SENT_TTL) return false;
+              // Check if any user highlight matches this content (trimmed)
+              return !resultHighlights.some(
+                h => h.type === 'user' && h.content.trim() === p.content.trim()
+              );
+            });
+            this.pendingSentMessages.set(hlSessionId, unconfirmed);
+
+            // Append unconfirmed pending messages as user highlights
+            for (const p of unconfirmed) {
+              resultHighlights.push({
+                id: p.clientMessageId,
+                type: 'user' as const,
+                content: p.content,
+                timestamp: p.sentAt,
+                isWaitingForChoice: false,
+              });
+            }
+            total += unconfirmed.length;
           }
         }
 
@@ -398,11 +437,12 @@ export class WebSocketHandler {
       }
 
       case 'get_full': {
+        const fullParams = payload as { sessionId?: string } | undefined;
         const t0 = Date.now();
-        const fullMessages = this.watcher.getMessages();
+        const fullSessionId = fullParams?.sessionId || client.subscribedSessionId || this.watcher.getActiveSessionId();
+        const fullMessages = this.watcher.getMessages(fullSessionId || undefined);
         const t1 = Date.now();
-        const fullSessionId = this.watcher.getActiveSessionId();
-        console.log(`WebSocket: get_full - getMessages: ${t1 - t0}ms, ${fullMessages.length} msgs`);
+        console.log(`WebSocket: get_full - getMessages: ${t1 - t0}ms, ${fullMessages.length} msgs, session: ${fullSessionId}`);
         this.send(client.ws, {
           type: 'full',
           success: true,
@@ -414,10 +454,11 @@ export class WebSocketHandler {
       }
 
       case 'get_status': {
+        const statusParams = payload as { sessionId?: string } | undefined;
         const t0 = Date.now();
-        const status = this.watcher.getStatus();
+        const statusSessionId = statusParams?.sessionId || client.subscribedSessionId || this.watcher.getActiveSessionId();
+        const status = this.watcher.getStatus(statusSessionId || undefined);
         const t1 = Date.now();
-        const statusSessionId = this.watcher.getActiveSessionId();
         console.log(
           `WebSocket: get_status - ${t1 - t0}ms - waiting: ${status.isWaitingForInput}, running: ${status.isRunning}, session: ${statusSessionId}`
         );
@@ -433,7 +474,7 @@ export class WebSocketHandler {
       }
 
       case 'get_server_summary':
-        // Get tmux sessions to filter - only show conversations with active tmux sessions
+        // Get tmux sessions to filter - show conversations with any active tmux session
         this.tmux
           .listSessions()
           .then(async (tmuxSessions) => {
@@ -649,10 +690,10 @@ export class WebSocketHandler {
         break;
 
       case 'get_terminal_output': {
-        const termPayload = payload as { sessionName: string; lines?: number } | undefined;
+        const termPayload = payload as { sessionName: string; lines?: number; offset?: number } | undefined;
         if (termPayload?.sessionName) {
           this.tmux
-            .capturePane(termPayload.sessionName, termPayload.lines || 100)
+            .capturePane(termPayload.sessionName, termPayload.lines || 100, termPayload.offset || 0)
             .then((output) => {
               this.send(client.ws, {
                 type: 'terminal_output',
@@ -1219,9 +1260,31 @@ export class WebSocketHandler {
     }
   }
 
+  /**
+   * Resolve a sessionId to a tmux session name.
+   * If sessionId already matches a tmux session, return it directly.
+   * Otherwise, look up the session's projectPath and find the matching tmux session.
+   */
+  private async resolveTmuxSession(sessionId: string): Promise<string | null> {
+    // Check if sessionId is already a tmux session name
+    const tmuxSessions = await this.tmux.listSessions();
+    if (tmuxSessions.some(ts => ts.name === sessionId)) {
+      return sessionId;
+    }
+
+    // Look up projectPath from watcher status
+    const status = this.watcher.getStatus(sessionId);
+    if (status?.projectPath) {
+      const match = tmuxSessions.find(ts => ts.workingDir === status.projectPath);
+      if (match) return match.name;
+    }
+
+    return null;
+  }
+
   private async handleSendInput(
     client: AuthenticatedClient,
-    payload: { input: string; sessionId?: string } | undefined,
+    payload: { input: string; sessionId?: string; tmuxSessionName?: string; clientMessageId?: string } | undefined,
     requestId?: string
   ): Promise<void> {
     if (!payload?.input) {
@@ -1234,22 +1297,16 @@ export class WebSocketHandler {
       return;
     }
 
-    // Resolve the target tmux session:
-    // If a sessionId (encoded project path) is provided, find the matching tmux session
-    let targetTmuxSession: string | undefined;
-    if (payload.sessionId) {
-      const convSession = this.watcher.getSessions().find((s) => s.id === payload.sessionId);
-      if (convSession?.projectPath) {
-        const tmuxSessions = await this.tmux.listSessions();
-        const match = tmuxSessions.find((ts) => ts.workingDir === convSession.projectPath);
-        if (match) {
-          targetTmuxSession = match.name;
-        }
-      }
+    // Resolve sessionId to tmux session name
+    let sessionToUse: string;
+    if (payload.tmuxSessionName) {
+      sessionToUse = payload.tmuxSessionName;
+    } else if (payload.sessionId) {
+      const resolved = await this.resolveTmuxSession(payload.sessionId);
+      sessionToUse = resolved || payload.sessionId;
+    } else {
+      sessionToUse = this.injector.getActiveSession();
     }
-
-    // Fall back to the global active session
-    const sessionToUse = targetTmuxSession || this.injector.getActiveSession();
 
     // Check if the target session exists before trying to send
     const sessionExists = await this.injector.checkSessionExists(sessionToUse);
@@ -1278,6 +1335,18 @@ export class WebSocketHandler {
     }
 
     const success = await this.injector.sendInput(payload.input, sessionToUse);
+
+    // Track pending sent message for optimistic display in get_highlights
+    if (success && payload.clientMessageId) {
+      const pending = this.pendingSentMessages.get(sessionToUse) || [];
+      pending.push({
+        clientMessageId: payload.clientMessageId,
+        content: payload.input,
+        sentAt: Date.now(),
+      });
+      this.pendingSentMessages.set(sessionToUse, pending);
+    }
+
     this.send(client.ws, {
       type: 'input_sent',
       success,
@@ -1378,7 +1447,7 @@ export class WebSocketHandler {
 
   private async handleSendWithImages(
     client: AuthenticatedClient,
-    payload: { imagePaths: string[]; message: string } | undefined,
+    payload: { imagePaths: string[]; message: string; tmuxSessionName?: string } | undefined,
     requestId?: string
   ): Promise<void> {
     if (!payload) {
@@ -1416,7 +1485,8 @@ export class WebSocketHandler {
       return;
     }
 
-    const success = await this.injector.sendInput(combinedMessage);
+    const targetSession = payload.tmuxSessionName || this.injector.getActiveSession();
+    const success = await this.injector.sendInput(combinedMessage, targetSession);
     this.send(client.ws, {
       type: 'message_sent',
       success,
@@ -1463,21 +1533,10 @@ export class WebSocketHandler {
     // 2. Update client's subscription to this session
     client.subscribedSessionId = sessionId;
 
-    // 3. Find and switch to corresponding tmux session
-    let tmuxSessionName: string | undefined;
-    try {
-      const convSession = this.watcher.getSessions().find((s) => s.id === sessionId);
-      if (convSession?.projectPath) {
-        const tmuxSessions = await this.tmux.listSessions();
-        const matchingTmux = tmuxSessions.find((ts) => ts.workingDir === convSession.projectPath);
-        if (matchingTmux) {
-          this.injector.setActiveSession(matchingTmux.name);
-          tmuxSessionName = matchingTmux.name;
-        }
-      }
-    } catch (err) {
-      console.error('Failed to switch tmux session:', err);
-      // Continue anyway - watcher switch succeeded
+    // 3. Resolve sessionId to tmux session name for the injector
+    const tmuxName = await this.resolveTmuxSession(sessionId);
+    if (tmuxName) {
+      this.injector.setActiveSession(tmuxName);
     }
 
     // 4. Return success with session context
@@ -1486,10 +1545,10 @@ export class WebSocketHandler {
       success: true,
       payload: {
         sessionId,
-        tmuxSession: tmuxSessionName,
-        epoch, // Echo back epoch for client validation
+        tmuxSession: tmuxName || sessionId,
+        epoch,
       },
-      sessionId, // Include at top level for validation
+      sessionId,
       requestId,
     } as WebSocketResponse);
   }
@@ -1618,8 +1677,8 @@ export class WebSocketHandler {
       // Switch input target to the new session
       this.injector.setActiveSession(sessionName);
 
-      // Clear the watcher's active session - no conversation exists yet
-      // This prevents returning old session data until the new conversation is created
+      // Clear the active session pointer so the UI shows empty until the new
+      // CLI writes its JSONL (old sessions for this dir remain in the list)
       this.watcher.clearActiveSession();
       console.log(`WebSocket: Cleared active session after creating tmux session "${sessionName}"`);
 
@@ -1872,12 +1931,9 @@ export class WebSocketHandler {
       // Store the session config for potential recreation later
       this.storeTmuxSessionConfig(payload.sessionName, tmuxSession.workingDir, true);
 
-      // Encode the working directory the same way the CLI does: /a/b_c -> -a-b-c
-      const encodedPath = tmuxSession.workingDir.replace(/[/_]/g, '-');
-
-      // Find conversation session whose ID matches or starts with this encoded path
+      // With UUID-based session IDs, match by projectPath instead of encoded ID
       const convSessions = this.watcher.getSessions();
-      const matchingConv = convSessions.find((cs) => cs.id === encodedPath);
+      const matchingConv = convSessions.find((cs) => cs.projectPath === tmuxSession!.workingDir);
 
       if (matchingConv) {
         this.watcher.setActiveSession(matchingConv.id);
@@ -1889,7 +1945,7 @@ export class WebSocketHandler {
         // No conversation yet for this project - clear active session so old data stops flowing
         this.watcher.clearActiveSession();
         console.log(
-          `WebSocket: No conversation found for ${encodedPath}, cleared active session. Available: ${convSessions.map((c) => c.id).join(', ')}`
+          `WebSocket: No conversation found for ${tmuxSession!.workingDir}, cleared active session. Available: ${convSessions.map((c) => c.id).join(', ')}`
         );
       }
     } else {
@@ -2088,18 +2144,12 @@ export class WebSocketHandler {
         const sessions = await this.tmux.listSessions();
         const activeSessionId = this.watcher.getActiveSessionId();
 
-        // Try to find matching tmux session by encoded path
+        // Try to find working directory from the active conversation's projectPath
         let workingDir = homeDir;
         if (activeSessionId) {
-          // The session ID is the encoded path like -Users-foo-project
-          // Match it against tmux session working directories
-          const matchingSession = sessions.find((s) => {
-            if (!s.workingDir) return false;
-            const encoded = s.workingDir.replace(/[/_]/g, '-');
-            return encoded === activeSessionId || s.name === activeSessionId;
-          });
-          if (matchingSession?.workingDir) {
-            workingDir = matchingSession.workingDir;
+          const convSession = this.watcher.getSessions().find((s) => s.id === activeSessionId);
+          if (convSession?.projectPath) {
+            workingDir = convSession.projectPath;
           }
         }
 
