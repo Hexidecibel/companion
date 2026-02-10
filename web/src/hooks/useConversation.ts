@@ -136,7 +136,8 @@ export function useConversation(
             total: number;
             hasMore: boolean;
           };
-          if (!highlightsEqual(payload.highlights, highlightsRef.current)) {
+          const hasPending = highlightsRef.current.some((h) => h.isPending);
+          if (hasPending || !highlightsEqual(payload.highlights, highlightsRef.current)) {
             setHighlights((prev) => mergeWithPending(prev, payload.highlights));
             setCachedHighlights(serverId!, sessionId!, payload.highlights);
           }
@@ -178,7 +179,8 @@ export function useConversation(
             total: number;
             hasMore: boolean;
           };
-          if (!highlightsEqual(payload.highlights, highlightsRef.current)) {
+          const hasPending = highlightsRef.current.some((h) => h.isPending);
+          if (hasPending || !highlightsEqual(payload.highlights, highlightsRef.current)) {
             setHighlights((prev) => mergeWithPending(prev, payload.highlights));
             setCachedHighlights(serverId!, sessionId!, payload.highlights);
           }
