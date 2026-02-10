@@ -30,6 +30,8 @@ let clientMessageCounter = 0;
  * Preserves isPending messages that haven't yet appeared in the server response,
  * and drops them once a matching user message shows up in server data.
  */
+const MAX_PENDING_AGE_MS = 60000; // Drop pending messages older than 60s
+
 function mergeWithPending(
   prev: ConversationHighlight[],
   server: ConversationHighlight[],
@@ -37,17 +39,30 @@ function mergeWithPending(
   const pending = prev.filter((h) => h.isPending);
   if (pending.length === 0) return server;
 
+  // Timeout: drop stale pending messages (handles compaction, edge cases)
+  const now = Date.now();
+  const freshPending = pending.filter((p) => now - p.timestamp < MAX_PENDING_AGE_MS);
+  if (freshPending.length === 0) return server;
+
+  // If a compaction occurred after pending messages were created, the old
+  // conversation was summarized and pending messages were consumed/absorbed.
+  const oldestPendingTime = Math.min(...freshPending.map((p) => p.timestamp));
+  const hasRecentCompaction = server.some(
+    (h) => h.isCompaction && h.timestamp > oldestPendingTime,
+  );
+  if (hasRecentCompaction) return server;
+
   // Check which pending messages are now confirmed by server data.
   // A pending message is confirmed if a server user message with matching
   // content appears after the last non-pending message.
   const lastServerUserContent = new Set(
     server
       .filter((h) => h.type === 'user')
-      .slice(-pending.length * 2) // check recent user messages
+      .slice(-freshPending.length * 2) // check recent user messages
       .map((h) => h.content.trim()),
   );
 
-  const stillPending = pending.filter(
+  const stillPending = freshPending.filter(
     (p) => !lastServerUserContent.has(p.content.trim()),
   );
 

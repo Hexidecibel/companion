@@ -85,6 +85,31 @@ export function MessageList({
     }
   }, [scrollToBottomProp]);
 
+  // Scroll to bottom on viewport resize (keyboard open/close) if near bottom.
+  // The resize can trigger scroll events that corrupt isNearBottomRef before our
+  // handler runs, so we capture state eagerly and use setTimeout to let layout settle.
+  useEffect(() => {
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const onResize = () => {
+      // Capture near-bottom state synchronously before resize-triggered scroll events
+      const wasNearBottom = isNearBottomRef.current;
+      if (wasNearBottom) {
+        // Wait for keyboard animation and layout reflow to settle
+        setTimeout(() => {
+          const el = containerRef.current;
+          if (el) {
+            el.scrollTop = el.scrollHeight - el.clientHeight;
+            isNearBottomRef.current = true;
+            setShowScrollButton(false);
+          }
+        }, 120);
+      }
+    };
+    vv.addEventListener('resize', onResize);
+    return () => vv.removeEventListener('resize', onResize);
+  }, []);
+
   // Scroll to current search match
   useEffect(() => {
     if (!currentMatchId || !containerRef.current) return;

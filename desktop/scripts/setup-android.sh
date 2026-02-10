@@ -97,7 +97,15 @@ else
   echo "Back navigation already configured in MainActivity"
 fi
 
-# 8. Remove Tauri vector icon that overrides PNG mipmap icons on API 24+
+# 8. Set windowSoftInputMode=adjustResize so keyboard shrinks WebView
+if ! grep -q "windowSoftInputMode" "$MANIFEST"; then
+  echo "Adding windowSoftInputMode=adjustResize to activity..."
+  sed -i 's/android:name=".MainActivity"/android:name=".MainActivity"\n            android:windowSoftInputMode="adjustResize"/' "$MANIFEST"
+else
+  echo "windowSoftInputMode already set in manifest"
+fi
+
+# 9. Remove Tauri vector icon that overrides PNG mipmap icons on API 24+
 VECTOR_ICON="$GEN_ANDROID/app/src/main/res/drawable-v24/ic_launcher_foreground.xml"
 if [ -f "$VECTOR_ICON" ]; then
   echo "Removing Tauri vector icon (would override PNG icons on API 24+)..."
