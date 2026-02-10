@@ -634,13 +634,16 @@ export function SessionSidebar({
           );
         })}
 
+      </div>
+
+      {snapshots.length > 0 && (
         <button
           className="sidebar-add-server-btn"
           onClick={() => setEditingServerId(null)}
         >
           + Add Server
         </button>
-      </div>
+      )}
 
       {tmuxServerId && (
         <TmuxModal

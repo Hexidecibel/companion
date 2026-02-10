@@ -116,6 +116,7 @@ export interface WebSocketResponse {
   error?: string;
   requestId?: string;
   sessionId?: string; // Session context for validation
+  isLocal?: boolean; // Whether connection is from localhost (sent in auth response)
 }
 
 export interface RegisteredDevice {

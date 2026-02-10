@@ -15,7 +15,7 @@ import { useSkills } from '../hooks/useSkills';
 import { WaitingIndicator } from './WaitingIndicator';
 import { TaskList } from './TaskList';
 import { MessageList } from './MessageList';
-import { InputBar } from './InputBar';
+import { InputBar, InputBarHandle } from './InputBar';
 import { SubAgentBar } from './SubAgentBar';
 import { SubAgentModal } from './SubAgentModal';
 import { SubAgentDetail } from './SubAgentDetail';
@@ -68,6 +68,7 @@ export function SessionView({
     hasMore,
     error,
     sendInput,
+    cancelMessage,
     loadMore,
   } = useConversation(serverId, sessionId, tmuxSessionName);
 
@@ -362,6 +363,16 @@ export function SessionView({
     sendInput(label);
   };
 
+  // Reference to InputBar for pre-filling text on cancel
+  const inputBarRef = useRef<InputBarHandle>(null);
+
+  const handleCancelMessage = useCallback(async (clientMessageId: string) => {
+    const originalText = await cancelMessage(clientMessageId);
+    if (originalText && inputBarRef.current) {
+      inputBarRef.current.prefill(originalText);
+    }
+  }, [cancelMessage]);
+
   const mobile = isMobileViewport();
 
   const actionButtons = (
@@ -522,6 +533,7 @@ export function SessionView({
             hasMore={hasMore}
             onLoadMore={loadMore}
             onSelectOption={handleSelectOption}
+            onCancelMessage={handleCancelMessage}
             onViewFile={handleViewFile}
             onViewArtifact={(content, title) => setArtifactContent({ content, title })}
             searchTerm={searchTerm}
@@ -552,6 +564,7 @@ export function SessionView({
       />
 
       <InputBar
+        ref={inputBarRef}
         onSend={handleSend}
         onSendWithImages={handleSendWithImages}
         disabled={false}

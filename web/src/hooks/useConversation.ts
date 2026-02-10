@@ -19,6 +19,7 @@ interface UseConversationReturn {
   hasMore: boolean;
   error: string | null;
   sendInput: (text: string) => Promise<boolean>;
+  cancelMessage: (clientMessageId: string) => Promise<string | null>;
   loadMore: () => void;
 }
 
@@ -238,6 +239,7 @@ export function useConversation(
               content: text,
               timestamp: Date.now(),
               isWaitingForChoice: false,
+              isPending: true,
             },
           ]);
         }
@@ -249,5 +251,34 @@ export function useConversation(
     [serverId, sessionId, tmuxSessionName],
   );
 
-  return { highlights, status, loading, loadingMore, hasMore, error, sendInput, loadMore };
+  const cancelMessage = useCallback(
+    async (clientMessageId: string): Promise<string | null> => {
+      if (!serverId || !sessionId) return null;
+      const conn = connectionManager.getConnection(serverId);
+      if (!conn || !conn.isConnected()) return null;
+
+      // Find the message content before removing
+      const msg = highlightsRef.current.find(h => h.id === clientMessageId);
+      const originalText = msg?.content || null;
+
+      try {
+        await conn.sendRequest('cancel_input', {
+          clientMessageId,
+          sessionId,
+          tmuxSessionName: tmuxSessionName || sessionId,
+        });
+
+        // Remove the optimistic message from local state
+        setHighlights((prev) => prev.filter(h => h.id !== clientMessageId));
+      } catch {
+        // Still remove locally even if server request fails
+        setHighlights((prev) => prev.filter(h => h.id !== clientMessageId));
+      }
+
+      return originalText;
+    },
+    [serverId, sessionId, tmuxSessionName],
+  );
+
+  return { highlights, status, loading, loadingMore, hasMore, error, sendInput, cancelMessage, loadMore };
 }

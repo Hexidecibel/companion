@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { ConversationHighlight, Question } from '../types';
 import { ToolCard } from './ToolCard';
 import { MarkdownRenderer } from './MarkdownRenderer';
@@ -8,6 +8,7 @@ const ARTIFACT_THRESHOLD = 100; // lines
 interface MessageBubbleProps {
   message: ConversationHighlight;
   onSelectOption?: (label: string) => void;
+  onCancelMessage?: (clientMessageId: string) => void;
   onViewFile?: (path: string) => void;
   onViewArtifact?: (content: string, title?: string) => void;
   searchTerm?: string | null;
@@ -23,6 +24,7 @@ function QuestionBlock({ question, onSelectOption }: QuestionBlockProps) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [showOther, setShowOther] = useState(false);
   const [otherText, setOtherText] = useState('');
+  const blockRef = useRef<HTMLDivElement>(null);
 
   const handleOptionClick = useCallback((label: string) => {
     if (question.multiSelect) {
@@ -51,23 +53,48 @@ function QuestionBlock({ question, onSelectOption }: QuestionBlockProps) {
     onSelectOption(trimmed);
   }, [otherText, onSelectOption]);
 
+  // Keyboard shortcuts: 1-9 to select options, Enter to submit multi-select
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      // Don't capture if user is typing in an input/textarea
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      const num = parseInt(e.key);
+      if (num >= 1 && num <= question.options.length) {
+        e.preventDefault();
+        handleOptionClick(question.options[num - 1].label);
+      }
+      if (e.key === 'Enter' && question.multiSelect && selected.size > 0) {
+        e.preventDefault();
+        handleSubmitMulti();
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [question.options, question.multiSelect, selected, handleOptionClick, handleSubmitMulti]);
+
+  const showDescriptions = question.options.some(o => o.description);
+
   return (
-    <div className="question-block">
+    <div className="question-block" ref={blockRef}>
       {question.header && (
         <div className="question-block-header">{question.header}</div>
       )}
       {question.question && (
         <div className="question-block-text">{question.question}</div>
       )}
-      <div className="question-block-options">
-        {question.options.map((opt) => (
+      <div className={`question-block-options ${showDescriptions ? 'with-descriptions' : ''}`}>
+        {question.options.map((opt, idx) => (
           <button
             key={opt.label}
-            className={`msg-option-btn ${question.multiSelect && selected.has(opt.label) ? 'selected' : ''}`}
+            className={`msg-option-btn ${question.multiSelect && selected.has(opt.label) ? 'selected' : ''} ${showDescriptions ? 'with-desc' : ''}`}
             onClick={() => handleOptionClick(opt.label)}
             title={opt.description}
           >
-            {opt.label}
+            <span className="option-key-hint">{idx + 1}</span>
+            <span className="option-label">{opt.label}</span>
+            {showDescriptions && opt.description && (
+              <span className="option-description">{opt.description}</span>
+            )}
           </button>
         ))}
       </div>
@@ -202,7 +229,18 @@ function MultiQuestionFlow({ questions, onSelectOption }: MultiQuestionFlowProps
 
   return (
     <div className="multi-question-flow">
-      <div className="multi-question-step">Question {step + 1} of {total}</div>
+      <div className="multi-question-progress">
+        <span className="multi-question-step">Question {step + 1} of {total}</span>
+        <div className="multi-question-dots">
+          {Array.from({ length: total }, (_, i) => (
+            <span
+              key={i}
+              className={`mq-dot ${i === step ? 'active' : ''} ${answers.has(i) ? 'answered' : ''}`}
+              onClick={() => { if (answers.has(i)) { setReviewing(false); setStep(i); } }}
+            />
+          ))}
+        </div>
+      </div>
       <QuestionBlockSingle
         question={currentQ}
         selectedAnswer={currentAnswer}
@@ -257,19 +295,39 @@ function QuestionBlockSingle({ question, selectedAnswer, onAnswer }: QuestionBlo
     setSelected(new Set());
   }, [otherText, onAnswer]);
 
+  // Keyboard: 1-9 to select options
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      const num = parseInt(e.key);
+      if (num >= 1 && num <= question.options.length) {
+        e.preventDefault();
+        handleOptionClick(question.options[num - 1].label);
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [question.options, handleOptionClick]);
+
+  const showDescriptions = question.options.some(o => o.description);
+
   return (
     <div className="question-block">
       {question.header && <div className="question-block-header">{question.header}</div>}
       {question.question && <div className="question-block-text">{question.question}</div>}
-      <div className="question-block-options">
-        {question.options.map(opt => (
+      <div className={`question-block-options ${showDescriptions ? 'with-descriptions' : ''}`}>
+        {question.options.map((opt, idx) => (
           <button
             key={opt.label}
-            className={`msg-option-btn ${selected.has(opt.label) ? 'selected' : ''}`}
+            className={`msg-option-btn ${selected.has(opt.label) ? 'selected' : ''} ${showDescriptions ? 'with-desc' : ''}`}
             onClick={() => handleOptionClick(opt.label)}
             title={opt.description}
           >
-            {opt.label}
+            <span className="option-key-hint">{idx + 1}</span>
+            <span className="option-label">{opt.label}</span>
+            {showDescriptions && opt.description && (
+              <span className="option-description">{opt.description}</span>
+            )}
           </button>
         ))}
       </div>
@@ -365,7 +423,7 @@ function CompactionMessage({ content }: { content: string }) {
   );
 }
 
-export function MessageBubble({ message, onSelectOption, onViewFile, onViewArtifact, searchTerm, isCurrentMatch }: MessageBubbleProps) {
+export function MessageBubble({ message, onSelectOption, onCancelMessage, onViewFile, onViewArtifact, searchTerm, isCurrentMatch }: MessageBubbleProps) {
   const isUser = message.type === 'user';
   const isSystem = message.type === 'system';
   const [allExpanded, setAllExpanded] = useState<boolean | undefined>(undefined);
@@ -415,7 +473,7 @@ export function MessageBubble({ message, onSelectOption, onViewFile, onViewArtif
       data-highlight-id={message.id}
     >
       {hasContent && (
-        <div className={`msg-bubble ${isUser ? 'msg-bubble-user' : 'msg-bubble-assistant'}`}>
+        <div className={`msg-bubble ${isUser ? 'msg-bubble-user' : 'msg-bubble-assistant'} ${isUser && message.isPending ? 'msg-bubble-pending' : ''}`}>
           {searchTerm ? (
             <pre className="msg-content">
               <HighlightedText text={message.content} term={searchTerm} />
@@ -428,6 +486,15 @@ export function MessageBubble({ message, onSelectOption, onViewFile, onViewArtif
               onFileClick={onViewFile}
               className="msg-markdown"
             />
+          )}
+          {isUser && message.isPending && onCancelMessage && (
+            <button
+              className="msg-cancel-btn"
+              onClick={() => onCancelMessage(message.id)}
+              title="Cancel and edit"
+            >
+              &#x2715;
+            </button>
           )}
         </div>
       )}

@@ -9,6 +9,7 @@ interface MessageListProps {
   hasMore: boolean;
   onLoadMore: () => void;
   onSelectOption?: (label: string) => void;
+  onCancelMessage?: (clientMessageId: string) => void;
   onViewFile?: (path: string) => void;
   onViewArtifact?: (content: string, title?: string) => void;
   searchTerm?: string | null;
@@ -23,6 +24,7 @@ export function MessageList({
   hasMore,
   onLoadMore,
   onSelectOption,
+  onCancelMessage,
   onViewFile,
   onViewArtifact,
   searchTerm,
@@ -160,6 +162,7 @@ export function MessageList({
           key={msg.id}
           message={msg}
           onSelectOption={onSelectOption}
+          onCancelMessage={onCancelMessage}
           onViewFile={onViewFile}
           onViewArtifact={onViewArtifact}
           searchTerm={searchTerm}

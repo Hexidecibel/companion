@@ -52,6 +52,7 @@ interface AuthenticatedClient {
   subscribed: boolean;
   subscribedSessionId?: string; // Track which session client is subscribed to
   listenerPort?: number; // Track which listener this client connected through
+  isLocal: boolean; // Whether connection is from localhost
 }
 
 interface ClientError {
@@ -233,14 +234,17 @@ export class WebSocketHandler {
     console.log(`WebSocket: Stored tmux session config for "${name}" (${workingDir})`);
   }
 
-  private handleConnection(ws: WebSocket, _req: IncomingMessage, listenerPort: number): void {
+  private handleConnection(ws: WebSocket, req: IncomingMessage, listenerPort: number): void {
     const clientId = uuidv4();
+    const remoteAddress = req.socket.remoteAddress || '';
+    const isLocal = remoteAddress === '127.0.0.1' || remoteAddress === '::1' || remoteAddress === '::ffff:127.0.0.1';
     const client: AuthenticatedClient = {
       id: clientId,
       ws,
       authenticated: false,
       subscribed: false,
       listenerPort,
+      isLocal,
     };
 
     this.clients.set(clientId, client);
@@ -295,10 +299,11 @@ export class WebSocketHandler {
         this.send(client.ws, {
           type: 'authenticated',
           success: true,
+          isLocal: client.isLocal,
           requestId,
         });
         console.log(
-          `WebSocket: Client authenticated (${client.id}) on port ${client.listenerPort}`
+          `WebSocket: Client authenticated (${client.id}) on port ${client.listenerPort} isLocal=${client.isLocal}`
         );
       } else {
         this.send(client.ws, {
@@ -580,6 +585,10 @@ export class WebSocketHandler {
             this.escalation.acknowledgeSession(activeSessionId);
           }
         }
+        break;
+
+      case 'cancel_input':
+        this.handleCancelInput(client, payload as { clientMessageId: string; tmuxSessionName?: string; sessionId?: string }, requestId);
         break;
 
       case 'send_image':
@@ -1354,6 +1363,50 @@ export class WebSocketHandler {
       type: 'input_sent',
       success,
       error: success ? undefined : 'Failed to send input to session',
+      requestId,
+    });
+  }
+
+  private async handleCancelInput(
+    client: AuthenticatedClient,
+    payload: { clientMessageId: string; tmuxSessionName?: string; sessionId?: string } | undefined,
+    requestId?: string
+  ): Promise<void> {
+    if (!payload?.clientMessageId) {
+      this.send(client.ws, { type: 'cancel_input', success: false, error: 'No clientMessageId', requestId });
+      return;
+    }
+
+    // Resolve tmux session
+    let sessionToUse = payload.tmuxSessionName || undefined;
+    if (!sessionToUse && payload.sessionId) {
+      sessionToUse = this.watcher.getTmuxSessionForConversation(payload.sessionId) || undefined;
+    }
+
+    // Remove from pending messages
+    let removed = false;
+    for (const [tmuxName, pending] of this.pendingSentMessages) {
+      const idx = pending.findIndex(p => p.clientMessageId === payload.clientMessageId);
+      if (idx !== -1) {
+        pending.splice(idx, 1);
+        if (pending.length === 0) this.pendingSentMessages.delete(tmuxName);
+        removed = true;
+        sessionToUse = sessionToUse || tmuxName;
+        console.log(`[CANCEL] Removed pending message ${payload.clientMessageId} from ${tmuxName}`);
+        break;
+      }
+    }
+
+    // Send Ctrl+C to abort if we know the session
+    if (sessionToUse) {
+      await this.injector.cancelInput(sessionToUse);
+      console.log(`[CANCEL] Sent Ctrl+C to tmux="${sessionToUse}"`);
+    }
+
+    this.send(client.ws, {
+      type: 'cancel_input',
+      success: true,
+      payload: { removed, clientMessageId: payload.clientMessageId },
       requestId,
     });
   }

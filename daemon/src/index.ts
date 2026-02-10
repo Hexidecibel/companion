@@ -173,21 +173,18 @@ async function main(): Promise<void> {
     console.log(
       `Auto-approve tools from config: ${config.autoApproveTools.length > 0 ? config.autoApproveTools.join(', ') : '(none - client toggle only)'}`
     );
-    const tmux = new TmuxManager('companion');
-    // Track recent approvals per session to avoid double-firing for the same prompt.
-    // Key: sessionId, Value: timestamp of last approval sent.
-    const lastApprovalBySession = new Map<string, number>();
+    // Track recent approvals per session+tool-set to avoid double-firing.
+    // Key: "sessionId:toolsSorted", Value: timestamp of last approval sent.
+    const lastApprovalByKey = new Map<string, number>();
 
     watcher.on('pending-approval', async ({ sessionId, projectPath, tools }) => {
       // Check per-session toggle OR config-level tools
       const sessionEnabled = wsHandler.autoApproveSessions.has(sessionId);
       if (config.autoApproveTools.length === 0 && !sessionEnabled) {
-        console.log(`[AUTO-APPROVE] Skipped: not enabled for session ${sessionId}`);
         return;
       }
 
-      // Only approve tools that are in the config list OR if the session has auto-approve on.
-      // Either way, only APPROVAL_TOOLS are valid (getPendingApprovalTools already filters).
+      // Only approve tools in the config list OR if the session toggle is on
       const autoApprovable = tools.filter((tool: string) => {
         if (config.autoApproveTools.includes(tool)) return true;
         if (sessionEnabled) return true;
@@ -199,82 +196,74 @@ async function main(): Promise<void> {
         return;
       }
 
-      // Per-session dedup: don't re-fire within 3 seconds of the last approval
-      // for the same session. This prevents double-sends when the file watcher
-      // re-fires before the CLI has processed the previous "yes".
-      // Short window (3s) so sequential tool approvals still work.
+      // Per-session+tool dedup: don't re-fire within 1 second for the SAME set of tools.
+      // This prevents double-sends when the watcher re-fires before CLI processes "yes".
+      // Using tool-specific keys so different tools in rapid succession still get approved.
       const now = Date.now();
-      const lastApproval = lastApprovalBySession.get(sessionId);
-      if (lastApproval && now - lastApproval < 3000) {
+      const dedupKey = `${sessionId}:${autoApprovable.sort().join(',')}`;
+      const lastApproval = lastApprovalByKey.get(dedupKey);
+      if (lastApproval && now - lastApproval < 1000) {
         console.log(
-          `[AUTO-APPROVE] Dedup: skipping (last approval ${now - lastApproval}ms ago for ${sessionId})`
+          `[AUTO-APPROVE] Dedup: skipping [${autoApprovable.join(', ')}] (${now - lastApproval}ms ago)`
         );
         return;
       }
-      lastApprovalBySession.set(sessionId, now);
+      lastApprovalByKey.set(dedupKey, now);
 
       // Clean up old entries
-      for (const [key, ts] of lastApprovalBySession) {
-        if (now - ts > 30000) lastApprovalBySession.delete(key);
+      for (const [key, ts] of lastApprovalByKey) {
+        if (now - ts > 30000) lastApprovalByKey.delete(key);
       }
 
+      // Resolve tmux session: prefer watcher's reverse lookup, fall back to path matching
+      let targetTmuxSession = watcher.getTmuxSessionForConversation(sessionId) || undefined;
+      if (!targetTmuxSession && projectPath) {
+        const tmux = new TmuxManager('companion');
+        const tmuxSessions = await tmux.listSessions();
+        const normalizedPath = projectPath.replace(/\/+$/, '');
+        const match = tmuxSessions.find(
+          (ts) =>
+            ts.workingDir === projectPath ||
+            ts.workingDir?.replace(/\/+$/, '') === normalizedPath
+        );
+        if (match) {
+          targetTmuxSession = match.name;
+        }
+      }
+
+      const target = targetTmuxSession || undefined;
+      console.log(
+        `[AUTO-APPROVE] Approving [${autoApprovable.join(', ')}] -> tmux="${target || 'active'}" (session: ${sessionId.substring(0, 8)})`
+      );
+
       try {
-        // Find the tmux session that matches this conversation's project path
-        let targetTmuxSession: string | undefined;
-        if (projectPath) {
-          const tmuxSessions = await tmux.listSessions();
-          // Try exact match first
-          const exactMatch = tmuxSessions.find((ts) => ts.workingDir === projectPath);
-          if (exactMatch) {
-            targetTmuxSession = exactMatch.name;
-          } else {
-            // Try normalized path match (trailing slash differences, symlinks)
-            const normalizedPath = projectPath.replace(/\/+$/, '');
-            const fuzzyMatch = tmuxSessions.find(
-              (ts) => ts.workingDir?.replace(/\/+$/, '') === normalizedPath
-            );
-            if (fuzzyMatch) {
-              targetTmuxSession = fuzzyMatch.name;
-              console.log(
-                `[AUTO-APPROVE] Fuzzy path match: "${fuzzyMatch.name}" for ${projectPath}`
-              );
-            }
+        // Verify terminal has an approval prompt before sending
+        const paneContent = await injector.capturePaneContent(target);
+        const hasApprovalPrompt = /\b(yes|no|always allow|approve|allow|deny|reject)\b/i.test(paneContent) ||
+          /\?\s*$/.test(paneContent.split('\n').pop() || '');
+
+        if (!hasApprovalPrompt) {
+          console.log(`[AUTO-APPROVE] No approval prompt detected in terminal, waiting 500ms...`);
+          await new Promise((resolve) => setTimeout(resolve, 500));
+          // Re-check after wait
+          const paneContent2 = await injector.capturePaneContent(target);
+          const hasPrompt2 = /\b(yes|no|always allow|approve|allow|deny|reject)\b/i.test(paneContent2) ||
+            /\?\s*$/.test(paneContent2.split('\n').pop() || '');
+          if (!hasPrompt2) {
+            console.log(`[AUTO-APPROVE] Still no prompt after wait, sending anyway`);
           }
         }
 
-        // Wait for terminal to settle before sending approval
-        await new Promise((resolve) => setTimeout(resolve, 300));
+        // Wait briefly for terminal to settle
+        await new Promise((resolve) => setTimeout(resolve, 200));
 
-        const sendApproval = async (target?: string): Promise<boolean> => {
-          try {
-            await injector.sendInput('yes', target);
-            return true;
-          } catch (err) {
-            console.log(`[AUTO-APPROVE] Send failed: ${err}`);
-            return false;
-          }
-        };
-
-        if (targetTmuxSession) {
-          console.log(
-            `[AUTO-APPROVE] Sending to tmux="${targetTmuxSession}" for tools [${autoApprovable.join(', ')}] (session: ${sessionId})`
-          );
-          const success = await sendApproval(targetTmuxSession);
-          if (!success) {
-            console.log(`[AUTO-APPROVE] Retrying after 500ms...`);
-            await new Promise((resolve) => setTimeout(resolve, 500));
-            await sendApproval(targetTmuxSession);
-          }
+        const success = await injector.sendInput('yes', target);
+        if (!success) {
+          console.log(`[AUTO-APPROVE] Send failed, retrying after 500ms...`);
+          await new Promise((resolve) => setTimeout(resolve, 500));
+          await injector.sendInput('yes', target);
         } else {
-          console.log(
-            `[AUTO-APPROVE] Sending to active session for tools [${autoApprovable.join(', ')}] (no tmux match for ${projectPath})`
-          );
-          const success = await sendApproval();
-          if (!success) {
-            console.log(`[AUTO-APPROVE] Retrying after 500ms...`);
-            await new Promise((resolve) => setTimeout(resolve, 500));
-            await sendApproval();
-          }
+          console.log(`[AUTO-APPROVE] Sent "yes" successfully`);
         }
       } catch (err) {
         console.error(`[AUTO-APPROVE] Error: ${err}`);

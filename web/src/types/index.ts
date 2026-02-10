@@ -68,6 +68,7 @@ export interface ConversationHighlight {
   multiSelect?: boolean;
   toolCalls?: ToolCall[];
   isCompaction?: boolean;
+  isPending?: boolean; // Optimistic sent message not yet confirmed by JSONL
 }
 
 // Session types

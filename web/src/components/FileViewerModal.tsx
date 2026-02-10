@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, memo } from 'react';
 import { connectionManager } from '../services/ConnectionManager';
 import { MarkdownRenderer } from './MarkdownRenderer';
-import { isTauriMobile } from '../utils/platform';
+import { isTauriDesktop } from '../utils/platform';
 import hljs from 'highlight.js/lib/core';
 import 'highlight.js/styles/github-dark.css';
 
@@ -259,6 +259,13 @@ export function FileViewerModal({ serverId, filePath, onClose }: FileViewerModal
   const fileName = currentPath.split('/').pop() || currentPath;
   const content = fileData && !fileData.binary && !fileData.encoding ? fileData.content : null;
 
+  // Only show "Open in Editor" on local connections (same host) or Tauri desktop
+  const showEditorButton = useMemo(() => {
+    if (isTauriDesktop()) return true;
+    const conn = connectionManager.getConnection(serverId);
+    return conn?.isLocal ?? false;
+  }, [serverId]);
+
   useEffect(() => {
     setLoading(true);
     setError(null);
@@ -347,7 +354,7 @@ export function FileViewerModal({ serverId, filePath, onClose }: FileViewerModal
             </div>
           </div>
           <div className="file-viewer-actions">
-            {!isTauriMobile() && (
+            {showEditorButton && (
               <button
                 className={`file-viewer-editor-btn ${editorStatus}`}
                 onClick={handleOpenInEditor}

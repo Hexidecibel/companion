@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useMemo, type KeyboardEvent, type ClipboardEvent, type DragEvent } from 'react';
+import { useState, useRef, useCallback, useMemo, forwardRef, useImperativeHandle, type KeyboardEvent, type ClipboardEvent, type DragEvent } from 'react';
 import { PendingImage, Skill } from '../types';
 import { useUndoHistory } from '../hooks/useUndoHistory';
 import { SlashMenu, SlashMenuItem } from './SlashMenu';
@@ -14,6 +14,10 @@ interface InputBarProps {
   onTerminalKey?: (key: string) => void;
 }
 
+export interface InputBarHandle {
+  prefill: (text: string) => void;
+}
+
 let imageIdCounter = 0;
 
 function fileToPreview(file: File): PendingImage {
@@ -24,7 +28,7 @@ function fileToPreview(file: File): PendingImage {
   };
 }
 
-export function InputBar({ onSend, onSendWithImages, disabled, skills = [], terminalMode, onTerminalSend, onTerminalKey }: InputBarProps) {
+export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function InputBar({ onSend, onSendWithImages, disabled, skills = [], terminalMode, onTerminalSend, onTerminalKey }, ref) {
   const { value: text, onChange: setText, undo, redo, reset: resetHistory } = useUndoHistory();
   const [sending, setSending] = useState(false);
   const [images, setImages] = useState<PendingImage[]>([]);
@@ -33,6 +37,15 @@ export function InputBar({ onSend, onSendWithImages, disabled, skills = [], term
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
+
+  useImperativeHandle(ref, () => ({
+    prefill(newText: string) {
+      setText(newText);
+      requestAnimationFrame(() => {
+        textareaRef.current?.focus();
+      });
+    },
+  }), [setText]);
 
   const hasContent = text.trim().length > 0 || images.length > 0;
 
@@ -376,4 +389,4 @@ export function InputBar({ onSend, onSendWithImages, disabled, skills = [], term
       )}
     </div>
   );
-}
+});

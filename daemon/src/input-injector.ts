@@ -135,6 +135,31 @@ export class InputInjector {
     return this.defaultSession;
   }
 
+  /**
+   * Send Ctrl+C to cancel current input in a tmux session
+   */
+  async cancelInput(targetSession?: string): Promise<boolean> {
+    const session = targetSession || this.activeSession;
+    const { spawnSync } = require('child_process');
+    const checkResult = spawnSync('tmux', ['has-session', '-t', session], { timeout: 5000 });
+    if (checkResult.status !== 0) return false;
+    const result = spawnSync('tmux', ['send-keys', '-t', session, 'C-c'], { timeout: 5000 });
+    return result.status === 0;
+  }
+
+  /**
+   * Capture the current content of a tmux pane
+   */
+  async capturePaneContent(targetSession?: string, lines = 20): Promise<string> {
+    const session = targetSession || this.activeSession;
+    const { spawnSync } = require('child_process');
+    const result = spawnSync('tmux', ['capture-pane', '-t', session, '-p', '-S', `-${lines}`], {
+      timeout: 5000,
+    });
+    if (result.status !== 0) return '';
+    return (result.stdout?.toString() || '').trim();
+  }
+
   // Deprecated - use setActiveSession
   setSession(sessionName: string): void {
     this.activeSession = sessionName;

@@ -13,6 +13,7 @@ export class ServerConnection {
   readonly serverId: string;
   private ws: WebSocket | null = null;
   private server: Server;
+  private _isLocal = false;
   private connectionState: ConnectionState = {
     status: 'disconnected',
     reconnectAttempts: 0,
@@ -104,6 +105,8 @@ export class ServerConnection {
       });
 
       if (response.success) {
+        this._isLocal = !!(response as unknown as { isLocal?: boolean }).isLocal;
+
         // Subscribe to broadcasts so we receive real-time status_change events
         await this.send({ type: 'subscribe', requestId: `req_${++this.requestCounter}` });
 
@@ -298,6 +301,10 @@ export class ServerConnection {
 
   getServer(): Server {
     return this.server;
+  }
+
+  get isLocal(): boolean {
+    return this._isLocal;
   }
 
   updateServerConfig(server: Server): void {
