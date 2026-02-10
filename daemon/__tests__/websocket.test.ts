@@ -311,7 +311,7 @@ describe('WebSocketHandler', () => {
       );
 
       // Wait for async handling (resolveTmuxSession calls tmux list-sessions via exec)
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      await new Promise((resolve) => setTimeout(resolve, 500));
 
       expect(authenticatedClient.send).toHaveBeenCalledWith(
         expect.stringContaining('"type":"session_switched"')
