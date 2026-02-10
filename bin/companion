@@ -29,9 +29,9 @@ if ! command -v node &>/dev/null; then
   exit 1
 fi
 
-# --- Auto-build on first run ---
+# --- Auto-build daemon if needed (required for any command) ---
 if [ ! -f "$ENTRY" ]; then
-  echo "First run — building daemon..."
+  echo "Building daemon..."
   cd "$DAEMON_DIR"
   npm install 2>&1
   npm run build 2>&1
@@ -39,7 +39,8 @@ if [ ! -f "$ENTRY" ]; then
   echo ""
 fi
 
-if [ ! -d "$ROOT/web/dist" ]; then
+# --- Setup: also build web client ---
+if [ "${1:-}" = "setup" ] && [ ! -d "$ROOT/web/dist" ]; then
   echo "Building web client..."
   cd "$ROOT/web"
   npm install 2>&1
