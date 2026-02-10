@@ -3552,9 +3552,10 @@ html {
 
 .plan-card {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  justify-content: space-between;
-  padding: 8px 12px;
+  gap: 8px;
+  padding: 10px 14px;
   background: rgba(139, 92, 246, 0.1);
   border: 1px solid rgba(139, 92, 246, 0.3);
   border-radius: 8px;
@@ -3565,6 +3566,8 @@ html {
   display: flex;
   align-items: center;
   gap: 8px;
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 .plan-card-icon {
@@ -3587,6 +3590,19 @@ html {
 
 .plan-card-view-btn:hover {
   background: rgba(139, 92, 246, 0.35);
+}
+
+.plan-card-actions {
+  display: flex;
+  gap: 8px;
+  flex-basis: 100%;
+  margin-top: 2px;
+}
+
+.plan-card-actions .msg-option-btn {
+  flex: 1;
+  text-align: center;
+  padding: 8px 16px;
 }
 
 .session-header-btn.plan-btn {

@@ -1,0 +1,8 @@
+#!/bin/bash
+# build — Build all components (daemon + web client).
+# Alias for bin/build-all.
+#
+# Usage:
+#   bin/build
+
+exec "$(dirname "$0")/build-all" "$@"

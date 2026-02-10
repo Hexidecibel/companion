@@ -1,5 +1,9 @@
 #!/bin/bash
-# View daemon logs (follows)
+# logs — Follow daemon logs (platform-aware: systemd / launchd).
+#
+# Usage:
+#   bin/logs            Follow logs
+#   bin/logs -n 100     Show last 100 lines then follow
 if systemctl --user is-active companion &>/dev/null; then
   journalctl --user -u companion -f "$@"
 elif command -v systemctl &>/dev/null && systemctl is-active companion &>/dev/null; then

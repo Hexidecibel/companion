@@ -1,5 +1,8 @@
 #!/bin/bash
-# Show status of all companion services
+# status — Show status of daemon, port, git, and tmux sessions.
+#
+# Usage:
+#   bin/status
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(dirname "$SCRIPT_DIR")"
 

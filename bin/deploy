@@ -1,9 +1,24 @@
 #!/bin/bash
-# Build daemon + web, restart the daemon service
+# deploy — Build daemon + web client, then restart the daemon service.
+#
+# Usage:
+#   bin/deploy
+#
+# Prerequisites: node, npm
+# Requires a running daemon service (see: bin/companion autostart enable)
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(dirname "$SCRIPT_DIR")"
+
+if ! command -v node &>/dev/null; then
+  echo "ERROR: Node.js is not installed. See https://nodejs.org/" >&2
+  exit 1
+fi
+
+if [ ! -f "$ROOT/.companion/config.json" ] && [ ! -f "$HOME/.companion/config.json" ]; then
+  echo "TIP: No config found. Run 'bin/companion setup' first." >&2
+fi
 
 echo "=== Building Web Client ==="
 cd "$ROOT/web" && npm run build

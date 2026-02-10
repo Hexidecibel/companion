@@ -26,15 +26,17 @@ ${bold('USAGE')}
   companion [command] [options]
 
 ${bold('COMMANDS')}
-  start       Start the daemon (default if no command given)
-  stop        Stop a running daemon
-  restart     Restart the daemon (via systemctl)
-  status      Show daemon status
-  config      View or modify configuration
-  token       Generate a new authentication token
-  install     Run the installation script
-  logs        Show recent daemon logs
-  help        Show this help message
+  start               Start the daemon (default if no command given)
+  stop                Stop a running daemon
+  restart             Restart the daemon (via systemctl)
+  status              Show daemon status
+  setup               First-time setup (creates config, prints connection info)
+  autostart enable    Install as a system service (systemd / launchd)
+  autostart disable   Remove the system service
+  config              View or modify configuration
+  token               Generate a new authentication token
+  logs                Show recent daemon logs
+  help                Show this help message
 
 ${bold('OPTIONS')}
   --help, -h     Show help
@@ -47,7 +49,8 @@ ${bold('CONFIG SUBCOMMANDS')}
 
 ${bold('EXAMPLES')}
   companion                    Start the daemon
-  companion start              Start the daemon
+  companion setup              First-time setup
+  companion autostart enable   Install as a system service
   companion stop               Stop the daemon
   companion restart            Restart the daemon
   companion status             Check if daemon is running
@@ -55,7 +58,6 @@ ${bold('EXAMPLES')}
   companion config set port 8080
   companion token              Generate new auth token
   companion logs               Show recent logs
-  companion install            Run installation setup
 `);
 }
 
@@ -303,21 +305,177 @@ function cmdConfig(args: string[]): void {
   );
 }
 
-function cmdInstall(): void {
-  const scriptPath = path.join(__dirname, '..', 'scripts', 'install.sh');
-  if (!fs.existsSync(scriptPath)) {
-    console.error(red('Install script not found at: ' + scriptPath));
-    console.error('Run from the daemon source directory or install manually.');
-    process.exit(1);
+async function cmdSetup(): Promise<void> {
+  const { displayFirstRunWelcome } = await import('./config');
+
+  // loadConfig auto-creates ~/.companion/config.json with a generated token on first run
+  const config = loadConfig();
+  const configPath = process.env.CONFIG_PATH || path.join(CONFIG_DIR, 'config.json');
+
+  await displayFirstRunWelcome(config, configPath);
+
+  // Check for tmux
+  try {
+    execSync('which tmux', { stdio: 'ignore' });
+  } catch {
+    console.log(yellow('  Warning: tmux is not installed.'));
+    console.log(dim('  The daemon needs tmux to interact with coding sessions.'));
+    console.log(dim('  Install it: sudo apt install tmux  (Debian/Ubuntu)'));
+    console.log(dim('              brew install tmux       (macOS)'));
+    console.log('');
   }
 
-  console.log('Running installation script...');
-  try {
-    execSync(`bash "${scriptPath}"`, { stdio: 'inherit' });
-  } catch (err) {
-    console.error(red(`Installation failed: ${err}`));
+  console.log(dim('Next steps:'));
+  console.log(dim('  companion start              Start the daemon'));
+  console.log(dim('  companion autostart enable   Install as a system service'));
+  console.log('');
+}
+
+function cmdAutostart(args: string[]): void {
+  const subcommand = args[0];
+  const platform = os.platform();
+
+  if (subcommand === 'enable') {
+    cmdAutostartEnable(platform);
+  } else if (subcommand === 'disable') {
+    cmdAutostartDisable(platform);
+  } else {
+    console.error(red('Usage: companion autostart <enable|disable>'));
     process.exit(1);
   }
+}
+
+function cmdAutostartEnable(platform: string): void {
+  // Find the daemon entry point (resolve from __dirname which is daemon/dist/)
+  const daemonEntry = path.resolve(__dirname, 'index.js');
+  const nodePath = process.execPath;
+
+  if (platform === 'darwin') {
+    const plistDir = path.join(HOME_DIR, 'Library', 'LaunchAgents');
+    const plistPath = path.join(plistDir, 'com.companion.daemon.plist');
+    const logPath = path.join(HOME_DIR, 'Library', 'Logs', 'companion.log');
+
+    const plist = `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.companion.daemon</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>${nodePath}</string>
+    <string>${daemonEntry}</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>${logPath}</string>
+  <key>StandardErrorPath</key>
+  <string>${logPath}</string>
+</dict>
+</plist>`;
+
+    fs.mkdirSync(plistDir, { recursive: true });
+    fs.writeFileSync(plistPath, plist);
+
+    try {
+      execSync(`launchctl load "${plistPath}"`, { stdio: 'inherit' });
+      console.log(green('Autostart enabled (launchd)'));
+      console.log(dim(`  Plist: ${plistPath}`));
+      console.log(dim(`  Logs:  ${logPath}`));
+    } catch {
+      console.error(red('Failed to load launchd plist'));
+      console.log(dim(`Plist written to: ${plistPath}`));
+      console.log(dim('Try manually: launchctl load ' + plistPath));
+    }
+  } else {
+    // Linux: systemd user service
+    const serviceDir = path.join(HOME_DIR, '.config', 'systemd', 'user');
+    const servicePath = path.join(serviceDir, 'companion.service');
+
+    const unit = `[Unit]
+Description=Companion Daemon
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=${nodePath} ${daemonEntry}
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
+`;
+
+    fs.mkdirSync(serviceDir, { recursive: true });
+    fs.writeFileSync(servicePath, unit);
+
+    try {
+      execSync('systemctl --user daemon-reload', { stdio: 'inherit' });
+      execSync('systemctl --user enable --now companion', { stdio: 'inherit' });
+      console.log(green('Autostart enabled (systemd user service)'));
+      console.log(dim(`  Unit: ${servicePath}`));
+      console.log(dim('  Logs: journalctl --user -u companion -f'));
+    } catch {
+      console.error(red('Failed to enable systemd service'));
+      console.log(dim(`Unit file written to: ${servicePath}`));
+      console.log(dim('Try manually:'));
+      console.log(dim('  systemctl --user daemon-reload'));
+      console.log(dim('  systemctl --user enable --now companion'));
+    }
+  }
+}
+
+function cmdAutostartDisable(platform: string): void {
+  if (platform === 'darwin') {
+    const plistPath = path.join(HOME_DIR, 'Library', 'LaunchAgents', 'com.companion.daemon.plist');
+
+    try {
+      execSync(`launchctl unload "${plistPath}" 2>/dev/null`, { stdio: 'inherit' });
+    } catch {
+      // May already be unloaded
+    }
+
+    if (fs.existsSync(plistPath)) {
+      fs.unlinkSync(plistPath);
+    }
+
+    console.log(green('Autostart disabled (launchd)'));
+    console.log(dim('Service stopped and plist removed.'));
+  } else {
+    // Linux: systemd user service
+    const servicePath = path.join(HOME_DIR, '.config', 'systemd', 'user', 'companion.service');
+
+    try {
+      execSync('systemctl --user disable --now companion 2>/dev/null', { stdio: 'inherit' });
+    } catch {
+      // May already be disabled
+    }
+
+    if (fs.existsSync(servicePath)) {
+      fs.unlinkSync(servicePath);
+    }
+
+    try {
+      execSync('systemctl --user daemon-reload', { stdio: 'ignore' });
+    } catch {
+      // Best effort
+    }
+
+    console.log(green('Autostart disabled (systemd)'));
+    console.log(dim('Service stopped and unit file removed.'));
+  }
+}
+
+function cmdInstall(): void {
+  console.log(yellow('The "install" command is deprecated.'));
+  console.log('');
+  console.log('Use these commands instead:');
+  console.log(`  ${bold('companion setup')}              Create config and show connection info`);
+  console.log(`  ${bold('companion autostart enable')}   Install as a system service`);
+  console.log('');
 }
 
 function cmdLogs(): void {
@@ -461,6 +619,14 @@ export async function dispatchCli(args: string[]): Promise<boolean> {
 
     case 'token':
       cmdToken();
+      return true;
+
+    case 'setup':
+      await cmdSetup();
+      return true;
+
+    case 'autostart':
+      cmdAutostart(args.slice(1));
       return true;
 
     case 'config':

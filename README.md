@@ -120,36 +120,38 @@ All native apps share a single web codebase — one React + Vite + TypeScript pr
 
 ## Quick Start
 
-### 1. Install the Daemon
+### 1. Setup
 
 ```bash
 git clone https://github.com/Hexidecibel/companion.git
-cd companion/daemon
-npm install && npm run build
-bash scripts/install.sh
+cd companion
+bin/companion setup
 ```
 
-The installer will:
-- Detect your OS and install dependencies (Node.js, tmux)
-- Build and install the daemon
-- Generate a secure authentication token
-- Set up auto-start (systemd on Linux, launchd on macOS)
+This auto-builds the daemon on first run, creates a config at `~/.companion/config.json` with a generated token, and prints connection info.
 
-**Save the token shown at the end — you'll need it for the app.**
+### 2. Start
 
-### 2. Connect
+```bash
+bin/companion start
+```
+
+Or install as a system service so it starts automatically:
+
+```bash
+bin/companion autostart enable
+```
+
+### 3. Connect
 
 1. Open the web client at `http://<your-server>:9877/web`
 2. Or download the Android APK / iOS IPA / desktop app from [Releases](https://github.com/Hexidecibel/companion/releases)
-3. Add your server's IP and authentication token
+3. Add your server's IP and the authentication token shown during setup
 4. Create a new tmux session or adopt an existing one
 
 ## Configuration
 
-Config file location:
-- **macOS**: `~/.companion/config.json`
-- **Linux (with sudo)**: `/etc/companion/config.json`
-- **Linux (without sudo)**: `~/.companion/config.json`
+Config file: `~/.companion/config.json` (created by `bin/companion setup`)
 
 ```json
 {
@@ -175,38 +177,22 @@ Config file location:
 
 ## Service Management
 
-### macOS (launchd)
-
 ```bash
-tail -f ~/Library/Logs/companion.log       # View logs
-launchctl kickstart -k gui/$(id -u)/com.companion.daemon  # Restart
-launchctl unload ~/Library/LaunchAgents/com.companion.daemon.plist  # Stop
-launchctl load ~/Library/LaunchAgents/com.companion.daemon.plist    # Start
-```
-
-### Linux (systemd)
-
-```bash
-sudo journalctl -u companion -f    # View logs
-sudo systemctl restart companion   # Restart
-sudo systemctl stop companion      # Stop
-sudo systemctl status companion    # Status
-```
-
-### CLI
-
-```bash
-companion status   # Show running state, PID, sessions
-companion stop     # Graceful shutdown
-companion config   # View/set config values
-companion logs     # Platform-aware log viewer
+bin/companion autostart enable    # Install as system service (systemd / launchd)
+bin/companion autostart disable   # Remove system service
+bin/companion start               # Start in foreground
+bin/companion stop                # Stop a running daemon
+bin/companion restart             # Restart via service manager
+bin/companion status              # Show running state, PID, sessions
+bin/companion logs                # Platform-aware log viewer
+bin/companion config              # View/set config values
 ```
 
 ## Uninstalling
 
 ```bash
-cd companion/daemon
-bash scripts/uninstall.sh
+bin/companion autostart disable   # Remove system service
+rm -rf ~/.companion               # Remove config
 ```
 
 ## Development
@@ -268,6 +254,8 @@ cargo tauri ios build --export-method app-store-connect
 ### Management Scripts
 
 ```bash
+bin/companion    # Top-level CLI (auto-builds on first run)
+bin/build        # Build daemon + web (alias for build-all)
 bin/build-all    # Build daemon + web
 bin/deploy       # Build + restart daemon service
 bin/dev          # Start daemon + Vite dev server

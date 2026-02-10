@@ -1,0 +1,45 @@
+#!/bin/bash
+# companion — Top-level entry point for the Companion daemon.
+#
+# Automatically builds the daemon on first run, then delegates to
+# the Node.js CLI (daemon/dist/index.js).
+#
+# Usage:
+#   bin/companion              Start the daemon
+#   bin/companion setup        First-time setup (creates config, prints connection info)
+#   bin/companion autostart enable   Install as a system service
+#   bin/companion autostart disable  Remove system service
+#   bin/companion help         Show all commands
+#
+# See README.md for full documentation.
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+ROOT="$(dirname "$SCRIPT_DIR")"
+DAEMON_DIR="$ROOT/daemon"
+ENTRY="$DAEMON_DIR/dist/index.js"
+
+# --- Check for Node.js ---
+if ! command -v node &>/dev/null; then
+  echo "ERROR: Node.js is not installed."
+  echo ""
+  echo "Install it from: https://nodejs.org/"
+  echo "  or via nvm:    curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash"
+  exit 1
+fi
+
+# --- Auto-build on first run ---
+if [ ! -f "$ENTRY" ]; then
+  echo "First run — building daemon..."
+  echo ""
+  cd "$DAEMON_DIR"
+  npm install 2>&1
+  npm run build 2>&1
+  echo ""
+  echo "Build complete."
+  echo ""
+fi
+
+# --- Delegate to daemon CLI ---
+exec node "$ENTRY" "$@"

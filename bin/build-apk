@@ -1,5 +1,11 @@
 #!/bin/bash
-# Build, sign, and optionally install Android APK via Tauri
+# build-apk — Build, sign, and optionally install Android APK via Tauri.
+#
+# Usage:
+#   bin/build-apk
+#
+# Prerequisites: node, npm, cargo, Android SDK, Java 17+
+# The keystore at desktop/debug.keystore is used for signing.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"

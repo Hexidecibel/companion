@@ -213,11 +213,13 @@ High-level features of the Companion daemon, web client, and desktop/mobile apps
 - Camera access for QR code scanning
 
 ## Daemon CLI
+- `bin/companion` — top-level entry point, auto-builds daemon on first run
+- `companion setup` — first-time wizard: creates config, generates token, prints connection info with QR code
+- `companion autostart enable/disable` — manages systemd user service (Linux) and launchd agent (macOS)
 - `companion status` — show running state, PID, tmux sessions, config summary
 - `companion stop` — graceful shutdown via PID file
 - `companion config` — view/set config values
 - `companion logs` — platform-aware log viewing (macOS launchd / Linux journalctl)
-- `companion install` — install as system service
 
 ## Parallel Work Groups
 - Spawn multiple Claude Code sessions in parallel from `/work` command
@@ -253,4 +255,4 @@ High-level features of the Companion daemon, web client, and desktop/mobile apps
 - Build date and version info in settings
 - Scroll behavior analytics
 - Client error reporting
-- Management scripts in `bin/` (build-all, build-apk, deploy, dev, test, logs, status)
+- Management scripts in `bin/` with usage headers and dep checks (companion, build, build-all, build-apk, deploy, dev, test, logs, status)

@@ -3,5 +3,3 @@
 Detailed plans for upcoming work items. Completed items are moved to FEATURES.md.
 
 ---
-
-(No active plans)

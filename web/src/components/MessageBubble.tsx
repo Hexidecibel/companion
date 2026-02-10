@@ -558,21 +558,19 @@ export function MessageBubble({ message, onSelectOption, onCancelMessage, onView
                     </button>
                   )}
                   {tool.status === 'pending' && onSelectOption && (
-                    <div className="msg-approval-prompt" style={{ marginTop: 8 }}>
-                      <div className="msg-options">
-                        <button
-                          className="msg-option-btn approve"
-                          onClick={(e) => { e.stopPropagation(); onSelectOption('yes'); }}
-                        >
-                          Approve
-                        </button>
-                        <button
-                          className="msg-option-btn reject"
-                          onClick={(e) => { e.stopPropagation(); onSelectOption('no'); }}
-                        >
-                          Reject
-                        </button>
-                      </div>
+                    <div className="plan-card-actions">
+                      <button
+                        className="msg-option-btn approve"
+                        onClick={(e) => { e.stopPropagation(); onSelectOption('yes'); }}
+                      >
+                        Approve
+                      </button>
+                      <button
+                        className="msg-option-btn reject"
+                        onClick={(e) => { e.stopPropagation(); onSelectOption('no'); }}
+                      >
+                        Reject
+                      </button>
                     </div>
                   )}
                 </div>

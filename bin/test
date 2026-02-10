@@ -1,9 +1,19 @@
 #!/bin/bash
-# Run all tests and type checks
+# test — Run all tests, lint, and type checks (daemon + web).
+#
+# Usage:
+#   bin/test
+#
+# Prerequisites: node, npm
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(dirname "$SCRIPT_DIR")"
+
+if ! command -v node &>/dev/null; then
+  echo "ERROR: Node.js is not installed. See https://nodejs.org/" >&2
+  exit 1
+fi
 FAILED=0
 
 echo "=== Daemon: Typecheck ==="

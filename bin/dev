@@ -1,9 +1,22 @@
 #!/bin/bash
-# Start development servers (daemon + web dev server)
+# dev — Start development servers (daemon + Vite web dev server).
+#
+# Usage:
+#   bin/dev
+#
+# Starts both servers in the foreground. Press Ctrl+C to stop.
+# Web client: http://localhost:5173   Daemon: ws://localhost:9877
+#
+# Prerequisites: node, npm
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(dirname "$SCRIPT_DIR")"
+
+if ! command -v node &>/dev/null; then
+  echo "ERROR: Node.js is not installed. See https://nodejs.org/" >&2
+  exit 1
+fi
 
 echo "Starting development servers..."
 echo "  Web: http://localhost:5173"
