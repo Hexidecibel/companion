@@ -9,7 +9,7 @@ import { ConnectionSnapshot } from '../services/ConnectionManager';
 import { connectionManager } from '../services/ConnectionManager';
 
 const STATUS_DOT_CLASS: Record<SessionSummary['status'], string> = {
-  waiting: 'status-dot-amber',
+  waiting: 'status-dot-blue status-dot-pulse',
   working: 'status-dot-blue',
   idle: 'status-dot-gray',
   error: 'status-dot-red',
@@ -271,8 +271,6 @@ function MobileSessionItem({ session, serverId, onSelect }: MobileSessionItemPro
     >
       {session.status === 'working' ? (
         <span className="mobile-session-spinner" />
-      ) : session.status === 'waiting' ? (
-        <span className="mobile-attention-dot" />
       ) : (
         <span className={`status-dot ${STATUS_DOT_CLASS[session.status]}`} />
       )}

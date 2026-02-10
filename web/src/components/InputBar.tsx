@@ -358,7 +358,7 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
             </button>
           </div>
         )}
-        {mobile && onTerminalKey && (
+        {terminalMode && mobile && onTerminalKey && (
           <button
             className="input-bar-esc-btn"
             onClick={() => onTerminalKey('Escape')}

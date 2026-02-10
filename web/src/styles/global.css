@@ -630,6 +630,15 @@ body {
   background-color: var(--accent-red);
 }
 
+.status-dot-pulse {
+  animation: dot-pulse 2s ease-in-out infinite;
+}
+
+@keyframes dot-pulse {
+  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.5); }
+  50% { opacity: 0.7; box-shadow: 0 0 0 4px rgba(59, 130, 246, 0); }
+}
+
 /* Sidebar footer */
 .sidebar-footer {
   display: flex;
@@ -740,6 +749,11 @@ body {
 
 .waiting-dot.amber {
   background-color: var(--accent-amber);
+  animation: pulse 2s infinite;
+}
+
+.waiting-dot.blue {
+  background-color: var(--accent-blue);
   animation: pulse 2s infinite;
 }
 
@@ -6522,12 +6536,12 @@ html {
   gap: 12px;
 }
 
-/* Pulsing amber dot — needs attention */
+/* Pulsing blue dot — needs attention */
 .mobile-attention-dot {
   width: 10px;
   height: 10px;
   border-radius: 50%;
-  background: var(--accent-amber);
+  background: var(--accent-blue);
   flex-shrink: 0;
   animation: attention-pulse 1.5s ease-in-out infinite;
 }

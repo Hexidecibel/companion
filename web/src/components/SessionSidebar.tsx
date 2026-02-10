@@ -28,7 +28,7 @@ interface SessionSidebarProps {
 }
 
 const STATUS_DOT_CLASS: Record<SessionSummary['status'], string> = {
-  waiting: 'status-dot-amber',
+  waiting: 'status-dot-blue status-dot-pulse',
   working: 'status-dot-blue',
   idle: 'status-dot-gray',
   error: 'status-dot-red',
@@ -72,7 +72,7 @@ function filterSessions(sessions: SessionSummary[], filter: StatusFilter): Sessi
 const WORKER_STATUS_DOT: Record<string, string> = {
   spawning: 'status-dot-gray',
   working: 'status-dot-blue',
-  waiting: 'status-dot-amber',
+  waiting: 'status-dot-blue status-dot-pulse',
   completed: 'status-dot-green',
   error: 'status-dot-red',
 };

@@ -9,8 +9,8 @@ export function WaitingIndicator({ status }: WaitingIndicatorProps) {
 
   if (status.isWaitingForInput) {
     return (
-      <div className="waiting-banner waiting-banner-amber">
-        <span className="waiting-dot amber" />
+      <div className="waiting-banner waiting-banner-blue">
+        <span className="waiting-dot blue" />
         <span>Waiting for input</span>
       </div>
     );
