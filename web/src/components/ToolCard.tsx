@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { ToolCall } from '../types';
+import { MarkdownRenderer } from './MarkdownRenderer';
 
 interface ToolCardProps {
   tool: ToolCall;
@@ -126,8 +127,35 @@ function ElapsedTimer({ startedAt }: { startedAt: number }) {
 export function ToolCard({ tool, forceExpanded }: ToolCardProps) {
   const [localExpanded, setLocalExpanded] = useState(false);
 
+  const isSkill = tool.name === 'Skill';
+
   // Auto-expand pending tools so user can see what needs approval
-  const expanded = forceExpanded !== undefined ? forceExpanded : (localExpanded || tool.status === 'pending');
+  // Skill tools stay collapsed by default (like compaction)
+  const expanded = forceExpanded !== undefined
+    ? forceExpanded
+    : isSkill
+      ? localExpanded
+      : (localExpanded || tool.status === 'pending');
+
+  // Skill tool: compact card with markdown output
+  if (isSkill) {
+    const skillName = typeof tool.input.skill === 'string' ? tool.input.skill : 'unknown';
+    return (
+      <div className={`tool-card tool-card-skill ${expanded ? 'expanded' : ''}`} onClick={() => setLocalExpanded(!localExpanded)}>
+        <div className="tool-card-header">
+          <span className="tool-card-name">Skill: {skillName}</span>
+          <span className={`tool-card-status ${STATUS_CLASSES[tool.status]}`}>
+            {STATUS_LABELS[tool.status]}
+          </span>
+        </div>
+        {expanded && tool.output && (
+          <div className="tool-card-body tool-card-skill-body" onClick={(e) => e.stopPropagation()}>
+            <MarkdownRenderer content={tool.output} />
+          </div>
+        )}
+      </div>
+    );
+  }
 
   const hasEditDiff = isEditTool(tool.name) &&
     typeof tool.input.old_string === 'string' &&

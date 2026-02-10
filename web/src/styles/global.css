@@ -1227,6 +1227,52 @@ body {
   margin: 0;
 }
 
+/* Skill tool card */
+.tool-card-skill {
+  border-left-color: var(--accent-blue);
+}
+
+.tool-card-skill-body .md-render {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.tool-card-skill-body .md-render h1,
+.tool-card-skill-body .md-render h2,
+.tool-card-skill-body .md-render h3,
+.tool-card-skill-body .md-render h4 {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 8px 0 4px;
+}
+
+.tool-card-skill-body .md-render h1:first-child,
+.tool-card-skill-body .md-render h2:first-child,
+.tool-card-skill-body .md-render h3:first-child {
+  margin-top: 0;
+}
+
+.tool-card-skill-body .md-render p {
+  margin: 4px 0;
+}
+
+.tool-card-skill-body .md-render pre {
+  font-size: 11px;
+  margin: 4px 0;
+  max-height: 150px;
+  overflow-y: auto;
+}
+
+.tool-card-skill-body .md-render ul,
+.tool-card-skill-body .md-render ol {
+  margin: 4px 0;
+  padding-left: 20px;
+}
+
 /* ========================================
    Input Bar
    ======================================== */

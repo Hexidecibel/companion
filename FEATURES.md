@@ -58,6 +58,7 @@ High-level features of the Companion daemon, web client, and desktop/mobile apps
 - Compacted conversation rendering as markdown with expand/collapse toggle
 - Expandable tool cards with inputs/outputs
 - Smart tool card collapsing with tool name chips and grouping
+- Skill tool cards: compact "Skill: {name}" header, collapsed by default, markdown-rendered output when expanded
 - Line numbers and language labels on Write/Edit views
 - Expandable diff view with "Show all" toggle (40-line default)
 - Graceful fallback rendering for unknown tool types

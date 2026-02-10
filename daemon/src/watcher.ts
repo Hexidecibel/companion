@@ -736,7 +736,7 @@ export class SessionWatcher extends EventEmitter {
           .filter(f => f.endsWith('.jsonl') && !f.includes('subagent'))
           .map(f => ({ name: f, path: path.join(projectDir, f), mtime: fs.statSync(path.join(projectDir, f)).mtimeMs }))
           .sort((a, b) => b.mtime - a.mtime)
-          .slice(0, sessions.length); // Load as many as we have sessions
+          .slice(0, sessions.length * 3); // Load extra to cover multiple conversations per session
 
         for (const file of files) {
           const convId = path.basename(file.name, '.jsonl');
@@ -750,11 +750,21 @@ export class SessionWatcher extends EventEmitter {
     }
 
     // Strategy 1: PID-based detection via /proc/fd (works if Claude keeps files open)
-    for (const [sessionName] of this.tmuxPathBySession) {
+    for (const [sessionName, ePath] of this.tmuxPathBySession) {
       if (this.tmuxConversationIds.has(sessionName)) continue;
       const convId = await this.detectConversationForSession(sessionName);
-      if (convId && this.conversations.has(convId)) {
-        this.tmuxConversationIds.set(sessionName, convId);
+      if (convId) {
+        if (!this.conversations.has(convId)) {
+          // Conversation not yet tracked — load it on demand
+          const convFile = path.join(this.codeHome, 'projects', ePath, `${convId}.jsonl`);
+          if (fs.existsSync(convFile)) {
+            console.log(`Watcher: PID detection found unloaded conversation ${convId.substring(0, 8)} for ${sessionName} — loading`);
+            this.processFileChange(convFile, convId);
+          }
+        }
+        if (this.conversations.has(convId)) {
+          this.tmuxConversationIds.set(sessionName, convId);
+        }
       }
     }
 

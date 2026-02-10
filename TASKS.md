@@ -2,11 +2,7 @@
 
 ## Work Queue (Async Tasks)
 
-1. [x] **Add server button styling** — CSS: full-width, sticky bottom of sidebar (see plan.md)
-2. [x] **Open in editor: host-only guard** — Add isLocal flag to auth, show button only on local connections (see plan.md)
-3. [x] **Auto-approve improvements** — Verify acceptance, reduce dedup, terminal content check (see plan.md)
-4. [x] **Multi-choice prompt UX** — Polish step-through, review screen, keyboard support (see plan.md)
-5. [x] **Edit/cancel sent message** — Cancel pending messages, pre-fill input for re-send (see plan.md)
+_(empty — add new tasks here)_
 
 ---
 
