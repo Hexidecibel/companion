@@ -49,6 +49,7 @@ export interface ConversationMessage {
   isWaitingForChoice?: boolean;
   multiSelect?: boolean;
   isCompaction?: boolean;
+  skillName?: string; // User message is an expanded skill invocation (e.g., "todo", "apk")
 }
 
 export interface ToolCall {
@@ -72,6 +73,7 @@ export interface ConversationHighlight {
   multiSelect?: boolean;
   toolCalls?: ToolCall[];
   isCompaction?: boolean;
+  skillName?: string;
 }
 
 export interface ActivityDetail {

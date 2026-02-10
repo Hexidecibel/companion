@@ -69,6 +69,7 @@ export interface ConversationHighlight {
   toolCalls?: ToolCall[];
   isCompaction?: boolean;
   isPending?: boolean; // Optimistic sent message not yet confirmed by JSONL
+  skillName?: string; // User message is an expanded skill invocation (e.g., "todo", "apk")
 }
 
 // Session types

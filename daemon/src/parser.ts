@@ -271,8 +271,43 @@ export function parseConversationFile(
     }
   }
 
-  // Return only the limit number of messages
-  return messages.slice(-limit);
+  // Post-pass: detect skill invocations and mark the expanded user message.
+  // Two patterns:
+  //   1. User message with <command-name>/foo</command-name> → next user message is expansion
+  //   2. Assistant message with Skill tool_use → next user message (after tool_result) is expansion
+  const trimmed = messages.slice(-limit);
+  for (let i = 0; i < trimmed.length - 1; i++) {
+    // Pattern 1: <command-name> user message
+    if (trimmed[i].type === 'user') {
+      const cmdMatch = trimmed[i].content.match(/<command-name>\/([^<]+)<\/command-name>/);
+      if (cmdMatch) {
+        const skillName = cmdMatch[1];
+        for (let j = i + 1; j < trimmed.length; j++) {
+          if (trimmed[j].type === 'user' && !trimmed[j].skillName) {
+            trimmed[j].skillName = skillName;
+            break;
+          }
+          if (trimmed[j].type === 'assistant') break;
+        }
+      }
+    }
+    // Pattern 2: Assistant message with Skill tool_use
+    if (trimmed[i].type === 'assistant' && trimmed[i].toolCalls) {
+      const skillTool = trimmed[i].toolCalls!.find(tc => tc.name === 'Skill');
+      if (skillTool) {
+        const skillName = (skillTool.input.skill as string) || 'unknown';
+        // Find the next user message with text content (skip tool_result messages which have empty content)
+        for (let j = i + 1; j < trimmed.length; j++) {
+          if (trimmed[j].type === 'user' && trimmed[j].content.trim() && !trimmed[j].skillName) {
+            trimmed[j].skillName = skillName;
+            break;
+          }
+          if (trimmed[j].type === 'assistant') break;
+        }
+      }
+    }
+  }
+  return trimmed;
 }
 
 function parseQueueOperation(entry: JsonlEntry): ConversationMessage | null {
@@ -506,8 +541,11 @@ export function extractHighlights(messages: ConversationMessage[]): Conversation
   // Find the index of the last user message - anything before this has been "responded to"
   const rawHighlights = messages
     .filter((msg) => {
-      // Include user messages with content
-      if (msg.type === 'user' && msg.content && msg.content.trim()) return true;
+      // Include user messages with content (but hide skill command triggers)
+      if (msg.type === 'user' && msg.content && msg.content.trim()) {
+        if (msg.content.includes('<command-name>')) return false;
+        return true;
+      }
       // Include system messages (task notifications, compaction summaries)
       if (msg.type === 'system') return true;
       // Include assistant messages with content OR toolCalls
@@ -583,6 +621,7 @@ export function extractHighlights(messages: ConversationMessage[]): Conversation
         isWaitingForChoice: showOptions ? msg.isWaitingForChoice : false,
         multiSelect: showOptions ? msg.multiSelect : undefined,
         toolCalls,
+        skillName: msg.skillName,
       };
     });
 

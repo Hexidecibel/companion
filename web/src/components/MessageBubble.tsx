@@ -423,6 +423,23 @@ function CompactionMessage({ content }: { content: string }) {
   );
 }
 
+function SkillCard({ skillName, content, onViewFile }: { skillName: string; content: string; onViewFile?: (path: string) => void }) {
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <div className={`skill-card ${expanded ? 'expanded' : ''}`} onClick={() => setExpanded(!expanded)}>
+      <div className="skill-card-header">
+        <span className="skill-card-name">/{skillName}</span>
+        <span className="skill-card-chevron">{expanded ? '\u25B4' : '\u25BE'}</span>
+      </div>
+      {expanded && (
+        <div className="skill-card-body" onClick={(e) => e.stopPropagation()}>
+          <MarkdownRenderer content={content} onFileClick={onViewFile} />
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function MessageBubble({ message, onSelectOption, onCancelMessage, onViewFile, onViewArtifact, searchTerm, isCurrentMatch }: MessageBubbleProps) {
   const isUser = message.type === 'user';
   const isSystem = message.type === 'system';
@@ -472,7 +489,9 @@ export function MessageBubble({ message, onSelectOption, onCancelMessage, onView
       className={`msg-row ${isUser ? 'msg-row-user' : 'msg-row-assistant'} ${isCurrentMatch ? 'msg-row-current-match' : ''}`}
       data-highlight-id={message.id}
     >
-      {hasContent && (
+      {hasContent && message.skillName ? (
+        <SkillCard skillName={message.skillName} content={message.content} onViewFile={onViewFile} />
+      ) : hasContent && (
         <div className={`msg-bubble ${isUser ? 'msg-bubble-user' : 'msg-bubble-assistant'} ${isUser && message.isPending ? 'msg-bubble-pending' : ''}`}>
           {searchTerm ? (
             <pre className="msg-content">

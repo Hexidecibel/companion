@@ -1227,6 +1227,87 @@ body {
   margin: 0;
 }
 
+/* Skill expansion card (user message with expanded skill instructions) */
+.skill-card {
+  background-color: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-left: 2px solid var(--accent-blue);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: border-color 0.15s;
+  overflow: hidden;
+  max-width: 90%;
+}
+
+.skill-card:hover {
+  border-color: var(--border-accent);
+}
+
+.skill-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+}
+
+.skill-card-name {
+  font-size: 12px;
+  font-weight: 600;
+  font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
+  color: var(--accent-blue);
+}
+
+.skill-card-chevron {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.skill-card-body {
+  border-top: 1px solid var(--border-color);
+  padding: 8px 10px;
+}
+
+.skill-card-body .md-render {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.skill-card-body .md-render h1,
+.skill-card-body .md-render h2,
+.skill-card-body .md-render h3,
+.skill-card-body .md-render h4 {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 8px 0 4px;
+}
+
+.skill-card-body .md-render h1:first-child,
+.skill-card-body .md-render h2:first-child,
+.skill-card-body .md-render h3:first-child {
+  margin-top: 0;
+}
+
+.skill-card-body .md-render p {
+  margin: 4px 0;
+}
+
+.skill-card-body .md-render pre {
+  font-size: 11px;
+  margin: 4px 0;
+  max-height: 150px;
+  overflow-y: auto;
+}
+
+.skill-card-body .md-render ul,
+.skill-card-body .md-render ol {
+  margin: 4px 0;
+  padding-left: 20px;
+}
+
 /* Skill tool card */
 .tool-card-skill {
   border-left-color: var(--accent-blue);
