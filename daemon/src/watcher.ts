@@ -875,6 +875,25 @@ export class SessionWatcher extends EventEmitter {
     return resolved?.id || null;
   }
 
+  /**
+   * Reverse lookup: given a conversation UUID, find the tmux session name running it.
+   */
+  getTmuxSessionForConversation(conversationId: string): string | null {
+    // Check direct mappings first
+    for (const [tmuxName, convId] of this.tmuxConversationIds) {
+      if (convId === conversationId) return tmuxName;
+    }
+    // Fall back: check if only one tmux session maps to this conversation's path
+    const tracked = this.conversations.get(conversationId);
+    if (!tracked) return null;
+    const encodedDir = this.getEncodedDirName(tracked.path);
+    const candidates: string[] = [];
+    for (const [tmuxName, ePath] of this.tmuxPathBySession) {
+      if (ePath === encodedDir) candidates.push(tmuxName);
+    }
+    return candidates.length === 1 ? candidates[0] : null;
+  }
+
   getActiveConversation(): ConversationFile | null {
     if (!this.activeConversationId) return null;
     const tracked = this.conversations.get(this.activeConversationId);

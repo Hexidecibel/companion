@@ -27,6 +27,7 @@ interface ContentBlock {
 
 interface JsonlEntry {
   type: string;
+  subtype?: string;
   message?: {
     role?: string;
     content?: string | ContentBlock[];
@@ -35,6 +36,7 @@ interface JsonlEntry {
   parentUuid?: string;
   uuid?: string;
   summary?: string;
+  content?: string;
 }
 
 interface AskUserQuestionInput {
@@ -224,13 +226,34 @@ export function parseConversationFile(
           messages.unshift(message); // Add to beginning to maintain order
         }
       } else if (entry.type === 'summary') {
-        // Compaction summary — create a system message marking the compaction point
+        // Legacy compaction summary — create a system message marking the compaction point
         if (entry.summary) {
           const timestamp = entry.timestamp ? new Date(entry.timestamp).getTime() : Date.now();
           messages.unshift({
             id: `compaction-${timestamp}`,
             type: 'system',
             content: entry.summary,
+            timestamp,
+            isCompaction: true,
+          });
+        }
+      } else if (entry.type === 'system' && entry.subtype === 'compact_boundary') {
+        // New compaction format — the user message we just processed (messages[0]) is the summary
+        const timestamp = entry.timestamp ? new Date(entry.timestamp).getTime() : Date.now();
+        if (messages.length > 0 && messages[0].type === 'user') {
+          // Convert the summary user message into a compaction system message
+          messages[0] = {
+            ...messages[0],
+            id: `compaction-${timestamp}`,
+            type: 'system',
+            isCompaction: true,
+          };
+        } else {
+          // No following user message — just insert a compaction marker
+          messages.unshift({
+            id: `compaction-${timestamp}`,
+            type: 'system',
+            content: 'Context compacted',
             timestamp,
             isCompaction: true,
           });
@@ -838,7 +861,7 @@ export function detectCompaction(
     try {
       const entry = JSON.parse(lines[i]);
 
-      // Look for summary type entries (context compaction)
+      // Look for summary type entries (context compaction) — legacy format
       if (entry.type === 'summary' && entry.summary) {
         const timestamp = entry.timestamp ? new Date(entry.timestamp).getTime() : Date.now();
         compactionEvent = {
@@ -846,6 +869,32 @@ export function detectCompaction(
           sessionName,
           projectPath,
           summary: entry.summary,
+          timestamp,
+        };
+      }
+      // New compact_boundary format
+      if (entry.type === 'system' && entry.subtype === 'compact_boundary') {
+        const timestamp = entry.timestamp ? new Date(entry.timestamp).getTime() : Date.now();
+        // The summary is in the next user message (if it exists)
+        let summary = 'Context compacted';
+        if (i + 1 < lines.length) {
+          try {
+            const next = JSON.parse(lines[i + 1]);
+            if (next.type === 'user' && next.message?.content) {
+              const c = next.message.content;
+              if (typeof c === 'string') summary = c.slice(0, 200);
+              else if (Array.isArray(c)) {
+                const textBlock = c.find((b: { type: string; text?: string }) => b.type === 'text' && b.text);
+                if (textBlock) summary = (textBlock.text || '').slice(0, 200);
+              }
+            }
+          } catch { /* skip */ }
+        }
+        compactionEvent = {
+          sessionId,
+          sessionName,
+          projectPath,
+          summary,
           timestamp,
         };
       }

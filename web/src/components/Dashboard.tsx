@@ -26,7 +26,6 @@ export function Dashboard({ onSettings }: DashboardProps) {
   const [merging, setMerging] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(isMobileViewport());
-  const [splitEnabled, setSplitEnabled] = useState(false);
   const [secondarySession, setSecondarySession] = useState<ActiveSession | null>(null);
   const [dashboardMode, setDashboardMode] = useState(false);
   const summaries = useAllServerSummaries();
@@ -180,17 +179,13 @@ export function Dashboard({ onSettings }: DashboardProps) {
       setActiveSession({ serverId, sessionId });
       return;
     }
-    if (splitEnabled && activeSession && (activeSession.serverId !== serverId || activeSession.sessionId !== sessionId)) {
-      setSecondarySession({ serverId, sessionId });
-      return;
-    }
     setActiveSession({ serverId, sessionId });
     if (isMobileViewport()) {
       setSidebarOpen(false);
       // Push history so Android back gesture returns to dashboard
       history.pushState({ session: true }, '');
     }
-  }, [splitEnabled, activeSession, dashboardMode]);
+  }, [dashboardMode]);
 
   // Push a base history entry on mobile so back from dashboard doesn't exit the app
   useEffect(() => {
@@ -341,11 +336,12 @@ export function Dashboard({ onSettings }: DashboardProps) {
   const toggleSidebar = useCallback(() => setSidebarOpen(prev => !prev), []);
   const handleMobileBack = useCallback(() => setActiveSession(null), []);
 
-  const handleToggleSplit = useCallback(() => {
-    setSplitEnabled(prev => {
-      if (prev) setSecondarySession(null);
-      return !prev;
-    });
+  const handleOpenInSplit = useCallback((serverId: string, sessionId: string) => {
+    setSecondarySession({ serverId, sessionId });
+  }, []);
+
+  const handleCloseSplit = useCallback(() => {
+    setSecondarySession(null);
   }, []);
 
   const handleToggleDashboardMode = useCallback(() => {
@@ -407,8 +403,8 @@ export function Dashboard({ onSettings }: DashboardProps) {
         activeSession={activeSession}
         onSelectSession={handleSelectSession}
         onSessionCreated={handleSessionCreated}
-        onToggleSplit={handleToggleSplit}
-        splitEnabled={splitEnabled}
+        onOpenInSplit={handleOpenInSplit}
+        onCloseSplit={handleCloseSplit}
         secondarySession={secondarySession}
         onToggleDashboardMode={handleToggleDashboardMode}
         dashboardMode={dashboardMode}
@@ -419,7 +415,7 @@ export function Dashboard({ onSettings }: DashboardProps) {
         workGroups={allWorkGroups}
         mobileOpen={sidebarOpen}
       />
-      <main className={`dashboard-main${splitEnabled ? ' split-enabled' : ''}`}>
+      <main className={`dashboard-main${secondarySession ? ' split-enabled' : ''}`}>
         {dashboardMode ? (
           <DashboardGrid
             snapshots={snapshots}
@@ -443,9 +439,17 @@ export function Dashboard({ onSettings }: DashboardProps) {
               merging={merging}
               onToggleSidebar={toggleSidebar}
             />
-            {splitEnabled && secondarySession && (
+            {secondarySession && (
               <>
-                <div className="split-divider" />
+                <div className="split-divider">
+                  <button
+                    className="split-close-btn"
+                    onClick={handleCloseSplit}
+                    title="Close split view"
+                  >
+                    &#x2715;
+                  </button>
+                </div>
                 <SessionView
                   serverId={secondarySession.serverId}
                   sessionId={secondarySession.sessionId}

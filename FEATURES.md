@@ -13,10 +13,12 @@ High-level features of the Companion daemon, web client, and desktop/mobile apps
 ## Real-Time Monitoring
 - Live WebSocket updates from CLI coding sessions
 - Multi-server, multi-session support
+- Multiple concurrent sessions per project directory with automatic disambiguation (terminal content matching, PID detection, process of elimination)
 - Session status indicators (waiting, working, idle)
 - Sub-agent tracking with expandable tree view (status icons, activity, duration, message count)
 - Click-to-view sub-agent conversation detail
 - Running/completed agent sections with collapsible completed list
+- Optimistic sent message display — messages appear immediately in chat before server acknowledgement
 
 ## Mobile Input
 - Send text and images to the CLI from your phone
@@ -37,6 +39,8 @@ High-level features of the Companion daemon, web client, and desktop/mobile apps
 
 ## Dashboard
 - Multi-server overview with connection status
+- Grid/dashboard mode toggle for card-based monitoring view
+- Split view — right-click a session to open side-by-side, close button on divider (desktop only)
 - Session cards showing current activity and task progress
 - Expandable task list per session with status indicators
 - Task detail screen with full metadata and dependencies
@@ -51,6 +55,7 @@ High-level features of the Companion daemon, web client, and desktop/mobile apps
 ## Conversation Viewer
 - Markdown rendering in assistant messages (headings, tables, task lists, code blocks with language labels, links)
 - User messages rendered as plain text
+- Compacted conversation rendering as markdown with expand/collapse toggle
 - Expandable tool cards with inputs/outputs
 - Smart tool card collapsing with tool name chips and grouping
 - Line numbers and language labels on Write/Edit views
@@ -134,6 +139,7 @@ High-level features of the Companion daemon, web client, and desktop/mobile apps
 
 ## Terminal Output Viewer
 - Raw tmux terminal output display with ANSI color rendering
+- Unified input bar for both chat and terminal modes
 - SSH command display with tap-to-copy (mobile) and click-to-copy (web)
 - Scroll-position-aware auto-scroll: pauses when reading, resumes at bottom
 - Auto-refresh polling with pause/resume toggle
@@ -141,6 +147,7 @@ High-level features of the Companion daemon, web client, and desktop/mobile apps
 - Font size zoom controls (mobile)
 - Pull-to-refresh (mobile) and manual refresh button (web)
 - Accessible from session header via button or Cmd+T shortcut
+- Infinity scroll with offset-based paging for terminal history
 
 ## Auto-Approve System
 - Automatic approval of safe tool calls (Read, Glob, Grep, etc.)
@@ -172,7 +179,11 @@ High-level features of the Companion daemon, web client, and desktop/mobile apps
 - Cmd/Ctrl+1-9: Switch to session by sidebar position
 - Cmd/Ctrl+Shift+A: Toggle auto-approve
 - Cmd/Ctrl+Shift+M: Toggle session mute
+- j/k or Arrow keys: Navigate sessions in sidebar
+- /: Focus input bar
+- ?: Toggle shortcut help overlay
 - Escape: Close modal/panel/search (priority-ordered)
+- Auto-focus textarea on desktop (re-focuses after any blur)
 
 ## Desktop App (Tauri 2.0)
 - Native apps for macOS, Linux, and Windows wrapping the web client
@@ -209,6 +220,7 @@ High-level features of the Companion daemon, web client, and desktop/mobile apps
 - Inline question answering: respond to worker questions without switching sessions
 - Octopus merge of completed worker branches with conflict detection
 - Cancel/retry controls for individual workers or entire groups
+- Per-server toggle to disable parallel worker spawning
 - Web dashboard: sidebar nesting with tree connectors and progress bars
 - Web dashboard: WorkGroupPanel with worker cards, merge/cancel controls
 - Mobile dashboard: expandable work group cards with worker sub-cards

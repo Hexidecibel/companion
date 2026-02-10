@@ -394,8 +394,11 @@ export class WebSocketHandler {
         }
 
         // Inject pending sent messages that haven't appeared in JSONL yet
-        if (hlSessionId) {
-          const pending = this.pendingSentMessages.get(hlSessionId);
+        // pendingSentMessages is keyed by tmux session name, but hlSessionId is a conversation UUID.
+        // Resolve the tmux session name for this conversation.
+        const tmuxNameForPending = hlSessionId ? this.watcher.getTmuxSessionForConversation(hlSessionId) : null;
+        if (tmuxNameForPending) {
+          const pending = this.pendingSentMessages.get(tmuxNameForPending);
           if (pending && pending.length > 0) {
             const now = Date.now();
             // Filter: remove expired and confirmed messages
@@ -406,7 +409,7 @@ export class WebSocketHandler {
                 h => h.type === 'user' && h.content.trim() === p.content.trim()
               );
             });
-            this.pendingSentMessages.set(hlSessionId, unconfirmed);
+            this.pendingSentMessages.set(tmuxNameForPending, unconfirmed);
 
             // Append unconfirmed pending messages as user highlights
             for (const p of unconfirmed) {

@@ -142,12 +142,12 @@ export function SessionView({
     return () => window.removeEventListener('close-overlay', handler);
   }, [showTerminal, showWorkGroupPanel, showConversationSearch, showFileFinder]);
 
-  // Auto-focus input and reset views when session changes
+  // Reset views when session changes, auto-focus on desktop only
   useEffect(() => {
     setShowTerminal(false);
     setShowWorkGroupPanel(false);
     setViewingFile(null);
-    if (serverId && sessionId) {
+    if (serverId && sessionId && !isMobileViewport()) {
       requestAnimationFrame(() => {
         const textarea = document.querySelector('.input-bar-textarea') as HTMLElement | null;
         textarea?.focus();
@@ -526,6 +526,7 @@ export function SessionView({
             onViewArtifact={(content, title) => setArtifactContent({ content, title })}
             searchTerm={searchTerm}
             currentMatchId={searchMatches.length > 0 ? searchMatches[currentMatchIndex]?.id : null}
+            scrollToBottom={!showTerminal}
           />
 
           <FileTabBar

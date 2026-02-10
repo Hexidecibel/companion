@@ -13,6 +13,7 @@ interface MessageListProps {
   onViewArtifact?: (content: string, title?: string) => void;
   searchTerm?: string | null;
   currentMatchId?: string | null;
+  scrollToBottom?: boolean;
 }
 
 export function MessageList({
@@ -26,6 +27,7 @@ export function MessageList({
   onViewArtifact,
   searchTerm,
   currentMatchId,
+  scrollToBottom: scrollToBottomProp,
 }: MessageListProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -48,13 +50,38 @@ export function MessageList({
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, []);
 
+  // Reset scroll-to-bottom state when highlights are replaced (session switch)
+  const prevHighlightsLenRef = useRef(0);
+  const justSwitchedRef = useRef(false);
+  useEffect(() => {
+    // If highlights went from 0 to N (session switch/initial load), force scroll to bottom instantly
+    if (prevHighlightsLenRef.current === 0 && highlights.length > 0) {
+      isNearBottomRef.current = true;
+      justSwitchedRef.current = true;
+    }
+    prevHighlightsLenRef.current = highlights.length;
+  }, [highlights.length]);
+
   // Auto-scroll to bottom whenever highlights change (new messages OR content updates)
   // if the user was already near the bottom
   useEffect(() => {
     if (isNearBottomRef.current) {
-      bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+      // Use instant scroll on session switch, smooth for incremental updates
+      const behavior = justSwitchedRef.current ? 'instant' as const : 'smooth' as const;
+      justSwitchedRef.current = false;
+      bottomRef.current?.scrollIntoView({ behavior });
     }
   }, [highlights]);
+
+  // Scroll to bottom when switching back from terminal to chat
+  useEffect(() => {
+    if (scrollToBottomProp) {
+      requestAnimationFrame(() => {
+        bottomRef.current?.scrollIntoView({ behavior: 'instant' });
+        isNearBottomRef.current = true;
+      });
+    }
+  }, [scrollToBottomProp]);
 
   // Scroll to current search match
   useEffect(() => {

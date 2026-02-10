@@ -14,8 +14,8 @@ interface SessionSidebarProps {
   activeSession: ActiveSession | null;
   onSelectSession: (serverId: string, sessionId: string) => void;
   onSessionCreated?: (serverId: string, sessionName: string) => void;
-  onToggleSplit?: () => void;
-  splitEnabled?: boolean;
+  onOpenInSplit?: (serverId: string, sessionId: string) => void;
+  onCloseSplit?: () => void;
   secondarySession?: ActiveSession | null;
   onToggleDashboardMode?: () => void;
   dashboardMode?: boolean;
@@ -34,13 +34,6 @@ const STATUS_DOT_CLASS: Record<SessionSummary['status'], string> = {
   error: 'status-dot-red',
 };
 
-const STATUS_PRIORITY: Record<SessionSummary['status'], number> = {
-  waiting: 0,
-  working: 1,
-  error: 2,
-  idle: 3,
-};
-
 type StatusFilter = 'all' | 'waiting' | 'working' | 'idle';
 
 function formatRelativeTime(timestamp: number): string {
@@ -54,10 +47,19 @@ function formatRelativeTime(timestamp: number): string {
   return `${days}d`;
 }
 
+const STATUS_PRIORITY: Record<SessionSummary['status'], number> = {
+  waiting: 0,
+  working: 0,
+  error: 1,
+  idle: 2,
+};
+
 function sortSessions(sessions: SessionSummary[]): SessionSummary[] {
   return [...sessions].sort((a, b) => {
+    // Active sessions (waiting/working) always above idle
     const pDiff = STATUS_PRIORITY[a.status] - STATUS_PRIORITY[b.status];
     if (pDiff !== 0) return pDiff;
+    // Within same priority, most recently active first
     return b.lastActivity - a.lastActivity;
   });
 }
@@ -90,8 +92,8 @@ export function SessionSidebar({
   activeSession,
   onSelectSession,
   onSessionCreated,
-  onToggleSplit,
-  splitEnabled,
+  onOpenInSplit,
+  onCloseSplit,
   secondarySession,
   onToggleDashboardMode,
   dashboardMode,
@@ -263,10 +265,27 @@ export function SessionSidebar({
 
   const buildSessionMenuItems = useCallback((serverId: string, sessionId: string, tmuxSessionName?: string): ContextMenuEntry[] => {
     const isMuted = mutedSessions?.has(sessionId) ?? false;
+    const isSecondary = secondarySession?.serverId === serverId && secondarySession?.sessionId === sessionId;
+    const isActive = activeSession?.serverId === serverId && activeSession?.sessionId === sessionId;
 
     const items: ContextMenuEntry[] = [];
 
+    // Split view options (desktop only)
+    if (onOpenInSplit && !isActive && !isSecondary) {
+      items.push({
+        label: 'Open in Split',
+        onClick: () => onOpenInSplit(serverId, sessionId),
+      });
+    }
+    if (onCloseSplit && isSecondary) {
+      items.push({
+        label: 'Close Split',
+        onClick: () => onCloseSplit(),
+      });
+    }
+
     if (onToggleMute) {
+      if (items.length > 0) items.push(null);
       items.push({
         label: isMuted ? 'Unmute' : 'Mute',
         onClick: () => onToggleMute(serverId, sessionId),
@@ -288,7 +307,7 @@ export function SessionSidebar({
     }
 
     return items;
-  }, [mutedSessions, onToggleMute]);
+  }, [mutedSessions, onToggleMute, onOpenInSplit, onCloseSplit, secondarySession, activeSession]);
 
   return (
     <aside className={`sidebar${mobileOpen ? ' sidebar-open' : ''}`}>
@@ -302,15 +321,6 @@ export function SessionSidebar({
               title={dashboardMode ? 'Exit dashboard view' : 'Dashboard view'}
             >
               Grid
-            </button>
-          )}
-          {onToggleSplit && (
-            <button
-              className={`sidebar-split-btn ${splitEnabled ? 'active' : ''}`}
-              onClick={onToggleSplit}
-              title={splitEnabled ? 'Disable split view' : 'Enable split view'}
-            >
-              {splitEnabled ? '\u25A3' : '\u25A1'}
             </button>
           )}
           {onNotificationSettings && (
