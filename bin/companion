@@ -32,12 +32,19 @@ fi
 # --- Auto-build on first run ---
 if [ ! -f "$ENTRY" ]; then
   echo "First run — building daemon..."
-  echo ""
   cd "$DAEMON_DIR"
   npm install 2>&1
   npm run build 2>&1
+  echo "Daemon built."
   echo ""
-  echo "Build complete."
+fi
+
+if [ ! -d "$ROOT/web/dist" ]; then
+  echo "Building web client..."
+  cd "$ROOT/web"
+  npm install 2>&1
+  npm run build 2>&1
+  echo "Web client built."
   echo ""
 fi
 
