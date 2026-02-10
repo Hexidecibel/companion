@@ -2187,7 +2187,6 @@ export class WebSocketHandler {
       } else {
         // Relative path - resolve against active tmux session's working directory
         // (more reliable than decoded project path which can mangle hyphenated names)
-        const sessions = await this.tmux.listSessions();
         const activeSessionId = this.watcher.getActiveSessionId();
 
         // Try to find working directory from the active conversation's projectPath
