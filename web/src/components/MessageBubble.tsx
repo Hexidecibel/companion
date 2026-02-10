@@ -117,6 +117,184 @@ function QuestionBlock({ question, onSelectOption }: QuestionBlockProps) {
   );
 }
 
+// Multi-question flow: step-by-step with review screen
+interface MultiQuestionFlowProps {
+  questions: Question[];
+  onSelectOption: (label: string) => void;
+}
+
+function MultiQuestionFlow({ questions, onSelectOption }: MultiQuestionFlowProps) {
+  const [step, setStep] = useState(0);
+  const [answers, setAnswers] = useState<Map<number, string>>(new Map());
+  const [reviewing, setReviewing] = useState(false);
+  const total = questions.length;
+
+  const handleAnswer = useCallback((questionIdx: number, answer: string) => {
+    setAnswers(prev => {
+      const next = new Map(prev);
+      next.set(questionIdx, answer);
+      return next;
+    });
+  }, []);
+
+  const handleNext = useCallback(() => {
+    if (step < total - 1) {
+      setStep(step + 1);
+    } else {
+      setReviewing(true);
+    }
+  }, [step, total]);
+
+  const handleBack = useCallback(() => {
+    if (reviewing) {
+      setReviewing(false);
+    } else if (step > 0) {
+      setStep(step - 1);
+    }
+  }, [step, reviewing]);
+
+  const handleEditFromReview = useCallback((idx: number) => {
+    setReviewing(false);
+    setStep(idx);
+  }, []);
+
+  const handleSubmitAll = useCallback(() => {
+    // Build combined answer: "Q1: answer1\nQ2: answer2\n..."
+    const parts: string[] = [];
+    for (let i = 0; i < total; i++) {
+      const answer = answers.get(i) || '';
+      parts.push(answer);
+    }
+    onSelectOption(parts.join('\n'));
+  }, [answers, total, onSelectOption]);
+
+  if (reviewing) {
+    return (
+      <div className="multi-question-flow">
+        <div className="multi-question-step">Review answers</div>
+        <div className="multi-question-review">
+          {questions.map((q, i) => (
+            <div key={i} className="multi-question-review-item">
+              <span>
+                <span className="review-question">{q.header || q.question}: </span>
+                <span className="review-answer">{answers.get(i) || '(no answer)'}</span>
+              </span>
+              <button className="review-edit" onClick={() => handleEditFromReview(i)}>Edit</button>
+            </div>
+          ))}
+        </div>
+        <div className="multi-question-nav">
+          <button onClick={handleBack}>Back</button>
+          <button
+            className="multi-question-submit"
+            onClick={handleSubmitAll}
+            disabled={answers.size < total}
+          >
+            Submit All
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  const currentQ = questions[step];
+  const currentAnswer = answers.get(step);
+
+  return (
+    <div className="multi-question-flow">
+      <div className="multi-question-step">Question {step + 1} of {total}</div>
+      <QuestionBlockSingle
+        question={currentQ}
+        selectedAnswer={currentAnswer}
+        onAnswer={(answer) => handleAnswer(step, answer)}
+      />
+      <div className="multi-question-nav">
+        <button onClick={handleBack} disabled={step === 0}>Back</button>
+        <button onClick={handleNext} disabled={!currentAnswer}>
+          {step === total - 1 ? 'Review' : 'Next'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// Single-question collector for multi-question flow (doesn't submit immediately)
+interface QuestionBlockSingleProps {
+  question: Question;
+  selectedAnswer?: string;
+  onAnswer: (answer: string) => void;
+}
+
+function QuestionBlockSingle({ question, selectedAnswer, onAnswer }: QuestionBlockSingleProps) {
+  const [selected, setSelected] = useState<Set<string>>(() => {
+    if (!selectedAnswer) return new Set();
+    if (question.multiSelect) return new Set(selectedAnswer.split(', '));
+    return new Set([selectedAnswer]);
+  });
+  const [showOther, setShowOther] = useState(false);
+  const [otherText, setOtherText] = useState('');
+
+  const handleOptionClick = useCallback((label: string) => {
+    if (question.multiSelect) {
+      setSelected(prev => {
+        const next = new Set(prev);
+        if (next.has(label)) next.delete(label);
+        else next.add(label);
+        const answer = Array.from(next).join(', ');
+        if (next.size > 0) onAnswer(answer);
+        return next;
+      });
+    } else {
+      setSelected(new Set([label]));
+      onAnswer(label);
+    }
+  }, [question.multiSelect, onAnswer]);
+
+  const handleSendOther = useCallback(() => {
+    const trimmed = otherText.trim();
+    if (!trimmed) return;
+    onAnswer(trimmed);
+    setSelected(new Set());
+  }, [otherText, onAnswer]);
+
+  return (
+    <div className="question-block">
+      {question.header && <div className="question-block-header">{question.header}</div>}
+      {question.question && <div className="question-block-text">{question.question}</div>}
+      <div className="question-block-options">
+        {question.options.map(opt => (
+          <button
+            key={opt.label}
+            className={`msg-option-btn ${selected.has(opt.label) ? 'selected' : ''}`}
+            onClick={() => handleOptionClick(opt.label)}
+            title={opt.description}
+          >
+            {opt.label}
+          </button>
+        ))}
+      </div>
+      <div className="question-block-actions">
+        <button className="question-block-other-toggle" onClick={() => setShowOther(!showOther)}>
+          Other...
+        </button>
+      </div>
+      {showOther && (
+        <div className="question-block-other-input">
+          <input
+            type="text"
+            value={otherText}
+            onChange={e => setOtherText(e.target.value)}
+            placeholder="Type your response..."
+            onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleSendOther(); } }}
+            autoFocus
+          />
+          <button className="question-block-other-send" onClick={handleSendOther}>Send</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // Highlight search matches in text
 function HighlightedText({ text, term }: { text: string; term: string }) {
   if (!term) return <>{text}</>;
@@ -166,10 +344,36 @@ export function extractPlanFilePath(message: ConversationHighlight): string | nu
   return null;
 }
 
+function CompactionMessage({ content }: { content: string }) {
+  const [expanded, setExpanded] = useState(false);
+
+  return (
+    <div className="msg-row msg-row-compaction">
+      <div style={{ width: '100%', maxWidth: 600 }}>
+        <div className="compaction-divider" onClick={() => setExpanded(!expanded)}>
+          <span className="compaction-label">
+            {expanded ? 'Hide summary' : 'Context compacted — view summary'}
+          </span>
+        </div>
+        {expanded && (
+          <div className="compaction-summary">
+            <MarkdownRenderer content={content} className="msg-markdown" />
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export function MessageBubble({ message, onSelectOption, onViewFile, onViewArtifact, searchTerm, isCurrentMatch }: MessageBubbleProps) {
   const isUser = message.type === 'user';
   const isSystem = message.type === 'system';
   const [allExpanded, setAllExpanded] = useState<boolean | undefined>(undefined);
+
+  // Render compaction summaries as expandable dividers
+  if (isSystem && message.isCompaction) {
+    return <CompactionMessage content={message.content} />;
+  }
 
   // Render system messages (task notifications) as compact cards
   if (isSystem) {
@@ -275,11 +479,15 @@ export function MessageBubble({ message, onSelectOption, onViewFile, onViewArtif
       )}
 
       {message.isWaitingForChoice && message.questions && onSelectOption && (
-        <>
-          {message.questions.map((q, i) => (
-            <QuestionBlock key={i} question={q} onSelectOption={onSelectOption} />
-          ))}
-        </>
+        message.questions.length > 1 ? (
+          <MultiQuestionFlow questions={message.questions} onSelectOption={onSelectOption} />
+        ) : (
+          <>
+            {message.questions.map((q, i) => (
+              <QuestionBlock key={i} question={q} onSelectOption={onSelectOption} />
+            ))}
+          </>
+        )
       )}
 
       {message.isWaitingForChoice && !message.questions && message.options && onSelectOption && (

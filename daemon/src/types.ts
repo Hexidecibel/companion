@@ -48,6 +48,7 @@ export interface ConversationMessage {
   questions?: Question[];
   isWaitingForChoice?: boolean;
   multiSelect?: boolean;
+  isCompaction?: boolean;
 }
 
 export interface ToolCall {
@@ -62,7 +63,7 @@ export interface ToolCall {
 
 export interface ConversationHighlight {
   id: string;
-  type: 'user' | 'assistant';
+  type: 'user' | 'assistant' | 'system';
   content: string;
   timestamp: number;
   options?: QuestionOption[];
@@ -70,6 +71,7 @@ export interface ConversationHighlight {
   isWaitingForChoice?: boolean;
   multiSelect?: boolean;
   toolCalls?: ToolCall[];
+  isCompaction?: boolean;
 }
 
 export interface ActivityDetail {

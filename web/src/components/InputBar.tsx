@@ -345,6 +345,15 @@ export function InputBar({ onSend, onSendWithImages, disabled, skills = [], term
             </button>
           </div>
         )}
+        {mobile && onTerminalKey && (
+          <button
+            className="input-bar-esc-btn"
+            onClick={() => onTerminalKey('Escape')}
+            title="Escape"
+          >
+            Esc
+          </button>
+        )}
         <button
           className="input-bar-send"
           onClick={terminalMode ? handleTerminalSend : handleSend}

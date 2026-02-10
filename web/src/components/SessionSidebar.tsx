@@ -17,6 +17,8 @@ interface SessionSidebarProps {
   onToggleSplit?: () => void;
   splitEnabled?: boolean;
   secondarySession?: ActiveSession | null;
+  onToggleDashboardMode?: () => void;
+  dashboardMode?: boolean;
   onNotificationSettings?: () => void;
   onSettings?: () => void;
   mutedSessions?: Set<string>;
@@ -91,6 +93,8 @@ export function SessionSidebar({
   onToggleSplit,
   splitEnabled,
   secondarySession,
+  onToggleDashboardMode,
+  dashboardMode,
   onNotificationSettings,
   onSettings,
   mutedSessions,
@@ -291,6 +295,15 @@ export function SessionSidebar({
       <div className="sidebar-header">
         <span className="sidebar-title">Companion</span>
         <div className="sidebar-header-actions">
+          {onToggleDashboardMode && (
+            <button
+              className={`dashboard-mode-toggle ${dashboardMode ? 'active' : ''}`}
+              onClick={onToggleDashboardMode}
+              title={dashboardMode ? 'Exit dashboard view' : 'Dashboard view'}
+            >
+              Grid
+            </button>
+          )}
           {onToggleSplit && (
             <button
               className={`sidebar-split-btn ${splitEnabled ? 'active' : ''}`}

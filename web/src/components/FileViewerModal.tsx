@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, memo } from 'react';
 import { connectionManager } from '../services/ConnectionManager';
 import { MarkdownRenderer } from './MarkdownRenderer';
+import { isTauriMobile } from '../utils/platform';
 import hljs from 'highlight.js/lib/core';
 import 'highlight.js/styles/github-dark.css';
 
@@ -346,17 +347,19 @@ export function FileViewerModal({ serverId, filePath, onClose }: FileViewerModal
             </div>
           </div>
           <div className="file-viewer-actions">
-            <button
-              className={`file-viewer-editor-btn ${editorStatus}`}
-              onClick={handleOpenInEditor}
-              disabled={editorStatus === 'opening'}
-              title="Open in your default editor on the server"
-            >
-              {editorStatus === 'opening' ? 'Opening...'
-                : editorStatus === 'opened' ? 'Opened'
-                : editorStatus === 'error' ? 'Failed'
-                : 'Open in Editor'}
-            </button>
+            {!isTauriMobile() && (
+              <button
+                className={`file-viewer-editor-btn ${editorStatus}`}
+                onClick={handleOpenInEditor}
+                disabled={editorStatus === 'opening'}
+                title="Open in your default editor on the server"
+              >
+                {editorStatus === 'opening' ? 'Opening...'
+                  : editorStatus === 'opened' ? 'Opened'
+                  : editorStatus === 'error' ? 'Failed'
+                  : 'Open in Editor'}
+              </button>
+            )}
             <button className="modal-close" onClick={onClose}>{'\u2715'}</button>
           </div>
         </div>

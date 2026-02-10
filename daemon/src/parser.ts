@@ -34,6 +34,7 @@ interface JsonlEntry {
   timestamp?: string;
   parentUuid?: string;
   uuid?: string;
+  summary?: string;
 }
 
 interface AskUserQuestionInput {
@@ -222,12 +223,24 @@ export function parseConversationFile(
         if (message) {
           messages.unshift(message); // Add to beginning to maintain order
         }
+      } else if (entry.type === 'summary') {
+        // Compaction summary — create a system message marking the compaction point
+        if (entry.summary) {
+          const timestamp = entry.timestamp ? new Date(entry.timestamp).getTime() : Date.now();
+          messages.unshift({
+            id: `compaction-${timestamp}`,
+            type: 'system',
+            content: entry.summary,
+            timestamp,
+            isCompaction: true,
+          });
+        }
       } else if (entry.type === 'queue-operation') {
         const notification = parseQueueOperation(entry);
         if (notification) {
           messages.unshift(notification);
         }
-      } else if (entry.type && entry.type !== 'summary') {
+      } else {
         // Silently ignore unknown types
       }
     } catch {
@@ -472,6 +485,8 @@ export function extractHighlights(messages: ConversationMessage[]): Conversation
     .filter((msg) => {
       // Include user messages with content
       if (msg.type === 'user' && msg.content && msg.content.trim()) return true;
+      // Include system messages (task notifications, compaction summaries)
+      if (msg.type === 'system') return true;
       // Include assistant messages with content OR toolCalls
       if (msg.type === 'assistant') {
         const trimmed = msg.content?.trim();
@@ -482,6 +497,18 @@ export function extractHighlights(messages: ConversationMessage[]): Conversation
       return false;
     })
     .map((msg, index, arr) => {
+      // System messages pass through directly
+      if (msg.type === 'system') {
+        return {
+          id: msg.id,
+          type: 'system' as const,
+          content: msg.content,
+          timestamp: msg.timestamp,
+          toolCalls: msg.toolCalls,
+          isCompaction: msg.isCompaction,
+        };
+      }
+
       const isLastMessage = index === arr.length - 1;
       const originalIndex = messages.indexOf(msg);
 

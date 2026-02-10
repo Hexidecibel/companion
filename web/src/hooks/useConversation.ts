@@ -77,9 +77,6 @@ export function useConversation(
       if (!conn || cancelled) return;
 
       try {
-        // Switch session on server, then fetch highlights + status in parallel
-        await conn.sendRequest('switch_session', { sessionId, epoch: guardEpoch });
-
         const [hlResponse, statusResponse] = await Promise.all([
           conn.sendRequest('get_highlights', { limit: PAGE_SIZE, sessionId }),
           conn.sendRequest('get_status', { sessionId }),

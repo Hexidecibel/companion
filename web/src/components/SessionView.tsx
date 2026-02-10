@@ -155,6 +155,35 @@ export function SessionView({
     }
   }, [serverId, sessionId]);
 
+  // Always keep textarea focused on desktop — re-focus whenever focus leaves
+  useEffect(() => {
+    if (isMobileViewport() || !serverId || !sessionId) return;
+    const refocus = () => {
+      requestAnimationFrame(() => {
+        const active = document.activeElement;
+        // Don't steal focus from other interactive elements
+        if (active && active.closest('input, textarea:not(.input-bar-textarea), [contenteditable], select')) return;
+        const textarea = document.querySelector('.input-bar-textarea') as HTMLElement | null;
+        textarea?.focus();
+      });
+    };
+    // Focus on any view change (terminal toggle, etc.)
+    refocus();
+    // Re-focus when clicks happen outside interactive elements
+    document.addEventListener('focusout', refocus);
+    return () => document.removeEventListener('focusout', refocus);
+  }, [showTerminal, serverId, sessionId]);
+
+  // Click on conversation area focuses textarea (desktop only)
+  const handleConversationClick = useCallback((e: React.MouseEvent) => {
+    if (isMobileViewport()) return;
+    const target = e.target as HTMLElement;
+    // Don't steal focus from interactive elements
+    if (target.closest('button, a, input, textarea, [role="button"], .msg-option-btn, .tool-card, .question-block')) return;
+    const textarea = document.querySelector('.input-bar-textarea') as HTMLElement | null;
+    textarea?.focus();
+  }, []);
+
   const handleSend = useCallback(
     async (text: string): Promise<boolean> => {
       // Only queue when we positively know Claude is working (status loaded, not waiting).
@@ -309,6 +338,10 @@ export function SessionView({
     });
   }, [serverId, tmuxSessionName]);
 
+  const handleCancel = useCallback(() => {
+    sendTerminalKey('C-c');
+  }, [sendTerminalKey]);
+
   if (!serverId || !sessionId) {
     return (
       <div className="session-view-empty">
@@ -333,6 +366,15 @@ export function SessionView({
 
   const actionButtons = (
     <div className="session-header-actions">
+      {status?.isRunning && !status?.isWaitingForInput && tmuxSessionName && (
+        <button
+          className="cancel-btn"
+          onClick={handleCancel}
+          title="Send Ctrl+C to cancel"
+        >
+          Cancel
+        </button>
+      )}
       {sessionId && (
         <button
           className={`auto-approve-btn ${!sessionMute.isMuted(sessionId) ? 'auto-approve-btn-active' : ''}`}
@@ -439,7 +481,7 @@ export function SessionView({
         />
       )}
 
-      <div className="session-conversation" style={{ display: showTerminal || showWorkGroupPanel ? 'none' : undefined }}>
+      <div className="session-conversation" onClick={handleConversationClick} style={{ display: showTerminal || showWorkGroupPanel ? 'none' : undefined }}>
           <WaitingIndicator status={status} />
 
           <SubAgentBar

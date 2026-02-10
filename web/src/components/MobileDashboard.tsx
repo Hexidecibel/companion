@@ -322,6 +322,9 @@ interface ServerCardProps {
   newSessionOpen: boolean;
 }
 
+export { ServerCard };
+export type { ServerCardProps };
+
 function ServerCard({ snap, summary, onSelectSession, onToggleEnabled, onDelete, onEdit, isEnabled, onNewSession, onTmuxSessions, newSessionOpen }: ServerCardProps) {
   const isConnected = snap.state.status === 'connected';
   const isConnecting = snap.state.status === 'connecting' || snap.state.status === 'reconnecting';

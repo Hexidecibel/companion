@@ -6,7 +6,7 @@ import { useConnections } from '../hooks/useConnections';
 import { useWorkGroups } from '../hooks/useWorkGroups';
 import { SessionSidebar } from './SessionSidebar';
 import { SessionView } from './SessionView';
-import { MobileDashboard } from './MobileDashboard';
+import { MobileDashboard, ServerCard } from './MobileDashboard';
 import { ShortcutHelpOverlay } from './ShortcutHelpOverlay';
 import { NotificationSettingsModal } from './NotificationSettingsModal';
 import { useSessionMute } from '../hooks/useSessionMute';
@@ -26,10 +26,13 @@ export function Dashboard({ onSettings }: DashboardProps) {
   const [merging, setMerging] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(isMobileViewport());
+  const [splitEnabled, setSplitEnabled] = useState(false);
+  const [secondarySession, setSecondarySession] = useState<ActiveSession | null>(null);
+  const [dashboardMode, setDashboardMode] = useState(false);
   const summaries = useAllServerSummaries();
   const sessionMute = useSessionMute(activeSession?.serverId ?? null);
   const { snapshots } = useConnections();
-  const { isParallelWorkersEnabled } = useServers();
+  const { servers, isParallelWorkersEnabled } = useServers();
 
   // Use work groups for the active server (only if enabled)
   const workersEnabled = activeSession ? isParallelWorkersEnabled(activeSession.serverId) : true;
@@ -172,13 +175,22 @@ export function Dashboard({ onSettings }: DashboardProps) {
   }, [flatSessions, activeSession]);
 
   const handleSelectSession = useCallback((serverId: string, sessionId: string) => {
+    if (dashboardMode) {
+      setDashboardMode(false);
+      setActiveSession({ serverId, sessionId });
+      return;
+    }
+    if (splitEnabled && activeSession && (activeSession.serverId !== serverId || activeSession.sessionId !== sessionId)) {
+      setSecondarySession({ serverId, sessionId });
+      return;
+    }
     setActiveSession({ serverId, sessionId });
     if (isMobileViewport()) {
       setSidebarOpen(false);
       // Push history so Android back gesture returns to dashboard
       history.pushState({ session: true }, '');
     }
-  }, []);
+  }, [splitEnabled, activeSession, dashboardMode]);
 
   // Push a base history entry on mobile so back from dashboard doesn't exit the app
   useEffect(() => {
@@ -329,6 +341,17 @@ export function Dashboard({ onSettings }: DashboardProps) {
   const toggleSidebar = useCallback(() => setSidebarOpen(prev => !prev), []);
   const handleMobileBack = useCallback(() => setActiveSession(null), []);
 
+  const handleToggleSplit = useCallback(() => {
+    setSplitEnabled(prev => {
+      if (prev) setSecondarySession(null);
+      return !prev;
+    });
+  }, []);
+
+  const handleToggleDashboardMode = useCallback(() => {
+    setDashboardMode(prev => !prev);
+  }, []);
+
   // --- Mobile layout: MobileDashboard or full-screen SessionView ---
   if (isMobile) {
     if (activeSession) {
@@ -384,6 +407,11 @@ export function Dashboard({ onSettings }: DashboardProps) {
         activeSession={activeSession}
         onSelectSession={handleSelectSession}
         onSessionCreated={handleSessionCreated}
+        onToggleSplit={handleToggleSplit}
+        splitEnabled={splitEnabled}
+        secondarySession={secondarySession}
+        onToggleDashboardMode={handleToggleDashboardMode}
+        dashboardMode={dashboardMode}
         onNotificationSettings={activeSession ? () => setShowNotifSettings(true) : undefined}
         onSettings={onSettings}
         mutedSessions={sessionMute.mutedSessions}
@@ -391,21 +419,45 @@ export function Dashboard({ onSettings }: DashboardProps) {
         workGroups={allWorkGroups}
         mobileOpen={sidebarOpen}
       />
-      <main className="dashboard-main">
-        <SessionView
-          serverId={activeSession?.serverId ?? null}
-          sessionId={activeSession?.sessionId ?? null}
-          tmuxSessionName={activeSessionSummary?.tmuxSessionName}
-          workGroup={isForemanView ? activeWorkGroup : undefined}
-          onViewWorker={handleViewWorker}
-          onSendWorkerInput={handleSendWorkerInput}
-          onMergeGroup={handleMergeGroup}
-          onCancelGroup={handleCancelGroup}
-          onRetryWorker={handleRetryWorker}
-          onDismissGroup={handleDismissGroup}
-          merging={merging}
-          onToggleSidebar={toggleSidebar}
-        />
+      <main className={`dashboard-main${splitEnabled ? ' split-enabled' : ''}`}>
+        {dashboardMode ? (
+          <DashboardGrid
+            snapshots={snapshots}
+            summaries={summaries}
+            servers={servers}
+            onSelectSession={handleSelectSession}
+          />
+        ) : (
+          <>
+            <SessionView
+              serverId={activeSession?.serverId ?? null}
+              sessionId={activeSession?.sessionId ?? null}
+              tmuxSessionName={activeSessionSummary?.tmuxSessionName}
+              workGroup={isForemanView ? activeWorkGroup : undefined}
+              onViewWorker={handleViewWorker}
+              onSendWorkerInput={handleSendWorkerInput}
+              onMergeGroup={handleMergeGroup}
+              onCancelGroup={handleCancelGroup}
+              onRetryWorker={handleRetryWorker}
+              onDismissGroup={handleDismissGroup}
+              merging={merging}
+              onToggleSidebar={toggleSidebar}
+            />
+            {splitEnabled && secondarySession && (
+              <>
+                <div className="split-divider" />
+                <SessionView
+                  serverId={secondarySession.serverId}
+                  sessionId={secondarySession.sessionId}
+                  tmuxSessionName={(() => {
+                    const ss = summaries.get(secondarySession.serverId);
+                    return ss?.sessions.find(s => s.id === secondarySession.sessionId)?.tmuxSessionName;
+                  })()}
+                />
+              </>
+            )}
+          </>
+        )}
       </main>
 
       {showNotifSettings && activeSession && (
@@ -418,6 +470,43 @@ export function Dashboard({ onSettings }: DashboardProps) {
       {showShortcutHelp && (
         <ShortcutHelpOverlay onClose={() => setShowShortcutHelp(false)} />
       )}
+    </div>
+  );
+}
+
+// Dashboard Grid: renders all server cards in a grid layout (desktop only)
+import { Server } from '../types';
+import { ConnectionSnapshot } from '../services/ConnectionManager';
+
+interface DashboardGridProps {
+  snapshots: ConnectionSnapshot[];
+  summaries: Map<string, import('../types').ServerSummary>;
+  servers: Server[];
+  onSelectSession: (serverId: string, sessionId: string) => void;
+}
+
+function DashboardGrid({ snapshots, summaries, servers, onSelectSession }: DashboardGridProps) {
+  return (
+    <div className="dashboard-grid">
+      {snapshots.map(snap => {
+        const server = servers.find(s => s.id === snap.serverId);
+        const isEnabled = server?.enabled !== false;
+        return (
+          <ServerCard
+            key={snap.serverId}
+            snap={snap}
+            summary={summaries.get(snap.serverId)}
+            onSelectSession={onSelectSession}
+            onToggleEnabled={() => {}}
+            onDelete={() => {}}
+            onEdit={() => {}}
+            isEnabled={isEnabled}
+            onNewSession={() => {}}
+            onTmuxSessions={() => {}}
+            newSessionOpen={false}
+          />
+        );
+      })}
     </div>
   );
 }

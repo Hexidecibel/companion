@@ -67,6 +67,7 @@ export interface ConversationHighlight {
   isWaitingForChoice?: boolean;
   multiSelect?: boolean;
   toolCalls?: ToolCall[];
+  isCompaction?: boolean;
 }
 
 // Session types

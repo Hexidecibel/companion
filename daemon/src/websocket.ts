@@ -1517,23 +1517,10 @@ export class WebSocketHandler {
     const { sessionId, epoch } = payload;
     console.log(`WebSocket: Switching to session ${sessionId} (epoch: ${epoch})`);
 
-    // 1. Switch the watcher's active session
-    const switched = this.watcher.setActiveSession(sessionId);
-    if (!switched) {
-      this.send(client.ws, {
-        type: 'session_switched',
-        success: false,
-        error: 'Session not found',
-        sessionId,
-        requestId,
-      } as WebSocketResponse);
-      return;
-    }
-
-    // 2. Update client's subscription to this session
+    // Update client's subscription to this session
     client.subscribedSessionId = sessionId;
 
-    // 3. Resolve sessionId to tmux session name for the injector
+    // Resolve sessionId to tmux session name for the injector
     const tmuxName = await this.resolveTmuxSession(sessionId);
     if (tmuxName) {
       this.injector.setActiveSession(tmuxName);
@@ -2993,10 +2980,7 @@ export class WebSocketHandler {
 
     for (const client of this.clients.values()) {
       if (client.authenticated && client.subscribed && client.ws.readyState === WebSocket.OPEN) {
-        // Only send to clients subscribed to this session (or all if no session filter)
-        if (!client.subscribedSessionId || client.subscribedSessionId === activeSessionId) {
-          client.ws.send(message);
-        }
+        client.ws.send(message);
       }
     }
   }
