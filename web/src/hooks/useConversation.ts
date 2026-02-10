@@ -18,7 +18,7 @@ interface UseConversationReturn {
   loadingMore: boolean;
   hasMore: boolean;
   error: string | null;
-  sendInput: (text: string) => Promise<boolean>;
+  sendInput: (text: string, opts?: { skipOptimistic?: boolean }) => Promise<boolean>;
   cancelMessage: (clientMessageId: string) => Promise<string | null>;
   loadMore: () => void;
 }
@@ -260,7 +260,7 @@ export function useConversation(
   }, [serverId, sessionId, loadingMore, hasMore, highlights.length]);
 
   const sendInput = useCallback(
-    async (text: string): Promise<boolean> => {
+    async (text: string, opts?: { skipOptimistic?: boolean }): Promise<boolean> => {
       if (!serverId || !sessionId) return false;
       const conn = connectionManager.getConnection(serverId);
       if (!conn || !conn.isConnected()) return false;
@@ -275,9 +275,11 @@ export function useConversation(
           tmuxSessionName: tmuxSessionName || sessionId,
           clientMessageId,
         });
-        if (response.success) {
+        if (response.success && !opts?.skipOptimistic) {
           // Optimistic display — server will include this in future get_highlights
           // via its pendingSentMessages tracking, but show immediately for instant UX
+          // Skipped for option/choice selections since those appear as tool_results
+          // in the JSONL (not user messages) and never match for confirmation.
           setHighlights((prev) => [
             ...prev,
             {

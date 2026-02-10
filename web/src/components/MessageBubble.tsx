@@ -186,14 +186,17 @@ function MultiQuestionFlow({ questions, onSelectOption }: MultiQuestionFlowProps
     setStep(idx);
   }, []);
 
-  const handleSubmitAll = useCallback(() => {
-    // Join answers with comma separator (newlines get interpreted as Enter by tmux)
-    const parts: string[] = [];
+  const handleSubmitAll = useCallback(async () => {
+    // Send each answer sequentially — the CLI presents one question at a time,
+    // so each answer needs its own sendInput + Enter with a delay between them.
     for (let i = 0; i < total; i++) {
       const answer = answers.get(i) || '';
-      parts.push(answer);
+      onSelectOption(answer);
+      if (i < total - 1) {
+        // Wait for the CLI to process the answer and show the next question
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      }
     }
-    onSelectOption(parts.join(', '));
   }, [answers, total, onSelectOption]);
 
   if (reviewing) {

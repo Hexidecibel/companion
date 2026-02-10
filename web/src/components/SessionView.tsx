@@ -348,7 +348,7 @@ export function SessionView({
   }
 
   const handleSelectOption = (label: string) => {
-    sendInput(label);
+    sendInput(label, { skipOptimistic: true });
   };
 
   const mobile = isMobileViewport();
