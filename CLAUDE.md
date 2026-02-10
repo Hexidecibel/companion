@@ -235,12 +235,19 @@ export function useMyHook(param: string) {
 
 ---
 
-## Task Workflow
+## Tracking Files
 
-See `TASKS.md` for current work queue. When working autonomously:
+Three files track the lifecycle of work items:
 
-1. Read the task from TASKS.md work queue
-2. Explore relevant existing code first
-3. Implement incrementally, testing each step
-4. Commit with descriptive message when complete
-5. Update TASKS.md to mark completed
+| File | Purpose |
+|------|---------|
+| `todo.md` | Quick capture for ideas and tasks. Items are raw, unplanned. |
+| `plan.md` | Detailed implementation plans with status, design, file lists, and steps. |
+| `FEATURES.md` | Completed features — living changelog of what's been shipped. |
+
+**Flow:** `todo.md` (idea) -> `plan.md` (planned -> in-progress -> done) -> `FEATURES.md` (shipped)
+
+When committing (`/commit`), update all three:
+1. Remove completed items from `todo.md`
+2. Set status to `done` in `plan.md` (clear done plans when all complete)
+3. Add/update entries in `FEATURES.md`
