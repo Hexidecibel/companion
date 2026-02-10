@@ -112,6 +112,8 @@ function createMockWatcher() {
     watcher.getActiveSessionId.mockReturnValue(null);
   });
   watcher.refreshTmuxPaths = jest.fn().mockResolvedValue(undefined);
+  watcher.markSessionAsNew = jest.fn();
+  watcher.getTmuxSessionForConversation = jest.fn().mockReturnValue(null);
 
   // Real-ish getServerSummary that respects multi-session per dir
   watcher.getServerSummary = jest.fn(async (tmuxSessions?: any[]) => {
@@ -290,7 +292,7 @@ const mockConfig: DaemonConfig = {
 function createAuthenticatedClient(wss: MockWebSocketServer): MockWebSocket {
   const client = new MockWebSocket();
   wss.clients.add(client);
-  wss.emit('connection', client, {});
+  wss.emit('connection', client, { socket: { remoteAddress: '127.0.0.1' } });
   client.emit('message', JSON.stringify({ type: 'authenticate', token: 'test-token', requestId: 'auth-1' }));
   client.send.mockClear();
   return client;
@@ -485,7 +487,8 @@ describe('Multi-Session Support', () => {
       const response = findResponse(responses, 'req-sw-1');
       expect(response.success).toBe(true);
       expect(response.payload.sessionId).toBe(UUID_SAME_2);
-      expect(mockWatcher.setActiveSession).toHaveBeenCalledWith(UUID_SAME_2);
+      // handleSwitchSession resolves to tmux session and sets injector target
+      expect(mockInjector.setActiveSession).toHaveBeenCalledWith('companion-my-project-ab12');
     });
 
     it('should switch back to session 1 from session 2', async () => {
@@ -1099,7 +1102,7 @@ describe('Multi-Session Support', () => {
       expect(update).toBeDefined();
     });
 
-    it('should NOT receive broadcasts for different session', () => {
+    it('should include sessionId in broadcasts so client can filter', () => {
       // Subscribe to session 1
       client.emit(
         'message',
@@ -1119,8 +1122,10 @@ describe('Multi-Session Support', () => {
 
       const sent = client.send.mock.calls.map((c: any) => JSON.parse(c[0]));
       const update = sent.find((s) => s.type === 'conversation_update');
-      // Should NOT receive because client is subscribed to session 1 but broadcast is for session 2
-      expect(update).toBeUndefined();
+      // Broadcasts go to all subscribed clients; sessionId is included
+      // so the client can filter on its side
+      expect(update).toBeDefined();
+      expect(update.sessionId).toBe(UUID_SAME_2);
     });
   });
 
@@ -1564,7 +1569,7 @@ describe('Multi-Session Support', () => {
     it('should reject unauthenticated get_sessions', async () => {
       const unauthClient = new MockWebSocket();
       wss.clients.add(unauthClient);
-      wss.emit('connection', unauthClient, {});
+      wss.emit('connection', unauthClient, { socket: { remoteAddress: '127.0.0.1' } });
       unauthClient.send.mockClear();
 
       // Skip authentication, try to get sessions directly
@@ -1583,7 +1588,7 @@ describe('Multi-Session Support', () => {
     it('should reject wrong token', async () => {
       const badClient = new MockWebSocket();
       wss.clients.add(badClient);
-      wss.emit('connection', badClient, {});
+      wss.emit('connection', badClient, { socket: { remoteAddress: '127.0.0.1' } });
       badClient.send.mockClear();
 
       badClient.emit(
@@ -1640,9 +1645,9 @@ describe('Multi-Session Support', () => {
 
       await new Promise((r) => setTimeout(r, 200));
 
-      // Should not crash, and final state should be session 1
-      const lastSwitchId = switches[switches.length - 1];
-      expect(mockWatcher.setActiveSession).toHaveBeenLastCalledWith(lastSwitchId);
+      // Should not crash, and injector should have been called for each switch
+      // Both sessions resolve to the same tmux session (same project dir)
+      expect(mockInjector.setActiveSession).toHaveBeenCalledWith('companion-my-project-ab12');
     });
   });
 

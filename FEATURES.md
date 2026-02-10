@@ -14,11 +14,15 @@ High-level features of the Companion daemon, web client, and desktop/mobile apps
 - Live WebSocket updates from CLI coding sessions
 - Multi-server, multi-session support
 - Multiple concurrent sessions per project directory with automatic disambiguation (terminal content matching, PID detection, process of elimination)
+- Session mapping persistence across daemon restarts (`~/.claude/companion-session-mappings.json`)
+- Event-driven compaction re-mapping when context compaction creates new JSONL files
+- ExitPlanMode and AskUserQuestion detected as "waiting for input" (triggers status banner, push notifications)
 - Session status indicators (waiting, working, idle)
 - Sub-agent tracking with expandable tree view (status icons, activity, duration, message count)
 - Click-to-view sub-agent conversation detail
 - Running/completed agent sections with collapsible completed list
 - Optimistic sent message display — messages appear immediately in chat before server acknowledgement
+- Direct message sending (no queue) — messages send immediately regardless of session state
 
 ## Mobile Input
 - Send text and images to the CLI from your phone
@@ -45,7 +49,7 @@ High-level features of the Companion daemon, web client, and desktop/mobile apps
 - Expandable task list per session with status indicators
 - Task detail screen with full metadata and dependencies
 - Kill sessions directly from dashboard with confirmation
-- Create new sessions with recent project picker
+- Create new sessions with redesigned wizard: unified path input, instant-create from recents, full-screen mobile sheet
 - Quick navigation to any session
 - Server enable/disable toggles
 - Server cards disabled when no active sessions
@@ -89,6 +93,8 @@ High-level features of the Companion daemon, web client, and desktop/mobile apps
 ## Plan Viewer
 - Detect plan file references in conversation (ExitPlanMode/EnterPlanMode tool calls)
 - Plan cards rendered inline for ExitPlanMode with "View Plan" button
+- Approve/Reject buttons on pending plan cards (sends "yes"/"no" directly from app)
+- Plan file path fallback for pending tools (uses latestPlanFile when tool output not yet available)
 - Plan button in session header when a plan file is detected
 - Plans open in the file viewer with full markdown rendering
 

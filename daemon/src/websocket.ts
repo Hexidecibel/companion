@@ -364,7 +364,6 @@ export class WebSocketHandler {
         const t0 = Date.now();
         // Use client's subscribed session, payload override, or fall back to global active
         const hlSessionId = hlParams?.sessionId || client.subscribedSessionId || this.watcher.getActiveSessionId();
-
         const limit = hlParams?.limit && hlParams.limit > 0 ? hlParams.limit : 0;
         const offset = hlParams?.offset || 0;
 
@@ -672,8 +671,8 @@ export class WebSocketHandler {
         });
 
         // When toggled ON, immediately check for pending tools that should be auto-approved
-        if (enabled) {
-          this.watcher.checkAndEmitPendingApproval();
+        if (enabled && targetSessionId) {
+          this.watcher.checkAndEmitPendingApproval(targetSessionId);
         }
         break;
       }
@@ -1719,6 +1718,10 @@ export class WebSocketHandler {
 
       // Switch input target to the new session
       this.injector.setActiveSession(sessionName);
+
+      // Mark session as newly created so path-based resolution won't return
+      // a stale conversation from the same directory
+      this.watcher.markSessionAsNew(sessionName);
 
       // Clear the active session pointer so the UI shows empty until the new
       // CLI writes its JSONL (old sessions for this dir remain in the list)

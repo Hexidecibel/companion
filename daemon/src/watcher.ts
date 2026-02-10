@@ -61,15 +61,51 @@ export class SessionWatcher extends EventEmitter {
   private startTime: number = Date.now();
   private tmuxProjectPaths: Set<string> = new Set(); // encoded paths of tagged sessions only
   private tmuxFilterEnabled: boolean = true;
+  private newlyCreatedSessions: Map<string, number> = new Map(); // session name -> creation timestamp
+  private compactedSessions: Set<string> = new Set(); // sessions expecting a new JSONL after compaction
   private debounceTimers: Map<string, NodeJS.Timeout> = new Map();
   private static readonly DEBOUNCE_MS = 150; // Debounce file changes per session
 
   constructor(codeHome: string) {
     super();
     this.codeHome = codeHome;
+    this.loadPersistedMappings();
     // Refresh tmux paths periodically
     this.refreshTmuxPaths();
     setInterval(() => this.refreshTmuxPaths(), 5000);
+  }
+
+  private get mappingsPath(): string {
+    return path.join(this.codeHome, 'companion-session-mappings.json');
+  }
+
+  private loadPersistedMappings(): void {
+    try {
+      const data = fs.readFileSync(this.mappingsPath, 'utf-8');
+      const mappings = JSON.parse(data) as Record<string, string>;
+      let loaded = 0;
+      for (const [session, convId] of Object.entries(mappings)) {
+        this.tmuxConversationIds.set(session, convId);
+        loaded++;
+      }
+      if (loaded > 0) {
+        console.log(`Watcher: Loaded ${loaded} persisted session mappings`);
+      }
+    } catch {
+      // No persisted mappings or parse error — start fresh
+    }
+  }
+
+  private persistMappings(): void {
+    try {
+      const mappings: Record<string, string> = {};
+      for (const [session, convId] of this.tmuxConversationIds) {
+        mappings[session] = convId;
+      }
+      fs.writeFileSync(this.mappingsPath, JSON.stringify(mappings));
+    } catch {
+      // Not critical
+    }
   }
 
   async refreshTmuxPaths(): Promise<void> {
@@ -329,6 +365,16 @@ export class SessionWatcher extends EventEmitter {
           if (unmapped.length === 1) {
             tmuxName = unmapped[0];
             this.tmuxConversationIds.set(tmuxName, convId);
+          } else if (unmapped.length === 0) {
+            // All sessions mapped — check if one recently compacted and expects a new JSONL
+            const compactedInPath = sessionsForPath.filter(name => this.compactedSessions.has(name));
+            if (compactedInPath.length === 1) {
+              const oldId = this.tmuxConversationIds.get(compactedInPath[0]);
+              console.log(`Watcher: Re-mapping ${compactedInPath[0]}: ${oldId?.substring(0, 8)} -> ${convId.substring(0, 8)} (post-compaction)`);
+              tmuxName = compactedInPath[0];
+              this.tmuxConversationIds.set(tmuxName, convId);
+              this.compactedSessions.delete(tmuxName);
+            }
           }
         }
       }
@@ -348,6 +394,11 @@ export class SessionWatcher extends EventEmitter {
     if (compactionEvent) {
       console.log(`Watcher: Detected compaction in session ${tmuxName || convId}`);
       this.emit('compaction', compactionEvent);
+      // Mark this session as expecting a new JSONL (compaction creates a continuation file)
+      // Only for live compaction events (prevTracked exists), not initial file loads
+      if (tmuxName && prevTracked) {
+        this.compactedSessions.add(tmuxName);
+      }
     }
 
     // Extract and cache task summary from already-read content
@@ -508,9 +559,13 @@ export class SessionWatcher extends EventEmitter {
       });
     }
 
-    // Check for pending tools - only emit when the set of pending tools CHANGES
+    // Check for pending tools - only emit when the set of pending tool IDs CHANGES.
+    // Using tool IDs (not just names) so that consecutive same-named tools
+    // (e.g., Bash A completes, Bash B pending) are correctly detected as new.
     const pendingTools = getPendingApprovalTools(messages);
-    const pendingKey = pendingTools.length > 0 ? pendingTools.sort().join(',') : '';
+    const pendingKey = pendingTools.length > 0
+      ? pendingTools.map(t => t.id).sort().join(',')
+      : '';
     if (pendingKey && pendingKey !== tracked.lastEmittedPendingTools) {
       tracked.lastEmittedPendingTools = pendingKey;
       this.emit('pending-approval', {
@@ -628,6 +683,14 @@ export class SessionWatcher extends EventEmitter {
   }
 
   /**
+   * Mark a session as newly created (no JSONL yet).
+   * Prevents path-based fallback from returning a stale conversation.
+   */
+  markSessionAsNew(sessionName: string): void {
+    this.newlyCreatedSessions.set(sessionName, Date.now());
+  }
+
+  /**
    * Resolve tmux session name to the conversation it's running.
    * Uses direct PID-based mapping first, falls back to path-based best-match.
    */
@@ -636,7 +699,16 @@ export class SessionWatcher extends EventEmitter {
     const directId = this.tmuxConversationIds.get(sessionName);
     if (directId) {
       const conv = this.conversations.get(directId);
-      if (conv) return { id: directId, conv };
+      if (conv) {
+        // Direct mapping found — session is no longer "new"
+        this.newlyCreatedSessions.delete(sessionName);
+        return { id: directId, conv };
+      }
+    }
+    // If session was just created and has no direct mapping yet, don't fall back
+    // to path-based matching (would return a stale conversation from same dir)
+    if (this.newlyCreatedSessions.has(sessionName)) {
+      return null;
     }
     // Fall back to path-based best-match
     const encodedPath = this.tmuxPathBySession.get(sessionName);
@@ -702,7 +774,39 @@ export class SessionWatcher extends EventEmitter {
     }
     for (const [name, convId] of this.tmuxConversationIds) {
       if (!this.conversations.has(convId)) {
+        // Conversation not loaded yet — check if file exists on disk before pruning
+        const ePath = this.tmuxPathBySession.get(name);
+        if (ePath) {
+          const convFile = path.join(this.codeHome, 'projects', ePath, `${convId}.jsonl`);
+          if (fs.existsSync(convFile)) continue; // File exists, keep mapping
+        }
         this.tmuxConversationIds.delete(name);
+      }
+    }
+
+    // Clear newlyCreated flag for sessions whose own JSONL has appeared
+    // (conversation file created AFTER the session was created)
+    for (const [sessionName, createdAt] of this.newlyCreatedSessions) {
+      const ePath = this.tmuxPathBySession.get(sessionName);
+      if (!ePath) continue;
+      // Find a conversation for this path that was modified after session creation
+      for (const [id, conv] of this.conversations) {
+        if (this.getEncodedDirName(conv.path) === ePath && conv.lastModified > createdAt) {
+          // This conversation appeared after the session was created — it's likely ours
+          // Only claim it if no other session already has it
+          const alreadyMapped = Array.from(this.tmuxConversationIds.values()).includes(id);
+          if (!alreadyMapped) {
+            console.log(`Watcher: New session ${sessionName} -> ${id.substring(0, 8)} (appeared after creation)`);
+            this.tmuxConversationIds.set(sessionName, id);
+            this.newlyCreatedSessions.delete(sessionName);
+            break;
+          }
+        }
+      }
+      // Expire the guard after 2 minutes regardless (fallback)
+      if (Date.now() - createdAt > 120_000) {
+        console.log(`Watcher: Expiring newlyCreated guard for ${sessionName}`);
+        this.newlyCreatedSessions.delete(sessionName);
       }
     }
 
@@ -752,6 +856,7 @@ export class SessionWatcher extends EventEmitter {
     // Strategy 1: PID-based detection via /proc/fd (works if Claude keeps files open)
     for (const [sessionName, ePath] of this.tmuxPathBySession) {
       if (this.tmuxConversationIds.has(sessionName)) continue;
+      if (this.newlyCreatedSessions.has(sessionName)) continue; // Don't map until JSONL exists
       const convId = await this.detectConversationForSession(sessionName);
       if (convId) {
         if (!this.conversations.has(convId)) {
@@ -791,6 +896,7 @@ export class SessionWatcher extends EventEmitter {
 
       for (const sessionName of unmapped) {
         if (this.tmuxConversationIds.has(sessionName)) continue; // Mapped by earlier iteration
+        if (this.newlyCreatedSessions.has(sessionName)) continue; // Skip newly created sessions
         try {
           // Capture scrollback history (up to 500 lines) to find user prompts
           const { stdout: paneText } = await execAsync(
@@ -843,7 +949,7 @@ export class SessionWatcher extends EventEmitter {
     // Strategy 3: Process of elimination
     for (const [ePath, sessions] of pathSessions) {
       if (sessions.length < 2) continue;
-      const unmapped = sessions.filter(name => !this.tmuxConversationIds.has(name));
+      const unmapped = sessions.filter(name => !this.tmuxConversationIds.has(name) && !this.newlyCreatedSessions.has(name));
       if (unmapped.length !== 1) continue;
 
       const mappedConvIds = new Set(
@@ -871,6 +977,7 @@ export class SessionWatcher extends EventEmitter {
       if (key !== this._lastMappingLog) {
         this._lastMappingLog = key;
         console.log(`Watcher: Session mappings: ${entries}`);
+        this.persistMappings();
       }
     }
   }
@@ -1091,21 +1198,23 @@ export class SessionWatcher extends EventEmitter {
   }
 
   /**
-   * Check the active session for pending approval tools and emit if found.
+   * Check a session for pending approval tools and emit if found.
    * Called externally when auto-approve is toggled on to retroactively approve.
+   * If sessionId is provided, checks that specific session; otherwise checks the active session.
    */
-  checkAndEmitPendingApproval(): void {
-    if (!this.activeTmuxSession || !this.activeConversationId) return;
+  checkAndEmitPendingApproval(sessionId?: string): void {
+    const targetTmux = sessionId || this.activeTmuxSession;
+    if (!targetTmux) return;
 
-    const tracked = this.conversations.get(this.activeConversationId);
-    if (!tracked) return;
+    const resolved = this.resolveConversationForSession(targetTmux);
+    if (!resolved) return;
 
-    const messages = tracked.cachedMessages || parseConversationFile(tracked.path);
+    const messages = resolved.conv.cachedMessages || parseConversationFile(resolved.conv.path);
     const pendingTools = getPendingApprovalTools(messages);
     if (pendingTools.length > 0) {
       this.emit('pending-approval', {
-        sessionId: this.activeTmuxSession,
-        projectPath: tracked.projectPath,
+        sessionId: targetTmux,
+        projectPath: resolved.conv.projectPath,
         tools: pendingTools,
       });
     }

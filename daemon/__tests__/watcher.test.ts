@@ -695,4 +695,302 @@ describe('SessionWatcher', () => {
       expect(updateSpy).not.toHaveBeenCalled();
     });
   });
+
+  // ========================================
+  // Session-conversation mapping persistence
+  // ========================================
+
+  describe('mapping persistence', () => {
+    const MAPPINGS_PATH = `${CODE_HOME}/companion-session-mappings.json`;
+    const TMUX_A1 = 'companion-project-a-1';
+    const TMUX_A2 = 'companion-project-a-2';
+
+    it('should load persisted mappings on construction', () => {
+      const persistedMappings = { [TMUX_A1]: FILE_UUID_1, [TMUX_A2]: FILE_UUID_2 };
+      mockFs.readFileSync.mockImplementation((p: any) => {
+        if (typeof p === 'string' && p.includes('companion-session-mappings.json')) {
+          return JSON.stringify(persistedMappings);
+        }
+        return '';
+      });
+
+      const w = new SessionWatcher(CODE_HOME);
+      const mappings = (w as any).tmuxConversationIds as Map<string, string>;
+      expect(mappings.get(TMUX_A1)).toBe(FILE_UUID_1);
+      expect(mappings.get(TMUX_A2)).toBe(FILE_UUID_2);
+      w.stop();
+    });
+
+    it('should not crash if no persisted mappings file exists', () => {
+      mockFs.readFileSync.mockImplementation((p: any) => {
+        if (typeof p === 'string' && p.includes('companion-session-mappings.json')) {
+          throw new Error('ENOENT');
+        }
+        return '';
+      });
+
+      expect(() => {
+        const w = new SessionWatcher(CODE_HOME);
+        w.stop();
+      }).not.toThrow();
+    });
+
+    it('should persist mappings when they change', async () => {
+      addTmuxSession(TMUX_SESSION_A, '/home/user/project-a');
+      const content = jsonlLine({ type: 'user', message: { content: 'Hello' }, uuid: 'msg-1' });
+      mockFs.readFileSync.mockReturnValue(content);
+
+      await startWatcher(watcher);
+      mockWatcher.emit('add', FILE_A1);
+      jest.advanceTimersByTime(200);
+
+      // Trigger the periodic 5s refreshTmuxPaths which calls refreshConversationMappings
+      // which calls persistMappings when the mapping log key changes
+      jest.useRealTimers();
+      // Manually trigger the refresh cycle
+      await (watcher as any).refreshTmuxPaths();
+      jest.useFakeTimers();
+
+      expect(mockFs.writeFileSync).toHaveBeenCalledWith(
+        MAPPINGS_PATH,
+        expect.any(String)
+      );
+    });
+
+    it('should not prune persisted mappings when JSONL file exists on disk', async () => {
+      // Load persisted mappings
+      const persistedMappings = { [TMUX_SESSION_A]: FILE_UUID_1 };
+      mockFs.readFileSync.mockImplementation((p: any) => {
+        if (typeof p === 'string' && p.includes('companion-session-mappings.json')) {
+          return JSON.stringify(persistedMappings);
+        }
+        return '';
+      });
+      mockFs.existsSync.mockReturnValue(true);
+
+      addTmuxSession(TMUX_SESSION_A, '/home/user/project-a');
+      const w = new SessionWatcher(CODE_HOME);
+
+      // After construction + refreshTmuxPaths, mapping should survive
+      jest.useRealTimers();
+      await new Promise(resolve => setTimeout(resolve, 100));
+      jest.useFakeTimers();
+
+      const mappings = (w as any).tmuxConversationIds as Map<string, string>;
+      expect(mappings.get(TMUX_SESSION_A)).toBe(FILE_UUID_1);
+      w.stop();
+    });
+
+    it('should prune persisted mappings when JSONL file is deleted', async () => {
+      const persistedMappings = { [TMUX_SESSION_A]: FILE_UUID_1 };
+      mockFs.readFileSync.mockImplementation((p: any) => {
+        if (typeof p === 'string' && p.includes('companion-session-mappings.json')) {
+          return JSON.stringify(persistedMappings);
+        }
+        return '';
+      });
+      // JSONL file does NOT exist on disk
+      mockFs.existsSync.mockImplementation((p: any) => {
+        if (typeof p === 'string' && p.endsWith('.jsonl')) return false;
+        return true;
+      });
+
+      addTmuxSession(TMUX_SESSION_A, '/home/user/project-a');
+      const w = new SessionWatcher(CODE_HOME);
+
+      jest.useRealTimers();
+      await new Promise(resolve => setTimeout(resolve, 100));
+      jest.useFakeTimers();
+
+      const mappings = (w as any).tmuxConversationIds as Map<string, string>;
+      expect(mappings.has(TMUX_SESSION_A)).toBe(false);
+      w.stop();
+    });
+  });
+
+  // ========================================
+  // Newly created session guard
+  // ========================================
+
+  describe('newly created session guard', () => {
+    it('should prevent stale conversation mapping for new sessions (shared path)', async () => {
+      // Two sessions sharing the same project directory
+      const TMUX_EXISTING = 'companion-project-a-old';
+      const TMUX_NEW = 'companion-project-a-new';
+      addTmuxSession(TMUX_EXISTING, '/home/user/project-a');
+      addTmuxSession(TMUX_NEW, '/home/user/project-a');
+      const content = jsonlLine({ type: 'user', message: { content: 'Old message' }, uuid: 'msg-1' });
+      mockFs.readFileSync.mockReturnValue(content);
+
+      await startWatcher(watcher);
+
+      // Mark the new session BEFORE any JSONL is loaded
+      watcher.markSessionAsNew(TMUX_NEW);
+
+      // Load an existing JSONL (belongs to TMUX_EXISTING)
+      mockWatcher.emit('add', FILE_A1);
+      jest.advanceTimersByTime(200);
+
+      // The new session should NOT pick up the old JSONL
+      const messages = watcher.getMessages(TMUX_NEW);
+      expect(messages).toEqual([]);
+
+      // But the existing session should still work
+      const existingMessages = watcher.getMessages(TMUX_EXISTING);
+      expect(existingMessages.length).toBeGreaterThan(0);
+    });
+
+    it('should clear guard when direct mapping is established', async () => {
+      const TMUX_EXISTING = 'companion-project-a-old';
+      const TMUX_NEW = 'companion-project-a-new';
+      addTmuxSession(TMUX_EXISTING, '/home/user/project-a');
+      addTmuxSession(TMUX_NEW, '/home/user/project-a');
+      const content = jsonlLine({ type: 'user', message: { content: 'Hello' }, uuid: 'msg-1' });
+      mockFs.readFileSync.mockReturnValue(content);
+
+      await startWatcher(watcher);
+      watcher.markSessionAsNew(TMUX_NEW);
+
+      // Manually set a direct mapping (simulates new JSONL detected for this session)
+      const mappings = (watcher as any).tmuxConversationIds as Map<string, string>;
+      mappings.set(TMUX_NEW, FILE_UUID_2);
+
+      // Load the JSONL for the new session
+      mockWatcher.emit('add', FILE_A2);
+      jest.advanceTimersByTime(200);
+
+      // Now getMessages should work because direct mapping bypasses the guard
+      const messages = watcher.getMessages(TMUX_NEW);
+      expect(messages.length).toBeGreaterThan(0);
+
+      // Guard should be cleared
+      const newlyCreated = (watcher as any).newlyCreatedSessions as Map<string, number>;
+      expect(newlyCreated.has(TMUX_NEW)).toBe(false);
+    });
+  });
+
+  // ========================================
+  // Compaction re-mapping
+  // ========================================
+
+  describe('compaction re-mapping', () => {
+    const TMUX_A1 = 'companion-project-a-1';
+    const TMUX_A2 = 'companion-project-a-2';
+    const FILE_UUID_NEW = 'd4e5f6a7-b8c9-0123-defa-456789012345';
+    const FILE_A_NEW = `${PROJECT_DIR_A}/${FILE_UUID_NEW}.jsonl`;
+
+    it('should re-map compacted session to new JSONL', async () => {
+      // Two sessions in same dir, each with their own JSONL
+      addTmuxSession(TMUX_A1, '/home/user/project-a');
+      addTmuxSession(TMUX_A2, '/home/user/project-a');
+      const content = jsonlLine({ type: 'user', message: { content: 'Hello' }, uuid: 'msg-1' });
+      mockFs.readFileSync.mockReturnValue(content);
+
+      await startWatcher(watcher);
+
+      // Load both JSONLs
+      mockWatcher.emit('add', FILE_A1);
+      jest.advanceTimersByTime(200);
+      mockWatcher.emit('add', FILE_A2);
+      jest.advanceTimersByTime(200);
+
+      // Set up direct mappings
+      const mappings = (watcher as any).tmuxConversationIds as Map<string, string>;
+      mappings.set(TMUX_A1, FILE_UUID_1);
+      mappings.set(TMUX_A2, FILE_UUID_2);
+
+      // Simulate: TMUX_A1 compacted (flag the session)
+      const compacted = (watcher as any).compactedSessions as Set<string>;
+      compacted.add(TMUX_A1);
+
+      // New JSONL appears (compaction successor)
+      mockWatcher.emit('add', FILE_A_NEW);
+      jest.advanceTimersByTime(200);
+
+      // TMUX_A1 should now be mapped to the new file
+      expect(mappings.get(TMUX_A1)).toBe(FILE_UUID_NEW);
+      // TMUX_A2 mapping should be unchanged
+      expect(mappings.get(TMUX_A2)).toBe(FILE_UUID_2);
+      // Compacted flag should be cleared
+      expect(compacted.has(TMUX_A1)).toBe(false);
+    });
+
+    it('should not re-map when no session is flagged as compacted', async () => {
+      addTmuxSession(TMUX_A1, '/home/user/project-a');
+      addTmuxSession(TMUX_A2, '/home/user/project-a');
+      const content = jsonlLine({ type: 'user', message: { content: 'Hello' }, uuid: 'msg-1' });
+      mockFs.readFileSync.mockReturnValue(content);
+
+      await startWatcher(watcher);
+
+      mockWatcher.emit('add', FILE_A1);
+      jest.advanceTimersByTime(200);
+      mockWatcher.emit('add', FILE_A2);
+      jest.advanceTimersByTime(200);
+
+      const mappings = (watcher as any).tmuxConversationIds as Map<string, string>;
+      mappings.set(TMUX_A1, FILE_UUID_1);
+      mappings.set(TMUX_A2, FILE_UUID_2);
+
+      // NO compaction flag — new file should NOT trigger re-mapping
+      mockWatcher.emit('add', FILE_A_NEW);
+      jest.advanceTimersByTime(200);
+
+      // Mappings unchanged
+      expect(mappings.get(TMUX_A1)).toBe(FILE_UUID_1);
+      expect(mappings.get(TMUX_A2)).toBe(FILE_UUID_2);
+    });
+
+    it('should not flag compaction on initial file load (no prevTracked)', async () => {
+      addTmuxSession(TMUX_SESSION_A, '/home/user/project-a');
+
+      // Content with a compaction-style message (context summary)
+      const compactionContent = jsonlContent(
+        jsonlLine({ type: 'summary', message: { content: '[Context compacted]' }, uuid: 'compact-1' }),
+        jsonlLine({ type: 'user', message: { content: 'Continue' }, uuid: 'msg-2' })
+      );
+      mockFs.readFileSync.mockReturnValue(compactionContent);
+
+      await startWatcher(watcher);
+
+      // First load — prevTracked is null
+      mockWatcher.emit('add', FILE_A1);
+      jest.advanceTimersByTime(200);
+
+      // compactedSessions should NOT contain this session (initial load)
+      const compacted = (watcher as any).compactedSessions as Set<string>;
+      expect(compacted.has(TMUX_SESSION_A)).toBe(false);
+    });
+
+    it('should only re-map exactly one compacted session', async () => {
+      // Edge case: both sessions compacted simultaneously
+      addTmuxSession(TMUX_A1, '/home/user/project-a');
+      addTmuxSession(TMUX_A2, '/home/user/project-a');
+      const content = jsonlLine({ type: 'user', message: { content: 'Hello' }, uuid: 'msg-1' });
+      mockFs.readFileSync.mockReturnValue(content);
+
+      await startWatcher(watcher);
+
+      mockWatcher.emit('add', FILE_A1);
+      jest.advanceTimersByTime(200);
+      mockWatcher.emit('add', FILE_A2);
+      jest.advanceTimersByTime(200);
+
+      const mappings = (watcher as any).tmuxConversationIds as Map<string, string>;
+      mappings.set(TMUX_A1, FILE_UUID_1);
+      mappings.set(TMUX_A2, FILE_UUID_2);
+
+      // BOTH sessions compacted — ambiguous, should NOT re-map
+      const compacted = (watcher as any).compactedSessions as Set<string>;
+      compacted.add(TMUX_A1);
+      compacted.add(TMUX_A2);
+
+      mockWatcher.emit('add', FILE_A_NEW);
+      jest.advanceTimersByTime(200);
+
+      // Neither should be re-mapped (ambiguous — 2 compacted, 1 new file)
+      expect(mappings.get(TMUX_A1)).toBe(FILE_UUID_1);
+      expect(mappings.get(TMUX_A2)).toBe(FILE_UUID_2);
+    });
+  });
 });

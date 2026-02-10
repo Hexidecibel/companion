@@ -173,11 +173,16 @@ async function main(): Promise<void> {
     console.log(
       `Auto-approve tools from config: ${config.autoApproveTools.length > 0 ? config.autoApproveTools.join(', ') : '(none - client toggle only)'}`
     );
-    // Track recent approvals per session+tool-set to avoid double-firing.
-    // Key: "sessionId:toolsSorted", Value: timestamp of last approval sent.
+    // Track recent approvals per session+tool-IDs to avoid double-firing.
+    // Key: "sessionId:toolId1,toolId2", Value: timestamp of last approval sent.
+    // Using tool IDs (not names) means each unique tool instance gets approved exactly once,
+    // while consecutive same-named tools (Bash → Bash) are correctly treated as distinct.
     const lastApprovalByKey = new Map<string, number>();
 
     watcher.on('pending-approval', async ({ sessionId, projectPath, tools }) => {
+      // tools is now Array<{name: string, id: string}>
+      const toolList = tools as Array<{name: string, id: string}>;
+
       // Check per-session toggle OR config-level tools
       const sessionEnabled = wsHandler.autoApproveSessions.has(sessionId);
       if (config.autoApproveTools.length === 0 && !sessionEnabled) {
@@ -185,26 +190,26 @@ async function main(): Promise<void> {
       }
 
       // Only approve tools in the config list OR if the session toggle is on
-      const autoApprovable = tools.filter((tool: string) => {
-        if (config.autoApproveTools.includes(tool)) return true;
+      const autoApprovable = toolList.filter((tool) => {
+        if (config.autoApproveTools.includes(tool.name)) return true;
         if (sessionEnabled) return true;
         return false;
       });
 
       if (autoApprovable.length === 0) {
-        console.log(`[AUTO-APPROVE] No auto-approvable tools in: [${tools.join(', ')}]`);
+        console.log(`[AUTO-APPROVE] No auto-approvable tools in: [${toolList.map(t => t.name).join(', ')}]`);
         return;
       }
 
-      // Per-session+tool dedup: don't re-fire within 1 second for the SAME set of tools.
-      // This prevents double-sends when the watcher re-fires before CLI processes "yes".
-      // Using tool-specific keys so different tools in rapid succession still get approved.
+      // Dedup by tool IDs — each unique set of tool instances gets approved exactly once.
+      // Different tool_use_ids always produce a different key, so consecutive
+      // same-named tools (e.g., Bash after Bash) are never blocked.
       const now = Date.now();
-      const dedupKey = `${sessionId}:${autoApprovable.sort().join(',')}`;
+      const dedupKey = `${sessionId}:${autoApprovable.map(t => t.id).sort().join(',')}`;
       const lastApproval = lastApprovalByKey.get(dedupKey);
       if (lastApproval && now - lastApproval < 1000) {
         console.log(
-          `[AUTO-APPROVE] Dedup: skipping [${autoApprovable.join(', ')}] (${now - lastApproval}ms ago)`
+          `[AUTO-APPROVE] Dedup: skipping [${autoApprovable.map(t => t.name).join(', ')}] (${now - lastApproval}ms ago)`
         );
         return;
       }
@@ -215,8 +220,10 @@ async function main(): Promise<void> {
         if (now - ts > 30000) lastApprovalByKey.delete(key);
       }
 
-      // Resolve tmux session: prefer watcher's reverse lookup, fall back to path matching
-      let targetTmuxSession = watcher.getTmuxSessionForConversation(sessionId) || undefined;
+      // Resolve tmux session: sessionId IS the tmux session name now (from watcher events),
+      // so use it directly. Fall back to path matching only if needed.
+      let targetTmuxSession: string | undefined = sessionId;
+      // Verify this is actually a tmux session name by checking if injector can target it
       if (!targetTmuxSession && projectPath) {
         const tmux = new TmuxManager('companion');
         const tmuxSessions = await tmux.listSessions();
@@ -233,34 +240,32 @@ async function main(): Promise<void> {
 
       const target = targetTmuxSession || undefined;
       console.log(
-        `[AUTO-APPROVE] Approving [${autoApprovable.join(', ')}] -> tmux="${target || 'active'}" (session: ${sessionId.substring(0, 8)})`
+        `[AUTO-APPROVE] Approving [${autoApprovable.map(t => t.name).join(', ')}] -> tmux="${target || 'active'}" (session: ${sessionId.substring(0, 8)})`
       );
 
       try {
-        // Verify terminal has an approval prompt before sending
+        // Check terminal for Claude Code's actual approval prompt format.
+        // Match patterns like "(Y)es / (N)o" or "Do you want to proceed?"
+        const approvalPromptRe = /\(Y\)es\s*\/\s*\(N\)o|Do you want to (proceed|run|allow|execute)|Approve\?|Allow this|Yes\/No/i;
+
         const paneContent = await injector.capturePaneContent(target);
-        const hasApprovalPrompt = /\b(yes|no|always allow|approve|allow|deny|reject)\b/i.test(paneContent) ||
-          /\?\s*$/.test(paneContent.split('\n').pop() || '');
+        const hasApprovalPrompt = approvalPromptRe.test(paneContent);
 
         if (!hasApprovalPrompt) {
-          console.log(`[AUTO-APPROVE] No approval prompt detected in terminal, waiting 500ms...`);
-          await new Promise((resolve) => setTimeout(resolve, 500));
-          // Re-check after wait
+          // Prompt may not have rendered yet — wait a short time and retry once
+          console.log(`[AUTO-APPROVE] No approval prompt detected, waiting 300ms...`);
+          await new Promise((resolve) => setTimeout(resolve, 300));
           const paneContent2 = await injector.capturePaneContent(target);
-          const hasPrompt2 = /\b(yes|no|always allow|approve|allow|deny|reject)\b/i.test(paneContent2) ||
-            /\?\s*$/.test(paneContent2.split('\n').pop() || '');
+          const hasPrompt2 = approvalPromptRe.test(paneContent2);
           if (!hasPrompt2) {
             console.log(`[AUTO-APPROVE] Still no prompt after wait, sending anyway`);
           }
         }
 
-        // Wait briefly for terminal to settle
-        await new Promise((resolve) => setTimeout(resolve, 200));
-
         const success = await injector.sendInput('yes', target);
         if (!success) {
-          console.log(`[AUTO-APPROVE] Send failed, retrying after 500ms...`);
-          await new Promise((resolve) => setTimeout(resolve, 500));
+          console.log(`[AUTO-APPROVE] Send failed, retrying after 300ms...`);
+          await new Promise((resolve) => setTimeout(resolve, 300));
           await injector.sendInput('yes', target);
         } else {
           console.log(`[AUTO-APPROVE] Sent "yes" successfully`);

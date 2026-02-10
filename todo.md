@@ -7,7 +7,6 @@ Quick capture for ideas and tasks. Run `/plan` to process into detailed plans.
 ## Upcoming
 - iOS push notifications -- implement native APNs plugin for tauri-plugin-fcm (currently no-op on iOS, Android only)
 - Mobile app icons -- logos not displaying correctly on Android (Tauri vector override) and iOS; need proper icon pipeline for both platforms
-- New project wizard
 - Top-level skills should all work and be friendly for new users
 
 ## Deferred

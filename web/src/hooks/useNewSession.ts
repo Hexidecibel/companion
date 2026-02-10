@@ -21,18 +21,13 @@ export interface UseNewSessionResult {
   browseTo: (path: string) => void;
   manualPath: string;
   setManualPath: (path: string) => void;
-  startCli: boolean;
-  setStartCli: (v: boolean) => void;
   creating: boolean;
+  creatingPath: string | null;
   error: string | null;
   create: () => Promise<boolean>;
+  createFromRecent: (path: string) => Promise<boolean>;
+  navigateToInput: () => void;
   reset: () => void;
-  // Worktree support
-  branchMode: boolean;
-  setBranchMode: (v: boolean) => void;
-  branchName: string;
-  setBranchName: (v: string) => void;
-  createWorktree: () => Promise<boolean>;
 }
 
 export function useNewSession(serverId: string): UseNewSessionResult {
@@ -42,11 +37,14 @@ export function useNewSession(serverId: string): UseNewSessionResult {
   const [entries, setEntries] = useState<DirectoryEntry[]>([]);
   const [browsing, setBrowsing] = useState(false);
   const [manualPath, setManualPath] = useState('');
-  const [startCli, setStartCli] = useState(true);
   const [creating, setCreating] = useState(false);
+  const [creatingPath, setCreatingPath] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [branchMode, setBranchMode] = useState(false);
-  const [branchName, setBranchName] = useState('');
+
+  // Clear error when path changes
+  useEffect(() => {
+    setError(null);
+  }, [manualPath]);
 
   // Fetch recents + initial browse on mount
   useEffect(() => {
@@ -87,7 +85,7 @@ export function useNewSession(serverId: string): UseNewSessionResult {
             }
           }
           merged.sort((a, b) => b.lastUsed - a.lastUsed);
-          if (!cancelled) setRecents(merged.slice(0, 10));
+          if (!cancelled) setRecents(merged.slice(0, 8));
         } else {
           if (!cancelled) setRecents(stored);
         }
@@ -106,6 +104,7 @@ export function useNewSession(serverId: string): UseNewSessionResult {
             entries: DirectoryEntry[];
           };
           setCurrentPath(payload.currentPath);
+          setManualPath(payload.currentPath);
           setEntries(payload.entries ?? []);
         }
       } catch {
@@ -133,6 +132,7 @@ export function useNewSession(serverId: string): UseNewSessionResult {
             entries: DirectoryEntry[];
           };
           setCurrentPath(payload.currentPath);
+          setManualPath(payload.currentPath);
           setEntries(payload.entries ?? []);
         }
       } catch {
@@ -144,71 +144,59 @@ export function useNewSession(serverId: string): UseNewSessionResult {
     [serverId],
   );
 
-  const create = useCallback(async (): Promise<boolean> => {
+  const navigateToInput = useCallback(() => {
+    const trimmed = manualPath.trim();
+    if (trimmed) {
+      browseTo(trimmed);
+    }
+  }, [manualPath, browseTo]);
+
+  const createSession = useCallback(async (dirPath: string): Promise<boolean> => {
     const conn = connectionManager.getConnection(serverId);
-    if (!conn || !conn.isConnected() || !manualPath.trim()) return false;
+    if (!conn || !conn.isConnected() || !dirPath.trim()) return false;
 
     setCreating(true);
+    setCreatingPath(dirPath);
     setError(null);
 
     try {
       const resp = await conn.sendRequest('create_tmux_session', {
-        workingDir: manualPath.trim(),
-        startCli,
+        workingDir: dirPath.trim(),
+        startCli: true,
       });
 
       if (resp.success) {
-        addRecentDirectory(serverId, manualPath.trim());
+        addRecentDirectory(serverId, dirPath.trim());
         setCreating(false);
+        setCreatingPath(null);
         return true;
       } else {
         setError(resp.error || 'Failed to create session');
         setCreating(false);
+        setCreatingPath(null);
         return false;
       }
     } catch (err) {
       setError(String(err));
       setCreating(false);
+      setCreatingPath(null);
       return false;
     }
-  }, [serverId, manualPath, startCli]);
+  }, [serverId]);
 
-  const createWorktree = useCallback(async (): Promise<boolean> => {
-    const conn = connectionManager.getConnection(serverId);
-    if (!conn || !conn.isConnected() || !manualPath.trim()) return false;
+  const create = useCallback(async (): Promise<boolean> => {
+    return createSession(manualPath);
+  }, [manualPath, createSession]);
 
-    setCreating(true);
-    setError(null);
-
-    try {
-      const resp = await conn.sendRequest('create_worktree_session', {
-        parentDir: manualPath.trim(),
-        branch: branchName.trim() || undefined,
-        startCli,
-      });
-
-      if (resp.success) {
-        addRecentDirectory(serverId, manualPath.trim());
-        setCreating(false);
-        return true;
-      } else {
-        setError(resp.error || 'Failed to create worktree session');
-        setCreating(false);
-        return false;
-      }
-    } catch (err) {
-      setError(String(err));
-      setCreating(false);
-      return false;
-    }
-  }, [serverId, manualPath, branchName, startCli]);
+  const createFromRecent = useCallback(async (path: string): Promise<boolean> => {
+    return createSession(path);
+  }, [createSession]);
 
   const reset = useCallback(() => {
     setManualPath('');
-    setBranchMode(false);
-    setBranchName('');
     setError(null);
     setCreating(false);
+    setCreatingPath(null);
   }, []);
 
   return {
@@ -220,16 +208,12 @@ export function useNewSession(serverId: string): UseNewSessionResult {
     browseTo,
     manualPath,
     setManualPath,
-    startCli,
-    setStartCli,
     creating,
+    creatingPath,
     error,
     create,
+    createFromRecent,
+    navigateToInput,
     reset,
-    branchMode,
-    setBranchMode,
-    branchName,
-    setBranchName,
-    createWorktree,
   };
 }

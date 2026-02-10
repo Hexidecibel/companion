@@ -13,6 +13,7 @@ interface MessageBubbleProps {
   onViewArtifact?: (content: string, title?: string) => void;
   searchTerm?: string | null;
   isCurrentMatch?: boolean;
+  planFilePath?: string | null;
 }
 
 interface QuestionBlockProps {
@@ -186,13 +187,13 @@ function MultiQuestionFlow({ questions, onSelectOption }: MultiQuestionFlowProps
   }, []);
 
   const handleSubmitAll = useCallback(() => {
-    // Build combined answer: "Q1: answer1\nQ2: answer2\n..."
+    // Join answers with comma separator (newlines get interpreted as Enter by tmux)
     const parts: string[] = [];
     for (let i = 0; i < total; i++) {
       const answer = answers.get(i) || '';
       parts.push(answer);
     }
-    onSelectOption(parts.join('\n'));
+    onSelectOption(parts.join(', '));
   }, [answers, total, onSelectOption]);
 
   if (reviewing) {
@@ -440,7 +441,7 @@ function SkillCard({ skillName, content, onViewFile }: { skillName: string; cont
   );
 }
 
-export function MessageBubble({ message, onSelectOption, onCancelMessage, onViewFile, onViewArtifact, searchTerm, isCurrentMatch }: MessageBubbleProps) {
+export function MessageBubble({ message, onSelectOption, onCancelMessage, onViewFile, onViewArtifact, searchTerm, isCurrentMatch, planFilePath }: MessageBubbleProps) {
   const isUser = message.type === 'user';
   const isSystem = message.type === 'system';
   const [allExpanded, setAllExpanded] = useState<boolean | undefined>(undefined);
@@ -539,7 +540,7 @@ export function MessageBubble({ message, onSelectOption, onCancelMessage, onView
           )}
           {toolCalls.map((tool) => {
             if (tool.name === 'ExitPlanMode' && onViewFile) {
-              const planPath = extractPlanFilePath(message);
+              const planPath = extractPlanFilePath(message) || planFilePath;
               return (
                 <div key={tool.id} className="plan-card">
                   <div className="plan-card-header">
@@ -555,6 +556,24 @@ export function MessageBubble({ message, onSelectOption, onCancelMessage, onView
                     >
                       View Plan
                     </button>
+                  )}
+                  {tool.status === 'pending' && onSelectOption && (
+                    <div className="msg-approval-prompt" style={{ marginTop: 8 }}>
+                      <div className="msg-options">
+                        <button
+                          className="msg-option-btn approve"
+                          onClick={(e) => { e.stopPropagation(); onSelectOption('yes'); }}
+                        >
+                          Approve
+                        </button>
+                        <button
+                          className="msg-option-btn reject"
+                          onClick={(e) => { e.stopPropagation(); onSelectOption('no'); }}
+                        >
+                          Reject
+                        </button>
+                      </div>
+                    </div>
                   )}
                 </div>
               );

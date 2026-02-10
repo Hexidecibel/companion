@@ -676,6 +676,15 @@ export function detectWaitingForInput(messages: ConversationMessage[]): boolean 
         return true;
       }
 
+      // ExitPlanMode and AskUserQuestion pending = CLI is waiting for user input
+      const INTERACTIVE_TOOLS = ['ExitPlanMode', 'AskUserQuestion'];
+      const hasPendingInteractive = lastMessage.toolCalls.some(
+        (tc) => tc.status === 'pending' && INTERACTIVE_TOOLS.includes(tc.name)
+      );
+      if (hasPendingInteractive) {
+        return true;
+      }
+
       // If any tools are still running, not waiting yet
       if (lastMessage.toolCalls.some((tc) => tc.status === 'running')) {
         return false;
@@ -843,8 +852,10 @@ export function getSessionStatus(
  * Get list of pending tools that need approval from the last message.
  * Only returns tools that actually require user approval (Bash, Write, Edit, etc.)
  * Excludes Task (runs in background), AskUserQuestion (choice prompts, not tool approval).
+ * Returns objects with both name and id so callers can distinguish different instances
+ * of the same tool (e.g., two consecutive Bash calls).
  */
-export function getPendingApprovalTools(messages: ConversationMessage[]): string[] {
+export function getPendingApprovalTools(messages: ConversationMessage[]): Array<{name: string, id: string}> {
   if (messages.length === 0) return [];
 
   const lastMessage = messages[messages.length - 1];
@@ -854,7 +865,7 @@ export function getPendingApprovalTools(messages: ConversationMessage[]): string
     .filter(
       (tc) => tc.status === 'pending' && APPROVAL_TOOLS.includes(tc.name) && tc.name !== 'Task'
     )
-    .map((tc) => tc.name);
+    .map((tc) => ({ name: tc.name, id: tc.id }));
 }
 
 interface UsageData {

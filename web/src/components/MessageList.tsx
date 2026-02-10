@@ -15,6 +15,7 @@ interface MessageListProps {
   searchTerm?: string | null;
   currentMatchId?: string | null;
   scrollToBottom?: boolean;
+  planFilePath?: string | null;
 }
 
 export function MessageList({
@@ -30,6 +31,7 @@ export function MessageList({
   searchTerm,
   currentMatchId,
   scrollToBottom: scrollToBottomProp,
+  planFilePath,
 }: MessageListProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -192,6 +194,7 @@ export function MessageList({
           onViewArtifact={onViewArtifact}
           searchTerm={searchTerm}
           isCurrentMatch={msg.id === currentMatchId}
+          planFilePath={planFilePath}
         />
       ))}
       <div ref={bottomRef} />

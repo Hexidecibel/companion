@@ -40,6 +40,8 @@ mockWatcher.getActiveConversation = jest.fn().mockReturnValue(null);
 mockWatcher.checkAndEmitPendingApproval = jest.fn();
 mockWatcher.clearActiveSession = jest.fn();
 mockWatcher.refreshTmuxPaths = jest.fn().mockResolvedValue(undefined);
+mockWatcher.markSessionAsNew = jest.fn();
+mockWatcher.getTmuxSessionForConversation = jest.fn().mockReturnValue(null);
 mockWatcher.getServerSummary = jest
   .fn()
   .mockResolvedValue({ sessions: [], totalSessions: 0, waitingCount: 0, workingCount: 0 });
@@ -137,7 +139,7 @@ describe('WebSocketHandler', () => {
       mockWss.clients.add(mockClient);
 
       // Simulate connection
-      mockWss.emit('connection', mockClient, {});
+      mockWss.emit('connection', mockClient, { socket: { remoteAddress: '127.0.0.1' } });
 
       // Clear connection ack
       mockClient.send.mockClear();
@@ -159,7 +161,7 @@ describe('WebSocketHandler', () => {
       const mockClient = new MockWebSocket();
       mockWss.clients.add(mockClient);
 
-      mockWss.emit('connection', mockClient, {});
+      mockWss.emit('connection', mockClient, { socket: { remoteAddress: '127.0.0.1' } });
       mockClient.send.mockClear();
 
       mockClient.emit(
@@ -178,7 +180,7 @@ describe('WebSocketHandler', () => {
       const mockClient = new MockWebSocket();
       mockWss.clients.add(mockClient);
 
-      mockWss.emit('connection', mockClient, {});
+      mockWss.emit('connection', mockClient, { socket: { remoteAddress: '127.0.0.1' } });
       mockClient.send.mockClear();
 
       mockClient.emit(
@@ -199,7 +201,7 @@ describe('WebSocketHandler', () => {
     beforeEach(() => {
       authenticatedClient = new MockWebSocket();
       mockWss.clients.add(authenticatedClient);
-      mockWss.emit('connection', authenticatedClient, {});
+      mockWss.emit('connection', authenticatedClient, { socket: { remoteAddress: '127.0.0.1' } });
 
       // Authenticate
       authenticatedClient.emit(
@@ -311,7 +313,6 @@ describe('WebSocketHandler', () => {
       // Wait for async handling (resolveTmuxSession calls tmux list-sessions via exec)
       await new Promise((resolve) => setTimeout(resolve, 100));
 
-      expect(mockWatcher.setActiveSession).toHaveBeenCalledWith('test-session');
       expect(authenticatedClient.send).toHaveBeenCalledWith(
         expect.stringContaining('"type":"session_switched"')
       );
@@ -397,7 +398,7 @@ describe('WebSocketHandler', () => {
 
       authenticatedClient = new MockWebSocket();
       tmuxWss.clients.add(authenticatedClient);
-      tmuxWss.emit('connection', authenticatedClient, {});
+      tmuxWss.emit('connection', authenticatedClient, { socket: { remoteAddress: '127.0.0.1' } });
       authenticatedClient.emit(
         'message',
         JSON.stringify({ type: 'authenticate', token: 'test-token', requestId: 'auth-1' })
@@ -506,7 +507,7 @@ describe('WebSocketHandler', () => {
       const mockClient = new MockWebSocket();
       mockWss.clients.add(mockClient);
 
-      mockWss.emit('connection', mockClient, {});
+      mockWss.emit('connection', mockClient, { socket: { remoteAddress: '127.0.0.1' } });
 
       // Authenticate and subscribe
       mockClient.emit('message', JSON.stringify({ type: 'authenticate', token: 'test-token' }));
@@ -524,7 +525,7 @@ describe('WebSocketHandler', () => {
       const mockClient = new MockWebSocket();
       mockWss.clients.add(mockClient);
 
-      mockWss.emit('connection', mockClient, {});
+      mockWss.emit('connection', mockClient, { socket: { remoteAddress: '127.0.0.1' } });
       mockClient.send.mockClear();
 
       // Send malformed JSON
@@ -538,7 +539,7 @@ describe('WebSocketHandler', () => {
     it('should forward conversation-update to subscribed clients', () => {
       const mockClient = new MockWebSocket();
       mockWss.clients.add(mockClient);
-      mockWss.emit('connection', mockClient, {});
+      mockWss.emit('connection', mockClient, { socket: { remoteAddress: '127.0.0.1' } });
 
       // Authenticate and subscribe
       mockClient.emit('message', JSON.stringify({ type: 'authenticate', token: 'test-token' }));
@@ -556,7 +557,7 @@ describe('WebSocketHandler', () => {
     it('should forward status-change to subscribed clients', () => {
       const mockClient = new MockWebSocket();
       mockWss.clients.add(mockClient);
-      mockWss.emit('connection', mockClient, {});
+      mockWss.emit('connection', mockClient, { socket: { remoteAddress: '127.0.0.1' } });
 
       // Authenticate and subscribe
       mockClient.emit('message', JSON.stringify({ type: 'authenticate', token: 'test-token' }));
@@ -577,7 +578,7 @@ describe('WebSocketHandler', () => {
     it('should not forward events to unsubscribed clients', () => {
       const mockClient = new MockWebSocket();
       mockWss.clients.add(mockClient);
-      mockWss.emit('connection', mockClient, {});
+      mockWss.emit('connection', mockClient, { socket: { remoteAddress: '127.0.0.1' } });
 
       // Authenticate but don't subscribe
       mockClient.emit('message', JSON.stringify({ type: 'authenticate', token: 'test-token' }));
@@ -598,8 +599,8 @@ describe('WebSocketHandler', () => {
       mockWss.clients.add(mockClient1);
       mockWss.clients.add(mockClient2);
 
-      mockWss.emit('connection', mockClient1, {});
-      mockWss.emit('connection', mockClient2, {});
+      mockWss.emit('connection', mockClient1, { socket: { remoteAddress: '127.0.0.1' } });
+      mockWss.emit('connection', mockClient2, { socket: { remoteAddress: '127.0.0.1' } });
 
       expect(handler.getConnectedClientCount()).toBe(2);
     });
@@ -611,8 +612,8 @@ describe('WebSocketHandler', () => {
       mockWss.clients.add(mockClient1);
       mockWss.clients.add(mockClient2);
 
-      mockWss.emit('connection', mockClient1, {});
-      mockWss.emit('connection', mockClient2, {});
+      mockWss.emit('connection', mockClient1, { socket: { remoteAddress: '127.0.0.1' } });
+      mockWss.emit('connection', mockClient2, { socket: { remoteAddress: '127.0.0.1' } });
 
       // Only authenticate one
       mockClient1.emit('message', JSON.stringify({ type: 'authenticate', token: 'test-token' }));
