@@ -25,6 +25,36 @@ interface UseConversationReturn {
 
 let clientMessageCounter = 0;
 
+/**
+ * Merge server highlights with locally pending (optimistic) messages.
+ * Preserves isPending messages that haven't yet appeared in the server response,
+ * and drops them once a matching user message shows up in server data.
+ */
+function mergeWithPending(
+  prev: ConversationHighlight[],
+  server: ConversationHighlight[],
+): ConversationHighlight[] {
+  const pending = prev.filter((h) => h.isPending);
+  if (pending.length === 0) return server;
+
+  // Check which pending messages are now confirmed by server data.
+  // A pending message is confirmed if a server user message with matching
+  // content appears after the last non-pending message.
+  const lastServerUserContent = new Set(
+    server
+      .filter((h) => h.type === 'user')
+      .slice(-pending.length * 2) // check recent user messages
+      .map((h) => h.content.trim()),
+  );
+
+  const stillPending = pending.filter(
+    (p) => !lastServerUserContent.has(p.content.trim()),
+  );
+
+  if (stillPending.length === 0) return server;
+  return [...server, ...stillPending];
+}
+
 export function useConversation(
   serverId: string | null,
   sessionId: string | null,
@@ -92,7 +122,7 @@ export function useConversation(
             hasMore: boolean;
           };
           if (!highlightsEqual(payload.highlights, highlightsRef.current)) {
-            setHighlights(payload.highlights);
+            setHighlights((prev) => mergeWithPending(prev, payload.highlights));
             setCachedHighlights(serverId!, sessionId!, payload.highlights);
           }
           setHasMore(payload.hasMore);
@@ -134,7 +164,7 @@ export function useConversation(
             hasMore: boolean;
           };
           if (!highlightsEqual(payload.highlights, highlightsRef.current)) {
-            setHighlights(payload.highlights);
+            setHighlights((prev) => mergeWithPending(prev, payload.highlights));
             setCachedHighlights(serverId!, sessionId!, payload.highlights);
           }
           setHasMore(payload.hasMore);
