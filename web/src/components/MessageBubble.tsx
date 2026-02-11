@@ -14,6 +14,7 @@ interface MessageBubbleProps {
   searchTerm?: string | null;
   isCurrentMatch?: boolean;
   planFilePath?: string | null;
+  hideTools?: boolean;
 }
 
 interface QuestionBlockProps {
@@ -455,7 +456,7 @@ function SkillCard({ skillName, content, onViewFile }: { skillName: string; cont
   );
 }
 
-export function MessageBubble({ message, onSelectOption, onCancelMessage, onViewFile, onViewArtifact, searchTerm, isCurrentMatch, planFilePath }: MessageBubbleProps) {
+export function MessageBubble({ message, onSelectOption, onCancelMessage, onViewFile, onViewArtifact, searchTerm, isCurrentMatch, planFilePath, hideTools }: MessageBubbleProps) {
   const isUser = message.type === 'user';
   const isSystem = message.type === 'system';
   const [allExpanded, setAllExpanded] = useState<boolean | undefined>(undefined);
@@ -542,9 +543,15 @@ export function MessageBubble({ message, onSelectOption, onCancelMessage, onView
         </button>
       )}
 
-      {toolCalls && toolCalls.length > 0 && (
+      {toolCalls && toolCalls.length > 0 && (() => {
+        // When hideTools is on, only show pending tools (need user action) and plan cards
+        const visibleTools = hideTools
+          ? toolCalls.filter(t => t.status === 'pending' || t.name === 'ExitPlanMode')
+          : toolCalls;
+        if (visibleTools.length === 0) return null;
+        return (
         <div className="msg-tools">
-          {hasMultipleTools && (
+          {!hideTools && hasMultipleTools && (
             <button
               className="msg-tools-toggle"
               onClick={() => setAllExpanded(allExpanded === true ? false : true)}
@@ -552,7 +559,7 @@ export function MessageBubble({ message, onSelectOption, onCancelMessage, onView
               {allExpanded === true ? 'Collapse All' : 'Expand All'}
             </button>
           )}
-          {toolCalls.map((tool) => {
+          {visibleTools.map((tool) => {
             if (tool.name === 'ExitPlanMode') {
               const planPath = extractPlanFilePath(message) || planFilePath;
               const inlinePlan = typeof tool.input?.plan === 'string' ? tool.input.plan : null;
@@ -601,7 +608,8 @@ export function MessageBubble({ message, onSelectOption, onCancelMessage, onView
             return <ToolCard key={tool.id} tool={tool} forceExpanded={allExpanded} />;
           })}
         </div>
-      )}
+        );
+      })()}
 
       {message.isWaitingForChoice && message.questions && onSelectOption && (
         message.questions.length > 1 ? (

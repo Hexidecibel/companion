@@ -343,3 +343,20 @@ Configurable `git` boolean in daemon config that gates all git-dependent behavio
 - When enabled: code review filters out already-committed files (no remaining diff and tracked by git)
 - Web UI hides parallel workers toggle and work group controls when git is disabled
 - Backward compatible: older daemons without the field default to enabled
+
+## Mobile Toolbar Layout
+Split mobile session toolbar across header and footer to prevent overflow.
+
+- View/action buttons (Files, Search, Plan, Review) moved to mobile header alongside Back button
+- Operational buttons (Cancel, Notify, Auto, Tools, Terminal) remain in bottom bar
+- Desktop layout unchanged — all buttons in header
+- Reduces bottom bar from up to 8 buttons to max 5
+
+## Tool Card Visibility Toggle
+Per-session toggle to show or hide tool call cards in conversation view.
+
+- "Tools: ON/OFF" button in bottom bar (mobile) and header (desktop)
+- When hidden, tool cards are completely removed from the DOM for cleaner reading
+- Pending tool cards always shown (require user action like approval)
+- ExitPlanMode cards always shown regardless of toggle
+- State persisted per session in localStorage

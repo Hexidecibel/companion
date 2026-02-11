@@ -111,6 +111,22 @@ export function SessionView({
   // Code review modal state
   const [showCodeReviewModal, setShowCodeReviewModal] = useState(false);
 
+  // Tool card visibility (persisted per session in localStorage)
+  const toolsKey = sessionId ? `hideTools:${sessionId}` : null;
+  const [hideTools, setHideToolsRaw] = useState(() => {
+    if (!toolsKey) return false;
+    return localStorage.getItem(toolsKey) === '1';
+  });
+  const setHideTools = useCallback((hide: boolean) => {
+    setHideToolsRaw(hide);
+    if (toolsKey) localStorage.setItem(toolsKey, hide ? '1' : '0');
+  }, [toolsKey]);
+
+  // Sync hideTools when session changes
+  useEffect(() => {
+    setHideToolsRaw(toolsKey ? localStorage.getItem(toolsKey) === '1' : false);
+  }, [toolsKey]);
+
   const searchMatches = useMemo(() => {
     if (!searchTerm) return [];
     const lower = searchTerm.toLowerCase();
@@ -372,43 +388,9 @@ export function SessionView({
 
   const mobile = isMobileViewport();
 
-  const actionButtons = (
-    <div className="session-header-actions">
-      {status?.isRunning && !status?.isWaitingForInput && tmuxSessionName && (
-        <button
-          className="cancel-btn"
-          onClick={handleCancel}
-          title="Send Ctrl+C to cancel"
-        >
-          Cancel
-        </button>
-      )}
-      {sessionId && (
-        <button
-          className={`auto-approve-btn ${!sessionMute.isMuted(sessionId) ? 'auto-approve-btn-active' : ''}`}
-          onClick={() => sessionMute.toggleMute(sessionId)}
-          title={sessionMute.isMuted(sessionId) ? 'Unmute notifications' : 'Mute notifications'}
-        >
-          {sessionMute.isMuted(sessionId) ? 'Notify: OFF' : 'Notify: ON'}
-        </button>
-      )}
-      <button
-        className={`auto-approve-btn ${autoApprove.enabled ? 'auto-approve-btn-active' : ''}`}
-        onClick={autoApprove.toggle}
-        disabled={autoApprove.loading}
-        title={autoApprove.enabled ? 'Auto-approve enabled' : 'Auto-approve disabled'}
-      >
-        {autoApprove.enabled ? 'Auto: ON' : 'Auto: OFF'}
-      </button>
-      {tmuxSessionName && (
-        <button
-          className={`session-header-btn ${showTerminal ? 'terminal-active' : ''}`}
-          onClick={() => setShowTerminal(!showTerminal)}
-          title={showTerminal ? 'Show conversation' : 'Show terminal output'}
-        >
-          Terminal
-        </button>
-      )}
+  // View/action buttons — shown in header on mobile, in header bar on desktop
+  const viewButtons = (
+    <>
       <button
         className="session-header-btn"
         onClick={() => setShowFileFinder(true)}
@@ -449,6 +431,62 @@ export function SessionView({
           Review ({fileChanges.length})
         </button>
       )}
+    </>
+  );
+
+  // Operational buttons — shown in bottom bar on mobile, in header bar on desktop
+  const operationalButtons = (
+    <>
+      {status?.isRunning && !status?.isWaitingForInput && tmuxSessionName && (
+        <button
+          className="cancel-btn"
+          onClick={handleCancel}
+          title="Send Ctrl+C to cancel"
+        >
+          Cancel
+        </button>
+      )}
+      {sessionId && (
+        <button
+          className={`auto-approve-btn ${!sessionMute.isMuted(sessionId) ? 'auto-approve-btn-active' : ''}`}
+          onClick={() => sessionMute.toggleMute(sessionId)}
+          title={sessionMute.isMuted(sessionId) ? 'Unmute notifications' : 'Mute notifications'}
+        >
+          {sessionMute.isMuted(sessionId) ? 'Notify: OFF' : 'Notify: ON'}
+        </button>
+      )}
+      <button
+        className={`auto-approve-btn ${autoApprove.enabled ? 'auto-approve-btn-active' : ''}`}
+        onClick={autoApprove.toggle}
+        disabled={autoApprove.loading}
+        title={autoApprove.enabled ? 'Auto-approve enabled' : 'Auto-approve disabled'}
+      >
+        {autoApprove.enabled ? 'Auto: ON' : 'Auto: OFF'}
+      </button>
+      <button
+        className={`auto-approve-btn ${!hideTools ? 'auto-approve-btn-active' : ''}`}
+        onClick={() => setHideTools(!hideTools)}
+        title={hideTools ? 'Show tool cards' : 'Hide tool cards'}
+      >
+        {hideTools ? 'Tools: OFF' : 'Tools: ON'}
+      </button>
+      {tmuxSessionName && (
+        <button
+          className={`session-header-btn ${showTerminal ? 'terminal-active' : ''}`}
+          onClick={() => setShowTerminal(!showTerminal)}
+          title={showTerminal ? 'Show conversation' : 'Show terminal output'}
+        >
+          Terminal
+        </button>
+      )}
+    </>
+  );
+
+  // Combined for desktop header
+  const actionButtons = (
+    <div className="session-header-actions">
+      {operationalButtons}
+      {viewButtons}
     </div>
   );
 
@@ -477,7 +515,11 @@ export function SessionView({
             </button>
           )
         )}
-        {!mobile && actionButtons}
+        {mobile ? (
+          <div className="session-header-actions">
+            {viewButtons}
+          </div>
+        ) : actionButtons}
       </div>
 
       {showTerminal && tmuxSessionName && serverId && (
@@ -561,6 +603,7 @@ export function SessionView({
             currentMatchId={searchMatches.length > 0 ? searchMatches[currentMatchIndex]?.id : null}
             scrollToBottom={!showTerminal}
             planFilePath={latestPlanFile}
+            hideTools={hideTools}
           />
 
           <FileTabBar
@@ -573,7 +616,9 @@ export function SessionView({
 
           {mobile && (
             <div className="session-bottom-bar">
-              {actionButtons}
+              <div className="session-header-actions">
+                {operationalButtons}
+              </div>
             </div>
           )}
       </div>

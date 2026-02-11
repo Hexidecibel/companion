@@ -2477,6 +2477,11 @@ html {
   min-height: calc(48px + var(--safe-top));
 }
 
+.session-header-mobile .session-header-actions {
+  flex: 1;
+  justify-content: flex-end;
+}
+
 .session-header-actions {
   display: flex;
   align-items: center;
