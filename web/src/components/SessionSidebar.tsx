@@ -20,6 +20,7 @@ interface SessionSidebarProps {
   onToggleDashboardMode?: () => void;
   dashboardMode?: boolean;
   onNotificationSettings?: () => void;
+  onCostDashboard?: () => void;
   onSettings?: () => void;
   mutedSessions?: Set<string>;
   onToggleMute?: (serverId: string, sessionId: string) => void;
@@ -98,6 +99,7 @@ export function SessionSidebar({
   onToggleDashboardMode,
   dashboardMode,
   onNotificationSettings,
+  onCostDashboard,
   onSettings,
   mutedSessions,
   onToggleMute,
@@ -330,6 +332,15 @@ export function SessionSidebar({
               title="Notification settings"
             >
               &#x1F514;
+            </button>
+          )}
+          {onCostDashboard && (
+            <button
+              className="sidebar-settings-btn"
+              onClick={onCostDashboard}
+              title="Cost dashboard"
+            >
+              $
             </button>
           )}
           {onSettings && (

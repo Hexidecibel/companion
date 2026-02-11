@@ -255,6 +255,36 @@ export interface WorkGroup {
   error?: string;
 }
 
+// Cost Dashboard types
+
+export interface DailyUsageBucket {
+  date: string; // YYYY-MM-DD
+  inputTokens: number;
+  outputTokens: number;
+  cacheCreationTokens: number;
+  cacheReadTokens: number;
+  estimatedCostUsd: number;
+  byModel: Record<string, {
+    inputTokens: number;
+    outputTokens: number;
+    cacheCreationTokens: number;
+    cacheReadTokens: number;
+    costUsd: number;
+  }>;
+}
+
+export interface CostDashboardData {
+  daily: DailyUsageBucket[];
+  totalCostUsd: number;
+  totalInputTokens: number;
+  totalOutputTokens: number;
+  totalCacheCreationTokens: number;
+  totalCacheReadTokens: number;
+  periodStart: string;
+  periodEnd: string;
+  hasAdminKey: boolean;
+}
+
 // Active session tracking
 
 export interface ActiveSession {

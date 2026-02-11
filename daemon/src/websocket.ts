@@ -40,6 +40,7 @@ import { ProjectConfig } from './scaffold/types';
 import { scoreTemplates } from './scaffold/scorer';
 import { EscalationService, EscalationEvent } from './escalation';
 import { NotificationEventType, EscalationConfig } from './types';
+import { UsageTracker } from './usage-tracker';
 
 // File for persisting tmux session configs
 const TMUX_CONFIGS_FILE = path.join(os.homedir(), '.companion', 'tmux-sessions.json');
@@ -91,6 +92,7 @@ export class WebSocketHandler {
   private escalation: EscalationService;
   private workGroupManager: WorkGroupManager | null;
   private skillCatalog: SkillCatalog;
+  private usageTracker: UsageTracker;
 
   constructor(
     servers: { server: Server; listener: ListenerConfig }[],
@@ -112,6 +114,7 @@ export class WebSocketHandler {
 
     this.escalation = new EscalationService(this.push.getStore(), this.push);
     this.skillCatalog = new SkillCatalog();
+    this.usageTracker = new UsageTracker(config.anthropicAdminApiKey);
 
     // Create a WebSocketServer for each listener
     for (const { server, listener } of servers) {
@@ -879,6 +882,14 @@ export class WebSocketHandler {
             startDate?: string;
             endDate?: string;
           },
+          requestId
+        );
+        break;
+
+      case 'get_cost_dashboard':
+        this.handleGetCostDashboard(
+          client,
+          payload as { period?: '7d' | '30d' } | undefined,
           requestId
         );
         break;
@@ -2575,6 +2586,31 @@ export class WebSocketHandler {
         type: 'api_usage',
         success: false,
         error: `Failed to fetch API usage: ${err instanceof Error ? err.message : 'Unknown error'}`,
+        requestId,
+      });
+    }
+  }
+
+  private async handleGetCostDashboard(
+    client: AuthenticatedClient,
+    payload: { period?: '7d' | '30d' } | undefined,
+    requestId?: string
+  ): Promise<void> {
+    try {
+      const period = payload?.period || '7d';
+      const data = await this.usageTracker.getCostDashboard(period);
+      this.send(client.ws, {
+        type: 'cost_dashboard',
+        success: true,
+        payload: data,
+        requestId,
+      });
+    } catch (err) {
+      console.error('Failed to get cost dashboard:', err);
+      this.send(client.ws, {
+        type: 'cost_dashboard',
+        success: false,
+        error: `Failed to fetch cost dashboard: ${err instanceof Error ? err.message : 'Unknown error'}`,
         requestId,
       });
     }
