@@ -15,6 +15,7 @@ import { useSkills } from '../hooks/useSkills';
 import { WaitingIndicator } from './WaitingIndicator';
 import { TaskList } from './TaskList';
 import { CodeReviewCard } from './CodeReviewCard';
+import { CodeReviewModal } from './CodeReviewModal';
 import { MessageList } from './MessageList';
 import { InputBar, InputBarHandle } from './InputBar';
 import { SubAgentBar } from './SubAgentBar';
@@ -107,6 +108,9 @@ export function SessionView({
   // File finder state
   const [showFileFinder, setShowFileFinder] = useState(false);
 
+  // Code review modal state
+  const [showCodeReviewModal, setShowCodeReviewModal] = useState(false);
+
   const searchMatches = useMemo(() => {
     if (!searchTerm) return [];
     const lower = searchTerm.toLowerCase();
@@ -136,22 +140,23 @@ export function SessionView({
 
   // Signal to Dashboard that an overlay is open (for back gesture coordination)
   useEffect(() => {
-    const isOverlay = showTerminal || showWorkGroupPanel || showConversationSearch || showFileFinder;
+    const isOverlay = showTerminal || showWorkGroupPanel || showConversationSearch || showFileFinder || showCodeReviewModal;
     document.body.dataset.overlay = isOverlay ? 'true' : '';
     return () => { document.body.dataset.overlay = ''; };
-  }, [showTerminal, showWorkGroupPanel, showConversationSearch, showFileFinder]);
+  }, [showTerminal, showWorkGroupPanel, showConversationSearch, showFileFinder, showCodeReviewModal]);
 
   // Listen for close-overlay event from Dashboard's back gesture handler
   useEffect(() => {
     const handler = () => {
-      if (showConversationSearch) setShowConversationSearch(false);
+      if (showCodeReviewModal) setShowCodeReviewModal(false);
+      else if (showConversationSearch) setShowConversationSearch(false);
       else if (showFileFinder) setShowFileFinder(false);
       else if (showTerminal) setShowTerminal(false);
       else if (showWorkGroupPanel) setShowWorkGroupPanel(false);
     };
     window.addEventListener('close-overlay', handler);
     return () => window.removeEventListener('close-overlay', handler);
-  }, [showTerminal, showWorkGroupPanel, showConversationSearch, showFileFinder]);
+  }, [showTerminal, showWorkGroupPanel, showConversationSearch, showFileFinder, showCodeReviewModal]);
 
   // Reset views when session changes, auto-focus on desktop only
   useEffect(() => {
@@ -295,7 +300,8 @@ export function SessionView({
     { key: 'a', meta: true, shift: true, handler: () => autoApprove.toggle() },
     { key: 'm', meta: true, shift: true, handler: () => { if (sessionId) sessionMute.toggleMute(sessionId); } },
     { key: 'Escape', handler: () => {
-      if (showFileFinder) setShowFileFinder(false);
+      if (showCodeReviewModal) setShowCodeReviewModal(false);
+      else if (showFileFinder) setShowFileFinder(false);
       else if (showSearch) handleCloseSearch();
       else if (artifactContent) setArtifactContent(null);
       else if (viewingFile) setViewingFile(null);
@@ -303,7 +309,7 @@ export function SessionView({
       else if (showAgentsModal) setShowAgentsModal(false);
       else if (viewingAgentId) setViewingAgentId(null);
     }},
-  ], [tmuxSessionName, showSearch, showFileFinder, viewingFile, showConversationSearch, showAgentsModal, viewingAgentId, artifactContent, sessionId, autoApprove, sessionMute, handleCloseSearch]));
+  ], [tmuxSessionName, showSearch, showFileFinder, showCodeReviewModal, viewingFile, showConversationSearch, showAgentsModal, viewingAgentId, artifactContent, sessionId, autoApprove, sessionMute, handleCloseSearch]));
 
   const sendTerminalText = useCallback(async (text: string): Promise<boolean> => {
     if (!serverId || !tmuxSessionName) return false;
@@ -437,7 +443,7 @@ export function SessionView({
       {fileChanges.length > 0 && (
         <button
           className="session-header-btn"
-          onClick={refreshReview}
+          onClick={() => setShowCodeReviewModal(true)}
           title="Review file changes"
         >
           Review ({fileChanges.length})
@@ -526,7 +532,7 @@ export function SessionView({
           <CodeReviewCard
             fileChanges={fileChanges}
             loading={reviewLoading}
-            onViewFile={handleViewFile}
+            onOpenModal={() => setShowCodeReviewModal(true)}
             onRefresh={refreshReview}
           />
 
@@ -620,6 +626,15 @@ export function SessionView({
           title={artifactContent.title}
           onClose={() => setArtifactContent(null)}
           onFileClick={handleViewFile}
+        />
+      )}
+
+      {showCodeReviewModal && fileChanges.length > 0 && (
+        <CodeReviewModal
+          fileChanges={fileChanges}
+          onViewFile={handleViewFile}
+          onRefresh={refreshReview}
+          onClose={() => setShowCodeReviewModal(false)}
         />
       )}
 
