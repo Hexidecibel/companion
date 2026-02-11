@@ -8,6 +8,7 @@ interface BrowserNotifPrefs {
   worker_waiting: boolean;
   worker_error: boolean;
   work_group_ready: boolean;
+  usage_warning: boolean;
 }
 
 const DEFAULT_PREFS: BrowserNotifPrefs = {
@@ -18,6 +19,7 @@ const DEFAULT_PREFS: BrowserNotifPrefs = {
   worker_waiting: true,
   worker_error: true,
   work_group_ready: true,
+  usage_warning: true,
 };
 
 import { isTauri } from '../utils/platform';

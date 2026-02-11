@@ -9,6 +9,7 @@ export interface EscalationConfig {
     worker_waiting: boolean;
     worker_error: boolean;
     work_group_ready: boolean;
+    usage_warning: boolean;
   };
   pushDelaySeconds: number;
   rateLimitSeconds: number;
@@ -17,6 +18,7 @@ export interface EscalationConfig {
     start: string;
     end: string;
   };
+  usageThresholds: number[];
 }
 
 interface UseEscalationConfigReturn {
@@ -35,6 +37,7 @@ const DEFAULT_CONFIG: EscalationConfig = {
     worker_waiting: true,
     worker_error: true,
     work_group_ready: true,
+    usage_warning: true,
   },
   pushDelaySeconds: 300,
   rateLimitSeconds: 60,
@@ -43,6 +46,7 @@ const DEFAULT_CONFIG: EscalationConfig = {
     start: '22:00',
     end: '08:00',
   },
+  usageThresholds: [50, 75, 90],
 };
 
 export function useEscalationConfig(serverId: string | null): UseEscalationConfigReturn {

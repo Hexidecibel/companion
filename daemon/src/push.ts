@@ -108,6 +108,8 @@ export class PushNotificationService {
         return 'Worker error';
       case 'work_group_ready':
         return 'Work group ready to merge';
+      case 'usage_warning':
+        return 'Usage warning';
     }
   }
 

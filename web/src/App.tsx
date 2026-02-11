@@ -4,7 +4,7 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 import { StatusPage } from './components/StatusPage';
 import { Dashboard } from './components/Dashboard';
 import { SettingsScreen } from './components/SettingsScreen';
-import { CostDashboard } from './components/CostDashboard';
+import { UsageDashboard } from './components/UsageDashboard';
 import { CommandPalette, CommandAction } from './components/CommandPalette';
 
 type Screen =
@@ -144,7 +144,7 @@ export function App() {
             />
           )}
           {screen.name === 'cost-dashboard' && (
-            <CostDashboard
+            <UsageDashboard
               serverId={screen.serverId}
               onBack={() => setScreen({ name: 'dashboard' })}
             />

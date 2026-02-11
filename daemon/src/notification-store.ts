@@ -60,7 +60,11 @@ export class NotificationStore {
         } else {
           // New format
           const state: PersistedNotificationState = raw;
-          this.escalation = { ...DEFAULT_ESCALATION_CONFIG, ...state.escalation };
+          this.escalation = {
+            ...DEFAULT_ESCALATION_CONFIG,
+            ...state.escalation,
+            events: { ...DEFAULT_ESCALATION_CONFIG.events, ...state.escalation?.events },
+          };
           for (const device of state.devices || []) {
             this.devices.set(device.deviceId, device);
           }
@@ -166,6 +170,9 @@ export class NotificationStore {
     }
     if (config.quietHours !== undefined) {
       this.escalation.quietHours = { ...this.escalation.quietHours, ...config.quietHours };
+    }
+    if (config.usageThresholds !== undefined) {
+      this.escalation.usageThresholds = config.usageThresholds;
     }
     this.scheduleSave();
     return this.getEscalation();

@@ -42,6 +42,7 @@ import { scoreTemplates } from './scaffold/scorer';
 import { EscalationService, EscalationEvent } from './escalation';
 import { NotificationEventType, EscalationConfig } from './types';
 import { UsageTracker } from './usage-tracker';
+import { OAuthUsageFetcher, UsageMonitor } from './oauth-usage';
 
 // File for persisting tmux session configs
 const TMUX_CONFIGS_FILE = path.join(os.homedir(), '.companion', 'tmux-sessions.json');
@@ -94,6 +95,8 @@ export class WebSocketHandler {
   private workGroupManager: WorkGroupManager | null;
   private skillCatalog: SkillCatalog;
   private usageTracker: UsageTracker;
+  private oauthUsageFetcher: OAuthUsageFetcher;
+  private usageMonitor: UsageMonitor;
 
   constructor(
     servers: { server: Server; listener: ListenerConfig }[],
@@ -116,6 +119,19 @@ export class WebSocketHandler {
     this.escalation = new EscalationService(this.push.getStore(), this.push);
     this.skillCatalog = new SkillCatalog();
     this.usageTracker = new UsageTracker(config.anthropicAdminApiKey);
+    this.oauthUsageFetcher = new OAuthUsageFetcher(config.codeHome);
+    this.usageMonitor = new UsageMonitor(
+      this.oauthUsageFetcher,
+      this.push.getStore(),
+      (event: EscalationEvent) => {
+        const result = this.escalation.handleEvent(event);
+        if (result.shouldBroadcast) {
+          console.log(`Escalation: usage_warning broadcast — ${event.content}`);
+        }
+        this.broadcast('usage_warning', { message: event.content });
+      }
+    );
+    this.usageMonitor.start();
 
     // Create a WebSocketServer for each listener
     for (const { server, listener } of servers) {
@@ -897,6 +913,10 @@ export class WebSocketHandler {
           payload as { period?: '7d' | '30d' } | undefined,
           requestId
         );
+        break;
+
+      case 'get_oauth_usage':
+        this.handleGetOAuthUsage(client, requestId);
         break;
 
       case 'get_agent_tree':
@@ -2701,6 +2721,29 @@ export class WebSocketHandler {
         type: 'cost_dashboard',
         success: false,
         error: `Failed to fetch cost dashboard: ${err instanceof Error ? err.message : 'Unknown error'}`,
+        requestId,
+      });
+    }
+  }
+
+  private async handleGetOAuthUsage(
+    client: AuthenticatedClient,
+    requestId?: string
+  ): Promise<void> {
+    try {
+      const data = await this.oauthUsageFetcher.getUsage();
+      this.send(client.ws, {
+        type: 'oauth_usage',
+        success: true,
+        payload: data,
+        requestId,
+      });
+    } catch (err) {
+      console.error('Failed to get OAuth usage:', err);
+      this.send(client.ws, {
+        type: 'oauth_usage',
+        success: false,
+        error: `Failed to fetch OAuth usage: ${err instanceof Error ? err.message : 'Unknown error'}`,
         requestId,
       });
     }

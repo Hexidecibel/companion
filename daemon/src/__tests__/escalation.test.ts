@@ -82,6 +82,7 @@ function createMockPush(): PushNotificationService & {
         worker_waiting: 'Worker needs input',
         worker_error: 'Worker error',
         work_group_ready: 'Work group ready to merge',
+        usage_warning: 'Usage warning',
       };
       return map[eventType];
     },

@@ -398,6 +398,7 @@ export function Dashboard({ onSettings }: DashboardProps) {
         onSelectSession={handleSelectSession}
         onSessionCreated={handleSessionCreated}
         onSettings={onSettings}
+        onCostDashboard={(serverId: string) => window.dispatchEvent(new CustomEvent('open-cost-dashboard', { detail: { serverId } }))}
         digest={awayDigest.digest && !awayDigest.dismissed ? awayDigest.digest : undefined}
         onDismissDigest={awayDigest.dismiss}
       />

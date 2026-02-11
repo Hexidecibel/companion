@@ -279,6 +279,20 @@ Full-screen usage and cost analytics with daily tracking and budget alerts.
 - Daemon-side daily snapshot persistence (90-day history)
 - Accessible from settings navigation
 
+## Usage Dashboard
+Real-time utilization gauges using Claude Code OAuth credentials — no admin API key required.
+
+- CSS conic-gradient gauge rings for 5-hour and 7-day utilization windows
+- Color-coded thresholds: green (<50%), amber (50-75%), red (>75%) with glow effect
+- Live countdown timers showing time until rate limit resets
+- Subscription tier badge (MAX, Pro, etc.)
+- Model-specific utilization bars (Opus, Sonnet, Cowork) when available
+- Extra usage credit tracking card
+- Collapsible cost breakdown section (reuses existing admin-key cost dashboard)
+- Configurable threshold notifications (50%, 75%, 90%, 95%) with push escalation
+- Daemon polls every 3 minutes with 3-minute cache; web auto-refreshes
+- Graceful fallback when OAuth credentials not available
+
 ## Code Review Mode
 Consolidated diff view of all files changed by a session, with approve/reject actions.
 

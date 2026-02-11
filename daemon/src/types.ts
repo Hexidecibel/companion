@@ -281,6 +281,31 @@ export interface AgentTree {
   completedCount: number;
 }
 
+// OAuth Usage Dashboard types
+export interface OAuthUsageWindow {
+  utilization: number;
+  resets_at: string;
+}
+
+export interface OAuthExtraUsage {
+  is_enabled: boolean;
+  monthly_limit: number | null;
+  used_credits: number | null;
+  utilization: number | null;
+}
+
+export interface UsageDashboardData {
+  available: boolean;
+  subscriptionType?: string;
+  rateLimitTier?: string;
+  fiveHour?: OAuthUsageWindow | null;
+  sevenDay?: OAuthUsageWindow | null;
+  sevenDayOpus?: OAuthUsageWindow | null;
+  sevenDaySonnet?: OAuthUsageWindow | null;
+  sevenDayCowork?: OAuthUsageWindow | null;
+  extraUsage?: OAuthExtraUsage | null;
+}
+
 // Notification event types (no longer includes text_match)
 export type NotificationEventType =
   | 'waiting_for_input'
@@ -288,7 +313,8 @@ export type NotificationEventType =
   | 'session_completed'
   | 'worker_waiting'
   | 'worker_error'
-  | 'work_group_ready';
+  | 'work_group_ready'
+  | 'usage_warning';
 
 // Escalation config — replaces NotificationRule system
 export interface EscalationConfig {
@@ -299,6 +325,7 @@ export interface EscalationConfig {
     worker_waiting: boolean;
     worker_error: boolean;
     work_group_ready: boolean;
+    usage_warning: boolean;
   };
   pushDelaySeconds: number; // default: 300 (5 min). 0 = immediate push
   rateLimitSeconds: number; // default: 60. Min time between notifs per session
@@ -307,6 +334,7 @@ export interface EscalationConfig {
     start: string; // "HH:MM"
     end: string; // "HH:MM"
   };
+  usageThresholds: number[]; // default: [50, 75, 90]. Utilization % thresholds for warnings
 }
 
 export const DEFAULT_ESCALATION_CONFIG: EscalationConfig = {
@@ -317,6 +345,7 @@ export const DEFAULT_ESCALATION_CONFIG: EscalationConfig = {
     worker_waiting: true,
     worker_error: true,
     work_group_ready: true,
+    usage_warning: true,
   },
   pushDelaySeconds: 300,
   rateLimitSeconds: 60,
@@ -325,6 +354,7 @@ export const DEFAULT_ESCALATION_CONFIG: EscalationConfig = {
     start: '22:00',
     end: '08:00',
   },
+  usageThresholds: [50, 75, 90],
 };
 
 // Pending event — tracks an unacknowledged notification awaiting push escalation

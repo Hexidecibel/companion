@@ -14,6 +14,7 @@ const EVENT_TYPE_LABELS: Record<string, string> = {
   worker_waiting: 'Worker Waiting',
   worker_error: 'Worker Error',
   work_group_ready: 'Group Ready to Merge',
+  usage_warning: 'Usage Warning',
 };
 
 const EVENT_TYPE_COLORS: Record<string, string> = {
@@ -23,7 +24,12 @@ const EVENT_TYPE_COLORS: Record<string, string> = {
   worker_waiting: 'var(--accent-amber)',
   worker_error: 'var(--accent-red)',
   work_group_ready: 'var(--accent-blue)',
+  usage_warning: 'var(--accent-amber)',
 };
+
+const ALL_EVENT_TYPES = ['waiting_for_input', 'error_detected', 'session_completed', 'worker_waiting', 'worker_error', 'work_group_ready', 'usage_warning'] as const;
+
+const AVAILABLE_THRESHOLDS = [50, 75, 90, 95];
 
 const PUSH_DELAY_OPTIONS = [
   { value: 0, label: 'Immediate' },
@@ -179,7 +185,7 @@ function EscalationTab({
         <div className="notif-card-detail" style={{ marginBottom: 8 }}>
           Which events trigger push notifications to mobile devices
         </div>
-        {(['waiting_for_input', 'error_detected', 'session_completed', 'worker_waiting', 'worker_error', 'work_group_ready'] as const).map((evt) => (
+        {ALL_EVENT_TYPES.map((evt) => (
           <div key={evt} className="notif-browser-event-row">
             <span>{EVENT_TYPE_LABELS[evt]}</span>
             <label className="notif-toggle">
@@ -230,7 +236,7 @@ function EscalationTab({
             </div>
             {browserNotifications.prefs.enabled && (
               <>
-                {(['waiting_for_input', 'error_detected', 'session_completed', 'worker_waiting', 'worker_error', 'work_group_ready'] as const).map((evt) => (
+                {ALL_EVENT_TYPES.map((evt) => (
                   <div key={evt} className="notif-browser-event-row">
                     <span>{EVENT_TYPE_LABELS[evt]}</span>
                     <label className="notif-toggle">
@@ -318,6 +324,41 @@ function EscalationTab({
             </label>
           </div>
         )}
+      </div>
+
+      {/* Usage thresholds */}
+      <div className="notif-card">
+        <div className="notif-card-name" style={{ marginBottom: 4 }}>Usage Thresholds</div>
+        <div className="notif-card-detail" style={{ marginBottom: 8 }}>
+          Get notified when utilization crosses these levels
+        </div>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+          {AVAILABLE_THRESHOLDS.map((t) => {
+            const active = (config.usageThresholds || [50, 75, 90]).includes(t);
+            return (
+              <button
+                key={t}
+                onClick={() => {
+                  const current = config.usageThresholds || [50, 75, 90];
+                  const next = active ? current.filter((v) => v !== t) : [...current, t].sort((a, b) => a - b);
+                  update({ usageThresholds: next });
+                }}
+                style={{
+                  padding: '4px 12px',
+                  borderRadius: '14px',
+                  border: active ? '1px solid var(--accent-amber)' : '1px solid var(--border-color)',
+                  backgroundColor: active ? 'rgba(245, 158, 11, 0.15)' : 'transparent',
+                  color: active ? 'var(--accent-amber)' : 'var(--text-muted)',
+                  cursor: 'pointer',
+                  fontSize: '0.8rem',
+                  fontWeight: 500,
+                }}
+              >
+                {t}%
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       {/* Test buttons */}

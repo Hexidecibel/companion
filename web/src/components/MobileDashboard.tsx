@@ -49,6 +49,7 @@ interface MobileDashboardProps {
   onSelectSession: (serverId: string, sessionId: string) => void;
   onSessionCreated?: (serverId: string, sessionName: string) => void;
   onSettings?: () => void;
+  onCostDashboard?: (serverId: string) => void;
   digest?: DigestData;
   onDismissDigest?: () => void;
 }
@@ -58,6 +59,7 @@ export function MobileDashboard({
   onSelectSession,
   onSessionCreated,
   onSettings,
+  onCostDashboard,
   digest,
   onDismissDigest,
 }: MobileDashboardProps) {
@@ -166,6 +168,7 @@ export function MobileDashboard({
                     tmuxServerId === snap.serverId ? null : snap.serverId,
                   )
                 }
+                onCostDashboard={onCostDashboard ? () => onCostDashboard(snap.serverId) : undefined}
                 newSessionOpen={newSessionServerId === snap.serverId}
               />
               {newSessionServerId === snap.serverId && (
@@ -341,13 +344,14 @@ interface ServerCardProps {
   isEnabled: boolean;
   onNewSession: () => void;
   onTmuxSessions: () => void;
+  onCostDashboard?: () => void;
   newSessionOpen: boolean;
 }
 
 export { ServerCard };
 export type { ServerCardProps };
 
-function ServerCard({ snap, summary, onSelectSession, onToggleEnabled, onDelete, onEdit, isEnabled, onNewSession, onTmuxSessions, newSessionOpen }: ServerCardProps) {
+function ServerCard({ snap, summary, onSelectSession, onToggleEnabled, onDelete, onEdit, isEnabled, onNewSession, onTmuxSessions, onCostDashboard, newSessionOpen }: ServerCardProps) {
   const isConnected = snap.state.status === 'connected';
   const isConnecting = snap.state.status === 'connecting' || snap.state.status === 'reconnecting';
   const sessions = summary ? sortSessions(summary.sessions) : [];
@@ -386,6 +390,15 @@ function ServerCard({ snap, summary, onSelectSession, onToggleEnabled, onDelete,
               >
                 T
               </button>
+              {onCostDashboard && (
+                <button
+                  className="mobile-server-tmux-btn"
+                  onClick={onCostDashboard}
+                  title="Cost dashboard"
+                >
+                  $
+                </button>
+              )}
             </>
           )}
           <button
