@@ -1,6 +1,6 @@
 {
   "name": "@hexidecibel/companion",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "description": "Server daemon for Companion - watches coding sessions and serves data to mobile app",
   "main": "dist/index.js",
   "bin": {
@@ -8,7 +8,6 @@
   },
   "files": [
     "dist",
-    "bin",
     "scripts",
     "web",
     "README.md"
@@ -29,6 +28,7 @@
   "author": "Hexidecibel",
   "license": "MIT",
   "scripts": {
+    "prepack": "rm -rf web && mkdir -p web && cp -r ../web/dist web/dist",
     "postinstall": "node scripts/postinstall.js",
     "build": "tsc && mkdir -p dist/skills && cp src/skills/catalog.json dist/skills/catalog.json",
     "start": "node dist/index.js",

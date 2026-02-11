@@ -275,11 +275,12 @@ export function useConversation(
           tmuxSessionName: tmuxSessionName || sessionId,
           clientMessageId,
         });
-        if (response.success && !opts?.skipOptimistic) {
+        const isSlashCommand = text.startsWith('/');
+        if (response.success && !opts?.skipOptimistic && !isSlashCommand) {
           // Optimistic display — server will include this in future get_highlights
           // via its pendingSentMessages tracking, but show immediately for instant UX
-          // Skipped for option/choice selections since those appear as tool_results
-          // in the JSONL (not user messages) and never match for confirmation.
+          // Skipped for option/choice selections (skipOptimistic) and slash commands
+          // since neither echo back as user messages in the JSONL.
           setHighlights((prev) => [
             ...prev,
             {
