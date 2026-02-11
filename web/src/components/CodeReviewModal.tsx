@@ -66,7 +66,7 @@ export function CodeReviewModal({ fileChanges, onViewFile, onRefresh, onClose }:
         case 'Enter':
         case ' ':
           e.preventDefault();
-          if (fileChanges[selectedIndex]?.diff) {
+          if (fileChanges[selectedIndex]) {
             toggleExpanded(fileChanges[selectedIndex].path);
           }
           break;
@@ -141,22 +141,22 @@ export function CodeReviewModal({ fileChanges, onViewFile, onRefresh, onClose }:
                     {fileName}
                   </span>
                   <span className="crm-file-dir">{dirPath}</span>
-                  {hasDiff && (
-                    <button
-                      className="code-review-diff-toggle"
-                      onClick={(e) => { e.stopPropagation(); toggleExpanded(fc.path); }}
-                    >
-                      {isExpanded ? 'Hide diff' : 'Diff'}
-                    </button>
-                  )}
+                  <button
+                    className="code-review-diff-toggle"
+                    onClick={(e) => { e.stopPropagation(); toggleExpanded(fc.path); }}
+                  >
+                    {isExpanded ? 'Hide diff' : 'Diff'}
+                  </button>
                 </div>
-                {isExpanded && fc.diff && (
+                {isExpanded && (
                   <div className="code-review-diff">
-                    {fc.diff.split('\n').map((line, li) => (
+                    {hasDiff ? fc.diff!.split('\n').map((line, li) => (
                       <div key={li} className={`code-review-diff-line ${classifyLine(line)}`}>
                         {line || '\n'}
                       </div>
-                    ))}
+                    )) : (
+                      <div className="code-review-diff-line context">No diff available</div>
+                    )}
                   </div>
                 )}
               </div>
