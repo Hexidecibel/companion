@@ -52,6 +52,7 @@ export class SessionWatcher extends EventEmitter {
   private tmuxPathBySession: Map<string, string> = new Map(); // tmux session name -> encodedPath
   private tmuxSessionWorkingDirs: Map<string, string> = new Map(); // tmux session name -> decoded working dir
   private tmuxConversationIds: Map<string, string> = new Map(); // tmux session name -> conversation UUID (direct mapping via PID detection)
+  private tmuxConversationHistory: Map<string, string[]> = new Map(); // tmux session name -> ordered conversation UUIDs (oldest first)
   private _lastMappingLog: string = ''; // Dedup mapping log output
   private activeTmuxSession: string | null = null; // public session ID (tmux session name)
   private activeConversationId: string | null = null; // internal UUID for conversation lookups
@@ -82,12 +83,30 @@ export class SessionWatcher extends EventEmitter {
   private loadPersistedMappings(): void {
     try {
       const data = fs.readFileSync(this.mappingsPath, 'utf-8');
-      const mappings = JSON.parse(data) as Record<string, string>;
+      const parsed = JSON.parse(data);
       let loaded = 0;
+
+      // New format: { mappings: {...}, history: {...} }
+      // Old format: { "session": "convId", ... } (flat, no "mappings" key)
+      const isNewFormat = parsed.mappings && typeof parsed.mappings === 'object';
+      const mappings: Record<string, string> = isNewFormat ? parsed.mappings : parsed;
+
       for (const [session, convId] of Object.entries(mappings)) {
-        this.tmuxConversationIds.set(session, convId);
-        loaded++;
+        if (typeof convId === 'string') {
+          this.tmuxConversationIds.set(session, convId);
+          loaded++;
+        }
       }
+
+      // Load history if present
+      if (isNewFormat && parsed.history) {
+        for (const [session, ids] of Object.entries(parsed.history)) {
+          if (Array.isArray(ids)) {
+            this.tmuxConversationHistory.set(session, ids as string[]);
+          }
+        }
+      }
+
       if (loaded > 0) {
         console.log(`Watcher: Loaded ${loaded} persisted session mappings`);
       }
@@ -102,10 +121,42 @@ export class SessionWatcher extends EventEmitter {
       for (const [session, convId] of this.tmuxConversationIds) {
         mappings[session] = convId;
       }
-      fs.writeFileSync(this.mappingsPath, JSON.stringify(mappings));
+
+      // Only persist history for sessions that still have active mappings
+      const history: Record<string, string[]> = {};
+      for (const [session, ids] of this.tmuxConversationHistory) {
+        if (this.tmuxConversationIds.has(session)) {
+          history[session] = ids;
+        }
+      }
+
+      fs.writeFileSync(this.mappingsPath, JSON.stringify({ mappings, history }));
     } catch {
       // Not critical
     }
+  }
+
+  /**
+   * Set a tmux session → conversation mapping and maintain history.
+   * @param isChainExtension - true when appending a new file after compaction (preserves old ID in history)
+   */
+  private setConversationMapping(sessionName: string, convId: string, isChainExtension: boolean = false): void {
+    const history = this.tmuxConversationHistory.get(sessionName) || [];
+
+    if (isChainExtension) {
+      // Compaction: the old ID should already be in history; append the new one
+      if (!history.includes(convId)) {
+        history.push(convId);
+      }
+    } else {
+      // Initial discovery / re-detection: ensure current ID is at the end
+      if (!history.includes(convId)) {
+        history.push(convId);
+      }
+    }
+
+    this.tmuxConversationHistory.set(sessionName, history);
+    this.tmuxConversationIds.set(sessionName, convId);
   }
 
   async refreshTmuxPaths(): Promise<void> {
@@ -188,6 +239,7 @@ export class SessionWatcher extends EventEmitter {
       this.tmuxPathBySession.clear();
       this.tmuxSessionWorkingDirs.clear();
       this.tmuxConversationIds.clear();
+      this.tmuxConversationHistory.clear();
     }
   }
 
@@ -356,7 +408,7 @@ export class SessionWatcher extends EventEmitter {
       }
       if (sessionsForPath.length === 1) {
         tmuxName = sessionsForPath[0];
-        this.tmuxConversationIds.set(tmuxName, convId);
+        this.setConversationMapping(tmuxName, convId);
       } else if (sessionsForPath.length > 1) {
         // Multiple sessions share this path — try elimination
         const convAlreadyMapped = Array.from(this.tmuxConversationIds.values()).includes(convId);
@@ -364,7 +416,7 @@ export class SessionWatcher extends EventEmitter {
           const unmapped = sessionsForPath.filter(name => !this.tmuxConversationIds.has(name));
           if (unmapped.length === 1) {
             tmuxName = unmapped[0];
-            this.tmuxConversationIds.set(tmuxName, convId);
+            this.setConversationMapping(tmuxName, convId);
           } else if (unmapped.length === 0) {
             // All sessions mapped — check if one recently compacted and expects a new JSONL
             const compactedInPath = sessionsForPath.filter(name => this.compactedSessions.has(name));
@@ -372,7 +424,7 @@ export class SessionWatcher extends EventEmitter {
               const oldId = this.tmuxConversationIds.get(compactedInPath[0]);
               console.log(`Watcher: Re-mapping ${compactedInPath[0]}: ${oldId?.substring(0, 8)} -> ${convId.substring(0, 8)} (post-compaction)`);
               tmuxName = compactedInPath[0];
-              this.tmuxConversationIds.set(tmuxName, convId);
+              this.setConversationMapping(tmuxName, convId, true);
               this.compactedSessions.delete(tmuxName);
             }
           }
@@ -770,6 +822,7 @@ export class SessionWatcher extends EventEmitter {
     for (const name of this.tmuxConversationIds.keys()) {
       if (!this.tmuxPathBySession.has(name)) {
         this.tmuxConversationIds.delete(name);
+        this.tmuxConversationHistory.delete(name);
       }
     }
     for (const [name, convId] of this.tmuxConversationIds) {
@@ -797,7 +850,7 @@ export class SessionWatcher extends EventEmitter {
           const alreadyMapped = Array.from(this.tmuxConversationIds.values()).includes(id);
           if (!alreadyMapped) {
             console.log(`Watcher: New session ${sessionName} -> ${id.substring(0, 8)} (appeared after creation)`);
-            this.tmuxConversationIds.set(sessionName, id);
+            this.setConversationMapping(sessionName, id);
             this.newlyCreatedSessions.delete(sessionName);
             break;
           }
@@ -868,7 +921,7 @@ export class SessionWatcher extends EventEmitter {
           }
         }
         if (this.conversations.has(convId)) {
-          this.tmuxConversationIds.set(sessionName, convId);
+          this.setConversationMapping(sessionName, convId);
         }
       }
     }
@@ -935,7 +988,7 @@ export class SessionWatcher extends EventEmitter {
             // Only use this match if it uniquely identifies one file
             if (matchingCandidates.length === 1) {
               console.log(`Watcher: Terminal matched ${sessionName} -> ${matchingCandidates[0].id.substring(0, 8)} via "${userLine.substring(0, 40)}"`);
-              this.tmuxConversationIds.set(sessionName, matchingCandidates[0].id);
+              this.setConversationMapping(sessionName, matchingCandidates[0].id);
               mappedConvIds.add(matchingCandidates[0].id);
               const idx = candidateConvs.findIndex(c => c.id === matchingCandidates[0].id);
               if (idx >= 0) candidateConvs.splice(idx, 1);
@@ -965,7 +1018,7 @@ export class SessionWatcher extends EventEmitter {
       }
 
       if (unmappedConvs.length === 1) {
-        this.tmuxConversationIds.set(unmapped[0], unmappedConvs[0]);
+        this.setConversationMapping(unmapped[0], unmappedConvs[0]);
       }
     }
 
@@ -1190,11 +1243,45 @@ export class SessionWatcher extends EventEmitter {
    * sessionId is a tmux session name — resolves to the best conversation.
    */
   getConversationChain(sessionId: string): string[] {
-    const convId = this.resolveToConversationId(sessionId);
-    if (!convId) return [];
-    const tracked = this.conversations.get(convId);
-    if (!tracked) return [];
-    return [tracked.path];
+    const history = this.tmuxConversationHistory.get(sessionId);
+    if (!history || history.length === 0) {
+      // No history — fall back to single current file
+      const convId = this.resolveToConversationId(sessionId);
+      if (!convId) return [];
+      const tracked = this.conversations.get(convId);
+      if (!tracked) return [];
+      return [tracked.path];
+    }
+
+    // Resolve each history ID to a file path (oldest first)
+    const encodedPath = this.tmuxPathBySession.get(sessionId);
+    const projectDir = encodedPath
+      ? path.join(this.codeHome, 'projects', encodedPath)
+      : null;
+
+    const chain: string[] = [];
+    const MAX_CHAIN = 20;
+
+    for (const id of history) {
+      if (chain.length >= MAX_CHAIN) break;
+
+      // Check in-memory tracked conversations first
+      const tracked = this.conversations.get(id);
+      if (tracked) {
+        chain.push(tracked.path);
+        continue;
+      }
+
+      // Fall back to disk lookup
+      if (projectDir) {
+        const filePath = path.join(projectDir, `${id}.jsonl`);
+        if (fs.existsSync(filePath)) {
+          chain.push(filePath);
+        }
+      }
+    }
+
+    return chain;
   }
 
   /**
