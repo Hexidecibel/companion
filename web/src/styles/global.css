@@ -860,6 +860,173 @@ body {
 }
 
 /* ========================================
+   Code Review Panel
+   ======================================== */
+
+.code-review-panel {
+  border-bottom: 1px solid var(--border-color);
+  flex-shrink: 0;
+}
+
+.code-review-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  cursor: pointer;
+  transition: background-color 0.15s;
+}
+
+.code-review-header:hover {
+  background-color: var(--bg-secondary);
+}
+
+.code-review-icon {
+  color: var(--accent-blue);
+  font-weight: 700;
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+.code-review-summary {
+  font-size: 13px;
+  color: var(--text-secondary);
+  flex: 1;
+  min-width: 0;
+}
+
+.code-review-refresh {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 14px;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+  transition: color 0.15s, background-color 0.15s;
+}
+
+.code-review-refresh:hover {
+  color: var(--text-primary);
+  background-color: var(--bg-tertiary);
+}
+
+.code-review-toggle {
+  color: var(--text-muted);
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.code-review-files {
+  padding: 4px 0;
+}
+
+.code-review-file {
+  border-top: 1px solid var(--border-color);
+}
+
+.code-review-file-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 16px;
+}
+
+.code-review-action {
+  font-family: monospace;
+  font-weight: 700;
+  font-size: 14px;
+  width: 16px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.code-review-action.write {
+  color: var(--accent-green);
+}
+
+.code-review-action.edit {
+  color: var(--accent-amber);
+}
+
+.code-review-file-name {
+  font-size: 13px;
+  color: var(--text-primary);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.code-review-file-name:hover {
+  text-decoration: underline;
+  color: var(--accent-blue);
+}
+
+.code-review-file-path {
+  font-size: 11px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
+
+.code-review-diff-toggle {
+  background: none;
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.code-review-diff-toggle:hover {
+  color: var(--text-primary);
+  border-color: var(--text-muted);
+}
+
+.code-review-diff {
+  padding: 8px 16px;
+  background-color: var(--bg-primary);
+  overflow-x: auto;
+  font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.code-review-diff-line {
+  white-space: pre;
+}
+
+.code-review-diff-line.added {
+  color: var(--accent-green);
+  background-color: rgba(34, 197, 94, 0.08);
+}
+
+.code-review-diff-line.removed {
+  color: var(--accent-red);
+  background-color: rgba(239, 68, 68, 0.08);
+}
+
+.code-review-diff-line.hunk {
+  color: var(--accent-purple);
+}
+
+.code-review-diff-line.meta {
+  color: var(--text-muted);
+  font-weight: 700;
+}
+
+.code-review-diff-line.context {
+  color: var(--text-secondary);
+}
+
+/* ========================================
    Message List
    ======================================== */
 

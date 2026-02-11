@@ -17,6 +17,7 @@ import {
   extractHighlights,
   extractUsageFromFile,
   extractTasks,
+  extractFileChanges,
   parseConversationChain,
   parseConversationFile,
 } from './parser';
@@ -557,6 +558,10 @@ export class WebSocketHandler {
             requestId,
           });
         }
+        break;
+
+      case 'get_session_diff':
+        this.handleGetSessionDiff(client, payload as { sessionId?: string } | undefined, requestId);
         break;
 
       case 'switch_session':
@@ -1291,6 +1296,77 @@ export class WebSocketHandler {
     }
 
     return null;
+  }
+
+  private async handleGetSessionDiff(
+    client: AuthenticatedClient,
+    payload: { sessionId?: string } | undefined,
+    requestId?: string,
+  ): Promise<void> {
+    const sessionId = payload?.sessionId || this.watcher.getActiveSessionId();
+    if (!sessionId) {
+      this.send(client.ws, {
+        type: 'session_diff',
+        success: false,
+        error: 'No session specified',
+        requestId,
+      });
+      return;
+    }
+
+    const sessions = this.watcher.getSessions();
+    const session = sessions.find((s) => s.id === sessionId);
+    if (!session?.conversationPath) {
+      this.send(client.ws, {
+        type: 'session_diff',
+        success: true,
+        payload: { fileChanges: [], sessionId },
+        requestId,
+      });
+      return;
+    }
+
+    try {
+      const content = fs.readFileSync(session.conversationPath, 'utf-8');
+      const fileChanges = extractFileChanges(content);
+
+      // Try to get git diffs for each file using the session's working directory
+      const workingDir = session.projectPath;
+      if (workingDir) {
+        const diffPromises = fileChanges.map(async (fc) => {
+          try {
+            const { stdout } = await execAsync(
+              `git diff HEAD -- ${JSON.stringify(fc.path)} 2>/dev/null || git diff -- ${JSON.stringify(fc.path)} 2>/dev/null`,
+              { cwd: workingDir, timeout: 5000 },
+            );
+            return { ...fc, diff: stdout || undefined };
+          } catch {
+            return fc;
+          }
+        });
+        const changesWithDiffs = await Promise.all(diffPromises);
+        this.send(client.ws, {
+          type: 'session_diff',
+          success: true,
+          payload: { fileChanges: changesWithDiffs, sessionId },
+          requestId,
+        });
+      } else {
+        this.send(client.ws, {
+          type: 'session_diff',
+          success: true,
+          payload: { fileChanges, sessionId },
+          requestId,
+        });
+      }
+    } catch (err) {
+      this.send(client.ws, {
+        type: 'session_diff',
+        success: false,
+        error: `Failed to get session diff: ${err}`,
+        requestId,
+      });
+    }
   }
 
   private async handleSendInput(

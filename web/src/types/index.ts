@@ -174,6 +174,14 @@ export interface PendingImage {
   previewUrl: string;
 }
 
+// Code review types (file changes extracted from session)
+export interface FileChange {
+  path: string;
+  action: 'write' | 'edit';
+  timestamp: number;
+  diff?: string;
+}
+
 // Work Group types (parallel /work orchestration)
 
 // Scaffold/New Project types

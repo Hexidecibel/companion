@@ -351,6 +351,13 @@ export interface TaskItem {
   updatedAt: number;
 }
 
+// Code review types (file changes extracted from session)
+export interface FileChange {
+  path: string;
+  action: 'write' | 'edit';
+  timestamp: number;
+}
+
 // Work Group types (parallel /work orchestration)
 export interface WorkerQuestion {
   text: string;
