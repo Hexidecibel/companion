@@ -1,12 +1,15 @@
-import { AnthropicUsageResponse, ApiUsageStats } from './types';
+import { AnthropicUsageResponse, ApiUsageStats, DailyUsageBucket } from './types';
 
 // Approximate pricing per million tokens (USD) - update as needed
 const PRICING: Record<
   string,
   { input: number; output: number; cacheWrite: number; cacheRead: number }
 > = {
+  'claude-opus-4-6-20260210': { input: 15, output: 75, cacheWrite: 18.75, cacheRead: 1.5 },
   'claude-opus-4-5-20251101': { input: 15, output: 75, cacheWrite: 18.75, cacheRead: 1.5 },
+  'claude-sonnet-4-5-20250929': { input: 3, output: 15, cacheWrite: 3.75, cacheRead: 0.3 },
   'claude-sonnet-4-5-20251101': { input: 3, output: 15, cacheWrite: 3.75, cacheRead: 0.3 },
+  'claude-haiku-4-5-20251001': { input: 0.8, output: 4, cacheWrite: 1, cacheRead: 0.08 },
   'claude-sonnet-4-20250514': { input: 3, output: 15, cacheWrite: 3.75, cacheRead: 0.3 },
   'claude-3-5-sonnet-20241022': { input: 3, output: 15, cacheWrite: 3.75, cacheRead: 0.3 },
   'claude-3-5-haiku-20241022': { input: 0.8, output: 4, cacheWrite: 1, cacheRead: 0.08 },
@@ -135,4 +138,112 @@ export async function fetchMonthUsage(adminApiKey: string): Promise<ApiUsageStat
   const now = new Date();
   const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
   return fetchAnthropicUsage(adminApiKey, startOfMonth, now);
+}
+
+export async function fetchDailyUsageBuckets(
+  adminApiKey: string,
+  startDate: Date,
+  endDate: Date
+): Promise<DailyUsageBucket[]> {
+  const bucketsByDate = new Map<string, DailyUsageBucket>();
+
+  let hasMore = true;
+  let page: string | undefined;
+
+  while (hasMore) {
+    const url = new URL('https://api.anthropic.com/v1/organizations/usage_report/messages');
+    url.searchParams.set('starting_at', startDate.toISOString());
+    url.searchParams.set('ending_at', endDate.toISOString());
+    url.searchParams.set('bucket_width', '1d');
+    url.searchParams.set('group_by[]', 'model');
+    if (page) {
+      url.searchParams.set('page', page);
+    }
+
+    const response = await fetch(url.toString(), {
+      headers: {
+        'anthropic-version': '2023-06-01',
+        'x-api-key': adminApiKey,
+        'User-Agent': 'Companion/1.0.0',
+      },
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Anthropic API error: ${response.status} - ${errorText}`);
+    }
+
+    const data = (await response.json()) as AnthropicUsageResponse;
+
+    for (const bucket of data.data) {
+      const date = bucket.started_at.split('T')[0]; // YYYY-MM-DD
+      const model = bucket.model || 'unknown';
+      const uncachedInput = bucket.uncached_input_tokens || 0;
+      const cacheCreation = bucket.cache_creation_input_tokens || 0;
+      const cacheRead = bucket.cache_read_input_tokens || 0;
+      const output = bucket.output_tokens || 0;
+      const totalInput = uncachedInput + cacheCreation;
+
+      const pricing = getModelPricing(model);
+      const bucketCost =
+        (uncachedInput / 1_000_000) * pricing.input +
+        (cacheCreation / 1_000_000) * pricing.cacheWrite +
+        (cacheRead / 1_000_000) * pricing.cacheRead +
+        (output / 1_000_000) * pricing.output;
+
+      let dayBucket = bucketsByDate.get(date);
+      if (!dayBucket) {
+        dayBucket = {
+          date,
+          inputTokens: 0,
+          outputTokens: 0,
+          cacheCreationTokens: 0,
+          cacheReadTokens: 0,
+          estimatedCostUsd: 0,
+          byModel: {},
+        };
+        bucketsByDate.set(date, dayBucket);
+      }
+
+      dayBucket.inputTokens += totalInput;
+      dayBucket.outputTokens += output;
+      dayBucket.cacheCreationTokens += cacheCreation;
+      dayBucket.cacheReadTokens += cacheRead;
+      dayBucket.estimatedCostUsd += bucketCost;
+
+      if (!dayBucket.byModel[model]) {
+        dayBucket.byModel[model] = {
+          inputTokens: 0,
+          outputTokens: 0,
+          cacheCreationTokens: 0,
+          cacheReadTokens: 0,
+          costUsd: 0,
+        };
+      }
+      dayBucket.byModel[model].inputTokens += totalInput;
+      dayBucket.byModel[model].outputTokens += output;
+      dayBucket.byModel[model].cacheCreationTokens += cacheCreation;
+      dayBucket.byModel[model].cacheReadTokens += cacheRead;
+      dayBucket.byModel[model].costUsd += bucketCost;
+    }
+
+    hasMore = data.has_more;
+    page = data.next_page;
+  }
+
+  // Round costs and sort by date
+  const result = Array.from(bucketsByDate.values())
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .map((bucket) => ({
+      ...bucket,
+      estimatedCostUsd: Math.round(bucket.estimatedCostUsd * 100) / 100,
+      byModel: Object.fromEntries(
+        Object.entries(bucket.byModel).map(([model, data]) => [
+          model,
+          { ...data, costUsd: Math.round(data.costUsd * 100) / 100 },
+        ])
+      ),
+    }));
+
+  return result;
 }

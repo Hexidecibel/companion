@@ -300,6 +300,12 @@ export function Dashboard({ onSettings }: DashboardProps) {
     return () => window.removeEventListener('open-notification-settings', handler);
   }, []);
 
+  const handleOpenCostDashboard = useCallback(() => {
+    if (activeSession) {
+      window.dispatchEvent(new CustomEvent('open-cost-dashboard', { detail: { serverId: activeSession.serverId } }));
+    }
+  }, [activeSession]);
+
   // Work group action handlers
   const handleViewWorker = useCallback((workerSessionId: string) => {
     if (activeSession) {
@@ -416,6 +422,7 @@ export function Dashboard({ onSettings }: DashboardProps) {
         onToggleDashboardMode={handleToggleDashboardMode}
         dashboardMode={dashboardMode}
         onNotificationSettings={activeSession ? () => setShowNotifSettings(true) : undefined}
+        onCostDashboard={activeSession ? handleOpenCostDashboard : undefined}
         onSettings={onSettings}
         mutedSessions={sessionMute.mutedSessions}
         onToggleMute={handleToggleMute}

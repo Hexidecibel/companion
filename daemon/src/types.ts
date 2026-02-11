@@ -229,6 +229,35 @@ export interface ApiUsageStats {
   estimatedCostUsd: number;
 }
 
+// Cost Dashboard types
+export interface DailyUsageBucket {
+  date: string; // YYYY-MM-DD
+  inputTokens: number;
+  outputTokens: number;
+  cacheCreationTokens: number;
+  cacheReadTokens: number;
+  estimatedCostUsd: number;
+  byModel: Record<string, {
+    inputTokens: number;
+    outputTokens: number;
+    cacheCreationTokens: number;
+    cacheReadTokens: number;
+    costUsd: number;
+  }>;
+}
+
+export interface CostDashboardData {
+  daily: DailyUsageBucket[];
+  totalCostUsd: number;
+  totalInputTokens: number;
+  totalOutputTokens: number;
+  totalCacheCreationTokens: number;
+  totalCacheReadTokens: number;
+  periodStart: string;
+  periodEnd: string;
+  hasAdminKey: boolean;
+}
+
 // Sub-agent tracking types
 export interface SubAgent {
   agentId: string;
@@ -349,6 +378,13 @@ export interface TaskItem {
   blocks?: string[];
   createdAt: number;
   updatedAt: number;
+}
+
+// Code review types (file changes extracted from session)
+export interface FileChange {
+  path: string;
+  action: 'write' | 'edit';
+  timestamp: number;
 }
 
 // Work Group types (parallel /work orchestration)

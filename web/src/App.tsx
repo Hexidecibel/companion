@@ -4,12 +4,14 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 import { StatusPage } from './components/StatusPage';
 import { Dashboard } from './components/Dashboard';
 import { SettingsScreen } from './components/SettingsScreen';
+import { CostDashboard } from './components/CostDashboard';
 import { CommandPalette, CommandAction } from './components/CommandPalette';
 
 type Screen =
   | { name: 'dashboard' }
   | { name: 'status' }
-  | { name: 'settings' };
+  | { name: 'settings' }
+  | { name: 'cost-dashboard'; serverId: string };
 
 export function App() {
   const [screen, setScreen] = useState<Screen>({ name: 'dashboard' });
@@ -64,6 +66,19 @@ export function App() {
     };
     window.addEventListener('popstate', handler);
     return () => window.removeEventListener('popstate', handler);
+  }, []);
+
+  // Listen for open-cost-dashboard events from child components
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent<{ serverId: string }>).detail;
+      if (detail?.serverId) {
+        history.pushState({ screen: 'cost-dashboard' }, '');
+        setScreen({ name: 'cost-dashboard', serverId: detail.serverId });
+      }
+    };
+    window.addEventListener('open-cost-dashboard', handler);
+    return () => window.removeEventListener('open-cost-dashboard', handler);
   }, []);
 
   const focusInput = useCallback(() => {
@@ -125,6 +140,12 @@ export function App() {
           )}
           {screen.name === 'settings' && (
             <SettingsScreen
+              onBack={() => setScreen({ name: 'dashboard' })}
+            />
+          )}
+          {screen.name === 'cost-dashboard' && (
+            <CostDashboard
+              serverId={screen.serverId}
               onBack={() => setScreen({ name: 'dashboard' })}
             />
           )}

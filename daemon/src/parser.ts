@@ -9,11 +9,14 @@ import {
   SessionUsage,
   CompactionEvent,
   TaskItem,
+  FileChange,
 } from './types';
 import { APPROVAL_TOOLS, KNOWN_TOOL_NAMES, getToolDescription, isKnownTool } from './tool-config';
 
 // Re-export TaskItem for tests
 export { TaskItem } from './types';
+// Re-export FileChange for tests
+export { FileChange } from './types';
 
 interface ContentBlock {
   type: string;
@@ -1182,4 +1185,78 @@ export function extractTasks(content: string): TaskItem[] {
     const bNum = parseInt(b.id, 10);
     return aNum - bNum;
   });
+}
+
+/**
+ * Extract file changes from JSONL content (from Write/Edit tool calls).
+ * Only includes completed tool calls (those with a matching tool_result).
+ * Deduplicates by file path, keeping the latest timestamp and upgrading
+ * action to 'write' if both edit and write happened on the same file.
+ */
+export function extractFileChanges(content: string): FileChange[] {
+  if (!content) return [];
+
+  const lines = content.split('\n').filter((line) => line.trim());
+
+  // First pass: collect completed tool IDs (those with tool_result)
+  const completedToolIds = new Set<string>();
+  for (const line of lines) {
+    try {
+      const entry = JSON.parse(line);
+      if (entry.message?.content && Array.isArray(entry.message.content)) {
+        for (const block of entry.message.content) {
+          if (block.type === 'tool_result' && block.tool_use_id) {
+            completedToolIds.add(block.tool_use_id);
+          }
+        }
+      }
+    } catch {
+      continue;
+    }
+  }
+
+  // Second pass: collect Write/Edit tool_use calls that have completed
+  const changesByPath = new Map<string, FileChange>();
+
+  for (const line of lines) {
+    try {
+      const entry = JSON.parse(line);
+      if (entry.message?.content && Array.isArray(entry.message.content)) {
+        const timestamp = entry.timestamp ? new Date(entry.timestamp).getTime() : Date.now();
+
+        for (const block of entry.message.content) {
+          if (block.type !== 'tool_use') continue;
+          if (block.name !== 'Write' && block.name !== 'Edit') continue;
+
+          const toolId = block.id as string;
+          if (!completedToolIds.has(toolId)) continue;
+
+          const input = block.input as Record<string, unknown> | undefined;
+          const filePath = input?.file_path as string | undefined;
+          if (!filePath) continue;
+
+          const action: 'write' | 'edit' = block.name === 'Write' ? 'write' : 'edit';
+          const existing = changesByPath.get(filePath);
+
+          if (existing) {
+            // Update timestamp to latest
+            if (timestamp > existing.timestamp) {
+              existing.timestamp = timestamp;
+            }
+            // Upgrade to 'write' if a Write happened on same file
+            if (action === 'write') {
+              existing.action = 'write';
+            }
+          } else {
+            changesByPath.set(filePath, { path: filePath, action, timestamp });
+          }
+        }
+      }
+    } catch {
+      continue;
+    }
+  }
+
+  // Return sorted by path for stable ordering
+  return Array.from(changesByPath.values()).sort((a, b) => a.path.localeCompare(b.path));
 }

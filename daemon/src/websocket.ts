@@ -17,6 +17,7 @@ import {
   extractHighlights,
   extractUsageFromFile,
   extractTasks,
+  extractFileChanges,
   parseConversationChain,
   parseConversationFile,
 } from './parser';
@@ -40,6 +41,7 @@ import { ProjectConfig } from './scaffold/types';
 import { scoreTemplates } from './scaffold/scorer';
 import { EscalationService, EscalationEvent } from './escalation';
 import { NotificationEventType, EscalationConfig } from './types';
+import { UsageTracker } from './usage-tracker';
 
 // File for persisting tmux session configs
 const TMUX_CONFIGS_FILE = path.join(os.homedir(), '.companion', 'tmux-sessions.json');
@@ -91,6 +93,7 @@ export class WebSocketHandler {
   private escalation: EscalationService;
   private workGroupManager: WorkGroupManager | null;
   private skillCatalog: SkillCatalog;
+  private usageTracker: UsageTracker;
 
   constructor(
     servers: { server: Server; listener: ListenerConfig }[],
@@ -112,6 +115,7 @@ export class WebSocketHandler {
 
     this.escalation = new EscalationService(this.push.getStore(), this.push);
     this.skillCatalog = new SkillCatalog();
+    this.usageTracker = new UsageTracker(config.anthropicAdminApiKey);
 
     // Create a WebSocketServer for each listener
     for (const { server, listener } of servers) {
@@ -559,6 +563,10 @@ export class WebSocketHandler {
         }
         break;
 
+      case 'get_session_diff':
+        this.handleGetSessionDiff(client, payload as { sessionId?: string } | undefined, requestId);
+        break;
+
       case 'switch_session':
         // Handle switch_session asynchronously but await completion
         this.handleSwitchSession(
@@ -879,6 +887,14 @@ export class WebSocketHandler {
             startDate?: string;
             endDate?: string;
           },
+          requestId
+        );
+        break;
+
+      case 'get_cost_dashboard':
+        this.handleGetCostDashboard(
+          client,
+          payload as { period?: '7d' | '30d' } | undefined,
           requestId
         );
         break;
@@ -1305,6 +1321,77 @@ export class WebSocketHandler {
     }
 
     return null;
+  }
+
+  private async handleGetSessionDiff(
+    client: AuthenticatedClient,
+    payload: { sessionId?: string } | undefined,
+    requestId?: string,
+  ): Promise<void> {
+    const sessionId = payload?.sessionId || this.watcher.getActiveSessionId();
+    if (!sessionId) {
+      this.send(client.ws, {
+        type: 'session_diff',
+        success: false,
+        error: 'No session specified',
+        requestId,
+      });
+      return;
+    }
+
+    const sessions = this.watcher.getSessions();
+    const session = sessions.find((s) => s.id === sessionId);
+    if (!session?.conversationPath) {
+      this.send(client.ws, {
+        type: 'session_diff',
+        success: true,
+        payload: { fileChanges: [], sessionId },
+        requestId,
+      });
+      return;
+    }
+
+    try {
+      const content = fs.readFileSync(session.conversationPath, 'utf-8');
+      const fileChanges = extractFileChanges(content);
+
+      // Try to get git diffs for each file using the session's working directory
+      const workingDir = session.projectPath;
+      if (workingDir) {
+        const diffPromises = fileChanges.map(async (fc) => {
+          try {
+            const { stdout } = await execAsync(
+              `git diff HEAD -- ${JSON.stringify(fc.path)} 2>/dev/null || git diff -- ${JSON.stringify(fc.path)} 2>/dev/null`,
+              { cwd: workingDir, timeout: 5000 },
+            );
+            return { ...fc, diff: stdout || undefined };
+          } catch {
+            return fc;
+          }
+        });
+        const changesWithDiffs = await Promise.all(diffPromises);
+        this.send(client.ws, {
+          type: 'session_diff',
+          success: true,
+          payload: { fileChanges: changesWithDiffs, sessionId },
+          requestId,
+        });
+      } else {
+        this.send(client.ws, {
+          type: 'session_diff',
+          success: true,
+          payload: { fileChanges, sessionId },
+          requestId,
+        });
+      }
+    } catch (err) {
+      this.send(client.ws, {
+        type: 'session_diff',
+        success: false,
+        error: `Failed to get session diff: ${err}`,
+        requestId,
+      });
+    }
   }
 
   private async handleSendInput(
@@ -2589,6 +2676,31 @@ export class WebSocketHandler {
         type: 'api_usage',
         success: false,
         error: `Failed to fetch API usage: ${err instanceof Error ? err.message : 'Unknown error'}`,
+        requestId,
+      });
+    }
+  }
+
+  private async handleGetCostDashboard(
+    client: AuthenticatedClient,
+    payload: { period?: '7d' | '30d' } | undefined,
+    requestId?: string
+  ): Promise<void> {
+    try {
+      const period = payload?.period || '7d';
+      const data = await this.usageTracker.getCostDashboard(period);
+      this.send(client.ws, {
+        type: 'cost_dashboard',
+        success: true,
+        payload: data,
+        requestId,
+      });
+    } catch (err) {
+      console.error('Failed to get cost dashboard:', err);
+      this.send(client.ws, {
+        type: 'cost_dashboard',
+        success: false,
+        error: `Failed to fetch cost dashboard: ${err instanceof Error ? err.message : 'Unknown error'}`,
         requestId,
       });
     }

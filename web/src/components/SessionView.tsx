@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { PendingImage, WorkGroup } from '../types';
 import { useConversation } from '../hooks/useConversation';
 import { useTasks } from '../hooks/useTasks';
+import { useCodeReview } from '../hooks/useCodeReview';
 import { useSubAgents } from '../hooks/useSubAgents';
 import { useSubAgentDetail } from '../hooks/useSubAgentDetail';
 import { useAutoApprove } from '../hooks/useAutoApprove';
@@ -13,6 +14,7 @@ import { useSessionMute } from '../hooks/useSessionMute';
 import { useSkills } from '../hooks/useSkills';
 import { WaitingIndicator } from './WaitingIndicator';
 import { TaskList } from './TaskList';
+import { CodeReviewCard } from './CodeReviewCard';
 import { MessageList } from './MessageList';
 import { InputBar, InputBarHandle } from './InputBar';
 import { SubAgentBar } from './SubAgentBar';
@@ -71,6 +73,7 @@ export function SessionView({
   } = useConversation(serverId, sessionId, tmuxSessionName);
 
   const { tasks, loading: tasksLoading } = useTasks(serverId, sessionId);
+  const { fileChanges, loading: reviewLoading, refresh: refreshReview } = useCodeReview(serverId, sessionId);
   const { agents, runningCount, completedCount, totalAgents } = useSubAgents(serverId, sessionId);
   const autoApprove = useAutoApprove(serverId, sessionId);
   const sessionMute = useSessionMute(serverId);
@@ -431,6 +434,15 @@ export function SessionView({
       >
         Search
       </button>
+      {fileChanges.length > 0 && (
+        <button
+          className="session-header-btn"
+          onClick={refreshReview}
+          title="Review file changes"
+        >
+          Review ({fileChanges.length})
+        </button>
+      )}
     </div>
   );
 
@@ -510,6 +522,13 @@ export function SessionView({
           )}
 
           <TaskList tasks={tasks} loading={tasksLoading} />
+
+          <CodeReviewCard
+            fileChanges={fileChanges}
+            loading={reviewLoading}
+            onViewFile={handleViewFile}
+            onRefresh={refreshReview}
+          />
 
           {showSearch && (
             <SearchBar
