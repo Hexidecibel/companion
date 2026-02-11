@@ -4,6 +4,7 @@ import { useDeviceManagement } from '../hooks/useDeviceManagement';
 import { useNotificationHistory } from '../hooks/useNotificationHistory';
 import { useNotifications } from '../hooks/useNotifications';
 import { useServers } from '../hooks/useServers';
+import { useConnections } from '../hooks/useConnections';
 
 type Tab = 'escalation' | 'devices' | 'history';
 
@@ -72,6 +73,8 @@ export function NotificationSettingsModal({ serverId, onClose }: NotificationSet
   const history = useNotificationHistory(serverId);
   const notifications = useNotifications(serverId);
   const { isParallelWorkersEnabled, toggleParallelWorkers } = useServers();
+  const { snapshots } = useConnections();
+  const gitEnabled = snapshots.find(s => s.serverId === serverId)?.gitEnabled ?? true;
 
   // Load data on mount / tab change
   useEffect(() => {
@@ -103,24 +106,26 @@ export function NotificationSettingsModal({ serverId, onClose }: NotificationSet
         <div className="notif-tab-content">
           {tab === 'escalation' && (
             <>
-              <div className="notif-section">
-                <div className="notif-card">
-                  <div className="notif-card-top">
-                    <div>
-                      <div className="notif-card-name">Parallel Workers</div>
-                      <div className="notif-card-detail">Show work group UI when Claude spawns parallel agents</div>
+              {gitEnabled && (
+                <div className="notif-section">
+                  <div className="notif-card">
+                    <div className="notif-card-top">
+                      <div>
+                        <div className="notif-card-name">Parallel Workers</div>
+                        <div className="notif-card-detail">Show work group UI when Claude spawns parallel agents</div>
+                      </div>
+                      <label className="notif-toggle">
+                        <input
+                          type="checkbox"
+                          checked={isParallelWorkersEnabled(serverId)}
+                          onChange={() => toggleParallelWorkers(serverId)}
+                        />
+                        <span className="notif-toggle-slider" />
+                      </label>
                     </div>
-                    <label className="notif-toggle">
-                      <input
-                        type="checkbox"
-                        checked={isParallelWorkersEnabled(serverId)}
-                        onChange={() => toggleParallelWorkers(serverId)}
-                      />
-                      <span className="notif-toggle-slider" />
-                    </label>
                   </div>
                 </div>
-              </div>
+              )}
               <EscalationTab
                 {...escalation}
                 browserNotifications={notifications}

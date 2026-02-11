@@ -333,3 +333,13 @@ User-assigned friendly names for sessions, replacing cryptic tmux session IDs.
 - Falls back to tmux session name / project path if no friendly name set
 - Real-time broadcast to all connected clients on rename
 - Clear friendly name by entering empty string
+
+## Git Integration Toggle
+Configurable `git` boolean in daemon config that gates all git-dependent behavior.
+
+- `"git": true/false` in daemon config (default: true)
+- Daemon sends `gitEnabled` to web clients in auth response
+- When disabled: code review shows JSONL file changes without diffs, worktree/work-group endpoints return errors/empty
+- When enabled: code review filters out already-committed files (no remaining diff and tracked by git)
+- Web UI hides parallel workers toggle and work group controls when git is disabled
+- Backward compatible: older daemons without the field default to enabled

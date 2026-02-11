@@ -323,6 +323,7 @@ export class WebSocketHandler {
           type: 'authenticated',
           success: true,
           isLocal: client.isLocal,
+          gitEnabled: this.config.git,
           requestId,
         });
         console.log(
@@ -1412,7 +1413,7 @@ export class WebSocketHandler {
 
       // Try to get git diffs for each file using the session's working directory
       const workingDir = session.projectPath;
-      if (workingDir) {
+      if (workingDir && this.config.git) {
         const diffPromises = fileChanges.map(async (fc) => {
           try {
             const { stdout } = await execAsync(
@@ -1425,10 +1426,31 @@ export class WebSocketHandler {
           }
         });
         const changesWithDiffs = await Promise.all(diffPromises);
+
+        // Filter out files that have been committed (no remaining diff and tracked by git)
+        let untrackedFiles: Set<string> | undefined;
+        try {
+          const { stdout: statusOut } = await execAsync(
+            'git status --porcelain 2>/dev/null',
+            { cwd: workingDir, timeout: 5000 },
+          );
+          untrackedFiles = new Set(
+            statusOut.split('\n')
+              .filter(l => l.startsWith('??'))
+              .map(l => l.slice(3).trim()),
+          );
+        } catch {
+          // If git status fails, skip filtering
+        }
+
+        const filtered = untrackedFiles
+          ? changesWithDiffs.filter(fc => (fc as { diff?: string }).diff || untrackedFiles!.has(fc.path))
+          : changesWithDiffs;
+
         this.send(client.ws, {
           type: 'session_diff',
           success: true,
-          payload: { fileChanges: changesWithDiffs, sessionId },
+          payload: { fileChanges: filtered, sessionId },
           requestId,
         });
       } else {
@@ -1972,6 +1994,16 @@ export class WebSocketHandler {
     payload: { parentDir: string; branch?: string; startCli?: boolean } | undefined,
     requestId?: string
   ): Promise<void> {
+    if (!this.config.git) {
+      this.send(client.ws, {
+        type: 'worktree_session_created',
+        success: false,
+        error: 'Git integration is disabled',
+        requestId,
+      });
+      return;
+    }
+
     if (!payload?.parentDir) {
       this.send(client.ws, {
         type: 'worktree_session_created',
@@ -2068,6 +2100,16 @@ export class WebSocketHandler {
     payload: { dir: string } | undefined,
     requestId?: string
   ): Promise<void> {
+    if (!this.config.git) {
+      this.send(client.ws, {
+        type: 'worktrees_list',
+        success: true,
+        payload: { worktrees: [] },
+        requestId,
+      });
+      return;
+    }
+
     if (!payload?.dir) {
       this.send(client.ws, {
         type: 'worktrees_list',
@@ -3075,7 +3117,7 @@ export class WebSocketHandler {
   }
 
   private handleGetWorkGroups(client: AuthenticatedClient, requestId?: string): void {
-    if (!this.workGroupManager) {
+    if (!this.config.git || !this.workGroupManager) {
       this.send(client.ws, {
         type: 'work_groups',
         success: true,
@@ -3115,6 +3157,15 @@ export class WebSocketHandler {
     payload: { groupId: string } | undefined,
     requestId?: string
   ): Promise<void> {
+    if (!this.config.git) {
+      this.send(client.ws, {
+        type: 'work_group_merged',
+        success: false,
+        error: 'Git integration is disabled',
+        requestId,
+      });
+      return;
+    }
     if (!this.workGroupManager || !payload?.groupId) {
       this.send(client.ws, {
         type: 'work_group_merged',

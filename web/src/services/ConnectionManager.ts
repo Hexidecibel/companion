@@ -5,6 +5,7 @@ export interface ConnectionSnapshot {
   serverId: string;
   serverName: string;
   state: ConnectionState;
+  gitEnabled: boolean;
 }
 
 type ChangeHandler = (snapshots: ConnectionSnapshot[]) => void;
@@ -103,6 +104,7 @@ export class ConnectionManager {
         serverId: conn.serverId,
         serverName: conn.getServer().name,
         state: conn.getState(),
+        gitEnabled: conn.gitEnabled,
       });
     }
     return snapshots;

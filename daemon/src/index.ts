@@ -112,7 +112,7 @@ async function main(): Promise<void> {
 
   // Initialize work group manager for parallel /work orchestration
   const workGroupTmux = new TmuxManager('companion');
-  const workGroupManager = new WorkGroupManager(workGroupTmux, injector, watcher);
+  const workGroupManager = new WorkGroupManager(workGroupTmux, injector, watcher, config.git);
 
   // Work group push notifications
   workGroupManager.on(

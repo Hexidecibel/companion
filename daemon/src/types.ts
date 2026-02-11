@@ -22,6 +22,7 @@ export interface DaemonConfig {
   fcmCredentialsPath?: string;
   pushDelayMs: number;
   autoApproveTools: string[];
+  git: boolean;
   // Anthropic Admin API key for fetching organization usage (sk-ant-admin-...)
   anthropicAdminApiKey?: string;
 }
@@ -119,6 +120,7 @@ export interface WebSocketResponse {
   requestId?: string;
   sessionId?: string; // Session context for validation
   isLocal?: boolean; // Whether connection is from localhost (sent in auth response)
+  gitEnabled?: boolean; // Whether git integration is enabled (sent in auth response)
 }
 
 export interface RegisteredDevice {

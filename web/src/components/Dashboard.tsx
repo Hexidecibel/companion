@@ -35,8 +35,11 @@ export function Dashboard({ onSettings }: DashboardProps) {
   const { snapshots } = useConnections();
   const { servers, isParallelWorkersEnabled } = useServers();
 
-  // Use work groups for the active server (only if enabled)
-  const workersEnabled = activeSession ? isParallelWorkersEnabled(activeSession.serverId) : true;
+  // Use work groups for the active server (only if enabled and git is available)
+  const gitEnabled = activeSession
+    ? (snapshots.find(s => s.serverId === activeSession.serverId)?.gitEnabled ?? true)
+    : true;
+  const workersEnabled = gitEnabled && (activeSession ? isParallelWorkersEnabled(activeSession.serverId) : true);
   const activeWorkGroups = useWorkGroups(activeSession?.serverId ?? null);
 
   // Away digest - shows what happened while the user was away

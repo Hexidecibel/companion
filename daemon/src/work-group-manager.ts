@@ -42,13 +42,15 @@ export class WorkGroupManager extends EventEmitter {
   private tmux: TmuxManager;
   private injector: InputInjector;
   private watcher: SessionWatcher;
+  private gitEnabled: boolean;
   private monitorInterval: NodeJS.Timeout | null = null;
 
-  constructor(tmux: TmuxManager, injector: InputInjector, watcher: SessionWatcher) {
+  constructor(tmux: TmuxManager, injector: InputInjector, watcher: SessionWatcher, gitEnabled: boolean = true) {
     super();
     this.tmux = tmux;
     this.injector = injector;
     this.watcher = watcher;
+    this.gitEnabled = gitEnabled;
 
     this.loadState();
     this.startMonitoring();
@@ -59,6 +61,10 @@ export class WorkGroupManager extends EventEmitter {
   }
 
   async createWorkGroup(request: SpawnWorkGroupRequest): Promise<WorkGroup> {
+    if (!this.gitEnabled) {
+      throw new Error('Git integration is disabled');
+    }
+
     const groupId = uuidv4();
     const group: WorkGroup = {
       id: groupId,

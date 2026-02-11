@@ -98,6 +98,7 @@ const DEFAULT_CONFIG: Omit<DaemonConfig, 'listeners'> & { listeners?: ListenerCo
   mdnsEnabled: true,
   pushDelayMs: 60000, // 1 minute
   autoApproveTools: DEFAULT_AUTO_APPROVE_TOOLS,
+  git: true,
 };
 
 export function loadConfig(): DaemonConfig {
@@ -137,6 +138,7 @@ export function loadConfig(): DaemonConfig {
         fcmCredentialsPath: parsed.fcm_credentials_path,
         pushDelayMs: parsed.push_delay_ms,
         autoApproveTools: parsed.auto_approve_tools,
+        git: parsed.git,
         anthropicAdminApiKey: parsed.anthropic_admin_api_key,
       };
     } catch (err) {

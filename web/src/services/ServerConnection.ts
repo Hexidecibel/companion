@@ -14,6 +14,7 @@ export class ServerConnection {
   private ws: WebSocket | null = null;
   private server: Server;
   private _isLocal = false;
+  private _gitEnabled = true;
   private connectionState: ConnectionState = {
     status: 'disconnected',
     reconnectAttempts: 0,
@@ -106,6 +107,7 @@ export class ServerConnection {
 
       if (response.success) {
         this._isLocal = !!(response as unknown as { isLocal?: boolean }).isLocal;
+        this._gitEnabled = (response as unknown as { gitEnabled?: boolean }).gitEnabled !== false;
 
         // Subscribe to broadcasts so we receive real-time status_change events
         await this.send({ type: 'subscribe', requestId: `req_${++this.requestCounter}` });
@@ -305,6 +307,10 @@ export class ServerConnection {
 
   get isLocal(): boolean {
     return this._isLocal;
+  }
+
+  get gitEnabled(): boolean {
+    return this._gitEnabled;
   }
 
   updateServerConfig(server: Server): void {
