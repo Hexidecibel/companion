@@ -256,3 +256,36 @@ High-level features of the Companion daemon, web client, and desktop/mobile apps
 - Scroll behavior analytics
 - Client error reporting
 - Management scripts in `bin/` with usage headers and dep checks (companion, build, build-all, build-apk, deploy, dev, test, logs, status)
+
+## Away Digest
+Summary card on the dashboard when returning after inactivity, showing what happened while you were away.
+
+- "While you were away" banner with relative time and event summary
+- Groups events by session: completed, waiting, errors
+- Per-session rows with status icons and preview text
+- Dismissible with fade-in animation
+- 5-minute inactivity threshold to avoid noise
+- Fetches from daemon notification history (persisted to disk)
+- Works on both mobile and desktop dashboards
+
+## Cost Dashboard
+Full-screen usage and cost analytics with daily tracking and budget alerts.
+
+- Stat cards: total cost today, this week, this month
+- Daily usage bar chart (7-day or 30-day view)
+- Per-model token breakdown (when Anthropic admin API key configured)
+- Per-session cost estimates with USD amounts
+- Configurable budget thresholds with push notification alerts
+- Daemon-side daily snapshot persistence (90-day history)
+- Accessible from settings navigation
+
+## Code Review Mode
+Consolidated diff view of all files changed by a session, with approve/reject actions.
+
+- Auto-triggers on session completion with review card in conversation
+- Manual "Review" button in session header for mid-session review
+- Git diff on server for accurate consolidated diffs
+- JSONL Edit/Write fallback for non-git directories
+- Per-file diff stats (insertions/deletions) with expandable diff view
+- "Looks good" to dismiss or "Request changes" to send feedback
+- Opens diffs in existing file viewer with full syntax highlighting
