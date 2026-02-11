@@ -105,12 +105,35 @@ else
   echo "windowSoftInputMode already set in manifest"
 fi
 
-# 9. Remove Tauri vector icon that overrides PNG mipmap icons on API 24+
-VECTOR_ICON="$GEN_ANDROID/app/src/main/res/drawable-v24/ic_launcher_foreground.xml"
+# 9. Copy custom Android icons (overwrite Tauri auto-generated ones)
+CUSTOM_ICONS="$PROJECT_DIR/src-tauri/icons/android"
+RES_DIR="$GEN_ANDROID/app/src/main/res"
+if [ -d "$CUSTOM_ICONS" ]; then
+  echo "Copying custom Android icons..."
+  for dir in "$CUSTOM_ICONS"/mipmap-*; do
+    [ -d "$dir" ] && cp -r "$dir" "$RES_DIR/"
+  done
+  # Copy adaptive icon XML
+  if [ -d "$CUSTOM_ICONS/mipmap-anydpi-v26" ]; then
+    mkdir -p "$RES_DIR/mipmap-anydpi-v26"
+    cp "$CUSTOM_ICONS/mipmap-anydpi-v26/"* "$RES_DIR/mipmap-anydpi-v26/"
+  fi
+  # Copy icon background color
+  if [ -f "$CUSTOM_ICONS/values/ic_launcher_background.xml" ]; then
+    mkdir -p "$RES_DIR/values"
+    cp "$CUSTOM_ICONS/values/ic_launcher_background.xml" "$RES_DIR/values/"
+  fi
+  echo "Custom icons installed"
+else
+  echo "WARNING: No custom Android icons found at $CUSTOM_ICONS"
+fi
+
+# 10. Remove Tauri vector icon that overrides PNG mipmap icons on API 24+
+VECTOR_ICON="$RES_DIR/drawable-v24/ic_launcher_foreground.xml"
 if [ -f "$VECTOR_ICON" ]; then
   echo "Removing Tauri vector icon (would override PNG icons on API 24+)..."
   rm "$VECTOR_ICON"
-  rmdir "$GEN_ANDROID/app/src/main/res/drawable-v24" 2>/dev/null || true
+  rmdir "$RES_DIR/drawable-v24" 2>/dev/null || true
 else
   echo "Tauri vector icon already removed"
 fi
