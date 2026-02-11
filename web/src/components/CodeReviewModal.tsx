@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { FileChange } from '../types';
+import { isMobileViewport } from '../utils/platform';
 
 interface CodeReviewModalProps {
   fileChanges: FileChange[];
@@ -87,6 +88,7 @@ export function CodeReviewModal({ fileChanges, onViewFile, onRefresh, onClose }:
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [fileChanges, selectedIndex, onClose, onViewFile, onRefresh, toggleExpanded]);
 
+  const mobile = isMobileViewport();
   const writes = fileChanges.filter(f => f.action === 'write').length;
   const edits = fileChanges.filter(f => f.action === 'edit').length;
 
@@ -107,13 +109,15 @@ export function CodeReviewModal({ fileChanges, onViewFile, onRefresh, onClose }:
           </div>
         </div>
 
-        <div className="crm-hints">
-          <span><kbd>{'\u2191'}</kbd><kbd>{'\u2193'}</kbd> navigate</span>
-          <span><kbd>Enter</kbd> toggle diff</span>
-          <span><kbd>o</kbd> open file</span>
-          <span><kbd>r</kbd> refresh</span>
-          <span><kbd>Esc</kbd> close</span>
-        </div>
+        {!mobile && (
+          <div className="crm-hints">
+            <span><kbd>{'\u2191'}</kbd><kbd>{'\u2193'}</kbd> navigate</span>
+            <span><kbd>Enter</kbd> toggle diff</span>
+            <span><kbd>o</kbd> open file</span>
+            <span><kbd>r</kbd> refresh</span>
+            <span><kbd>Esc</kbd> close</span>
+          </div>
+        )}
 
         <div className="crm-file-list" ref={fileListRef}>
           {fileChanges.map((fc, i) => {
@@ -127,7 +131,7 @@ export function CodeReviewModal({ fileChanges, onViewFile, onRefresh, onClose }:
               <div
                 key={fc.path}
                 className={`crm-file-item ${isSelected ? 'crm-file-selected' : ''}`}
-                onClick={() => setSelectedIndex(i)}
+                onClick={() => { setSelectedIndex(i); if (mobile) toggleExpanded(fc.path); }}
               >
                 <div className="crm-file-row">
                   <span className={`code-review-action ${fc.action}`}>
