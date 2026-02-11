@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo, useEffect } from 'react';
+import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import { ActiveSession, SessionSummary, WorkGroup } from '../types';
 import { useAllServerSummaries } from '../hooks/useAllServerSummaries';
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
@@ -163,6 +163,61 @@ export function Dashboard({ onSettings }: DashboardProps) {
     return result;
   }, [snapshots, summaries]);
 
+  // Jump number map: sessionId → 1-based index (max 9) for Ctrl+Alt badge display
+  const jumpNumberMap = useMemo(() => {
+    const map = new Map<string, number>();
+    for (let i = 0; i < Math.min(flatSessions.length, 9); i++) {
+      map.set(flatSessions[i].sessionId, i + 1);
+    }
+    return map;
+  }, [flatSessions]);
+
+  // Track Ctrl+Alt held state for showing jump number badges
+  const [showJumpNumbers, setShowJumpNumbers] = useState(false);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.altKey) setShowJumpNumbers(true);
+    };
+    const handleKeyUp = () => {
+      setShowJumpNumbers(false);
+    };
+    const handleBlur = () => setShowJumpNumbers(false);
+    document.addEventListener('keydown', handleKeyDown);
+    document.addEventListener('keyup', handleKeyUp);
+    window.addEventListener('blur', handleBlur);
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+      document.removeEventListener('keyup', handleKeyUp);
+      window.removeEventListener('blur', handleBlur);
+    };
+  }, []);
+
+  // MRU session tracking for Ctrl+Tab cycling
+  const sessionMRURef = useRef<string[]>([]);
+
+  useEffect(() => {
+    if (!activeSession) return;
+    const key = `${activeSession.serverId}:${activeSession.sessionId}`;
+    sessionMRURef.current = [key, ...sessionMRURef.current.filter(k => k !== key)];
+  }, [activeSession]);
+
+  const cycleMRU = useCallback((direction: 1 | -1) => {
+    const mru = sessionMRURef.current;
+    if (mru.length < 2) return;
+    const currentKey = activeSession ? `${activeSession.serverId}:${activeSession.sessionId}` : '';
+    const currentIdx = mru.indexOf(currentKey);
+    let nextIdx = currentIdx + direction;
+    if (nextIdx < 0) nextIdx = mru.length - 1;
+    if (nextIdx >= mru.length) nextIdx = 0;
+    const parts = mru[nextIdx].split(':');
+    const serverId = parts[0];
+    const sessionId = parts.slice(1).join(':');
+    if (serverId && sessionId) {
+      setActiveSession({ serverId, sessionId });
+    }
+  }, [activeSession]);
+
   const navigateSession = useCallback((direction: 1 | -1) => {
     if (flatSessions.length === 0) return;
     if (!activeSession) {
@@ -269,7 +324,9 @@ export function Dashboard({ onSettings }: DashboardProps) {
     { key: '7', meta: true, handler: () => selectSessionByIndex(6) },
     { key: '8', meta: true, handler: () => selectSessionByIndex(7) },
     { key: '9', meta: true, handler: () => selectSessionByIndex(8) },
-  ], [navigateSession, selectSessionByIndex, showShortcutHelp, showNotifSettings]);
+    { key: 'Tab', ctrl: true, handler: () => cycleMRU(1) },
+    { key: 'Tab', ctrl: true, shift: true, handler: () => cycleMRU(-1) },
+  ], [navigateSession, selectSessionByIndex, cycleMRU, showShortcutHelp, showNotifSettings]);
 
   useKeyboardShortcuts(shortcuts);
 
@@ -399,6 +456,9 @@ export function Dashboard({ onSettings }: DashboardProps) {
         onSessionCreated={handleSessionCreated}
         onSettings={onSettings}
         onCostDashboard={(serverId: string) => window.dispatchEvent(new CustomEvent('open-cost-dashboard', { detail: { serverId } }))}
+        onOpenInSplit={handleOpenInSplit}
+        onCloseSplit={handleCloseSplit}
+        secondarySession={secondarySession}
         digest={awayDigest.digest && !awayDigest.dismissed ? awayDigest.digest : undefined}
         onDismissDigest={awayDigest.dismiss}
       />
@@ -429,6 +489,8 @@ export function Dashboard({ onSettings }: DashboardProps) {
         onToggleMute={handleToggleMute}
         workGroups={allWorkGroups}
         mobileOpen={sidebarOpen}
+        showJumpNumbers={showJumpNumbers}
+        jumpNumberMap={jumpNumberMap}
       />
       <main className={`dashboard-main${secondarySession ? ' split-enabled' : ''}`}>
         {awayDigest.digest && !awayDigest.dismissed && (

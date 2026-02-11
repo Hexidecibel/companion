@@ -303,3 +303,33 @@ Consolidated diff view of all files changed by a session, with approve/reject ac
 - Per-file diff stats (insertions/deletions) with expandable diff view
 - "Looks good" to dismiss or "Request changes" to send feedback
 - Opens diffs in existing file viewer with full syntax highlighting
+- Full-screen code review modal with keyboard navigation (j/k, arrows, Enter, Escape)
+- File list panel with diff viewer side-by-side (stacked on mobile)
+- Consolidated entry point: Review button and file changes summary both open the modal
+
+## Mobile Session Context Menu
+Long-press or right-click on a mobile session to get a full context menu.
+
+- Open in Split, Rename, Mute/Unmute, Kill Session actions
+- Replaces old inline kill-confirm UI with proper ContextMenu component
+- Matches desktop sidebar context menu feature parity
+
+## Session Jump Hotkeys
+Keyboard shortcuts for fast session switching on desktop.
+
+- Hold Ctrl/Cmd+Alt to show numbered badges (1-9) on sidebar sessions
+- Ctrl/Cmd+1-9 jumps to session by position (existing)
+- Ctrl+Tab / Ctrl+Shift+Tab cycles through recently used sessions (MRU)
+- Jump badges animate in with scale effect
+- MRU list maintained per session (resets on page reload)
+- Documented in shortcut help overlay (?)
+
+## Session Renaming
+User-assigned friendly names for sessions, replacing cryptic tmux session IDs.
+
+- Right-click "Rename" in both desktop sidebar and mobile context menus
+- Friendly names persisted on daemon at `~/.companion/session-names.json`
+- Display friendly name everywhere: sidebar, mobile dashboard, session cards
+- Falls back to tmux session name / project path if no friendly name set
+- Real-time broadcast to all connected clients on rename
+- Clear friendly name by entering empty string

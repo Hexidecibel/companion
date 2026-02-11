@@ -2,9 +2,11 @@ import { useState, useMemo, useRef, useCallback } from 'react';
 import { ServerSummary, SessionSummary, ActiveSession } from '../types';
 import { useConnections } from '../hooks/useConnections';
 import { useServers } from '../hooks/useServers';
+import { useSessionMute } from '../hooks/useSessionMute';
 import { ServerForm } from './ServerForm';
 import { NewSessionPanel } from './NewSessionPanel';
 import { TmuxModal } from './TmuxModal';
+import { ContextMenu, ContextMenuEntry } from './ContextMenu';
 import { ConnectionSnapshot } from '../services/ConnectionManager';
 import { connectionManager } from '../services/ConnectionManager';
 import { DigestData } from '../hooks/useAwayDigest';
@@ -50,6 +52,9 @@ interface MobileDashboardProps {
   onSessionCreated?: (serverId: string, sessionName: string) => void;
   onSettings?: () => void;
   onCostDashboard?: (serverId: string) => void;
+  onOpenInSplit?: (serverId: string, sessionId: string) => void;
+  onCloseSplit?: () => void;
+  secondarySession?: ActiveSession | null;
   digest?: DigestData;
   onDismissDigest?: () => void;
 }
@@ -60,6 +65,9 @@ export function MobileDashboard({
   onSessionCreated,
   onSettings,
   onCostDashboard,
+  onOpenInSplit,
+  onCloseSplit,
+  secondarySession,
   digest,
   onDismissDigest,
 }: MobileDashboardProps) {
@@ -169,6 +177,9 @@ export function MobileDashboard({
                   )
                 }
                 onCostDashboard={onCostDashboard ? () => onCostDashboard(snap.serverId) : undefined}
+                onOpenInSplit={onOpenInSplit}
+                onCloseSplit={onCloseSplit}
+                secondarySessionId={secondarySession?.serverId === snap.serverId ? secondarySession.sessionId : null}
                 newSessionOpen={newSessionServerId === snap.serverId}
               />
               {newSessionServerId === snap.serverId && (
@@ -238,24 +249,34 @@ interface MobileSessionItemProps {
   session: SessionSummary;
   serverId: string;
   onSelect: () => void;
+  onOpenInSplit?: (serverId: string, sessionId: string) => void;
+  onCloseSplit?: () => void;
+  isSecondary?: boolean;
+  isMuted?: boolean;
+  onToggleMute?: (sessionId: string) => void;
 }
 
-function MobileSessionItem({ session, serverId, onSelect }: MobileSessionItemProps) {
-  const [confirmKill, setConfirmKill] = useState(false);
+function MobileSessionItem({ session, serverId, onSelect, onOpenInSplit, onCloseSplit, isSecondary, isMuted, onToggleMute }: MobileSessionItemProps) {
   const [killing, setKilling] = useState(false);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const didLongPress = useRef(false);
 
-  const startLongPress = useCallback((_e: React.TouchEvent | React.MouseEvent) => {
-    if (!session.tmuxSessionName) return;
+  const openMenu = useCallback((x: number, y: number) => {
+    setContextMenu({ x, y });
+    if (navigator.vibrate) navigator.vibrate(50);
+  }, []);
+
+  const startLongPress = useCallback((e: React.TouchEvent | React.MouseEvent) => {
     didLongPress.current = false;
+    const pos = 'touches' in e
+      ? { x: e.touches[0].clientX, y: e.touches[0].clientY }
+      : { x: e.clientX, y: e.clientY };
     longPressTimer.current = setTimeout(() => {
       didLongPress.current = true;
-      setConfirmKill(true);
-      // Vibrate on mobile if available
-      if (navigator.vibrate) navigator.vibrate(50);
+      openMenu(pos.x, pos.y);
     }, 500);
-  }, [session.tmuxSessionName]);
+  }, [openMenu]);
 
   const cancelLongPress = useCallback(() => {
     if (longPressTimer.current) {
@@ -269,9 +290,9 @@ function MobileSessionItem({ session, serverId, onSelect }: MobileSessionItemPro
       didLongPress.current = false;
       return;
     }
-    if (confirmKill) return;
+    if (contextMenu) return;
     onSelect();
-  }, [confirmKill, onSelect]);
+  }, [contextMenu, onSelect]);
 
   const handleKill = useCallback(async () => {
     if (!session.tmuxSessionName) return;
@@ -281,8 +302,34 @@ function MobileSessionItem({ session, serverId, onSelect }: MobileSessionItemPro
       await conn.sendRequest('kill_tmux_session', { sessionName: session.tmuxSessionName });
     }
     setKilling(false);
-    setConfirmKill(false);
   }, [serverId, session.tmuxSessionName]);
+
+  const menuItems = useMemo((): ContextMenuEntry[] => {
+    const items: ContextMenuEntry[] = [];
+    if (isSecondary && onCloseSplit) {
+      items.push({ label: 'Close Split', onClick: onCloseSplit });
+    } else if (onOpenInSplit) {
+      items.push({ label: 'Open in Split', onClick: () => onOpenInSplit(serverId, session.id) });
+    }
+    items.push({
+      label: 'Rename',
+      onClick: () => {
+        const newName = window.prompt('Session name:', session.friendlyName || '');
+        if (newName !== null) {
+          const conn = connectionManager.getConnection(serverId);
+          if (conn) conn.sendRequest('rename_session', { sessionId: session.id, name: newName });
+        }
+      },
+    });
+    if (onToggleMute) {
+      items.push({ label: isMuted ? 'Unmute' : 'Mute', onClick: () => onToggleMute(session.id) });
+    }
+    if (session.tmuxSessionName) {
+      items.push(null);
+      items.push({ label: killing ? 'Killing...' : 'Kill Session', onClick: handleKill, danger: true, disabled: killing });
+    }
+    return items;
+  }, [isSecondary, onCloseSplit, onOpenInSplit, onToggleMute, isMuted, session, serverId, killing, handleKill]);
 
   return (
     <div
@@ -293,7 +340,7 @@ function MobileSessionItem({ session, serverId, onSelect }: MobileSessionItemPro
       onTouchMove={cancelLongPress}
       onContextMenu={(e) => {
         e.preventDefault();
-        if (session.tmuxSessionName) setConfirmKill(true);
+        openMenu(e.clientX, e.clientY);
       }}
     >
       {session.status === 'working' ? (
@@ -302,33 +349,20 @@ function MobileSessionItem({ session, serverId, onSelect }: MobileSessionItemPro
         <span className={`status-dot ${STATUS_DOT_CLASS[session.status]}`} />
       )}
       <div className="mobile-session-info">
-        <div className="mobile-session-name">{session.name}</div>
-        {confirmKill ? (
-          <div className="mobile-session-kill-confirm">
-            <button
-              className="mobile-kill-btn"
-              onClick={(e) => { e.stopPropagation(); handleKill(); }}
-              disabled={killing}
-            >
-              {killing ? 'Killing...' : 'Kill Session'}
-            </button>
-            <button
-              className="mobile-kill-cancel-btn"
-              onClick={(e) => { e.stopPropagation(); setConfirmKill(false); }}
-            >
-              Cancel
-            </button>
-          </div>
-        ) : (
-          session.currentActivity && (
-            <div className="mobile-session-activity">{session.currentActivity}</div>
-          )
+        <div className="mobile-session-name">{session.friendlyName || session.name}</div>
+        {session.currentActivity && (
+          <div className="mobile-session-activity">{session.currentActivity}</div>
         )}
       </div>
-      {!confirmKill && (
-        <span className="mobile-session-time">
-          {formatRelativeTime(session.lastActivity)}
-        </span>
+      <span className="mobile-session-time">
+        {formatRelativeTime(session.lastActivity)}
+      </span>
+      {contextMenu && menuItems.length > 0 && (
+        <ContextMenu
+          items={menuItems}
+          position={contextMenu}
+          onClose={() => setContextMenu(null)}
+        />
       )}
     </div>
   );
@@ -345,22 +379,26 @@ interface ServerCardProps {
   onNewSession: () => void;
   onTmuxSessions: () => void;
   onCostDashboard?: () => void;
+  onOpenInSplit?: (serverId: string, sessionId: string) => void;
+  onCloseSplit?: () => void;
+  secondarySessionId?: string | null;
   newSessionOpen: boolean;
 }
 
 export { ServerCard };
 export type { ServerCardProps };
 
-function ServerCard({ snap, summary, onSelectSession, onToggleEnabled, onDelete, onEdit, isEnabled, onNewSession, onTmuxSessions, onCostDashboard, newSessionOpen }: ServerCardProps) {
+function ServerCard({ snap, summary, onSelectSession, onToggleEnabled, onDelete, onEdit, isEnabled, onNewSession, onTmuxSessions, onCostDashboard, onOpenInSplit, onCloseSplit, secondarySessionId, newSessionOpen }: ServerCardProps) {
   const isConnected = snap.state.status === 'connected';
   const isConnecting = snap.state.status === 'connecting' || snap.state.status === 'reconnecting';
   const sessions = summary ? sortSessions(summary.sessions) : [];
   const waitingCount = summary?.waitingCount ?? 0;
+  const { mutedSessions, toggleMute } = useSessionMute(snap.serverId);
 
   const dotClass = isConnected
     ? 'status-dot-green'
     : isConnecting
-      ? 'status-dot-amber'
+      ? 'status-dot-blue status-dot-pulse'
       : snap.state.error
         ? 'status-dot-red'
         : 'status-dot-gray';
@@ -459,6 +497,11 @@ function ServerCard({ snap, summary, onSelectSession, onToggleEnabled, onDelete,
                   session={session}
                   serverId={snap.serverId}
                   onSelect={() => onSelectSession(snap.serverId, session.id)}
+                  onOpenInSplit={onOpenInSplit}
+                  onCloseSplit={onCloseSplit}
+                  isSecondary={secondarySessionId === session.id}
+                  isMuted={mutedSessions.has(session.id)}
+                  onToggleMute={toggleMute}
                 />
               ))}
             </div>

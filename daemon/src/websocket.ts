@@ -43,6 +43,7 @@ import { EscalationService, EscalationEvent } from './escalation';
 import { NotificationEventType, EscalationConfig } from './types';
 import { UsageTracker } from './usage-tracker';
 import { OAuthUsageFetcher, UsageMonitor } from './oauth-usage';
+import { SessionNameStore } from './session-names';
 
 // File for persisting tmux session configs
 const TMUX_CONFIGS_FILE = path.join(os.homedir(), '.companion', 'tmux-sessions.json');
@@ -97,6 +98,7 @@ export class WebSocketHandler {
   private usageTracker: UsageTracker;
   private oauthUsageFetcher: OAuthUsageFetcher;
   private usageMonitor: UsageMonitor;
+  private sessionNameStore: SessionNameStore;
 
   constructor(
     servers: { server: Server; listener: ListenerConfig }[],
@@ -119,6 +121,7 @@ export class WebSocketHandler {
     this.escalation = new EscalationService(this.push.getStore(), this.push);
     this.skillCatalog = new SkillCatalog();
     this.usageTracker = new UsageTracker(config.anthropicAdminApiKey);
+    this.sessionNameStore = new SessionNameStore(path.join(os.homedir(), '.companion'));
     this.oauthUsageFetcher = new OAuthUsageFetcher(config.codeHome);
     this.usageMonitor = new UsageMonitor(
       this.oauthUsageFetcher,
@@ -506,6 +509,12 @@ export class WebSocketHandler {
           .listSessions()
           .then(async (tmuxSessions) => {
             const summary = await this.watcher.getServerSummary(tmuxSessions);
+            // Merge friendly names into session summaries
+            const friendlyNames = this.sessionNameStore.getAll();
+            for (const session of summary.sessions) {
+              const fn = friendlyNames[session.id];
+              if (fn) (session as Record<string, unknown>).friendlyName = fn;
+            }
             this.send(client.ws, {
               type: 'server_summary',
               success: true,
@@ -1176,6 +1185,32 @@ export class WebSocketHandler {
           success: true,
           payload: { sessionIds: store.getMutedSessions() },
           requestId,
+        });
+        break;
+      }
+
+      // Session renaming
+      case 'rename_session': {
+        const renamePayload = payload as { sessionId: string; name: string } | undefined;
+        if (!renamePayload?.sessionId) {
+          this.send(client.ws, { type: 'session_renamed', success: false, error: 'Missing sessionId', requestId });
+          break;
+        }
+        if (renamePayload.name) {
+          this.sessionNameStore.set(renamePayload.sessionId, renamePayload.name);
+        } else {
+          this.sessionNameStore.delete(renamePayload.sessionId);
+        }
+        this.send(client.ws, {
+          type: 'session_renamed',
+          success: true,
+          payload: { sessionId: renamePayload.sessionId, friendlyName: renamePayload.name || null },
+          requestId,
+        });
+        // Broadcast to other clients so they update in real-time
+        this.broadcast('session_renamed', {
+          sessionId: renamePayload.sessionId,
+          friendlyName: renamePayload.name || null,
         });
         break;
       }

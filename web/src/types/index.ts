@@ -95,6 +95,7 @@ export interface SessionStatus {
 export interface SessionSummary {
   id: string;
   name: string;
+  friendlyName?: string;
   projectPath: string;
   status: 'idle' | 'working' | 'waiting' | 'error';
   lastActivity: number;

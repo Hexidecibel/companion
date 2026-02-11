@@ -26,6 +26,8 @@ interface SessionSidebarProps {
   onToggleMute?: (serverId: string, sessionId: string) => void;
   workGroups?: Map<string, WorkGroup[]>;
   mobileOpen?: boolean;
+  showJumpNumbers?: boolean;
+  jumpNumberMap?: Map<string, number>;
 }
 
 const STATUS_DOT_CLASS: Record<SessionSummary['status'], string> = {
@@ -105,6 +107,8 @@ export function SessionSidebar({
   onToggleMute,
   workGroups,
   mobileOpen,
+  showJumpNumbers,
+  jumpNumberMap,
 }: SessionSidebarProps) {
   const { snapshots } = useConnections();
   const { getServer, toggleEnabled, deleteServer } = useServers();
@@ -286,6 +290,21 @@ export function SessionSidebar({
       });
     }
 
+    // Rename
+    items.push({
+      label: 'Rename',
+      onClick: () => {
+        const currentName = summaries.get(serverId)?.sessions.find(s => s.id === sessionId)?.friendlyName || '';
+        const newName = window.prompt('Session name:', currentName);
+        if (newName !== null) {
+          const conn = connectionManager.getConnection(serverId);
+          if (conn) {
+            conn.sendRequest('rename_session', { sessionId, name: newName });
+          }
+        }
+      },
+    });
+
     if (onToggleMute) {
       if (items.length > 0) items.push(null);
       items.push({
@@ -309,7 +328,7 @@ export function SessionSidebar({
     }
 
     return items;
-  }, [mutedSessions, onToggleMute, onOpenInSplit, onCloseSplit, secondarySession, activeSession]);
+  }, [mutedSessions, onToggleMute, onOpenInSplit, onCloseSplit, secondarySession, activeSession, summaries]);
 
   return (
     <aside className={`sidebar${mobileOpen ? ' sidebar-open' : ''}`}>
@@ -542,10 +561,13 @@ export function SessionSidebar({
                             {isGroupCollapsed ? '\u25B6' : '\u25BC'}
                           </button>
                         )}
+                        {showJumpNumbers && jumpNumberMap?.has(session.id) && (
+                          <span className="jump-badge">{jumpNumberMap.get(session.id)}</span>
+                        )}
                         <span className={`status-dot ${STATUS_DOT_CLASS[session.status]}`} />
                         <div className="sidebar-session-info">
                           <span className="sidebar-session-name">
-                            {session.name}
+                            {session.friendlyName || session.name}
                             {foremanGroup && (
                               <span className="sidebar-foreman-label"> (foreman)</span>
                             )}

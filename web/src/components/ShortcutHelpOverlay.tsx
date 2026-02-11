@@ -10,6 +10,8 @@ const SHORTCUT_GROUPS = [
     title: 'Navigation',
     shortcuts: [
       { keys: `${MOD}+1-9`, description: 'Switch to session by position' },
+      { keys: `${MOD}+Alt (hold)`, description: 'Show jump number badges' },
+      { keys: `${MOD}+Tab`, description: 'Cycle recent sessions (MRU)' },
       { keys: `${MOD}+[`, description: 'Previous session' },
       { keys: `${MOD}+]`, description: 'Next session' },
       { keys: 'j / \u2193', description: 'Next session' },
