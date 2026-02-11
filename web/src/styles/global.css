@@ -7447,3 +7447,135 @@ html {
   color: #fff;
   border-color: var(--accent-blue);
 }
+
+/* Away Digest */
+.away-digest {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-left: 3px solid var(--accent-purple);
+  border-radius: 8px;
+  margin: 12px;
+  overflow: hidden;
+  animation: fadeIn 0.3s ease;
+}
+
+.away-digest-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.away-digest-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.away-digest-duration {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--text-muted);
+}
+
+.away-digest-dismiss {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 4px 6px;
+  border-radius: 4px;
+  line-height: 1;
+}
+
+.away-digest-dismiss:hover {
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+}
+
+.away-digest-body {
+  padding: 8px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.away-digest-session {
+  padding: 6px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.away-digest-session:hover {
+  background: var(--bg-tertiary);
+}
+
+.away-digest-session-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+
+.away-digest-session-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.away-digest-session-time {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.away-digest-events {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.away-digest-event {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.away-digest-event-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.away-digest-event-type {
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.away-digest-event-preview {
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.away-digest-footer {
+  padding: 6px 12px;
+  border-top: 1px solid var(--border-color);
+}
+
+.away-digest-count {
+  font-size: 11px;
+  color: var(--text-muted);
+}

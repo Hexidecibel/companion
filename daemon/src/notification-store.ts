@@ -231,6 +231,11 @@ export class NotificationStore {
     return { entries, total };
   }
 
+  getHistorySince(since: number): { entries: NotificationHistoryEntry[]; total: number } {
+    const entries = this.history.filter((e) => e.timestamp >= since);
+    return { entries, total: entries.length };
+  }
+
   addHistoryEntry(
     entry: Omit<NotificationHistoryEntry, 'id' | 'timestamp'>
   ): NotificationHistoryEntry {

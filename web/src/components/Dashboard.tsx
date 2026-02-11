@@ -14,6 +14,8 @@ import { useBrowserNotificationListener } from '../hooks/useBrowserNotificationL
 import { initPush, registerWithAllServers } from '../services/push';
 import { isTauri, isTauriDesktop, isMobileViewport } from '../utils/platform';
 import { useServers } from '../hooks/useServers';
+import { useAwayDigest } from '../hooks/useAwayDigest';
+import { AwayDigest } from './AwayDigest';
 
 interface DashboardProps {
   onSettings?: () => void;
@@ -36,6 +38,9 @@ export function Dashboard({ onSettings }: DashboardProps) {
   // Use work groups for the active server (only if enabled)
   const workersEnabled = activeSession ? isParallelWorkersEnabled(activeSession.serverId) : true;
   const activeWorkGroups = useWorkGroups(activeSession?.serverId ?? null);
+
+  // Away digest - shows what happened while the user was away
+  const awayDigest = useAwayDigest();
 
   // Browser notification listener - listens on ALL connected servers
   useBrowserNotificationListener();
@@ -387,6 +392,8 @@ export function Dashboard({ onSettings }: DashboardProps) {
         onSelectSession={handleSelectSession}
         onSessionCreated={handleSessionCreated}
         onSettings={onSettings}
+        digest={awayDigest.digest && !awayDigest.dismissed ? awayDigest.digest : undefined}
+        onDismissDigest={awayDigest.dismiss}
       />
     );
   }
@@ -416,6 +423,22 @@ export function Dashboard({ onSettings }: DashboardProps) {
         mobileOpen={sidebarOpen}
       />
       <main className={`dashboard-main${secondarySession ? ' split-enabled' : ''}`}>
+        {awayDigest.digest && !awayDigest.dismissed && (
+          <AwayDigest
+            digest={awayDigest.digest}
+            onDismiss={awayDigest.dismiss}
+            onSelectSession={(sessionId) => {
+              const snap = snapshots.find(s => {
+                const summary = summaries.get(s.serverId);
+                return summary?.sessions.some(sess => sess.id === sessionId);
+              });
+              if (snap) {
+                handleSelectSession(snap.serverId, sessionId);
+                awayDigest.dismiss();
+              }
+            }}
+          />
+        )}
         {dashboardMode ? (
           <DashboardGrid
             snapshots={snapshots}

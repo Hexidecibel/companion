@@ -1158,6 +1158,20 @@ export class WebSocketHandler {
         break;
       }
 
+      case 'get_digest': {
+        const digestPayload = payload as { since?: number } | undefined;
+        const since = digestPayload?.since ?? (Date.now() - 24 * 60 * 60 * 1000); // default: last 24h
+        const store = this.push.getStore();
+        const digest = store.getHistorySince(since);
+        this.send(client.ws, {
+          type: 'digest',
+          success: true,
+          payload: { entries: digest.entries, total: digest.total, since },
+          requestId,
+        });
+        break;
+      }
+
       case 'clear_notification_history': {
         const store = this.push.getStore();
         store.clearHistory();

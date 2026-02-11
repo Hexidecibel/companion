@@ -7,6 +7,8 @@ import { NewSessionPanel } from './NewSessionPanel';
 import { TmuxModal } from './TmuxModal';
 import { ConnectionSnapshot } from '../services/ConnectionManager';
 import { connectionManager } from '../services/ConnectionManager';
+import { DigestData } from '../hooks/useAwayDigest';
+import { AwayDigest } from './AwayDigest';
 
 const STATUS_DOT_CLASS: Record<SessionSummary['status'], string> = {
   waiting: 'status-dot-blue status-dot-pulse',
@@ -47,6 +49,8 @@ interface MobileDashboardProps {
   onSelectSession: (serverId: string, sessionId: string) => void;
   onSessionCreated?: (serverId: string, sessionName: string) => void;
   onSettings?: () => void;
+  digest?: DigestData;
+  onDismissDigest?: () => void;
 }
 
 export function MobileDashboard({
@@ -54,6 +58,8 @@ export function MobileDashboard({
   onSelectSession,
   onSessionCreated,
   onSettings,
+  digest,
+  onDismissDigest,
 }: MobileDashboardProps) {
   const { snapshots } = useConnections();
   const { servers, toggleEnabled, deleteServer } = useServers();
@@ -98,6 +104,24 @@ export function MobileDashboard({
       </header>
 
       <div className="mobile-dashboard-content">
+        {digest && onDismissDigest && (
+          <AwayDigest
+            digest={digest}
+            onDismiss={onDismissDigest}
+            onSelectSession={(sessionId) => {
+              // Find which server has this session
+              for (const snap of snapshots) {
+                const summary = summaries.get(snap.serverId);
+                if (summary?.sessions.some(s => s.id === sessionId)) {
+                  onSelectSession(snap.serverId, sessionId);
+                  onDismissDigest();
+                  return;
+                }
+              }
+            }}
+          />
+        )}
+
         {snapshots.length === 0 && !addingServer && (
           <div className="mobile-empty-state">
             <div className="mobile-empty-icon">&#x1F4E1;</div>
