@@ -21,7 +21,7 @@ import { SubAgentDetail } from './SubAgentDetail';
 import { FileViewerModal } from './FileViewerModal';
 import { ArtifactViewerModal } from './ArtifactViewerModal';
 import { FileTabBar } from './FileTabBar';
-import { extractPlanFilePath } from './MessageBubble';
+import { extractPlanFilePath, extractInlinePlan } from './MessageBubble';
 import { SearchBar } from './SearchBar';
 import { ConversationSearch } from './ConversationSearch';
 import { TerminalPanel } from './TerminalPanel';
@@ -120,6 +120,16 @@ export function SessionView({
     }
     return null;
   }, [highlights]);
+
+  // Detect inline plan content (ExitPlanMode with input.plan)
+  const latestInlinePlan = useMemo(() => {
+    if (latestPlanFile) return null; // file path takes priority
+    for (let i = highlights.length - 1; i >= 0; i--) {
+      const plan = extractInlinePlan(highlights[i]);
+      if (plan) return plan;
+    }
+    return null;
+  }, [highlights, latestPlanFile]);
 
   // Signal to Dashboard that an overlay is open (for back gesture coordination)
   useEffect(() => {
@@ -397,7 +407,7 @@ export function SessionView({
       >
         Files
       </button>
-      {latestPlanFile && (
+      {latestPlanFile ? (
         <button
           className="session-header-btn plan-btn"
           onClick={() => handleViewFile(latestPlanFile)}
@@ -405,7 +415,15 @@ export function SessionView({
         >
           Plan
         </button>
-      )}
+      ) : latestInlinePlan ? (
+        <button
+          className="session-header-btn plan-btn"
+          onClick={() => setArtifactContent({ content: latestInlinePlan, title: 'Plan' })}
+          title="View plan"
+        >
+          Plan
+        </button>
+      ) : null}
       <button
         className="session-header-btn"
         onClick={() => setShowConversationSearch(true)}

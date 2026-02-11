@@ -385,6 +385,17 @@ function HighlightedText({ text, term }: { text: string; term: string }) {
 // Detect plan file paths in content text
 const PLAN_PATH_RE = /(?:\/[^\s)>"'\]]*\.claude\/plans\/[^\s)>"'\]]+\.md|\/[^\s)>"'\]]*plan\.md)/g;
 
+export function extractInlinePlan(message: ConversationHighlight): string | null {
+  if (message.toolCalls) {
+    for (const tool of message.toolCalls) {
+      if (tool.name === 'ExitPlanMode' && typeof tool.input?.plan === 'string') {
+        return tool.input.plan;
+      }
+    }
+  }
+  return null;
+}
+
 export function extractPlanFilePath(message: ConversationHighlight): string | null {
   // Check tool call inputs for plan references
   if (message.toolCalls) {
@@ -542,8 +553,9 @@ export function MessageBubble({ message, onSelectOption, onCancelMessage, onView
             </button>
           )}
           {toolCalls.map((tool) => {
-            if (tool.name === 'ExitPlanMode' && onViewFile) {
+            if (tool.name === 'ExitPlanMode') {
               const planPath = extractPlanFilePath(message) || planFilePath;
+              const inlinePlan = typeof tool.input?.plan === 'string' ? tool.input.plan : null;
               return (
                 <div key={tool.id} className="plan-card">
                   <div className="plan-card-header">
@@ -552,14 +564,21 @@ export function MessageBubble({ message, onSelectOption, onCancelMessage, onView
                       {tool.status === 'completed' ? 'Approved' : 'Pending'}
                     </span>
                   </div>
-                  {planPath && (
+                  {planPath && onViewFile ? (
                     <button
                       className="plan-card-view-btn"
                       onClick={(e) => { e.stopPropagation(); onViewFile(planPath); }}
                     >
                       View Plan
                     </button>
-                  )}
+                  ) : inlinePlan && onViewArtifact ? (
+                    <button
+                      className="plan-card-view-btn"
+                      onClick={(e) => { e.stopPropagation(); onViewArtifact(inlinePlan, 'Plan'); }}
+                    >
+                      View Plan
+                    </button>
+                  ) : null}
                   {tool.status === 'pending' && onSelectOption && (
                     <div className="plan-card-actions">
                       <button
