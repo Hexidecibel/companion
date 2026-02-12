@@ -21,7 +21,7 @@ High-level features of the Companion daemon, web client, and desktop/mobile apps
 - Sub-agent tracking with expandable tree view (status icons, activity, duration, message count)
 - Click-to-view sub-agent conversation detail
 - Running/completed agent sections with collapsible completed list
-- Optimistic sent message display — messages appear immediately in chat before server acknowledgement
+- Optimistic sent message display — messages appear immediately in chat before server acknowledgement, including terminal-mode sends
 - Direct message sending (no queue) — messages send immediately regardless of session state
 
 ## Mobile Input

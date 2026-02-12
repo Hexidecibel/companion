@@ -35,8 +35,8 @@
   --focus-glow: 0 0 0 2px rgba(139, 92, 246, 0.3);
   --focus-glow-blue: 0 0 0 2px rgba(59, 130, 246, 0.3);
 
-  /* Keyboard height (set by JS visualViewport listener) */
-  --keyboard-height: 0px;
+  /* App height — set by JS visualViewport listener to shrink layout when keyboard opens */
+  /* Falls back to 100dvh when not set (desktop, Tauri mobile) */
 
   /* Font scaling */
   --font-scale: 1;

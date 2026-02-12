@@ -70,6 +70,7 @@ export function SessionView({
     error,
     sendInput,
     cancelMessage,
+    addOptimisticMessage,
     loadMore,
   } = useConversation(serverId, sessionId, tmuxSessionName);
 
@@ -336,11 +337,14 @@ export function SessionView({
         sessionName: tmuxSessionName,
         text,
       });
+      if (response.success) {
+        addOptimisticMessage(text);
+      }
       return response.success;
     } catch {
       return false;
     }
-  }, [serverId, tmuxSessionName]);
+  }, [serverId, tmuxSessionName, addOptimisticMessage]);
 
   const sendTerminalKey = useCallback((key: string) => {
     if (!serverId || !tmuxSessionName) return;

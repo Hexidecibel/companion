@@ -51,41 +51,61 @@ export function applySafeAreaInsets(): void {
 }
 
 /**
- * Track keyboard height via visualViewport API and expose as CSS variable.
- * When the virtual keyboard opens on mobile, the visual viewport shrinks
- * but the layout viewport stays the same. We compute the difference and
- * set --keyboard-height so CSS can adjust bottom-fixed elements.
+ * Track visual viewport height and expose as --app-height CSS variable.
+ * When the virtual keyboard opens, the visual viewport shrinks. Instead of
+ * adding padding, we set the container height to the visible area so the
+ * flex layout naturally keeps the input bar above the keyboard.
  *
- * Uses visualViewport.height as the reference (not window.innerHeight) to
- * avoid false offsets from URL bar collapse/expand. A minimum threshold of
- * 100px filters out small viewport changes that aren't keyboard-related.
+ * Uses thresholds + debounce to avoid "sliding" during keyboard animations
+ * and to ignore small changes from URL bar / autocomplete bar adjustments.
  *
  * On Tauri mobile (Android/iOS), the WebView resizes via adjustResize,
- * so the keyboard is already accounted for and we skip the CSS variable
- * to avoid double-counting (WebView shrink + CSS padding).
+ * so the keyboard is already accounted for and we skip this entirely.
  */
 export function initKeyboardHeightListener(): void {
-  // Tauri mobile WebViews handle keyboard resize natively via adjustResize.
-  // Adding CSS padding on top would double-count, pushing the input bar too high.
   if (isTauriMobile()) return;
 
   const vv = window.visualViewport;
   if (!vv) return;
 
-  // Track the largest visual viewport height as the "no keyboard" baseline.
-  // This avoids window.innerHeight vs vv.height discrepancies (URL bar, nav bar).
-  let maxViewportHeight = vv.height;
+  let fullHeight = vv.height; // viewport height without keyboard
+  let lastApplied = vv.height;
+  let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+
+  const apply = (height: number) => {
+    lastApplied = height;
+    document.documentElement.style.setProperty('--app-height', `${height}px`);
+  };
 
   const update = () => {
-    if (vv.height > maxViewportHeight) {
-      maxViewportHeight = vv.height;
+    if (debounceTimer) clearTimeout(debounceTimer);
+
+    const h = vv.height;
+
+    // Viewport grew back (keyboard closing, URL bar hiding) — snap immediately
+    if (h >= fullHeight) {
+      fullHeight = h;
+      if (Math.abs(h - lastApplied) > 5) {
+        apply(h);
+      }
+      return;
     }
-    const rawDiff = Math.max(0, maxViewportHeight - vv.height);
-    // Keyboards are always >150px; smaller changes are URL/nav bar transitions
-    const keyboardHeight = rawDiff > 150 ? rawDiff : 0;
-    document.documentElement.style.setProperty('--keyboard-height', `${keyboardHeight}px`);
+
+    const shrinkFromFull = fullHeight - h;
+    const changeFromApplied = Math.abs(h - lastApplied);
+
+    // Small shrink from full height (< 100px) — URL bar, autocomplete, ignore
+    if (shrinkFromFull < 100) return;
+
+    // Already tracking keyboard, small adjustment (< 50px) — ignore jitter
+    if (changeFromApplied < 50) return;
+
+    // Significant keyboard change — debounce to let animation settle
+    debounceTimer = setTimeout(() => {
+      apply(vv.height);
+    }, 100);
   };
 
   vv.addEventListener('resize', update);
-  vv.addEventListener('scroll', update);
+  apply(vv.height);
 }

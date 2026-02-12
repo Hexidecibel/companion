@@ -20,6 +20,7 @@ interface UseConversationReturn {
   error: string | null;
   sendInput: (text: string, opts?: { skipOptimistic?: boolean }) => Promise<boolean>;
   cancelMessage: (clientMessageId: string) => Promise<string | null>;
+  addOptimisticMessage: (text: string) => void;
   loadMore: () => void;
 }
 
@@ -330,5 +331,20 @@ export function useConversation(
     [serverId, sessionId, tmuxSessionName],
   );
 
-  return { highlights, status, loading, loadingMore, hasMore, error, sendInput, cancelMessage, loadMore };
+  const addOptimisticMessage = useCallback((text: string) => {
+    const id = `terminal-${Date.now()}-${++clientMessageCounter}`;
+    setHighlights((prev) => [
+      ...prev,
+      {
+        id,
+        type: 'user' as const,
+        content: text,
+        timestamp: Date.now(),
+        isWaitingForChoice: false,
+        isPending: true,
+      },
+    ]);
+  }, []);
+
+  return { highlights, status, loading, loadingMore, hasMore, error, sendInput, cancelMessage, addOptimisticMessage, loadMore };
 }

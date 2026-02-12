@@ -412,7 +412,7 @@ body {
 
 .dashboard {
   display: flex;
-  height: 100dvh;
+  height: var(--app-height, 100dvh);
   overflow: hidden;
 }
 
@@ -2339,10 +2339,10 @@ body {
     max-width: 95%;
   }
 
-  /* Input bar flush with safe area; keyboard-height overrides safe-bottom when keyboard is open */
+  /* Input bar flush with safe area */
   .input-bar {
     padding: 8px 12px;
-    padding-bottom: max(8px, var(--safe-bottom), var(--keyboard-height));
+    padding-bottom: max(8px, var(--safe-bottom));
     gap: 6px;
   }
 
@@ -2840,7 +2840,7 @@ html {
   top: 0;
   left: 0;
   right: 0;
-  bottom: var(--keyboard-height);
+  bottom: 0;
   background-color: rgba(0, 0, 0, 0.6);
   display: flex;
   align-items: center;
@@ -4674,7 +4674,7 @@ html {
   top: 0;
   left: 0;
   right: 0;
-  bottom: var(--keyboard-height);
+  bottom: 0;
   background-color: rgba(0, 0, 0, 0.5);
   display: flex;
   justify-content: center;
@@ -6454,8 +6454,8 @@ html {
 @media (max-width: 480px) {
   .server-form-modal {
     width: 100%;
-    max-height: 100dvh;
-    height: 100dvh;
+    max-height: var(--app-height, 100dvh);
+    height: var(--app-height, 100dvh);
     border-radius: 0;
   }
 
@@ -6804,7 +6804,7 @@ html {
 .mobile-dashboard {
   display: flex;
   flex-direction: column;
-  height: 100dvh;
+  height: var(--app-height, 100dvh);
   overflow: hidden;
   background: var(--bg-primary);
 }
@@ -7171,8 +7171,8 @@ html {
 @media (max-width: 768px) {
   .skill-browser {
     max-width: 100%;
-    max-height: 100dvh;
-    height: 100dvh;
+    max-height: var(--app-height, 100dvh);
+    height: var(--app-height, 100dvh);
     border-radius: 0;
   }
 
