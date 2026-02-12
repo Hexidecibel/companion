@@ -191,8 +191,23 @@ export function SessionView({
   // Always keep textarea focused on desktop — re-focus whenever focus leaves
   useEffect(() => {
     if (isMobileViewport() || !serverId || !sessionId) return;
+    // Track mouse-down state to avoid stealing focus during click-drag selection
+    let mouseDown = false;
+    const onMouseDown = () => { mouseDown = true; };
+    const onMouseUp = () => {
+      mouseDown = false;
+      // After mouseup, refocus if no text was selected
+      requestAnimationFrame(() => {
+        const selection = window.getSelection();
+        if (selection && selection.toString().length > 0) return;
+        const textarea = document.querySelector('.input-bar-textarea') as HTMLElement | null;
+        textarea?.focus();
+      });
+    };
+
     const refocus = () => {
       requestAnimationFrame(() => {
+        if (mouseDown) return;
         const active = document.activeElement;
         // Don't steal focus from other interactive elements
         if (active && active.closest('input, textarea:not(.input-bar-textarea), [contenteditable], select')) return;
@@ -207,7 +222,13 @@ export function SessionView({
     refocus();
     // Re-focus when clicks happen outside interactive elements
     document.addEventListener('focusout', refocus);
-    return () => document.removeEventListener('focusout', refocus);
+    document.addEventListener('mousedown', onMouseDown);
+    document.addEventListener('mouseup', onMouseUp);
+    return () => {
+      document.removeEventListener('focusout', refocus);
+      document.removeEventListener('mousedown', onMouseDown);
+      document.removeEventListener('mouseup', onMouseUp);
+    };
   }, [showTerminal, serverId, sessionId]);
 
   // Click on conversation area focuses textarea (desktop only)

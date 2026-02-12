@@ -2,6 +2,8 @@ import { useState, useCallback, useEffect, useRef } from 'react';
 import { ConversationHighlight, Question } from '../types';
 import { ToolCard } from './ToolCard';
 import { MarkdownRenderer } from './MarkdownRenderer';
+import { ContextMenu, ContextMenuEntry } from './ContextMenu';
+import { isTouchDevice } from '../utils/platform';
 
 const ARTIFACT_THRESHOLD = 100; // lines
 
@@ -460,6 +462,62 @@ export function MessageBubble({ message, onSelectOption, onCancelMessage, onView
   const isUser = message.type === 'user';
   const isSystem = message.type === 'system';
   const [allExpanded, setAllExpanded] = useState<boolean | undefined>(undefined);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
+  const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const didLongPress = useRef(false);
+  const bubbleRef = useRef<HTMLDivElement>(null);
+
+  const showContextMenu = !isSystem && !message.isPending;
+
+  const openMenu = useCallback((x: number, y: number) => {
+    setContextMenu({ x, y });
+    if (navigator.vibrate) navigator.vibrate(50);
+  }, []);
+
+  const startLongPress = useCallback((e: React.TouchEvent) => {
+    didLongPress.current = false;
+    const touch = e.touches[0];
+    longPressTimer.current = setTimeout(() => {
+      didLongPress.current = true;
+      openMenu(touch.clientX, touch.clientY);
+    }, 500);
+  }, [openMenu]);
+
+  const cancelLongPress = useCallback(() => {
+    if (longPressTimer.current) {
+      clearTimeout(longPressTimer.current);
+      longPressTimer.current = null;
+    }
+  }, []);
+
+  const handleContextMenu = useCallback((e: React.MouseEvent) => {
+    if (!showContextMenu) return;
+    e.preventDefault();
+    openMenu(e.clientX, e.clientY);
+  }, [showContextMenu, openMenu]);
+
+  const contextMenuItems = useCallback((): ContextMenuEntry[] => {
+    const items: ContextMenuEntry[] = [];
+    if (isUser) {
+      items.push({
+        label: 'Copy message',
+        onClick: () => navigator.clipboard.writeText(message.content),
+      });
+    } else {
+      items.push({
+        label: 'Copy message',
+        onClick: () => {
+          const text = bubbleRef.current?.innerText || message.content;
+          navigator.clipboard.writeText(text);
+        },
+      });
+      items.push({
+        label: 'Copy as Markdown',
+        onClick: () => navigator.clipboard.writeText(message.content),
+      });
+    }
+    return items;
+  }, [message.content, isUser]);
 
   // Render compaction summaries as expandable dividers
   if (isSystem && message.isCompaction) {
@@ -508,7 +566,16 @@ export function MessageBubble({ message, onSelectOption, onCancelMessage, onView
       {hasContent && message.skillName ? (
         <SkillCard skillName={message.skillName} content={message.content} onViewFile={onViewFile} />
       ) : hasContent && (
-        <div className={`msg-bubble ${isUser ? 'msg-bubble-user' : 'msg-bubble-assistant'} ${isUser && message.isPending ? 'msg-bubble-pending' : ''}`}>
+        <div
+          ref={bubbleRef}
+          className={`msg-bubble ${isUser ? 'msg-bubble-user' : 'msg-bubble-assistant'} ${isUser && message.isPending ? 'msg-bubble-pending' : ''}`}
+          onContextMenu={handleContextMenu}
+          {...(showContextMenu && isTouchDevice() ? {
+            onTouchStart: startLongPress,
+            onTouchEnd: cancelLongPress,
+            onTouchMove: cancelLongPress,
+          } : {})}
+        >
           {searchTerm ? (
             <pre className="msg-content">
               <HighlightedText text={message.content} term={searchTerm} />
@@ -530,6 +597,13 @@ export function MessageBubble({ message, onSelectOption, onCancelMessage, onView
             >
               &#x2715;
             </button>
+          )}
+          {showContextMenu && contextMenu && (
+            <ContextMenu
+              items={contextMenuItems()}
+              position={contextMenu}
+              onClose={() => setContextMenu(null)}
+            />
           )}
         </div>
       )}

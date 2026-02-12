@@ -40,10 +40,14 @@ function mergeWithPending(
   const pending = prev.filter((h) => h.isPending);
   if (pending.length === 0) return server;
 
-  // Timeout: drop stale pending messages (handles compaction, edge cases)
+  // Auto-confirm stale pending messages instead of dropping them —
+  // the message was almost certainly delivered, just not yet in JSONL.
   const now = Date.now();
+  const stalePending = pending.filter((p) => now - p.timestamp >= MAX_PENDING_AGE_MS);
   const freshPending = pending.filter((p) => now - p.timestamp < MAX_PENDING_AGE_MS);
-  if (freshPending.length === 0) return server;
+  // Stale messages get confirmed (isPending removed) and appended to server data
+  const confirmed = stalePending.map((p) => ({ ...p, isPending: false }));
+  if (freshPending.length === 0) return [...server, ...confirmed];
 
   // If a compaction occurred after pending messages were created, the old
   // conversation was summarized and pending messages were consumed/absorbed.
@@ -51,24 +55,29 @@ function mergeWithPending(
   const hasRecentCompaction = server.some(
     (h) => h.isCompaction && h.timestamp > oldestPendingTime,
   );
-  if (hasRecentCompaction) return server;
+  if (hasRecentCompaction) return [...server, ...confirmed];
 
   // Check which pending messages are now confirmed by server data.
   // A pending message is confirmed if a server user message with matching
-  // content appears after the last non-pending message.
+  // content appears in recent server messages.
+  const allPending = [...freshPending, ...stalePending];
   const lastServerUserContent = new Set(
     server
       .filter((h) => h.type === 'user')
-      .slice(-freshPending.length * 2) // check recent user messages
+      .slice(-allPending.length * 2) // check recent user messages
       .map((h) => h.content.trim()),
   );
 
   const stillPending = freshPending.filter(
     (p) => !lastServerUserContent.has(p.content.trim()),
   );
+  // Only add confirmed stale messages that aren't already in server data
+  const stillConfirmed = confirmed.filter(
+    (p) => !lastServerUserContent.has(p.content.trim()),
+  );
 
-  if (stillPending.length === 0) return server;
-  return [...server, ...stillPending];
+  if (stillPending.length === 0 && stillConfirmed.length === 0) return server;
+  return [...server, ...stillConfirmed, ...stillPending];
 }
 
 export function useConversation(

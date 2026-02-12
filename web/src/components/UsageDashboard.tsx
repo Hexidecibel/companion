@@ -53,7 +53,7 @@ export function UsageDashboard({ serverId, onBack }: UsageDashboardProps) {
   }, [refresh, costDash.refresh]);
 
   return (
-    <div style={{ padding: '1rem', maxWidth: '640px', margin: '0 auto', width: '100%' }}>
+    <div style={{ padding: '1rem', paddingTop: 'calc(1rem + var(--safe-top))', maxWidth: '640px', margin: '0 auto', width: '100%' }}>
       {/* Header */}
       <div
         style={{

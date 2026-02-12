@@ -24,7 +24,19 @@ jobs:
         with:
           name: web-dist
           path: web/dist
-      - run: cd daemon && npm ci && npm run build && npm test
+      - name: Build and test daemon
+        run: |
+          cd daemon && npm ci && npm run build
+          npm test 2>&1 | tee test-output.txt; RC=${PIPESTATUS[0]}
+          # Jest with forceExit exits non-zero on open handles even when all tests pass.
+          if grep -q "Tests:.*failed" test-output.txt; then
+            echo "::error::Tests failed"
+            exit 1
+          fi
+          if ! grep -q "Tests:.*passed" test-output.txt; then
+            echo "::error::No test results found — Jest may have crashed"
+            exit $RC
+          fi
       - name: Package daemon
         run: cd daemon && npm pack
       - uses: actions/upload-artifact@v4
@@ -110,6 +122,8 @@ jobs:
       - run: cd desktop && npm ci
       - name: Initialize iOS project
         run: cd desktop && npx tauri ios init
+      - name: Patch iOS project (icons)
+        run: cd desktop && bash scripts/setup-ios.sh
       - name: Set iOS display name
         run: |
           INFO_PLIST=$(find desktop/src-tauri/gen/apple -name 'Info.plist' -path '*_iOS*' | head -1)
