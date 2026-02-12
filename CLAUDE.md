@@ -237,15 +237,17 @@ export function useMyHook(param: string) {
 
 ## Tracking Files
 
-Three files track the lifecycle of work items:
+Four files track the lifecycle of work items:
 
 | File | Purpose |
 |------|---------|
 | `todo.md` | Quick capture for ideas and tasks. Items are raw, unplanned. |
 | `plan.md` | Detailed implementation plans with status, design, file lists, and steps. |
 | `FEATURES.md` | Completed features — living changelog of what's been shipped. |
+| `backlog.md` | Deferred ideas, long-term research, and items not in the daily workflow. |
 
 **Flow:** `todo.md` (idea) -> `plan.md` (planned -> in-progress -> done) -> `FEATURES.md` (shipped)
+**Deferred:** Items moved from `todo.md` to `backlog.md` when not prioritized.
 
 When committing (`/commit`), update all three:
 1. Remove completed items from `todo.md`

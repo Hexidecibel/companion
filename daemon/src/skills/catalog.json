@@ -117,6 +117,15 @@
     "content": "# Stop Project\n\nStop your project's running development services.\n\n## Instructions\n\n1. Detect running services:\n   - Check for running docker-compose services\n   - Check for node/python/go processes in the project directory\n   - Check for processes on common dev ports (3000, 5173, 8080, etc.)\n\n2. Stop services gracefully:\n   - docker-compose down (if applicable)\n   - Send SIGTERM to application processes\n\n3. Report what was stopped\n\n## Fault Detection\n\n- If no services found running, report that\n- If a service won't stop, suggest force kill\n"
   },
   {
+    "id": "ideas",
+    "name": "Ideas",
+    "description": "Introspect the codebase and suggest ideas for features, refactors, or general improvements.",
+    "category": "workflow",
+    "scope": "universal",
+    "prerequisites": ["CLAUDE.md", "FEATURES.md"],
+    "content": "# Ideas\n\nIntrospect the codebase and suggest ideas for features, refactors, or general improvements.\n\n## Instructions\n\n1. Read `CLAUDE.md` to understand the project structure and architecture\n\n2. Read `FEATURES.md` to understand what's already been built\n\n3. Read `todo.md` to see what's already planned (avoid duplicating these)\n\n4. Read `plan.md` to see what's in progress\n\n5. Explore the codebase — scan key files, look at recent git history, check for:\n   - Code patterns that could be improved\n   - Missing features that would complement existing ones\n   - UX rough edges or inconsistencies\n   - Performance opportunities\n   - Architecture improvements\n   - Developer experience improvements\n\n6. Present 5-10 ideas organized by category:\n\n   ### Features\n   - Ideas for new user-facing functionality\n\n   ### Refactors\n   - Code quality, architecture, or pattern improvements\n\n   ### Polish\n   - UX improvements, edge cases, visual refinements\n\n   ### Infrastructure\n   - Build, deploy, testing, or tooling improvements\n\n7. For each idea:\n   - One-line description\n   - Brief rationale (why it matters)\n   - Rough scope estimate (small / medium / large)\n\n## Rules\n\n- Don't suggest things already in todo.md or plan.md\n- Don't suggest things already in FEATURES.md (already shipped)\n- Focus on practical, high-impact ideas\n- Prioritize ideas that build on existing strengths\n- Be specific — \"improve performance\" is too vague, \"lazy-load highlight.js languages\" is good\n"
+  },
+  {
     "id": "deploy",
     "name": "Deploy",
     "description": "Deploy your project using detected deployment method (Vercel, AWS, systemd, Docker, etc.).",

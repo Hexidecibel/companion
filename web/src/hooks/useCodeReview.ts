@@ -58,5 +58,24 @@ export function useCodeReview(
     };
   }, [serverId, sessionId, fetchDiff]);
 
+  // Auto-refresh when conversation updates (e.g. Write/Edit tool completes)
+  useEffect(() => {
+    if (!serverId || !sessionId) return;
+
+    const conn = connectionManager.getConnection(serverId);
+    if (!conn) return;
+
+    const unsub = conn.onMessage((msg) => {
+      if (!mountedRef.current) return;
+      if (msg.sessionId && msg.sessionId !== sessionId) return;
+
+      if (msg.type === 'conversation_update') {
+        fetchDiff();
+      }
+    });
+
+    return unsub;
+  }, [serverId, sessionId, fetchDiff]);
+
   return { fileChanges, loading, refresh: fetchDiff };
 }

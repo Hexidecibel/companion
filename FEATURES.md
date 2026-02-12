@@ -306,6 +306,7 @@ Consolidated diff view of all files changed by a session, with approve/reject ac
 - Full-screen code review modal with keyboard navigation (j/k, arrows, Enter, Escape)
 - File list panel with diff viewer side-by-side (stacked on mobile)
 - Consolidated entry point: Review button and file changes summary both open the modal
+- Auto-refresh on file changes: listens for `conversation_update` broadcasts to re-fetch diffs when Write/Edit tools complete
 
 ## Mobile Session Context Menu
 Long-press or right-click on a mobile session to get a full context menu.
