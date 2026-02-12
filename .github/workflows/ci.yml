@@ -40,7 +40,18 @@ jobs:
 
       - name: Test
         working-directory: daemon
-        run: npm test -- --coverage
+        run: |
+          npm test -- --coverage 2>&1 | tee test-output.txt; RC=${PIPESTATUS[0]}
+          # Jest with forceExit exits non-zero on open handles even when all tests pass.
+          # Check actual test results instead of relying on exit code.
+          if grep -q "Tests:.*failed" test-output.txt; then
+            echo "::error::Tests failed"
+            exit 1
+          fi
+          if ! grep -q "Tests:.*passed" test-output.txt; then
+            echo "::error::No test results found — Jest may have crashed"
+            exit $RC
+          fi
 
       - name: Build
         working-directory: daemon
@@ -75,6 +86,10 @@ jobs:
       - name: Type check
         working-directory: web
         run: npm run typecheck
+
+      - name: Test
+        working-directory: web
+        run: npm test
 
       - name: Build
         working-directory: web
