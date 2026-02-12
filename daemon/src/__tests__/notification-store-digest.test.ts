@@ -1,14 +1,6 @@
 import { NotificationStore } from '../notification-store';
-import * as fs from 'fs';
-import * as path from 'path';
-import * as os from 'os';
 
-// Use a temp directory so tests don't touch real state
-const TEST_DIR = path.join(os.tmpdir(), `companion-digest-test-${process.pid}`);
-const STATE_FILE = path.join(TEST_DIR, 'notification-state.json');
-const HISTORY_FILE = path.join(TEST_DIR, 'notification-history.json');
-
-// Monkey-patch the module constants before importing
+// Monkey-patch fs so tests don't touch real state
 jest.mock('fs', () => {
   const actual = jest.requireActual('fs');
   return {
@@ -55,9 +47,6 @@ describe('NotificationStore.getHistorySince', () => {
       tier: 'browser',
       acknowledged: false,
     });
-
-    // Wait a tick to ensure different timestamps
-    const afterFirst = Date.now();
 
     store.addHistoryEntry({
       eventType: 'error_detected',
@@ -112,7 +101,7 @@ describe('NotificationStore.getHistorySince', () => {
 
     const result = store.getHistorySince(midpoint);
     // Should only contain the newer entry
-    expect(result.entries.every(e => e.timestamp >= midpoint)).toBe(true);
+    expect(result.entries.every((e) => e.timestamp >= midpoint)).toBe(true);
   });
 
   it('should return empty when since is in the future', () => {

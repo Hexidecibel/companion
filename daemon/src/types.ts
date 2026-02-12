@@ -239,13 +239,16 @@ export interface DailyUsageBucket {
   cacheCreationTokens: number;
   cacheReadTokens: number;
   estimatedCostUsd: number;
-  byModel: Record<string, {
-    inputTokens: number;
-    outputTokens: number;
-    cacheCreationTokens: number;
-    cacheReadTokens: number;
-    costUsd: number;
-  }>;
+  byModel: Record<
+    string,
+    {
+      inputTokens: number;
+      outputTokens: number;
+      cacheCreationTokens: number;
+      cacheReadTokens: number;
+      costUsd: number;
+    }
+  >;
 }
 
 export interface CostDashboardData {

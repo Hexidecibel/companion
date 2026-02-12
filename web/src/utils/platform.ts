@@ -56,6 +56,10 @@ export function applySafeAreaInsets(): void {
  * but the layout viewport stays the same. We compute the difference and
  * set --keyboard-height so CSS can adjust bottom-fixed elements.
  *
+ * Uses visualViewport.height as the reference (not window.innerHeight) to
+ * avoid false offsets from URL bar collapse/expand. A minimum threshold of
+ * 100px filters out small viewport changes that aren't keyboard-related.
+ *
  * On Tauri mobile (Android/iOS), the WebView resizes via adjustResize,
  * so the keyboard is already accounted for and we skip the CSS variable
  * to avoid double-counting (WebView shrink + CSS padding).
@@ -68,8 +72,17 @@ export function initKeyboardHeightListener(): void {
   const vv = window.visualViewport;
   if (!vv) return;
 
+  // Track the largest visual viewport height as the "no keyboard" baseline.
+  // This avoids window.innerHeight vs vv.height discrepancies (URL bar, nav bar).
+  let maxViewportHeight = vv.height;
+
   const update = () => {
-    const keyboardHeight = Math.max(0, window.innerHeight - vv.height);
+    if (vv.height > maxViewportHeight) {
+      maxViewportHeight = vv.height;
+    }
+    const rawDiff = Math.max(0, maxViewportHeight - vv.height);
+    // Keyboards are always >150px; smaller changes are URL/nav bar transitions
+    const keyboardHeight = rawDiff > 150 ? rawDiff : 0;
     document.documentElement.style.setProperty('--keyboard-height', `${keyboardHeight}px`);
   };
 

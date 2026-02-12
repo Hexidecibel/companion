@@ -45,7 +45,12 @@ export class WorkGroupManager extends EventEmitter {
   private gitEnabled: boolean;
   private monitorInterval: NodeJS.Timeout | null = null;
 
-  constructor(tmux: TmuxManager, injector: InputInjector, watcher: SessionWatcher, gitEnabled: boolean = true) {
+  constructor(
+    tmux: TmuxManager,
+    injector: InputInjector,
+    watcher: SessionWatcher,
+    gitEnabled: boolean = true
+  ) {
     super();
     this.tmux = tmux;
     this.injector = injector;

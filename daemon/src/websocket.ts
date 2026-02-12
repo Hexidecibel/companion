@@ -86,11 +86,14 @@ export class WebSocketHandler {
   // Pending sent messages per session — tracks messages sent via send_input that
   // haven't yet appeared in the JSONL (because Claude hasn't processed them yet).
   // Keyed by tmux session name.
-  private pendingSentMessages: Map<string, Array<{
-    clientMessageId: string;
-    content: string;
-    sentAt: number;
-  }>> = new Map();
+  private pendingSentMessages: Map<
+    string,
+    Array<{
+      clientMessageId: string;
+      content: string;
+      sentAt: number;
+    }>
+  > = new Map();
   private static readonly PENDING_SENT_TTL = 10 * 60 * 1000; // 10 minute safety valve
   private escalation: EscalationService;
   private workGroupManager: WorkGroupManager | null;
@@ -260,7 +263,10 @@ export class WebSocketHandler {
   private handleConnection(ws: WebSocket, req: IncomingMessage, listenerPort: number): void {
     const clientId = uuidv4();
     const remoteAddress = req.socket.remoteAddress || '';
-    const isLocal = remoteAddress === '127.0.0.1' || remoteAddress === '::1' || remoteAddress === '::ffff:127.0.0.1';
+    const isLocal =
+      remoteAddress === '127.0.0.1' ||
+      remoteAddress === '::1' ||
+      remoteAddress === '::ffff:127.0.0.1';
     const client: AuthenticatedClient = {
       id: clientId,
       ws,
@@ -384,10 +390,13 @@ export class WebSocketHandler {
         break;
 
       case 'get_highlights': {
-        const hlParams = payload as { limit?: number; offset?: number; sessionId?: string } | undefined;
+        const hlParams = payload as
+          | { limit?: number; offset?: number; sessionId?: string }
+          | undefined;
         const t0 = Date.now();
         // Use client's subscribed session, payload override, or fall back to global active
-        const hlSessionId = hlParams?.sessionId || client.subscribedSessionId || this.watcher.getActiveSessionId();
+        const hlSessionId =
+          hlParams?.sessionId || client.subscribedSessionId || this.watcher.getActiveSessionId();
         const limit = hlParams?.limit && hlParams.limit > 0 ? hlParams.limit : 0;
         const offset = hlParams?.offset || 0;
 
@@ -424,17 +433,19 @@ export class WebSocketHandler {
         // Inject pending sent messages that haven't appeared in JSONL yet
         // pendingSentMessages is keyed by tmux session name, but hlSessionId is a conversation UUID.
         // Resolve the tmux session name for this conversation.
-        const tmuxNameForPending = hlSessionId ? this.watcher.getTmuxSessionForConversation(hlSessionId) : null;
+        const tmuxNameForPending = hlSessionId
+          ? this.watcher.getTmuxSessionForConversation(hlSessionId)
+          : null;
         if (tmuxNameForPending) {
           const pending = this.pendingSentMessages.get(tmuxNameForPending);
           if (pending && pending.length > 0) {
             const now = Date.now();
             // Filter: remove expired and confirmed messages
-            const unconfirmed = pending.filter(p => {
+            const unconfirmed = pending.filter((p) => {
               if (now - p.sentAt > WebSocketHandler.PENDING_SENT_TTL) return false;
               // Check if any user highlight matches this content (trimmed)
               return !resultHighlights.some(
-                h => h.type === 'user' && h.content.trim() === p.content.trim()
+                (h) => h.type === 'user' && h.content.trim() === p.content.trim()
               );
             });
             this.pendingSentMessages.set(tmuxNameForPending, unconfirmed);
@@ -455,7 +466,9 @@ export class WebSocketHandler {
 
         const t1 = Date.now();
         if (t1 - t0 > 100) {
-          console.log(`WebSocket: get_highlights - ${t1 - t0}ms (slow), chain: ${chain.length} files, returning ${resultHighlights.length}/${total}`);
+          console.log(
+            `WebSocket: get_highlights - ${t1 - t0}ms (slow), chain: ${chain.length} files, returning ${resultHighlights.length}/${total}`
+          );
         }
         this.send(client.ws, {
           type: 'highlights',
@@ -470,10 +483,13 @@ export class WebSocketHandler {
       case 'get_full': {
         const fullParams = payload as { sessionId?: string } | undefined;
         const t0 = Date.now();
-        const fullSessionId = fullParams?.sessionId || client.subscribedSessionId || this.watcher.getActiveSessionId();
+        const fullSessionId =
+          fullParams?.sessionId || client.subscribedSessionId || this.watcher.getActiveSessionId();
         const fullMessages = this.watcher.getMessages(fullSessionId || undefined);
         const t1 = Date.now();
-        console.log(`WebSocket: get_full - getMessages: ${t1 - t0}ms, ${fullMessages.length} msgs, session: ${fullSessionId}`);
+        console.log(
+          `WebSocket: get_full - getMessages: ${t1 - t0}ms, ${fullMessages.length} msgs, session: ${fullSessionId}`
+        );
         this.send(client.ws, {
           type: 'full',
           success: true,
@@ -487,7 +503,10 @@ export class WebSocketHandler {
       case 'get_status': {
         const statusParams = payload as { sessionId?: string } | undefined;
         const t0 = Date.now();
-        const statusSessionId = statusParams?.sessionId || client.subscribedSessionId || this.watcher.getActiveSessionId();
+        const statusSessionId =
+          statusParams?.sessionId ||
+          client.subscribedSessionId ||
+          this.watcher.getActiveSessionId();
         const status = this.watcher.getStatus(statusSessionId || undefined);
         const t1 = Date.now();
         console.log(
@@ -621,7 +640,11 @@ export class WebSocketHandler {
         break;
 
       case 'cancel_input':
-        this.handleCancelInput(client, payload as { clientMessageId: string; tmuxSessionName?: string; sessionId?: string }, requestId);
+        this.handleCancelInput(
+          client,
+          payload as { clientMessageId: string; tmuxSessionName?: string; sessionId?: string },
+          requestId
+        );
         break;
 
       case 'send_image':
@@ -735,7 +758,9 @@ export class WebSocketHandler {
         break;
 
       case 'get_terminal_output': {
-        const termPayload = payload as { sessionName: string; lines?: number; offset?: number } | undefined;
+        const termPayload = payload as
+          | { sessionName: string; lines?: number; offset?: number }
+          | undefined;
         if (termPayload?.sessionName) {
           this.tmux
             .capturePane(termPayload.sessionName, termPayload.lines || 100, termPayload.offset || 0)
@@ -1194,7 +1219,12 @@ export class WebSocketHandler {
       case 'rename_session': {
         const renamePayload = payload as { sessionId: string; name: string } | undefined;
         if (!renamePayload?.sessionId) {
-          this.send(client.ws, { type: 'session_renamed', success: false, error: 'Missing sessionId', requestId });
+          this.send(client.ws, {
+            type: 'session_renamed',
+            success: false,
+            error: 'Missing sessionId',
+            requestId,
+          });
           break;
         }
         if (renamePayload.name) {
@@ -1232,7 +1262,7 @@ export class WebSocketHandler {
 
       case 'get_digest': {
         const digestPayload = payload as { since?: number } | undefined;
-        const since = digestPayload?.since ?? (Date.now() - 24 * 60 * 60 * 1000); // default: last 24h
+        const since = digestPayload?.since ?? Date.now() - 24 * 60 * 60 * 1000; // default: last 24h
         const store = this.push.getStore();
         const digest = store.getHistorySince(since);
         this.send(client.ws, {
@@ -1340,11 +1370,19 @@ export class WebSocketHandler {
         break;
 
       case 'search_conversations':
-        this.handleSearchConversations(client, payload as { query: string; limit?: number }, requestId);
+        this.handleSearchConversations(
+          client,
+          payload as { query: string; limit?: number },
+          requestId
+        );
         break;
 
       case 'get_conversation_file':
-        this.handleGetConversationFile(client, payload as { filePath: string; limit?: number; offset?: number }, requestId);
+        this.handleGetConversationFile(
+          client,
+          payload as { filePath: string; limit?: number; offset?: number },
+          requestId
+        );
         break;
 
       default:
@@ -1365,14 +1403,14 @@ export class WebSocketHandler {
   private async resolveTmuxSession(sessionId: string): Promise<string | null> {
     // Check if sessionId is already a tmux session name
     const tmuxSessions = await this.tmux.listSessions();
-    if (tmuxSessions.some(ts => ts.name === sessionId)) {
+    if (tmuxSessions.some((ts) => ts.name === sessionId)) {
       return sessionId;
     }
 
     // Look up projectPath from watcher status
     const status = this.watcher.getStatus(sessionId);
     if (status?.projectPath) {
-      const match = tmuxSessions.find(ts => ts.workingDir === status.projectPath);
+      const match = tmuxSessions.find((ts) => ts.workingDir === status.projectPath);
       if (match) return match.name;
     }
 
@@ -1382,7 +1420,7 @@ export class WebSocketHandler {
   private async handleGetSessionDiff(
     client: AuthenticatedClient,
     payload: { sessionId?: string } | undefined,
-    requestId?: string,
+    requestId?: string
   ): Promise<void> {
     const sessionId = payload?.sessionId || this.watcher.getActiveSessionId();
     if (!sessionId) {
@@ -1418,7 +1456,7 @@ export class WebSocketHandler {
           try {
             const { stdout } = await execAsync(
               `git diff HEAD -- ${JSON.stringify(fc.path)} 2>/dev/null || git diff -- ${JSON.stringify(fc.path)} 2>/dev/null`,
-              { cwd: workingDir, timeout: 5000 },
+              { cwd: workingDir, timeout: 5000 }
             );
             return { ...fc, diff: stdout || undefined };
           } catch {
@@ -1430,21 +1468,24 @@ export class WebSocketHandler {
         // Filter out files that have been committed (no remaining diff and tracked by git)
         let untrackedFiles: Set<string> | undefined;
         try {
-          const { stdout: statusOut } = await execAsync(
-            'git status --porcelain 2>/dev/null',
-            { cwd: workingDir, timeout: 5000 },
-          );
+          const { stdout: statusOut } = await execAsync('git status --porcelain 2>/dev/null', {
+            cwd: workingDir,
+            timeout: 5000,
+          });
           untrackedFiles = new Set(
-            statusOut.split('\n')
-              .filter(l => l.startsWith('??'))
-              .map(l => l.slice(3).trim()),
+            statusOut
+              .split('\n')
+              .filter((l) => l.startsWith('??'))
+              .map((l) => l.slice(3).trim())
           );
         } catch {
           // If git status fails, skip filtering
         }
 
         const filtered = untrackedFiles
-          ? changesWithDiffs.filter(fc => (fc as { diff?: string }).diff || untrackedFiles!.has(fc.path))
+          ? changesWithDiffs.filter(
+              (fc) => (fc as { diff?: string }).diff || untrackedFiles!.has(fc.path)
+            )
           : changesWithDiffs;
 
         this.send(client.ws, {
@@ -1473,7 +1514,9 @@ export class WebSocketHandler {
 
   private async handleSendInput(
     client: AuthenticatedClient,
-    payload: { input: string; sessionId?: string; tmuxSessionName?: string; clientMessageId?: string } | undefined,
+    payload:
+      | { input: string; sessionId?: string; tmuxSessionName?: string; clientMessageId?: string }
+      | undefined,
     requestId?: string
   ): Promise<void> {
     if (!payload?.input) {
@@ -1550,7 +1593,12 @@ export class WebSocketHandler {
     requestId?: string
   ): Promise<void> {
     if (!payload?.clientMessageId) {
-      this.send(client.ws, { type: 'cancel_input', success: false, error: 'No clientMessageId', requestId });
+      this.send(client.ws, {
+        type: 'cancel_input',
+        success: false,
+        error: 'No clientMessageId',
+        requestId,
+      });
       return;
     }
 
@@ -1563,7 +1611,7 @@ export class WebSocketHandler {
     // Remove from pending messages
     let removed = false;
     for (const [tmuxName, pending] of this.pendingSentMessages) {
-      const idx = pending.findIndex(p => p.clientMessageId === payload.clientMessageId);
+      const idx = pending.findIndex((p) => p.clientMessageId === payload.clientMessageId);
       if (idx !== -1) {
         pending.splice(idx, 1);
         if (pending.length === 0) this.pendingSentMessages.delete(tmuxName);
@@ -2448,9 +2496,14 @@ export class WebSocketHandler {
 
       // Detect binary: read first 8KB and check for null bytes
       const MIME_TYPES: Record<string, string> = {
-        png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg',
-        gif: 'image/gif', svg: 'image/svg+xml', webp: 'image/webp',
-        ico: 'image/x-icon', bmp: 'image/bmp',
+        png: 'image/png',
+        jpg: 'image/jpeg',
+        jpeg: 'image/jpeg',
+        gif: 'image/gif',
+        svg: 'image/svg+xml',
+        webp: 'image/webp',
+        ico: 'image/x-icon',
+        bmp: 'image/bmp',
       };
 
       if (isImageExt) {
@@ -3519,7 +3572,7 @@ export class WebSocketHandler {
       }
 
       const sessions = this.watcher.getSessions();
-      const activeSession = sessions.find(s => s.id === activeSessionId);
+      const activeSession = sessions.find((s) => s.id === activeSessionId);
       if (!activeSession?.conversationPath) {
         this.send(client.ws, {
           type: 'search_conversations',
@@ -3537,8 +3590,8 @@ export class WebSocketHandler {
       try {
         const entries = fs.readdirSync(projectDir);
         files = entries
-          .filter(f => f.endsWith('.jsonl'))
-          .map(f => {
+          .filter((f) => f.endsWith('.jsonl'))
+          .map((f) => {
             const fullPath = path.join(projectDir, f);
             try {
               const stats = fs.statSync(fullPath);
@@ -3571,7 +3624,7 @@ export class WebSocketHandler {
           const { stdout: countOut } = await execAsync(
             `grep -i -c ${escaped} ${this.shellEscape(file.path)}`,
             { timeout: 3000 }
-          ).catch(err => {
+          ).catch((err) => {
             // grep returns exit code 1 for no matches
             if (err.code === 1) return { stdout: '0' };
             throw err;
@@ -3609,7 +3662,8 @@ export class WebSocketHandler {
               if (idx >= 0) {
                 const start = Math.max(0, idx - 60);
                 const end = Math.min(text.length, idx + query.length + 60);
-                snippet = (start > 0 ? '...' : '') +
+                snippet =
+                  (start > 0 ? '...' : '') +
                   text.slice(start, end).replace(/\n/g, ' ') +
                   (end < text.length ? '...' : '');
               } else {
@@ -3721,9 +3775,24 @@ export class WebSocketHandler {
   private static FILE_TREE_TTL = 30_000; // 30s cache
 
   private static IGNORE_DIRS = new Set([
-    '.git', 'node_modules', 'dist', '__pycache__', 'target', '.next',
-    '.turbo', '.nuxt', 'build', 'coverage', '.cache', '.expo', 'venv',
-    '.venv', 'env', '.tox', '.mypy_cache', '.pytest_cache',
+    '.git',
+    'node_modules',
+    'dist',
+    '__pycache__',
+    'target',
+    '.next',
+    '.turbo',
+    '.nuxt',
+    'build',
+    'coverage',
+    '.cache',
+    '.expo',
+    'venv',
+    '.venv',
+    'env',
+    '.tox',
+    '.mypy_cache',
+    '.pytest_cache',
   ]);
 
   private walkDirectory(dir: string, root: string, files: string[], depth: number = 0): void {
@@ -3827,7 +3896,11 @@ export class WebSocketHandler {
       const limit = payload?.limit || 20;
 
       const scored = allFiles
-        .map((f) => ({ path: f, relativePath: path.relative(projectRoot, f), score: this.fuzzyScore(query, f, projectRoot) }))
+        .map((f) => ({
+          path: f,
+          relativePath: path.relative(projectRoot, f),
+          score: this.fuzzyScore(query, f, projectRoot),
+        }))
         .filter((f) => f.score > 0)
         .sort((a, b) => b.score - a.score)
         .slice(0, limit);

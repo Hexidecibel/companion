@@ -16,6 +16,7 @@ import {
   detectCompaction,
   extractTasks,
 } from './parser';
+import { APPROVAL_TOOLS } from './tool-config';
 
 const execAsync = promisify(exec);
 
@@ -65,7 +66,9 @@ export class SessionWatcher extends EventEmitter {
   private newlyCreatedSessions: Map<string, number> = new Map(); // session name -> creation timestamp
   private compactedSessions: Set<string> = new Set(); // sessions expecting a new JSONL after compaction
   private debounceTimers: Map<string, NodeJS.Timeout> = new Map();
+  private waitingDebounceTimers: Map<string, NodeJS.Timeout> = new Map();
   private static readonly DEBOUNCE_MS = 150; // Debounce file changes per session
+  private static readonly WAITING_DEBOUNCE_MS = 3000; // Delay before confirming "waiting" for non-interactive tools
 
   constructor(codeHome: string) {
     super();
@@ -140,7 +143,11 @@ export class SessionWatcher extends EventEmitter {
    * Set a tmux session → conversation mapping and maintain history.
    * @param isChainExtension - true when appending a new file after compaction (preserves old ID in history)
    */
-  private setConversationMapping(sessionName: string, convId: string, isChainExtension: boolean = false): void {
+  private setConversationMapping(
+    sessionName: string,
+    convId: string,
+    isChainExtension: boolean = false
+  ): void {
     const history = this.tmuxConversationHistory.get(sessionName) || [];
 
     if (isChainExtension) {
@@ -309,6 +316,10 @@ export class SessionWatcher extends EventEmitter {
       clearTimeout(timer);
     }
     this.debounceTimers.clear();
+    for (const timer of this.waitingDebounceTimers.values()) {
+      clearTimeout(timer);
+    }
+    this.waitingDebounceTimers.clear();
   }
 
   private handleFileChange(filePath: string): void {
@@ -361,6 +372,54 @@ export class SessionWatcher extends EventEmitter {
   }
 
   /**
+   * Schedule a delayed confirmation of "waiting for input" for non-interactive tools.
+   * If the file changes again before the timer fires, the timer is cancelled
+   * (in processFileChange). This avoids false "waiting" status during tool execution.
+   */
+  private scheduleWaitingConfirmation(convId: string, filePath: string): void {
+    this.waitingDebounceTimers.set(
+      convId,
+      setTimeout(() => {
+        this.waitingDebounceTimers.delete(convId);
+        const tracked = this.conversations.get(convId);
+        if (!tracked) return;
+
+        // Re-parse to confirm still waiting
+        const messages = parseConversationFile(filePath);
+        if (!detectWaitingForInput(messages)) return;
+
+        // Confirmed: tool is genuinely waiting for input (not just running)
+        tracked.isWaitingForInput = true;
+        tracked.cachedMessages = messages;
+        const currentIsRunning = messages.length > 0 && !tracked.isWaitingForInput;
+        tracked.isRunning = currentIsRunning;
+
+        if (this.activeConversationId === convId) {
+          this.isWaitingForInput = true;
+        }
+
+        // Find tmux session name for this conversation
+        let sessionId: string | undefined;
+        for (const [name, mappedId] of this.tmuxConversationIds) {
+          if (mappedId === convId) {
+            sessionId = name;
+            break;
+          }
+        }
+        if (!sessionId) return;
+
+        const lastMessage = messages[messages.length - 1];
+        this.emit('status-change', {
+          sessionId,
+          isWaitingForInput: true,
+          currentActivity: detectCurrentActivity(messages),
+          lastMessage,
+        });
+      }, SessionWatcher.WAITING_DEBOUNCE_MS)
+    );
+  }
+
+  /**
    * Process a JSONL file change. convId is the internal conversation UUID
    * (JSONL filename). External events use the tmux session name as sessionId.
    */
@@ -382,10 +441,58 @@ export class SessionWatcher extends EventEmitter {
         `Watcher: processFileChange parse took ${t1 - t0}ms + highlights ${t2 - t1}ms = ${t2 - t0}ms (${messages.length} msgs) for ${convId}`
       );
     }
-    const conversationWaiting = detectWaitingForInput(messages);
+    const parserSaysWaiting = detectWaitingForInput(messages);
+
+    // Cancel any pending waiting debounce for this conversation (file changed, re-evaluate)
+    const existingWaitTimer = this.waitingDebounceTimers.get(convId);
+    if (existingWaitTimer) {
+      clearTimeout(existingWaitTimer);
+      this.waitingDebounceTimers.delete(convId);
+    }
+
+    // For non-interactive pending tools (Bash, Edit, Write), delay the "waiting" state
+    // by 3 seconds to avoid false positives from tools that are still running.
+    // Interactive tools (AskUserQuestion, ExitPlanMode) get instant detection.
+    const lastMsg = messages[messages.length - 1];
+    const hasInteractivePending =
+      lastMsg?.type === 'assistant' &&
+      lastMsg.toolCalls?.some(
+        (tc) => tc.status === 'pending' && ['AskUserQuestion', 'ExitPlanMode'].includes(tc.name)
+      );
 
     // Get previous tracking state for compaction detection
     const prevTracked = this.conversations.get(convId);
+    const prevWasWaiting = prevTracked?.isWaitingForInput || false;
+
+    // Determine effective waiting state:
+    // - Interactive tools (AskUserQuestion, ExitPlanMode): instant
+    // - Already confirmed waiting: keep immediately
+    // - Pending approval tools (Bash, Edit, Write): delay 3s to avoid false positives
+    //   from auto-approved tools that are still executing
+    // - Assistant finished (no pending tools): instant
+    // - Transition to NOT waiting: instant (tool completed → clear immediately)
+    let conversationWaiting: boolean;
+    if (!parserSaysWaiting) {
+      conversationWaiting = false;
+    } else if (hasInteractivePending || prevWasWaiting) {
+      // Interactive tool or already confirmed waiting → set immediately
+      conversationWaiting = true;
+    } else {
+      // New transition to waiting — check if it's due to pending approval tools
+      const hasPendingApprovalTools =
+        lastMsg?.type === 'assistant' &&
+        lastMsg.toolCalls?.some(
+          (tc) => tc.status === 'pending' && APPROVAL_TOOLS.includes(tc.name) && tc.name !== 'Task'
+        );
+      if (hasPendingApprovalTools) {
+        // Delay: auto-approved tool might still be running
+        conversationWaiting = false;
+        this.scheduleWaitingConfirmation(convId, filePath);
+      } else {
+        // Assistant finished with text only, or all tools completed → genuine waiting
+        conversationWaiting = true;
+      }
+    }
     const lastCompactionLine = prevTracked?.lastCompactionLine || 0;
 
     // Find which tmux session owns this conversation
@@ -413,16 +520,20 @@ export class SessionWatcher extends EventEmitter {
         // Multiple sessions share this path — try elimination
         const convAlreadyMapped = Array.from(this.tmuxConversationIds.values()).includes(convId);
         if (!convAlreadyMapped) {
-          const unmapped = sessionsForPath.filter(name => !this.tmuxConversationIds.has(name));
+          const unmapped = sessionsForPath.filter((name) => !this.tmuxConversationIds.has(name));
           if (unmapped.length === 1) {
             tmuxName = unmapped[0];
             this.setConversationMapping(tmuxName, convId);
           } else if (unmapped.length === 0) {
             // All sessions mapped — check if one recently compacted and expects a new JSONL
-            const compactedInPath = sessionsForPath.filter(name => this.compactedSessions.has(name));
+            const compactedInPath = sessionsForPath.filter((name) =>
+              this.compactedSessions.has(name)
+            );
             if (compactedInPath.length === 1) {
               const oldId = this.tmuxConversationIds.get(compactedInPath[0]);
-              console.log(`Watcher: Re-mapping ${compactedInPath[0]}: ${oldId?.substring(0, 8)} -> ${convId.substring(0, 8)} (post-compaction)`);
+              console.log(
+                `Watcher: Re-mapping ${compactedInPath[0]}: ${oldId?.substring(0, 8)} -> ${convId.substring(0, 8)} (post-compaction)`
+              );
               tmuxName = compactedInPath[0];
               this.setConversationMapping(tmuxName, convId, true);
               this.compactedSessions.delete(tmuxName);
@@ -541,7 +652,11 @@ export class SessionWatcher extends EventEmitter {
 
     // Auto-select: during initial load pick the most recent; after that only if no active session
     const isInitialLoad = Date.now() - this.startTime < 3000;
-    if (isInitialLoad || !this.activeTmuxSession || !this.tmuxPathBySession.has(this.activeTmuxSession)) {
+    if (
+      isInitialLoad ||
+      !this.activeTmuxSession ||
+      !this.tmuxPathBySession.has(this.activeTmuxSession)
+    ) {
       // Find tmux session with most recently modified best conversation
       let bestTmux: { name: string; bestConvId: string; time: number } | null = null;
       for (const [tName, ePath] of this.tmuxPathBySession) {
@@ -569,9 +684,8 @@ export class SessionWatcher extends EventEmitter {
 
     // Emit events for ALL sessions using per-conversation state for dedup
     const prevMessageCount = prevTracked?.messageCount || 0;
-    const prevWasWaitingSession = prevTracked?.isWaitingForInput || false;
     const hasNewMessages = messages.length !== prevMessageCount;
-    const waitingStatusChanged = conversationWaiting !== prevWasWaitingSession;
+    const waitingStatusChanged = conversationWaiting !== prevWasWaiting;
 
     if (hasNewMessages) {
       // Update global lastMessageCount if this is the active session (for compat)
@@ -615,9 +729,13 @@ export class SessionWatcher extends EventEmitter {
     // Using tool IDs (not just names) so that consecutive same-named tools
     // (e.g., Bash A completes, Bash B pending) are correctly detected as new.
     const pendingTools = getPendingApprovalTools(messages);
-    const pendingKey = pendingTools.length > 0
-      ? pendingTools.map(t => t.id).sort().join(',')
-      : '';
+    const pendingKey =
+      pendingTools.length > 0
+        ? pendingTools
+            .map((t) => t.id)
+            .sort()
+            .join(',')
+        : '';
     if (pendingKey && pendingKey !== tracked.lastEmittedPendingTools) {
       tracked.lastEmittedPendingTools = pendingKey;
       this.emit('pending-approval', {
@@ -722,7 +840,9 @@ export class SessionWatcher extends EventEmitter {
    * Find the best (most recently modified) conversation for a given encoded project path.
    * Returns the conversation with the highest lastModified timestamp.
    */
-  private getBestConversationForPath(encodedPath: string): { id: string; conv: TrackedConversation } | null {
+  private getBestConversationForPath(
+    encodedPath: string
+  ): { id: string; conv: TrackedConversation } | null {
     let best: { id: string; conv: TrackedConversation } | null = null;
     for (const [id, conv] of this.conversations) {
       if (this.getEncodedDirName(conv.path) === encodedPath) {
@@ -746,7 +866,9 @@ export class SessionWatcher extends EventEmitter {
    * Resolve tmux session name to the conversation it's running.
    * Uses direct PID-based mapping first, falls back to path-based best-match.
    */
-  private resolveConversationForSession(sessionName: string): { id: string; conv: TrackedConversation } | null {
+  private resolveConversationForSession(
+    sessionName: string
+  ): { id: string; conv: TrackedConversation } | null {
     // Direct mapping (most accurate, especially for shared project dirs)
     const directId = this.tmuxConversationIds.get(sessionName);
     if (directId) {
@@ -788,7 +910,9 @@ export class SessionWatcher extends EventEmitter {
         for (const match of tree.matchAll(/\((\d+)\)/g)) {
           if (match[1] !== rootPid) pids.push(match[1]);
         }
-      } catch { /* pstree not available */ }
+      } catch {
+        /* pstree not available */
+      }
 
       // Check /proc/<pid>/fd/ for open JSONL files in the projects directory
       for (const pid of pids) {
@@ -798,12 +922,20 @@ export class SessionWatcher extends EventEmitter {
           for (const fd of fds) {
             try {
               const target = fs.readlinkSync(path.join(fdDir, fd));
-              if (target.startsWith(projectsDir) && target.endsWith('.jsonl') && !target.includes('/subagents/')) {
+              if (
+                target.startsWith(projectsDir) &&
+                target.endsWith('.jsonl') &&
+                !target.includes('/subagents/')
+              ) {
                 return path.basename(target, '.jsonl');
               }
-            } catch { /* can't read this fd */ }
+            } catch {
+              /* can't read this fd */
+            }
           }
-        } catch { /* can't read /proc/<pid>/fd */ }
+        } catch {
+          /* can't read /proc/<pid>/fd */
+        }
       }
 
       return null;
@@ -849,7 +981,9 @@ export class SessionWatcher extends EventEmitter {
           // Only claim it if no other session already has it
           const alreadyMapped = Array.from(this.tmuxConversationIds.values()).includes(id);
           if (!alreadyMapped) {
-            console.log(`Watcher: New session ${sessionName} -> ${id.substring(0, 8)} (appeared after creation)`);
+            console.log(
+              `Watcher: New session ${sessionName} -> ${id.substring(0, 8)} (appeared after creation)`
+            );
             this.setConversationMapping(sessionName, id);
             this.newlyCreatedSessions.delete(sessionName);
             break;
@@ -884,14 +1018,21 @@ export class SessionWatcher extends EventEmitter {
 
       if (convCount >= sessions.length) continue;
 
-      console.log(`Watcher: Path ${ePath} has ${sessions.length} sessions but only ${convCount} conversations — scanning`);
+      console.log(
+        `Watcher: Path ${ePath} has ${sessions.length} sessions but only ${convCount} conversations — scanning`
+      );
 
       // Need more conversations — scan the directory and force-load recent files
       const projectDir = path.join(this.codeHome, 'projects', ePath);
       try {
-        const files = fs.readdirSync(projectDir)
-          .filter(f => f.endsWith('.jsonl') && !f.includes('subagent'))
-          .map(f => ({ name: f, path: path.join(projectDir, f), mtime: fs.statSync(path.join(projectDir, f)).mtimeMs }))
+        const files = fs
+          .readdirSync(projectDir)
+          .filter((f) => f.endsWith('.jsonl') && !f.includes('subagent'))
+          .map((f) => ({
+            name: f,
+            path: path.join(projectDir, f),
+            mtime: fs.statSync(path.join(projectDir, f)).mtimeMs,
+          }))
           .sort((a, b) => b.mtime - a.mtime)
           .slice(0, sessions.length * 3); // Load extra to cover multiple conversations per session
 
@@ -916,7 +1057,9 @@ export class SessionWatcher extends EventEmitter {
           // Conversation not yet tracked — load it on demand
           const convFile = path.join(this.codeHome, 'projects', ePath, `${convId}.jsonl`);
           if (fs.existsSync(convFile)) {
-            console.log(`Watcher: PID detection found unloaded conversation ${convId.substring(0, 8)} for ${sessionName} — loading`);
+            console.log(
+              `Watcher: PID detection found unloaded conversation ${convId.substring(0, 8)} for ${sessionName} — loading`
+            );
             this.processFileChange(convFile, convId);
           }
         }
@@ -929,14 +1072,14 @@ export class SessionWatcher extends EventEmitter {
     // Strategy 2: Terminal content matching — capture scrollback and match to JSONL content
     for (const [ePath, sessions] of pathSessions) {
       if (sessions.length < 2) continue;
-      const unmapped = sessions.filter(name => !this.tmuxConversationIds.has(name));
+      const unmapped = sessions.filter((name) => !this.tmuxConversationIds.has(name));
       if (unmapped.length === 0) continue;
 
       // Get unmapped conversations for this path
       const mappedConvIds = new Set(
         sessions
-          .filter(name => this.tmuxConversationIds.has(name))
-          .map(name => this.tmuxConversationIds.get(name)!)
+          .filter((name) => this.tmuxConversationIds.has(name))
+          .map((name) => this.tmuxConversationIds.get(name)!)
       );
       const candidateConvs: Array<{ id: string; conv: TrackedConversation }> = [];
       for (const [id, conv] of this.conversations) {
@@ -957,23 +1100,24 @@ export class SessionWatcher extends EventEmitter {
           );
 
           // Extract user prompts from terminal output (lines after ❯ prompt)
-          const userLines = paneText.split('\n')
-            .filter(line => {
+          const userLines = paneText
+            .split('\n')
+            .filter((line) => {
               const trimmed = line.trimStart();
               return trimmed.startsWith('\u276f') || trimmed.startsWith('❯');
             })
-            .map(line => {
+            .map((line) => {
               const trimmed = line.trimStart();
               return trimmed.replace(/^[❯\u276f]\s*/, '').trim();
             })
-            .filter(line => line.length > 10);
+            .filter((line) => line.length > 10);
 
           if (userLines.length === 0) continue;
 
           // Try to match user prompts (most recent first) uniquely to one candidate
           for (let i = userLines.length - 1; i >= 0; i--) {
             const userLine = userLines[i];
-            const matchingCandidates = candidateConvs.filter(candidate => {
+            const matchingCandidates = candidateConvs.filter((candidate) => {
               try {
                 const stats = fs.statSync(candidate.conv.path);
                 const readSize = Math.min(64 * 1024, stats.size);
@@ -982,33 +1126,41 @@ export class SessionWatcher extends EventEmitter {
                 fs.readSync(fd, buffer, 0, readSize, Math.max(0, stats.size - readSize));
                 fs.closeSync(fd);
                 return buffer.toString('utf-8').includes(userLine);
-              } catch { return false; }
+              } catch {
+                return false;
+              }
             });
 
             // Only use this match if it uniquely identifies one file
             if (matchingCandidates.length === 1) {
-              console.log(`Watcher: Terminal matched ${sessionName} -> ${matchingCandidates[0].id.substring(0, 8)} via "${userLine.substring(0, 40)}"`);
+              console.log(
+                `Watcher: Terminal matched ${sessionName} -> ${matchingCandidates[0].id.substring(0, 8)} via "${userLine.substring(0, 40)}"`
+              );
               this.setConversationMapping(sessionName, matchingCandidates[0].id);
               mappedConvIds.add(matchingCandidates[0].id);
-              const idx = candidateConvs.findIndex(c => c.id === matchingCandidates[0].id);
+              const idx = candidateConvs.findIndex((c) => c.id === matchingCandidates[0].id);
               if (idx >= 0) candidateConvs.splice(idx, 1);
               break;
             }
           }
-        } catch { /* tmux capture failed */ }
+        } catch {
+          /* tmux capture failed */
+        }
       }
     }
 
     // Strategy 3: Process of elimination
     for (const [ePath, sessions] of pathSessions) {
       if (sessions.length < 2) continue;
-      const unmapped = sessions.filter(name => !this.tmuxConversationIds.has(name) && !this.newlyCreatedSessions.has(name));
+      const unmapped = sessions.filter(
+        (name) => !this.tmuxConversationIds.has(name) && !this.newlyCreatedSessions.has(name)
+      );
       if (unmapped.length !== 1) continue;
 
       const mappedConvIds = new Set(
         sessions
-          .filter(name => this.tmuxConversationIds.has(name))
-          .map(name => this.tmuxConversationIds.get(name)!)
+          .filter((name) => this.tmuxConversationIds.has(name))
+          .map((name) => this.tmuxConversationIds.get(name)!)
       );
       const unmappedConvs: string[] = [];
       for (const [id, conv] of this.conversations) {
@@ -1255,9 +1407,7 @@ export class SessionWatcher extends EventEmitter {
 
     // Resolve each history ID to a file path (oldest first)
     const encodedPath = this.tmuxPathBySession.get(sessionId);
-    const projectDir = encodedPath
-      ? path.join(this.codeHome, 'projects', encodedPath)
-      : null;
+    const projectDir = encodedPath ? path.join(this.codeHome, 'projects', encodedPath) : null;
 
     const chain: string[] = [];
     const MAX_CHAIN = 20;
@@ -1312,7 +1462,9 @@ export class SessionWatcher extends EventEmitter {
    * Uses tmuxSessions from TmuxManager for authoritative tagged status,
    * finds the best conversation for each to determine activity/status.
    */
-  async getServerSummary(tmuxSessions?: Array<{ name: string; workingDir?: string; tagged?: boolean }>): Promise<{
+  async getServerSummary(
+    tmuxSessions?: Array<{ name: string; workingDir?: string; tagged?: boolean }>
+  ): Promise<{
     sessions: Array<{
       id: string;
       name: string;

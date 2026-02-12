@@ -181,7 +181,7 @@ async function main(): Promise<void> {
 
     watcher.on('pending-approval', async ({ sessionId, projectPath, tools }) => {
       // tools is now Array<{name: string, id: string}>
-      const toolList = tools as Array<{name: string, id: string}>;
+      const toolList = tools as Array<{ name: string; id: string }>;
 
       // Check per-session toggle OR config-level tools
       const sessionEnabled = wsHandler.autoApproveSessions.has(sessionId);
@@ -197,7 +197,9 @@ async function main(): Promise<void> {
       });
 
       if (autoApprovable.length === 0) {
-        console.log(`[AUTO-APPROVE] No auto-approvable tools in: [${toolList.map(t => t.name).join(', ')}]`);
+        console.log(
+          `[AUTO-APPROVE] No auto-approvable tools in: [${toolList.map((t) => t.name).join(', ')}]`
+        );
         return;
       }
 
@@ -205,11 +207,14 @@ async function main(): Promise<void> {
       // Different tool_use_ids always produce a different key, so consecutive
       // same-named tools (e.g., Bash after Bash) are never blocked.
       const now = Date.now();
-      const dedupKey = `${sessionId}:${autoApprovable.map(t => t.id).sort().join(',')}`;
+      const dedupKey = `${sessionId}:${autoApprovable
+        .map((t) => t.id)
+        .sort()
+        .join(',')}`;
       const lastApproval = lastApprovalByKey.get(dedupKey);
       if (lastApproval && now - lastApproval < 1000) {
         console.log(
-          `[AUTO-APPROVE] Dedup: skipping [${autoApprovable.map(t => t.name).join(', ')}] (${now - lastApproval}ms ago)`
+          `[AUTO-APPROVE] Dedup: skipping [${autoApprovable.map((t) => t.name).join(', ')}] (${now - lastApproval}ms ago)`
         );
         return;
       }
@@ -230,8 +235,7 @@ async function main(): Promise<void> {
         const normalizedPath = projectPath.replace(/\/+$/, '');
         const match = tmuxSessions.find(
           (ts) =>
-            ts.workingDir === projectPath ||
-            ts.workingDir?.replace(/\/+$/, '') === normalizedPath
+            ts.workingDir === projectPath || ts.workingDir?.replace(/\/+$/, '') === normalizedPath
         );
         if (match) {
           targetTmuxSession = match.name;
@@ -240,13 +244,14 @@ async function main(): Promise<void> {
 
       const target = targetTmuxSession || undefined;
       console.log(
-        `[AUTO-APPROVE] Approving [${autoApprovable.map(t => t.name).join(', ')}] -> tmux="${target || 'active'}" (session: ${sessionId.substring(0, 8)})`
+        `[AUTO-APPROVE] Approving [${autoApprovable.map((t) => t.name).join(', ')}] -> tmux="${target || 'active'}" (session: ${sessionId.substring(0, 8)})`
       );
 
       try {
         // Check terminal for Claude Code's actual approval prompt format.
         // Match patterns like "(Y)es / (N)o" or "Do you want to proceed?"
-        const approvalPromptRe = /\(Y\)es\s*\/\s*\(N\)o|Do you want to (proceed|run|allow|execute)|Approve\?|Allow this|Yes\/No/i;
+        const approvalPromptRe =
+          /\(Y\)es\s*\/\s*\(N\)o|Do you want to (proceed|run|allow|execute)|Approve\?|Allow this|Yes\/No/i;
 
         const paneContent = await injector.capturePaneContent(target);
         const hasApprovalPrompt = approvalPromptRe.test(paneContent);

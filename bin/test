@@ -24,6 +24,10 @@ echo "=== Daemon: Lint ==="
 cd "$ROOT/daemon" && npm run lint || FAILED=1
 
 echo ""
+echo "=== Daemon: Format Check ==="
+cd "$ROOT/daemon" && npm run format:check || FAILED=1
+
+echo ""
 echo "=== Daemon: Tests ==="
 cd "$ROOT/daemon" && npm test || FAILED=1
 

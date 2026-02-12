@@ -62,7 +62,7 @@ export class OAuthUsageFetcher {
     try {
       const resp = await fetch('https://api.anthropic.com/api/oauth/usage', {
         headers: {
-          'Authorization': `Bearer ${creds.accessToken}`,
+          Authorization: `Bearer ${creds.accessToken}`,
           'anthropic-beta': 'oauth-2025-04-20',
         },
       });
@@ -153,9 +153,12 @@ export class UsageMonitor {
 
     this.checkWindow('fiveHour', '5-hour', data.fiveHour, thresholds);
     this.checkWindow('sevenDay', '7-day', data.sevenDay, thresholds);
-    if (data.sevenDayOpus) this.checkWindow('sevenDayOpus', '7-day Opus', data.sevenDayOpus, thresholds);
-    if (data.sevenDaySonnet) this.checkWindow('sevenDaySonnet', '7-day Sonnet', data.sevenDaySonnet, thresholds);
-    if (data.sevenDayCowork) this.checkWindow('sevenDayCowork', '7-day Cowork', data.sevenDayCowork, thresholds);
+    if (data.sevenDayOpus)
+      this.checkWindow('sevenDayOpus', '7-day Opus', data.sevenDayOpus, thresholds);
+    if (data.sevenDaySonnet)
+      this.checkWindow('sevenDaySonnet', '7-day Sonnet', data.sevenDaySonnet, thresholds);
+    if (data.sevenDayCowork)
+      this.checkWindow('sevenDayCowork', '7-day Cowork', data.sevenDayCowork, thresholds);
   }
 
   private checkWindow(

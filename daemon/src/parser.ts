@@ -296,7 +296,7 @@ export function parseConversationFile(
     }
     // Pattern 2: Assistant message with Skill tool_use
     if (trimmed[i].type === 'assistant' && trimmed[i].toolCalls) {
-      const skillTool = trimmed[i].toolCalls!.find(tc => tc.name === 'Skill');
+      const skillTool = trimmed[i].toolCalls!.find((tc) => tc.name === 'Skill');
       if (skillTool) {
         const skillName = (skillTool.input.skill as string) || 'unknown';
         // Find the next user message with text content (skip tool_result messages which have empty content)
@@ -332,13 +332,17 @@ function parseQueueOperation(entry: JsonlEntry): ConversationMessage | null {
     type: 'system',
     content: summary,
     timestamp,
-    toolCalls: outputFile ? [{
-      id: `task-output-${taskId}`,
-      name: 'TaskOutput',
-      input: { taskId, outputFile },
-      output: outputFile,
-      status: status === 'completed' ? 'completed' : status === 'error' ? 'error' : 'running',
-    }] : undefined,
+    toolCalls: outputFile
+      ? [
+          {
+            id: `task-output-${taskId}`,
+            name: 'TaskOutput',
+            input: { taskId, outputFile },
+            output: outputFile,
+            status: status === 'completed' ? 'completed' : status === 'error' ? 'error' : 'running',
+          },
+        ]
+      : undefined,
   };
 }
 
@@ -672,8 +676,10 @@ export function detectWaitingForInput(messages: ConversationMessage[]): boolean 
   if (lastMessage.type === 'assistant') {
     // Check for pending tool calls that need approval
     if (lastMessage.toolCalls) {
+      // Task tools run in background for long periods — exclude from approval check
+      // (consistent with getPendingApprovalTools and extractHighlights)
       const hasPendingApproval = lastMessage.toolCalls.some(
-        (tc) => tc.status === 'pending' && APPROVAL_TOOLS.includes(tc.name)
+        (tc) => tc.status === 'pending' && APPROVAL_TOOLS.includes(tc.name) && tc.name !== 'Task'
       );
       if (hasPendingApproval) {
         return true;
@@ -858,7 +864,9 @@ export function getSessionStatus(
  * Returns objects with both name and id so callers can distinguish different instances
  * of the same tool (e.g., two consecutive Bash calls).
  */
-export function getPendingApprovalTools(messages: ConversationMessage[]): Array<{name: string, id: string}> {
+export function getPendingApprovalTools(
+  messages: ConversationMessage[]
+): Array<{ name: string; id: string }> {
   if (messages.length === 0) return [];
 
   const lastMessage = messages[messages.length - 1];
@@ -937,11 +945,15 @@ export function detectCompaction(
               const c = next.message.content;
               if (typeof c === 'string') summary = c.slice(0, 200);
               else if (Array.isArray(c)) {
-                const textBlock = c.find((b: { type: string; text?: string }) => b.type === 'text' && b.text);
+                const textBlock = c.find(
+                  (b: { type: string; text?: string }) => b.type === 'text' && b.text
+                );
                 if (textBlock) summary = (textBlock.text || '').slice(0, 200);
               }
             }
-          } catch { /* skip */ }
+          } catch {
+            /* skip */
+          }
         }
         compactionEvent = {
           sessionId,

@@ -36,10 +36,7 @@ function userMsg(content: string, opts: { uuid?: string; timestamp?: string } = 
   };
 }
 
-function assistantText(
-  text: string,
-  opts: { uuid?: string; timestamp?: string } = {}
-): object {
+function assistantText(text: string, opts: { uuid?: string; timestamp?: string } = {}): object {
   return {
     type: 'assistant',
     message: {
@@ -69,11 +66,7 @@ function assistantWithTools(
   };
 }
 
-function toolResult(
-  toolUseId: string,
-  output: string,
-  opts: { timestamp?: string } = {}
-): object {
+function toolResult(toolUseId: string, output: string, opts: { timestamp?: string } = {}): object {
   return {
     type: 'user',
     message: {
@@ -137,10 +130,7 @@ function usageEntry(
 
 describe('parseConversationFile', () => {
   it('parses user and assistant text messages', () => {
-    const content = jsonl(
-      userMsg('Hello'),
-      assistantText('Hi there!')
-    );
+    const content = jsonl(userMsg('Hello'), assistantText('Hi there!'));
     const msgs = parseConversationFile('test.jsonl', Infinity, content);
     expect(msgs).toHaveLength(2);
     expect(msgs[0].type).toBe('user');
@@ -219,10 +209,7 @@ describe('parseConversationFile', () => {
   });
 
   it('handles legacy summary type (compaction)', () => {
-    const content = jsonl(
-      summaryEntry('Here is the summary of context'),
-      userMsg('Continue')
-    );
+    const content = jsonl(summaryEntry('Here is the summary of context'), userMsg('Continue'));
     const msgs = parseConversationFile('test.jsonl', Infinity, content);
     const system = msgs.find((m) => m.type === 'system');
     expect(system).toBeDefined();
@@ -335,7 +322,10 @@ describe('parseConversationFile', () => {
           {
             type: 'tool_result',
             tool_use_id: 'tool1',
-            content: [{ type: 'text', text: 'line1' }, { type: 'text', text: 'line2' }],
+            content: [
+              { type: 'text', text: 'line1' },
+              { type: 'text', text: 'line2' },
+            ],
           },
         ],
       },
@@ -354,7 +344,8 @@ describe('parseConversationFile', () => {
   it('handles queue-operation entries with task-notification', () => {
     const queueOp = {
       type: 'queue-operation',
-      content: '<task-notification><task-id>abc</task-id><output-file>/tmp/out</output-file><status>completed</status><summary>Agent finished research</summary></task-notification>',
+      content:
+        '<task-notification><task-id>abc</task-id><output-file>/tmp/out</output-file><status>completed</status><summary>Agent finished research</summary></task-notification>',
       timestamp: '2026-01-28T10:05:00.000Z',
     };
     const msgs = parseConversationFile('test.jsonl', Infinity, JSON.stringify(queueOp));
@@ -434,9 +425,7 @@ describe('detectWaitingForInput', () => {
         type: 'assistant',
         content: 'Done!',
         timestamp: 1,
-        toolCalls: [
-          { id: 't1', name: 'Read', input: {}, status: 'completed', output: 'data' },
-        ],
+        toolCalls: [{ id: 't1', name: 'Read', input: {}, status: 'completed', output: 'data' }],
       },
     ];
     expect(detectWaitingForInput(msgs)).toBe(true);
@@ -558,7 +547,9 @@ describe('detectCurrentActivity', () => {
         type: 'assistant',
         content: '',
         timestamp: 1,
-        toolCalls: [{ id: 't1', name: 'Read', input: { file_path: '/src/app.ts' }, status: 'running' }],
+        toolCalls: [
+          { id: 't1', name: 'Read', input: { file_path: '/src/app.ts' }, status: 'running' },
+        ],
       },
     ];
     const activity = detectCurrentActivity(msgs);
@@ -882,9 +873,7 @@ describe('detectCurrentActivityFast', () => {
 
   it('returns approval prompt for pending Bash tool', () => {
     const lines = jsonl(
-      assistantWithTools('', [
-        { name: 'Bash', id: 'b1', input: { command: 'npm test' } },
-      ])
+      assistantWithTools('', [{ name: 'Bash', id: 'b1', input: { command: 'npm test' } }])
     );
     const buf = Buffer.from(lines);
     mockedFs.existsSync.mockReturnValue(true);
@@ -906,10 +895,7 @@ describe('detectCurrentActivityFast', () => {
 
 describe('getSessionStatus', () => {
   it('returns composite status for a conversation', () => {
-    const content = jsonl(
-      userMsg('Hello'),
-      assistantText('Hi there!')
-    );
+    const content = jsonl(userMsg('Hello'), assistantText('Hi there!'));
     mockedFs.existsSync.mockReturnValue(true);
     mockedFs.readFileSync.mockReturnValue(content);
 
@@ -932,9 +918,7 @@ describe('getSessionStatus', () => {
 
   it('reports currentActivity when process is running', () => {
     const content = jsonl(
-      assistantWithTools('', [
-        { name: 'Bash', id: 'b1', input: { command: 'npm test' } },
-      ])
+      assistantWithTools('', [{ name: 'Bash', id: 'b1', input: { command: 'npm test' } }])
     );
     mockedFs.existsSync.mockReturnValue(true);
     mockedFs.readFileSync.mockReturnValue(content);
@@ -954,9 +938,7 @@ describe('getPendingApprovalTools', () => {
   });
 
   it('returns empty when last message is user', () => {
-    const msgs: ConversationMessage[] = [
-      { id: '1', type: 'user', content: 'hi', timestamp: 1 },
-    ];
+    const msgs: ConversationMessage[] = [{ id: '1', type: 'user', content: 'hi', timestamp: 1 }];
     expect(getPendingApprovalTools(msgs)).toEqual([]);
   });
 
@@ -967,9 +949,7 @@ describe('getPendingApprovalTools', () => {
         type: 'assistant',
         content: '',
         timestamp: 1,
-        toolCalls: [
-          { id: 'bash1', name: 'Bash', input: { command: 'ls' }, status: 'pending' },
-        ],
+        toolCalls: [{ id: 'bash1', name: 'Bash', input: { command: 'ls' }, status: 'pending' }],
       },
     ];
     const tools = getPendingApprovalTools(msgs);
@@ -1001,7 +981,13 @@ describe('getPendingApprovalTools', () => {
         content: '',
         timestamp: 1,
         toolCalls: [
-          { id: 'bash1', name: 'Bash', input: { command: 'ls' }, status: 'completed', output: 'ok' },
+          {
+            id: 'bash1',
+            name: 'Bash',
+            input: { command: 'ls' },
+            status: 'completed',
+            output: 'ok',
+          },
         ],
       },
     ];
@@ -1060,7 +1046,14 @@ describe('detectCompaction', () => {
     const content = jsonl(
       summaryEntry('Summary of previous context', { timestamp: '2026-01-28T09:00:00.000Z' })
     );
-    const result = detectCompaction('/tmp/test.jsonl', 'sess1', 'Session 1', '/project', 0, content);
+    const result = detectCompaction(
+      '/tmp/test.jsonl',
+      'sess1',
+      'Session 1',
+      '/project',
+      0,
+      content
+    );
     expect(result.event).not.toBeNull();
     expect(result.event!.summary).toBe('Summary of previous context');
     expect(result.event!.sessionId).toBe('sess1');
@@ -1073,27 +1066,41 @@ describe('detectCompaction', () => {
       compactBoundary({ timestamp: '2026-01-28T09:00:00.000Z' }),
       userMsg('Summary of what happened before', { timestamp: '2026-01-28T09:00:01.000Z' })
     );
-    const result = detectCompaction('/tmp/test.jsonl', 'sess1', 'Session 1', '/project', 0, content);
+    const result = detectCompaction(
+      '/tmp/test.jsonl',
+      'sess1',
+      'Session 1',
+      '/project',
+      0,
+      content
+    );
     expect(result.event).not.toBeNull();
     expect(result.event!.summary).toBe('Summary of what happened before');
   });
 
   it('skips lines before lastCheckedLine', () => {
-    const content = jsonl(
-      summaryEntry('Old summary'),
-      userMsg('Continue'),
-      assistantText('Done')
+    const content = jsonl(summaryEntry('Old summary'), userMsg('Continue'), assistantText('Done'));
+    const result = detectCompaction(
+      '/tmp/test.jsonl',
+      'sess1',
+      'Session 1',
+      '/project',
+      3,
+      content
     );
-    const result = detectCompaction('/tmp/test.jsonl', 'sess1', 'Session 1', '/project', 3, content);
     expect(result.event).toBeNull();
   });
 
   it('returns lastLine equal to total lines', () => {
-    const content = jsonl(
-      userMsg('line1'),
-      assistantText('line2')
+    const content = jsonl(userMsg('line1'), assistantText('line2'));
+    const result = detectCompaction(
+      '/tmp/test.jsonl',
+      'sess1',
+      'Session 1',
+      '/project',
+      0,
+      content
     );
-    const result = detectCompaction('/tmp/test.jsonl', 'sess1', 'Session 1', '/project', 0, content);
     expect(result.lastLine).toBe(2);
   });
 });
@@ -1116,9 +1123,7 @@ describe('extractUsageFromFile', () => {
   });
 
   it('extracts input/output tokens', () => {
-    const content = jsonl(
-      usageEntry(1000, 500, { msgId: 'msg1' })
-    );
+    const content = jsonl(usageEntry(1000, 500, { msgId: 'msg1' }));
     mockedFs.existsSync.mockReturnValue(true);
     mockedFs.readFileSync.mockReturnValue(content);
 
@@ -1198,9 +1203,9 @@ describe('extractFileChanges', () => {
 
   it('extracts completed Write tool calls', () => {
     const content = jsonl(
-      assistantWithTools('', [
-        { name: 'Write', id: 'w1', input: { file_path: '/src/app.ts' } },
-      ], { timestamp: '2026-01-28T10:00:00.000Z' }),
+      assistantWithTools('', [{ name: 'Write', id: 'w1', input: { file_path: '/src/app.ts' } }], {
+        timestamp: '2026-01-28T10:00:00.000Z',
+      }),
       toolResult('w1', 'ok')
     );
     const changes = extractFileChanges(content);
@@ -1211,9 +1216,9 @@ describe('extractFileChanges', () => {
 
   it('extracts completed Edit tool calls', () => {
     const content = jsonl(
-      assistantWithTools('', [
-        { name: 'Edit', id: 'e1', input: { file_path: '/src/utils.ts' } },
-      ], { timestamp: '2026-01-28T10:00:00.000Z' }),
+      assistantWithTools('', [{ name: 'Edit', id: 'e1', input: { file_path: '/src/utils.ts' } }], {
+        timestamp: '2026-01-28T10:00:00.000Z',
+      }),
       toolResult('e1', 'ok')
     );
     const changes = extractFileChanges(content);
@@ -1224,9 +1229,7 @@ describe('extractFileChanges', () => {
 
   it('excludes incomplete tool calls (no tool_result)', () => {
     const content = jsonl(
-      assistantWithTools('', [
-        { name: 'Write', id: 'w1', input: { file_path: '/src/pending.ts' } },
-      ])
+      assistantWithTools('', [{ name: 'Write', id: 'w1', input: { file_path: '/src/pending.ts' } }])
     );
     const changes = extractFileChanges(content);
     expect(changes).toHaveLength(0);
@@ -1234,13 +1237,13 @@ describe('extractFileChanges', () => {
 
   it('deduplicates by file path, keeping latest timestamp', () => {
     const content = jsonl(
-      assistantWithTools('', [
-        { name: 'Edit', id: 'e1', input: { file_path: '/src/app.ts' } },
-      ], { timestamp: '2026-01-28T10:00:00.000Z' }),
+      assistantWithTools('', [{ name: 'Edit', id: 'e1', input: { file_path: '/src/app.ts' } }], {
+        timestamp: '2026-01-28T10:00:00.000Z',
+      }),
       toolResult('e1', 'ok', { timestamp: '2026-01-28T10:00:01.000Z' }),
-      assistantWithTools('', [
-        { name: 'Edit', id: 'e2', input: { file_path: '/src/app.ts' } },
-      ], { timestamp: '2026-01-28T10:05:00.000Z' }),
+      assistantWithTools('', [{ name: 'Edit', id: 'e2', input: { file_path: '/src/app.ts' } }], {
+        timestamp: '2026-01-28T10:05:00.000Z',
+      }),
       toolResult('e2', 'ok', { timestamp: '2026-01-28T10:05:01.000Z' })
     );
     const changes = extractFileChanges(content);
@@ -1250,13 +1253,13 @@ describe('extractFileChanges', () => {
 
   it('upgrades to "write" if both edit and write on same file', () => {
     const content = jsonl(
-      assistantWithTools('', [
-        { name: 'Edit', id: 'e1', input: { file_path: '/src/app.ts' } },
-      ], { timestamp: '2026-01-28T10:00:00.000Z' }),
+      assistantWithTools('', [{ name: 'Edit', id: 'e1', input: { file_path: '/src/app.ts' } }], {
+        timestamp: '2026-01-28T10:00:00.000Z',
+      }),
       toolResult('e1', 'ok'),
-      assistantWithTools('', [
-        { name: 'Write', id: 'w1', input: { file_path: '/src/app.ts' } },
-      ], { timestamp: '2026-01-28T10:01:00.000Z' }),
+      assistantWithTools('', [{ name: 'Write', id: 'w1', input: { file_path: '/src/app.ts' } }], {
+        timestamp: '2026-01-28T10:01:00.000Z',
+      }),
       toolResult('w1', 'ok')
     );
     const changes = extractFileChanges(content);
@@ -1266,13 +1269,13 @@ describe('extractFileChanges', () => {
 
   it('sorts results by path', () => {
     const content = jsonl(
-      assistantWithTools('', [
-        { name: 'Write', id: 'w1', input: { file_path: '/z/file.ts' } },
-      ], { timestamp: '2026-01-28T10:00:00.000Z' }),
+      assistantWithTools('', [{ name: 'Write', id: 'w1', input: { file_path: '/z/file.ts' } }], {
+        timestamp: '2026-01-28T10:00:00.000Z',
+      }),
       toolResult('w1', 'ok'),
-      assistantWithTools('', [
-        { name: 'Write', id: 'w2', input: { file_path: '/a/file.ts' } },
-      ], { timestamp: '2026-01-28T10:01:00.000Z' }),
+      assistantWithTools('', [{ name: 'Write', id: 'w2', input: { file_path: '/a/file.ts' } }], {
+        timestamp: '2026-01-28T10:01:00.000Z',
+      }),
       toolResult('w2', 'ok')
     );
     const changes = extractFileChanges(content);
@@ -1379,7 +1382,13 @@ describe('getRecentActivity', () => {
         content: '',
         timestamp: 100,
         toolCalls: [
-          { id: 't1', name: 'Read', input: { file_path: '/a.ts' }, status: 'completed', output: 'data' },
+          {
+            id: 't1',
+            name: 'Read',
+            input: { file_path: '/a.ts' },
+            status: 'completed',
+            output: 'data',
+          },
         ],
       },
       {
@@ -1388,7 +1397,13 @@ describe('getRecentActivity', () => {
         content: '',
         timestamp: 200,
         toolCalls: [
-          { id: 't2', name: 'Bash', input: { command: 'npm test' }, status: 'completed', output: 'pass' },
+          {
+            id: 't2',
+            name: 'Bash',
+            input: { command: 'npm test' },
+            status: 'completed',
+            output: 'pass',
+          },
         ],
       },
     ];
@@ -1425,7 +1440,13 @@ describe('getRecentActivity', () => {
         content: '',
         timestamp: 100,
         toolCalls: [
-          { id: 't1', name: 'Read', input: { file_path: '/src/app.ts' }, status: 'completed', output: '' },
+          {
+            id: 't1',
+            name: 'Read',
+            input: { file_path: '/src/app.ts' },
+            status: 'completed',
+            output: '',
+          },
         ],
       },
     ];
@@ -1442,7 +1463,13 @@ describe('getRecentActivity', () => {
         content: '',
         timestamp: 100,
         toolCalls: [
-          { id: 't1', name: 'Bash', input: { command: 'npm test' }, status: 'completed', output: 'ok' },
+          {
+            id: 't1',
+            name: 'Bash',
+            input: { command: 'npm test' },
+            status: 'completed',
+            output: 'ok',
+          },
         ],
       },
     ];
@@ -1459,7 +1486,13 @@ describe('getRecentActivity', () => {
         content: '',
         timestamp: 100,
         toolCalls: [
-          { id: 't1', name: 'Grep', input: { pattern: 'TODO' }, status: 'completed', output: 'matches' },
+          {
+            id: 't1',
+            name: 'Grep',
+            input: { pattern: 'TODO' },
+            status: 'completed',
+            output: 'matches',
+          },
         ],
       },
     ];
@@ -1483,7 +1516,13 @@ describe('getRecentActivity', () => {
         content: '',
         timestamp: 100,
         toolCalls: [
-          { id: 't1', name: 'Bash', input: { command: 'cat big' }, status: 'completed', output: longOutput },
+          {
+            id: 't1',
+            name: 'Bash',
+            input: { command: 'cat big' },
+            status: 'completed',
+            output: longOutput,
+          },
         ],
       },
     ];
