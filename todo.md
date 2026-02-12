@@ -9,7 +9,7 @@ Quick capture for ideas and tasks. Run `/plan` to process into detailed plans.
 - Theme customization -- choosable theme presets (sent message gradient, text color, button color, accents). Curated set of options, not too many
 - Mobile button rearrange -- move on/off toggles (Notify, Auto, Tools) to header, move Files/Search/Terminal to bottom bar. Cancel stays in bottom
 - New project wizard v2 -- reimplement bigger and better than before
-- Mobile copy/paste -- better copy support for messages (copy button, allow shortening/selecting before copy)
+- Copy/paste support -- better copy for messages (copy button, allow shortening/selecting before copy). Desktop text selection now works (fixed focus-stealing); mobile still needs work
 - Skeleton loading screens -- animated placeholder cards while sessions/conversations load instead of spinners
 - Expose hook error states in UI -- inline error banners for failed fetches (conversation, tasks, review diff). Currently errors are silent
 - React.memo on MessageBubble and ToolCard -- prevent cascading re-renders in long conversations, especially on mobile

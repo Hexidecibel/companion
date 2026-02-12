@@ -196,6 +196,9 @@ export function SessionView({
         const active = document.activeElement;
         // Don't steal focus from other interactive elements
         if (active && active.closest('input, textarea:not(.input-bar-textarea), [contenteditable], select')) return;
+        // Don't steal focus if user is selecting text
+        const selection = window.getSelection();
+        if (selection && selection.toString().length > 0) return;
         const textarea = document.querySelector('.input-bar-textarea') as HTMLElement | null;
         textarea?.focus();
       });
@@ -213,6 +216,9 @@ export function SessionView({
     const target = e.target as HTMLElement;
     // Don't steal focus from interactive elements
     if (target.closest('button, a, input, textarea, [role="button"], .msg-option-btn, .tool-card, .question-block')) return;
+    // Don't steal focus if user is selecting text
+    const selection = window.getSelection();
+    if (selection && selection.toString().length > 0) return;
     const textarea = document.querySelector('.input-bar-textarea') as HTMLElement | null;
     textarea?.focus();
   }, []);
