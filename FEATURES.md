@@ -360,3 +360,12 @@ Per-session toggle to show or hide tool call cards in conversation view.
 - Pending tool cards always shown (require user action like approval)
 - ExitPlanMode cards always shown regardless of toggle
 - State persisted per session in localStorage
+
+## Test Suite
+Comprehensive automated tests for daemon parser and web client services.
+
+- **Daemon parser:** 96 tests across 13 functions (parseConversationFile, detectWaitingForInput, extractHighlights, detectCurrentActivityFast, detectIdle, detectCurrentActivity, getSessionStatus, getPendingApprovalTools, detectCompaction, extractUsageFromFile, extractFileChanges, parseConversationChain, getRecentActivity)
+- Inline JSONL fixture builders for readable, maintainable test data
+- **Web client:** Vitest + @testing-library/react + jsdom infrastructure
+- ServerConnection tests (23): connection lifecycle, auth handshake, reconnection, request/response matching, message handlers, config updates
+- ConnectionManager tests (14): multi-server management, snapshots, connect/disconnect, change handlers
