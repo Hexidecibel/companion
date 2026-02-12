@@ -62,50 +62,93 @@ export function applySafeAreaInsets(): void {
  * On Tauri mobile (Android/iOS), the WebView resizes via adjustResize,
  * so the keyboard is already accounted for and we skip this entirely.
  */
+
+/** Minimum height change to be considered a keyboard event (vs URL bar). */
+const KEYBOARD_THRESHOLD = 100;
+
+export interface KeyboardHandler {
+  /** Process a viewport resize. Call with the current visualViewport.height. */
+  handleResize(viewportHeight: number): void;
+  /** Whether the keyboard is currently detected as open. */
+  isKeyboardOpen(): boolean;
+  /** The current "full" (no-keyboard) baseline height. */
+  getFullHeight(): number;
+}
+
+/**
+ * Create a keyboard height handler. Extracted for testability.
+ * @param initialHeight - the viewport height at init time
+ * @param setProperty - called with height string when keyboard opens/resizes
+ * @param removeProperty - called when keyboard closes
+ */
+export function createKeyboardHandler(
+  initialHeight: number,
+  setProperty: (value: string) => void,
+  removeProperty: () => void,
+): KeyboardHandler {
+  let fullHeight = initialHeight;
+  let keyboardOpen = false;
+  let lastAppliedHeight = initialHeight;
+
+  return {
+    handleResize(viewportHeight: number) {
+      // Viewport grew back to full size — keyboard closed
+      if (viewportHeight >= fullHeight) {
+        fullHeight = viewportHeight;
+        lastAppliedHeight = viewportHeight;
+        if (keyboardOpen) {
+          keyboardOpen = false;
+          removeProperty();
+        }
+        return;
+      }
+
+      const shrinkFromFull = fullHeight - viewportHeight;
+
+      // Small shrink (< threshold) — URL bar or keyboard closed with URL bar visible
+      if (shrinkFromFull < KEYBOARD_THRESHOLD) {
+        if (keyboardOpen) {
+          // Was keyboard-open, now close to full → keyboard closed
+          keyboardOpen = false;
+          lastAppliedHeight = viewportHeight;
+          removeProperty();
+        }
+        return;
+      }
+
+      // Keyboard is open — but ignore small jitter (< 40px) from autocomplete
+      // bar or suggestion strip changes while typing
+      const changeFromApplied = Math.abs(viewportHeight - lastAppliedHeight);
+      if (keyboardOpen && changeFromApplied < 40) return;
+
+      keyboardOpen = true;
+      lastAppliedHeight = viewportHeight;
+      setProperty(`${viewportHeight}px`);
+    },
+
+    isKeyboardOpen() {
+      return keyboardOpen;
+    },
+
+    getFullHeight() {
+      return fullHeight;
+    },
+  };
+}
+
 export function initKeyboardHeightListener(): void {
   if (isTauriMobile()) return;
 
   const vv = window.visualViewport;
   if (!vv) return;
 
-  let fullHeight = vv.height; // viewport height without keyboard
-  let lastApplied = vv.height;
-  let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+  const style = document.documentElement.style;
+  const handler = createKeyboardHandler(
+    vv.height,
+    (value) => style.setProperty('--app-height', value),
+    () => style.removeProperty('--app-height'),
+  );
 
-  const apply = (height: number) => {
-    lastApplied = height;
-    document.documentElement.style.setProperty('--app-height', `${height}px`);
-  };
-
-  const update = () => {
-    if (debounceTimer) clearTimeout(debounceTimer);
-
-    const h = vv.height;
-
-    // Viewport grew back (keyboard closing, URL bar hiding) — snap immediately
-    if (h >= fullHeight) {
-      fullHeight = h;
-      if (Math.abs(h - lastApplied) > 5) {
-        apply(h);
-      }
-      return;
-    }
-
-    const shrinkFromFull = fullHeight - h;
-    const changeFromApplied = Math.abs(h - lastApplied);
-
-    // Small shrink from full height (< 100px) — URL bar, autocomplete, ignore
-    if (shrinkFromFull < 100) return;
-
-    // Already tracking keyboard, small adjustment (< 50px) — ignore jitter
-    if (changeFromApplied < 50) return;
-
-    // Significant keyboard change — debounce to let animation settle
-    debounceTimer = setTimeout(() => {
-      apply(vv.height);
-    }, 100);
-  };
-
-  vv.addEventListener('resize', update);
-  apply(vv.height);
+  vv.addEventListener('resize', () => handler.handleResize(vv.height));
+  // Do NOT set --app-height on init — let CSS 100dvh handle the default
 }
