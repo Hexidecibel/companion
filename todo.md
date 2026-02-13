@@ -4,6 +4,16 @@ Quick capture for ideas and tasks. Run `/plan` to process into detailed plans.
 
 ---
 
+## App Store Release
+- ~~Privacy policy~~ done -- PRIVACY.md written, needs hosting (GitHub Pages)
+- Release signing key -- generate a proper upload key for Google Play (back it up!). Enroll in Google Play App Signing
+- ~~Store listing content~~ done -- STORE-LISTING.md drafted (descriptions + keywords). Still need screenshots + feature graphic
+- ~~Version bump to 1.0.0~~ done -- all packages synced
+- iOS push notifications -- implement APNs in tauri-plugin-fcm (currently no-op stub) [planned]
+- Auth screen store links -- add Google Play and App Store badges/links to the web first-auth screen
+- Google Play developer registration -- $25 one-time, set up app listing
+- TestFlight beta -- submit iOS build for beta testing before public release
+
 ## Upcoming
 - Split snap layouts -- show snap zone boxes (like Windows/macOS) when dragging/splitting sessions into different configurations
 - Theme customization -- choosable theme presets (sent message gradient, text color, button color, accents). Curated set of options, not too many

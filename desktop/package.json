@@ -1,6 +1,6 @@
 {
   "name": "@hexidecibel/companion-desktop",
-  "version": "0.2.5",
+  "version": "1.0.0",
   "private": true,
   "scripts": {
     "tauri": "tauri",

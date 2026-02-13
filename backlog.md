@@ -6,6 +6,7 @@ Long-term ideas, deferred items, and research notes. Not part of the daily workf
 
 ## iOS Push Notifications
 Implement native APNs plugin for tauri-plugin-fcm (currently no-op on iOS, Android only).
+**Promoted to todo.md** — required for App Store release.
 
 ## OpenAI Codex CLI Parser
 Add a parser/watcher for OpenAI's Codex CLI so Companion can monitor both Claude Code and Codex sessions. Users would choose their AI per session/project.

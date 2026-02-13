@@ -111,6 +111,10 @@ rm -rf ~/.companion               # Remove config
 | [Development](docs/DEVELOPMENT.md) | Building, testing, project structure, troubleshooting |
 | [Changelog](CHANGELOG.md) | Release history |
 
+## Privacy
+
+See [PRIVACY.md](PRIVACY.md). Companion is fully self-hosted — no telemetry, no analytics, no third-party data sharing.
+
 ## License
 
 MIT
