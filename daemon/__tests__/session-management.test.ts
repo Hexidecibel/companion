@@ -237,6 +237,7 @@ const mockConfig: DaemonConfig = {
   mdnsEnabled: false,
   pushDelayMs: 60000,
   autoApproveTools: [],
+  git: true,
 };
 
 // ========================================

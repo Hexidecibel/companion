@@ -213,13 +213,17 @@ High-level features of the Companion daemon, web client, and desktop/mobile apps
 - Camera access for QR code scanning
 
 ## Daemon CLI
-- `bin/companion` — top-level entry point, auto-builds daemon on first run
+- `bin/companion` — top-level entry point, auto-builds daemon + web client when stale
+- `companion start` — background start with PID file, already-running detection, 1-second liveness check
+- `companion start -f` — foreground start for debugging
 - `companion setup` — first-time wizard: creates config, generates token, prints connection info with QR code
 - `companion autostart enable/disable` — manages systemd user service (Linux) and launchd agent (macOS)
 - `companion status` — show running state, PID, tmux sessions, config summary
 - `companion stop` — graceful shutdown via PID file
 - `companion config` — view/set config values
-- `companion logs` — platform-aware log viewing (macOS launchd / Linux journalctl)
+- `companion logs` — platform-aware log viewing (macOS launchd / Linux journalctl / `~/.companion/daemon.log`)
+- Robust build detection: only rebuilds when source files are newer than build output
+- Platform-aware log locations: `~/Library/Logs/companion.log` (macOS), `~/.companion/daemon.log` (Linux)
 
 ## Parallel Work Groups
 - Spawn multiple Claude Code sessions in parallel from `/work` command
@@ -255,7 +259,7 @@ High-level features of the Companion daemon, web client, and desktop/mobile apps
 - Build date and version info in settings
 - Scroll behavior analytics
 - Client error reporting
-- Management scripts in `bin/` with usage headers and dep checks (companion, build, build-all, build-apk, deploy, dev, test, logs, status)
+- Management scripts in `bin/` with usage headers and dep checks (companion, build, build-all, build-apk, deploy, dev, test)
 
 ## Away Digest
 Summary card on the dashboard when returning after inactivity, showing what happened while you were away.

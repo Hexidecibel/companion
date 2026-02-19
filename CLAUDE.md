@@ -28,17 +28,20 @@ desktop/        # Tauri 2.0 wrapper (desktop + mobile native builds)
 
 ### Commands
 ```bash
-# Build
-cd daemon && npm install && npm run build
+# First-time setup (auto-builds daemon + web, creates config)
+bin/companion setup
 
-# Install as service
-sudo bash scripts/install.sh
+# Start daemon (background by default)
+bin/companion start
+
+# Start in foreground (for debugging)
+bin/companion start -f
 
 # Manage
-sudo systemctl start companion
-sudo systemctl stop companion
-sudo systemctl restart companion
-sudo journalctl -u companion -f   # View logs
+bin/companion stop
+bin/companion restart
+bin/companion status
+bin/companion logs
 ```
 
 ### Config options

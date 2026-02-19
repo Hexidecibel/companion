@@ -113,7 +113,8 @@ All scripts live in `bin/` and include usage headers and dependency checks.
 |--------|-------------|
 | `bin/companion` | Top-level CLI entry point (auto-builds on first run) |
 | `bin/companion setup` | First-time wizard: creates config, generates token, prints connection info |
-| `bin/companion start` | Start daemon in foreground |
+| `bin/companion start` | Start daemon (background) |
+| `bin/companion start -f` | Start daemon in foreground (debugging) |
 | `bin/companion stop` | Stop a running daemon |
 | `bin/companion restart` | Restart via service manager |
 | `bin/companion status` | Show running state, PID, sessions |
@@ -127,8 +128,6 @@ All scripts live in `bin/` and include usage headers and dependency checks.
 | `bin/deploy` | Build + restart daemon service |
 | `bin/dev` | Start daemon + Vite dev server |
 | `bin/test` | Run all tests, lint, typecheck |
-| `bin/logs` | View daemon logs (platform-aware) |
-| `bin/status` | Show daemon status and info |
 
 ## Testing
 

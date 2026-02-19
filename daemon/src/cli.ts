@@ -26,7 +26,8 @@ ${bold('USAGE')}
   companion [command] [options]
 
 ${bold('COMMANDS')}
-  start               Start the daemon (default if no command given)
+  start               Start the daemon (background by default)
+  start -f            Start in foreground (for debugging)
   stop                Stop a running daemon
   restart             Restart the daemon (via systemctl)
   status              Show daemon status
@@ -48,7 +49,8 @@ ${bold('CONFIG SUBCOMMANDS')}
   config path         Show config file path
 
 ${bold('EXAMPLES')}
-  companion                    Start the daemon
+  companion                    Start the daemon (background)
+  companion start -f           Start in foreground (for debugging)
   companion setup              First-time setup
   companion autostart enable   Install as a system service
   companion stop               Stop the daemon
@@ -240,7 +242,7 @@ function cmdConfig(args: string[]): void {
     try {
       config = loadConfig();
     } catch {
-      console.error(red('Cannot load config. Run "companion install" first.'));
+      console.error(red('Cannot load config. Run "companion setup" first.'));
       process.exit(1);
     }
 
@@ -279,7 +281,7 @@ function cmdConfig(args: string[]): void {
   try {
     config = loadConfig();
   } catch {
-    console.error(red('Cannot load config. Run "companion install" first.'));
+    console.error(red('Cannot load config. Run "companion setup" first.'));
     process.exit(1);
   }
 
@@ -490,22 +492,11 @@ function cmdLogs(): void {
         console.error(red('Failed to read log file'));
       }
     } else {
-      // Try /tmp/daemon.log (dev mode)
-      const devLog = '/tmp/daemon.log';
-      if (fs.existsSync(devLog)) {
-        try {
-          execSync(`tail -50 "${devLog}"`, { stdio: 'inherit' });
-        } catch {
-          console.error(red('Failed to read log file'));
-        }
-      } else {
-        console.log(dim('No log file found'));
-        console.log(dim(`Checked: ${logPath}`));
-        console.log(dim(`Checked: ${devLog}`));
-      }
+      console.log(dim('No log file found'));
+      console.log(dim(`Checked: ${logPath}`));
     }
   } else {
-    // Linux: try journalctl first
+    // Linux: try journalctl first, then fall back to log file
     try {
       execSync(
         'journalctl --user -u companion --no-pager -n 50 2>/dev/null || journalctl -u companion --no-pager -n 50 2>/dev/null',
@@ -514,8 +505,19 @@ function cmdLogs(): void {
         }
       );
     } catch {
-      console.log(dim('No logs found via journalctl'));
-      console.log(dim('If running manually, check your terminal output'));
+      // Fall back to log file for manual background starts
+      const logPath = path.join(CONFIG_DIR, 'daemon.log');
+      if (fs.existsSync(logPath)) {
+        try {
+          execSync(`tail -50 "${logPath}"`, { stdio: 'inherit' });
+        } catch {
+          console.error(red('Failed to read log file'));
+        }
+      } else {
+        console.log(dim('No logs found via journalctl'));
+        console.log(dim(`No log file at: ${logPath}`));
+        console.log(dim('If running manually, check your terminal output'));
+      }
     }
   }
 }
@@ -558,7 +560,7 @@ function cmdToken(): void {
   try {
     config = loadConfig();
   } catch {
-    console.error(red('Cannot load config. Run "companion install" first.'));
+    console.error(red('Cannot load config. Run "companion setup" first.'));
     process.exit(1);
   }
 

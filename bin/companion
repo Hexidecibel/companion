@@ -1,14 +1,15 @@
 #!/bin/bash
 # companion — Top-level entry point for the Companion daemon.
 #
-# Automatically builds the daemon on first run, then delegates to
-# the Node.js CLI (daemon/dist/index.js).
+# Handles building, backgrounding, and process management in the shell,
+# then delegates everything else to the Node.js CLI (daemon/dist/index.js).
 #
 # Usage:
-#   bin/companion              Start the daemon
+#   bin/companion              Start the daemon (background)
+#   bin/companion start -f     Start in foreground (for debugging)
 #   bin/companion setup        First-time setup (creates config, prints connection info)
-#   bin/companion autostart enable   Install as a system service
-#   bin/companion autostart disable  Remove system service
+#   bin/companion stop         Stop a running daemon
+#   bin/companion status       Show daemon status
 #   bin/companion help         Show all commands
 #
 # See README.md for full documentation.
@@ -18,7 +19,17 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(dirname "$SCRIPT_DIR")"
 DAEMON_DIR="$ROOT/daemon"
+WEB_DIR="$ROOT/web"
 ENTRY="$DAEMON_DIR/dist/index.js"
+CONFIG_DIR="$HOME/.companion"
+PID_FILE="$CONFIG_DIR/daemon.pid"
+
+# Platform-aware log location
+if [[ "$OSTYPE" == darwin* ]]; then
+  LOG_FILE="$HOME/Library/Logs/companion.log"
+else
+  LOG_FILE="$CONFIG_DIR/daemon.log"
+fi
 
 # --- Check for Node.js ---
 if ! command -v node &>/dev/null; then
@@ -29,25 +40,158 @@ if ! command -v node &>/dev/null; then
   exit 1
 fi
 
-# --- Auto-build daemon if needed (required for any command) ---
-if [ ! -f "$ENTRY" ]; then
-  echo "Building daemon..."
-  cd "$DAEMON_DIR"
-  npm install 2>&1
-  npm run build 2>&1
-  echo "Daemon built."
-  echo ""
-fi
+# --- Build helpers ---
+
+needs_npm_install() {
+  local dir="$1"
+  # No node_modules at all
+  if [ ! -d "$dir/node_modules" ]; then
+    return 0
+  fi
+  # package-lock.json is newer than the install marker
+  if [ -f "$dir/package-lock.json" ] && [ -f "$dir/node_modules/.package-lock.json" ]; then
+    if [ "$dir/package-lock.json" -nt "$dir/node_modules/.package-lock.json" ]; then
+      return 0
+    fi
+  fi
+  return 1
+}
+
+needs_daemon_build() {
+  # No build output at all
+  if [ ! -f "$ENTRY" ]; then
+    return 0
+  fi
+  # Any .ts source newer than the entry point
+  if find "$DAEMON_DIR/src" -name '*.ts' -newer "$ENTRY" -print -quit 2>/dev/null | grep -q .; then
+    return 0
+  fi
+  return 1
+}
+
+needs_web_build() {
+  # No build output at all
+  if [ ! -d "$WEB_DIR/dist" ]; then
+    return 0
+  fi
+  # Any .ts/.tsx source newer than dist/index.html
+  if find "$WEB_DIR/src" \( -name '*.ts' -o -name '*.tsx' \) -newer "$WEB_DIR/dist/index.html" -print -quit 2>/dev/null | grep -q .; then
+    return 0
+  fi
+  return 1
+}
+
+build_daemon() {
+  local did_work=false
+
+  if needs_npm_install "$DAEMON_DIR"; then
+    echo "Installing daemon dependencies..."
+    (cd "$DAEMON_DIR" && npm install) || { echo "ERROR: npm install failed in daemon/"; exit 1; }
+    did_work=true
+  fi
+
+  if needs_daemon_build; then
+    echo "Building daemon..."
+    (cd "$DAEMON_DIR" && npm run build) || { echo "ERROR: daemon build failed"; exit 1; }
+    did_work=true
+  fi
+
+  if $did_work; then
+    echo ""
+  fi
+}
+
+build_web() {
+  local did_work=false
+
+  if needs_npm_install "$WEB_DIR"; then
+    echo "Installing web dependencies..."
+    (cd "$WEB_DIR" && npm install) || { echo "ERROR: npm install failed in web/"; exit 1; }
+    did_work=true
+  fi
+
+  if needs_web_build; then
+    echo "Building web client..."
+    (cd "$WEB_DIR" && npm run build) || { echo "ERROR: web client build failed"; exit 1; }
+    did_work=true
+  fi
+
+  if $did_work; then
+    echo ""
+  fi
+}
+
+# --- Always ensure daemon is built ---
+build_daemon
 
 # --- Setup: also build web client ---
-if [ "${1:-}" = "setup" ] && [ ! -d "$ROOT/web/dist" ]; then
-  echo "Building web client..."
-  cd "$ROOT/web"
-  npm install 2>&1
-  npm run build 2>&1
-  echo "Web client built."
-  echo ""
+if [ "${1:-}" = "setup" ]; then
+  build_web
+  exec node "$ENTRY" "$@"
 fi
 
-# --- Delegate to daemon CLI ---
+# --- Start command (default) ---
+if [ "${1:-}" = "" ] || [ "${1:-}" = "start" ]; then
+  # Parse flags
+  FOREGROUND=false
+  shift 2>/dev/null || true  # consume "start" if present
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      -f|--foreground)
+        FOREGROUND=true
+        shift
+        ;;
+      *)
+        echo "Unknown option: $1"
+        echo "Usage: companion start [-f|--foreground]"
+        exit 1
+        ;;
+    esac
+  done
+
+  # Also build web client for start (daemon serves it)
+  build_web
+
+  # Check if already running
+  if [ -f "$PID_FILE" ]; then
+    EXISTING_PID=$(cat "$PID_FILE" 2>/dev/null || true)
+    if [ -n "$EXISTING_PID" ] && kill -0 "$EXISTING_PID" 2>/dev/null; then
+      echo "Daemon is already running (PID $EXISTING_PID)"
+      echo "Use 'companion stop' to stop it first, or 'companion restart' to restart."
+      exit 1
+    fi
+    # Stale PID file — clean up
+    rm -f "$PID_FILE"
+  fi
+
+  if $FOREGROUND; then
+    exec node "$ENTRY" start
+  fi
+
+  # Background start
+  mkdir -p "$(dirname "$LOG_FILE")"
+  nohup node "$ENTRY" start >> "$LOG_FILE" 2>&1 &
+  DAEMON_PID=$!
+
+  # Write PID file (the node CLI also writes one, but we write early for the liveness check)
+  mkdir -p "$CONFIG_DIR"
+  echo "$DAEMON_PID" > "$PID_FILE"
+
+  # 1-second liveness check
+  sleep 1
+  if ! kill -0 "$DAEMON_PID" 2>/dev/null; then
+    echo "ERROR: Daemon exited immediately after starting."
+    echo ""
+    echo "Last 20 lines of log ($LOG_FILE):"
+    tail -20 "$LOG_FILE" 2>/dev/null || echo "(no log output)"
+    rm -f "$PID_FILE"
+    exit 1
+  fi
+
+  echo "Daemon started (PID $DAEMON_PID)"
+  echo "  Logs: $LOG_FILE"
+  exit 0
+fi
+
+# --- All other commands delegate to node CLI ---
 exec node "$ENTRY" "$@"

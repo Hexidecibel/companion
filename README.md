@@ -85,7 +85,8 @@ Config file: `~/.companion/config.json` (created by `bin/companion setup`)
 ```bash
 bin/companion autostart enable    # Install as system service (systemd / launchd)
 bin/companion autostart disable   # Remove system service
-bin/companion start               # Start in foreground
+bin/companion start               # Start daemon (background)
+bin/companion start -f            # Start in foreground (debugging)
 bin/companion stop                # Stop a running daemon
 bin/companion restart             # Restart via service manager
 bin/companion status              # Show running state, PID, sessions
