@@ -1,4 +1,6 @@
-const STORAGE_KEY = 'companion_recent_dirs';
+import { RECENT_DIRS_KEY } from './storageKeys';
+
+const STORAGE_KEY = RECENT_DIRS_KEY;
 const MAX_ENTRIES = 10;
 
 export interface RecentDirectory {

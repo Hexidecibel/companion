@@ -4,9 +4,12 @@ export interface KeyboardShortcut {
   key: string;
   ctrl?: boolean;
   meta?: boolean;
+  alt?: boolean;
   shift?: boolean;
   handler: () => void;
 }
+
+const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform);
 
 function isInputFocused(): boolean {
   const el = document.activeElement;
@@ -23,21 +26,30 @@ export function useKeyboardShortcuts(shortcuts: KeyboardShortcut[]) {
     function handleKeyDown(e: KeyboardEvent) {
       const current = shortcutsRef.current;
       for (const shortcut of current) {
-        const wantsCtrlOrMeta = shortcut.ctrl || shortcut.meta;
-        const ctrlOrMetaPressed = e.ctrlKey || e.metaKey;
+        // On Mac: use metaKey (Cmd). On Windows/Linux: use ctrlKey.
+        const wantsModifier = shortcut.ctrl || shortcut.meta;
+        const modifierPressed = isMac ? e.metaKey : e.ctrlKey;
 
-        const keyMatch = e.key.toLowerCase() === shortcut.key.toLowerCase()
-          || e.code.toLowerCase() === shortcut.key.toLowerCase();
+        const k = shortcut.key.toLowerCase();
+        const code = e.code.toLowerCase();
+        const keyMatch = e.key.toLowerCase() === k
+          || code === k
+          || code === `key${k}`
+          || code === `digit${k}`
+          || (k === '[' && code === 'bracketleft')
+          || (k === ']' && code === 'bracketright');
 
         if (!keyMatch) continue;
 
-        if (wantsCtrlOrMeta && !ctrlOrMetaPressed) continue;
-        if (!wantsCtrlOrMeta && ctrlOrMetaPressed) continue;
+        if (wantsModifier && !modifierPressed) continue;
+        if (!wantsModifier && modifierPressed) continue;
 
         if (shortcut.shift && !e.shiftKey) continue;
+        if (shortcut.alt && !e.altKey) continue;
+        if (!shortcut.alt && e.altKey) continue;
 
         // For plain-letter shortcuts (no ctrl/meta), skip when input is focused
-        if (!wantsCtrlOrMeta && isInputFocused()) continue;
+        if (!wantsModifier && isInputFocused()) continue;
 
         e.preventDefault();
         shortcut.handler();

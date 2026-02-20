@@ -1,4 +1,6 @@
-const STORAGE_KEY = 'companion_browser_notifications';
+import { BROWSER_NOTIFICATIONS_KEY } from './storageKeys';
+
+const STORAGE_KEY = BROWSER_NOTIFICATIONS_KEY;
 
 interface BrowserNotifPrefs {
   enabled: boolean;

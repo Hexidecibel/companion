@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { connectionManager } from '../services/ConnectionManager';
 import { useConnections } from './useConnections';
+import { AWAY_KEY as AWAY_STORAGE_KEY } from '../services/storageKeys';
 
 export interface DigestEntry {
   id: string;
@@ -26,7 +27,7 @@ interface UseAwayDigestReturn {
   dismiss: () => void;
 }
 
-const AWAY_KEY = 'companion_last_active';
+const AWAY_KEY = AWAY_STORAGE_KEY;
 
 function getLastActive(): number {
   const stored = localStorage.getItem(AWAY_KEY);

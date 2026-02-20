@@ -1,8 +1,6 @@
 import { Server } from '../types';
 import { syncToStore } from './persistentStorage';
-
-const SERVERS_KEY = 'companion_servers';
-const FONT_SCALE_KEY = 'companion_font_scale';
+import { SERVERS_KEY, FONT_SCALE_KEY } from './storageKeys';
 
 export function getServers(): Server[] {
   try {

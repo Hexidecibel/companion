@@ -8,6 +8,7 @@ import { TmuxModal } from './TmuxModal';
 import { ServerForm } from './ServerForm';
 import { ContextMenu, ContextMenuEntry } from './ContextMenu';
 import { getFontScale, saveFontScale } from '../services/storage';
+import { Sparkline } from './Sparkline';
 
 interface SessionSidebarProps {
   summaries: Map<string, ServerSummary>;
@@ -28,6 +29,7 @@ interface SessionSidebarProps {
   mobileOpen?: boolean;
   showJumpNumbers?: boolean;
   jumpNumberMap?: Map<string, number>;
+  style?: React.CSSProperties;
 }
 
 const STATUS_DOT_CLASS: Record<SessionSummary['status'], string> = {
@@ -109,6 +111,7 @@ export function SessionSidebar({
   mobileOpen,
   showJumpNumbers,
   jumpNumberMap,
+  style,
 }: SessionSidebarProps) {
   const { snapshots } = useConnections();
   const { getServer, toggleEnabled, deleteServer } = useServers();
@@ -331,7 +334,7 @@ export function SessionSidebar({
   }, [mutedSessions, onToggleMute, onOpenInSplit, onCloseSplit, secondarySession, activeSession, summaries]);
 
   return (
-    <aside className={`sidebar${mobileOpen ? ' sidebar-open' : ''}`}>
+    <aside className={`sidebar${mobileOpen ? ' sidebar-open' : ''}`} style={style}>
       <div className="sidebar-header">
         <span className="sidebar-title">Companion</span>
         <div className="sidebar-header-actions">
@@ -598,6 +601,9 @@ export function SessionSidebar({
                             </span>
                           )}
                         </div>
+                        {session.recentTimestamps && session.recentTimestamps.length > 0 && (
+                          <Sparkline timestamps={session.recentTimestamps} />
+                        )}
                         <span className="sidebar-session-time">
                           {formatRelativeTime(session.lastActivity)}
                         </span>

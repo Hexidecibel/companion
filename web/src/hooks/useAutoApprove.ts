@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import { connectionManager } from '../services/ConnectionManager';
+import { AUTO_APPROVE_KEY } from '../services/storageKeys';
 
-const STORAGE_KEY = 'companion_auto_approve_sessions';
+const STORAGE_KEY = AUTO_APPROVE_KEY;
 
 function getStoredState(serverId: string, sessionId: string): boolean {
   try {

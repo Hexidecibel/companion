@@ -101,6 +101,7 @@ export interface SessionSummary {
   lastActivity: number;
   currentActivity?: string;
   tmuxSessionName?: string;
+  recentTimestamps?: number[];
 }
 
 export interface ServerSummary {

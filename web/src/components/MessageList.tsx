@@ -18,6 +18,8 @@ interface MessageListProps {
   scrollToBottom?: boolean;
   planFilePath?: string | null;
   hideTools?: boolean;
+  isBookmarked?: (messageId: string) => boolean;
+  onToggleBookmark?: (messageId: string, content: string) => void;
 }
 
 export function MessageList({
@@ -36,6 +38,8 @@ export function MessageList({
   scrollToBottom: scrollToBottomProp,
   planFilePath,
   hideTools,
+  isBookmarked,
+  onToggleBookmark,
 }: MessageListProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -204,6 +208,8 @@ export function MessageList({
           isCurrentMatch={msg.id === currentMatchId}
           planFilePath={planFilePath}
           hideTools={hideTools}
+          isBookmarked={isBookmarked?.(msg.id)}
+          onToggleBookmark={onToggleBookmark}
         />
       ))}
       <div ref={bottomRef} />

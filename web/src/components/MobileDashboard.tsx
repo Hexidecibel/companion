@@ -8,6 +8,7 @@ import { NewSessionPanel } from './NewSessionPanel';
 import { TmuxModal } from './TmuxModal';
 import { ContextMenu, ContextMenuEntry } from './ContextMenu';
 import { ConnectionSnapshot } from '../services/ConnectionManager';
+import { Sparkline } from './Sparkline';
 import { connectionManager } from '../services/ConnectionManager';
 import { DigestData } from '../hooks/useAwayDigest';
 import { AwayDigest } from './AwayDigest';
@@ -354,6 +355,9 @@ function MobileSessionItem({ session, serverId, onSelect, onOpenInSplit, onClose
           <div className="mobile-session-activity">{session.currentActivity}</div>
         )}
       </div>
+      {session.recentTimestamps && session.recentTimestamps.length > 0 && (
+        <Sparkline timestamps={session.recentTimestamps} />
+      )}
       <span className="mobile-session-time">
         {formatRelativeTime(session.lastActivity)}
       </span>

@@ -28,4 +28,14 @@ Quick capture for ideas and tasks. Run `/plan` to process into detailed plans.
 - Vite code splitting -- lazy-load UsageDashboard, CodeReviewModal, FileViewerModal, ConversationSearch. Main bundle is 816KB
 - Defensive JSONL parsing -- graceful fallbacks for unknown entry types and format changes. Claude's format isn't officially stable either
 - Permission prompts stuck in chat mode -- parse "Yes / Yes and always allow / No" permission prompts from CLI output and surface them as tappable options (like AskUserQuestion). Currently no indication when stuck at these. (partially done: native key-sequence choice selection now works for JSONL-detected approval tools)
+- Diff line number gutter [planned] -- render actual line numbers alongside diff lines in CodeReviewModal (data already computed for line comments)
+- Sticky comment threads on files [planned] -- persist line comments in localStorage (session+file keyed) so previous comments show as annotations when reopening review modal
+- Session activity sparkline [planned] -- tiny inline SVG in sidebar showing message frequency over last 30min (one bar per minute). Data available from highlights timestamps
+- Batch approve pending tools [planned] -- "Approve all N" button when multiple tool calls pending, instead of individual approval. send_choice infra already handles key sequences
+- Message bookmarks [planned] -- long-press/right-click to bookmark a message, stored in localStorage, accessible from header button
+- Centralize localStorage keys into storageKeys.ts [planned] -- 38 scattered operations use hardcoded string keys, single module with typed key builders prevents typos
+- Extract QuestionBlock and MultiQuestionFlow out of MessageBubble.tsx [planned] -- 808-line file with 3 complex sub-components inlined, move to own file (~300 lines)
+- Named constants for daemon magic numbers [planned] -- hardcoded delays (150ms, 80ms, 200ms), size limits (5MB, 150MB), cache TTLs (30s) scattered across 4000 lines. Extract to daemon/src/constants.ts
+- Focus-visible keyboard outlines [planned] -- no :focus-visible styles in global.css, keyboard users can't see focused button. Add consistent blue glow ring
+- Error toast for failed choice/approval sends [planned] -- onSelectChoice failures swallowed silently, show inline "Failed to send — tap to retry" below options
 

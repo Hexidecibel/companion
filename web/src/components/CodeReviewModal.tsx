@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect, useRef } from 'react';
 import { FileChange } from '../types';
 import { isMobileViewport } from '../utils/platform';
 import { ContextMenu, ContextMenuEntry } from './ContextMenu';
+import { crmCommentsKey } from '../services/storageKeys';
 
 interface CommentingLine {
   filePath: string;
@@ -11,12 +12,21 @@ interface CommentingLine {
   anchorY: number;
 }
 
+interface SavedComment {
+  filePath: string;
+  lineNumber: number;
+  lineText: string;
+  comment: string;
+  timestamp: number;
+}
+
 interface CodeReviewModalProps {
   fileChanges: FileChange[];
   onViewFile: (path: string) => void;
   onRefresh: () => void;
   onClose: () => void;
   onComment?: (text: string) => void;
+  sessionId?: string | null;
 }
 
 function classifyLine(line: string): string {
@@ -28,7 +38,24 @@ function classifyLine(line: string): string {
   return 'context';
 }
 
-export function CodeReviewModal({ fileChanges, onViewFile, onRefresh, onClose, onComment }: CodeReviewModalProps) {
+function loadSavedComments(sessionId: string | null | undefined): SavedComment[] {
+  if (!sessionId) return [];
+  try {
+    const raw = localStorage.getItem(crmCommentsKey(sessionId));
+    return raw ? JSON.parse(raw) : [];
+  } catch { return []; }
+}
+
+function saveSavedComments(sessionId: string | null | undefined, comments: SavedComment[]) {
+  if (!sessionId) return;
+  if (comments.length === 0) {
+    localStorage.removeItem(crmCommentsKey(sessionId));
+  } else {
+    localStorage.setItem(crmCommentsKey(sessionId), JSON.stringify(comments));
+  }
+}
+
+export function CodeReviewModal({ fileChanges, onViewFile, onRefresh, onClose, onComment, sessionId }: CodeReviewModalProps) {
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set());
   const fileListRef = useRef<HTMLDivElement>(null);
@@ -37,6 +64,7 @@ export function CodeReviewModal({ fileChanges, onViewFile, onRefresh, onClose, o
   const [commentingLine, setCommentingLine] = useState<CommentingLine | null>(null);
   const [commentText, setCommentText] = useState('');
   const commentInputRef = useRef<HTMLInputElement>(null);
+  const [savedComments, setSavedComments] = useState<SavedComment[]>(() => loadSavedComments(sessionId));
 
   const toggleExpanded = useCallback((path: string) => {
     setExpandedPaths(prev => {
@@ -65,10 +93,21 @@ export function CodeReviewModal({ fileChanges, onViewFile, onRefresh, onClose, o
     if (!commentingLine || !commentText.trim() || !onComment) return;
     const formatted = `Re: ${commentingLine.filePath}:${commentingLine.lineNumber}\n> ${commentingLine.lineText}\n\n${commentText.trim()}`;
     onComment(formatted);
+    // Save comment for sticky threads
+    const newComment: SavedComment = {
+      filePath: commentingLine.filePath,
+      lineNumber: commentingLine.lineNumber,
+      lineText: commentingLine.lineText,
+      comment: commentText.trim(),
+      timestamp: Date.now(),
+    };
+    const updated = [...savedComments, newComment];
+    setSavedComments(updated);
+    saveSavedComments(sessionId, updated);
     setCommentingLine(null);
     setCommentText('');
     onClose();
-  }, [commentingLine, commentText, onComment, onClose]);
+  }, [commentingLine, commentText, onComment, onClose, savedComments, sessionId]);
 
   // Focus inline comment input when it appears
   useEffect(() => {
@@ -152,6 +191,15 @@ export function CodeReviewModal({ fileChanges, onViewFile, onRefresh, onClose, o
               {edits > 0 && ` (${edits} edited)`}
             </h3>
             <div className="crm-header-actions">
+              {savedComments.length > 0 && (
+                <button
+                  className="crm-clear-comments-btn"
+                  onClick={() => { setSavedComments([]); saveSavedComments(sessionId, []); }}
+                  title="Clear saved comments"
+                >
+                  Clear comments ({savedComments.length})
+                </button>
+              )}
               <button className="crm-refresh-btn" onClick={onRefresh} title="Refresh (r)">
                 {'\u21BB'}
               </button>
@@ -231,14 +279,24 @@ export function CodeReviewModal({ fileChanges, onViewFile, onRefresh, onClose, o
 
                           const isCommentable = cls === 'added' || cls === 'removed' || cls === 'context';
                           const lineContent = cls === 'added' || cls === 'removed' ? line.slice(1) : line;
+                          const lineComments = isCommentable ? savedComments.filter(
+                            c => c.filePath === fc.path && c.lineNumber === displayLineNum
+                          ) : [];
 
                           return (
-                            <div
-                              key={li}
-                              className={`code-review-diff-line ${cls}`}
-                              onContextMenu={isCommentable ? (e) => handleLineContextMenu(e, fc.path, displayLineNum, lineContent.trim()) : undefined}
-                            >
-                              {line || '\n'}
+                            <div key={li}>
+                              <div
+                                className={`code-review-diff-line ${cls}`}
+                                onContextMenu={isCommentable ? (e) => handleLineContextMenu(e, fc.path, displayLineNum, lineContent.trim()) : undefined}
+                              >
+                                <span className="crm-line-num">{displayLineNum || ''}</span>
+                                <span className="crm-line-content">{line || '\n'}</span>
+                              </div>
+                              {lineComments.map((c, ci) => (
+                                <div key={ci} className="crm-saved-comment">
+                                  {c.comment}
+                                </div>
+                              ))}
                             </div>
                           );
                         });

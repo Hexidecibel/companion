@@ -9,11 +9,10 @@ const SHORTCUT_GROUPS = [
   {
     title: 'Navigation',
     shortcuts: [
-      { keys: `${MOD}+1-9`, description: 'Switch to session by position' },
+      { keys: `${MOD}+Alt+1-9`, description: 'Switch to session by position' },
       { keys: `${MOD}+Alt (hold)`, description: 'Show jump number badges' },
-      { keys: `${MOD}+Tab`, description: 'Cycle recent sessions (MRU)' },
-      { keys: `${MOD}+[`, description: 'Previous session' },
-      { keys: `${MOD}+]`, description: 'Next session' },
+      { keys: `${MOD}+Alt+[`, description: 'Previous session' },
+      { keys: `${MOD}+Alt+]`, description: 'Next session' },
       { keys: 'j / \u2193', description: 'Next session' },
       { keys: 'k / \u2191', description: 'Previous session' },
       { keys: '/', description: 'Focus input bar' },
@@ -22,10 +21,11 @@ const SHORTCUT_GROUPS = [
   {
     title: 'Session',
     shortcuts: [
-      { keys: `${MOD}+T`, description: 'Toggle terminal' },
-      { keys: `${MOD}+F`, description: 'Search messages' },
-      { keys: `${MOD}+Shift+A`, description: 'Toggle auto-approve' },
-      { keys: `${MOD}+Shift+M`, description: 'Toggle mute' },
+      { keys: `${MOD}+Alt+T`, description: 'Toggle terminal' },
+      { keys: `${MOD}+Alt+F`, description: 'Search messages' },
+      { keys: `${MOD}+Alt+P`, description: 'Open file finder' },
+      { keys: `${MOD}+Alt+Shift+A`, description: 'Toggle auto-approve' },
+      { keys: `${MOD}+Alt+Shift+M`, description: 'Toggle mute' },
     ],
   },
   {

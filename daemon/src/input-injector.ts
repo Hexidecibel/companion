@@ -1,4 +1,5 @@
 import { spawn } from 'child_process';
+import { TMUX_OPERATION_TIMEOUT_MS, INPUT_LOG_PREVIEW_LENGTH, POST_TEXT_DELAY_MS, POST_ENTER_DELAY_MS, POST_ENTER_BEFORE_TYPING_DELAY_MS, POST_OTHER_SELECT_DELAY_MS, POST_TEXT_INPUT_DELAY_MS, POST_CHOICE_DELAY_MS, DEFAULT_PANE_CAPTURE_LINES } from './constants';
 
 export class InputInjector {
   private defaultSession: string;
@@ -29,7 +30,7 @@ export class InputInjector {
       const { spawnSync } = require('child_process');
 
       // First, check if the tmux session exists
-      const checkResult = spawnSync('tmux', ['has-session', '-t', session], { timeout: 5000 });
+      const checkResult = spawnSync('tmux', ['has-session', '-t', session], { timeout: TMUX_OPERATION_TIMEOUT_MS });
       if (checkResult.status !== 0) {
         console.error(`Tmux session '${session}' not found`);
         return false;
@@ -44,13 +45,13 @@ export class InputInjector {
 
   private async doSendInput(input: string, session: string): Promise<boolean> {
     try {
-      console.log(`Sending input to tmux session '${session}': ${input.substring(0, 80)}...`);
+      console.log(`Sending input to tmux session '${session}': ${input.substring(0, INPUT_LOG_PREVIEW_LENGTH)}...`);
 
       const { spawnSync } = require('child_process');
 
       // Send the text using spawnSync (avoids shell interpretation)
       const textResult = spawnSync('tmux', ['send-keys', '-t', session, '-l', '--', input], {
-        timeout: 5000,
+        timeout: TMUX_OPERATION_TIMEOUT_MS,
       });
       if (textResult.status !== 0) {
         console.error('Failed to send text:', textResult.stderr?.toString());
@@ -59,11 +60,11 @@ export class InputInjector {
       console.log('Text sent to tmux');
 
       // Wait for tmux to process the text before sending Enter
-      await new Promise((resolve) => setTimeout(resolve, 150));
+      await new Promise((resolve) => setTimeout(resolve, POST_TEXT_DELAY_MS));
 
       // Send Enter
       const enterResult = spawnSync('tmux', ['send-keys', '-t', session, 'Enter'], {
-        timeout: 5000,
+        timeout: TMUX_OPERATION_TIMEOUT_MS,
       });
       if (enterResult.status !== 0) {
         console.error('Failed to send Enter:', enterResult.stderr?.toString());
@@ -72,7 +73,7 @@ export class InputInjector {
       console.log('Enter sent to tmux');
 
       // Small delay after Enter to ensure tmux processes it before next message
-      await new Promise((resolve) => setTimeout(resolve, 50));
+      await new Promise((resolve) => setTimeout(resolve, POST_ENTER_DELAY_MS));
 
       console.log(`Input sent successfully to tmux session '${session}'`);
       return true;
@@ -163,7 +164,7 @@ export class InputInjector {
       const session = targetSession || this.activeSession;
       const { spawnSync } = require('child_process');
 
-      const checkResult = spawnSync('tmux', ['has-session', '-t', session], { timeout: 5000 });
+      const checkResult = spawnSync('tmux', ['has-session', '-t', session], { timeout: TMUX_OPERATION_TIMEOUT_MS });
       if (checkResult.status !== 0) {
         console.error(`Tmux session '${session}' not found`);
         return false;
@@ -187,7 +188,7 @@ export class InputInjector {
       const KEY_DELAY = 80; // ms between key presses
 
       const sendKey = (key: string): boolean => {
-        const result = spawnSync('tmux', ['send-keys', '-t', session, key], { timeout: 5000 });
+        const result = spawnSync('tmux', ['send-keys', '-t', session, key], { timeout: TMUX_OPERATION_TIMEOUT_MS });
         if (result.status !== 0) {
           console.error(`Failed to send key '${key}':`, result.stderr?.toString());
           return false;
@@ -203,14 +204,14 @@ export class InputInjector {
           await new Promise((r) => setTimeout(r, KEY_DELAY));
         }
         if (!sendKey('Enter')) return false;
-        await new Promise((r) => setTimeout(r, 200));
+        await new Promise((r) => setTimeout(r, POST_OTHER_SELECT_DELAY_MS));
 
         // Type the text
         const textResult = spawnSync('tmux', ['send-keys', '-t', session, '-l', '--', otherText], {
-          timeout: 5000,
+          timeout: TMUX_OPERATION_TIMEOUT_MS,
         });
         if (textResult.status !== 0) return false;
-        await new Promise((r) => setTimeout(r, 150));
+        await new Promise((r) => setTimeout(r, POST_TEXT_INPUT_DELAY_MS));
         if (!sendKey('Enter')) return false;
       } else if (multiSelect) {
         // Multi-select: walk through all options, Space on selected ones, then Enter
@@ -241,7 +242,7 @@ export class InputInjector {
         if (!sendKey('Enter')) return false;
       }
 
-      await new Promise((r) => setTimeout(r, 50));
+      await new Promise((r) => setTimeout(r, POST_CHOICE_DELAY_MS));
       console.log(`Choice sent successfully to tmux session '${session}'`);
       return true;
     } catch (err) {
@@ -256,20 +257,20 @@ export class InputInjector {
   async cancelInput(targetSession?: string): Promise<boolean> {
     const session = targetSession || this.activeSession;
     const { spawnSync } = require('child_process');
-    const checkResult = spawnSync('tmux', ['has-session', '-t', session], { timeout: 5000 });
+    const checkResult = spawnSync('tmux', ['has-session', '-t', session], { timeout: TMUX_OPERATION_TIMEOUT_MS });
     if (checkResult.status !== 0) return false;
-    const result = spawnSync('tmux', ['send-keys', '-t', session, 'C-c'], { timeout: 5000 });
+    const result = spawnSync('tmux', ['send-keys', '-t', session, 'C-c'], { timeout: TMUX_OPERATION_TIMEOUT_MS });
     return result.status === 0;
   }
 
   /**
    * Capture the current content of a tmux pane
    */
-  async capturePaneContent(targetSession?: string, lines = 20): Promise<string> {
+  async capturePaneContent(targetSession?: string, lines = DEFAULT_PANE_CAPTURE_LINES): Promise<string> {
     const session = targetSession || this.activeSession;
     const { spawnSync } = require('child_process');
     const result = spawnSync('tmux', ['capture-pane', '-t', session, '-p', '-S', `-${lines}`], {
-      timeout: 5000,
+      timeout: TMUX_OPERATION_TIMEOUT_MS,
     });
     if (result.status !== 0) return '';
     return (result.stdout?.toString() || '').trim();

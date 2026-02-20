@@ -16,6 +16,7 @@ import { isTauri, isTauriDesktop, isMobileViewport } from '../utils/platform';
 import { useServers } from '../hooks/useServers';
 import { useAwayDigest } from '../hooks/useAwayDigest';
 import { AwayDigest } from './AwayDigest';
+import { SIDEBAR_WIDTH_KEY } from '../services/storageKeys';
 
 interface DashboardProps {
   onSettings?: () => void;
@@ -28,6 +29,11 @@ export function Dashboard({ onSettings }: DashboardProps) {
   const [merging, setMerging] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(isMobileViewport());
+  const [sidebarWidth, setSidebarWidth] = useState(() => {
+    const stored = localStorage.getItem(SIDEBAR_WIDTH_KEY);
+    return stored ? parseInt(stored, 10) : 280;
+  });
+  const draggingRef = useRef(false);
   const [secondarySession, setSecondarySession] = useState<ActiveSession | null>(null);
   const [dashboardMode, setDashboardMode] = useState(false);
   const summaries = useAllServerSummaries();
@@ -179,8 +185,10 @@ export function Dashboard({ onSettings }: DashboardProps) {
   const [showJumpNumbers, setShowJumpNumbers] = useState(false);
 
   useEffect(() => {
+    const isMac = /Mac|iPhone|iPad/.test(navigator.platform);
     const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.altKey) setShowJumpNumbers(true);
+      const mod = isMac ? e.metaKey : e.ctrlKey;
+      if (mod && e.altKey) setShowJumpNumbers(true);
     };
     const handleKeyUp = () => {
       setShowJumpNumbers(false);
@@ -195,31 +203,6 @@ export function Dashboard({ onSettings }: DashboardProps) {
       window.removeEventListener('blur', handleBlur);
     };
   }, []);
-
-  // MRU session tracking for Ctrl+Tab cycling
-  const sessionMRURef = useRef<string[]>([]);
-
-  useEffect(() => {
-    if (!activeSession) return;
-    const key = `${activeSession.serverId}:${activeSession.sessionId}`;
-    sessionMRURef.current = [key, ...sessionMRURef.current.filter(k => k !== key)];
-  }, [activeSession]);
-
-  const cycleMRU = useCallback((direction: 1 | -1) => {
-    const mru = sessionMRURef.current;
-    if (mru.length < 2) return;
-    const currentKey = activeSession ? `${activeSession.serverId}:${activeSession.sessionId}` : '';
-    const currentIdx = mru.indexOf(currentKey);
-    let nextIdx = currentIdx + direction;
-    if (nextIdx < 0) nextIdx = mru.length - 1;
-    if (nextIdx >= mru.length) nextIdx = 0;
-    const parts = mru[nextIdx].split(':');
-    const serverId = parts[0];
-    const sessionId = parts.slice(1).join(':');
-    if (serverId && sessionId) {
-      setActiveSession({ serverId, sessionId });
-    }
-  }, [activeSession]);
 
   const navigateSession = useCallback((direction: 1 | -1) => {
     if (flatSessions.length === 0) return;
@@ -316,20 +299,18 @@ export function Dashboard({ onSettings }: DashboardProps) {
       if (showShortcutHelp) setShowShortcutHelp(false);
       else if (showNotifSettings) setShowNotifSettings(false);
     }},
-    { key: '[', meta: true, handler: () => navigateSession(-1) },
-    { key: ']', meta: true, handler: () => navigateSession(1) },
-    { key: '1', meta: true, handler: () => selectSessionByIndex(0) },
-    { key: '2', meta: true, handler: () => selectSessionByIndex(1) },
-    { key: '3', meta: true, handler: () => selectSessionByIndex(2) },
-    { key: '4', meta: true, handler: () => selectSessionByIndex(3) },
-    { key: '5', meta: true, handler: () => selectSessionByIndex(4) },
-    { key: '6', meta: true, handler: () => selectSessionByIndex(5) },
-    { key: '7', meta: true, handler: () => selectSessionByIndex(6) },
-    { key: '8', meta: true, handler: () => selectSessionByIndex(7) },
-    { key: '9', meta: true, handler: () => selectSessionByIndex(8) },
-    { key: 'Tab', ctrl: true, handler: () => cycleMRU(1) },
-    { key: 'Tab', ctrl: true, shift: true, handler: () => cycleMRU(-1) },
-  ], [navigateSession, selectSessionByIndex, cycleMRU, showShortcutHelp, showNotifSettings]);
+    { key: '[', meta: true, alt: true, handler: () => navigateSession(-1) },
+    { key: ']', meta: true, alt: true, handler: () => navigateSession(1) },
+    { key: '1', meta: true, alt: true, handler: () => selectSessionByIndex(0) },
+    { key: '2', meta: true, alt: true, handler: () => selectSessionByIndex(1) },
+    { key: '3', meta: true, alt: true, handler: () => selectSessionByIndex(2) },
+    { key: '4', meta: true, alt: true, handler: () => selectSessionByIndex(3) },
+    { key: '5', meta: true, alt: true, handler: () => selectSessionByIndex(4) },
+    { key: '6', meta: true, alt: true, handler: () => selectSessionByIndex(5) },
+    { key: '7', meta: true, alt: true, handler: () => selectSessionByIndex(6) },
+    { key: '8', meta: true, alt: true, handler: () => selectSessionByIndex(7) },
+    { key: '9', meta: true, alt: true, handler: () => selectSessionByIndex(8) },
+  ], [navigateSession, selectSessionByIndex, showShortcutHelp, showNotifSettings]);
 
   useKeyboardShortcuts(shortcuts);
 
@@ -406,6 +387,32 @@ export function Dashboard({ onSettings }: DashboardProps) {
 
   const toggleSidebar = useCallback(() => setSidebarOpen(prev => !prev), []);
   const handleMobileBack = useCallback(() => setActiveSession(null), []);
+
+  const handleDragStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    draggingRef.current = true;
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+
+    const onMouseMove = (ev: MouseEvent) => {
+      if (!draggingRef.current) return;
+      const newWidth = Math.min(Math.max(ev.clientX, 180), 600);
+      setSidebarWidth(newWidth);
+    };
+
+    const onMouseUp = (ev: MouseEvent) => {
+      draggingRef.current = false;
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+      const finalWidth = Math.min(Math.max(ev.clientX, 180), 600);
+      localStorage.setItem(SIDEBAR_WIDTH_KEY, String(finalWidth));
+    };
+
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+  }, []);
 
   const handleOpenInSplit = useCallback((serverId: string, sessionId: string) => {
     setSecondarySession({ serverId, sessionId });
@@ -494,7 +501,9 @@ export function Dashboard({ onSettings }: DashboardProps) {
         mobileOpen={sidebarOpen}
         showJumpNumbers={showJumpNumbers}
         jumpNumberMap={jumpNumberMap}
+        style={{ width: sidebarWidth }}
       />
+      <div className="sidebar-drag-handle" onMouseDown={handleDragStart} />
       <main className={`dashboard-main${secondarySession ? ' split-enabled' : ''}`}>
         {awayDigest.digest && !awayDigest.dismissed && (
           <AwayDigest

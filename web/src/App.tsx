@@ -31,10 +31,12 @@ export function App() {
     };
   }, []);
 
-  // Cmd+K / Ctrl+K to open command palette
+  // Cmd+Alt+K / Ctrl+Alt+K to open command palette
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+      const isMac = /Mac|iPhone|iPad/.test(navigator.platform);
+      const mod = isMac ? e.metaKey : e.ctrlKey;
+      if (mod && e.altKey && e.key === 'k') {
         e.preventDefault();
         setShowCommandPalette((prev) => !prev);
       }

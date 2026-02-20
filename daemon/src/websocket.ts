@@ -10,6 +10,32 @@ import { promisify } from 'util';
 
 const execAsync = promisify(exec);
 import { SessionWatcher } from './watcher';
+import {
+  SLOW_OPERATION_THRESHOLD_MS,
+  FCM_TOKEN_LOG_PREVIEW_LENGTH,
+  DEFAULT_TERMINAL_LINES,
+  DEFAULT_DIGEST_PERIOD_MS,
+  EXEC_OPERATION_TIMEOUT_MS,
+  MAX_DIRECTORY_LISTING_ENTRIES,
+  MAX_IMAGE_FILE_SIZE_BYTES,
+  MAX_TEXT_FILE_SIZE_BYTES,
+  BINARY_DETECTION_PROBE_SIZE,
+  MAX_APK_FILE_SIZE_BYTES,
+  DEFAULT_SEARCH_RESULT_LIMIT,
+  MAX_SEARCH_RESULT_LIMIT,
+  SEARCH_SNIPPET_CONTEXT_CHARS,
+  DEFAULT_SEARCH_SNIPPET_LENGTH,
+  DEFAULT_HIGHLIGHTS_LIMIT,
+  MAX_DIRECTORY_TRAVERSAL_DEPTH,
+  DEFAULT_FILE_SEARCH_LIMIT,
+  FUZZY_SCORE_EXACT_MATCH,
+  FUZZY_SCORE_STARTS_WITH,
+  FUZZY_SCORE_CONTAINS,
+  FUZZY_SCORE_PATH_MATCH,
+  FUZZY_SCORE_SUBSEQUENCE_BASE,
+  FUZZY_SCORE_CONSECUTIVE_MULTIPLIER,
+  FUZZY_SCORE_LENGTH_MULTIPLIER,
+} from './constants';
 import { InputInjector } from './input-injector';
 import { PushNotificationService } from './push';
 import { TmuxManager } from './tmux-manager';
@@ -480,7 +506,7 @@ export class WebSocketHandler {
         }
 
         const t1 = Date.now();
-        if (t1 - t0 > 100) {
+        if (t1 - t0 > SLOW_OPERATION_THRESHOLD_MS) {
           console.log(
             `WebSocket: get_highlights - ${t1 - t0}ms (slow), chain: ${chain.length} files, returning ${resultHighlights.length}/${total}`
           );
@@ -706,7 +732,7 @@ export class WebSocketHandler {
         if (pushPayload?.fcmToken && pushPayload?.deviceId) {
           const isExpoToken = pushPayload.fcmToken.startsWith('ExponentPushToken');
           console.log(
-            `Push registration: device=${pushPayload.deviceId}, type=${isExpoToken ? 'expo' : 'fcm'}, token=${pushPayload.fcmToken.substring(0, 30)}...`
+            `Push registration: device=${pushPayload.deviceId}, type=${isExpoToken ? 'expo' : 'fcm'}, token=${pushPayload.fcmToken.substring(0, FCM_TOKEN_LOG_PREVIEW_LENGTH)}...`
           );
           // Link deviceId to this client for instant notify
           client.deviceId = pushPayload.deviceId;
@@ -799,7 +825,7 @@ export class WebSocketHandler {
           | undefined;
         if (termPayload?.sessionName) {
           this.tmux
-            .capturePane(termPayload.sessionName, termPayload.lines || 100, termPayload.offset || 0)
+            .capturePane(termPayload.sessionName, termPayload.lines || DEFAULT_TERMINAL_LINES, termPayload.offset || 0)
             .then((output) => {
               this.send(client.ws, {
                 type: 'terminal_output',
@@ -1298,7 +1324,7 @@ export class WebSocketHandler {
 
       case 'get_digest': {
         const digestPayload = payload as { since?: number } | undefined;
-        const since = digestPayload?.since ?? Date.now() - 24 * 60 * 60 * 1000; // default: last 24h
+        const since = digestPayload?.since ?? Date.now() - DEFAULT_DIGEST_PERIOD_MS; // default: last 24h
         const store = this.push.getStore();
         const digest = store.getHistorySince(since);
         this.send(client.ws, {
@@ -1492,7 +1518,7 @@ export class WebSocketHandler {
           try {
             const { stdout } = await execAsync(
               `git diff HEAD -- ${JSON.stringify(fc.path)} 2>/dev/null || git diff -- ${JSON.stringify(fc.path)} 2>/dev/null`,
-              { cwd: workingDir, timeout: 5000 }
+              { cwd: workingDir, timeout: EXEC_OPERATION_TIMEOUT_MS }
             );
             return { ...fc, diff: stdout || undefined };
           } catch {
@@ -1506,7 +1532,7 @@ export class WebSocketHandler {
         try {
           const { stdout: statusOut } = await execAsync('git status --porcelain 2>/dev/null', {
             cwd: workingDir,
-            timeout: 5000,
+            timeout: EXEC_OPERATION_TIMEOUT_MS,
           });
           untrackedFiles = new Set(
             statusOut
@@ -2485,7 +2511,7 @@ export class WebSocketHandler {
         success: true,
         payload: {
           currentPath: basePath,
-          entries: entries.slice(0, 100), // Limit to 100 entries
+          entries: entries.slice(0, MAX_DIRECTORY_LISTING_ENTRIES), // Limit to max entries
         },
         requestId,
       });
@@ -2579,7 +2605,7 @@ export class WebSocketHandler {
       const IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'ico', 'bmp']);
       const ext = path.extname(resolvedPath).slice(1).toLowerCase();
       const isImageExt = IMAGE_EXTS.has(ext);
-      const maxSize = isImageExt ? 5 * 1024 * 1024 : 1024 * 1024;
+      const maxSize = isImageExt ? MAX_IMAGE_FILE_SIZE_BYTES : MAX_TEXT_FILE_SIZE_BYTES;
 
       if (stats.size > maxSize) {
         this.send(client.ws, {
@@ -2622,7 +2648,7 @@ export class WebSocketHandler {
       }
 
       // Check for binary content (null bytes in first 8KB)
-      const probe = Buffer.alloc(Math.min(8192, stats.size));
+      const probe = Buffer.alloc(Math.min(BINARY_DETECTION_PROBE_SIZE, stats.size));
       const fd = fs.openSync(resolvedPath, 'r');
       fs.readSync(fd, probe, 0, probe.length, 0);
       fs.closeSync(fd);
@@ -2831,7 +2857,7 @@ export class WebSocketHandler {
       }
 
       // Limit to 150MB for APKs
-      const maxSize = 150 * 1024 * 1024;
+      const maxSize = MAX_APK_FILE_SIZE_BYTES;
       if (stats.size > maxSize) {
         this.send(client.ws, {
           type: 'file_download',
@@ -3160,7 +3186,7 @@ export class WebSocketHandler {
           totalOutputTokens,
           totalCacheCreationTokens,
           totalCacheReadTokens,
-          periodStart: Date.now() - 24 * 60 * 60 * 1000, // Last 24h
+          periodStart: Date.now() - DEFAULT_DIGEST_PERIOD_MS, // Last 24h
           periodEnd: Date.now(),
         },
         requestId,
@@ -3653,7 +3679,7 @@ export class WebSocketHandler {
     }
 
     const query = payload.query.trim();
-    const resultLimit = Math.min(payload.limit || 20, 50);
+    const resultLimit = Math.min(payload.limit || DEFAULT_SEARCH_RESULT_LIMIT, MAX_SEARCH_RESULT_LIMIT);
 
     try {
       // Get the project directory from the active session
@@ -3757,14 +3783,14 @@ export class WebSocketHandler {
               const lowerText = text.toLowerCase();
               const idx = lowerText.indexOf(lowerQuery);
               if (idx >= 0) {
-                const start = Math.max(0, idx - 60);
-                const end = Math.min(text.length, idx + query.length + 60);
+                const start = Math.max(0, idx - SEARCH_SNIPPET_CONTEXT_CHARS);
+                const end = Math.min(text.length, idx + query.length + SEARCH_SNIPPET_CONTEXT_CHARS);
                 snippet =
                   (start > 0 ? '...' : '') +
                   text.slice(start, end).replace(/\n/g, ' ') +
                   (end < text.length ? '...' : '');
               } else {
-                snippet = text.slice(0, 120).replace(/\n/g, ' ');
+                snippet = text.slice(0, DEFAULT_SEARCH_SNIPPET_LENGTH).replace(/\n/g, ' ');
               }
               break; // Found a good snippet
             } catch {
@@ -3843,7 +3869,7 @@ export class WebSocketHandler {
       const messages = parseConversationFile(resolved);
       const allHighlights = extractHighlights(messages);
       const total = allHighlights.length;
-      const limit = payload.limit || 50;
+      const limit = payload.limit || DEFAULT_HIGHLIGHTS_LIMIT;
       const offset = payload.offset || 0;
       const startIdx = Math.max(0, total - offset - limit);
       const endIdx = Math.max(total - offset, 0);
@@ -3893,7 +3919,7 @@ export class WebSocketHandler {
   ]);
 
   private walkDirectory(dir: string, root: string, files: string[], depth: number = 0): void {
-    if (depth > 10) return; // Max depth
+    if (depth > MAX_DIRECTORY_TRAVERSAL_DEPTH) return; // Max depth
     try {
       const entries = fs.readdirSync(dir, { withFileTypes: true });
       for (const entry of entries) {
@@ -3933,15 +3959,15 @@ export class WebSocketHandler {
     const q = query.toLowerCase();
 
     // Exact basename match scores highest
-    if (basename === q) return 1000;
+    if (basename === q) return FUZZY_SCORE_EXACT_MATCH;
     // Basename starts with query
-    if (basename.startsWith(q)) return 500 + (q.length / basename.length) * 100;
+    if (basename.startsWith(q)) return FUZZY_SCORE_STARTS_WITH + (q.length / basename.length) * FUZZY_SCORE_LENGTH_MULTIPLIER;
     // Basename contains query
     const basenameIdx = basename.indexOf(q);
-    if (basenameIdx >= 0) return 300 + (q.length / basename.length) * 100 - basenameIdx;
+    if (basenameIdx >= 0) return FUZZY_SCORE_CONTAINS + (q.length / basename.length) * FUZZY_SCORE_LENGTH_MULTIPLIER - basenameIdx;
     // Path contains query
     const pathIdx = relativePath.indexOf(q);
-    if (pathIdx >= 0) return 100 - pathIdx * 0.1;
+    if (pathIdx >= 0) return FUZZY_SCORE_PATH_MATCH - pathIdx * 0.1;
 
     // Subsequence match on basename
     let qi = 0;
@@ -3956,7 +3982,7 @@ export class WebSocketHandler {
         consecutive = 0;
       }
     }
-    if (qi === q.length) return 50 + maxConsecutive * 10;
+    if (qi === q.length) return FUZZY_SCORE_SUBSEQUENCE_BASE + maxConsecutive * FUZZY_SCORE_CONSECUTIVE_MULTIPLIER;
 
     return -1; // No match
   }
@@ -3990,7 +4016,7 @@ export class WebSocketHandler {
 
     try {
       const allFiles = this.getFileTree(projectRoot);
-      const limit = payload?.limit || 20;
+      const limit = payload?.limit || DEFAULT_FILE_SEARCH_LIMIT;
 
       const scored = allFiles
         .map((f) => ({

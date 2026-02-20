@@ -4,6 +4,11 @@
   padding: 0;
 }
 
+:focus-visible {
+  outline: 2px solid #3b82f6;
+  outline-offset: 2px;
+}
+
 body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Inter', sans-serif;
   background-color: var(--bg-primary);
@@ -436,6 +441,30 @@ body {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+}
+
+.sidebar-drag-handle {
+  width: 4px;
+  flex-shrink: 0;
+  cursor: col-resize;
+  background: transparent;
+  transition: background 0.15s;
+  position: relative;
+  z-index: 10;
+}
+
+.sidebar-drag-handle::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -3px;
+  right: -3px;
+}
+
+.sidebar-drag-handle:hover,
+.sidebar-drag-handle:active {
+  background: var(--accent-blue, #3b82f6);
 }
 
 .sidebar-header {
@@ -1018,6 +1047,22 @@ body {
 
 .code-review-diff-line {
   white-space: pre;
+  display: flex;
+}
+
+.crm-line-num {
+  width: 40px;
+  min-width: 40px;
+  text-align: right;
+  color: var(--text-muted);
+  user-select: none;
+  flex-shrink: 0;
+  padding-right: 8px;
+}
+
+.crm-line-content {
+  flex: 1;
+  min-width: 0;
 }
 
 .code-review-diff-line.added {
@@ -1228,6 +1273,28 @@ body {
   cursor: default;
 }
 
+.crm-saved-comment {
+  font-size: 11px;
+  color: #f59e0b;
+  padding: 2px 0 2px 48px;
+  font-style: italic;
+}
+
+.crm-clear-comments-btn {
+  background: transparent;
+  border: 1px solid var(--border-primary);
+  color: var(--text-secondary);
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.crm-clear-comments-btn:hover {
+  color: var(--accent-red);
+  border-color: var(--accent-red);
+}
+
 /* ========================================
    Message List
    ======================================== */
@@ -1377,6 +1444,69 @@ body {
 
 .msg-bubble-pending {
   opacity: 0.8;
+}
+
+.msg-bubble-bookmarked {
+  border-left: 2px solid #f59e0b;
+}
+
+.bookmark-list-dropdown {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-primary);
+  border-radius: 8px;
+  margin: 0 8px 8px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.bookmark-list-empty {
+  padding: 12px;
+  color: var(--text-muted);
+  font-size: 13px;
+  text-align: center;
+}
+
+.bookmark-list-item {
+  padding: 8px 12px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--border-primary);
+}
+
+.bookmark-list-item:last-child {
+  border-bottom: none;
+}
+
+.bookmark-list-item:hover {
+  background: var(--bg-tertiary);
+}
+
+.bookmark-list-content {
+  font-size: 12px;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.bookmark-list-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 4px;
+}
+
+.bookmark-list-time {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.bookmark-list-remove {
+  background: none;
+  border: none;
+  color: var(--accent-red);
+  font-size: 11px;
+  cursor: pointer;
+  padding: 0;
 }
 
 .msg-cancel-btn {
@@ -2337,6 +2467,10 @@ body {
     display: block;
   }
 
+  .sidebar-drag-handle {
+    display: none;
+  }
+
   /* Dashboard takes full width */
   .dashboard-main {
     width: 100%;
@@ -2667,6 +2801,28 @@ html {
 .msg-tools-toggle:hover {
   background-color: var(--bg-tertiary);
   color: var(--text-secondary);
+}
+
+.msg-batch-approve-btn {
+  background: linear-gradient(135deg, #22c55e, #16a34a);
+  border: none;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  align-self: flex-start;
+  margin-bottom: 4px;
+}
+
+.msg-batch-approve-btn:hover:not(:disabled) {
+  background: linear-gradient(135deg, #16a34a, #15803d);
+}
+
+.msg-batch-approve-btn:disabled {
+  opacity: 0.7;
+  cursor: default;
 }
 
 /* ========================================
@@ -4666,6 +4822,13 @@ html {
 
 .question-block-other-send:hover {
   background: var(--gradient-button-hover);
+}
+
+.choice-send-error {
+  color: var(--accent-red);
+  font-size: 12px;
+  cursor: pointer;
+  padding: 4px 0;
 }
 
 /* ========================================

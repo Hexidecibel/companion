@@ -13,6 +13,7 @@
 
 import { isTauriMobile } from '../utils/platform';
 import { connectionManager } from './ConnectionManager';
+import { DEVICE_ID_KEY } from './storageKeys';
 
 let pushToken: string | null = null;
 let deviceId: string | null = null;
@@ -21,13 +22,13 @@ let tokenRefreshUnlisten: (() => void) | null = null;
 /** Generate or retrieve a persistent device ID. */
 function getDeviceId(): string {
   if (deviceId) return deviceId;
-  const stored = localStorage.getItem('companion_device_id');
+  const stored = localStorage.getItem(DEVICE_ID_KEY);
   if (stored) {
     deviceId = stored;
     return stored;
   }
   const id = 'web-' + crypto.randomUUID();
-  localStorage.setItem('companion_device_id', id);
+  localStorage.setItem(DEVICE_ID_KEY, id);
   deviceId = id;
   return id;
 }

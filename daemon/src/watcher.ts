@@ -17,6 +17,22 @@ import {
   extractTasks,
 } from './parser';
 import { APPROVAL_TOOLS } from './tool-config';
+import {
+  TMUX_PATH_REFRESH_INTERVAL_MS,
+  CHOKIDAR_STABILITY_THRESHOLD_MS,
+  CHOKIDAR_POLL_INTERVAL_MS,
+  FILE_WATCHER_POLL_INTERVAL_MS,
+  INITIAL_LOAD_COMPLETION_DELAY_MS,
+  INITIAL_FILE_MAX_AGE_MS,
+  INITIAL_LOAD_WINDOW_MS,
+  SLOW_FILE_PROCESSING_THRESHOLD_MS,
+  SESSION_COMPLETION_MESSAGE_LENGTH,
+  MIN_USER_PROMPT_LENGTH,
+  CONVERSATION_READ_BUFFER_SIZE,
+  CONVERSATION_ID_LOG_LENGTH,
+  USER_LINE_LOG_LENGTH,
+  RECENT_ACTIVITY_LIMIT,
+} from './constants';
 
 const execAsync = promisify(exec);
 
@@ -76,7 +92,7 @@ export class SessionWatcher extends EventEmitter {
     this.loadPersistedMappings();
     // Refresh tmux paths periodically
     this.refreshTmuxPaths();
-    setInterval(() => this.refreshTmuxPaths(), 5000);
+    setInterval(() => this.refreshTmuxPaths(), TMUX_PATH_REFRESH_INTERVAL_MS);
   }
 
   private get mappingsPath(): string {
@@ -280,12 +296,12 @@ export class SessionWatcher extends EventEmitter {
       persistent: true,
       ignoreInitial: false,
       awaitWriteFinish: {
-        stabilityThreshold: 100,
-        pollInterval: 50,
+        stabilityThreshold: CHOKIDAR_STABILITY_THRESHOLD_MS,
+        pollInterval: CHOKIDAR_POLL_INTERVAL_MS,
       },
       depth: 2,
       usePolling: true,
-      interval: 100,
+      interval: FILE_WATCHER_POLL_INTERVAL_MS,
     });
 
     this.watcher.on('add', (filePath) => this.handleFileChange(filePath));
@@ -299,7 +315,7 @@ export class SessionWatcher extends EventEmitter {
     setTimeout(() => {
       this.initialLoadComplete = true;
       console.log('Watcher: Initial load complete');
-    }, 3000);
+    }, INITIAL_LOAD_COMPLETION_DELAY_MS);
 
     // Also watch the main directory for any root-level conversation files
     const rootPattern = path.join(this.codeHome, '*.jsonl');
@@ -343,8 +359,7 @@ export class SessionWatcher extends EventEmitter {
       try {
         const stats = fs.statSync(filePath);
         const ageMs = Date.now() - stats.mtimeMs;
-        const MAX_AGE_MS = 2 * 60 * 1000; // 2 minutes
-        if (ageMs > MAX_AGE_MS) {
+        if (ageMs > INITIAL_FILE_MAX_AGE_MS) {
           return;
         }
       } catch {
@@ -436,7 +451,7 @@ export class SessionWatcher extends EventEmitter {
     const t1 = Date.now();
     const highlights = extractHighlights(messages);
     const t2 = Date.now();
-    if (t2 - t0 > 50) {
+    if (t2 - t0 > SLOW_FILE_PROCESSING_THRESHOLD_MS) {
       console.log(
         `Watcher: processFileChange parse took ${t1 - t0}ms + highlights ${t2 - t1}ms = ${t2 - t0}ms (${messages.length} msgs) for ${convId}`
       );
@@ -646,12 +661,12 @@ export class SessionWatcher extends EventEmitter {
         sessionId,
         projectPath,
         sessionName,
-        content: lastMsg?.content?.substring(0, 200) || 'Session completed',
+        content: lastMsg?.content?.substring(0, SESSION_COMPLETION_MESSAGE_LENGTH) || 'Session completed',
       });
     }
 
     // Auto-select: during initial load pick the most recent; after that only if no active session
-    const isInitialLoad = Date.now() - this.startTime < 3000;
+    const isInitialLoad = Date.now() - this.startTime < INITIAL_LOAD_WINDOW_MS;
     if (
       isInitialLoad ||
       !this.activeTmuxSession ||
@@ -1110,7 +1125,7 @@ export class SessionWatcher extends EventEmitter {
               const trimmed = line.trimStart();
               return trimmed.replace(/^[❯\u276f]\s*/, '').trim();
             })
-            .filter((line) => line.length > 10);
+            .filter((line) => line.length > MIN_USER_PROMPT_LENGTH);
 
           if (userLines.length === 0) continue;
 
@@ -1120,7 +1135,7 @@ export class SessionWatcher extends EventEmitter {
             const matchingCandidates = candidateConvs.filter((candidate) => {
               try {
                 const stats = fs.statSync(candidate.conv.path);
-                const readSize = Math.min(64 * 1024, stats.size);
+                const readSize = Math.min(CONVERSATION_READ_BUFFER_SIZE, stats.size);
                 const buffer = Buffer.alloc(readSize);
                 const fd = fs.openSync(candidate.conv.path, 'r');
                 fs.readSync(fd, buffer, 0, readSize, Math.max(0, stats.size - readSize));
@@ -1134,7 +1149,7 @@ export class SessionWatcher extends EventEmitter {
             // Only use this match if it uniquely identifies one file
             if (matchingCandidates.length === 1) {
               console.log(
-                `Watcher: Terminal matched ${sessionName} -> ${matchingCandidates[0].id.substring(0, 8)} via "${userLine.substring(0, 40)}"`
+                `Watcher: Terminal matched ${sessionName} -> ${matchingCandidates[0].id.substring(0, CONVERSATION_ID_LOG_LENGTH)} via "${userLine.substring(0, USER_LINE_LOG_LENGTH)}"`
               );
               this.setConversationMapping(sessionName, matchingCandidates[0].id);
               mappedConvIds.add(matchingCandidates[0].id);
@@ -1294,7 +1309,7 @@ export class SessionWatcher extends EventEmitter {
       conversationId: tracked.path,
       projectPath: tracked.projectPath,
       currentActivity: detectCurrentActivity(messages),
-      recentActivity: getRecentActivity(messages, 10),
+      recentActivity: getRecentActivity(messages, RECENT_ACTIVITY_LIMIT),
     };
   }
 
@@ -1490,6 +1505,7 @@ export class SessionWatcher extends EventEmitter {
         completed: number;
         activeTask?: string;
       };
+      recentTimestamps?: number[];
     }>;
     totalSessions: number;
     waitingCount: number;
@@ -1510,6 +1526,7 @@ export class SessionWatcher extends EventEmitter {
         completed: number;
         activeTask?: string;
       };
+      recentTimestamps?: number[];
     }> = [];
 
     let waitingCount = 0;
@@ -1533,6 +1550,8 @@ export class SessionWatcher extends EventEmitter {
       let lastActivity = 0;
       let projectPath = ts.workingDir || '';
 
+      let recentTimestamps: number[] | undefined;
+
       if (best) {
         const conv = best.conv;
         projectPath = conv.projectPath;
@@ -1552,6 +1571,14 @@ export class SessionWatcher extends EventEmitter {
           status = 'working';
           workingCount++;
         }
+
+        // Extract recent message timestamps for sparkline (last 30 min)
+        if (messages) {
+          const cutoff = Date.now() - 30 * 60 * 1000;
+          recentTimestamps = messages
+            .filter(m => m.timestamp >= cutoff)
+            .map(m => m.timestamp);
+        }
       }
 
       sessions.push({
@@ -1563,6 +1590,7 @@ export class SessionWatcher extends EventEmitter {
         currentActivity,
         tmuxSessionName: ts.name,
         taskSummary,
+        recentTimestamps,
       });
     }
 

@@ -12,6 +12,7 @@ import {
   FileChange,
 } from './types';
 import { APPROVAL_TOOLS, KNOWN_TOOL_NAMES, getToolDescription, isKnownTool } from './tool-config';
+import { PARSER_WARNING_RATE_LIMIT_MS, PARSER_DEDUP_KEY_PREVIEW_LENGTH, FILE_ACTIVITY_READ_BUFFER_SIZE, COMMAND_LOG_PREVIEW_LENGTH, QUESTION_PREVIEW_LENGTH, TOOL_DESCRIPTION_PREVIEW_LENGTH, TOOL_APPROVAL_PREVIEW_LENGTH, SHORT_COMMAND_DISPLAY_LENGTH, TOOL_INPUT_SUMMARY_LENGTH, MAX_TOOL_OUTPUT_SIZE, MAX_SUMMARY_TEXT_LENGTH } from './constants';
 
 // Re-export TaskItem for tests
 export { TaskItem } from './types';
@@ -59,10 +60,10 @@ const KNOWN_TOOLS = KNOWN_TOOL_NAMES;
 // Rate-limit parser warnings: max one per key per 60s
 const _warnedRecently = new Map<string, number>();
 function logParserWarning(type: string, details: string): void {
-  const key = `${type}:${details.substring(0, 100)}`;
+  const key = `${type}:${details.substring(0, PARSER_DEDUP_KEY_PREVIEW_LENGTH)}`;
   const now = Date.now();
   const last = _warnedRecently.get(key);
-  if (last && now - last < 60000) return;
+  if (last && now - last < PARSER_WARNING_RATE_LIMIT_MS) return;
   _warnedRecently.set(key, now);
   console.log(`[PARSER_WARN] ${type}: ${details}`);
 }
@@ -82,7 +83,7 @@ export function detectCurrentActivityFast(filePath: string): string | undefined 
     const fileSize = stats.size;
 
     // Read last 32KB - enough to get recent messages
-    const readSize = Math.min(32 * 1024, fileSize);
+    const readSize = Math.min(FILE_ACTIVITY_READ_BUFFER_SIZE, fileSize);
     const buffer = Buffer.alloc(readSize);
     const fd = fs.openSync(filePath, 'r');
     fs.readSync(fd, buffer, 0, readSize, Math.max(0, fileSize - readSize));
@@ -136,8 +137,8 @@ export function detectCurrentActivityFast(filePath: string): string | undefined 
                 if (APPROVAL_TOOLS.includes(block.name)) {
                   const input = block.input as Record<string, unknown> | undefined;
                   if (block.name === 'Bash' && input?.command) {
-                    const cmd = (input.command as string).substring(0, 40);
-                    return `Approve? ${cmd}${(input.command as string).length > 40 ? '...' : ''}`;
+                    const cmd = (input.command as string).substring(0, COMMAND_LOG_PREVIEW_LENGTH);
+                    return `Approve? ${cmd}${(input.command as string).length > COMMAND_LOG_PREVIEW_LENGTH ? '...' : ''}`;
                   }
                   if ((block.name === 'Edit' || block.name === 'Write') && input?.file_path) {
                     const fileName =
@@ -421,7 +422,7 @@ function parseEntry(
             isWaitingForChoice = true;
             multiSelect = firstQuestion.multiSelect || false;
             console.log(
-              `Parser: Extracted ${questions.length} questions, first has ${options.length} options: "${content.substring(0, 50)}..." (multiSelect: ${multiSelect})`
+              `Parser: Extracted ${questions.length} questions, first has ${options.length} options: "${content.substring(0, QUESTION_PREVIEW_LENGTH)}..." (multiSelect: ${multiSelect})`
             );
           }
         } else if (block.name === 'AskUserQuestion' && !isPending) {
@@ -439,7 +440,7 @@ function parseEntry(
 
           // Build a helpful description based on tool type
           if (block.name === 'Bash' && input.command) {
-            description = `Run: ${(input.command as string).substring(0, 100)}`;
+            description = `Run: ${(input.command as string).substring(0, TOOL_DESCRIPTION_PREVIEW_LENGTH)}`;
           } else if ((block.name === 'Edit' || block.name === 'Write') && input.file_path) {
             description = `${block.name}: ${input.file_path}`;
           } else if (block.name === 'EnterPlanMode') {
@@ -467,7 +468,7 @@ function parseEntry(
           }
           isWaitingForChoice = true;
           console.log(
-            `Parser: Pending ${block.name} tool needs approval: "${description.substring(0, 50)}..."`
+            `Parser: Pending ${block.name} tool needs approval: "${description.substring(0, TOOL_APPROVAL_PREVIEW_LENGTH)}..."`
           );
         }
       } else if (block.type === 'tool_result') {
@@ -776,8 +777,8 @@ export function detectCurrentActivity(messages: ConversationMessage[]): string |
     if (lastTool.status === 'pending' && APPROVAL_TOOLS.includes(lastTool.name)) {
       const input = lastTool.input as Record<string, unknown>;
       if (lastTool.name === 'Bash' && input.command) {
-        const cmd = (input.command as string).substring(0, 40);
-        return `Approve? ${cmd}${(input.command as string).length > 40 ? '...' : ''}`;
+        const cmd = (input.command as string).substring(0, COMMAND_LOG_PREVIEW_LENGTH);
+        return `Approve? ${cmd}${(input.command as string).length > COMMAND_LOG_PREVIEW_LENGTH ? '...' : ''}`;
       }
       if ((lastTool.name === 'Edit' || lastTool.name === 'Write') && input.file_path) {
         const filePath = input.file_path as string;
@@ -798,8 +799,8 @@ export function detectCurrentActivity(messages: ConversationMessage[]): string |
         return `${description}: ${fileName}`;
       }
       if (input.command) {
-        const cmd = (input.command as string).substring(0, 30);
-        return `${description}: ${cmd}${(input.command as string).length > 30 ? '...' : ''}`;
+        const cmd = (input.command as string).substring(0, SHORT_COMMAND_DISPLAY_LENGTH);
+        return `${description}: ${cmd}${(input.command as string).length > SHORT_COMMAND_DISPLAY_LENGTH ? '...' : ''}`;
       }
     }
 
@@ -840,10 +841,10 @@ export function getRecentActivity(
         }
 
         activities.push({
-          summary: `${tool.name}${inputStr ? `: ${inputStr.substring(0, 100)}` : ''}`,
+          summary: `${tool.name}${inputStr ? `: ${inputStr.substring(0, TOOL_INPUT_SUMMARY_LENGTH)}` : ''}`,
           toolName: tool.name,
           input: inputStr,
-          output: outputStr.substring(0, 2000), // Limit output size
+          output: outputStr.substring(0, MAX_TOOL_OUTPUT_SIZE), // Limit output size
           timestamp: msg.timestamp,
         });
       }
@@ -955,12 +956,12 @@ export function detectCompaction(
             const next = JSON.parse(lines[i + 1]);
             if (next.type === 'user' && next.message?.content) {
               const c = next.message.content;
-              if (typeof c === 'string') summary = c.slice(0, 200);
+              if (typeof c === 'string') summary = c.slice(0, MAX_SUMMARY_TEXT_LENGTH);
               else if (Array.isArray(c)) {
                 const textBlock = c.find(
                   (b: { type: string; text?: string }) => b.type === 'text' && b.text
                 );
-                if (textBlock) summary = (textBlock.text || '').slice(0, 200);
+                if (textBlock) summary = (textBlock.text || '').slice(0, MAX_SUMMARY_TEXT_LENGTH);
               }
             }
           } catch {

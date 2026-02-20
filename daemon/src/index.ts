@@ -13,6 +13,7 @@ import { createServer, validateTlsConfig } from './tls';
 import { certsExist, generateAndSaveCerts, getDefaultCertPaths } from './cert-generator';
 import { createQRRequestHandler } from './qr-server';
 import { dispatchCli, writePidFile, removePidFile } from './cli';
+import { AUTO_APPROVAL_DEDUP_WINDOW_MS, AUTO_APPROVAL_CLEANUP_WINDOW_MS, APPROVAL_SEND_DELAY_MS, SHUTDOWN_TIMEOUT_MS, STATUS_LOG_INTERVAL_MS } from './constants';
 
 // Check CLI commands before starting daemon
 const cliArgs = process.argv.slice(2);
@@ -212,7 +213,7 @@ async function main(): Promise<void> {
         .sort()
         .join(',')}`;
       const lastApproval = lastApprovalByKey.get(dedupKey);
-      if (lastApproval && now - lastApproval < 1000) {
+      if (lastApproval && now - lastApproval < AUTO_APPROVAL_DEDUP_WINDOW_MS) {
         console.log(
           `[AUTO-APPROVE] Dedup: skipping [${autoApprovable.map((t) => t.name).join(', ')}] (${now - lastApproval}ms ago)`
         );
@@ -222,7 +223,7 @@ async function main(): Promise<void> {
 
       // Clean up old entries
       for (const [key, ts] of lastApprovalByKey) {
-        if (now - ts > 30000) lastApprovalByKey.delete(key);
+        if (now - ts > AUTO_APPROVAL_CLEANUP_WINDOW_MS) lastApprovalByKey.delete(key);
       }
 
       // Resolve tmux session: sessionId IS the tmux session name now (from watcher events),
@@ -258,8 +259,8 @@ async function main(): Promise<void> {
 
         if (!hasApprovalPrompt) {
           // Prompt may not have rendered yet — wait a short time and retry once
-          console.log(`[AUTO-APPROVE] No approval prompt detected, waiting 300ms...`);
-          await new Promise((resolve) => setTimeout(resolve, 300));
+          console.log(`[AUTO-APPROVE] No approval prompt detected, waiting ${APPROVAL_SEND_DELAY_MS}ms...`);
+          await new Promise((resolve) => setTimeout(resolve, APPROVAL_SEND_DELAY_MS));
           const paneContent2 = await injector.capturePaneContent(target);
           const hasPrompt2 = approvalPromptRe.test(paneContent2);
           if (!hasPrompt2) {
@@ -269,8 +270,8 @@ async function main(): Promise<void> {
 
         const success = await injector.sendInput('yes', target);
         if (!success) {
-          console.log(`[AUTO-APPROVE] Send failed, retrying after 300ms...`);
-          await new Promise((resolve) => setTimeout(resolve, 300));
+          console.log(`[AUTO-APPROVE] Send failed, retrying after ${APPROVAL_SEND_DELAY_MS}ms...`);
+          await new Promise((resolve) => setTimeout(resolve, APPROVAL_SEND_DELAY_MS));
           await injector.sendInput('yes', target);
         } else {
           console.log(`[AUTO-APPROVE] Sent "yes" successfully`);
@@ -321,7 +322,7 @@ async function main(): Promise<void> {
     setTimeout(() => {
       console.error('Forced shutdown after timeout');
       process.exit(1);
-    }, 5000);
+    }, SHUTDOWN_TIMEOUT_MS);
   };
 
   process.on('SIGINT', shutdown);
@@ -335,7 +336,7 @@ async function main(): Promise<void> {
         `waiting: ${status.isWaitingForInput}, ` +
         `push devices: ${push.getRegisteredDeviceCount()}`
     );
-  }, 60000);
+  }, STATUS_LOG_INTERVAL_MS);
 }
 
 // main() is called from the CLI dispatcher above

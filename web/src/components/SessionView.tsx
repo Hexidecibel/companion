@@ -31,6 +31,9 @@ import { TerminalPanel } from './TerminalPanel';
 import { WorkGroupBar } from './WorkGroupBar';
 import { WorkGroupPanel } from './WorkGroupPanel';
 import { FileFinder } from './FileFinder';
+import { useBookmarks } from '../hooks/useBookmarks';
+import { BookmarkList } from './BookmarkList';
+import { hideToolsKey } from '../services/storageKeys';
 
 interface SessionViewProps {
   serverId: string | null;
@@ -112,8 +115,13 @@ export function SessionView({
   // Code review modal state
   const [showCodeReviewModal, setShowCodeReviewModal] = useState(false);
 
+  // Bookmarks
+  const { addBookmark, removeBookmark, isBookmarked, sessionBookmarks } = useBookmarks(serverId);
+  const [showBookmarks, setShowBookmarks] = useState(false);
+  const currentBookmarks = sessionId ? sessionBookmarks(sessionId) : [];
+
   // Tool card visibility (persisted per session in localStorage)
-  const toolsKey = sessionId ? `hideTools:${sessionId}` : null;
+  const toolsKey = sessionId ? hideToolsKey(sessionId) : null;
   const [hideTools, setHideToolsRaw] = useState(() => {
     if (!toolsKey) return false;
     return localStorage.getItem(toolsKey) === '1';
@@ -340,11 +348,11 @@ export function SessionView({
 
   // Session-specific keyboard shortcuts
   useKeyboardShortcuts(useMemo(() => [
-    { key: 'f', meta: true, handler: () => setShowSearch(true) },
-    { key: 'p', meta: true, handler: () => setShowFileFinder(true) },
-    { key: 't', meta: true, handler: () => { if (tmuxSessionName) setShowTerminal(prev => !prev); } },
-    { key: 'a', meta: true, shift: true, handler: () => autoApprove.toggle() },
-    { key: 'm', meta: true, shift: true, handler: () => { if (sessionId) sessionMute.toggleMute(sessionId); } },
+    { key: 'f', meta: true, alt: true, handler: () => setShowSearch(true) },
+    { key: 'p', meta: true, alt: true, handler: () => setShowFileFinder(true) },
+    { key: 't', meta: true, alt: true, handler: () => { if (tmuxSessionName) setShowTerminal(prev => !prev); } },
+    { key: 'a', meta: true, alt: true, shift: true, handler: () => autoApprove.toggle() },
+    { key: 'm', meta: true, alt: true, shift: true, handler: () => { if (sessionId) sessionMute.toggleMute(sessionId); } },
     { key: 'Escape', handler: () => {
       if (showCodeReviewModal) setShowCodeReviewModal(false);
       else if (showFileFinder) setShowFileFinder(false);
@@ -476,6 +484,15 @@ export function SessionView({
       >
         Search
       </button>
+      {currentBookmarks.length > 0 && (
+        <button
+          className="session-header-btn"
+          onClick={() => setShowBookmarks(!showBookmarks)}
+          title="View bookmarks"
+        >
+          Bookmarks ({currentBookmarks.length})
+        </button>
+      )}
       {fileChanges.length > 0 && (
         <button
           className="session-header-btn"
@@ -643,6 +660,18 @@ export function SessionView({
             />
           )}
 
+          {showBookmarks && (
+            <BookmarkList
+              bookmarks={currentBookmarks}
+              onNavigate={(messageId) => {
+                const el = document.querySelector(`[data-highlight-id="${messageId}"]`);
+                if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+              }}
+              onRemove={removeBookmark}
+              onClose={() => setShowBookmarks(false)}
+            />
+          )}
+
           <MessageList
             highlights={highlights}
             loading={loading}
@@ -659,6 +688,15 @@ export function SessionView({
             scrollToBottom={!showTerminal}
             planFilePath={latestPlanFile}
             hideTools={hideTools}
+            isBookmarked={isBookmarked}
+            onToggleBookmark={(messageId, content) => {
+              if (!sessionId) return;
+              if (isBookmarked(messageId)) {
+                removeBookmark(messageId);
+              } else {
+                addBookmark(messageId, sessionId, content);
+              }
+            }}
           />
 
           <FileTabBar
@@ -736,6 +774,7 @@ export function SessionView({
           onRefresh={refreshReview}
           onClose={() => setShowCodeReviewModal(false)}
           onComment={handleSend}
+          sessionId={sessionId}
         />
       )}
 

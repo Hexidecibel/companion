@@ -1,4 +1,6 @@
-const STORAGE_KEY = 'companion_open_files';
+import { OPEN_FILES_KEY } from './storageKeys';
+
+const STORAGE_KEY = OPEN_FILES_KEY;
 const MAX_TABS = 10;
 
 export interface OpenFile {

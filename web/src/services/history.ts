@@ -1,6 +1,7 @@
 import { ConversationHighlight } from '../types';
+import { HISTORY_KEY } from './storageKeys';
 
-const HISTORY_STORAGE_KEY = 'companion_history';
+const HISTORY_STORAGE_KEY = HISTORY_KEY;
 const MAX_SESSIONS = 50;
 const MAX_MESSAGES_PER_SESSION = 100;
 
