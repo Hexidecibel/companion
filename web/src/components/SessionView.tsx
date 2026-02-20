@@ -196,8 +196,10 @@ export function SessionView({
     const onMouseDown = () => { mouseDown = true; };
     const onMouseUp = () => {
       mouseDown = false;
-      // After mouseup, refocus if no text was selected
+      // After mouseup, refocus if no text was selected and focus isn't on an interactive element
       requestAnimationFrame(() => {
+        const active = document.activeElement;
+        if (active && active.closest('input, textarea:not(.input-bar-textarea), [contenteditable], select')) return;
         const selection = window.getSelection();
         if (selection && selection.toString().length > 0) return;
         const textarea = document.querySelector('.input-bar-textarea') as HTMLElement | null;
@@ -414,7 +416,28 @@ export function SessionView({
   }
 
   const handleSelectOption = (label: string) => {
-    sendInput(label, { skipOptimistic: true });
+    return sendInput(label, { skipOptimistic: true });
+  };
+
+  const handleSelectChoice = async (choice: {
+    selectedIndices: number[];
+    optionCount: number;
+    multiSelect: boolean;
+    otherText?: string;
+  }): Promise<boolean> => {
+    if (!serverId || !sessionId) return false;
+    const conn = connectionManager.getConnection(serverId);
+    if (!conn?.isConnected()) return false;
+    try {
+      const response = await conn.sendRequest('send_choice', {
+        ...choice,
+        sessionId,
+        tmuxSessionName: tmuxSessionName || sessionId,
+      });
+      return response.success;
+    } catch {
+      return false;
+    }
   };
 
   const mobile = isMobileViewport();
@@ -627,6 +650,7 @@ export function SessionView({
             hasMore={hasMore}
             onLoadMore={loadMore}
             onSelectOption={handleSelectOption}
+            onSelectChoice={handleSelectChoice}
             onCancelMessage={handleCancelMessage}
             onViewFile={handleViewFile}
             onViewArtifact={(content, title) => setArtifactContent({ content, title })}
@@ -711,6 +735,7 @@ export function SessionView({
           onViewFile={handleViewFile}
           onRefresh={refreshReview}
           onClose={() => setShowCodeReviewModal(false)}
+          onComment={handleSend}
         />
       )}
 
@@ -721,6 +746,7 @@ export function SessionView({
       {showFileFinder && serverId && (
         <FileFinder
           serverId={serverId}
+          sessionId={sessionId || undefined}
           onSelectFile={handleViewFile}
           onClose={() => setShowFileFinder(false)}
         />

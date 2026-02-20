@@ -3,6 +3,7 @@ import { connectionManager } from '../services/ConnectionManager';
 
 interface FileFinderProps {
   serverId: string;
+  sessionId?: string;
   onSelectFile: (path: string) => void;
   onClose: () => void;
 }
@@ -12,7 +13,7 @@ interface FileResult {
   relativePath: string;
 }
 
-export function FileFinder({ serverId, onSelectFile, onClose }: FileFinderProps) {
+export function FileFinder({ serverId, sessionId, onSelectFile, onClose }: FileFinderProps) {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<FileResult[]>([]);
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -40,7 +41,7 @@ export function FileFinder({ serverId, onSelectFile, onClose }: FileFinderProps)
       if (!conn || !conn.isConnected()) return;
 
       setLoading(true);
-      conn.sendRequest('search_files', { query: query.trim(), limit: 20 })
+      conn.sendRequest('search_files', { query: query.trim(), limit: 20, sessionId })
         .then((response) => {
           if (response.success && response.payload) {
             const payload = response.payload as { files: FileResult[] };

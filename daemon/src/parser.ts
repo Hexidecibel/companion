@@ -432,8 +432,8 @@ function parseEntry(
           }
         }
         // Add Yes/No options for pending approval tools
-        // But NOT for Task tools - they run in background and stay "pending" for a long time
-        else if (isPending && APPROVAL_TOOLS.includes(block.name) && block.name !== 'Task') {
+        // But NOT for Task tools (background, stay "pending" long) or ExitPlanMode (has plan card UI)
+        else if (isPending && APPROVAL_TOOLS.includes(block.name) && block.name !== 'Task' && block.name !== 'ExitPlanMode') {
           const input = block.input as Record<string, unknown>;
           let description = '';
 
@@ -442,20 +442,29 @@ function parseEntry(
             description = `Run: ${(input.command as string).substring(0, 100)}`;
           } else if ((block.name === 'Edit' || block.name === 'Write') && input.file_path) {
             description = `${block.name}: ${input.file_path}`;
-          } else if (block.name === 'Task' && input.description) {
-            description = `Task: ${input.description}`;
+          } else if (block.name === 'EnterPlanMode') {
+            description = 'Enter plan mode';
           } else {
             description = `Allow ${block.name}?`;
           }
 
-          options = [
-            { label: 'yes', description: `Approve: ${description}` },
-            { label: 'no', description: 'Reject this action' },
-            {
-              label: "yes, and don't ask again for this session",
-              description: `Always allow: ${description}`,
-            },
-          ];
+          if (block.name === 'EnterPlanMode') {
+            // EnterPlanMode: just yes/no (2 options in CLI)
+            options = [
+              { label: 'yes', description: `Approve: ${description}` },
+              { label: 'no', description: 'Reject' },
+            ];
+          } else {
+            // Standard tool approval: yes/always/no (3 options in CLI)
+            options = [
+              { label: 'yes', description: `Approve: ${description}` },
+              {
+                label: "yes, and don't ask again for this session",
+                description: `Always allow: ${description}`,
+              },
+              { label: 'no', description: 'Reject this action' },
+            ];
+          }
           isWaitingForChoice = true;
           console.log(
             `Parser: Pending ${block.name} tool needs approval: "${description.substring(0, 50)}..."`
@@ -580,10 +589,13 @@ export function extractHighlights(messages: ConversationMessage[]): Conversation
       const isLastMessage = index === arr.length - 1;
       const originalIndex = messages.indexOf(msg);
 
-      // Check if this message has pending approval tools
-      const hasPendingApprovalTools =
+      // Check if this message has pending interactive tools (approval tools or AskUserQuestion)
+      const hasPendingInteractiveTools =
         msg.toolCalls?.some(
-          (tc) => tc.status === 'pending' && APPROVAL_TOOLS.includes(tc.name) && tc.name !== 'Task'
+          (tc) =>
+            tc.status === 'pending' &&
+            (APPROVAL_TOOLS.includes(tc.name) || tc.name === 'AskUserQuestion') &&
+            tc.name !== 'Task'
         ) ?? false;
 
       // Check if all tools in this message are already completed/errored
@@ -606,7 +618,7 @@ export function extractHighlights(messages: ConversationMessage[]): Conversation
       const showOptions =
         msg.options &&
         msg.options.length > 0 &&
-        (isLastMessage || hasPendingApprovalTools) &&
+        (isLastMessage || hasPendingInteractiveTools) &&
         !allToolsCompleted &&
         !userRespondedAfter;
 

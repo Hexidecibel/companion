@@ -30,6 +30,8 @@ High-level features of the Companion daemon, web client, and desktop/mobile apps
 - Multi-question answering with per-question selection and "Other" freetext
 - Multi-select checkbox UI for questions that allow multiple answers
 - Undo history for recovering cleared or sent input
+- **Native choice selection:** approval prompts and AskUserQuestion options send key sequences (arrow keys + Space/Enter) instead of text, matching the CLI's interactive selection UI
+- Image paste and drag-and-drop in terminal mode (sends via normal image upload path)
 
 ## Skill Browser & Slash Commands
 - Type `/` in the input bar to see an autocomplete menu of skills, quick actions, and CLI built-ins
@@ -81,7 +83,7 @@ High-level features of the Companion daemon, web client, and desktop/mobile apps
 - Progressive rendering for large files (3000 lines at a time with "Show more")
 - Image file rendering (PNG, JPG, GIF, SVG, WebP, ICO) via base64
 - Binary file detection with size display
-- Fuzzy file finder (Cmd+P) with debounced search, keyboard navigation, match highlighting
+- Fuzzy file finder (Cmd+P) with debounced search, keyboard navigation, match highlighting, session-scoped project root
 - "Files" button in session header for quick access to file finder
 - Large assistant messages (100+ lines) get "View full output in viewer" button
 - Artifact viewer modal for inline content with copy-to-clipboard
@@ -311,6 +313,8 @@ Consolidated diff view of all files changed by a session, with approve/reject ac
 - File list panel with diff viewer side-by-side (stacked on mobile)
 - Consolidated entry point: Review button and file changes summary both open the modal
 - Auto-refresh on file changes: listens for `conversation_update` broadcasts to re-fetch diffs when Write/Edit tools complete
+- **Line comments:** right-click any diff line to comment on it — sends formatted message with file path, line number, and quoted code to the CLI session
+- Copy line from context menu
 
 ## Mobile Session Context Menu
 Long-press or right-click on a mobile session to get a full context menu.

@@ -1151,6 +1151,83 @@ body {
   min-width: 0;
 }
 
+/* Code Review: inline comment overlay */
+.crm-comment-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1100;
+  background: rgba(0, 0, 0, 0.3);
+}
+
+.crm-comment-input {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(420px, 90vw);
+  background: #1f2937;
+  border: 1px solid #374151;
+  border-radius: 8px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+}
+
+.crm-comment-context {
+  font-size: 11px;
+  color: #9ca3af;
+  font-family: monospace;
+}
+
+.crm-comment-line {
+  font-size: 12px;
+  font-family: monospace;
+  color: #d1d5db;
+  background: #111827;
+  padding: 4px 8px;
+  border-radius: 4px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 60px;
+  overflow: auto;
+}
+
+.crm-comment-text-input {
+  flex: 1;
+  background: #111827;
+  border: 1px solid #374151;
+  border-radius: 4px;
+  color: #f3f4f6;
+  padding: 6px 8px;
+  font-size: 13px;
+  outline: none;
+}
+
+.crm-comment-text-input:focus {
+  border-color: #3b82f6;
+}
+
+.crm-comment-send {
+  background: #3b82f6;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  padding: 6px 14px;
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.crm-comment-send:hover:not(:disabled) {
+  background: #2563eb;
+}
+
+.crm-comment-send:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 /* ========================================
    Message List
    ======================================== */

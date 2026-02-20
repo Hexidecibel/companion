@@ -1228,6 +1228,16 @@ export class SessionWatcher extends EventEmitter {
     };
   }
 
+  getConversationInfo(sessionId: string): ConversationFile | null {
+    const resolved = this.resolveConversationForSession(sessionId);
+    if (!resolved) return null;
+    return {
+      path: resolved.conv.path,
+      projectPath: resolved.conv.projectPath,
+      lastModified: resolved.conv.lastModified,
+    };
+  }
+
   getMessages(sessionId?: string): ConversationMessage[] {
     const targetId = this.resolveToConversationId(sessionId);
     if (!targetId) return [];

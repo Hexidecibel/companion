@@ -27,57 +27,53 @@ interface UseConversationReturn {
 let clientMessageCounter = 0;
 
 /**
- * Merge server highlights with locally pending (optimistic) messages.
- * Preserves isPending messages that haven't yet appeared in the server response,
- * and drops them once a matching user message shows up in server data.
+ * Identify optimistic messages added client-side (not yet in server data).
  */
-const MAX_PENDING_AGE_MS = 60000; // Drop pending messages older than 60s
+function isOptimistic(h: ConversationHighlight): boolean {
+  return h.id.startsWith('sent-') || h.id.startsWith('terminal-');
+}
 
-function mergeWithPending(
+/**
+ * Merge server highlights with locally-sent optimistic messages.
+ * Keeps optimistic messages appended until server data includes a matching
+ * user message (same content). No timer — messages stay until confirmed.
+ */
+function mergeWithOptimistic(
   prev: ConversationHighlight[],
   server: ConversationHighlight[],
 ): ConversationHighlight[] {
-  const pending = prev.filter((h) => h.isPending);
-  if (pending.length === 0) return server;
+  const optimistic = prev.filter(isOptimistic);
+  if (optimistic.length === 0) return server;
 
-  // Auto-confirm stale pending messages instead of dropping them —
-  // the message was almost certainly delivered, just not yet in JSONL.
-  const now = Date.now();
-  const stalePending = pending.filter((p) => now - p.timestamp >= MAX_PENDING_AGE_MS);
-  const freshPending = pending.filter((p) => now - p.timestamp < MAX_PENDING_AGE_MS);
-  // Stale messages get confirmed (isPending removed) and appended to server data
-  const confirmed = stalePending.map((p) => ({ ...p, isPending: false }));
-  if (freshPending.length === 0) return [...server, ...confirmed];
-
-  // If a compaction occurred after pending messages were created, the old
-  // conversation was summarized and pending messages were consumed/absorbed.
-  const oldestPendingTime = Math.min(...freshPending.map((p) => p.timestamp));
-  const hasRecentCompaction = server.some(
-    (h) => h.isCompaction && h.timestamp > oldestPendingTime,
-  );
-  if (hasRecentCompaction) return [...server, ...confirmed];
-
-  // Check which pending messages are now confirmed by server data.
-  // A pending message is confirmed if a server user message with matching
-  // content appears in recent server messages.
-  const allPending = [...freshPending, ...stalePending];
-  const lastServerUserContent = new Set(
+  // Check which optimistic messages are now confirmed by server data.
+  const serverUserContent = new Set(
     server
       .filter((h) => h.type === 'user')
-      .slice(-allPending.length * 2) // check recent user messages
+      .slice(-optimistic.length * 2)
       .map((h) => h.content.trim()),
   );
 
-  const stillPending = freshPending.filter(
-    (p) => !lastServerUserContent.has(p.content.trim()),
-  );
-  // Only add confirmed stale messages that aren't already in server data
-  const stillConfirmed = confirmed.filter(
-    (p) => !lastServerUserContent.has(p.content.trim()),
+  const stillOptimistic = optimistic.filter(
+    (o) => !serverUserContent.has(o.content.trim()),
   );
 
-  if (stillPending.length === 0 && stillConfirmed.length === 0) return server;
-  return [...server, ...stillConfirmed, ...stillPending];
+  if (stillOptimistic.length === 0) return server;
+
+  // Insert optimistic messages at the correct position by timestamp
+  // instead of always appending at the end
+  const merged = [...server];
+  for (const opt of stillOptimistic) {
+    let insertIdx = merged.length;
+    for (let i = merged.length - 1; i >= 0; i--) {
+      if (merged[i].timestamp <= opt.timestamp) {
+        insertIdx = i + 1;
+        break;
+      }
+      if (i === 0) insertIdx = 0;
+    }
+    merged.splice(insertIdx, 0, opt);
+  }
+  return merged;
 }
 
 export function useConversation(
@@ -146,10 +142,11 @@ export function useConversation(
             total: number;
             hasMore: boolean;
           };
-          const hasPending = highlightsRef.current.some((h) => h.isPending);
-          if (hasPending || !highlightsEqual(payload.highlights, highlightsRef.current)) {
-            setHighlights((prev) => mergeWithPending(prev, payload.highlights));
-            setCachedHighlights(serverId!, sessionId!, payload.highlights);
+          const hasOptimistic = highlightsRef.current.some(isOptimistic);
+          if (hasOptimistic || !highlightsEqual(payload.highlights, highlightsRef.current)) {
+            const merged = mergeWithOptimistic(highlightsRef.current, payload.highlights);
+            setHighlights(merged);
+            setCachedHighlights(serverId!, sessionId!, merged);
           }
           setHasMore(payload.hasMore);
         }
@@ -189,10 +186,11 @@ export function useConversation(
             total: number;
             hasMore: boolean;
           };
-          const hasPending = highlightsRef.current.some((h) => h.isPending);
-          if (hasPending || !highlightsEqual(payload.highlights, highlightsRef.current)) {
-            setHighlights((prev) => mergeWithPending(prev, payload.highlights));
-            setCachedHighlights(serverId!, sessionId!, payload.highlights);
+          const hasOptimistic = highlightsRef.current.some(isOptimistic);
+          if (hasOptimistic || !highlightsEqual(payload.highlights, highlightsRef.current)) {
+            const merged = mergeWithOptimistic(highlightsRef.current, payload.highlights);
+            setHighlights(merged);
+            setCachedHighlights(serverId!, sessionId!, merged);
           }
           setHasMore(payload.hasMore);
         }
@@ -287,8 +285,8 @@ export function useConversation(
         });
         const isSlashCommand = text.startsWith('/');
         if (response.success && !opts?.skipOptimistic && !isSlashCommand) {
-          // Optimistic display — server will include this in future get_highlights
-          // via its pendingSentMessages tracking, but show immediately for instant UX
+          // Optimistic display — show immediately as confirmed message.
+          // Tracked by 'sent-' ID prefix for dedup when server data catches up.
           // Skipped for option/choice selections (skipOptimistic) and slash commands
           // since neither echo back as user messages in the JSONL.
           setHighlights((prev) => [
@@ -299,7 +297,6 @@ export function useConversation(
               content: text,
               timestamp: Date.now(),
               isWaitingForChoice: false,
-              isPending: true,
             },
           ]);
         }
@@ -350,7 +347,6 @@ export function useConversation(
         content: text,
         timestamp: Date.now(),
         isWaitingForChoice: false,
-        isPending: true,
       },
     ]);
   }, []);

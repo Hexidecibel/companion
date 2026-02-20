@@ -179,7 +179,7 @@ export const DEFAULT_TOOL_CONFIG: Record<string, ToolDefinition> = {
     icon: '📐',
     description: 'Entering plan mode',
     defaultSummary: 'Enter plan mode',
-    requiresApproval: false,
+    requiresApproval: true,
   },
   ExitPlanMode: {
     name: 'ExitPlanMode',

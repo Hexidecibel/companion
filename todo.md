@@ -27,4 +27,5 @@ Quick capture for ideas and tasks. Run `/plan` to process into detailed plans.
 - Extract reusable usePollData hook -- 5 hooks duplicate identical 5000ms polling pattern, ~400 lines removable
 - Vite code splitting -- lazy-load UsageDashboard, CodeReviewModal, FileViewerModal, ConversationSearch. Main bundle is 816KB
 - Defensive JSONL parsing -- graceful fallbacks for unknown entry types and format changes. Claude's format isn't officially stable either
+- Permission prompts stuck in chat mode -- parse "Yes / Yes and always allow / No" permission prompts from CLI output and surface them as tappable options (like AskUserQuestion). Currently no indication when stuck at these. (partially done: native key-sequence choice selection now works for JSONL-detected approval tools)
 

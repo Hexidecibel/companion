@@ -136,6 +136,121 @@ export class InputInjector {
   }
 
   /**
+   * Send a choice selection via key sequences for interactive CLI prompts.
+   * Works with AskUserQuestion — navigates with arrow keys, toggles with Space,
+   * and confirms with Enter.
+   *
+   * For single-select: Down × selectedIndex, then Enter.
+   * For multi-select: walk all options, Space on selected indices, then Enter.
+   * For "Other": navigate to Other option, Enter, type text, Enter.
+   */
+  async sendChoice(
+    selectedIndices: number[],
+    optionCount: number,
+    multiSelect: boolean,
+    otherText: string | undefined,
+    targetSession?: string
+  ): Promise<boolean> {
+    const previousLock = this.sendLock;
+    let releaseLock: () => void;
+    this.sendLock = new Promise<void>((resolve) => {
+      releaseLock = resolve;
+    });
+
+    try {
+      await previousLock;
+
+      const session = targetSession || this.activeSession;
+      const { spawnSync } = require('child_process');
+
+      const checkResult = spawnSync('tmux', ['has-session', '-t', session], { timeout: 5000 });
+      if (checkResult.status !== 0) {
+        console.error(`Tmux session '${session}' not found`);
+        return false;
+      }
+
+      return await this.doSendChoice(selectedIndices, optionCount, multiSelect, otherText, session);
+    } finally {
+      releaseLock!();
+    }
+  }
+
+  private async doSendChoice(
+    selectedIndices: number[],
+    optionCount: number,
+    multiSelect: boolean,
+    otherText: string | undefined,
+    session: string
+  ): Promise<boolean> {
+    try {
+      const { spawnSync } = require('child_process');
+      const KEY_DELAY = 80; // ms between key presses
+
+      const sendKey = (key: string): boolean => {
+        const result = spawnSync('tmux', ['send-keys', '-t', session, key], { timeout: 5000 });
+        if (result.status !== 0) {
+          console.error(`Failed to send key '${key}':`, result.stderr?.toString());
+          return false;
+        }
+        return true;
+      };
+
+      if (otherText !== undefined) {
+        // "Other" option: navigate past all options to "Other", press Enter, type text, Enter
+        console.log(`Sending choice: Other "${otherText.substring(0, 60)}" to '${session}'`);
+        for (let i = 0; i < optionCount; i++) {
+          if (!sendKey('Down')) return false;
+          await new Promise((r) => setTimeout(r, KEY_DELAY));
+        }
+        if (!sendKey('Enter')) return false;
+        await new Promise((r) => setTimeout(r, 200));
+
+        // Type the text
+        const textResult = spawnSync('tmux', ['send-keys', '-t', session, '-l', '--', otherText], {
+          timeout: 5000,
+        });
+        if (textResult.status !== 0) return false;
+        await new Promise((r) => setTimeout(r, 150));
+        if (!sendKey('Enter')) return false;
+      } else if (multiSelect) {
+        // Multi-select: walk through all options, Space on selected ones, then Enter
+        const selectedSet = new Set(selectedIndices);
+        console.log(`Sending multi-select choice: indices [${selectedIndices.join(',')}] of ${optionCount} to '${session}'`);
+
+        for (let i = 0; i < optionCount; i++) {
+          if (selectedSet.has(i)) {
+            if (!sendKey('Space')) return false;
+            await new Promise((r) => setTimeout(r, KEY_DELAY));
+          }
+          if (i < optionCount - 1) {
+            if (!sendKey('Down')) return false;
+            await new Promise((r) => setTimeout(r, KEY_DELAY));
+          }
+        }
+        // Submit
+        if (!sendKey('Enter')) return false;
+      } else {
+        // Single-select: Down to the selected option, then Enter
+        const idx = selectedIndices[0] || 0;
+        console.log(`Sending single-select choice: index ${idx} of ${optionCount} to '${session}'`);
+
+        for (let i = 0; i < idx; i++) {
+          if (!sendKey('Down')) return false;
+          await new Promise((r) => setTimeout(r, KEY_DELAY));
+        }
+        if (!sendKey('Enter')) return false;
+      }
+
+      await new Promise((r) => setTimeout(r, 50));
+      console.log(`Choice sent successfully to tmux session '${session}'`);
+      return true;
+    } catch (err) {
+      console.error('Error sending choice to tmux:', err);
+      return false;
+    }
+  }
+
+  /**
    * Send Ctrl+C to cancel current input in a tmux session
    */
   async cancelInput(targetSession?: string): Promise<boolean> {

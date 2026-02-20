@@ -430,6 +430,21 @@ export class WebSocketHandler {
           }
         }
 
+        // Suppress approval options when the session is actively running (tool was approved
+        // but hasn't completed yet — JSONL still shows tool_use without tool_result)
+        const sessionStatus = this.watcher.getStatus(hlSessionId || undefined);
+        if (!sessionStatus.isWaitingForInput && resultHighlights.length > 0) {
+          const last = resultHighlights[resultHighlights.length - 1];
+          if (last.isWaitingForChoice && !last.questions) {
+            // Clear approval options (but keep AskUserQuestion — those ARE waiting for input)
+            resultHighlights[resultHighlights.length - 1] = {
+              ...last,
+              options: undefined,
+              isWaitingForChoice: false,
+            };
+          }
+        }
+
         // Inject pending sent messages that haven't appeared in JSONL yet
         // pendingSentMessages is keyed by tmux session name, but hlSessionId is a conversation UUID.
         // Resolve the tmux session name for this conversation.
@@ -631,6 +646,27 @@ export class WebSocketHandler {
       case 'send_input':
         this.handleSendInput(client, payload as { input: string }, requestId);
         // Acknowledge session — user is responding, cancel push escalation
+        {
+          const activeSessionId = this.watcher.getActiveSessionId();
+          if (activeSessionId) {
+            this.escalation.acknowledgeSession(activeSessionId);
+          }
+        }
+        break;
+
+      case 'send_choice':
+        this.handleSendChoice(
+          client,
+          payload as {
+            selectedIndices: number[];
+            optionCount: number;
+            multiSelect: boolean;
+            otherText?: string;
+            sessionId?: string;
+            tmuxSessionName?: string;
+          },
+          requestId
+        );
         {
           const activeSessionId = this.watcher.getActiveSessionId();
           if (activeSessionId) {
@@ -911,7 +947,7 @@ export class WebSocketHandler {
         break;
 
       case 'search_files':
-        this.handleSearchFiles(client, payload as { query: string; limit?: number }, requestId);
+        this.handleSearchFiles(client, payload as { query: string; limit?: number; sessionId?: string }, requestId);
         break;
 
       case 'check_files_exist':
@@ -1583,6 +1619,67 @@ export class WebSocketHandler {
       type: 'input_sent',
       success,
       error: success ? undefined : 'Failed to send input to session',
+      requestId,
+    });
+  }
+
+  private async handleSendChoice(
+    client: AuthenticatedClient,
+    payload:
+      | {
+          selectedIndices: number[];
+          optionCount: number;
+          multiSelect: boolean;
+          otherText?: string;
+          sessionId?: string;
+          tmuxSessionName?: string;
+        }
+      | undefined,
+    requestId?: string
+  ): Promise<void> {
+    if (!payload || !Array.isArray(payload.selectedIndices) || !payload.optionCount) {
+      this.send(client.ws, {
+        type: 'choice_sent',
+        success: false,
+        error: 'Missing choice data',
+        requestId,
+      });
+      return;
+    }
+
+    let sessionToUse: string;
+    if (payload.tmuxSessionName) {
+      sessionToUse = payload.tmuxSessionName;
+    } else if (payload.sessionId) {
+      const resolved = await this.resolveTmuxSession(payload.sessionId);
+      sessionToUse = resolved || payload.sessionId;
+    } else {
+      sessionToUse = this.injector.getActiveSession();
+    }
+
+    const sessionExists = await this.injector.checkSessionExists(sessionToUse);
+    if (!sessionExists) {
+      this.send(client.ws, {
+        type: 'choice_sent',
+        success: false,
+        error: 'tmux_session_not_found',
+        requestId,
+      });
+      return;
+    }
+
+    const success = await this.injector.sendChoice(
+      payload.selectedIndices,
+      payload.optionCount,
+      payload.multiSelect,
+      payload.otherText,
+      sessionToUse
+    );
+
+    this.send(client.ws, {
+      type: 'choice_sent',
+      success,
+      error: success ? undefined : 'Failed to send choice to session',
       requestId,
     });
   }
@@ -3866,7 +3963,7 @@ export class WebSocketHandler {
 
   private handleSearchFiles(
     client: AuthenticatedClient,
-    payload: { query: string; limit?: number } | undefined,
+    payload: { query: string; limit?: number; sessionId?: string } | undefined,
     requestId?: string
   ): void {
     const query = payload?.query?.trim();
@@ -3880,7 +3977,7 @@ export class WebSocketHandler {
       return;
     }
 
-    const projectRoot = this.getProjectRoot();
+    const projectRoot = this.getProjectRoot(payload?.sessionId);
     if (!projectRoot) {
       this.send(client.ws, {
         type: 'search_files_result',
@@ -3953,8 +4050,15 @@ export class WebSocketHandler {
     });
   }
 
-  private getProjectRoot(): string | null {
-    // Get the actual project root from the active session's decoded project path
+  private getProjectRoot(sessionId?: string): string | null {
+    // If a sessionId is provided, resolve to that session's project path
+    if (sessionId) {
+      const conv = this.watcher.getConversationInfo(sessionId);
+      if (conv?.projectPath) {
+        return conv.projectPath;
+      }
+    }
+    // Fall back to the active session's project path
     const conv = this.watcher.getActiveConversation();
     if (conv?.projectPath) {
       return conv.projectPath;

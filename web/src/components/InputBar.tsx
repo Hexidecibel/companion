@@ -100,11 +100,32 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
       savedImages.forEach((img) => URL.revokeObjectURL(img.previewUrl));
     }
     setSending(false);
-    textareaRef.current?.focus();
+    requestAnimationFrame(() => textareaRef.current?.focus());
   }, [text, images, sending, disabled, onSend, onSendWithImages, resetHistory]);
 
   const handleTerminalSend = useCallback(async () => {
     if (sending || !onTerminalSend) return;
+
+    // If images are attached, use the normal image send path
+    if (images.length > 0 && onSendWithImages) {
+      const trimmed = text.trim();
+      const savedText = text;
+      const savedImages = [...images];
+      resetHistory();
+      setImages([]);
+      setSending(true);
+      if (textareaRef.current) textareaRef.current.style.height = 'auto';
+      const success = await onSendWithImages(trimmed, savedImages);
+      if (!success) {
+        setText(savedText);
+        setImages(savedImages);
+      } else {
+        savedImages.forEach((img) => URL.revokeObjectURL(img.previewUrl));
+      }
+      setSending(false);
+      requestAnimationFrame(() => textareaRef.current?.focus());
+      return;
+    }
 
     const trimmed = text.trim();
     const savedText = text;
@@ -122,8 +143,8 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
       setText(savedText);
     }
     setSending(false);
-    textareaRef.current?.focus();
-  }, [text, sending, onTerminalSend, resetHistory, setText]);
+    requestAnimationFrame(() => textareaRef.current?.focus());
+  }, [text, images, sending, onTerminalSend, onSendWithImages, resetHistory, setText]);
 
   const handleSlashSelect = useCallback(
     (item: SlashMenuItem) => {
@@ -222,7 +243,6 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
   };
 
   const handlePaste = useCallback((e: ClipboardEvent<HTMLTextAreaElement>) => {
-    if (terminalMode) return; // No image paste in terminal mode
     const items = e.clipboardData?.items;
     if (!items) return;
     const files: File[] = [];
@@ -239,10 +259,9 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
   }, [addImages, terminalMode]);
 
   const handleDragOver = useCallback((e: DragEvent<HTMLDivElement>) => {
-    if (terminalMode) return;
     e.preventDefault();
     setDragging(true);
-  }, [terminalMode]);
+  }, []);
 
   const handleDragLeave = useCallback((e: DragEvent<HTMLDivElement>) => {
     e.preventDefault();
@@ -254,10 +273,9 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
   const handleDrop = useCallback((e: DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     setDragging(false);
-    if (terminalMode) return;
     const files = Array.from(e.dataTransfer.files);
     addImages(files);
-  }, [addImages, terminalMode]);
+  }, [addImages]);
 
   const handleFileSelect = useCallback(() => {
     fileInputRef.current?.click();
@@ -288,7 +306,7 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
           onClose={() => setShowSlashMenu(false)}
         />
       )}
-      {!terminalMode && images.length > 0 && (
+      {images.length > 0 && (
         <div className="input-bar-images">
           {images.map((img) => (
             <div key={img.id} className="input-bar-image-preview">
@@ -382,7 +400,7 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
           )}
         </button>
       </div>
-      {!terminalMode && dragging && (
+      {dragging && (
         <div className="input-bar-drop-overlay">
           Drop images here
         </div>

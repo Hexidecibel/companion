@@ -7,9 +7,17 @@ import { isTouchDevice } from '../utils/platform';
 
 const ARTIFACT_THRESHOLD = 100; // lines
 
+export interface ChoiceData {
+  selectedIndices: number[];
+  optionCount: number;
+  multiSelect: boolean;
+  otherText?: string;
+}
+
 interface MessageBubbleProps {
   message: ConversationHighlight;
-  onSelectOption?: (label: string) => void;
+  onSelectOption?: (label: string) => void | Promise<boolean>;
+  onSelectChoice?: (choice: ChoiceData) => Promise<boolean>;
   onCancelMessage?: (clientMessageId: string) => void;
   onViewFile?: (path: string) => void;
   onViewArtifact?: (content: string, title?: string) => void;
@@ -21,41 +29,69 @@ interface MessageBubbleProps {
 
 interface QuestionBlockProps {
   question: Question;
-  onSelectOption: (label: string) => void;
+  onSelectOption: (label: string) => void | Promise<boolean>;
+  onSelectChoice?: (choice: ChoiceData) => Promise<boolean>;
 }
 
-function QuestionBlock({ question, onSelectOption }: QuestionBlockProps) {
-  const [selected, setSelected] = useState<Set<string>>(new Set());
+function QuestionBlock({ question, onSelectOption, onSelectChoice }: QuestionBlockProps) {
+  const [selected, setSelected] = useState<Set<number>>(new Set());
   const [showOther, setShowOther] = useState(false);
   const [otherText, setOtherText] = useState('');
   const blockRef = useRef<HTMLDivElement>(null);
 
-  const handleOptionClick = useCallback((label: string) => {
+  const handleOptionClick = useCallback((idx: number) => {
     if (question.multiSelect) {
       setSelected((prev) => {
         const next = new Set(prev);
-        if (next.has(label)) {
-          next.delete(label);
+        if (next.has(idx)) {
+          next.delete(idx);
         } else {
-          next.add(label);
+          next.add(idx);
         }
         return next;
       });
+    } else if (onSelectChoice) {
+      // Single-select: send key sequence immediately
+      onSelectChoice({
+        selectedIndices: [idx],
+        optionCount: question.options.length,
+        multiSelect: false,
+      });
     } else {
-      onSelectOption(label);
+      onSelectOption(question.options[idx].label);
     }
-  }, [question.multiSelect, onSelectOption]);
+  }, [question.multiSelect, question.options, onSelectOption, onSelectChoice]);
 
   const handleSubmitMulti = useCallback(() => {
     if (selected.size === 0) return;
-    onSelectOption(Array.from(selected).join(', '));
-  }, [selected, onSelectOption]);
+    const indices = Array.from(selected).sort((a, b) => a - b);
+    if (onSelectChoice) {
+      onSelectChoice({
+        selectedIndices: indices,
+        optionCount: question.options.length,
+        multiSelect: true,
+      });
+    } else {
+      // Fallback: send as text
+      const labels = indices.map(i => question.options[i].label);
+      onSelectOption(labels.join(', '));
+    }
+  }, [selected, question.options, onSelectOption, onSelectChoice]);
 
   const handleSendOther = useCallback(() => {
     const trimmed = otherText.trim();
     if (!trimmed) return;
-    onSelectOption(trimmed);
-  }, [otherText, onSelectOption]);
+    if (onSelectChoice) {
+      onSelectChoice({
+        selectedIndices: [],
+        optionCount: question.options.length,
+        multiSelect: question.multiSelect,
+        otherText: trimmed,
+      });
+    } else {
+      onSelectOption(trimmed);
+    }
+  }, [otherText, question.options.length, question.multiSelect, onSelectOption, onSelectChoice]);
 
   // Keyboard shortcuts: 1-9 to select options, Enter to submit multi-select
   useEffect(() => {
@@ -65,7 +101,7 @@ function QuestionBlock({ question, onSelectOption }: QuestionBlockProps) {
       const num = parseInt(e.key);
       if (num >= 1 && num <= question.options.length) {
         e.preventDefault();
-        handleOptionClick(question.options[num - 1].label);
+        handleOptionClick(num - 1);
       }
       if (e.key === 'Enter' && question.multiSelect && selected.size > 0) {
         e.preventDefault();
@@ -90,8 +126,8 @@ function QuestionBlock({ question, onSelectOption }: QuestionBlockProps) {
         {question.options.map((opt, idx) => (
           <button
             key={opt.label}
-            className={`msg-option-btn ${question.multiSelect && selected.has(opt.label) ? 'selected' : ''} ${showDescriptions ? 'with-desc' : ''}`}
-            onClick={() => handleOptionClick(opt.label)}
+            className={`msg-option-btn ${question.multiSelect && selected.has(idx) ? 'selected' : ''} ${showDescriptions ? 'with-desc' : ''}`}
+            onClick={() => handleOptionClick(idx)}
             title={opt.description}
           >
             <span className="option-key-hint">{idx + 1}</span>
@@ -151,16 +187,18 @@ function QuestionBlock({ question, onSelectOption }: QuestionBlockProps) {
 // Multi-question flow: step-by-step with review screen
 interface MultiQuestionFlowProps {
   questions: Question[];
-  onSelectOption: (label: string) => void;
+  onSelectOption: (label: string) => void | Promise<boolean>;
+  onSelectChoice?: (choice: ChoiceData) => Promise<boolean>;
 }
 
-function MultiQuestionFlow({ questions, onSelectOption }: MultiQuestionFlowProps) {
+function MultiQuestionFlow({ questions, onSelectOption, onSelectChoice }: MultiQuestionFlowProps) {
   const [step, setStep] = useState(0);
-  const [answers, setAnswers] = useState<Map<number, string>>(new Map());
+  // Track both display text and structured choice data per question
+  const [answers, setAnswers] = useState<Map<number, { text: string; indices: number[]; otherText?: string }>>(new Map());
   const [reviewing, setReviewing] = useState(false);
   const total = questions.length;
 
-  const handleAnswer = useCallback((questionIdx: number, answer: string) => {
+  const handleAnswer = useCallback((questionIdx: number, answer: { text: string; indices: number[]; otherText?: string }) => {
     setAnswers(prev => {
       const next = new Map(prev);
       next.set(questionIdx, answer);
@@ -191,16 +229,26 @@ function MultiQuestionFlow({ questions, onSelectOption }: MultiQuestionFlowProps
 
   const handleSubmitAll = useCallback(async () => {
     // Send each answer sequentially — the CLI presents one question at a time,
-    // so each answer needs its own sendInput + Enter with a delay between them.
+    // so each answer needs its own send + delay between them.
     for (let i = 0; i < total; i++) {
-      const answer = answers.get(i) || '';
-      onSelectOption(answer);
+      const answer = answers.get(i);
+      const q = questions[i];
+      if (onSelectChoice && answer) {
+        await onSelectChoice({
+          selectedIndices: answer.indices,
+          optionCount: q.options.length,
+          multiSelect: q.multiSelect,
+          otherText: answer.otherText,
+        });
+      } else {
+        await onSelectOption(answer?.text || '');
+      }
       if (i < total - 1) {
         // Wait for the CLI to process the answer and show the next question
         await new Promise((resolve) => setTimeout(resolve, 500));
       }
     }
-  }, [answers, total, onSelectOption]);
+  }, [answers, total, questions, onSelectOption, onSelectChoice]);
 
   if (reviewing) {
     return (
@@ -211,7 +259,7 @@ function MultiQuestionFlow({ questions, onSelectOption }: MultiQuestionFlowProps
             <div key={i} className="multi-question-review-item">
               <span>
                 <span className="review-question">{q.header || q.question}: </span>
-                <span className="review-answer">{answers.get(i) || '(no answer)'}</span>
+                <span className="review-answer">{answers.get(i)?.text || '(no answer)'}</span>
               </span>
               <button className="review-edit" onClick={() => handleEditFromReview(i)}>Edit</button>
             </div>
@@ -253,6 +301,7 @@ function MultiQuestionFlow({ questions, onSelectOption }: MultiQuestionFlowProps
         selectedAnswer={currentAnswer}
         onAnswer={(answer) => handleAnswer(step, answer)}
       />
+
       <div className="multi-question-nav">
         <button onClick={handleBack} disabled={step === 0}>Back</button>
         <button onClick={handleNext} disabled={!currentAnswer}>
@@ -264,41 +313,49 @@ function MultiQuestionFlow({ questions, onSelectOption }: MultiQuestionFlowProps
 }
 
 // Single-question collector for multi-question flow (doesn't submit immediately)
+interface AnswerData {
+  text: string;
+  indices: number[];
+  otherText?: string;
+}
+
 interface QuestionBlockSingleProps {
   question: Question;
-  selectedAnswer?: string;
-  onAnswer: (answer: string) => void;
+  selectedAnswer?: AnswerData;
+  onAnswer: (answer: AnswerData) => void;
 }
 
 function QuestionBlockSingle({ question, selectedAnswer, onAnswer }: QuestionBlockSingleProps) {
-  const [selected, setSelected] = useState<Set<string>>(() => {
+  const [selected, setSelected] = useState<Set<number>>(() => {
     if (!selectedAnswer) return new Set();
-    if (question.multiSelect) return new Set(selectedAnswer.split(', '));
-    return new Set([selectedAnswer]);
+    return new Set(selectedAnswer.indices);
   });
   const [showOther, setShowOther] = useState(false);
   const [otherText, setOtherText] = useState('');
 
-  const handleOptionClick = useCallback((label: string) => {
+  const handleOptionClick = useCallback((idx: number) => {
     if (question.multiSelect) {
       setSelected(prev => {
         const next = new Set(prev);
-        if (next.has(label)) next.delete(label);
-        else next.add(label);
-        const answer = Array.from(next).join(', ');
-        if (next.size > 0) onAnswer(answer);
+        if (next.has(idx)) next.delete(idx);
+        else next.add(idx);
+        const sortedIndices = Array.from(next).sort((a, b) => a - b);
+        const labels = sortedIndices.map(i => question.options[i].label);
+        if (sortedIndices.length > 0) {
+          onAnswer({ text: labels.join(', '), indices: sortedIndices });
+        }
         return next;
       });
     } else {
-      setSelected(new Set([label]));
-      onAnswer(label);
+      setSelected(new Set([idx]));
+      onAnswer({ text: question.options[idx].label, indices: [idx] });
     }
-  }, [question.multiSelect, onAnswer]);
+  }, [question.multiSelect, question.options, onAnswer]);
 
   const handleSendOther = useCallback(() => {
     const trimmed = otherText.trim();
     if (!trimmed) return;
-    onAnswer(trimmed);
+    onAnswer({ text: trimmed, indices: [], otherText: trimmed });
     setSelected(new Set());
   }, [otherText, onAnswer]);
 
@@ -309,7 +366,7 @@ function QuestionBlockSingle({ question, selectedAnswer, onAnswer }: QuestionBlo
       const num = parseInt(e.key);
       if (num >= 1 && num <= question.options.length) {
         e.preventDefault();
-        handleOptionClick(question.options[num - 1].label);
+        handleOptionClick(num - 1);
       }
     };
     window.addEventListener('keydown', handler);
@@ -326,8 +383,8 @@ function QuestionBlockSingle({ question, selectedAnswer, onAnswer }: QuestionBlo
         {question.options.map((opt, idx) => (
           <button
             key={opt.label}
-            className={`msg-option-btn ${selected.has(opt.label) ? 'selected' : ''} ${showDescriptions ? 'with-desc' : ''}`}
-            onClick={() => handleOptionClick(opt.label)}
+            className={`msg-option-btn ${selected.has(idx) ? 'selected' : ''} ${showDescriptions ? 'with-desc' : ''}`}
+            onClick={() => handleOptionClick(idx)}
             title={opt.description}
           >
             <span className="option-key-hint">{idx + 1}</span>
@@ -458,7 +515,7 @@ function SkillCard({ skillName, content, onViewFile }: { skillName: string; cont
   );
 }
 
-export function MessageBubble({ message, onSelectOption, onCancelMessage, onViewFile, onViewArtifact, searchTerm, isCurrentMatch, planFilePath, hideTools }: MessageBubbleProps) {
+export function MessageBubble({ message, onSelectOption, onSelectChoice, onCancelMessage, onViewFile, onViewArtifact, searchTerm, isCurrentMatch, planFilePath, hideTools }: MessageBubbleProps) {
   const isUser = message.type === 'user';
   const isSystem = message.type === 'system';
   const [allExpanded, setAllExpanded] = useState<boolean | undefined>(undefined);
@@ -660,17 +717,31 @@ export function MessageBubble({ message, onSelectOption, onCancelMessage, onView
                       View Plan
                     </button>
                   ) : null}
-                  {tool.status === 'pending' && onSelectOption && (
+                  {tool.status === 'pending' && (onSelectChoice || onSelectOption) && (
                     <div className="plan-card-actions">
                       <button
                         className="msg-option-btn approve"
-                        onClick={(e) => { e.stopPropagation(); onSelectOption('yes'); }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (onSelectChoice) {
+                            onSelectChoice({ selectedIndices: [0], optionCount: 3, multiSelect: false });
+                          } else if (onSelectOption) {
+                            onSelectOption('yes');
+                          }
+                        }}
                       >
                         Approve
                       </button>
                       <button
                         className="msg-option-btn reject"
-                        onClick={(e) => { e.stopPropagation(); onSelectOption('no'); }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (onSelectChoice) {
+                            onSelectChoice({ selectedIndices: [2], optionCount: 3, multiSelect: false });
+                          } else if (onSelectOption) {
+                            onSelectOption('no');
+                          }
+                        }}
                       >
                         Reject
                       </button>
@@ -687,23 +758,23 @@ export function MessageBubble({ message, onSelectOption, onCancelMessage, onView
 
       {message.isWaitingForChoice && message.questions && onSelectOption && (
         message.questions.length > 1 ? (
-          <MultiQuestionFlow questions={message.questions} onSelectOption={onSelectOption} />
+          <MultiQuestionFlow questions={message.questions} onSelectOption={onSelectOption} onSelectChoice={onSelectChoice} />
         ) : (
           <>
             {message.questions.map((q, i) => (
-              <QuestionBlock key={i} question={q} onSelectOption={onSelectOption} />
+              <QuestionBlock key={i} question={q} onSelectOption={onSelectOption} onSelectChoice={onSelectChoice} />
             ))}
           </>
         )
       )}
 
-      {message.isWaitingForChoice && !message.questions && message.options && onSelectOption && (
+      {message.isWaitingForChoice && !message.questions && message.options && (onSelectChoice || onSelectOption) && (
         <div className="msg-approval-prompt">
           {message.options[0]?.description && (
             <div className="msg-approval-description">{message.options[0].description}</div>
           )}
           <div className="msg-options">
-            {message.options.map((opt) => {
+            {message.options.map((opt, idx) => {
               const isApprove = opt.label === 'yes';
               const isReject = opt.label === 'no';
               const isAlways = opt.label.startsWith('yes, and don');
@@ -711,7 +782,17 @@ export function MessageBubble({ message, onSelectOption, onCancelMessage, onView
                 <button
                   key={opt.label}
                   className={`msg-option-btn ${isApprove ? 'approve' : isReject ? 'reject' : isAlways ? 'always' : ''}`}
-                  onClick={() => onSelectOption(opt.label)}
+                  onClick={() => {
+                    if (onSelectChoice) {
+                      onSelectChoice({
+                        selectedIndices: [idx],
+                        optionCount: message.options!.length,
+                        multiSelect: false,
+                      });
+                    } else if (onSelectOption) {
+                      onSelectOption(opt.label);
+                    }
+                  }}
                   title={opt.description}
                 >
                   {isApprove ? 'Approve' : isReject ? 'Reject' : isAlways ? 'Always Allow' : opt.label}

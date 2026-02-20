@@ -277,6 +277,53 @@ describe('parseConversationFile', () => {
     expect(msgs[0].content).toBe('Which approach?');
   });
 
+  it('extracts multiSelect AskUserQuestion with multiple questions', () => {
+    const content = jsonl(
+      assistantWithTools('', [
+        {
+          name: 'AskUserQuestion',
+          id: 'ask2',
+          input: {
+            questions: [
+              {
+                question: 'Which features do you want to enable?',
+                header: 'Features',
+                options: [
+                  { label: 'Dark mode', description: 'Enable dark theme' },
+                  { label: 'Notifications', description: 'Push notifications' },
+                  { label: 'Auto-save', description: 'Save automatically' },
+                ],
+                multiSelect: true,
+              },
+              {
+                question: 'Which platform?',
+                header: 'Platform',
+                options: [
+                  { label: 'iOS', description: 'Apple devices' },
+                  { label: 'Android', description: 'Google devices' },
+                ],
+                multiSelect: false,
+              },
+            ],
+          },
+        },
+      ])
+    );
+    const msgs = parseConversationFile('test.jsonl', Infinity, content);
+    expect(msgs[0].isWaitingForChoice).toBe(true);
+    expect(msgs[0].questions).toHaveLength(2);
+    // First question: multiSelect
+    expect(msgs[0].questions![0].multiSelect).toBe(true);
+    expect(msgs[0].questions![0].options).toHaveLength(3);
+    expect(msgs[0].questions![0].question).toBe('Which features do you want to enable?');
+    // Second question: single select
+    expect(msgs[0].questions![1].multiSelect).toBe(false);
+    expect(msgs[0].questions![1].options).toHaveLength(2);
+    // Legacy options field uses first question
+    expect(msgs[0].options).toHaveLength(3);
+    expect(msgs[0].multiSelect).toBe(true);
+  });
+
   it('generates approval options for pending Bash tool', () => {
     const content = jsonl(
       assistantWithTools('', [
