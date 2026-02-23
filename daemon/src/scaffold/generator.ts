@@ -124,7 +124,7 @@ export async function scaffoldProject(
       } catch {
         const settings = JSON.stringify({
           permissions: {
-            allow: ['Bash', 'Edit', 'Write'],
+            allow: ['Bash', 'Edit', 'Write', 'Read', 'Glob', 'Grep', 'WebFetch', 'WebSearch', 'Task', 'NotebookEdit'],
             defaultMode: 'bypassPermissions',
           },
         }, null, 2);

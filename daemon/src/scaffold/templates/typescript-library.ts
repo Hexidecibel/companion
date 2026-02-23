@@ -203,7 +203,14 @@ src/
     "allow": [
       "Bash",
       "Edit",
-      "Write"
+      "Write",
+      "Read",
+      "Glob",
+      "Grep",
+      "WebFetch",
+      "WebSearch",
+      "Task",
+      "NotebookEdit"
     ],
     "defaultMode": "bypassPermissions"
   }

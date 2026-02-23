@@ -826,7 +826,7 @@ export class WebSocketHandler {
               try { existing = JSON.parse(fs.readFileSync(settingsPath, 'utf-8')); } catch { existing = {}; }
             }
             const perms = (existing.permissions || {}) as Record<string, unknown>;
-            perms.allow = perms.allow || ['Bash', 'Edit', 'Write'];
+            perms.allow = perms.allow || ['Bash', 'Edit', 'Write', 'Read', 'Glob', 'Grep', 'WebFetch', 'WebSearch', 'Task', 'NotebookEdit'];
             perms.defaultMode = 'bypassPermissions';
             existing.permissions = perms;
             fs.writeFileSync(settingsPath, JSON.stringify(existing, null, 2), 'utf-8');
