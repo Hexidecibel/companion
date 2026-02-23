@@ -35,8 +35,8 @@ function isOptimistic(h: ConversationHighlight): boolean {
 
 /**
  * Merge server highlights with locally-sent optimistic messages.
- * Keeps optimistic messages appended until server data includes a matching
- * user message (same content). No timer — messages stay until confirmed.
+ * Drops optimistic messages that match server data by content or ID.
+ * Inserts remaining ones at the correct chronological position.
  */
 function mergeWithOptimistic(
   prev: ConversationHighlight[],
@@ -45,7 +45,18 @@ function mergeWithOptimistic(
   const optimistic = prev.filter(isOptimistic);
   if (optimistic.length === 0) return server;
 
-  // Check which optimistic messages are now confirmed by server data.
+  // If a compaction occurred after optimistic messages were created,
+  // the conversation was summarized and optimistic messages were consumed.
+  const oldestOptTime = Math.min(...optimistic.map((o) => o.timestamp));
+  const hasRecentCompaction = server.some(
+    (h) => h.isCompaction && h.timestamp > oldestOptTime,
+  );
+  if (hasRecentCompaction) return server;
+
+  // Match optimistic messages against server data by content or ID
+  const serverUserIds = new Set(
+    server.filter((h) => h.type === 'user').map((h) => h.id),
+  );
   const serverUserContent = new Set(
     server
       .filter((h) => h.type === 'user')
@@ -54,13 +65,13 @@ function mergeWithOptimistic(
   );
 
   const stillOptimistic = optimistic.filter(
-    (o) => !serverUserContent.has(o.content.trim()),
+    (o) =>
+      !serverUserIds.has(o.id) && !serverUserContent.has(o.content.trim()),
   );
 
   if (stillOptimistic.length === 0) return server;
 
   // Insert optimistic messages at the correct position by timestamp
-  // instead of always appending at the end
   const merged = [...server];
   for (const opt of stillOptimistic) {
     let insertIdx = merged.length;
