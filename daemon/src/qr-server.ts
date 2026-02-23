@@ -59,11 +59,11 @@ function getContentType(filePath: string): string {
 function findWebDir(): string | null {
   // Try built Vite output first (web/dist/), then fall back to source web/
   const bases = [
-    path.join(__dirname, '../web'), // npm-installed package (web/ inside package root)
-    path.join(__dirname, '../../web'), // From dist/ in monorepo (sibling web/)
-    path.join(__dirname, '../../../web'), // From dist/ in nested installed location
+    path.join(__dirname, '../../web'), // From dist/ in monorepo (sibling web/) — preferred
     path.join(process.cwd(), '../web'), // From daemon directory
     path.join(process.cwd(), 'web'), // From project root
+    path.join(__dirname, '../web'), // npm-installed package (web/ inside package root)
+    path.join(__dirname, '../../../web'), // From dist/ in nested installed location
   ];
 
   // Prefer web/dist/ (Vite build output)

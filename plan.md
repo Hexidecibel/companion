@@ -4,6 +4,209 @@ Detailed plans for upcoming work items. Completed items are moved to FEATURES.md
 
 ---
 
+## Item: Theme customization — Phase 1: Clean up hardcoded colors
+**Status:** done
+
+### Requirements
+- Replace hardcoded hex colors in global.css with existing CSS variables (or create new ones where needed)
+- Convert inline style colors in the 5 problem components to CSS classes using variables
+- Add missing variables: `--gradient-success`, `--gradient-success-hover`, `--color-white`
+- Do NOT touch GitHub syntax highlighter colors (intentionally hardcoded from highlight.js theme)
+- No visual changes — this is a pure refactor
+
+### Files to Modify
+- `web/src/styles/variables.css` — add missing variables (`--gradient-success`, `--gradient-success-hover`, `--color-white`)
+- `web/src/styles/global.css` — replace ~67 hardcoded hex colors with `var()` references
+- `web/src/components/UsageDashboard.tsx` — convert ~30 inline style colors to CSS classes
+- `web/src/components/CostDashboard.tsx` — convert ~10 inline style colors to CSS classes
+- `web/src/components/DailyUsageChart.tsx` — convert inline style colors to CSS classes
+- `web/src/components/TerminalPanel.tsx` — check and convert if needed
+- `web/src/components/ErrorBoundary.tsx` — check and convert if needed
+
+### Implementation Steps
+1. Open `web/src/styles/variables.css` and add missing variables to the `:root` block:
+   - `--gradient-success: linear-gradient(135deg, #22c55e 0%, #10b981 100%);`
+   - `--gradient-success-hover: linear-gradient(135deg, #16a34a 0%, #059669 100%);`
+   - `--color-white: #ffffff;`
+2. Audit `web/src/styles/global.css` for hardcoded hex colors. For each one:
+   a. Identify which existing CSS variable matches (e.g., `#3b82f6` -> `var(--accent-blue)`, `#f1f5f9` -> `var(--text-primary)`, `#334155` -> `var(--border-color)`)
+   b. Replace the hardcoded value with the `var()` reference
+   c. Skip any colors inside the `.hljs` / syntax highlighter block (these are from a highlight.js theme and must stay hardcoded)
+   d. For colors with no exact variable match, check if it is close enough to an existing variable or create a new variable in variables.css
+3. For `web/src/components/UsageDashboard.tsx`:
+   a. Search for all `style={{ ... color:` and `style={{ ... background` patterns
+   b. Create CSS classes in global.css for each unique style combination (e.g., `.usage-bar-blue { background: var(--accent-blue); }`)
+   c. Replace inline `style=` with `className=` references
+   d. For chart/SVG fill colors that must stay inline, use CSS custom properties via `style={{ fill: 'var(--accent-blue)' }}`
+4. Repeat step 3 for `web/src/components/CostDashboard.tsx` (~10 inline colors)
+5. Repeat step 3 for `web/src/components/DailyUsageChart.tsx`
+6. Check `web/src/components/TerminalPanel.tsx` for hardcoded colors:
+   a. If any exist, convert to CSS variables/classes
+   b. ANSI terminal color codes should remain as-is (they are part of terminal emulation)
+7. Check `web/src/components/ErrorBoundary.tsx` for hardcoded colors and convert any found
+8. Run `cd web && npx tsc --noEmit` to verify no type errors introduced
+9. Run a final grep for remaining hardcoded hex colors: `grep -rn '#[0-9a-fA-F]\{6\}' web/src/styles/global.css` and verify all remaining are either in syntax highlighter blocks or are intentional (e.g., inside `rgba()` or SVG data URIs)
+10. Visual verification: open the app in browser and confirm no visible color changes
+
+### Tests Needed
+- `cd web && npx tsc --noEmit` — typecheck passes
+- Visual verification in browser — no color changes visible (pixel-identical behavior)
+- Grep for remaining hardcoded hex colors outside syntax highlighter blocks — should be zero or justified
+- All 5 modified components render correctly (UsageDashboard, CostDashboard, DailyUsageChart, TerminalPanel, ErrorBoundary)
+
+---
+
+## Item: Theme customization — Phase 2: Theme presets
+**Status:** done
+
+### Requirements
+- 5 curated theme presets: Midnight (current default), Ocean (teal/cyan), Forest (green/emerald), Warm (amber/orange), Rose (pink/magenta)
+- Each preset defines all ~35 CSS variable overrides plus gradient variants
+- Theme selector in SettingsScreen — card grid with color previews
+- Live preview when selecting a preset
+- Persist selection to localStorage (key: `companion_theme`)
+- Load theme before first render to avoid flash of wrong theme (inline script or blocking read in index.html)
+- On Tauri mobile, also persist via tauri-plugin-store for cross-launch persistence
+- All presets must maintain WCAG AA contrast ratios for text readability
+
+### Architecture
+- CSS class-based approach: `:root { /* midnight default */ }`, `:root.theme-ocean { ... }`, etc.
+- Theme context: `web/src/context/ThemeContext.tsx` with provider, hook, and preset definitions
+- No granular per-color customization — presets only (curated to look good)
+- Theme applied by adding class to `<html>` element (`document.documentElement.classList`)
+
+### Theme Color Palettes
+Each preset overrides all variables from `variables.css`:
+
+**Midnight** (default — current colors, no class needed):
+- Accents: blue `#3b82f6` + purple `#8b5cf6`
+- Backgrounds: `#0f172a` (primary), `#1e293b` (secondary), `#334155` (tertiary)
+- Gradient: blue-to-purple
+
+**Ocean** (`.theme-ocean`):
+- Accents: teal `#06b6d4` + blue `#0ea5e9`
+- Backgrounds: `#0c1222` (deep navy), `#132038` (secondary), `#1e3350` (tertiary)
+- Gradient: teal-to-blue
+- Border accent: `#1a4a6a`
+
+**Forest** (`.theme-forest`):
+- Accents: emerald `#10b981` + green `#22c55e`
+- Backgrounds: `#0a1510` (dark forest), `#11261a` (secondary), `#1a3828` (tertiary)
+- Gradient: emerald-to-green
+- Border accent: `#1a4a2e`
+
+**Warm** (`.theme-warm`):
+- Accents: amber `#f59e0b` + orange `#f97316`
+- Backgrounds: `#1a1008` (dark warm), `#261a0a` (secondary), `#3d2a12` (tertiary)
+- Gradient: amber-to-orange
+- Border accent: `#5a3d1a`
+
+**Rose** (`.theme-rose`):
+- Accents: pink `#ec4899` + magenta `#d946ef`
+- Backgrounds: `#1a0a14` (dark plum), `#261020` (secondary), `#3d1a30` (tertiary)
+- Gradient: pink-to-magenta
+- Border accent: `#5a1a4a`
+
+Each preset needs to define:
+- 6 background colors (`--bg-primary` through `--bg-card-purple`)
+- 3 text colors (`--text-primary`, `--text-secondary`, `--text-muted`)
+- 7 accent colors (`--accent-blue` renamed semantically or overridden, hover states, light variants)
+- 2 border colors (`--border-color`, `--border-accent`)
+- 6 gradients (`--gradient-primary`, `--gradient-header`, `--gradient-button`, `--gradient-button-hover`, `--gradient-progress`, `--gradient-text`)
+- 2 focus glow effects (`--focus-glow`, `--focus-glow-blue`)
+- Success gradients (`--gradient-success`, `--gradient-success-hover`)
+
+### Files to Create
+- `web/src/context/ThemeContext.tsx` — ThemeProvider component, `useTheme` hook, preset metadata (name, key, preview colors)
+
+### Files to Modify
+- `web/src/styles/variables.css` — Add theme class overrides (`:root.theme-ocean { ... }`, etc.) after the default `:root` block
+- `web/src/App.tsx` — Wrap app with `<ThemeProvider>`, ensure theme class is applied before first render
+- `web/src/components/SettingsScreen.tsx` — Add theme selector section with preview cards
+- `web/src/styles/global.css` — Add styles for theme selector cards (`.theme-card`, `.theme-card-active`, `.theme-preview-swatch`)
+- `web/index.html` — Add inline `<script>` in `<head>` to read `companion_theme` from localStorage and apply class to `<html>` before paint (prevents flash)
+
+### Implementation Steps
+1. **Design the theme preset data structure** in `web/src/context/ThemeContext.tsx`:
+   ```typescript
+   interface ThemePreset {
+     key: string;           // 'midnight' | 'ocean' | 'forest' | 'warm' | 'rose'
+     name: string;          // Display name
+     className: string;     // CSS class ('' for midnight default, 'theme-ocean', etc.)
+     previewColors: {       // For the selector UI
+       bg: string;
+       accent1: string;
+       accent2: string;
+     };
+   }
+   ```
+2. **Define the 5 preset objects** with their metadata and preview colors
+3. **Create ThemeProvider component**:
+   a. Read saved theme from localStorage key `companion_theme` on mount
+   b. Provide `{ currentTheme, setTheme, presets }` via React context
+   c. On `setTheme(key)`: save to localStorage, update `document.documentElement.className` (preserve non-theme classes), and on Tauri mobile also write to tauri-plugin-store
+   d. On mount: apply the saved theme class to `<html>` (redundant with inline script but ensures sync)
+4. **Create `useTheme` hook** that returns the context value with a friendly error if used outside provider
+5. **Add flash-prevention script** to `web/index.html`:
+   ```html
+   <script>
+     (function() {
+       var theme = localStorage.getItem('companion_theme');
+       if (theme && theme !== 'midnight') {
+         document.documentElement.classList.add('theme-' + theme);
+       }
+     })();
+   </script>
+   ```
+   Place this in `<head>` before any CSS loads, so the correct theme class is present before first paint
+6. **Add CSS variable overrides** in `web/src/styles/variables.css`:
+   a. After the existing `:root { ... }` block, add `:root.theme-ocean { ... }` with all variable overrides
+   b. Repeat for `.theme-forest`, `.theme-warm`, `.theme-rose`
+   c. Each block overrides every variable defined in the default `:root` (backgrounds, text colors, accents, borders, gradients, focus glows)
+   d. Ensure text-on-background contrast ratios meet WCAG AA (4.5:1 for normal text, 3:1 for large text) — verify with a contrast checker tool
+7. **Wrap App with ThemeProvider** in `web/src/App.tsx`:
+   a. Import `ThemeProvider` from `../context/ThemeContext`
+   b. Wrap the outermost element: `<ThemeProvider><ConnectionProvider>...</ConnectionProvider></ThemeProvider>`
+8. **Add theme selector to SettingsScreen** (`web/src/components/SettingsScreen.tsx`):
+   a. Import `useTheme` hook
+   b. Add a "Theme" section after the "Font Size" section
+   c. Render a grid of theme preview cards (2-3 columns on mobile, 5 across on desktop)
+   d. Each card shows: theme name, 3 color swatches (bg + 2 accents), active checkmark
+   e. On click, call `setTheme(preset.key)`
+   f. Active card gets a highlighted border using the theme's accent color
+9. **Add CSS for theme selector** in `web/src/styles/global.css`:
+   ```css
+   .theme-selector-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 12px; }
+   .theme-card { padding: 12px; border-radius: 12px; border: 2px solid var(--border-color); cursor: pointer; transition: border-color 0.2s; }
+   .theme-card:hover { border-color: var(--accent-blue); }
+   .theme-card-active { border-color: var(--accent-blue); box-shadow: var(--focus-glow-blue); }
+   .theme-preview-swatches { display: flex; gap: 6px; margin-top: 8px; }
+   .theme-preview-swatch { width: 24px; height: 24px; border-radius: 50%; }
+   ```
+10. **Handle Tauri mobile persistence**:
+    a. In `ThemeContext.tsx`, detect if running in Tauri mobile via `isTauriMobile()`
+    b. If so, also write to tauri-plugin-store on theme change: `await store.set('companion_theme', key); await store.save();`
+    c. On mount in Tauri mobile, read from store as well (store takes precedence over localStorage if both exist)
+11. **Test the complete flow**:
+    a. Run `cd web && npx tsc --noEmit` — typecheck must pass
+    b. `npm run dev` and verify all 5 themes render correctly
+    c. Switch themes and verify all UI elements update (backgrounds, text, buttons, gradients, borders, focus rings)
+    d. Refresh page — theme persists, no flash of default theme
+    e. Check contrast ratios for each theme (especially light text on colored backgrounds)
+
+### Tests Needed
+- `cd web && npx tsc --noEmit` — typecheck passes
+- Each preset renders with correct colors (visual verification for all 5)
+- Theme persists across page reload (check localStorage)
+- No flash of default theme on page load (inline script applies class before paint)
+- Contrast ratios meet WCAG AA for all 5 themes (4.5:1 for body text)
+- Theme selector cards show correct preview swatches
+- Active theme card is visually distinguished
+- Tauri mobile: theme persists across app restart (tauri-plugin-store)
+- Switching themes updates all UI elements in real-time (no stale colors)
+
+---
+
 ## Item: Diff line number gutter
 **Status:** planned
 

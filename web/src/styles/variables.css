@@ -38,9 +38,164 @@
   /* App height — set by JS visualViewport listener to shrink layout when keyboard opens */
   /* Falls back to 100dvh when not set (desktop, Tauri mobile) */
 
+  /* Success gradients */
+  --gradient-success: linear-gradient(135deg, #22c55e, #16a34a);
+  --gradient-success-hover: linear-gradient(135deg, #16a34a, #15803d);
+
+  /* Utility */
+  --color-white: #ffffff;
+
   /* Font scaling */
   --font-scale: 1;
   --fs-content: calc(14px * var(--font-scale));
   --fs-content-sm: calc(13px * var(--font-scale));
   --fs-content-lg: calc(16px * var(--font-scale));
+}
+
+/* ========================================
+   Theme: Ocean (teal/cyan)
+   ======================================== */
+:root.theme-ocean {
+  --bg-primary: #0c1a2e;
+  --bg-secondary: #142338;
+  --bg-tertiary: #1e3348;
+  --bg-hover: #2a4562;
+  --bg-card-tinted: #0e1f35;
+  --bg-card-purple: #0e2530;
+  --text-primary: #f1f5f9;
+  --text-secondary: #94a3b8;
+  --text-muted: #64748b;
+  --accent-blue: #06b6d4;
+  --accent-blue-hover: #0891b2;
+  --accent-blue-light: #22d3ee;
+  --accent-purple: #0ea5e9;
+  --accent-purple-hover: #0284c7;
+  --accent-purple-light: #38bdf8;
+  --accent-indigo: #0891b2;
+  --accent-green: #22c55e;
+  --accent-amber: #f59e0b;
+  --accent-red: #ef4444;
+  --border-color: #1e3348;
+  --border-accent: #1a4a6a;
+  --gradient-primary: linear-gradient(135deg, #06b6d4 0%, #0ea5e9 100%);
+  --gradient-header: linear-gradient(135deg, #0e2030 0%, #0e2838 100%);
+  --gradient-button: linear-gradient(135deg, #06b6d4 0%, #0284c7 100%);
+  --gradient-button-hover: linear-gradient(135deg, #0891b2 0%, #0369a1 100%);
+  --gradient-progress: linear-gradient(90deg, #06b6d4 0%, #0ea5e9 100%);
+  --gradient-text: linear-gradient(135deg, #22d3ee 0%, #38bdf8 100%);
+  --focus-glow: 0 0 0 2px rgba(6, 182, 212, 0.3);
+  --focus-glow-blue: 0 0 0 2px rgba(6, 182, 212, 0.3);
+  --gradient-success: linear-gradient(135deg, #22c55e, #16a34a);
+  --gradient-success-hover: linear-gradient(135deg, #16a34a, #15803d);
+}
+
+/* ========================================
+   Theme: Forest (green/emerald)
+   ======================================== */
+:root.theme-forest {
+  --bg-primary: #0c1f17;
+  --bg-secondary: #14291f;
+  --bg-tertiary: #1e3a2d;
+  --bg-hover: #2a5040;
+  --bg-card-tinted: #0e231a;
+  --bg-card-purple: #0e2a1e;
+  --text-primary: #f1f5f9;
+  --text-secondary: #94a3b8;
+  --text-muted: #64748b;
+  --accent-blue: #10b981;
+  --accent-blue-hover: #059669;
+  --accent-blue-light: #34d399;
+  --accent-purple: #22c55e;
+  --accent-purple-hover: #16a34a;
+  --accent-purple-light: #4ade80;
+  --accent-indigo: #059669;
+  --accent-green: #22c55e;
+  --accent-amber: #f59e0b;
+  --accent-red: #ef4444;
+  --border-color: #1e3a2d;
+  --border-accent: #1a4a2e;
+  --gradient-primary: linear-gradient(135deg, #10b981 0%, #22c55e 100%);
+  --gradient-header: linear-gradient(135deg, #0e2418 0%, #122e1e 100%);
+  --gradient-button: linear-gradient(135deg, #10b981 0%, #16a34a 100%);
+  --gradient-button-hover: linear-gradient(135deg, #059669 0%, #15803d 100%);
+  --gradient-progress: linear-gradient(90deg, #10b981 0%, #22c55e 100%);
+  --gradient-text: linear-gradient(135deg, #34d399 0%, #4ade80 100%);
+  --focus-glow: 0 0 0 2px rgba(16, 185, 129, 0.3);
+  --focus-glow-blue: 0 0 0 2px rgba(16, 185, 129, 0.3);
+  --gradient-success: linear-gradient(135deg, #22c55e, #16a34a);
+  --gradient-success-hover: linear-gradient(135deg, #16a34a, #15803d);
+}
+
+/* ========================================
+   Theme: Warm (amber/orange)
+   ======================================== */
+:root.theme-warm {
+  --bg-primary: #1a1510;
+  --bg-secondary: #24201a;
+  --bg-tertiary: #342e24;
+  --bg-hover: #4a4030;
+  --bg-card-tinted: #1e1912;
+  --bg-card-purple: #2a2014;
+  --text-primary: #f1f5f9;
+  --text-secondary: #94a3b8;
+  --text-muted: #7c7060;
+  --accent-blue: #f59e0b;
+  --accent-blue-hover: #d97706;
+  --accent-blue-light: #fbbf24;
+  --accent-purple: #f97316;
+  --accent-purple-hover: #ea580c;
+  --accent-purple-light: #fb923c;
+  --accent-indigo: #d97706;
+  --accent-green: #22c55e;
+  --accent-amber: #f59e0b;
+  --accent-red: #ef4444;
+  --border-color: #342e24;
+  --border-accent: #5a3d1a;
+  --gradient-primary: linear-gradient(135deg, #f59e0b 0%, #f97316 100%);
+  --gradient-header: linear-gradient(135deg, #1e1a12 0%, #241c10 100%);
+  --gradient-button: linear-gradient(135deg, #f59e0b 0%, #ea580c 100%);
+  --gradient-button-hover: linear-gradient(135deg, #d97706 0%, #c2410c 100%);
+  --gradient-progress: linear-gradient(90deg, #f59e0b 0%, #f97316 100%);
+  --gradient-text: linear-gradient(135deg, #fbbf24 0%, #fb923c 100%);
+  --focus-glow: 0 0 0 2px rgba(245, 158, 11, 0.3);
+  --focus-glow-blue: 0 0 0 2px rgba(245, 158, 11, 0.3);
+  --gradient-success: linear-gradient(135deg, #22c55e, #16a34a);
+  --gradient-success-hover: linear-gradient(135deg, #16a34a, #15803d);
+}
+
+/* ========================================
+   Theme: Rose (pink/magenta)
+   ======================================== */
+:root.theme-rose {
+  --bg-primary: #1a0f1e;
+  --bg-secondary: #241828;
+  --bg-tertiary: #342238;
+  --bg-hover: #4a3050;
+  --bg-card-tinted: #1e1222;
+  --bg-card-purple: #28142e;
+  --text-primary: #f1f5f9;
+  --text-secondary: #94a3b8;
+  --text-muted: #64748b;
+  --accent-blue: #ec4899;
+  --accent-blue-hover: #db2777;
+  --accent-blue-light: #f472b6;
+  --accent-purple: #d946ef;
+  --accent-purple-hover: #c026d3;
+  --accent-purple-light: #e879f9;
+  --accent-indigo: #db2777;
+  --accent-green: #22c55e;
+  --accent-amber: #f59e0b;
+  --accent-red: #ef4444;
+  --border-color: #342238;
+  --border-accent: #5a1a4a;
+  --gradient-primary: linear-gradient(135deg, #ec4899 0%, #d946ef 100%);
+  --gradient-header: linear-gradient(135deg, #1e1222 0%, #221430 100%);
+  --gradient-button: linear-gradient(135deg, #ec4899 0%, #c026d3 100%);
+  --gradient-button-hover: linear-gradient(135deg, #db2777 0%, #a21caf 100%);
+  --gradient-progress: linear-gradient(90deg, #ec4899 0%, #d946ef 100%);
+  --gradient-text: linear-gradient(135deg, #f472b6 0%, #e879f9 100%);
+  --focus-glow: 0 0 0 2px rgba(236, 72, 153, 0.3);
+  --focus-glow-blue: 0 0 0 2px rgba(236, 72, 153, 0.3);
+  --gradient-success: linear-gradient(135deg, #22c55e, #16a34a);
+  --gradient-success-hover: linear-gradient(135deg, #16a34a, #15803d);
 }

@@ -206,7 +206,7 @@ export function SessionView({
     document.body.style.cursor = 'row-resize';
     document.body.style.userSelect = 'none';
 
-    const container = (e.target as HTMLElement).closest('.session-conversation');
+    const container = (e.target as HTMLElement).closest('.session-view');
     if (!container) return;
     const containerRect = container.getBoundingClientRect();
 
@@ -694,7 +694,7 @@ export function SessionView({
       )}
 
       <div className="session-conversation" onClick={handleConversationClick} style={{ display: showTerminal || showWorkGroupPanel ? 'none' : undefined }}>
-          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minHeight: 0 }}>
             <WaitingIndicator status={status} />
 
             {workGroup && (workGroup.status === 'active' || workGroup.status === 'merging' || workGroup.status === 'completed' || workGroup.status === 'failed') && (
@@ -712,6 +712,20 @@ export function SessionView({
               onOpenModal={() => setShowCodeReviewModal(true)}
               onRefresh={refreshReview}
             />
+
+            {!mobile && dispatchCollapsed && totalAgents > 0 && serverId && (
+              <div className="dispatch-collapsed-bar" onClick={() => setDispatchCollapsed(false)}>
+                <span className={`dispatch-mobile-dot ${runningCount > 0 ? 'dispatch-dot-running' : 'dispatch-dot-done'}`} />
+                <span className="dispatch-collapsed-label">
+                  {runningCount > 0
+                    ? `${runningCount} agent${runningCount !== 1 ? 's' : ''} running`
+                    : `${totalAgents} agent${totalAgents !== 1 ? 's' : ''} done`}
+                  {(totalAgents - runningCount) > 0 && runningCount > 0 &&
+                    ` / ${totalAgents - runningCount} done`}
+                </span>
+                <span className="dispatch-collapsed-expand">{'\u25B2'}</span>
+              </div>
+            )}
 
             {showSearch && (
               <SearchBar
@@ -772,22 +786,6 @@ export function SessionView({
             />
           </div>
 
-          {showDispatchPanel && !mobile && (
-            <div className="dispatch-divider" onMouseDown={handleDispatchDragStart} />
-          )}
-
-          {serverId && totalAgents > 0 && (
-            <DispatchPanel
-              serverId={serverId}
-              agents={agents}
-              runningCount={runningCount}
-              totalAgents={totalAgents}
-              height={dispatchHeight}
-              collapsed={dispatchCollapsed}
-              onCollapse={() => setDispatchCollapsed(prev => !prev)}
-            />
-          )}
-
           {mobile && (
             <div className="session-bottom-bar">
               <div className="session-header-actions">
@@ -796,6 +794,22 @@ export function SessionView({
             </div>
           )}
       </div>
+
+      {showDispatchPanel && !mobile && (
+        <div className="dispatch-divider" onMouseDown={handleDispatchDragStart} />
+      )}
+
+      {serverId && totalAgents > 0 && (
+        <DispatchPanel
+          serverId={serverId}
+          agents={agents}
+          runningCount={runningCount}
+          totalAgents={totalAgents}
+          height={dispatchHeight}
+          collapsed={dispatchCollapsed}
+          onCollapse={() => setDispatchCollapsed(prev => !prev)}
+        />
+      )}
 
       <InputBar
         ref={inputBarRef}

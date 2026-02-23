@@ -284,6 +284,18 @@ File-based permission bypass that works for all sessions and subagents in a proj
 - Centralized color system (web CSS variables)
 - Consistent dark theme with vibrant accent hierarchy
 
+## Theme Presets
+Switchable color themes with 5 curated presets, CSS variable architecture, and flash-free persistence.
+
+- 5 theme presets: Midnight (default blue/purple), Ocean (teal/cyan), Forest (emerald/green), Warm (amber/orange), Rose (pink/magenta)
+- Each preset overrides all CSS variables: backgrounds, text, accents, borders, gradients, focus glows
+- Theme selector in Settings with color swatch preview cards and active indicator
+- ThemeContext provider with `useTheme` hook for app-wide theme state
+- Flash prevention: inline script in `<head>` reads localStorage and applies theme class before first paint
+- Persists to localStorage (`companion_theme`); Tauri mobile also writes to tauri-plugin-store
+- Phase 1 refactor: replaced ~67 hardcoded hex colors in global.css and ~40 inline style colors across 5 components with CSS variable references
+- All themes maintain WCAG AA contrast ratios for text readability
+
 ## Developer Tools
 - Sentry error tracking integration
 - Error boundary with user feedback and bug reporting

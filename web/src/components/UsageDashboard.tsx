@@ -11,9 +11,9 @@ interface UsageDashboardProps {
 
 // Color thresholds for utilization
 function utilizationColor(pct: number): string {
-  if (pct >= 75) return '#ef4444';
-  if (pct >= 50) return '#f59e0b';
-  return '#10b981';
+  if (pct >= 75) return 'var(--accent-red)';
+  if (pct >= 50) return 'var(--accent-amber)';
+  return 'var(--accent-green)';
 }
 
 function formatCountdown(resetsAt: string): string {
@@ -53,48 +53,20 @@ export function UsageDashboard({ serverId, onBack }: UsageDashboardProps) {
   }, [refresh, costDash.refresh]);
 
   return (
-    <div style={{ padding: '1rem', paddingTop: 'calc(1rem + var(--safe-top))', maxWidth: '640px', margin: '0 auto', width: '100%' }}>
+    <div className="usage-dash-page">
       {/* Header */}
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: '0.75rem',
-          marginBottom: '1.25rem',
-          padding: '0.75rem 1rem',
-          borderRadius: '10px',
-          background: 'linear-gradient(135deg, rgba(59,130,246,0.12) 0%, rgba(16,185,129,0.08) 100%)',
-        }}
-      >
-        <button
-          onClick={onBack}
-          style={{
-            background: 'none',
-            border: 'none',
-            color: '#9ca3af',
-            cursor: 'pointer',
-            fontSize: '1.25rem',
-            padding: '0.25rem',
-          }}
-        >
+      <div className="usage-dash-header">
+        <button onClick={onBack} className="usage-dash-back-btn">
           &#8592;
         </button>
-        <h2 style={{ color: '#f3f4f6', fontSize: '1.25rem', fontWeight: 600, margin: 0 }}>
+        <h2 style={{ color: 'var(--text-primary)', fontSize: '1.25rem', fontWeight: 600, margin: 0 }}>
           Usage
         </h2>
         <div style={{ flex: 1 }} />
         <button
           onClick={refreshAll}
           disabled={loading}
-          style={{
-            background: 'none',
-            border: '1px solid #374151',
-            borderRadius: '6px',
-            color: '#9ca3af',
-            cursor: 'pointer',
-            padding: '0.25rem 0.5rem',
-            fontSize: '0.75rem',
-          }}
+          className="usage-dash-refresh-btn"
         >
           {loading ? '...' : 'Refresh'}
         </button>
@@ -102,24 +74,14 @@ export function UsageDashboard({ serverId, onBack }: UsageDashboardProps) {
 
       {/* Error */}
       {error && (
-        <div
-          style={{
-            backgroundColor: 'rgba(239, 68, 68, 0.1)',
-            border: '1px solid rgba(239, 68, 68, 0.3)',
-            borderRadius: '8px',
-            padding: '0.75rem 1rem',
-            color: '#ef4444',
-            fontSize: '0.85rem',
-            marginBottom: '1rem',
-          }}
-        >
+        <div className="usage-dash-error">
           {error}
         </div>
       )}
 
       {/* Loading */}
       {loading && !data && (
-        <div style={{ color: '#9ca3af', textAlign: 'center', padding: '3rem 0' }}>
+        <div className="usage-dash-loading">
           Loading usage data...
         </div>
       )}
@@ -172,20 +134,7 @@ export function UsageDashboard({ serverId, onBack }: UsageDashboardProps) {
         <div style={{ marginTop: '1rem' }}>
           <button
             onClick={() => setCostOpen(!costOpen)}
-            style={{
-              width: '100%',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.5rem',
-              padding: '0.75rem 1rem',
-              backgroundColor: '#1f2937',
-              borderRadius: '8px',
-              border: '1px solid #374151',
-              color: '#f3f4f6',
-              cursor: 'pointer',
-              fontSize: '0.85rem',
-              fontWeight: 500,
-            }}
+            className="usage-dash-cost-toggle"
           >
             <span style={{
               transform: costOpen ? 'rotate(90deg)' : 'rotate(0deg)',
@@ -197,7 +146,7 @@ export function UsageDashboard({ serverId, onBack }: UsageDashboardProps) {
             Cost Breakdown ({costDash.period === '7d' ? '7 days' : '30 days'})
             <div style={{ flex: 1 }} />
             {costDash.data && (
-              <span style={{ color: '#10b981', fontWeight: 600 }}>
+              <span className="usage-dash-cost-value">
                 ${costDash.data.totalCostUsd.toFixed(2)}
               </span>
             )}
@@ -245,7 +194,7 @@ function GaugeRing({
           <span className="gauge-ring-label">{label}</span>
         </div>
       </div>
-      <div style={{ color: '#9ca3af', fontSize: '0.7rem' }}>
+      <div className="usage-gauge-reset">
         Resets {formatCountdown(resetsAt)}
       </div>
     </div>
@@ -283,13 +232,7 @@ function UtilizationBar({ label, window }: { label: string; window: OAuthUsageWi
   const color = utilizationColor(pct);
 
   return (
-    <div
-      style={{
-        backgroundColor: '#1f2937',
-        borderRadius: '8px',
-        padding: '0.625rem 1rem',
-      }}
-    >
+    <div className="usage-dash-card" style={{ padding: '0.625rem 1rem' }}>
       <div
         style={{
           display: 'flex',
@@ -298,14 +241,14 @@ function UtilizationBar({ label, window }: { label: string; window: OAuthUsageWi
           marginBottom: '0.375rem',
         }}
       >
-        <span style={{ color: '#d1d5db', fontSize: '0.75rem' }}>{label}</span>
+        <span className="usage-bar-text-secondary" style={{ fontSize: '0.75rem' }}>{label}</span>
         <span style={{ color, fontSize: '0.75rem', fontWeight: 600 }}>{pct}%</span>
       </div>
       <div
+        className="usage-bar-bg"
         style={{
           width: '100%',
           height: '6px',
-          backgroundColor: '#374151',
           borderRadius: '3px',
           overflow: 'hidden',
         }}
@@ -320,7 +263,7 @@ function UtilizationBar({ label, window }: { label: string; window: OAuthUsageWi
           }}
         />
       </div>
-      <div style={{ color: '#6b7280', fontSize: '0.65rem', marginTop: '0.25rem' }}>
+      <div className="usage-bar-text-muted" style={{ marginTop: '0.25rem' }}>
         Resets {formatCountdown(window.resets_at)}
       </div>
     </div>
@@ -329,25 +272,17 @@ function UtilizationBar({ label, window }: { label: string; window: OAuthUsageWi
 
 function ExtraUsageCard({ extra }: { extra: OAuthExtraUsage }) {
   return (
-    <div
-      style={{
-        backgroundColor: '#1f2937',
-        borderRadius: '8px',
-        padding: '0.75rem 1rem',
-        marginTop: '1rem',
-        borderLeft: '3px solid #8b5cf6',
-      }}
-    >
-      <div style={{ color: '#d1d5db', fontSize: '0.75rem', marginBottom: '0.25rem' }}>
+    <div className="usage-dash-card usage-dash-card-accent" style={{ marginTop: '1rem' }}>
+      <div className="usage-bar-text-secondary" style={{ fontSize: '0.75rem', marginBottom: '0.25rem' }}>
         Extra Usage
       </div>
-      <div style={{ color: '#f3f4f6', fontSize: '0.9rem', fontWeight: 500 }}>
+      <div className="usage-bar-text-light" style={{ fontSize: '0.9rem', fontWeight: 500 }}>
         {extra.used_credits != null && extra.monthly_limit != null
           ? `$${extra.used_credits.toFixed(2)} / $${extra.monthly_limit.toFixed(2)}`
           : 'Enabled'}
       </div>
       {extra.utilization != null && (
-        <div style={{ color: '#9ca3af', fontSize: '0.7rem', marginTop: '0.25rem' }}>
+        <div className="usage-gauge-reset" style={{ marginTop: '0.25rem' }}>
           {Math.round(extra.utilization)}% of monthly limit
         </div>
       )}
@@ -357,22 +292,12 @@ function ExtraUsageCard({ extra }: { extra: OAuthExtraUsage }) {
 
 function NoCredentialsCard() {
   return (
-    <div
-      style={{
-        backgroundColor: '#1f2937',
-        borderRadius: '8px',
-        padding: '1.5rem',
-        textAlign: 'center',
-        color: '#9ca3af',
-        fontSize: '0.85rem',
-        lineHeight: 1.6,
-      }}
-    >
+    <div className="usage-no-creds-card">
       <div style={{ fontSize: '1.5rem', marginBottom: '0.75rem', opacity: 0.5 }}>&#9679;</div>
-      <div style={{ color: '#f3f4f6', fontWeight: 500, marginBottom: '0.5rem' }}>
+      <div className="usage-no-creds-title">
         No OAuth Credentials
       </div>
-      Claude Code stores credentials at <code style={{ color: '#f59e0b' }}>~/.claude/.credentials.json</code>.
+      Claude Code stores credentials at <code className="usage-code-highlight">~/.claude/.credentials.json</code>.
       <br />
       Log in to Claude Code to enable usage tracking.
     </div>
@@ -396,15 +321,7 @@ function CostSection({
           <button
             key={p}
             onClick={() => setPeriod(p)}
-            style={{
-              padding: '0.25rem 0.5rem',
-              borderRadius: '6px',
-              border: period === p ? '1px solid #3b82f6' : '1px solid #374151',
-              backgroundColor: period === p ? 'rgba(59, 130, 246, 0.15)' : 'transparent',
-              color: period === p ? '#3b82f6' : '#9ca3af',
-              cursor: 'pointer',
-              fontSize: '0.75rem',
-            }}
+            className={`usage-dash-period-btn ${period === p ? 'active' : 'inactive'}`}
           >
             {p === '7d' ? '7 days' : '30 days'}
           </button>
@@ -420,22 +337,15 @@ function CostSection({
           marginBottom: '0.75rem',
         }}
       >
-        <MiniCard label="Total Cost" value={`$${data.totalCostUsd.toFixed(2)}`} color="#10b981" />
-        <MiniCard label="Output" value={formatTokens(data.totalOutputTokens)} color="#3b82f6" />
-        <MiniCard label="Input" value={formatTokens(data.totalInputTokens)} color="#f59e0b" />
-        <MiniCard label="Cache Reads" value={formatTokens(data.totalCacheReadTokens)} color="#8b5cf6" />
+        <MiniCard label="Total Cost" value={`$${data.totalCostUsd.toFixed(2)}`} accentColor="var(--accent-green)" />
+        <MiniCard label="Output" value={formatTokens(data.totalOutputTokens)} accentColor="var(--accent-blue)" />
+        <MiniCard label="Input" value={formatTokens(data.totalInputTokens)} accentColor="var(--accent-amber)" />
+        <MiniCard label="Cache Reads" value={formatTokens(data.totalCacheReadTokens)} accentColor="var(--accent-purple)" />
       </div>
 
       {/* Chart */}
-      <div
-        style={{
-          backgroundColor: '#1f2937',
-          borderRadius: '8px',
-          padding: '0.75rem',
-          marginBottom: '0.75rem',
-        }}
-      >
-        <div style={{ color: '#f3f4f6', fontSize: '0.8rem', fontWeight: 500, marginBottom: '0.5rem' }}>
+      <div className="usage-dash-card" style={{ padding: '0.75rem', marginBottom: '0.75rem' }}>
+        <div className="usage-chart-title">
           Daily Cost
         </div>
         <DailyUsageChart daily={data.daily} />
@@ -447,18 +357,14 @@ function CostSection({
   );
 }
 
-function MiniCard({ label, value, color }: { label: string; value: string; color: string }) {
+function MiniCard({ label, value, accentColor }: { label: string; value: string; accentColor: string }) {
   return (
     <div
-      style={{
-        backgroundColor: '#1f2937',
-        borderRadius: '6px',
-        padding: '0.5rem 0.75rem',
-        borderLeft: `3px solid ${color}`,
-      }}
+      className="usage-mini-card"
+      style={{ borderLeft: `3px solid ${accentColor}` }}
     >
-      <div style={{ color: '#9ca3af', fontSize: '0.65rem', marginBottom: '0.125rem' }}>{label}</div>
-      <div style={{ color: '#f3f4f6', fontSize: '1rem', fontWeight: 600 }}>{value}</div>
+      <div className="usage-mini-card-label">{label}</div>
+      <div className="usage-mini-card-value">{value}</div>
     </div>
   );
 }
@@ -478,28 +384,19 @@ function CostModelBreakdown({ daily }: { daily: DailyUsageBucket[] }) {
   if (sorted.length === 0) return null;
 
   return (
-    <div style={{ backgroundColor: '#1f2937', borderRadius: '8px', padding: '0.75rem' }}>
-      <div style={{ color: '#f3f4f6', fontSize: '0.8rem', fontWeight: 500, marginBottom: '0.5rem' }}>
+    <div className="usage-dash-card" style={{ padding: '0.75rem' }}>
+      <div className="usage-chart-title">
         By Model
       </div>
       {sorted.map(([model, d]) => (
-        <div
-          key={model}
-          style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            padding: '0.375rem 0',
-            borderBottom: '1px solid #374151',
-          }}
-        >
+        <div key={model} className="usage-model-row">
           <div>
-            <div style={{ color: '#f3f4f6', fontSize: '0.75rem' }}>{model.replace(/-\d{8}$/, '')}</div>
-            <div style={{ color: '#9ca3af', fontSize: '0.65rem' }}>
+            <div className="usage-bar-text-light" style={{ fontSize: '0.75rem' }}>{model.replace(/-\d{8}$/, '')}</div>
+            <div className="usage-bar-text-secondary" style={{ fontSize: '0.65rem' }}>
               {formatTokens(d.inputTokens)} in / {formatTokens(d.outputTokens)} out
             </div>
           </div>
-          <div style={{ color: '#10b981', fontSize: '0.85rem', fontWeight: 500 }}>
+          <div className="usage-model-cost" style={{ fontSize: '0.85rem' }}>
             ${d.costUsd.toFixed(2)}
           </div>
         </div>

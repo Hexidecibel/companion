@@ -6,7 +6,7 @@ interface DailyUsageChartProps {
 
 export function DailyUsageChart({ daily }: DailyUsageChartProps) {
   if (daily.length === 0) {
-    return <div style={{ color: '#9ca3af', textAlign: 'center', padding: '2rem 0' }}>No usage data for this period</div>;
+    return <div style={{ color: 'var(--text-secondary)', textAlign: 'center', padding: '2rem 0' }}>No usage data for this period</div>;
   }
 
   const maxCost = Math.max(...daily.map((d) => d.estimatedCostUsd), 0.01);
@@ -45,7 +45,7 @@ export function DailyUsageChart({ daily }: DailyUsageChartProps) {
                   width: '100%',
                   maxWidth: '32px',
                   height: `${heightPct}%`,
-                  backgroundColor: '#3b82f6',
+                  backgroundColor: 'var(--accent-blue)',
                   borderRadius: '3px 3px 0 0',
                   minHeight: '2px',
                   transition: 'height 0.3s ease',
@@ -56,7 +56,7 @@ export function DailyUsageChart({ daily }: DailyUsageChartProps) {
                   position: 'absolute',
                   bottom: '-1.25rem',
                   fontSize: '0.65rem',
-                  color: '#9ca3af',
+                  color: 'var(--text-secondary)',
                   whiteSpace: 'nowrap',
                 }}
               >

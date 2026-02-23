@@ -1,4 +1,4 @@
-import { Component, ErrorInfo, ReactNode, CSSProperties } from 'react';
+import { Component, ErrorInfo, ReactNode } from 'react';
 
 const GITHUB_REPO = 'Hexidecibel/companion';
 const APP_VERSION = '0.1.0';
@@ -102,50 +102,38 @@ ${componentStack}
       const { error } = this.state;
 
       return (
-        <div style={styles.container}>
-          <div style={styles.content}>
+        <div className="error-boundary-container">
+          <div className="error-boundary-content">
             {/* Error icon */}
-            <div style={styles.iconCircle}>
-              <span style={styles.iconText}>!</span>
+            <div className="error-boundary-icon">
+              <span className="error-boundary-icon-text">!</span>
             </div>
 
             {/* Heading */}
-            <h1 style={styles.heading}>Something went wrong</h1>
-            <p style={styles.subheading}>
+            <h1 className="error-boundary-heading">Something went wrong</h1>
+            <p className="error-boundary-subheading">
               The app encountered an unexpected error.
             </p>
 
             {/* Error message card */}
-            <div style={styles.errorCard}>
-              <span style={styles.errorLabel}>ERROR</span>
-              <p style={styles.errorMessage}>
+            <div className="error-boundary-card">
+              <span className="error-boundary-label">ERROR</span>
+              <p className="error-boundary-message">
                 {error?.message || 'Unknown error'}
               </p>
             </div>
 
             {/* Buttons */}
-            <div style={styles.buttonContainer}>
+            <div className="error-boundary-buttons">
               <button
-                style={styles.reportButton}
+                className="error-boundary-btn error-boundary-btn-report"
                 onClick={() => this.openGitHubIssue()}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.opacity = '0.85';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.opacity = '1';
-                }}
               >
                 Report Bug
               </button>
               <button
-                style={styles.retryButton}
+                className="error-boundary-btn error-boundary-btn-retry"
                 onClick={() => this.retry()}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.opacity = '0.85';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.opacity = '1';
-                }}
               >
                 Try Again
               </button>
@@ -158,107 +146,3 @@ ${componentStack}
     return this.props.children;
   }
 }
-
-const styles: Record<string, CSSProperties> = {
-  container: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    minHeight: '100vh',
-    backgroundColor: '#111827',
-    padding: 24,
-  },
-  content: {
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    maxWidth: 480,
-    width: '100%',
-  },
-  iconCircle: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    backgroundColor: 'rgba(239, 68, 68, 0.15)',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    border: '2px solid #ef4444',
-    marginBottom: 24,
-  },
-  iconText: {
-    color: '#ef4444',
-    fontSize: 32,
-    fontWeight: 700,
-    lineHeight: '36px',
-  },
-  heading: {
-    color: '#f3f4f6',
-    fontSize: 22,
-    fontWeight: 700,
-    textAlign: 'center',
-    margin: '0 0 8px 0',
-  },
-  subheading: {
-    color: '#9ca3af',
-    fontSize: 15,
-    textAlign: 'center',
-    margin: '0 0 24px 0',
-  },
-  errorCard: {
-    width: '100%',
-    backgroundColor: '#1f2937',
-    borderRadius: 12,
-    padding: 16,
-    border: '1px solid #374151',
-    marginBottom: 24,
-    boxSizing: 'border-box',
-  },
-  errorLabel: {
-    color: '#ef4444',
-    fontSize: 11,
-    fontWeight: 600,
-    textTransform: 'uppercase',
-    letterSpacing: '0.5px',
-    display: 'block',
-    marginBottom: 8,
-  },
-  errorMessage: {
-    color: '#f3f4f6',
-    fontSize: 14,
-    lineHeight: '20px',
-    fontFamily: "'Menlo', 'Monaco', 'Courier New', monospace",
-    margin: 0,
-    wordBreak: 'break-word',
-  },
-  buttonContainer: {
-    width: '100%',
-    display: 'flex',
-    flexDirection: 'column',
-    gap: 12,
-  },
-  reportButton: {
-    width: '100%',
-    padding: '14px 0',
-    borderRadius: 12,
-    backgroundColor: '#3b82f6',
-    color: '#ffffff',
-    fontSize: 16,
-    fontWeight: 600,
-    border: 'none',
-    cursor: 'pointer',
-    transition: 'opacity 0.15s',
-  },
-  retryButton: {
-    width: '100%',
-    padding: '14px 0',
-    borderRadius: 12,
-    backgroundColor: '#10b981',
-    color: '#ffffff',
-    fontSize: 16,
-    fontWeight: 600,
-    border: 'none',
-    cursor: 'pointer',
-    transition: 'opacity 0.15s',
-  },
-};

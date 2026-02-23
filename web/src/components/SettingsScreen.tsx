@@ -6,6 +6,7 @@ import { clearStore } from '../services/persistentStorage';
 import { NotificationSettingsModal } from './NotificationSettingsModal';
 import { SkillBrowser } from './SkillBrowser';
 import { isTauriDesktop, isMobileViewport } from '../utils/platform';
+import { useTheme } from '../context/ThemeContext';
 
 interface SettingsScreenProps {
   onBack: () => void;
@@ -20,6 +21,7 @@ const FONT_PRESETS = [
 
 export function SettingsScreen({ onBack }: SettingsScreenProps) {
   const { snapshots } = useConnections();
+  const { theme, setTheme, presets } = useTheme();
   const [fontScale, setFontScale] = useState(getFontScale);
   const [notifServerId, setNotifServerId] = useState<string | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
@@ -148,6 +150,29 @@ export function SettingsScreen({ onBack }: SettingsScreenProps) {
             >
               The quick brown fox jumps over the lazy dog.
             </div>
+          </div>
+        </section>
+
+        {/* Theme */}
+        <section className="settings-section">
+          <h3 className="settings-section-title">Theme</h3>
+          <div className="theme-selector-grid">
+            {presets.map((preset) => (
+              <button
+                key={preset.id}
+                className={`theme-card${theme === preset.id ? ' theme-card-active' : ''}`}
+                onClick={() => setTheme(preset.id)}
+              >
+                <div
+                  className="theme-preview-swatch"
+                  style={{
+                    background: `linear-gradient(135deg, ${preset.accentColor} 0%, ${preset.secondaryColor} 100%)`,
+                  }}
+                />
+                <div className="theme-card-name">{preset.name}</div>
+                <div className="theme-card-desc">{preset.description}</div>
+              </button>
+            ))}
           </div>
         </section>
 

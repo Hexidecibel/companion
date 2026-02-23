@@ -16,7 +16,7 @@ Quick capture for ideas and tasks. Run `/plan` to process into detailed plans.
 
 ## Upcoming
 - Split snap layouts -- show snap zone boxes (like Windows/macOS) when dragging/splitting sessions into different configurations
-- Theme customization -- choosable theme presets (sent message gradient, text color, button color, accents). Curated set of options, not too many
+- ~~Theme customization~~ done -- choosable theme presets (sent message gradient, text color, button color, accents). Curated set of options, not too many
 - Mobile button rearrange -- move on/off toggles (Notify, Auto, Tools) to header, move Files/Search/Terminal to bottom bar. Cancel stays in bottom
 - Copy/paste support -- better copy for messages (copy button, allow shortening/selecting before copy). Desktop text selection now works (fixed focus-stealing); mobile still needs work
 - Skeleton loading screens -- animated placeholder cards while sessions/conversations load instead of spinners

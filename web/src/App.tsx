@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { ConnectionProvider } from './context/ConnectionContext';
+import { ThemeProvider } from './context/ThemeContext';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { StatusPage } from './components/StatusPage';
 import { Dashboard } from './components/Dashboard';
@@ -139,36 +140,38 @@ export function App() {
 
   return (
     <ErrorBoundary>
-      <ConnectionProvider>
-        <div id="app" className={isDashboard ? 'app-dashboard' : ''}>
-          {screen.name === 'dashboard' && (
-            <Dashboard
-              onSettings={() => navigateTo('settings')}
-            />
-          )}
-          {screen.name === 'status' && (
-            <StatusPage />
-          )}
-          {screen.name === 'settings' && (
-            <SettingsScreen
-              onBack={() => setScreen({ name: 'dashboard' })}
-            />
-          )}
-          {screen.name === 'cost-dashboard' && (
-            <UsageDashboard
-              serverId={screen.serverId}
-              onBack={() => setScreen({ name: 'dashboard' })}
-            />
-          )}
+      <ThemeProvider>
+        <ConnectionProvider>
+          <div id="app" className={isDashboard ? 'app-dashboard' : ''}>
+            {screen.name === 'dashboard' && (
+              <Dashboard
+                onSettings={() => navigateTo('settings')}
+              />
+            )}
+            {screen.name === 'status' && (
+              <StatusPage />
+            )}
+            {screen.name === 'settings' && (
+              <SettingsScreen
+                onBack={() => setScreen({ name: 'dashboard' })}
+              />
+            )}
+            {screen.name === 'cost-dashboard' && (
+              <UsageDashboard
+                serverId={screen.serverId}
+                onBack={() => setScreen({ name: 'dashboard' })}
+              />
+            )}
 
-          {showCommandPalette && (
-            <CommandPalette
-              actions={actions}
-              onClose={() => setShowCommandPalette(false)}
-            />
-          )}
-        </div>
-      </ConnectionProvider>
+            {showCommandPalette && (
+              <CommandPalette
+                actions={actions}
+                onClose={() => setShowCommandPalette(false)}
+              />
+            )}
+          </div>
+        </ConnectionProvider>
+      </ThemeProvider>
     </ErrorBoundary>
   );
 }

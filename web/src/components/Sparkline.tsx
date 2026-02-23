@@ -46,7 +46,7 @@ export function Sparkline({ timestamps, width = 60, height = 16, minutes = 30 }:
             y={height - barHeight}
             width={barWidth}
             height={barHeight}
-            fill="#3b82f6"
+            fill="var(--accent-blue)"
             rx={0.5}
           />
         );
