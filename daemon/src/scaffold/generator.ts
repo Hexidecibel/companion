@@ -113,6 +113,26 @@ export async function scaffoldProject(
     await fs.writeFile(claudeMdPath, claudeMdContent, 'utf-8');
     filesCreated.push('CLAUDE.md');
 
+    // Create .claude/settings.json if bypassPermissions is enabled
+    if (config.options.bypassPermissions) {
+      const settingsPath = path.join(projectPath, '.claude', 'settings.json');
+      const settingsDir = path.dirname(settingsPath);
+      await fs.mkdir(settingsDir, { recursive: true });
+      // Only write if not already created by template
+      try {
+        await fs.access(settingsPath);
+      } catch {
+        const settings = JSON.stringify({
+          permissions: {
+            allow: ['Bash', 'Edit', 'Write'],
+            defaultMode: 'bypassPermissions',
+          },
+        }, null, 2);
+        await fs.writeFile(settingsPath, settings, 'utf-8');
+        filesCreated.push('.claude/settings.json');
+      }
+    }
+
     const commandFiles = generateCommandFiles(variables.projectName, config.stackId);
     const commandsDir = path.join(projectPath, '.claude', 'commands');
     await fs.mkdir(commandsDir, { recursive: true });
@@ -233,6 +253,19 @@ async function scaffoldBlankProject(
     const claudeMd = `# ${toValidName(config.name)}\n\n${config.description || 'A new project'}\n`;
     await fs.writeFile(path.join(projectPath, 'CLAUDE.md'), claudeMd, 'utf-8');
     filesCreated.push('CLAUDE.md');
+
+    if (config.options.bypassPermissions) {
+      const settingsDir = path.join(projectPath, '.claude');
+      await fs.mkdir(settingsDir, { recursive: true });
+      const settings = JSON.stringify({
+        permissions: {
+          allow: ['Bash', 'Edit', 'Write'],
+          defaultMode: 'bypassPermissions',
+        },
+      }, null, 2);
+      await fs.writeFile(path.join(settingsDir, 'settings.json'), settings, 'utf-8');
+      filesCreated.push('.claude/settings.json');
+    }
 
     if (config.options.initGit) {
       onProgress?.({ step: 'Initializing git repository', progress: 60, complete: false });

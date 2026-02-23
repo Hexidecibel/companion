@@ -4,8 +4,7 @@ import { useConversation } from '../hooks/useConversation';
 import { useTasks } from '../hooks/useTasks';
 import { useCodeReview } from '../hooks/useCodeReview';
 import { useSubAgents } from '../hooks/useSubAgents';
-import { useSubAgentDetail } from '../hooks/useSubAgentDetail';
-import { useAutoApprove } from '../hooks/useAutoApprove';
+import { useBypassPermissions } from '../hooks/useBypassPermissions';
 import { useOpenFiles } from '../hooks/useOpenFiles';
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
 import { connectionManager } from '../services/ConnectionManager';
@@ -18,9 +17,7 @@ import { CodeReviewCard } from './CodeReviewCard';
 import { CodeReviewModal } from './CodeReviewModal';
 import { MessageList } from './MessageList';
 import { InputBar, InputBarHandle } from './InputBar';
-import { SubAgentBar } from './SubAgentBar';
-import { SubAgentModal } from './SubAgentModal';
-import { SubAgentDetail } from './SubAgentDetail';
+import { DispatchPanel } from './DispatchPanel';
 import { FileViewerModal } from './FileViewerModal';
 import { ArtifactViewerModal } from './ArtifactViewerModal';
 import { FileTabBar } from './FileTabBar';
@@ -79,14 +76,19 @@ export function SessionView({
 
   const { tasks, loading: tasksLoading } = useTasks(serverId, sessionId);
   const { fileChanges, loading: reviewLoading, refresh: refreshReview } = useCodeReview(serverId, sessionId);
-  const { agents, runningCount, completedCount, totalAgents } = useSubAgents(serverId, sessionId);
-  const autoApprove = useAutoApprove(serverId, sessionId);
+  const { agents, runningCount, totalAgents } = useSubAgents(serverId, sessionId);
+  const bypass = useBypassPermissions(serverId, sessionId);
   const sessionMute = useSessionMute(serverId);
   const { skills } = useSkills(serverId);
-  // Sub-agent state
-  const [showAgentsModal, setShowAgentsModal] = useState(false);
-  const [viewingAgentId, setViewingAgentId] = useState<string | null>(null);
-  const agentDetail = useSubAgentDetail(serverId, viewingAgentId);
+  // Dispatch panel state
+  const DISPATCH_HEIGHT_KEY = 'dispatch-panel-height';
+  const [dispatchCollapsed, setDispatchCollapsed] = useState(false);
+  const [dispatchHeight, setDispatchHeight] = useState(() => {
+    const stored = localStorage.getItem(DISPATCH_HEIGHT_KEY);
+    return stored ? parseInt(stored, 10) : 280;
+  });
+  const dispatchDraggingRef = useRef(false);
+  const prevRunningRef = useRef(0);
 
   // File viewer state
   const [viewingFile, setViewingFile] = useState<string | null>(null);
@@ -162,6 +164,51 @@ export function SessionView({
     }
     return null;
   }, [highlights, latestPlanFile]);
+
+  // Auto-show dispatch panel when agents start running
+  useEffect(() => {
+    if (runningCount > 0 && prevRunningRef.current === 0) {
+      setDispatchCollapsed(false);
+    }
+    prevRunningRef.current = runningCount;
+  }, [runningCount]);
+
+  const showDispatchPanel = !dispatchCollapsed && totalAgents > 0;
+
+  const handleDispatchDragStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    dispatchDraggingRef.current = true;
+    document.body.style.cursor = 'row-resize';
+    document.body.style.userSelect = 'none';
+
+    const container = (e.target as HTMLElement).closest('.session-conversation');
+    if (!container) return;
+    const containerRect = container.getBoundingClientRect();
+
+    const onMouseMove = (ev: MouseEvent) => {
+      if (!dispatchDraggingRef.current) return;
+      const newHeight = Math.min(
+        Math.max(containerRect.bottom - ev.clientY, 100),
+        containerRect.height - 100
+      );
+      setDispatchHeight(newHeight);
+    };
+
+    const onMouseUp = () => {
+      dispatchDraggingRef.current = false;
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+      setDispatchHeight((h) => {
+        localStorage.setItem(DISPATCH_HEIGHT_KEY, String(h));
+        return h;
+      });
+    };
+
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+  }, []);
 
   // Signal to Dashboard that an overlay is open (for back gesture coordination)
   useEffect(() => {
@@ -246,7 +293,7 @@ export function SessionView({
     if (isMobileViewport()) return;
     const target = e.target as HTMLElement;
     // Don't steal focus from interactive elements
-    if (target.closest('button, a, input, textarea, [role="button"], .msg-option-btn, .tool-card, .question-block')) return;
+    if (target.closest('button, a, input, textarea, [role="button"], .msg-option-btn, .tool-card, .question-block, .dispatch-panel, .dispatch-mobile-overlay')) return;
     // Don't steal focus if user is selecting text
     const selection = window.getSelection();
     if (selection && selection.toString().length > 0) return;
@@ -351,7 +398,7 @@ export function SessionView({
     { key: 'f', meta: true, alt: true, handler: () => setShowSearch(true) },
     { key: 'p', meta: true, alt: true, handler: () => setShowFileFinder(true) },
     { key: 't', meta: true, alt: true, handler: () => { if (tmuxSessionName) setShowTerminal(prev => !prev); } },
-    { key: 'a', meta: true, alt: true, shift: true, handler: () => autoApprove.toggle() },
+    { key: 'a', meta: true, alt: true, shift: true, handler: () => bypass.toggle() },
     { key: 'm', meta: true, alt: true, shift: true, handler: () => { if (sessionId) sessionMute.toggleMute(sessionId); } },
     { key: 'Escape', handler: () => {
       if (showCodeReviewModal) setShowCodeReviewModal(false);
@@ -360,10 +407,8 @@ export function SessionView({
       else if (artifactContent) setArtifactContent(null);
       else if (viewingFile) setViewingFile(null);
       else if (showConversationSearch) setShowConversationSearch(false);
-      else if (showAgentsModal) setShowAgentsModal(false);
-      else if (viewingAgentId) setViewingAgentId(null);
     }},
-  ], [tmuxSessionName, showSearch, showFileFinder, showCodeReviewModal, viewingFile, showConversationSearch, showAgentsModal, viewingAgentId, artifactContent, sessionId, autoApprove, sessionMute, handleCloseSearch]));
+  ], [tmuxSessionName, showSearch, showFileFinder, showCodeReviewModal, viewingFile, showConversationSearch, artifactContent, sessionId, bypass, sessionMute, handleCloseSearch]));
 
   const sendTerminalText = useCallback(async (text: string): Promise<boolean> => {
     if (!serverId || !tmuxSessionName) return false;
@@ -527,12 +572,12 @@ export function SessionView({
         </button>
       )}
       <button
-        className={`auto-approve-btn ${autoApprove.enabled ? 'auto-approve-btn-active' : ''}`}
-        onClick={autoApprove.toggle}
-        disabled={autoApprove.loading}
-        title={autoApprove.enabled ? 'Auto-approve enabled' : 'Auto-approve disabled'}
+        className={`auto-approve-btn ${bypass.enabled ? 'auto-approve-btn-active' : ''}`}
+        onClick={bypass.toggle}
+        disabled={bypass.loading}
+        title={bypass.enabled ? 'Permission bypass enabled — tools run without prompts' : 'Permission bypass disabled'}
       >
-        {autoApprove.enabled ? 'Auto: ON' : 'Auto: OFF'}
+        {bypass.enabled ? 'Bypass: ON' : 'Bypass: OFF'}
       </button>
       <button
         className={`auto-approve-btn ${!hideTools ? 'auto-approve-btn-active' : ''}`}
@@ -620,92 +665,99 @@ export function SessionView({
       )}
 
       <div className="session-conversation" onClick={handleConversationClick} style={{ display: showTerminal || showWorkGroupPanel ? 'none' : undefined }}>
-          <WaitingIndicator status={status} />
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+            <WaitingIndicator status={status} />
 
-          <SubAgentBar
-            agents={agents}
-            runningCount={runningCount}
-            completedCount={completedCount}
-            totalAgents={totalAgents}
-            onClick={() => setShowAgentsModal(true)}
-            onViewAgent={(agentId) => {
-              setViewingAgentId(agentId);
-            }}
-          />
+            {workGroup && (workGroup.status === 'active' || workGroup.status === 'merging' || workGroup.status === 'completed' || workGroup.status === 'failed') && (
+              <WorkGroupBar
+                group={workGroup}
+                onClick={() => setShowWorkGroupPanel(true)}
+              />
+            )}
 
-          {workGroup && (workGroup.status === 'active' || workGroup.status === 'merging' || workGroup.status === 'completed' || workGroup.status === 'failed') && (
-            <WorkGroupBar
-              group={workGroup}
-              onClick={() => setShowWorkGroupPanel(true)}
+            <TaskList tasks={tasks} loading={tasksLoading} />
+
+            <CodeReviewCard
+              fileChanges={fileChanges}
+              loading={reviewLoading}
+              onOpenModal={() => setShowCodeReviewModal(true)}
+              onRefresh={refreshReview}
             />
-          )}
 
-          <TaskList tasks={tasks} loading={tasksLoading} />
+            {showSearch && (
+              <SearchBar
+                onSearch={(term) => { setSearchTerm(term || null); setCurrentMatchIndex(0); }}
+                matchCount={searchMatches.length}
+                currentMatch={currentMatchIndex}
+                onNext={handleSearchNext}
+                onPrev={handleSearchPrev}
+                onClose={handleCloseSearch}
+              />
+            )}
 
-          <CodeReviewCard
-            fileChanges={fileChanges}
-            loading={reviewLoading}
-            onOpenModal={() => setShowCodeReviewModal(true)}
-            onRefresh={refreshReview}
-          />
+            {showBookmarks && (
+              <BookmarkList
+                bookmarks={currentBookmarks}
+                onNavigate={(messageId) => {
+                  const el = document.querySelector(`[data-highlight-id="${messageId}"]`);
+                  if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }}
+                onRemove={removeBookmark}
+                onClose={() => setShowBookmarks(false)}
+              />
+            )}
 
-          {showSearch && (
-            <SearchBar
-              onSearch={(term) => { setSearchTerm(term || null); setCurrentMatchIndex(0); }}
-              matchCount={searchMatches.length}
-              currentMatch={currentMatchIndex}
-              onNext={handleSearchNext}
-              onPrev={handleSearchPrev}
-              onClose={handleCloseSearch}
-            />
-          )}
-
-          {showBookmarks && (
-            <BookmarkList
-              bookmarks={currentBookmarks}
-              onNavigate={(messageId) => {
-                const el = document.querySelector(`[data-highlight-id="${messageId}"]`);
-                if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            <MessageList
+              highlights={highlights}
+              loading={loading}
+              loadingMore={loadingMore}
+              hasMore={hasMore}
+              onLoadMore={loadMore}
+              onSelectOption={handleSelectOption}
+              onSelectChoice={handleSelectChoice}
+              onCancelMessage={handleCancelMessage}
+              onViewFile={handleViewFile}
+              onViewArtifact={(content, title) => setArtifactContent({ content, title })}
+              searchTerm={searchTerm}
+              currentMatchId={searchMatches.length > 0 ? searchMatches[currentMatchIndex]?.id : null}
+              scrollToBottom={!showTerminal}
+              planFilePath={latestPlanFile}
+              hideTools={hideTools}
+              isBookmarked={isBookmarked}
+              onToggleBookmark={(messageId, content) => {
+                if (!sessionId) return;
+                if (isBookmarked(messageId)) {
+                  removeBookmark(messageId);
+                } else {
+                  addBookmark(messageId, sessionId, content);
+                }
               }}
-              onRemove={removeBookmark}
-              onClose={() => setShowBookmarks(false)}
             />
+
+            <FileTabBar
+              files={openFiles.map(f => f.path)}
+              activeFile={viewingFile}
+              onSelectFile={setViewingFile}
+              onCloseFile={handleCloseFileTab}
+              onCloseAll={handleCloseAllFileTabs}
+            />
+          </div>
+
+          {showDispatchPanel && !mobile && (
+            <div className="dispatch-divider" onMouseDown={handleDispatchDragStart} />
           )}
 
-          <MessageList
-            highlights={highlights}
-            loading={loading}
-            loadingMore={loadingMore}
-            hasMore={hasMore}
-            onLoadMore={loadMore}
-            onSelectOption={handleSelectOption}
-            onSelectChoice={handleSelectChoice}
-            onCancelMessage={handleCancelMessage}
-            onViewFile={handleViewFile}
-            onViewArtifact={(content, title) => setArtifactContent({ content, title })}
-            searchTerm={searchTerm}
-            currentMatchId={searchMatches.length > 0 ? searchMatches[currentMatchIndex]?.id : null}
-            scrollToBottom={!showTerminal}
-            planFilePath={latestPlanFile}
-            hideTools={hideTools}
-            isBookmarked={isBookmarked}
-            onToggleBookmark={(messageId, content) => {
-              if (!sessionId) return;
-              if (isBookmarked(messageId)) {
-                removeBookmark(messageId);
-              } else {
-                addBookmark(messageId, sessionId, content);
-              }
-            }}
-          />
-
-          <FileTabBar
-            files={openFiles.map(f => f.path)}
-            activeFile={viewingFile}
-            onSelectFile={setViewingFile}
-            onCloseFile={handleCloseFileTab}
-            onCloseAll={handleCloseAllFileTabs}
-          />
+          {serverId && totalAgents > 0 && (
+            <DispatchPanel
+              serverId={serverId}
+              agents={agents}
+              runningCount={runningCount}
+              totalAgents={totalAgents}
+              height={dispatchHeight}
+              collapsed={dispatchCollapsed}
+              onCollapse={() => setDispatchCollapsed(prev => !prev)}
+            />
+          )}
 
           {mobile && (
             <div className="session-bottom-bar">
@@ -728,28 +780,6 @@ export function SessionView({
       />
 
       {/* Modals */}
-      {showAgentsModal && (
-        <SubAgentModal
-          agents={agents}
-          runningCount={runningCount}
-          completedCount={completedCount}
-          onClose={() => setShowAgentsModal(false)}
-          onViewAgent={(agentId) => {
-            setViewingAgentId(agentId);
-            setShowAgentsModal(false);
-          }}
-        />
-      )}
-
-      {viewingAgentId && (
-        <SubAgentDetail
-          agent={agentDetail.agent}
-          highlights={agentDetail.highlights}
-          loading={agentDetail.loading}
-          onClose={() => setViewingAgentId(null)}
-        />
-      )}
-
       {viewingFile && serverId && (
         <FileViewerModal
           serverId={serverId}

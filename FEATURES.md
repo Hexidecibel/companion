@@ -163,6 +163,28 @@ High-level features of the Companion daemon, web client, and desktop/mobile apps
 - Accessible from session header via button or Cmd+T shortcut
 - Infinity scroll with offset-based paging for terminal history
 
+## Dispatch Panel (Subagents)
+Prominent bottom drawer panel showing subagents as first-class UI, replacing the old modal-based SubAgent components.
+
+- Auto-shows when agents spawn (runningCount 0 → >0), stays visible until manually collapsed
+- Compact agent cards with status dot (pulsing green = running, blue check = completed, red = error), slug, description, duration, message count
+- Click-to-drill-down into agent conversation detail with back button
+- Resizable via draggable divider (height persisted to localStorage)
+- Mobile: collapsed bar at bottom → full-screen overlay on tap
+- Adaptive polling: 2s when agents running, 5s when idle
+- CLAUDE.md instructions for dispatch mode included in all scaffold templates
+
+## Permission Bypass Toggle
+File-based permission bypass that works for all sessions and subagents in a project, replacing the old tmux-injection auto-approve.
+
+- "Bypass: ON/OFF" button in session header (desktop) and bottom bar (mobile)
+- Writes `.claude/settings.json` with `defaultMode: bypassPermissions` to the project directory
+- Works for all Claude Code sessions and subagents in the project (file-based, not process-specific)
+- Daemon endpoints: `set_bypass_permissions` and `get_bypass_permissions`
+- Scaffold wizard includes "Bypass permission prompts" checkbox (default on)
+- All 7 scaffold templates include `.claude/settings.json` with bypass enabled
+- Keyboard shortcut: Cmd/Ctrl+Alt+Shift+A
+
 ## Auto-Approve System
 - Automatic approval of safe tool calls (Read, Glob, Grep, etc.)
 - "Always Allow" option on pending approval prompts

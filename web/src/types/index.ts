@@ -211,6 +211,7 @@ export interface ProjectConfig {
     includeDocker: boolean;
     includeCI: boolean;
     includeLinter: boolean;
+    bypassPermissions: boolean;
   };
 }
 

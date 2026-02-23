@@ -238,6 +238,18 @@ export function useMyHook(param: string) {
 
 ---
 
+## Dispatch Mode (Subagents)
+
+The Companion app shows subagents (Task tool invocations) in a prominent bottom panel that auto-opens when agents spawn. To keep the main conversation readable and take advantage of this:
+
+- **Use the Task tool liberally** for independent, parallelizable work (file exploration, research, builds, tests)
+- **Keep the main thread for orchestration** — decisions, sequencing, and user-facing communication
+- **Launch multiple agents in parallel** when tasks don't depend on each other (e.g., reading multiple files, running tests while building)
+- **Give agents descriptive prompts** — the agent's description shows in the dispatch panel as context for the user
+- Agents poll at 2s while running, 5s when idle — keep this in mind for responsiveness
+
+---
+
 ## Tracking Files
 
 Four files track the lifecycle of work items:

@@ -112,6 +112,7 @@ export function NewProjectModal({ serverId, onClose, onComplete }: NewProjectMod
   const [includeDocker, setIncludeDocker] = useState(false);
   const [includeCI, setIncludeCI] = useState(false);
   const [includeLinter, setIncludeLinter] = useState(true);
+  const [bypassPermissions, setBypassPermissions] = useState(true);
   const [viewingFile, setViewingFile] = useState<string | null>(null);
 
   // Preview state
@@ -196,7 +197,7 @@ export function NewProjectModal({ serverId, onClose, onComplete }: NewProjectMod
         description: projectDescription,
         location,
         stackId: selectedTemplate,
-        options: { initGit, createGitHubRepo, privateRepo, includeDocker, includeCI, includeLinter },
+        options: { initGit, createGitHubRepo, privateRepo, includeDocker, includeCI, includeLinter, bypassPermissions },
       };
       const response = await conn.sendRequest('scaffold_preview', config);
       if (response.success && response.payload) {
@@ -209,7 +210,7 @@ export function NewProjectModal({ serverId, onClose, onComplete }: NewProjectMod
     } finally {
       setPreviewLoading(false);
     }
-  }, [conn, projectName, selectedTemplate, projectDescription, location, initGit, createGitHubRepo, privateRepo, includeDocker, includeCI, includeLinter]);
+  }, [conn, projectName, selectedTemplate, projectDescription, location, initGit, createGitHubRepo, privateRepo, includeDocker, includeCI, includeLinter, bypassPermissions]);
 
   // Create project with progress streaming
   const handleCreate = useCallback(async () => {
@@ -230,7 +231,7 @@ export function NewProjectModal({ serverId, onClose, onComplete }: NewProjectMod
         description: projectDescription || `A ${templates.find(t => t.id === selectedTemplate)?.name || 'new'} project`,
         location,
         stackId: selectedTemplate,
-        options: { initGit, createGitHubRepo, privateRepo, includeDocker, includeCI, includeLinter },
+        options: { initGit, createGitHubRepo, privateRepo, includeDocker, includeCI, includeLinter, bypassPermissions },
       };
       const response = await conn.sendRequest('scaffold_create', config, 120000);
       unsub();
@@ -426,6 +427,19 @@ export function NewProjectModal({ serverId, onClose, onComplete }: NewProjectMod
                   <div className="form-group checkbox" style={{ paddingLeft: 30 }}>
                     <input type="checkbox" id="wiz-private" checked={privateRepo} onChange={(e) => setPrivateRepo(e.target.checked)} />
                     <label htmlFor="wiz-private">Private repository</label>
+                  </div>
+                )}
+              </div>
+
+              <div className="wizard-options-section">
+                <h4>Claude Code</h4>
+                <div className="form-group checkbox">
+                  <input type="checkbox" id="wiz-bypass" checked={bypassPermissions} onChange={(e) => setBypassPermissions(e.target.checked)} />
+                  <label htmlFor="wiz-bypass">Bypass permission prompts</label>
+                </div>
+                {bypassPermissions && (
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', paddingLeft: 30, marginTop: -4, marginBottom: 8 }}>
+                    Auto-approves Bash, Edit, Write tools — no permission dialogs
                   </div>
                 )}
               </div>

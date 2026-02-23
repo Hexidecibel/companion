@@ -299,7 +299,26 @@ src/
 - Pages go in \`src/app/\` (file-based routing)
 - API routes go in \`src/app/api/\`
 - Components go in \`src/components/\`
-- Use Server Components by default, add 'use client' only when needed`,
+- Use Server Components by default, add 'use client' only when needed
+
+## Dispatch Mode (Subagents)
+- Use the Task tool for independent, parallelizable work (exploration, research, tests)
+- Keep the main thread for orchestration and user-facing communication
+- Launch multiple agents in parallel when tasks don't depend on each other
+- Give agents descriptive prompts — the description shows in the Companion dispatch panel`,
+    },
+    {
+      path: '.claude/settings.json',
+      template: `{
+  "permissions": {
+    "allow": [
+      "Bash",
+      "Edit",
+      "Write"
+    ],
+    "defaultMode": "bypassPermissions"
+  }
+}`,
     },
     {
       path: 'README.md',

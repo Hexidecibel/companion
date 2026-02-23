@@ -2826,248 +2826,6 @@ html {
 }
 
 /* ========================================
-   Sub-Agent Bar
-   ======================================== */
-
-.subagent-bar-wrapper {
-  flex-shrink: 0;
-}
-
-.subagent-bar {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 16px;
-  background-color: rgba(59, 130, 246, 0.08);
-  border-bottom: 1px solid rgba(59, 130, 246, 0.12);
-  cursor: pointer;
-  transition: background-color 0.15s;
-  flex-shrink: 0;
-}
-
-.subagent-bar:hover {
-  background-color: rgba(59, 130, 246, 0.14);
-}
-
-.subagent-bar-left {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-shrink: 0;
-  cursor: pointer;
-}
-
-.subagent-bar-expand {
-  font-size: 8px;
-  color: var(--text-muted);
-  transition: color 0.15s;
-}
-
-.subagent-bar-left:hover .subagent-bar-expand {
-  color: var(--accent-blue);
-}
-
-.subagent-bar-indicator {
-  font-size: 8px;
-  color: var(--accent-blue);
-}
-
-.subagent-bar-count {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--accent-blue);
-  white-space: nowrap;
-}
-
-.subagent-bar-activity {
-  flex: 1;
-  font-size: 11px;
-  color: var(--text-muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.subagent-bar-chevron {
-  color: var(--text-muted);
-  font-size: 16px;
-  flex-shrink: 0;
-  padding: 2px 4px;
-  border-radius: 4px;
-  transition: background-color 0.15s, color 0.15s;
-}
-
-.subagent-bar-chevron:hover {
-  background-color: rgba(59, 130, 246, 0.2);
-  color: var(--accent-blue);
-}
-
-/* ========================================
-   Sub-Agent Tree (inline expandable)
-   ======================================== */
-
-.subagent-tree {
-  background-color: rgba(59, 130, 246, 0.04);
-  border-bottom: 1px solid rgba(59, 130, 246, 0.12);
-  padding: 8px 16px 12px;
-}
-
-.subagent-tree-summary {
-  display: flex;
-  background-color: var(--bg-secondary);
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-  padding: 10px 0;
-  margin-bottom: 8px;
-}
-
-.subagent-tree-summary-item {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 2px;
-}
-
-.subagent-tree-summary-value {
-  font-size: 18px;
-  font-weight: 700;
-  color: var(--text-primary);
-}
-
-.subagent-tree-summary-label {
-  font-size: 10px;
-  color: var(--text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.3px;
-}
-
-.subagent-tree-summary-divider {
-  width: 1px;
-  background-color: var(--border-color);
-}
-
-.subagent-tree-list {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.subagent-tree-node {
-  background-color: var(--bg-secondary);
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-  overflow: hidden;
-  transition: border-color 0.15s;
-}
-
-.subagent-tree-node:hover {
-  border-color: var(--bg-hover);
-}
-
-.subagent-tree-node-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
-  cursor: pointer;
-}
-
-.subagent-tree-node-icon {
-  font-size: 14px;
-  width: 18px;
-  text-align: center;
-  flex-shrink: 0;
-}
-
-.subagent-tree-status-running {
-  color: var(--accent-green);
-}
-
-.subagent-tree-status-completed {
-  color: var(--accent-blue);
-}
-
-.subagent-tree-status-error {
-  color: var(--accent-red);
-}
-
-.subagent-tree-node-info {
-  flex: 1;
-  min-width: 0;
-}
-
-.subagent-tree-node-slug {
-  display: block;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text-primary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.subagent-tree-node-meta {
-  display: block;
-  font-size: 11px;
-  color: var(--text-muted);
-  margin-top: 1px;
-}
-
-.subagent-tree-node-expand {
-  font-size: 10px;
-  color: var(--text-muted);
-  flex-shrink: 0;
-}
-
-.subagent-tree-node-details {
-  padding: 8px 12px 10px;
-  border-top: 1px solid var(--border-color);
-  background-color: var(--bg-primary);
-}
-
-.subagent-tree-detail-row {
-  display: flex;
-  gap: 8px;
-  margin-bottom: 4px;
-  font-size: 12px;
-}
-
-.subagent-tree-detail-label {
-  color: var(--text-muted);
-  width: 60px;
-  flex-shrink: 0;
-}
-
-.subagent-tree-detail-value {
-  color: var(--text-secondary);
-  flex: 1;
-  min-width: 0;
-}
-
-.subagent-tree-agent-id {
-  font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
-  font-size: 11px;
-}
-
-.subagent-tree-view-btn {
-  margin-top: 8px;
-  background: var(--bg-tertiary);
-  border: 1px solid var(--border-color);
-  color: var(--accent-blue);
-  font-size: 12px;
-  font-weight: 600;
-  padding: 4px 12px;
-  border-radius: 6px;
-  cursor: pointer;
-  transition: background-color 0.15s;
-}
-
-.subagent-tree-view-btn:hover {
-  background-color: var(--bg-hover);
-}
-
-/* ========================================
    Modal Overlay (shared)
    ======================================== */
 
@@ -3129,155 +2887,305 @@ html {
 }
 
 /* ========================================
-   Sub-Agent Modal
+   Dispatch Panel (Bottom Agent Panel)
    ======================================== */
 
-.subagent-modal-body {
-  flex: 1;
-  overflow-y: auto;
-  padding: 12px 18px;
+.dispatch-panel {
+  display: flex;
+  flex-direction: column;
+  background-color: var(--bg-secondary);
+  border-top: 1px solid var(--border-color);
+  overflow: hidden;
+  flex-shrink: 0;
 }
 
-.subagent-modal-section {
-  margin-bottom: 16px;
+.dispatch-divider {
+  height: 4px;
+  flex-shrink: 0;
+  cursor: row-resize;
+  background: transparent;
+  transition: background 0.15s;
+  position: relative;
+  z-index: 10;
 }
 
-.subagent-modal-section:last-child {
-  margin-bottom: 0;
+.dispatch-divider::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -3px;
+  bottom: -3px;
 }
 
-.subagent-modal-section-title {
-  font-size: 11px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  color: var(--text-muted);
-  margin-bottom: 8px;
+.dispatch-divider:hover,
+.dispatch-divider:active {
+  background: var(--accent-blue, #3b82f6);
 }
 
-.subagent-card {
-  background-color: var(--bg-primary);
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-  padding: 10px 12px;
-  margin-bottom: 6px;
-  cursor: pointer;
-  transition: border-color 0.15s;
-}
-
-.subagent-card:hover {
-  border-color: var(--bg-hover);
-}
-
-.subagent-card-header {
+.dispatch-toolbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border-color);
+  flex-shrink: 0;
 }
 
-.subagent-card-slug {
-  font-size: 13px;
+.dispatch-toolbar-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.dispatch-toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.dispatch-toolbar-label {
+  font-size: 12px;
   font-weight: 600;
-  font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
-  color: var(--text-primary);
+  color: var(--text-secondary);
 }
 
-.subagent-card-status {
+.dispatch-toolbar-meta {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.dispatch-toolbar-status {
   font-size: 10px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.5px;
-  padding: 2px 6px;
+  padding: 1px 6px;
   border-radius: 4px;
-  flex-shrink: 0;
 }
 
-.subagent-status-running {
+.dispatch-status-running {
   background-color: rgba(59, 130, 246, 0.2);
   color: var(--accent-blue);
 }
 
-.subagent-status-completed {
+.dispatch-status-completed {
   background-color: rgba(34, 197, 94, 0.15);
   color: var(--accent-green);
 }
 
-.subagent-status-error {
+.dispatch-status-error {
   background-color: rgba(239, 68, 68, 0.15);
   color: var(--accent-red);
 }
 
-.subagent-card-desc {
+.dispatch-back-btn {
+  background: none;
+  border: none;
+  color: var(--accent-blue);
   font-size: 12px;
-  color: var(--text-secondary);
-  margin-top: 4px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+  transition: background-color 0.15s;
+}
+
+.dispatch-back-btn:hover {
+  background-color: rgba(59, 130, 246, 0.1);
+}
+
+.dispatch-collapse-btn {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 12px;
+  cursor: pointer;
+  padding: 2px 8px;
+  border-radius: 4px;
+  transition: background-color 0.15s, color 0.15s;
+}
+
+.dispatch-collapse-btn:hover {
+  background-color: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.dispatch-card-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 8px;
+}
+
+/* Compact agent card row */
+.dispatch-agent-card {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background-color 0.15s;
+}
+
+.dispatch-agent-card:hover {
+  background-color: var(--bg-hover);
+}
+
+/* Status dot */
+.dispatch-card-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.dispatch-card-running .dispatch-card-dot {
+  background-color: var(--accent-green, #10b981);
+  animation: dispatch-pulse 2s ease-in-out infinite;
+}
+
+.dispatch-card-completed .dispatch-card-dot {
+  background-color: var(--accent-blue, #3b82f6);
+}
+
+.dispatch-card-error .dispatch-card-dot {
+  background-color: var(--accent-red, #ef4444);
+}
+
+@keyframes dispatch-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.dispatch-card-slug {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+  font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
+  flex-shrink: 0;
+  max-width: 140px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.subagent-card-meta {
-  display: flex;
-  gap: 10px;
+.dispatch-card-desc {
+  flex: 1;
   font-size: 11px;
   color: var(--text-muted);
-  margin-top: 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
 }
 
-/* ========================================
-   Sub-Agent Detail
-   ======================================== */
-
-.subagent-detail {
-  max-width: 720px;
-}
-
-.subagent-detail-meta {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 8px 18px;
-  border-bottom: 1px solid var(--border-color);
-  flex-shrink: 0;
-}
-
-.subagent-detail-status {
-  font-size: 10px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  padding: 2px 6px;
-  border-radius: 4px;
-}
-
-.subagent-detail-type {
-  font-size: 12px;
-  color: var(--text-secondary);
-  font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
-}
-
-.subagent-detail-duration,
-.subagent-detail-msgs {
-  font-size: 12px;
+.dispatch-card-meta {
+  font-size: 11px;
   color: var(--text-muted);
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
-.subagent-detail-desc {
-  padding: 8px 18px;
-  font-size: 13px;
+.dispatch-card-chevron {
+  color: var(--text-muted);
+  font-size: 16px;
+  flex-shrink: 0;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.dispatch-agent-card:hover .dispatch-card-chevron {
+  opacity: 1;
+}
+
+/* Completed agents are slightly muted */
+.dispatch-card-completed .dispatch-card-slug {
+  color: var(--text-secondary);
+}
+
+.dispatch-card-completed .dispatch-card-desc {
+  color: var(--text-muted);
+  opacity: 0.7;
+}
+
+/* Detail view */
+.dispatch-detail-desc {
+  padding: 6px 12px;
+  font-size: 12px;
   color: var(--text-secondary);
   border-bottom: 1px solid var(--border-color);
   flex-shrink: 0;
 }
 
-.subagent-detail-conversation {
+.dispatch-detail-conversation {
   flex: 1;
   overflow-y: auto;
-  padding: 12px 18px;
+  padding: 8px 12px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
+}
+
+/* Mobile bar (collapsed) */
+.dispatch-mobile-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  background-color: rgba(59, 130, 246, 0.08);
+  border-top: 1px solid rgba(59, 130, 246, 0.12);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.dispatch-mobile-bar:active {
+  background-color: rgba(59, 130, 246, 0.14);
+}
+
+.dispatch-mobile-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.dispatch-dot-running {
+  background-color: var(--accent-green, #10b981);
+  animation: dispatch-pulse 2s ease-in-out infinite;
+}
+
+.dispatch-dot-done {
+  background-color: var(--accent-blue, #3b82f6);
+}
+
+.dispatch-mobile-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent-blue);
+}
+
+/* Mobile overlay (expanded) */
+.dispatch-mobile-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  background-color: var(--bg-primary);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* Hide divider on mobile */
+@media (max-width: 768px) {
+  .dispatch-divider {
+    display: none;
+  }
+
+  .dispatch-panel {
+    display: none;
+  }
 }
 
 /* ========================================

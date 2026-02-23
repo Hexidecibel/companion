@@ -798,6 +798,89 @@ export class WebSocketHandler {
         break;
       }
 
+      case 'set_bypass_permissions': {
+        const bypassPayload = payload as { enabled: boolean; sessionId?: string };
+        const bypassSessionId = bypassPayload?.sessionId || this.watcher.getActiveSessionId();
+        const bypassEnabled = bypassPayload?.enabled ?? false;
+
+        if (!bypassSessionId) {
+          this.send(client.ws, { type: 'bypass_permissions_set', success: false, error: 'No active session', requestId });
+          break;
+        }
+
+        const convInfo = this.watcher.getConversationInfo(bypassSessionId);
+        if (!convInfo?.projectPath) {
+          this.send(client.ws, { type: 'bypass_permissions_set', success: false, error: 'No project path found', requestId });
+          break;
+        }
+
+        try {
+          const settingsDir = require('path').join(convInfo.projectPath, '.claude');
+          const settingsPath = require('path').join(settingsDir, 'settings.json');
+          const fs = require('fs');
+
+          if (bypassEnabled) {
+            if (!fs.existsSync(settingsDir)) fs.mkdirSync(settingsDir, { recursive: true });
+            let existing: Record<string, unknown> = {};
+            if (fs.existsSync(settingsPath)) {
+              try { existing = JSON.parse(fs.readFileSync(settingsPath, 'utf-8')); } catch { existing = {}; }
+            }
+            const perms = (existing.permissions || {}) as Record<string, unknown>;
+            perms.allow = perms.allow || ['Bash', 'Edit', 'Write'];
+            perms.defaultMode = 'bypassPermissions';
+            existing.permissions = perms;
+            fs.writeFileSync(settingsPath, JSON.stringify(existing, null, 2), 'utf-8');
+          } else {
+            if (fs.existsSync(settingsPath)) {
+              let existing: Record<string, unknown> = {};
+              try { existing = JSON.parse(fs.readFileSync(settingsPath, 'utf-8')); } catch { existing = {}; }
+              const perms = (existing.permissions || {}) as Record<string, unknown>;
+              delete perms.defaultMode;
+              existing.permissions = perms;
+              fs.writeFileSync(settingsPath, JSON.stringify(existing, null, 2), 'utf-8');
+            }
+          }
+
+          console.log(`Bypass permissions ${bypassEnabled ? 'enabled' : 'disabled'} for ${convInfo.projectPath}`);
+          this.send(client.ws, { type: 'bypass_permissions_set', success: true, payload: { enabled: bypassEnabled, projectPath: convInfo.projectPath }, requestId });
+        } catch (err) {
+          console.error('Failed to set bypass permissions:', err);
+          this.send(client.ws, { type: 'bypass_permissions_set', success: false, error: String(err), requestId });
+        }
+        break;
+      }
+
+      case 'get_bypass_permissions': {
+        const getBypassPayload = payload as { sessionId?: string };
+        const getBypassSessionId = getBypassPayload?.sessionId || this.watcher.getActiveSessionId();
+
+        if (!getBypassSessionId) {
+          this.send(client.ws, { type: 'bypass_permissions', success: true, payload: { enabled: false }, requestId });
+          break;
+        }
+
+        const getConvInfo = this.watcher.getConversationInfo(getBypassSessionId);
+        if (!getConvInfo?.projectPath) {
+          this.send(client.ws, { type: 'bypass_permissions', success: true, payload: { enabled: false }, requestId });
+          break;
+        }
+
+        try {
+          const settingsPath = require('path').join(getConvInfo.projectPath, '.claude', 'settings.json');
+          const fs = require('fs');
+          if (fs.existsSync(settingsPath)) {
+            const content = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'));
+            const mode = content?.permissions?.defaultMode;
+            this.send(client.ws, { type: 'bypass_permissions', success: true, payload: { enabled: mode === 'bypassPermissions' }, requestId });
+          } else {
+            this.send(client.ws, { type: 'bypass_permissions', success: true, payload: { enabled: false }, requestId });
+          }
+        } catch {
+          this.send(client.ws, { type: 'bypass_permissions', success: true, payload: { enabled: false }, requestId });
+        }
+        break;
+      }
+
       // set_notification_prefs removed — escalation config replaces per-device prefs
 
       case 'ping':

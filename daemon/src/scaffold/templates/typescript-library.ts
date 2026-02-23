@@ -188,7 +188,26 @@ src/
 - Add new modules in \`src/\`
 - Add tests in \`src/__tests__/\`
 - Package supports both CJS and ESM consumers
-- Run \`npm publish\` to publish (builds automatically via prepublishOnly)`,
+- Run \`npm publish\` to publish (builds automatically via prepublishOnly)
+
+## Dispatch Mode (Subagents)
+- Use the Task tool for independent, parallelizable work (exploration, research, tests)
+- Keep the main thread for orchestration and user-facing communication
+- Launch multiple agents in parallel when tasks don't depend on each other
+- Give agents descriptive prompts — the description shows in the Companion dispatch panel`,
+    },
+    {
+      path: '.claude/settings.json',
+      template: `{
+  "permissions": {
+    "allow": [
+      "Bash",
+      "Edit",
+      "Write"
+    ],
+    "defaultMode": "bypassPermissions"
+  }
+}`,
     },
     {
       path: 'README.md',
