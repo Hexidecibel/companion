@@ -165,14 +165,37 @@ export function SessionView({
     return null;
   }, [highlights, latestPlanFile]);
 
-  // Auto-show dispatch panel when agents START running (not on initial load)
+  // Auto-show dispatch panel when agents START running (desktop only, not on initial load)
+  // Auto-collapse ~3s after all agents finish (desktop only)
   const hasMountedRef = useRef(false);
+  const autoCollapseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
-    if (hasMountedRef.current && runningCount > 0 && prevRunningRef.current === 0) {
-      setDispatchCollapsed(false);
+    // Clear any pending auto-collapse timer
+    if (autoCollapseTimerRef.current) {
+      clearTimeout(autoCollapseTimerRef.current);
+      autoCollapseTimerRef.current = null;
+    }
+
+    if (hasMountedRef.current && !isMobileViewport()) {
+      // Auto-open when agents start running
+      if (runningCount > 0 && prevRunningRef.current === 0) {
+        setDispatchCollapsed(false);
+      }
+      // Auto-collapse after all agents complete (brief delay so user sees "done" state)
+      if (runningCount === 0 && prevRunningRef.current > 0) {
+        autoCollapseTimerRef.current = setTimeout(() => {
+          setDispatchCollapsed(true);
+        }, 3000);
+      }
     }
     prevRunningRef.current = runningCount;
     hasMountedRef.current = true;
+
+    return () => {
+      if (autoCollapseTimerRef.current) {
+        clearTimeout(autoCollapseTimerRef.current);
+      }
+    };
   }, [runningCount]);
 
   const showDispatchPanel = !dispatchCollapsed && totalAgents > 0;
@@ -212,17 +235,21 @@ export function SessionView({
     document.addEventListener('mouseup', onMouseUp);
   }, []);
 
+  // Track whether dispatch overlay is open on mobile (for back gesture)
+  const dispatchOverlayOpen = isMobileViewport() && !dispatchCollapsed && totalAgents > 0;
+
   // Signal to Dashboard that an overlay is open (for back gesture coordination)
   useEffect(() => {
-    const isOverlay = showTerminal || showWorkGroupPanel || showConversationSearch || showFileFinder || showCodeReviewModal;
+    const isOverlay = showTerminal || showWorkGroupPanel || showConversationSearch || showFileFinder || showCodeReviewModal || dispatchOverlayOpen;
     document.body.dataset.overlay = isOverlay ? 'true' : '';
     return () => { document.body.dataset.overlay = ''; };
-  }, [showTerminal, showWorkGroupPanel, showConversationSearch, showFileFinder, showCodeReviewModal]);
+  }, [showTerminal, showWorkGroupPanel, showConversationSearch, showFileFinder, showCodeReviewModal, dispatchOverlayOpen]);
 
   // Listen for close-overlay event from Dashboard's back gesture handler
   useEffect(() => {
     const handler = () => {
-      if (showCodeReviewModal) setShowCodeReviewModal(false);
+      if (dispatchOverlayOpen) setDispatchCollapsed(true);
+      else if (showCodeReviewModal) setShowCodeReviewModal(false);
       else if (showConversationSearch) setShowConversationSearch(false);
       else if (showFileFinder) setShowFileFinder(false);
       else if (showTerminal) setShowTerminal(false);
@@ -230,7 +257,7 @@ export function SessionView({
     };
     window.addEventListener('close-overlay', handler);
     return () => window.removeEventListener('close-overlay', handler);
-  }, [showTerminal, showWorkGroupPanel, showConversationSearch, showFileFinder, showCodeReviewModal]);
+  }, [showTerminal, showWorkGroupPanel, showConversationSearch, showFileFinder, showCodeReviewModal, dispatchOverlayOpen]);
 
   // Reset views when session changes, auto-focus on desktop only
   useEffect(() => {

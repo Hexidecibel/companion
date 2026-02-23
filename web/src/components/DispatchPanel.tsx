@@ -167,8 +167,22 @@ export function DispatchPanel({
     );
   }
 
-  // Desktop: bottom panel
-  if (collapsed) return null;
+  // Desktop: collapsed bar (always visible when agents exist)
+  if (collapsed) {
+    return (
+      <div className="dispatch-collapsed-bar" onClick={(e) => { e.stopPropagation(); onCollapse(); }}>
+        <span className={`dispatch-mobile-dot ${runningCount > 0 ? 'dispatch-dot-running' : 'dispatch-dot-done'}`} />
+        <span className="dispatch-collapsed-label">
+          {runningCount > 0
+            ? `${runningCount} agent${runningCount !== 1 ? 's' : ''} running`
+            : `${totalAgents} agent${totalAgents !== 1 ? 's' : ''} done`}
+          {completedCount > 0 && runningCount > 0 &&
+            ` / ${completedCount} done`}
+        </span>
+        <span className="dispatch-collapsed-expand">{'\u25B2'}</span>
+      </div>
+    );
+  }
 
   return (
     <div className="dispatch-panel" style={{ height }}>

@@ -3018,11 +3018,11 @@ html {
   padding: 4px 8px;
 }
 
-/* Compact agent card row */
+/* Two-line agent card */
 .dispatch-agent-card {
   display: flex;
-  align-items: center;
-  gap: 8px;
+  flex-direction: column;
+  gap: 2px;
   padding: 8px 10px;
   border-radius: 6px;
   cursor: pointer;
@@ -3031,6 +3031,21 @@ html {
 
 .dispatch-agent-card:hover {
   background-color: var(--bg-hover);
+}
+
+/* Row 1: dot + slug + duration */
+.dispatch-card-row1 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Row 2: description + msg count + chevron */
+.dispatch-card-row2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-left: 16px;
 }
 
 /* Status dot */
@@ -3065,9 +3080,17 @@ html {
   color: var(--text-primary);
   font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
   flex-shrink: 0;
-  max-width: 140px;
+  max-width: 200px;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dispatch-card-duration {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-left: auto;
+  flex-shrink: 0;
   white-space: nowrap;
 }
 
@@ -3126,6 +3149,40 @@ html {
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+/* Desktop collapsed bar */
+.dispatch-collapsed-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  background-color: var(--bg-secondary);
+  border-top: 1px solid var(--border-color);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background-color 0.15s;
+}
+
+.dispatch-collapsed-bar:hover {
+  background-color: var(--bg-hover);
+}
+
+.dispatch-collapsed-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  flex: 1;
+}
+
+.dispatch-collapsed-expand {
+  font-size: 10px;
+  color: var(--text-muted);
+  transition: color 0.15s;
+}
+
+.dispatch-collapsed-bar:hover .dispatch-collapsed-expand {
+  color: var(--text-primary);
 }
 
 /* Mobile bar (collapsed) */

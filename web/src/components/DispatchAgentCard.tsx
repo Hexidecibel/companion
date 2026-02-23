@@ -31,18 +31,31 @@ export function DispatchAgentCard({ agent, onClick }: DispatchAgentCardProps) {
 
   return (
     <div className={`dispatch-agent-card ${statusClass}`} onClick={(e) => { e.stopPropagation(); onClick(); }}>
-      <span className="dispatch-card-dot" />
-      <span className="dispatch-card-slug">{agent.slug || agent.agentId.slice(0, 8)}</span>
+      <div className="dispatch-card-row1">
+        <span className="dispatch-card-dot" />
+        <span className="dispatch-card-slug">{agent.slug || agent.agentId.slice(0, 8)}</span>
+        <span className="dispatch-card-duration">
+          {formatDuration(agent.startedAt, agent.completedAt)}
+        </span>
+      </div>
       {subtitle && (
-        <span className="dispatch-card-desc">{subtitle}</span>
+        <div className="dispatch-card-row2">
+          <span className="dispatch-card-desc">{subtitle}</span>
+          <span className="dispatch-card-meta">
+            {agent.messageCount} msgs
+          </span>
+          <span className="dispatch-card-chevron">{'\u203A'}</span>
+        </div>
       )}
-      <span className="dispatch-card-meta">
-        {formatDuration(agent.startedAt, agent.completedAt)}
-      </span>
-      <span className="dispatch-card-meta">
-        {agent.messageCount} msgs
-      </span>
-      <span className="dispatch-card-chevron">{'\u203A'}</span>
+      {!subtitle && (
+        <div className="dispatch-card-row2">
+          <span className="dispatch-card-desc" />
+          <span className="dispatch-card-meta">
+            {agent.messageCount} msgs
+          </span>
+          <span className="dispatch-card-chevron">{'\u203A'}</span>
+        </div>
+      )}
     </div>
   );
 }

@@ -238,9 +238,9 @@ export class SubAgentWatcher extends EventEmitter {
     let runningCount = 0;
     let completedCount = 0;
 
-    // Only show running agents + completed agents from last 30 minutes
+    // Only show running agents + completed agents from last 5 minutes
     const now = Date.now();
-    const thirtyMinAgo = now - 30 * 60 * 1000;
+    const completedCutoff = now - 5 * 60 * 1000;
     const fiveMinAgo = now - 5 * 60 * 1000;
 
     const sessionIdSet = sessionIds && sessionIds.length > 0 ? new Set(sessionIds) : null;
@@ -257,7 +257,7 @@ export class SubAgentWatcher extends EventEmitter {
         tracked.completedAt || (isStale ? tracked.lastActivity : undefined);
 
       // Skip old completed agents
-      if (status === 'completed' && effectiveCompletedAt && effectiveCompletedAt < thirtyMinAgo) {
+      if (status === 'completed' && effectiveCompletedAt && effectiveCompletedAt < completedCutoff) {
         continue;
       }
 
