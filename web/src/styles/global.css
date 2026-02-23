@@ -8927,3 +8927,42 @@ html {
 .error-boundary-btn-retry {
   background-color: var(--accent-green);
 }
+
+/* ── Fetch Error Banner ───────────────────────────────────────────── */
+.fetch-error-banner {
+  padding: 6px 12px;
+  background-color: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.2);
+  border-radius: 6px;
+  color: var(--accent-red);
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  margin: 4px 12px;
+}
+
+.fetch-error-banner-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fetch-error-banner-btn {
+  background: none;
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  border-radius: 4px;
+  color: var(--accent-red);
+  font-size: 11px;
+  padding: 2px 8px;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background-color 0.15s;
+}
+
+.fetch-error-banner-btn:hover {
+  background-color: rgba(239, 68, 68, 0.15);
+}

@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, memo } from 'react';
 import { ConversationHighlight } from '../types';
 import { ToolCard } from './ToolCard';
 import { MarkdownRenderer } from './MarkdownRenderer';
@@ -123,7 +123,7 @@ function SkillCard({ skillName, content, onViewFile }: { skillName: string; cont
   );
 }
 
-export function MessageBubble({ message, onSelectOption, onSelectChoice, onCancelMessage, onViewFile, onViewArtifact, searchTerm, isCurrentMatch, planFilePath, hideTools, isBookmarked, onToggleBookmark }: MessageBubbleProps) {
+export const MessageBubble = memo(function MessageBubble({ message, onSelectOption, onSelectChoice, onCancelMessage, onViewFile, onViewArtifact, searchTerm, isCurrentMatch, planFilePath, hideTools, isBookmarked, onToggleBookmark }: MessageBubbleProps) {
   const isUser = message.type === 'user';
   const isSystem = message.type === 'system';
   const [allExpanded, setAllExpanded] = useState<boolean | undefined>(undefined);
@@ -132,6 +132,16 @@ export function MessageBubble({ message, onSelectOption, onSelectChoice, onCance
   const didLongPress = useRef(false);
   const bubbleRef = useRef<HTMLDivElement>(null);
   const [batchApproving, setBatchApproving] = useState<{ current: number; total: number } | null>(null);
+  const [copied, setCopied] = useState(false);
+  const copiedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const handleCopy = useCallback(() => {
+    navigator.clipboard.writeText(message.content).then(() => {
+      setCopied(true);
+      if (copiedTimer.current) clearTimeout(copiedTimer.current);
+      copiedTimer.current = setTimeout(() => setCopied(false), 1500);
+    });
+  }, [message.content]);
 
   const showContextMenu = !isSystem && !message.isPending;
 
@@ -260,6 +270,15 @@ export function MessageBubble({ message, onSelectOption, onSelectChoice, onCance
               onFileClick={onViewFile}
               className="msg-markdown"
             />
+          )}
+          {isTouchDevice() && !message.isPending && (
+            <button
+              className={`msg-copy-btn ${copied ? 'msg-copy-btn-copied' : ''}`}
+              onClick={(e) => { e.stopPropagation(); handleCopy(); }}
+              aria-label="Copy message"
+            >
+              {copied ? 'Copied' : 'Copy'}
+            </button>
           )}
           {isUser && message.isPending && onCancelMessage && (
             <button
@@ -449,5 +468,5 @@ export function MessageBubble({ message, onSelectOption, onSelectChoice, onCance
       )}
     </div>
   );
-}
+});
 

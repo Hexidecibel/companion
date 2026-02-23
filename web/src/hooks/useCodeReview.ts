@@ -5,6 +5,7 @@ import { connectionManager } from '../services/ConnectionManager';
 interface UseCodeReviewReturn {
   fileChanges: FileChange[];
   loading: boolean;
+  error: string | null;
   refresh: () => void;
 }
 
@@ -14,6 +15,7 @@ export function useCodeReview(
 ): UseCodeReviewReturn {
   const [fileChanges, setFileChanges] = useState<FileChange[]>([]);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const mountedRef = useRef(true);
 
   const fetchDiff = useCallback(async () => {
@@ -31,9 +33,14 @@ export function useCodeReview(
       if (response.success && response.payload) {
         const payload = response.payload as { fileChanges: FileChange[]; sessionId: string };
         setFileChanges(payload.fileChanges);
+        setError(null);
+      } else if (!response.success) {
+        setError(response.error || 'Failed to load code review');
       }
-    } catch {
-      // Silently ignore
+    } catch (err) {
+      if (mountedRef.current) {
+        setError(err instanceof Error ? err.message : 'Failed to load code review');
+      }
     } finally {
       if (mountedRef.current) {
         setLoading(false);
@@ -47,6 +54,7 @@ export function useCodeReview(
     if (!serverId || !sessionId) {
       setFileChanges([]);
       setLoading(false);
+      setError(null);
       return;
     }
 
@@ -77,5 +85,5 @@ export function useCodeReview(
     return unsub;
   }, [serverId, sessionId, fetchDiff]);
 
-  return { fileChanges, loading, refresh: fetchDiff };
+  return { fileChanges, loading, error, refresh: fetchDiff };
 }

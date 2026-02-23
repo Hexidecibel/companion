@@ -30,6 +30,7 @@ import { WorkGroupPanel } from './WorkGroupPanel';
 import { FileFinder } from './FileFinder';
 import { useBookmarks } from '../hooks/useBookmarks';
 import { BookmarkList } from './BookmarkList';
+import { FetchErrorBanner } from './FetchErrorBanner';
 import { hideToolsKey } from '../services/storageKeys';
 
 interface SessionViewProps {
@@ -74,9 +75,9 @@ export function SessionView({
     loadMore,
   } = useConversation(serverId, sessionId, tmuxSessionName);
 
-  const { tasks, loading: tasksLoading } = useTasks(serverId, sessionId);
-  const { fileChanges, loading: reviewLoading, refresh: refreshReview } = useCodeReview(serverId, sessionId);
-  const { agents, runningCount, totalAgents } = useSubAgents(serverId, sessionId);
+  const { tasks, loading: tasksLoading, error: tasksError, refresh: refreshTasks } = useTasks(serverId, sessionId);
+  const { fileChanges, loading: reviewLoading, error: reviewError, refresh: refreshReview } = useCodeReview(serverId, sessionId);
+  const { agents, runningCount, totalAgents, error: agentsError } = useSubAgents(serverId, sessionId);
   const bypass = useBypassPermissions(serverId, sessionId);
   const sessionMute = useSessionMute(serverId);
   const { skills } = useSkills(serverId);
@@ -712,6 +713,16 @@ export function SessionView({
               onOpenModal={() => setShowCodeReviewModal(true)}
               onRefresh={refreshReview}
             />
+
+            {tasksError && (
+              <FetchErrorBanner message={`Tasks: ${tasksError}`} onRetry={refreshTasks} />
+            )}
+            {reviewError && (
+              <FetchErrorBanner message={`Code review: ${reviewError}`} onRetry={refreshReview} />
+            )}
+            {agentsError && (
+              <FetchErrorBanner message={`Agents: ${agentsError}`} />
+            )}
 
             {!mobile && dispatchCollapsed && totalAgents > 0 && serverId && (
               <div className="dispatch-collapsed-bar" onClick={() => setDispatchCollapsed(false)}>

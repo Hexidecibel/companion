@@ -7,6 +7,7 @@ const POLL_INTERVAL = 5000;
 interface UseTasksReturn {
   tasks: TaskItem[];
   loading: boolean;
+  error: string | null;
   refresh: () => void;
 }
 
@@ -16,6 +17,7 @@ export function useTasks(
 ): UseTasksReturn {
   const [tasks, setTasks] = useState<TaskItem[]>([]);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const mountedRef = useRef(true);
 
   const fetchTasks = useCallback(async () => {
@@ -33,9 +35,14 @@ export function useTasks(
       if (response.success && response.payload) {
         const payload = response.payload as { tasks: TaskItem[]; sessionId: string };
         setTasks(payload.tasks);
+        setError(null);
+      } else if (!response.success) {
+        setError(response.error || 'Failed to load tasks');
       }
-    } catch {
-      // Silently ignore
+    } catch (err) {
+      if (mountedRef.current) {
+        setError(err instanceof Error ? err.message : 'Failed to load tasks');
+      }
     } finally {
       if (mountedRef.current) {
         setLoading(false);
@@ -49,6 +56,7 @@ export function useTasks(
     if (!serverId || !sessionId) {
       setTasks([]);
       setLoading(false);
+      setError(null);
       return;
     }
 
@@ -62,5 +70,5 @@ export function useTasks(
     };
   }, [serverId, sessionId, fetchTasks]);
 
-  return { tasks, loading, refresh: fetchTasks };
+  return { tasks, loading, error, refresh: fetchTasks };
 }

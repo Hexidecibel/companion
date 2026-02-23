@@ -11,6 +11,7 @@ interface UseSubAgentsReturn {
   completedCount: number;
   totalAgents: number;
   loading: boolean;
+  error: string | null;
 }
 
 export function useSubAgents(
@@ -22,6 +23,7 @@ export function useSubAgents(
   const [completedCount, setCompletedCount] = useState(0);
   const [totalAgents, setTotalAgents] = useState(0);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const mountedRef = useRef(true);
   const runningRef = useRef(0);
 
@@ -34,6 +36,7 @@ export function useSubAgents(
       setCompletedCount(0);
       setTotalAgents(0);
       setLoading(false);
+      setError(null);
       return;
     }
 
@@ -63,9 +66,14 @@ export function useSubAgents(
           setCompletedCount(payload.completedCount);
           setTotalAgents(payload.totalAgents);
           runningRef.current = payload.runningCount;
+          setError(null);
+        } else if (!response.success) {
+          setError(response.error || 'Failed to load agents');
         }
-      } catch {
-        // Silently ignore
+      } catch (err) {
+        if (mountedRef.current) {
+          setError(err instanceof Error ? err.message : 'Failed to load agents');
+        }
       } finally {
         if (mountedRef.current) {
           setLoading(false);
@@ -88,5 +96,5 @@ export function useSubAgents(
     };
   }, [serverId, sessionId]);
 
-  return { agents, runningCount, completedCount, totalAgents, loading };
+  return { agents, runningCount, completedCount, totalAgents, loading, error };
 }
