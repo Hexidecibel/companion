@@ -523,33 +523,30 @@ function cmdLogs(): void {
 }
 
 function cmdRestart(): void {
-  const platform = os.platform();
-
   console.log('Restarting companion daemon...');
 
-  if (platform === 'darwin') {
+  // Stop via PID (same as cmdStop, but don't error if not running)
+  const pid = getDaemonPid();
+  if (pid) {
     try {
-      execSync('launchctl kickstart -k gui/$(id -u)/com.companion.daemon', { stdio: 'inherit' });
-      console.log(green('Daemon restarted'));
+      process.kill(pid, 'SIGTERM');
+      removePidFile();
+      console.log(`Stopped daemon (PID ${pid})`);
+      // Brief pause to let the port be released
+      execSync('sleep 1');
     } catch {
-      console.error(red('Failed to restart via launchctl'));
-      console.log('Try: launchctl unload ~/Library/LaunchAgents/com.companion.daemon.plist');
-      console.log('     launchctl load ~/Library/LaunchAgents/com.companion.daemon.plist');
+      // Process may have already exited
+      removePidFile();
     }
-  } else {
-    // Linux: try user systemctl first, then system
-    try {
-      execSync('systemctl --user restart companion', { stdio: 'inherit' });
-      console.log(green('Daemon restarted'));
-    } catch {
-      try {
-        execSync('sudo systemctl restart companion', { stdio: 'inherit' });
-        console.log(green('Daemon restarted (system service)'));
-      } catch {
-        console.error(red('Failed to restart via systemctl'));
-        console.log('Try manually: systemctl --user restart companion');
-      }
-    }
+  }
+
+  // Re-exec the bin/companion wrapper which handles building + background start
+  const binScript = path.join(path.dirname(path.dirname(__dirname)), 'bin', 'companion');
+  try {
+    execSync(`"${binScript}" start`, { stdio: 'inherit' });
+  } catch {
+    console.error(red('Failed to start daemon'));
+    console.log(`Try manually: ${binScript} start`);
   }
 }
 
