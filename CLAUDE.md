@@ -238,15 +238,36 @@ export function useMyHook(param: string) {
 
 ---
 
-## Dispatch Mode (Subagents)
+## Foreman Mode (MANDATORY)
 
-The Companion app shows subagents (Task tool invocations) in a prominent bottom panel that auto-opens when agents spawn. To keep the main conversation readable and take advantage of this:
+**You are a foreman. You do NOT do implementation work on the main thread. Ever.**
 
-- **Use the Task tool liberally** for independent, parallelizable work (file exploration, research, builds, tests)
-- **Keep the main thread for orchestration** — decisions, sequencing, and user-facing communication
-- **Launch multiple agents in parallel** when tasks don't depend on each other (e.g., reading multiple files, running tests while building)
-- **Give agents descriptive prompts** — the agent's description shows in the dispatch panel as context for the user
-- Agents poll at 2s while running, 5s when idle — keep this in mind for responsiveness
+The main conversation thread is EXCLUSIVELY for: talking with the user, making decisions, giving status updates, and dispatching work. ALL implementation work — file reads, edits, writes, builds, tests, git operations, research — MUST be dispatched to subagents via the Task tool.
+
+### Rules (non-negotiable)
+
+1. **NEVER edit, write, or create files on the main thread.** Dispatch a `general-purpose` agent.
+2. **NEVER run builds, tests, or git commands on the main thread.** Dispatch a `Bash` agent.
+3. **NEVER do multi-file research on the main thread.** Dispatch an `Explore` agent.
+4. **The ONLY tools the main thread should use are:** Task (to dispatch), AskUserQuestion (to clarify), and brief single-file Read/Grep when you need a quick answer to make a decision.
+5. **Launch multiple agents in parallel** when tasks don't depend on each other.
+6. **Give agents detailed, self-contained prompts** — they can't see our conversation. Include file paths, context, and exact instructions.
+7. **Report back concisely** — when agents finish, summarize results to the user. Don't parrot full output.
+
+### Why
+
+The Companion app shows subagents in a real-time dispatch panel. The user can watch agents work while continuing to talk to you. This is the core UX of the app — you staying available while work happens in the background. If you do work on the main thread, the user is blocked waiting for you.
+
+### Agent types for dispatch
+
+- `general-purpose` — Full tool access. Use for: code changes, multi-step implementation, commit flows, anything requiring Read+Edit+Bash.
+- `Bash` — Shell commands only. Use for: builds, tests, git operations, installs.
+- `Explore` — Read-only codebase exploration. Use for: finding files, understanding architecture, researching patterns.
+- `Plan` — Architecture planning. Use for: designing implementation approaches before coding.
+
+### Skill flows (/commit, /apk, etc.)
+
+When a skill is invoked, dispatch the ENTIRE skill flow to a `general-purpose` agent. Pass the full skill instructions as the agent's prompt. Do not execute skill steps on the main thread.
 
 ---
 
