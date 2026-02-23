@@ -34,6 +34,7 @@ export function Dashboard({ onSettings }: DashboardProps) {
     return stored ? parseInt(stored, 10) : 280;
   });
   const draggingRef = useRef(false);
+  const suppressPopstate = useRef(false);
   const [secondarySession, setSecondarySession] = useState<ActiveSession | null>(null);
   const [dashboardMode, setDashboardMode] = useState(false);
   const summaries = useAllServerSummaries();
@@ -226,18 +227,21 @@ export function Dashboard({ onSettings }: DashboardProps) {
       return;
     }
     setActiveSession({ serverId, sessionId });
-    if (isMobileViewport()) {
+    if (isMobile) {
       setSidebarOpen(false);
-      // Push history so Android back gesture returns to dashboard
+      // Push history so Android back gesture returns to dashboard.
+      // We always push here so the popstate handler has an entry to pop.
       history.pushState({ session: true }, '');
     }
-  }, [dashboardMode]);
+  }, [dashboardMode, isMobile]);
 
-  // Push a base history entry on mobile so back from dashboard doesn't exit the app
+  // Ensure the base history entry has the 'base' flag on mobile so the popstate
+  // handler recognizes it as the floor. App.tsx sets { screen, base } on mount;
+  // this is a fallback in case it was overwritten.
   useEffect(() => {
     if (!isMobile) return;
     if (!history.state?.base) {
-      history.replaceState({ base: true }, '');
+      history.replaceState({ ...history.state, base: true }, '');
     }
   }, [isMobile]);
 
@@ -245,6 +249,13 @@ export function Dashboard({ onSettings }: DashboardProps) {
   useEffect(() => {
     if (!isMobile) return;
     const handler = (_e: PopStateEvent) => {
+      // If the popstate was triggered programmatically (e.g. handleMobileBack),
+      // skip handling since the caller already managed the state transition.
+      if (suppressPopstate.current) {
+        suppressPopstate.current = false;
+        return;
+      }
+
       if (showNotifSettings) {
         // Close notification settings modal first
         setShowNotifSettings(false);
@@ -252,10 +263,15 @@ export function Dashboard({ onSettings }: DashboardProps) {
       } else if (document.body.dataset.overlay === 'true') {
         // An overlay panel (terminal, work group) is open — close it first
         window.dispatchEvent(new CustomEvent('close-overlay'));
-        history.pushState({ session: true }, '');
+        // Re-push so the next back still has an entry to pop
+        if (activeSession) {
+          history.pushState({ session: true }, '');
+        } else {
+          history.pushState({ base: true }, '');
+        }
       } else if (activeSession) {
         setActiveSession(null);
-        // Re-push base entry so next back doesn't exit
+        // Re-push base entry so next back on dashboard doesn't exit the app
         history.pushState({ base: true }, '');
       } else {
         // On dashboard with nowhere to go — re-push to prevent app exit
@@ -386,7 +402,16 @@ export function Dashboard({ onSettings }: DashboardProps) {
   }, [sessionMute]);
 
   const toggleSidebar = useCallback(() => setSidebarOpen(prev => !prev), []);
-  const handleMobileBack = useCallback(() => setActiveSession(null), []);
+
+  const handleMobileBack = useCallback(() => {
+    setActiveSession(null);
+    if (isMobile && history.state?.session) {
+      // There's a session entry on the stack — pop it via history.back().
+      // Suppress the popstate handler so we don't double-handle.
+      suppressPopstate.current = true;
+      history.back();
+    }
+  }, [isMobile]);
 
   const handleDragStart = useCallback((e: React.MouseEvent) => {
     e.preventDefault();

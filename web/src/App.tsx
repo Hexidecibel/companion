@@ -46,10 +46,12 @@ export function App() {
     return () => window.removeEventListener('keydown', handler);
   }, []);
 
-  // Ensure there's always a base history entry so back gesture doesn't exit the app
+  // Ensure there's always a base history entry so back gesture doesn't exit the app.
+  // Include both 'screen' and 'base' keys so both App and Dashboard popstate handlers
+  // recognize this as the floor entry.
   useEffect(() => {
     if (!history.state?.screen) {
-      history.replaceState({ screen: 'dashboard' }, '');
+      history.replaceState({ screen: 'dashboard', base: true }, '');
     }
   }, []);
 

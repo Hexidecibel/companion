@@ -84,23 +84,24 @@ export function MobileDashboard({
 
   // Signal to Dashboard that a modal overlay is open (for back gesture coordination)
   useEffect(() => {
-    const isOverlay = !!newProjectServerId || !!tmuxServerId || addingServer || !!editingServerId;
+    const isOverlay = !!newSessionServerId || !!newProjectServerId || !!tmuxServerId || addingServer || !!editingServerId;
     document.body.dataset.overlay = isOverlay ? 'true' : '';
     return () => { document.body.dataset.overlay = ''; };
-  }, [newProjectServerId, tmuxServerId, addingServer, editingServerId]);
+  }, [newSessionServerId, newProjectServerId, tmuxServerId, addingServer, editingServerId]);
 
   // Listen for close-overlay event from Dashboard's back gesture handler
   useEffect(() => {
     const handler = () => {
       // Close innermost modal first
-      if (newProjectServerId) setNewProjectServerId(null);
+      if (newSessionServerId) setNewSessionServerId(null);
+      else if (newProjectServerId) setNewProjectServerId(null);
       else if (tmuxServerId) setTmuxServerId(null);
       else if (editingServerId) setEditingServerId(undefined);
       else if (addingServer) setAddingServer(false);
     };
     window.addEventListener('close-overlay', handler);
     return () => window.removeEventListener('close-overlay', handler);
-  }, [newProjectServerId, tmuxServerId, editingServerId, addingServer]);
+  }, [newSessionServerId, newProjectServerId, tmuxServerId, editingServerId, addingServer]);
 
   // Check if any session across all servers needs attention
   const hasWaiting = useMemo(() => {
