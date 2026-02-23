@@ -347,6 +347,59 @@ function parseQueueOperation(entry: JsonlEntry): ConversationMessage | null {
   };
 }
 
+/**
+ * Detect CLI permission prompts rendered as text (e.g. "Do you want to make this edit?")
+ * and extract them as native chooser options. Returns null if no prompt found.
+ */
+function parsePermissionPrompt(content: string): {
+  question: string;
+  options: QuestionOption[];
+  cleanContent: string;
+} | null {
+  // Match "Do you want to <action>?" followed by numbered options
+  // Options are prefixed with ❯ (selected) or spaces, then "N. label"
+  // Optionally followed by footer like "Esc to cancel · Tab to amend"
+  const promptRegex =
+    /(Do you want to [^\n]+\?)\n((?:[❯\s]*\d+\.\s+[^\n]+\n?)+)(?:\n?Esc[^\n]*)?/;
+  const promptMatch = content.match(promptRegex);
+
+  if (!promptMatch) return null;
+
+  const question = promptMatch[1];
+  const optionsBlock = promptMatch[2];
+
+  // Parse individual options: "N. label" with optional (shortcut) suffix
+  const optionRegex = /\d+\.\s+(.+)/g;
+  const options: QuestionOption[] = [];
+  let optMatch;
+  while ((optMatch = optionRegex.exec(optionsBlock)) !== null) {
+    const rawLabel = optMatch[1].trim();
+    // Strip keyboard shortcut hints like "(shift+tab)"
+    const cleanLabel = rawLabel.replace(/\s*\([^)]*\)\s*$/, '').trim();
+    options.push({
+      label: mapPermissionLabel(cleanLabel),
+      description: question,
+    });
+  }
+
+  if (options.length === 0) return null;
+
+  // Strip the entire prompt block from content
+  const cleanContent = content.replace(promptMatch[0], '').trim();
+
+  return { question, options, cleanContent };
+}
+
+function mapPermissionLabel(label: string): string {
+  const lower = label.toLowerCase();
+  if (lower === 'yes') return 'yes';
+  if (lower === 'no') return 'no';
+  if (lower.startsWith('yes, allow all') || lower.includes("don't ask again")) {
+    return "yes, and don't ask again for this session";
+  }
+  return lower;
+}
+
 function parseEntry(
   entry: JsonlEntry,
   toolResults: Map<string, string>,
@@ -475,6 +528,16 @@ function parseEntry(
         // Skip tool results entirely - they're internal assistant responses
         // We only want to show actual user-typed messages
       }
+    }
+  }
+
+  // Detect permission prompts in text content and convert to native chooser
+  const permissionPrompt = parsePermissionPrompt(content);
+  if (permissionPrompt) {
+    content = permissionPrompt.cleanContent;
+    if (!options) {
+      options = permissionPrompt.options;
+      isWaitingForChoice = true;
     }
   }
 
