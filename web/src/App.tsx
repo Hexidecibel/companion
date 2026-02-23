@@ -64,12 +64,22 @@ export function App() {
   // Handle browser back (Android back gesture triggers popstate via WebView goBack)
   useEffect(() => {
     const handler = (_e: PopStateEvent) => {
-      // Always go back to dashboard on popstate at this level
+      // Dashboard has its own popstate handler — don't double-handle
+      if (screen.name === 'dashboard') return;
+
+      // If an overlay/modal is open in the current screen, close it first
+      if (document.body.dataset.overlay === 'true') {
+        window.dispatchEvent(new CustomEvent('close-overlay'));
+        // Re-push the current screen's history entry so next back still works
+        history.pushState({ screen: screen.name }, '');
+        return;
+      }
+      // No overlay — go back to dashboard
       setScreen({ name: 'dashboard' });
     };
     window.addEventListener('popstate', handler);
     return () => window.removeEventListener('popstate', handler);
-  }, []);
+  }, [screen.name]);
 
   // Listen for open-cost-dashboard events from child components
   useEffect(() => {

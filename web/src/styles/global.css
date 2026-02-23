@@ -1430,11 +1430,13 @@ body {
 
 /* Message bubbles */
 .msg-bubble {
+  position: relative;
   max-width: 80%;
   padding: 10px 14px;
   border-radius: 12px;
   word-break: break-word;
 }
+
 
 .msg-bubble-user {
   background: var(--gradient-button);
@@ -3233,6 +3235,8 @@ html {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  padding-top: var(--safe-top);
+  padding-bottom: var(--safe-bottom);
 }
 
 /* Hide divider on mobile */
@@ -6383,6 +6387,7 @@ html {
   flex: 1;
   overflow-y: auto;
   padding: 24px;
+  padding-bottom: calc(24px + var(--safe-bottom));
   max-width: 640px;
   margin: 0 auto;
   width: 100%;
@@ -7460,6 +7465,10 @@ html {
   .skill-browser-header {
     padding-top: calc(12px + var(--safe-top));
   }
+
+  .skill-browser-body {
+    padding-bottom: calc(16px + var(--safe-bottom));
+  }
 }
 
 .skill-browser-header {
@@ -8162,6 +8171,7 @@ html {
 .usage-dash-page {
   padding: 1rem;
   padding-top: calc(1rem + var(--safe-top));
+  padding-bottom: calc(1rem + var(--safe-bottom));
   max-width: 640px;
   margin: 0 auto;
   width: 100%;

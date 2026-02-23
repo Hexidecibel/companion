@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef, useCallback } from 'react';
+import { useState, useMemo, useRef, useCallback, useEffect } from 'react';
 import { ServerSummary, SessionSummary, ActiveSession } from '../types';
 import { useConnections } from '../hooks/useConnections';
 import { useServers } from '../hooks/useServers';
@@ -81,6 +81,26 @@ export function MobileDashboard({
   const [newSessionServerId, setNewSessionServerId] = useState<string | null>(null);
   const [newProjectServerId, setNewProjectServerId] = useState<string | null>(null);
   const [tmuxServerId, setTmuxServerId] = useState<string | null>(null);
+
+  // Signal to Dashboard that a modal overlay is open (for back gesture coordination)
+  useEffect(() => {
+    const isOverlay = !!newProjectServerId || !!tmuxServerId || addingServer || !!editingServerId;
+    document.body.dataset.overlay = isOverlay ? 'true' : '';
+    return () => { document.body.dataset.overlay = ''; };
+  }, [newProjectServerId, tmuxServerId, addingServer, editingServerId]);
+
+  // Listen for close-overlay event from Dashboard's back gesture handler
+  useEffect(() => {
+    const handler = () => {
+      // Close innermost modal first
+      if (newProjectServerId) setNewProjectServerId(null);
+      else if (tmuxServerId) setTmuxServerId(null);
+      else if (editingServerId) setEditingServerId(undefined);
+      else if (addingServer) setAddingServer(false);
+    };
+    window.addEventListener('close-overlay', handler);
+    return () => window.removeEventListener('close-overlay', handler);
+  }, [newProjectServerId, tmuxServerId, editingServerId, addingServer]);
 
   // Check if any session across all servers needs attention
   const hasWaiting = useMemo(() => {

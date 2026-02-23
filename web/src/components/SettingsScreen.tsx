@@ -5,7 +5,7 @@ import { getFontScale, saveFontScale } from '../services/storage';
 import { clearStore } from '../services/persistentStorage';
 import { NotificationSettingsModal } from './NotificationSettingsModal';
 import { SkillBrowser } from './SkillBrowser';
-import { isTauriDesktop, isMobileViewport } from '../utils/platform';
+import { isTauriDesktop } from '../utils/platform';
 import { useTheme } from '../context/ThemeContext';
 
 interface SettingsScreenProps {
@@ -93,11 +93,7 @@ export function SettingsScreen({ onBack }: SettingsScreenProps) {
     }
   };
 
-  // Push history when opening notification modal so back gesture closes it
   const openNotifSettings = useCallback((serverId: string) => {
-    if (isMobileViewport()) {
-      history.pushState({ modal: 'notif' }, '');
-    }
     setNotifServerId(serverId);
   }, []);
 
@@ -105,15 +101,26 @@ export function SettingsScreen({ onBack }: SettingsScreenProps) {
     setNotifServerId(null);
   }, []);
 
-  // Handle back gesture to close notification modal
+  // Signal to App.tsx that an overlay is open (for back gesture coordination)
   useEffect(() => {
-    if (!notifServerId || !isMobileViewport()) return;
+    const isOverlay = !!notifServerId || !!skillBrowserServerId;
+    document.body.dataset.overlay = isOverlay ? 'true' : '';
+    return () => { document.body.dataset.overlay = ''; };
+  }, [notifServerId, skillBrowserServerId]);
+
+  // Listen for close-overlay event from App.tsx's back gesture handler
+  useEffect(() => {
     const handler = () => {
-      setNotifServerId(null);
+      // Close innermost overlay first: skill browser, then notification modal
+      if (skillBrowserServerId) {
+        setSkillBrowserServerId(null);
+      } else if (notifServerId) {
+        setNotifServerId(null);
+      }
     };
-    window.addEventListener('popstate', handler);
-    return () => window.removeEventListener('popstate', handler);
-  }, [notifServerId]);
+    window.addEventListener('close-overlay', handler);
+    return () => window.removeEventListener('close-overlay', handler);
+  }, [skillBrowserServerId, notifServerId]);
 
   const connectedServers = snapshots.filter((s) => s.state.status === 'connected');
 

@@ -3,7 +3,6 @@ import { ConversationHighlight } from '../types';
 import { ToolCard } from './ToolCard';
 import { MarkdownRenderer } from './MarkdownRenderer';
 import { ContextMenu, ContextMenuEntry } from './ContextMenu';
-import { isTouchDevice } from '../utils/platform';
 import { QuestionBlock, MultiQuestionFlow, ChoiceData } from './QuestionBlock';
 
 export type { ChoiceData } from './QuestionBlock';
@@ -128,42 +127,14 @@ export const MessageBubble = memo(function MessageBubble({ message, onSelectOpti
   const isSystem = message.type === 'system';
   const [allExpanded, setAllExpanded] = useState<boolean | undefined>(undefined);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
-  const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const didLongPress = useRef(false);
   const bubbleRef = useRef<HTMLDivElement>(null);
   const [batchApproving, setBatchApproving] = useState<{ current: number; total: number } | null>(null);
-  const [copied, setCopied] = useState(false);
-  const copiedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const handleCopy = useCallback(() => {
-    navigator.clipboard.writeText(message.content).then(() => {
-      setCopied(true);
-      if (copiedTimer.current) clearTimeout(copiedTimer.current);
-      copiedTimer.current = setTimeout(() => setCopied(false), 1500);
-    });
-  }, [message.content]);
 
   const showContextMenu = !isSystem && !message.isPending;
 
   const openMenu = useCallback((x: number, y: number) => {
     setContextMenu({ x, y });
     if (navigator.vibrate) navigator.vibrate(50);
-  }, []);
-
-  const startLongPress = useCallback((e: React.TouchEvent) => {
-    didLongPress.current = false;
-    const touch = e.touches[0];
-    longPressTimer.current = setTimeout(() => {
-      didLongPress.current = true;
-      openMenu(touch.clientX, touch.clientY);
-    }, 500);
-  }, [openMenu]);
-
-  const cancelLongPress = useCallback(() => {
-    if (longPressTimer.current) {
-      clearTimeout(longPressTimer.current);
-      longPressTimer.current = null;
-    }
   }, []);
 
   const handleContextMenu = useCallback((e: React.MouseEvent) => {
@@ -252,11 +223,6 @@ export const MessageBubble = memo(function MessageBubble({ message, onSelectOpti
           ref={bubbleRef}
           className={`msg-bubble ${isUser ? 'msg-bubble-user' : 'msg-bubble-assistant'} ${isUser && message.isPending ? 'msg-bubble-pending' : ''} ${isBookmarked ? 'msg-bubble-bookmarked' : ''}`}
           onContextMenu={handleContextMenu}
-          {...(showContextMenu && isTouchDevice() ? {
-            onTouchStart: startLongPress,
-            onTouchEnd: cancelLongPress,
-            onTouchMove: cancelLongPress,
-          } : {})}
         >
           {searchTerm ? (
             <pre className="msg-content">
@@ -270,15 +236,6 @@ export const MessageBubble = memo(function MessageBubble({ message, onSelectOpti
               onFileClick={onViewFile}
               className="msg-markdown"
             />
-          )}
-          {isTouchDevice() && !message.isPending && (
-            <button
-              className={`msg-copy-btn ${copied ? 'msg-copy-btn-copied' : ''}`}
-              onClick={(e) => { e.stopPropagation(); handleCopy(); }}
-              aria-label="Copy message"
-            >
-              {copied ? 'Copied' : 'Copy'}
-            </button>
           )}
           {isUser && message.isPending && onCancelMessage && (
             <button

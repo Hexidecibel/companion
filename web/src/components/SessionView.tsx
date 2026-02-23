@@ -241,24 +241,28 @@ export function SessionView({
 
   // Signal to Dashboard that an overlay is open (for back gesture coordination)
   useEffect(() => {
-    const isOverlay = showTerminal || showWorkGroupPanel || showConversationSearch || showFileFinder || showCodeReviewModal || dispatchOverlayOpen;
+    const isOverlay = showTerminal || showWorkGroupPanel || showConversationSearch || showFileFinder || showCodeReviewModal || dispatchOverlayOpen || !!viewingFile || !!artifactContent || showBookmarks;
     document.body.dataset.overlay = isOverlay ? 'true' : '';
     return () => { document.body.dataset.overlay = ''; };
-  }, [showTerminal, showWorkGroupPanel, showConversationSearch, showFileFinder, showCodeReviewModal, dispatchOverlayOpen]);
+  }, [showTerminal, showWorkGroupPanel, showConversationSearch, showFileFinder, showCodeReviewModal, dispatchOverlayOpen, viewingFile, artifactContent, showBookmarks]);
 
   // Listen for close-overlay event from Dashboard's back gesture handler
   useEffect(() => {
     const handler = () => {
-      if (dispatchOverlayOpen) setDispatchCollapsed(true);
+      // Close innermost/topmost overlay first
+      if (artifactContent) setArtifactContent(null);
+      else if (viewingFile) setViewingFile(null);
+      else if (dispatchOverlayOpen) setDispatchCollapsed(true);
       else if (showCodeReviewModal) setShowCodeReviewModal(false);
       else if (showConversationSearch) setShowConversationSearch(false);
       else if (showFileFinder) setShowFileFinder(false);
+      else if (showBookmarks) setShowBookmarks(false);
       else if (showTerminal) setShowTerminal(false);
       else if (showWorkGroupPanel) setShowWorkGroupPanel(false);
     };
     window.addEventListener('close-overlay', handler);
     return () => window.removeEventListener('close-overlay', handler);
-  }, [showTerminal, showWorkGroupPanel, showConversationSearch, showFileFinder, showCodeReviewModal, dispatchOverlayOpen]);
+  }, [showTerminal, showWorkGroupPanel, showConversationSearch, showFileFinder, showCodeReviewModal, dispatchOverlayOpen, viewingFile, artifactContent, showBookmarks]);
 
   // Reset views when session changes, auto-focus on desktop only
   useEffect(() => {
