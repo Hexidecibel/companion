@@ -82,7 +82,7 @@ export function SessionView({
   const { skills } = useSkills(serverId);
   // Dispatch panel state
   const DISPATCH_HEIGHT_KEY = 'dispatch-panel-height';
-  const [dispatchCollapsed, setDispatchCollapsed] = useState(false);
+  const [dispatchCollapsed, setDispatchCollapsed] = useState(true);
   const [dispatchHeight, setDispatchHeight] = useState(() => {
     const stored = localStorage.getItem(DISPATCH_HEIGHT_KEY);
     return stored ? parseInt(stored, 10) : 280;
@@ -165,12 +165,14 @@ export function SessionView({
     return null;
   }, [highlights, latestPlanFile]);
 
-  // Auto-show dispatch panel when agents start running
+  // Auto-show dispatch panel when agents START running (not on initial load)
+  const hasMountedRef = useRef(false);
   useEffect(() => {
-    if (runningCount > 0 && prevRunningRef.current === 0) {
+    if (hasMountedRef.current && runningCount > 0 && prevRunningRef.current === 0) {
       setDispatchCollapsed(false);
     }
     prevRunningRef.current = runningCount;
+    hasMountedRef.current = true;
   }, [runningCount]);
 
   const showDispatchPanel = !dispatchCollapsed && totalAgents > 0;

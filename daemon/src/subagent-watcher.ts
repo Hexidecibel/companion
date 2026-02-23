@@ -144,6 +144,7 @@ export class SubAgentWatcher extends EventEmitter {
     let lastActivity = 0;
     let lastContent = '';
     let isComplete = false;
+    let lastEntryIsAssistantText = false;
 
     for (const line of lines) {
       try {
@@ -157,6 +158,7 @@ export class SubAgentWatcher extends EventEmitter {
 
         if (startedAt === 0) startedAt = timestamp;
         lastActivity = timestamp;
+        lastEntryIsAssistantText = false;
 
         if (entry.type === 'user' && entry.message?.content) {
           messageCount++;
@@ -181,24 +183,36 @@ export class SubAgentWatcher extends EventEmitter {
             completedAt = timestamp;
           }
 
-          // Extract last activity content
+          // Track whether last entry is an assistant text response (not tool_use)
+          // This is a strong signal the agent is done — Claude Code doesn't set stop_reason in JSONL
+          let hasToolUse = false;
           if (entry.message.content) {
             if (typeof entry.message.content === 'string') {
               lastContent = entry.message.content.substring(0, 50);
+              lastEntryIsAssistantText = true;
             } else if (Array.isArray(entry.message.content)) {
               for (const block of entry.message.content) {
                 if (block.type === 'text' && block.text) {
                   lastContent = block.text.substring(0, 50);
                 } else if (block.type === 'tool_use') {
                   lastContent = `Using tool...`;
+                  hasToolUse = true;
                 }
               }
+              lastEntryIsAssistantText = !hasToolUse;
             }
           }
         }
       } catch {
         // Skip malformed lines
       }
+    }
+
+    // If the last entry is an assistant text response (no tool_use), the agent is done.
+    // Claude Code subagent JSONL doesn't reliably set stop_reason, so use this heuristic.
+    if (lastEntryIsAssistantText && !isComplete) {
+      isComplete = true;
+      completedAt = lastActivity;
     }
 
     if (!agentId || !sessionId) return null;
@@ -219,29 +233,31 @@ export class SubAgentWatcher extends EventEmitter {
     };
   }
 
-  getAgentTree(sessionId?: string): AgentTree {
+  getAgentTree(sessionIds?: string[]): AgentTree {
     const agents: SubAgent[] = [];
     let runningCount = 0;
     let completedCount = 0;
 
-    // Only show running agents + completed agents from last 2 hours
+    // Only show running agents + completed agents from last 30 minutes
     const now = Date.now();
-    const twoHoursAgo = now - 2 * 60 * 60 * 1000;
-    const oneHourAgo = now - 60 * 60 * 1000;
+    const thirtyMinAgo = now - 30 * 60 * 1000;
+    const fiveMinAgo = now - 5 * 60 * 1000;
+
+    const sessionIdSet = sessionIds && sessionIds.length > 0 ? new Set(sessionIds) : null;
 
     for (const tracked of this.agents.values()) {
       // Filter by session if specified
-      if (sessionId && tracked.sessionId !== sessionId) continue;
+      if (sessionIdSet && !sessionIdSet.has(tracked.sessionId)) continue;
 
-      // Consider agent completed if explicitly marked OR no activity in 1 hour
-      const isStale = tracked.lastActivity < oneHourAgo;
+      // Consider agent completed if explicitly marked OR no activity in 5 minutes
+      const isStale = tracked.lastActivity < fiveMinAgo;
       const isActuallyComplete = tracked.isComplete || isStale;
       const status = isActuallyComplete ? 'completed' : 'running';
       const effectiveCompletedAt =
         tracked.completedAt || (isStale ? tracked.lastActivity : undefined);
 
       // Skip old completed agents
-      if (status === 'completed' && effectiveCompletedAt && effectiveCompletedAt < twoHoursAgo) {
+      if (status === 'completed' && effectiveCompletedAt && effectiveCompletedAt < thirtyMinAgo) {
         continue;
       }
 
@@ -267,7 +283,7 @@ export class SubAgentWatcher extends EventEmitter {
     agents.sort((a, b) => b.lastActivity - a.lastActivity);
 
     return {
-      sessionId: sessionId || 'all',
+      sessionId: sessionIds?.[0] || 'all',
       agents,
       totalAgents: agents.length,
       runningCount,
@@ -275,8 +291,8 @@ export class SubAgentWatcher extends EventEmitter {
     };
   }
 
-  getAgentsForSession(sessionId: string): SubAgent[] {
-    return this.getAgentTree(sessionId).agents;
+  getAgentsForSession(sessionIds: string[]): SubAgent[] {
+    return this.getAgentTree(sessionIds).agents;
   }
 
   /**
@@ -305,8 +321,8 @@ export class SubAgentWatcher extends EventEmitter {
 
     // Build the SubAgent info
     const now = Date.now();
-    const oneHourAgo = now - 60 * 60 * 1000;
-    const isStale = tracked.lastActivity < oneHourAgo;
+    const fiveMinAgo = now - 5 * 60 * 1000;
+    const isStale = tracked.lastActivity < fiveMinAgo;
     const isActuallyComplete = tracked.isComplete || isStale;
     const status = isActuallyComplete ? 'completed' : 'running';
 

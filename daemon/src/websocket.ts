@@ -572,11 +572,25 @@ export class WebSocketHandler {
           .listSessions()
           .then(async (tmuxSessions) => {
             const summary = await this.watcher.getServerSummary(tmuxSessions);
-            // Merge friendly names into session summaries
+            // Merge friendly names and subagent counts into session summaries
             const friendlyNames = this.sessionNameStore.getAll();
             for (const session of summary.sessions) {
               const fn = friendlyNames[session.id];
               if (fn) (session as Record<string, unknown>).friendlyName = fn;
+              // Add subagent counts per session (current conversation only)
+              if (this.subAgentWatcher) {
+                const convInfo = this.watcher.getConversationInfo(session.id);
+                if (convInfo) {
+                  const basename = convInfo.path.split('/').pop()?.replace('.jsonl', '');
+                  if (basename) {
+                    const tree = this.subAgentWatcher.getAgentTree([basename]);
+                    if (tree.totalAgents > 0) {
+                      (session as Record<string, unknown>).subagentRunning = tree.runningCount;
+                      (session as Record<string, unknown>).subagentTotal = tree.totalAgents;
+                    }
+                  }
+                }
+              }
             }
             this.send(client.ws, {
               type: 'server_summary',
@@ -3186,7 +3200,20 @@ export class WebSocketHandler {
     }
 
     try {
-      const tree = this.subAgentWatcher.getAgentTree(payload?.sessionId);
+      // Translate tmux session name to the CURRENT conversation UUID only.
+      // Don't include history — old conversations' subagents are not relevant.
+      let sessionIds: string[] | undefined;
+      if (payload?.sessionId) {
+        const convInfo = this.watcher.getConversationInfo(payload.sessionId);
+        if (convInfo) {
+          // Extract UUID from the conversation file path (last path segment without .jsonl)
+          const basename = convInfo.path.split('/').pop()?.replace('.jsonl', '');
+          if (basename) sessionIds = [basename];
+        }
+        // Fallback: pass the raw ID (might already be a UUID)
+        if (!sessionIds || sessionIds.length === 0) sessionIds = [payload.sessionId];
+      }
+      const tree = this.subAgentWatcher.getAgentTree(sessionIds);
       this.send(client.ws, {
         type: 'agent_tree',
         success: true,

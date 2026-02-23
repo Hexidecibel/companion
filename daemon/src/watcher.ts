@@ -1213,6 +1213,19 @@ export class SessionWatcher extends EventEmitter {
   }
 
   /**
+   * Get all conversation UUIDs associated with a tmux session name.
+   * Includes the current mapping plus the full compaction history.
+   */
+  getConversationIdsForSession(tmuxSessionName: string): string[] {
+    const ids: string[] = [];
+    const history = this.tmuxConversationHistory.get(tmuxSessionName);
+    if (history) ids.push(...history);
+    const current = this.tmuxConversationIds.get(tmuxSessionName);
+    if (current && !ids.includes(current)) ids.push(current);
+    return ids;
+  }
+
+  /**
    * Reverse lookup: given a conversation UUID, find the tmux session name running it.
    */
   getTmuxSessionForConversation(conversationId: string): string | null {

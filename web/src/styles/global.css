@@ -7204,6 +7204,31 @@ html {
   margin-top: 2px;
 }
 
+.mobile-session-subagents {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.mobile-subagent-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.mobile-subagent-dot.running {
+  background: var(--accent-blue);
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+.mobile-subagent-dot.done {
+  background: var(--accent-green);
+}
+
 .mobile-session-time {
   font-size: 12px;
   color: var(--text-muted);

@@ -102,6 +102,8 @@ export interface SessionSummary {
   currentActivity?: string;
   tmuxSessionName?: string;
   recentTimestamps?: number[];
+  subagentRunning?: number;
+  subagentTotal?: number;
 }
 
 export interface ServerSummary {

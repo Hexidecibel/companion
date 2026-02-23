@@ -377,6 +377,14 @@ function MobileSessionItem({ session, serverId, onSelect, onOpenInSplit, onClose
         {session.currentActivity && (
           <div className="mobile-session-activity">{session.currentActivity}</div>
         )}
+        {session.subagentTotal && session.subagentTotal > 0 && (
+          <div className="mobile-session-subagents">
+            <span className={`mobile-subagent-dot ${session.subagentRunning ? 'running' : 'done'}`} />
+            {session.subagentRunning
+              ? `${session.subagentRunning} agent${session.subagentRunning !== 1 ? 's' : ''}`
+              : `${session.subagentTotal} done`}
+          </div>
+        )}
       </div>
       {session.recentTimestamps && session.recentTimestamps.length > 0 && (
         <Sparkline timestamps={session.recentTimestamps} />
