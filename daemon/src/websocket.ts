@@ -35,6 +35,8 @@ import {
   FUZZY_SCORE_SUBSEQUENCE_BASE,
   FUZZY_SCORE_CONSECUTIVE_MULTIPLIER,
   FUZZY_SCORE_LENGTH_MULTIPLIER,
+  CLI_READY_POLL_INTERVAL_MS,
+  CLI_READY_TIMEOUT_MS,
 } from './constants';
 import { InputInjector } from './input-injector';
 import { PushNotificationService } from './push';
@@ -940,6 +942,14 @@ export class WebSocketHandler {
         );
         break;
 
+      case 'scaffold_open_session':
+        this.handleScaffoldOpenSession(
+          client,
+          payload as { workingDir: string; projectName: string; projectDescription?: string; templateName?: string },
+          requestId
+        );
+        break;
+
       case 'kill_tmux_session':
         this.handleKillTmuxSession(client, payload as { sessionName: string }, requestId);
         break;
@@ -1128,6 +1138,7 @@ export class WebSocketHandler {
                   type: t.type,
                   icon: t.icon,
                   tags: t.tags,
+                  fileCount: t.files.length,
                   score: s?.score ?? 0,
                   matchedKeywords: s?.matchedKeywords ?? [],
                 };
@@ -1147,6 +1158,7 @@ export class WebSocketHandler {
                 type: t.type,
                 icon: t.icon,
                 tags: t.tags,
+                fileCount: t.files.length,
               })),
             },
             requestId,
@@ -2101,6 +2113,79 @@ export class WebSocketHandler {
         requestId,
       });
     }
+  }
+
+  private async handleScaffoldOpenSession(
+    client: AuthenticatedClient,
+    payload: { workingDir: string; projectName: string; projectDescription?: string; templateName?: string } | undefined,
+    requestId?: string
+  ): Promise<void> {
+    if (!payload?.workingDir || !payload?.projectName) {
+      this.send(client.ws, {
+        type: 'scaffold_session_opened',
+        success: false,
+        error: 'Missing workingDir or projectName',
+        requestId,
+      });
+      return;
+    }
+
+    // Create the tmux session (reuse existing logic)
+    const sessionName = this.tmux.generateSessionName(payload.workingDir);
+    console.log(`WebSocket: scaffold_open_session "${sessionName}" in ${payload.workingDir}`);
+
+    const result = await this.tmux.createSession(sessionName, payload.workingDir, true);
+
+    if (!result.success) {
+      this.send(client.ws, {
+        type: 'scaffold_session_opened',
+        success: false,
+        error: result.error,
+        requestId,
+      });
+      return;
+    }
+
+    // Store config, switch target, mark new, refresh paths (same as handleCreateTmuxSession)
+    this.storeTmuxSessionConfig(sessionName, payload.workingDir, true);
+    this.injector.setActiveSession(sessionName);
+    this.watcher.markSessionAsNew(sessionName);
+    this.watcher.clearActiveSession();
+    await this.watcher.refreshTmuxPaths();
+
+    // Respond immediately -- don't block on CLI readiness
+    this.send(client.ws, {
+      type: 'scaffold_session_opened',
+      success: true,
+      payload: { sessionName, workingDir: payload.workingDir },
+      requestId,
+    });
+    this.broadcast('tmux_sessions_changed', { action: 'created', sessionName });
+
+    // Fire-and-forget: poll for CLI readiness then inject initial message
+    const { projectName, projectDescription, templateName } = payload;
+    (async () => {
+      const deadline = Date.now() + CLI_READY_TIMEOUT_MS;
+      const promptRe = /[>$]\s*$/;
+
+      while (Date.now() < deadline) {
+        await new Promise(resolve => setTimeout(resolve, CLI_READY_POLL_INTERVAL_MS));
+        try {
+          const paneContent = await this.injector.capturePaneContent(sessionName);
+          if (promptRe.test(paneContent)) {
+            console.log(`[SCAFFOLD] CLI ready in "${sessionName}", injecting initial message`);
+            const templateNote = templateName ? ` The project has been scaffolded with the "${templateName}" template.` : '';
+            const description = projectDescription ? ` ${projectDescription}` : '';
+            const message = `I'm starting a new project called "${projectName}".${description}${templateNote} Please:\n1. Review the project structure and CLAUDE.md\n2. Create a prioritized todo list (TaskCreate) with concrete steps to accomplish the goal\n3. Begin working on the first task`;
+            await this.injector.sendInput(message, sessionName);
+            return;
+          }
+        } catch (err) {
+          console.log(`[SCAFFOLD] Poll error: ${err}`);
+        }
+      }
+      console.log(`[SCAFFOLD] CLI readiness timeout for "${sessionName}" after ${CLI_READY_TIMEOUT_MS}ms`);
+    })().catch(err => console.error(`[SCAFFOLD] Unexpected error: ${err}`));
   }
 
   private async handleKillTmuxSession(

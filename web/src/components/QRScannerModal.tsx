@@ -99,7 +99,7 @@ export function QRScannerModal({ onScan, onClose }: QRScannerModalProps) {
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal qr-scanner-modal" onClick={(e) => e.stopPropagation()}>
         <div className="form-header">
-          <button className="icon-btn small" onClick={onClose}>&larr;</button>
+          <button className="icon-btn small" onClick={onClose} title="Close">&larr;</button>
           <h2>Scan QR Code</h2>
           <div className="header-spacer" />
         </div>

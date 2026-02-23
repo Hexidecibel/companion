@@ -118,7 +118,7 @@ export function SettingsScreen({ onBack }: SettingsScreenProps) {
   return (
     <div className="screen">
       <header className="form-header">
-        <button className="icon-btn" onClick={onBack}>
+        <button className="icon-btn" onClick={onBack} title="Back">
           &larr;
         </button>
         <h2>Settings</h2>

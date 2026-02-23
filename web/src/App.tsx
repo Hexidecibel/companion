@@ -120,6 +120,15 @@ export function App() {
       },
     },
     {
+      id: 'new-project',
+      label: 'New Project',
+      icon: 'P',
+      execute: () => {
+        navigateTo('dashboard');
+        window.dispatchEvent(new CustomEvent('open-new-project'));
+      },
+    },
+    {
       id: 'focus-input',
       label: 'Focus Input',
       icon: '/',

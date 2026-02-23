@@ -314,6 +314,7 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
               <button
                 className="input-bar-image-remove"
                 onClick={() => removeImage(img.id)}
+                title="Remove image"
               >
                 x
               </button>

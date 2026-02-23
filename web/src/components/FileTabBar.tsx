@@ -25,6 +25,7 @@ export function FileTabBar({ files, activeFile, onSelectFile, onCloseFile, onClo
               <span className="file-tab-name">{fileName}</span>
               <span
                 className="file-tab-close"
+                title="Close tab"
                 onClick={(e) => {
                   e.stopPropagation();
                   onCloseFile(path);

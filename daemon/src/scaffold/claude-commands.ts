@@ -146,6 +146,42 @@ export function generateClaudeMd(
   sections.push('- `/work` — Implement planned items');
   sections.push('');
 
+  // Tracking files
+  sections.push('## Tracking Files');
+  sections.push('');
+  sections.push('Four files track the lifecycle of work items:');
+  sections.push('');
+  sections.push('| File | Purpose |');
+  sections.push('|------|---------|');
+  sections.push('| `todo.md` | Quick capture for ideas and tasks. Items are raw, unplanned. |');
+  sections.push('| `plan.md` | Detailed implementation plans with status, design, file lists, and steps. |');
+  sections.push('| `FEATURES.md` | Completed features — living changelog of what\'s been shipped. |');
+  sections.push('| `backlog.md` | Deferred ideas, long-term research, and items not in the daily workflow. |');
+  sections.push('');
+  sections.push('**Flow:** `todo.md` (idea) -> `plan.md` (planned -> in-progress -> done) -> `FEATURES.md` (shipped)');
+  sections.push('**Deferred:** Items moved from `todo.md` to `backlog.md` when not prioritized.');
+  sections.push('');
+  sections.push('When committing (`/commit`), update tracking files:');
+  sections.push('1. Remove completed items from `todo.md`');
+  sections.push('2. Set status to `done` in `plan.md`');
+  sections.push('3. Add/update entries in `FEATURES.md`');
+  sections.push('');
+
+  // Task management
+  sections.push('## Task Management');
+  sections.push('');
+  sections.push('Use `TaskCreate` for concrete work items to track progress:');
+  sections.push('- Create tasks with clear, actionable subjects');
+  sections.push('- Set tasks to `in_progress` when starting, `completed` when done');
+  sections.push('- Use task dependencies (`blocks`/`blockedBy`) for ordering');
+  sections.push('');
+
+  // Interaction style
+  sections.push('## Interaction');
+  sections.push('');
+  sections.push('When you need user input, prefer `AskUserQuestion` with clear options over open-ended questions. This renders a native chooser in the companion app rather than a wall of text.');
+  sections.push('');
+
   return sections.join('\n');
 }
 

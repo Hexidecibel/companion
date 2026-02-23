@@ -275,7 +275,7 @@ Detailed plans for upcoming work items. Completed items are moved to FEATURES.md
 ---
 
 ## Item: Error toast for failed choice/approval sends
-**Status:** planned
+**Status:** done
 
 ### Requirements
 - When `onSelectChoice` or `onSelectOption` fails, show inline error below the options

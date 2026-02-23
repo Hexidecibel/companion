@@ -78,7 +78,7 @@ export function UsagePanel({ serverId, onClose }: UsagePanelProps) {
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 520 }}>
         <div className="form-header">
-          <button className="icon-btn small" onClick={onClose}>&larr;</button>
+          <button className="icon-btn small" onClick={onClose} title="Back">&larr;</button>
           <h2>Usage</h2>
           <button className="icon-btn small" onClick={loadUsage} disabled={loading}>
             &#x21bb;

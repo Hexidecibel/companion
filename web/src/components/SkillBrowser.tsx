@@ -62,7 +62,7 @@ export function SkillBrowser({ serverId, onClose }: SkillBrowserProps) {
     <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && onClose()}>
       <div className="skill-browser">
         <header className="skill-browser-header">
-          <button className="icon-btn" onClick={onClose}>&larr;</button>
+          <button className="icon-btn" onClick={onClose} title="Back">&larr;</button>
           <h2>Skills</h2>
           <button className="icon-btn" onClick={refresh} title="Refresh">&#x21bb;</button>
         </header>

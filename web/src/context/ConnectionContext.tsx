@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useState, useCallback, type ReactNode } from 'react';
 import { Server } from '../types';
 import { connectionManager, ConnectionSnapshot } from '../services/ConnectionManager';
-import { getServers, addServer as storageAddServer, updateServer as storageUpdateServer, deleteServer as storageDeleteServer } from '../services/storage';
+import { getServers, saveServers, addServer as storageAddServer, updateServer as storageUpdateServer, deleteServer as storageDeleteServer } from '../services/storage';
 
 const LOCAL_SERVER_ID = '__local__';
 
@@ -64,6 +64,15 @@ export function ConnectionProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let loaded = getServers();
 
+    // Deduplicate by host:port (keep the last entry, which is most recent)
+    const seen = new Map<string, number>();
+    loaded.forEach((s, i) => seen.set(`${s.host}:${s.port}`, i));
+    if (seen.size < loaded.length) {
+      const keep = new Set(seen.values());
+      loaded = loaded.filter((_, i) => keep.has(i));
+      saveServers(loaded);
+    }
+
     const autoServer = autoDetectLocalServer(loaded);
     if (autoServer) {
       const existingIdx = loaded.findIndex((s) => s.id === autoServer.id);
@@ -95,6 +104,13 @@ export function ConnectionProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const addServer = useCallback((server: Server) => {
+    // Disconnect any existing server with the same host:port before adding
+    const existing = getServers().filter(
+      (s) => s.host === server.host && s.port === server.port && s.id !== server.id,
+    );
+    for (const old of existing) {
+      connectionManager.disconnectServer(old.id);
+    }
     storageAddServer(server);
     const updated = getServers();
     setServers(updated);

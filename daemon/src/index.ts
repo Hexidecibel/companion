@@ -13,7 +13,7 @@ import { createServer, validateTlsConfig } from './tls';
 import { certsExist, generateAndSaveCerts, getDefaultCertPaths } from './cert-generator';
 import { createQRRequestHandler } from './qr-server';
 import { dispatchCli, writePidFile, removePidFile } from './cli';
-import { AUTO_APPROVAL_DEDUP_WINDOW_MS, AUTO_APPROVAL_CLEANUP_WINDOW_MS, APPROVAL_SEND_DELAY_MS, SHUTDOWN_TIMEOUT_MS, STATUS_LOG_INTERVAL_MS } from './constants';
+import { APPROVAL_SEND_DELAY_MS, AUTO_APPROVAL_MAX_TRACKED_IDS, SHUTDOWN_TIMEOUT_MS, STATUS_LOG_INTERVAL_MS } from './constants';
 
 // Check CLI commands before starting daemon
 const cliArgs = process.argv.slice(2);
@@ -174,11 +174,9 @@ async function main(): Promise<void> {
     console.log(
       `Auto-approve tools from config: ${config.autoApproveTools.length > 0 ? config.autoApproveTools.join(', ') : '(none - client toggle only)'}`
     );
-    // Track recent approvals per session+tool-IDs to avoid double-firing.
-    // Key: "sessionId:toolId1,toolId2", Value: timestamp of last approval sent.
-    // Using tool IDs (not names) means each unique tool instance gets approved exactly once,
-    // while consecutive same-named tools (Bash → Bash) are correctly treated as distinct.
-    const lastApprovalByKey = new Map<string, number>();
+    // Track approved tool IDs to avoid double-firing.
+    // Tool use IDs are unique UUIDs — once approved, never re-approve.
+    const approvedToolIds = new Set<string>();
 
     watcher.on('pending-approval', async ({ sessionId, projectPath, tools }) => {
       // tools is now Array<{name: string, id: string}>
@@ -204,26 +202,23 @@ async function main(): Promise<void> {
         return;
       }
 
-      // Dedup by tool IDs — each unique set of tool instances gets approved exactly once.
-      // Different tool_use_ids always produce a different key, so consecutive
-      // same-named tools (e.g., Bash after Bash) are never blocked.
-      const now = Date.now();
-      const dedupKey = `${sessionId}:${autoApprovable
-        .map((t) => t.id)
-        .sort()
-        .join(',')}`;
-      const lastApproval = lastApprovalByKey.get(dedupKey);
-      if (lastApproval && now - lastApproval < AUTO_APPROVAL_DEDUP_WINDOW_MS) {
+      // Dedup by tool IDs — each unique tool use ID gets approved exactly once.
+      const toolIds = autoApprovable.map((t) => t.id);
+      const unapproved = autoApprovable.filter((t) => !approvedToolIds.has(t.id));
+      if (unapproved.length === 0) {
         console.log(
-          `[AUTO-APPROVE] Dedup: skipping [${autoApprovable.map((t) => t.name).join(', ')}] (${now - lastApproval}ms ago)`
+          `[AUTO-APPROVE] Dedup: all tool IDs already approved [${autoApprovable.map((t) => t.name).join(', ')}]`
         );
         return;
       }
-      lastApprovalByKey.set(dedupKey, now);
 
-      // Clean up old entries
-      for (const [key, ts] of lastApprovalByKey) {
-        if (now - ts > AUTO_APPROVAL_CLEANUP_WINDOW_MS) lastApprovalByKey.delete(key);
+      // Mark all tool IDs as approved before sending
+      toolIds.forEach((id) => approvedToolIds.add(id));
+
+      // Bounded cleanup: if set grows too large, clear it (old IDs are safe to forget)
+      if (approvedToolIds.size > AUTO_APPROVAL_MAX_TRACKED_IDS) {
+        console.log(`[AUTO-APPROVE] Clearing tracked IDs (exceeded ${AUTO_APPROVAL_MAX_TRACKED_IDS})`);
+        approvedToolIds.clear();
       }
 
       // Resolve tmux session: sessionId IS the tmux session name now (from watcher events),

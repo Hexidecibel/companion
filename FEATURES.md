@@ -28,7 +28,7 @@ High-level features of the Companion daemon, web client, and desktop/mobile apps
 - Send text and images to the CLI from your phone
 - Quick reply chips and slash commands
 - Multi-question answering with per-question selection and "Other" freetext
-- Multi-select checkbox UI for questions that allow multiple answers
+- Multi-select checkbox UI for questions that allow multiple answers with send-in-flight guard (buttons disabled, "Sending..." text during async submit)
 - Undo history for recovering cleared or sent input
 - **Native choice selection:** approval prompts and AskUserQuestion options send key sequences (arrow keys + Space/Enter) instead of text, matching the CLI's interactive selection UI
 - Image paste and drag-and-drop in terminal mode (sends via normal image upload path)
@@ -102,6 +102,8 @@ High-level features of the Companion daemon, web client, and desktop/mobile apps
 
 ## Push Notifications
 - FCM-based push notifications when the CLI needs input
+- **In-app notifications:** when the tab is focused, emits custom events so the sidebar shows inline indicators instead of suppressing silently
+- **Session attention badges:** amber pulsing dot on sidebar sessions that transition to "waiting" while not actively viewed, clears when session is selected
 - 2-tier escalation: browser notifications immediately, push after configurable delay
 - Consolidated notifications batching multiple pending events into one push
 - Quiet hours scheduling
@@ -122,11 +124,14 @@ High-level features of the Companion daemon, web client, and desktop/mobile apps
 
 ## Project Scaffolding (New Project Wizard)
 - Multiple stack templates (React, Node, Python, Go, Next.js, MUI)
-- Auto-generated CLAUDE.md with project-specific instructions
+- Auto-generated CLAUDE.md with project-specific instructions, tracking files workflow, task management, and interaction guidance
 - Standard slash commands (.claude/commands/) tailored per stack: /up, /down, /todo, /plan, /work, /test
 - Git initialization and GitHub repo creation
 - Template variable interpolation
 - Progress tracking during creation
+- **Auto-kickstart sessions:** `scaffold_open_session` endpoint creates tmux session, polls for CLI readiness, then injects initial message describing the project and asking Claude to create a task list
+- **File viewer on done screen:** clickable file names in the created-files tree open FileViewerModal for immediate inspection
+- **Session selection fix:** passes tmux session name directly instead of unreliable path-based lookup
 
 ## Conversation Archive
 - Save completed conversation summaries
@@ -162,7 +167,7 @@ High-level features of the Companion daemon, web client, and desktop/mobile apps
 - Automatic approval of safe tool calls (Read, Glob, Grep, etc.)
 - "Always Allow" option on pending approval prompts
 - Auto-expand pending tool approval cards
-- Composite key deduplication to prevent duplicate approvals
+- Tool-ID-based deduplication: each unique tool use UUID is approved exactly once, preventing "yes" spam when tools remain pending
 - Fuzzy tmux session path matching
 - Retry logic for failed approval sends
 - Detailed logging for debugging approval flow
@@ -269,8 +274,9 @@ Summary card on the dashboard when returning after inactivity, showing what happ
 - "While you were away" banner with relative time and event summary
 - Groups events by session: completed, waiting, errors
 - Per-session rows with status icons and preview text
-- Dismissible with fade-in animation
-- 5-minute inactivity threshold to avoid noise
+- Dismissible with fade-in animation and per-away-period persistence (won't re-show on subsequent re-focuses)
+- 2-minute minimum away duration to avoid noise on brief tab switches
+- Only shows for urgent events (waiting_for_input, error_detected, worker_waiting, worker_error)
 - Fetches from daemon notification history (persisted to disk)
 - Works on both mobile and desktop dashboards
 

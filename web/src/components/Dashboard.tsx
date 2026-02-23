@@ -611,6 +611,7 @@ function DashboardGrid({ snapshots, summaries, servers, onSelectSession }: Dashb
             onEdit={() => {}}
             isEnabled={isEnabled}
             onNewSession={() => {}}
+            onNewProject={() => {}}
             onTmuxSessions={() => {}}
             newSessionOpen={false}
           />

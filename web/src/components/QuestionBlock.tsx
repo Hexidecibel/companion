@@ -20,6 +20,7 @@ export function QuestionBlock({ question, onSelectOption, onSelectChoice }: Ques
   const [otherText, setOtherText] = useState('');
   const blockRef = useRef<HTMLDivElement>(null);
   const [sendError, setSendError] = useState(false);
+  const [isSending, setIsSending] = useState(false);
   const lastChoiceRef = useRef<ChoiceData | null>(null);
 
   useEffect(() => {
@@ -31,6 +32,7 @@ export function QuestionBlock({ question, onSelectOption, onSelectChoice }: Ques
 
   const trySendChoice = useCallback(async (choice: ChoiceData) => {
     lastChoiceRef.current = choice;
+    setIsSending(true);
     try {
       if (onSelectChoice) {
         const result = await onSelectChoice(choice);
@@ -38,6 +40,8 @@ export function QuestionBlock({ question, onSelectOption, onSelectChoice }: Ques
       }
     } catch {
       setSendError(true);
+    } finally {
+      setIsSending(false);
     }
   }, [onSelectChoice]);
 
@@ -132,6 +136,7 @@ export function QuestionBlock({ question, onSelectOption, onSelectChoice }: Ques
             className={`msg-option-btn ${question.multiSelect && selected.has(idx) ? 'selected' : ''} ${showDescriptions ? 'with-desc' : ''}`}
             onClick={() => handleOptionClick(idx)}
             title={opt.description}
+            disabled={isSending}
           >
             <span className="option-key-hint">{idx + 1}</span>
             <span className="option-label">{opt.label}</span>
@@ -147,14 +152,15 @@ export function QuestionBlock({ question, onSelectOption, onSelectChoice }: Ques
           <button
             className="question-block-submit"
             onClick={handleSubmitMulti}
-            disabled={selected.size === 0}
+            disabled={selected.size === 0 || isSending}
           >
-            Submit ({selected.size})
+            {isSending ? 'Sending...' : `Submit (${selected.size})`}
           </button>
         )}
         <button
           className="question-block-other-toggle"
           onClick={() => setShowOther(!showOther)}
+          disabled={isSending}
         >
           Other...
         </button>
@@ -178,6 +184,7 @@ export function QuestionBlock({ question, onSelectOption, onSelectChoice }: Ques
           <button
             className="question-block-other-send"
             onClick={handleSendOther}
+            disabled={isSending}
           >
             Send
           </button>

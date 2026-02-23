@@ -1,5 +1,5 @@
 import { spawn } from 'child_process';
-import { TMUX_OPERATION_TIMEOUT_MS, INPUT_LOG_PREVIEW_LENGTH, POST_TEXT_DELAY_MS, POST_ENTER_DELAY_MS, POST_ENTER_BEFORE_TYPING_DELAY_MS, POST_OTHER_SELECT_DELAY_MS, POST_TEXT_INPUT_DELAY_MS, POST_CHOICE_DELAY_MS, DEFAULT_PANE_CAPTURE_LINES } from './constants';
+import { TMUX_OPERATION_TIMEOUT_MS, INPUT_LOG_PREVIEW_LENGTH, POST_TEXT_DELAY_MS, POST_ENTER_DELAY_MS, POST_ENTER_BEFORE_TYPING_DELAY_MS, POST_OTHER_SELECT_DELAY_MS, POST_TEXT_INPUT_DELAY_MS, POST_CHOICE_DELAY_MS, DEFAULT_PANE_CAPTURE_LINES, OVERLAY_DISMISS_DELAY_MS, OVERLAY_DETECTION_LINES } from './constants';
 
 export class InputInjector {
   private defaultSession: string;
@@ -36,10 +36,38 @@ export class InputInjector {
         return false;
       }
 
+      // Dismiss any TUI overlay before sending
+      await this.dismissOverlayIfPresent(session);
+
       // Session exists, send the input
       return await this.doSendInput(input, session);
     } finally {
       releaseLock!();
+    }
+  }
+
+  /**
+   * Detect and dismiss TUI overlays (e.g. "Background tasks" panel) before sending input.
+   * Overlays intercept keystrokes, causing messages to silently fail.
+   * Fails open: if capture errors, we proceed without dismissing.
+   */
+  private async dismissOverlayIfPresent(session: string): Promise<void> {
+    try {
+      const paneContent = await this.capturePaneContent(session, OVERLAY_DETECTION_LINES);
+      const overlayPatterns = [
+        /to select.*Enter to view.*Esc to close/,  // Background tasks panel
+        /Esc to close/,                              // Generic overlay catch-all
+      ];
+      const hasOverlay = overlayPatterns.some((p) => p.test(paneContent));
+      if (hasOverlay) {
+        console.log(`Overlay detected in session '${session}', sending Escape to dismiss`);
+        const { spawnSync } = require('child_process');
+        spawnSync('tmux', ['send-keys', '-t', session, 'Escape'], { timeout: TMUX_OPERATION_TIMEOUT_MS });
+        await new Promise((resolve) => setTimeout(resolve, OVERLAY_DISMISS_DELAY_MS));
+      }
+    } catch (err) {
+      // Fail open — never block sending
+      console.warn('Overlay detection failed, proceeding with send:', err);
     }
   }
 
@@ -170,6 +198,9 @@ export class InputInjector {
         return false;
       }
 
+      // Dismiss any TUI overlay before sending
+      await this.dismissOverlayIfPresent(session);
+
       return await this.doSendChoice(selectedIndices, optionCount, multiSelect, otherText, session);
     } finally {
       releaseLock!();
@@ -259,6 +290,7 @@ export class InputInjector {
     const { spawnSync } = require('child_process');
     const checkResult = spawnSync('tmux', ['has-session', '-t', session], { timeout: TMUX_OPERATION_TIMEOUT_MS });
     if (checkResult.status !== 0) return false;
+    await this.dismissOverlayIfPresent(session);
     const result = spawnSync('tmux', ['send-keys', '-t', session, 'C-c'], { timeout: TMUX_OPERATION_TIMEOUT_MS });
     return result.status === 0;
   }

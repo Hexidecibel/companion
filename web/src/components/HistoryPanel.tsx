@@ -47,7 +47,7 @@ export function HistoryPanel({ onViewSession, onClose }: HistoryPanelProps) {
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 520 }}>
         <div className="form-header">
-          <button className="icon-btn small" onClick={onClose}>&larr;</button>
+          <button className="icon-btn small" onClick={onClose} title="Back">&larr;</button>
           <h2>Session History</h2>
           {sessions.length > 0 && (
             <button className="icon-btn small danger" onClick={handleClearAll} title="Clear all history">

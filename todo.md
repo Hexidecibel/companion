@@ -18,7 +18,6 @@ Quick capture for ideas and tasks. Run `/plan` to process into detailed plans.
 - Split snap layouts -- show snap zone boxes (like Windows/macOS) when dragging/splitting sessions into different configurations
 - Theme customization -- choosable theme presets (sent message gradient, text color, button color, accents). Curated set of options, not too many
 - Mobile button rearrange -- move on/off toggles (Notify, Auto, Tools) to header, move Files/Search/Terminal to bottom bar. Cancel stays in bottom
-- New project wizard v2 -- reimplement bigger and better than before
 - Copy/paste support -- better copy for messages (copy button, allow shortening/selecting before copy). Desktop text selection now works (fixed focus-stealing); mobile still needs work
 - Skeleton loading screens -- animated placeholder cards while sessions/conversations load instead of spinners
 - Expose hook error states in UI -- inline error banners for failed fetches (conversation, tasks, review diff). Currently errors are silent
@@ -37,5 +36,5 @@ Quick capture for ideas and tasks. Run `/plan` to process into detailed plans.
 - Extract QuestionBlock and MultiQuestionFlow out of MessageBubble.tsx [planned] -- 808-line file with 3 complex sub-components inlined, move to own file (~300 lines)
 - Named constants for daemon magic numbers [planned] -- hardcoded delays (150ms, 80ms, 200ms), size limits (5MB, 150MB), cache TTLs (30s) scattered across 4000 lines. Extract to daemon/src/constants.ts
 - Focus-visible keyboard outlines [planned] -- no :focus-visible styles in global.css, keyboard users can't see focused button. Add consistent blue glow ring
-- Error toast for failed choice/approval sends [planned] -- onSelectChoice failures swallowed silently, show inline "Failed to send — tap to retry" below options
+- ~~Error toast for failed choice/approval sends~~ done -- sendError + retry + isSending guard
 

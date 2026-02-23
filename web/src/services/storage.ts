@@ -26,8 +26,12 @@ export function saveServers(servers: Server[]): void {
 
 export function addServer(server: Server): void {
   const servers = getServers();
-  servers.push(server);
-  saveServers(servers);
+  // Remove any existing server with the same host:port to prevent duplicates
+  const filtered = servers.filter(
+    (s) => !(s.host === server.host && s.port === server.port),
+  );
+  filtered.push(server);
+  saveServers(filtered);
 }
 
 export function updateServer(server: Server): void {

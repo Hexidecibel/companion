@@ -5,6 +5,7 @@ import { useServers } from '../hooks/useServers';
 import { useSessionMute } from '../hooks/useSessionMute';
 import { ServerForm } from './ServerForm';
 import { NewSessionPanel } from './NewSessionPanel';
+import { NewProjectModal } from './NewProjectModal';
 import { TmuxModal } from './TmuxModal';
 import { ContextMenu, ContextMenuEntry } from './ContextMenu';
 import { ConnectionSnapshot } from '../services/ConnectionManager';
@@ -78,6 +79,7 @@ export function MobileDashboard({
   const [editingServerId, setEditingServerId] = useState<string | undefined>();
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [newSessionServerId, setNewSessionServerId] = useState<string | null>(null);
+  const [newProjectServerId, setNewProjectServerId] = useState<string | null>(null);
   const [tmuxServerId, setTmuxServerId] = useState<string | null>(null);
 
   // Check if any session across all servers needs attention
@@ -172,6 +174,7 @@ export function MobileDashboard({
                     newSessionServerId === snap.serverId ? null : snap.serverId,
                   )
                 }
+                onNewProject={() => setNewProjectServerId(snap.serverId)}
                 onTmuxSessions={() =>
                   setTmuxServerId(
                     tmuxServerId === snap.serverId ? null : snap.serverId,
@@ -230,6 +233,26 @@ export function MobileDashboard({
           </div>
         )}
       </div>
+
+      {newProjectServerId && (
+        <NewProjectModal
+          serverId={newProjectServerId}
+          onClose={() => setNewProjectServerId(null)}
+          onComplete={(projectPath, sessionName) => {
+            const serverId = newProjectServerId;
+            setNewProjectServerId(null);
+            if (sessionName) {
+              onSelectSession(serverId, sessionName);
+            } else {
+              const summary = summaries.get(serverId);
+              const newSession = summary?.sessions.find(s => s.projectPath === projectPath);
+              if (newSession) {
+                onSelectSession(serverId, newSession.id);
+              }
+            }
+          }}
+        />
+      )}
 
       {tmuxServerId && (
         <TmuxModal
@@ -381,6 +404,7 @@ interface ServerCardProps {
   onEdit: () => void;
   isEnabled: boolean;
   onNewSession: () => void;
+  onNewProject: () => void;
   onTmuxSessions: () => void;
   onCostDashboard?: () => void;
   onOpenInSplit?: (serverId: string, sessionId: string) => void;
@@ -392,7 +416,7 @@ interface ServerCardProps {
 export { ServerCard };
 export type { ServerCardProps };
 
-function ServerCard({ snap, summary, onSelectSession, onToggleEnabled, onDelete, onEdit, isEnabled, onNewSession, onTmuxSessions, onCostDashboard, onOpenInSplit, onCloseSplit, secondarySessionId, newSessionOpen }: ServerCardProps) {
+function ServerCard({ snap, summary, onSelectSession, onToggleEnabled, onDelete, onEdit, isEnabled, onNewSession, onNewProject, onTmuxSessions, onCostDashboard, onOpenInSplit, onCloseSplit, secondarySessionId, newSessionOpen }: ServerCardProps) {
   const isConnected = snap.state.status === 'connected';
   const isConnecting = snap.state.status === 'connecting' || snap.state.status === 'reconnecting';
   const sessions = summary ? sortSessions(summary.sessions) : [];
@@ -424,6 +448,13 @@ function ServerCard({ snap, summary, onSelectSession, onToggleEnabled, onDelete,
                 title="New session"
               >
                 +
+              </button>
+              <button
+                className="mobile-server-tmux-btn"
+                onClick={onNewProject}
+                title="New project"
+              >
+                P
               </button>
               <button
                 className="mobile-server-tmux-btn"

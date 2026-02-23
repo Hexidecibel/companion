@@ -351,7 +351,7 @@ function parseQueueOperation(entry: JsonlEntry): ConversationMessage | null {
  * Detect CLI permission prompts rendered as text (e.g. "Do you want to make this edit?")
  * and extract them as native chooser options. Returns null if no prompt found.
  */
-function parsePermissionPrompt(content: string): {
+export function parsePermissionPrompt(content: string): {
   question: string;
   options: QuestionOption[];
   cleanContent: string;
@@ -390,7 +390,7 @@ function parsePermissionPrompt(content: string): {
   return { question, options, cleanContent };
 }
 
-function mapPermissionLabel(label: string): string {
+export function mapPermissionLabel(label: string): string {
   const lower = label.toLowerCase();
   if (lower === 'yes') return 'yes';
   if (lower === 'no') return 'no';
@@ -531,14 +531,13 @@ function parseEntry(
     }
   }
 
-  // Detect permission prompts in text content and convert to native chooser
+  // Detect permission prompts in text content and strip the prompt block.
+  // Tool-based detection (lines 488-526) is the source of truth for options.
+  // Don't set options from text regex — prevents false positives when the CLI
+  // emits prompt text while actively working (no pending approval tool).
   const permissionPrompt = parsePermissionPrompt(content);
   if (permissionPrompt) {
     content = permissionPrompt.cleanContent;
-    if (!options) {
-      options = permissionPrompt.options;
-      isWaitingForChoice = true;
-    }
   }
 
   const timestamp = entry.timestamp ? new Date(entry.timestamp).getTime() : Date.now();

@@ -28,6 +28,7 @@ interface UseAwayDigestReturn {
 }
 
 const AWAY_KEY = AWAY_STORAGE_KEY;
+const DIGEST_DISMISSED_KEY = 'companion:digest_dismissed';
 
 function getLastActive(): number {
   const stored = localStorage.getItem(AWAY_KEY);
@@ -41,7 +42,11 @@ function setLastActive(ts: number): void {
 export function useAwayDigest(): UseAwayDigestReturn {
   const [digest, setDigest] = useState<DigestData | null>(null);
   const [loading, setLoading] = useState(false);
-  const [dismissed, setDismissed] = useState(false);
+  const [dismissed, setDismissed] = useState(() => {
+    const dismissedVal = localStorage.getItem(DIGEST_DISMISSED_KEY);
+    const lastActive = getLastActive();
+    return dismissedVal !== null && dismissedVal === String(lastActive);
+  });
   const { snapshots } = useConnections();
   const fetchedRef = useRef(false);
 
@@ -50,6 +55,7 @@ export function useAwayDigest(): UseAwayDigestReturn {
     const handleVisibility = () => {
       if (document.visibilityState === 'hidden') {
         setLastActive(Date.now());
+        localStorage.removeItem(DIGEST_DISMISSED_KEY);
       }
     };
     // Set initial last active on mount (page load = return from away)
@@ -100,7 +106,26 @@ export function useAwayDigest(): UseAwayDigestReturn {
             seen.add(e.id);
             return true;
           });
-        setDigest({ entries: unique, total: unique.length, since: lastActive });
+
+        // Skip digest if user was away for less than 2 minutes
+        const awayDurationMs = Date.now() - lastActive;
+        const MIN_AWAY_MS = 2 * 60 * 1000; // 2 minutes
+        if (awayDurationMs < MIN_AWAY_MS) {
+          setLoading(false);
+          setLastActive(Date.now());
+          return;
+        }
+
+        // Only show urgent events
+        const URGENT_TYPES = new Set(['waiting_for_input', 'error_detected', 'worker_waiting', 'worker_error']);
+        const urgentEntries = unique.filter(e => URGENT_TYPES.has(e.eventType));
+        if (urgentEntries.length === 0) {
+          setLoading(false);
+          setLastActive(Date.now());
+          return;
+        }
+
+        setDigest({ entries: urgentEntries, total: urgentEntries.length, since: lastActive });
       }
       setLoading(false);
       // Update last active after fetching
@@ -113,6 +138,7 @@ export function useAwayDigest(): UseAwayDigestReturn {
   const dismiss = useCallback(() => {
     setDismissed(true);
     setDigest(null);
+    localStorage.setItem(DIGEST_DISMISSED_KEY, String(getLastActive()));
   }, []);
 
   return { digest, loading, dismissed, dismiss };

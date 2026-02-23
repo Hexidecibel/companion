@@ -87,7 +87,13 @@ class BrowserNotificationService {
   show(title: string, options?: { body?: string; tag?: string; force?: boolean }): void {
     if (this.permission !== 'granted') return;
     // Don't show if window is focused (unless forced)
-    if (!options?.force && document.hasFocus()) return;
+    if (!options?.force && document.hasFocus()) {
+      // Emit in-app notification event so sidebar/dashboard can show inline indicator
+      window.dispatchEvent(new CustomEvent('companion-in-app-notification', {
+        detail: { title, body: options?.body, tag: options?.tag },
+      }));
+      return;
+    }
 
     const prefs = this.getPrefs();
     if (!prefs.enabled) return;

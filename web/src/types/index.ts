@@ -194,6 +194,7 @@ export interface StackTemplate {
   type: 'frontend' | 'backend' | 'fullstack' | 'library' | 'cli';
   icon: string;
   tags: string[];
+  fileCount?: number;
   score?: number;
   matchedKeywords?: string[];
 }

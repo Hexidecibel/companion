@@ -4,6 +4,7 @@ import { useConnections } from '../hooks/useConnections';
 import { useServers } from '../hooks/useServers';
 import { connectionManager } from '../services/ConnectionManager';
 import { NewSessionPanel } from './NewSessionPanel';
+import { NewProjectModal } from './NewProjectModal';
 import { TmuxModal } from './TmuxModal';
 import { ServerForm } from './ServerForm';
 import { ContextMenu, ContextMenuEntry } from './ContextMenu';
@@ -123,12 +124,82 @@ export function SessionSidebar({
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   // undefined = not open, null = adding new, string = editing existing
   const [editingServerId, setEditingServerId] = useState<string | undefined | null>(undefined);
+  const [newProjectServerId, setNewProjectServerId] = useState<string | null>(null);
+
+  // Track sessions that transitioned to "waiting" while not actively viewed
+  const [unseenWaiting, setUnseenWaiting] = useState<Set<string>>(new Set());
 
   // Listen for 'open-add-server' custom event (from command palette)
   useEffect(() => {
     const handler = () => setEditingServerId(null);
     window.addEventListener('open-add-server', handler);
     return () => window.removeEventListener('open-add-server', handler);
+  }, []);
+
+  // Listen for 'open-new-project' custom event (from command palette)
+  useEffect(() => {
+    const handler = () => {
+      // Open for the first connected server
+      const connected = snapshots.find(s => s.state.status === 'connected');
+      if (connected) setNewProjectServerId(connected.serverId);
+    };
+    window.addEventListener('open-new-project', handler);
+    return () => window.removeEventListener('open-new-project', handler);
+  }, [snapshots]);
+
+  // Track sessions that go to "waiting" status while not active
+  useEffect(() => {
+    const waitingSessions = new Set<string>();
+    for (const [serverId, summary] of summaries) {
+      for (const session of summary.sessions) {
+        if (session.status === 'waiting') {
+          const key = `${serverId}:${session.id}`;
+          waitingSessions.add(key);
+        }
+      }
+    }
+    setUnseenWaiting(prev => {
+      const next = new Set(prev);
+      // Add new waiting sessions (except active)
+      const activeKey = activeSession ? `${activeSession.serverId}:${activeSession.sessionId}` : '';
+      for (const key of waitingSessions) {
+        if (key !== activeKey) next.add(key);
+      }
+      // Remove sessions no longer waiting
+      for (const key of next) {
+        if (!waitingSessions.has(key)) next.delete(key);
+      }
+      return next;
+    });
+  }, [summaries, activeSession]);
+
+  // Clear attention badge when session becomes active
+  useEffect(() => {
+    if (!activeSession) return;
+    const key = `${activeSession.serverId}:${activeSession.sessionId}`;
+    setUnseenWaiting(prev => {
+      if (!prev.has(key)) return prev;
+      const next = new Set(prev);
+      next.delete(key);
+      return next;
+    });
+  }, [activeSession]);
+
+  // Listen for in-app notifications (when tab is focused but session is not active)
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      const tag = detail?.tag as string;
+      if (!tag) return;
+      // Try to find matching session row and add alert animation
+      const row = document.querySelector(`[data-session-tag="${tag}"]`);
+      if (row) {
+        row.classList.add('sidebar-session-alert');
+        setTimeout(() => row.classList.remove('sidebar-session-alert'), 2000);
+      }
+    };
+    window.addEventListener('companion-in-app-notification', handler);
+    return () => window.removeEventListener('companion-in-app-notification', handler);
   }, []);
 
   // Count total sessions across all servers for filter visibility
@@ -444,6 +515,13 @@ export function SessionSidebar({
                     </button>
                     <button
                       className="sidebar-tmux-btn"
+                      onClick={() => setNewProjectServerId(snap.serverId)}
+                      title="New project"
+                    >
+                      P
+                    </button>
+                    <button
+                      className="sidebar-tmux-btn"
                       onClick={() =>
                         setTmuxServerId(
                           tmuxServerId === snap.serverId ? null : snap.serverId,
@@ -568,6 +646,9 @@ export function SessionSidebar({
                           <span className="jump-badge">{jumpNumberMap.get(session.id)}</span>
                         )}
                         <span className={`status-dot ${STATUS_DOT_CLASS[session.status]}`} />
+                        {unseenWaiting.has(`${snap.serverId}:${session.id}`) && (
+                          <span className="sidebar-attention-badge" />
+                        )}
                         <div className="sidebar-session-info">
                           <span className="sidebar-session-name">
                             {session.friendlyName || session.name}
@@ -689,6 +770,26 @@ export function SessionSidebar({
           serverId={tmuxServerId}
           serverName={tmuxServerName}
           onClose={() => setTmuxServerId(null)}
+        />
+      )}
+
+      {newProjectServerId && (
+        <NewProjectModal
+          serverId={newProjectServerId}
+          onClose={() => setNewProjectServerId(null)}
+          onComplete={(projectPath, sessionName) => {
+            const sid = newProjectServerId;
+            setNewProjectServerId(null);
+            if (sessionName) {
+              onSelectSession(sid, sessionName);
+            } else {
+              const summary = summaries.get(sid);
+              const newSession = summary?.sessions.find(s => s.projectPath === projectPath);
+              if (newSession) {
+                onSelectSession(sid, newSession.id);
+              }
+            }
+          }}
         />
       )}
 

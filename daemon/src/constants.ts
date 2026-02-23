@@ -12,6 +12,8 @@ export const POST_OTHER_SELECT_DELAY_MS = 200;
 export const POST_TEXT_INPUT_DELAY_MS = 150;
 export const POST_CHOICE_DELAY_MS = 50;
 export const DEFAULT_PANE_CAPTURE_LINES = 20;
+export const OVERLAY_DISMISS_DELAY_MS = 200;
+export const OVERLAY_DETECTION_LINES = 10;
 
 // ========================================
 // File Size Limits
@@ -41,9 +43,8 @@ export const INITIAL_FILE_MAX_AGE_MS = 2 * 60 * 1000;         // 2 min
 // ========================================
 // Auto-Approval
 // ========================================
-export const AUTO_APPROVAL_DEDUP_WINDOW_MS = 1000;
-export const AUTO_APPROVAL_CLEANUP_WINDOW_MS = 30000;
 export const APPROVAL_SEND_DELAY_MS = 300;
+export const AUTO_APPROVAL_MAX_TRACKED_IDS = 10000;
 
 // ========================================
 // Server & Lifecycle
@@ -103,6 +104,8 @@ export const FUZZY_SCORE_LENGTH_MULTIPLIER = 100;
 export const DEFAULT_TERMINAL_LINES = 100;
 export const DEFAULT_DIGEST_PERIOD_MS = 24 * 60 * 60 * 1000;  // 24h
 export const SCAFFOLD_INIT_TIMEOUT_MS = 5000;
+export const CLI_READY_POLL_INTERVAL_MS = 500;
+export const CLI_READY_TIMEOUT_MS = 30000;
 export const EXEC_OPERATION_TIMEOUT_MS = 5000;
 
 // ========================================

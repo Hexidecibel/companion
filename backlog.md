@@ -28,3 +28,25 @@ Codex stores JSONL in `~/.codex/sessions/<provider>/<date>/<uuid>.jsonl`. Runs f
 - [openai/codex](https://github.com/openai/codex)
 - [Codex CLI docs](https://developers.openai.com/codex/cli)
 - [App-server protocol](https://developers.openai.com/codex/app-server/)
+
+## Dispatch Mode — Background Agents with Chat-Ready Main Thread
+
+When implementing a multi-file plan, the current workflow blocks the main conversation thread with sequential edits. The user can't chat, steer, or redirect until the work is done.
+
+**Idea:** A "dispatch mode" where the companion:
+1. Receives a plan (or generates one from a task)
+2. Identifies parallelizable subtasks (e.g., daemon changes, CSS, component rewrites)
+3. Spawns each subtask as a background agent (worktree-isolated where possible)
+4. Keeps the main thread free for the user to chat, ask questions, reprioritize, or cancel subtasks mid-flight
+5. Aggregates results back — shows diffs, merges worktrees, reports status
+
+**Key design questions:**
+- How to detect which subtasks are independent vs sequential (dependency graph from the plan)?
+- How to present live progress to the user — task list widget? inline status messages?
+- Should subtask agents get the full plan context or just their slice?
+- Merge strategy when multiple agents edit the same file (rare if plan is well-structured)
+- How does steering work — can the user say "skip the CSS part" or "change the approach for task 3" mid-flight?
+
+**Why it matters:** Keeps the human-in-the-loop experience responsive. The user's time is the bottleneck, not the AI's — so the AI should never hold the conversation hostage during mechanical work.
+
+**Rough scope:** ~3-5 days. Touches daemon (task orchestration), web (progress UI), and the CLI integration layer.

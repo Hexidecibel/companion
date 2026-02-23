@@ -44,6 +44,13 @@ export async function scaffoldProject(
   config: ProjectConfig,
   onProgress?: ProgressCallback
 ): Promise<ScaffoldResult> {
+  const projectPath = path.join(expandPath(config.location), toValidName(config.name));
+
+  // Handle blank project: just CLAUDE.md + git init
+  if (config.stackId === 'blank') {
+    return scaffoldBlankProject(config, projectPath, onProgress);
+  }
+
   const template = getTemplate(config.stackId);
   if (!template) {
     return {
@@ -53,8 +60,6 @@ export async function scaffoldProject(
       error: `Unknown template: ${config.stackId}`,
     };
   }
-
-  const projectPath = path.join(expandPath(config.location), toValidName(config.name));
   const filesCreated: string[] = [];
 
   const variables: Record<string, string> = {
@@ -212,16 +217,75 @@ export async function scaffoldProject(
   }
 }
 
+// Scaffold a blank project (CLAUDE.md only + optional git)
+async function scaffoldBlankProject(
+  config: ProjectConfig,
+  projectPath: string,
+  onProgress?: ProgressCallback
+): Promise<ScaffoldResult> {
+  const filesCreated: string[] = [];
+
+  try {
+    onProgress?.({ step: 'Creating project directory', progress: 10, complete: false });
+    await fs.mkdir(projectPath, { recursive: true });
+
+    onProgress?.({ step: 'Writing CLAUDE.md', progress: 30, complete: false });
+    const claudeMd = `# ${toValidName(config.name)}\n\n${config.description || 'A new project'}\n`;
+    await fs.writeFile(path.join(projectPath, 'CLAUDE.md'), claudeMd, 'utf-8');
+    filesCreated.push('CLAUDE.md');
+
+    if (config.options.initGit) {
+      onProgress?.({ step: 'Initializing git repository', progress: 60, complete: false });
+      try {
+        await execAsync('which git');
+        await execAsync('git init', { cwd: projectPath });
+        await execAsync('git add .', { cwd: projectPath });
+        await execAsync('git commit -m "Initial commit from Companion"', { cwd: projectPath });
+
+        if (config.options.createGitHubRepo) {
+          onProgress?.({ step: 'Creating GitHub repository', progress: 80, complete: false });
+          try {
+            await execAsync('which gh');
+            const visibility = config.options.privateRepo ? '--private' : '--public';
+            const repoName = toValidName(config.name);
+            await execAsync(
+              `gh repo create ${repoName} ${visibility} --source=. --remote=origin --push`,
+              { cwd: projectPath, timeout: 30000 }
+            );
+          } catch {
+            console.warn('GitHub repo creation failed for blank project');
+          }
+        }
+      } catch {
+        console.warn('Git init failed for blank project');
+      }
+    }
+
+    onProgress?.({ step: 'Complete', progress: 100, complete: true });
+    return { success: true, projectPath, filesCreated };
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    onProgress?.({ step: 'Error', detail: errorMessage, progress: 0, complete: true, error: errorMessage });
+    return { success: false, projectPath, filesCreated, error: errorMessage };
+  }
+}
+
 // Preview what will be created without actually creating
 export async function previewScaffold(
   config: ProjectConfig
 ): Promise<{ files: string[]; projectPath: string } | { error: string }> {
+  const projectPath = path.join(expandPath(config.location), toValidName(config.name));
+
+  // Blank project preview
+  if (config.stackId === 'blank') {
+    return { files: ['CLAUDE.md'], projectPath };
+  }
+
   const template = getTemplate(config.stackId);
   if (!template) {
     return { error: `Unknown template: ${config.stackId}` };
   }
 
-  const projectPath = path.join(expandPath(config.location), toValidName(config.name));
   const files = template.files.map((f) => f.path);
 
   // Include CLAUDE.md and commands in preview
