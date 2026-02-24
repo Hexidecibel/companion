@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
+import { useState, useCallback, useMemo, useEffect, useRef, lazy, Suspense } from 'react';
 import { ActiveSession, SessionSummary, WorkGroup } from '../types';
 import { useAllServerSummaries } from '../hooks/useAllServerSummaries';
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
@@ -8,15 +8,16 @@ import { SessionSidebar } from './SessionSidebar';
 import { SessionView } from './SessionView';
 import { MobileDashboard, ServerCard } from './MobileDashboard';
 import { ShortcutHelpOverlay } from './ShortcutHelpOverlay';
-import { NotificationSettingsModal } from './NotificationSettingsModal';
 import { useSessionMute } from '../hooks/useSessionMute';
+
+const NotificationSettingsModal = lazy(() => import('./NotificationSettingsModal').then(m => ({ default: m.NotificationSettingsModal })));
 import { useBrowserNotificationListener } from '../hooks/useBrowserNotificationListener';
 import { initPush, registerWithAllServers } from '../services/push';
 import { isTauri, isTauriDesktop, isMobileViewport } from '../utils/platform';
 import { useServers } from '../hooks/useServers';
 import { useAwayDigest } from '../hooks/useAwayDigest';
 import { AwayDigest } from './AwayDigest';
-import { SIDEBAR_WIDTH_KEY } from '../services/storageKeys';
+import { SIDEBAR_WIDTH_KEY, SPLIT_RATIO_KEY } from '../services/storageKeys';
 
 interface DashboardProps {
   onSettings?: () => void;
@@ -36,6 +37,13 @@ export function Dashboard({ onSettings }: DashboardProps) {
   const draggingRef = useRef(false);
   const suppressPopstate = useRef(false);
   const [secondarySession, setSecondarySession] = useState<ActiveSession | null>(null);
+  const [splitRatio, setSplitRatio] = useState(() => {
+    const stored = localStorage.getItem(SPLIT_RATIO_KEY);
+    return stored ? parseFloat(stored) : 50;
+  });
+  const [splitDragging, setSplitDragging] = useState(false);
+  const [splitPreviewRatio, setSplitPreviewRatio] = useState<number | null>(null);
+  const splitContainerRef = useRef<HTMLElement | null>(null);
   const [dashboardMode, setDashboardMode] = useState(false);
   const summaries = useAllServerSummaries();
   const sessionMute = useSessionMute(activeSession?.serverId ?? null);
@@ -439,6 +447,51 @@ export function Dashboard({ onSettings }: DashboardProps) {
     document.addEventListener('mouseup', onMouseUp);
   }, []);
 
+  const handleSplitDragStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    setSplitDragging(true);
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+
+    const container = splitContainerRef.current;
+    if (!container) return;
+
+    const onMouseMove = (ev: MouseEvent) => {
+      const rect = container.getBoundingClientRect();
+      const ratio = ((ev.clientX - rect.left) / rect.width) * 100;
+      const clamped = Math.min(Math.max(ratio, 20), 80);
+      setSplitPreviewRatio(clamped);
+    };
+
+    const onMouseUp = (ev: MouseEvent) => {
+      const rect = container.getBoundingClientRect();
+      let ratio = ((ev.clientX - rect.left) / rect.width) * 100;
+      ratio = Math.min(Math.max(ratio, 20), 80);
+
+      // Snap to nearest snap point if within threshold
+      const snapPoints = [33, 50, 67];
+      const threshold = 8;
+      for (const snap of snapPoints) {
+        if (Math.abs(ratio - snap) < threshold) {
+          ratio = snap;
+          break;
+        }
+      }
+
+      setSplitRatio(ratio);
+      setSplitPreviewRatio(null);
+      setSplitDragging(false);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      localStorage.setItem(SPLIT_RATIO_KEY, String(ratio));
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+    };
+
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+  }, []);
+
   const handleOpenInSplit = useCallback((serverId: string, sessionId: string) => {
     setSecondarySession({ serverId, sessionId });
   }, []);
@@ -474,10 +527,12 @@ export function Dashboard({ onSettings }: DashboardProps) {
           </main>
 
           {showNotifSettings && (
-            <NotificationSettingsModal
-              serverId={activeSession.serverId}
-              onClose={() => setShowNotifSettings(false)}
-            />
+            <Suspense fallback={null}>
+              <NotificationSettingsModal
+                serverId={activeSession.serverId}
+                onClose={() => setShowNotifSettings(false)}
+              />
+            </Suspense>
           )}
         </div>
       );
@@ -529,7 +584,10 @@ export function Dashboard({ onSettings }: DashboardProps) {
         style={{ width: sidebarWidth }}
       />
       <div className="sidebar-drag-handle" onMouseDown={handleDragStart} />
-      <main className={`dashboard-main${secondarySession ? ' split-enabled' : ''}`}>
+      <main
+        className={`dashboard-main${secondarySession ? ' split-enabled' : ''}`}
+        ref={splitContainerRef as React.RefObject<HTMLElement>}
+      >
         {awayDigest.digest && !awayDigest.dismissed && (
           <AwayDigest
             digest={awayDigest.digest}
@@ -568,10 +626,15 @@ export function Dashboard({ onSettings }: DashboardProps) {
               onDismissGroup={handleDismissGroup}
               merging={merging}
               onToggleSidebar={toggleSidebar}
+              style={secondarySession ? { flex: `0 0 ${splitPreviewRatio ?? splitRatio}%` } : undefined}
             />
             {secondarySession && (
               <>
-                <div className="split-divider">
+                <div
+                  className={`split-divider-area${splitDragging ? ' dragging' : ''}`}
+                  onMouseDown={handleSplitDragStart}
+                >
+                  <div className="split-divider-line" />
                   <button
                     className="split-close-btn"
                     onClick={handleCloseSplit}
@@ -580,6 +643,17 @@ export function Dashboard({ onSettings }: DashboardProps) {
                     &#x2715;
                   </button>
                 </div>
+                {splitDragging && (
+                  <div className="split-snap-indicators">
+                    {[33, 50, 67].map(pos => (
+                      <div
+                        key={pos}
+                        className={`split-snap-line${Math.abs((splitPreviewRatio ?? splitRatio) - pos) < 8 ? ' active' : ''}`}
+                        style={{ left: `${pos}%` }}
+                      />
+                    ))}
+                  </div>
+                )}
                 <SessionView
                   serverId={secondarySession.serverId}
                   sessionId={secondarySession.sessionId}
@@ -587,6 +661,7 @@ export function Dashboard({ onSettings }: DashboardProps) {
                     const ss = summaries.get(secondarySession.serverId);
                     return ss?.sessions.find(s => s.id === secondarySession.sessionId)?.tmuxSessionName;
                   })()}
+                  style={{ flex: `0 0 ${100 - (splitPreviewRatio ?? splitRatio)}%` }}
                 />
               </>
             )}
@@ -595,10 +670,12 @@ export function Dashboard({ onSettings }: DashboardProps) {
       </main>
 
       {showNotifSettings && activeSession && (
-        <NotificationSettingsModal
-          serverId={activeSession.serverId}
-          onClose={() => setShowNotifSettings(false)}
-        />
+        <Suspense fallback={null}>
+          <NotificationSettingsModal
+            serverId={activeSession.serverId}
+            onClose={() => setShowNotifSettings(false)}
+          />
+        </Suspense>
       )}
 
       {showShortcutHelp && (

@@ -22,6 +22,17 @@ export function useAllServerSummaries() {
 
       const next = new Map<string, ServerSummary>();
 
+      // Preserve last-known summaries for disconnected servers still in the snapshot list
+      const connectedIds = new Set(connected.map(s => s.serverId));
+      for (const [id, summary] of summariesRef.current) {
+        if (!connectedIds.has(id)) {
+          const stillExists = snapshots.some(s => s.serverId === id);
+          if (stillExists) {
+            next.set(id, summary);
+          }
+        }
+      }
+
       await Promise.all(
         connected.map(async (snap) => {
           const conn = connectionManager.getConnection(snap.serverId);

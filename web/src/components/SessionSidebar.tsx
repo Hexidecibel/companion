@@ -1,15 +1,17 @@
-import { useState, useMemo, useEffect, useCallback } from 'react';
+import { useState, useMemo, useEffect, useCallback, lazy, Suspense } from 'react';
 import { ServerSummary, ActiveSession, SessionSummary, WorkGroup, WorkerSession } from '../types';
 import { useConnections } from '../hooks/useConnections';
 import { useServers } from '../hooks/useServers';
 import { connectionManager } from '../services/ConnectionManager';
 import { NewSessionPanel } from './NewSessionPanel';
-import { NewProjectModal } from './NewProjectModal';
 import { TmuxModal } from './TmuxModal';
+
+const NewProjectModal = lazy(() => import('./NewProjectModal').then(m => ({ default: m.NewProjectModal })));
 import { ServerForm } from './ServerForm';
 import { ContextMenu, ContextMenuEntry } from './ContextMenu';
 import { getFontScale, saveFontScale } from '../services/storage';
 import { Sparkline } from './Sparkline';
+import { SkeletonSessionCard } from './Skeleton';
 
 interface SessionSidebarProps {
   summaries: Map<string, ServerSummary>;
@@ -547,11 +549,24 @@ export function SessionSidebar({
                 />
               )}
 
-              {!isConnected && (
-                <div className="sidebar-server-offline">
-                  {snap.state.status === 'connecting' || snap.state.status === 'reconnecting'
-                    ? 'Connecting...'
-                    : 'Disconnected'}
+              {!isConnected && (snap.state.status === 'connecting' || snap.state.status === 'reconnecting') && !summary && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '4px 0' }}>
+                  <SkeletonSessionCard />
+                  <SkeletonSessionCard />
+                  <SkeletonSessionCard />
+                </div>
+              )}
+
+              {!isConnected && snap.state.status !== 'connecting' && snap.state.status !== 'reconnecting' && (
+                <div
+                  className="sidebar-server-offline sidebar-reconnect-btn"
+                  onClick={() => {
+                    const server = getServer(snap.serverId);
+                    if (server) connectionManager.connectServer({ ...server, enabled: true });
+                  }}
+                  style={{ cursor: 'pointer' }}
+                >
+                  Reconnect
                 </div>
               )}
 
@@ -563,7 +578,7 @@ export function SessionSidebar({
                 <div className="sidebar-server-offline">No {statusFilter} sessions</div>
               )}
 
-              {isConnected &&
+              {summary && allSessions.length > 0 &&
                 (() => {
                   // Group sessions by projectPath for multi-session projects
                   const projectGroups: { path: string; name: string; sessions: SessionSummary[] }[] = [];
@@ -586,7 +601,9 @@ export function SessionSidebar({
                     });
                   }
 
-                  return projectGroups.map((group) => {
+                  const disconnectedStyle = !isConnected ? { opacity: 0.5, pointerEvents: 'none' as const } : undefined;
+
+                  return (<div style={disconnectedStyle}>{projectGroups.map((group) => {
                     const showGroupHeader = group.sessions.length > 1;
                     const isGroupCollapsedProject = collapsedGroups.has(`project:${group.path}`);
 
@@ -645,7 +662,7 @@ export function SessionSidebar({
                         {showJumpNumbers && jumpNumberMap?.has(session.id) && (
                           <span className="jump-badge">{jumpNumberMap.get(session.id)}</span>
                         )}
-                        <span className={`status-dot ${STATUS_DOT_CLASS[session.status]}`} />
+                        <span className={`status-dot ${isConnected ? STATUS_DOT_CLASS[session.status] : 'status-dot-gray'}`} />
                         {unseenWaiting.has(`${snap.serverId}:${session.id}`) && (
                           <span className="sidebar-attention-badge" />
                         )}
@@ -748,7 +765,7 @@ export function SessionSidebar({
                 })}
                       </div>
                     );
-                  });
+                  })}</div>);
                 })()}
             </div>
           );
@@ -774,23 +791,25 @@ export function SessionSidebar({
       )}
 
       {newProjectServerId && (
-        <NewProjectModal
-          serverId={newProjectServerId}
-          onClose={() => setNewProjectServerId(null)}
-          onComplete={(projectPath, sessionName) => {
-            const sid = newProjectServerId;
-            setNewProjectServerId(null);
-            if (sessionName) {
-              onSelectSession(sid, sessionName);
-            } else {
-              const summary = summaries.get(sid);
-              const newSession = summary?.sessions.find(s => s.projectPath === projectPath);
-              if (newSession) {
-                onSelectSession(sid, newSession.id);
+        <Suspense fallback={null}>
+          <NewProjectModal
+            serverId={newProjectServerId}
+            onClose={() => setNewProjectServerId(null)}
+            onComplete={(projectPath, sessionName) => {
+              const sid = newProjectServerId;
+              setNewProjectServerId(null);
+              if (sessionName) {
+                onSelectSession(sid, sessionName);
+              } else {
+                const summary = summaries.get(sid);
+                const newSession = summary?.sessions.find(s => s.projectPath === projectPath);
+                if (newSession) {
+                  onSelectSession(sid, newSession.id);
+                }
               }
-            }
-          }}
-        />
+            }}
+          />
+        </Suspense>
       )}
 
       {contextMenu && (

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef, lazy, Suspense } from 'react';
 import { PendingImage, WorkGroup } from '../types';
 import { useConversation } from '../hooks/useConversation';
 import { useTasks } from '../hooks/useTasks';
@@ -14,11 +14,9 @@ import { useSkills } from '../hooks/useSkills';
 import { WaitingIndicator } from './WaitingIndicator';
 import { TaskList } from './TaskList';
 import { CodeReviewCard } from './CodeReviewCard';
-import { CodeReviewModal } from './CodeReviewModal';
 import { MessageList } from './MessageList';
 import { InputBar, InputBarHandle } from './InputBar';
 import { DispatchPanel } from './DispatchPanel';
-import { FileViewerModal } from './FileViewerModal';
 import { ArtifactViewerModal } from './ArtifactViewerModal';
 import { FileTabBar } from './FileTabBar';
 import { extractPlanFilePath, extractInlinePlan } from './MessageBubble';
@@ -33,6 +31,9 @@ import { BookmarkList } from './BookmarkList';
 import { FetchErrorBanner } from './FetchErrorBanner';
 import { hideToolsKey } from '../services/storageKeys';
 
+const CodeReviewModal = lazy(() => import('./CodeReviewModal').then(m => ({ default: m.CodeReviewModal })));
+const FileViewerModal = lazy(() => import('./FileViewerModal').then(m => ({ default: m.FileViewerModal })));
+
 interface SessionViewProps {
   serverId: string | null;
   sessionId: string | null;
@@ -46,6 +47,7 @@ interface SessionViewProps {
   onDismissGroup?: () => void;
   merging?: boolean;
   onToggleSidebar?: () => void;
+  style?: React.CSSProperties;
 }
 
 export function SessionView({
@@ -61,6 +63,7 @@ export function SessionView({
   onDismissGroup,
   merging,
   onToggleSidebar,
+  style,
 }: SessionViewProps) {
   const {
     highlights,
@@ -506,7 +509,7 @@ export function SessionView({
 
   if (!serverId || !sessionId) {
     return (
-      <div className="session-view-empty">
+      <div className="session-view-empty" style={style}>
         <p>Select a session from the sidebar</p>
       </div>
     );
@@ -514,7 +517,7 @@ export function SessionView({
 
   if (error) {
     return (
-      <div className="session-view-empty">
+      <div className="session-view-empty" style={style}>
         <p className="session-view-error">{error}</p>
       </div>
     );
@@ -659,7 +662,7 @@ export function SessionView({
   );
 
   return (
-    <div className="session-view">
+    <div className="session-view" style={style}>
       {/* Top header: back arrow on mobile, full header on desktop */}
       <div className={`session-header ${mobile ? 'session-header-mobile' : ''}`}>
         {onToggleSidebar && (
@@ -860,11 +863,13 @@ export function SessionView({
 
       {/* Modals */}
       {viewingFile && serverId && (
-        <FileViewerModal
-          serverId={serverId}
-          filePath={viewingFile}
-          onClose={() => setViewingFile(null)}
-        />
+        <Suspense fallback={null}>
+          <FileViewerModal
+            serverId={serverId}
+            filePath={viewingFile}
+            onClose={() => setViewingFile(null)}
+          />
+        </Suspense>
       )}
 
       {artifactContent && (
@@ -877,14 +882,16 @@ export function SessionView({
       )}
 
       {showCodeReviewModal && fileChanges.length > 0 && (
-        <CodeReviewModal
-          fileChanges={fileChanges}
-          onViewFile={handleViewFile}
-          onRefresh={refreshReview}
-          onClose={() => setShowCodeReviewModal(false)}
-          onComment={handleSend}
-          sessionId={sessionId}
-        />
+        <Suspense fallback={null}>
+          <CodeReviewModal
+            fileChanges={fileChanges}
+            onViewFile={handleViewFile}
+            onRefresh={refreshReview}
+            onClose={() => setShowCodeReviewModal(false)}
+            onComment={handleSend}
+            sessionId={sessionId}
+          />
+        </Suspense>
       )}
 
       {showConversationSearch && serverId && (

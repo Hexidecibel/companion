@@ -3213,6 +3213,65 @@ html {
   background-color: #ef4444;
 }
 
+/* Dismiss buttons */
+.dispatch-tile-dismiss {
+  margin-left: auto;
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 4px;
+  opacity: 0;
+  transition: opacity 0.15s, color 0.15s;
+}
+
+.dispatch-tile:hover .dispatch-tile-dismiss,
+.dispatch-tile-dismiss:focus {
+  opacity: 1;
+}
+
+.dispatch-tile-dismiss:hover {
+  color: var(--text-primary);
+}
+
+.dispatch-card-dismiss {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 4px;
+  margin-left: 8px;
+  opacity: 0.6;
+  transition: opacity 0.15s, color 0.15s;
+}
+
+.dispatch-card-dismiss:hover {
+  opacity: 1;
+  color: var(--text-primary);
+}
+
+.dispatch-show-all {
+  background: none;
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  font-size: 12px;
+  padding: 4px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  margin: 8px auto;
+  display: block;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.dispatch-show-all:hover {
+  color: var(--text-primary);
+  border-color: var(--text-secondary);
+}
+
 /* Desktop collapsed bar (rendered at top of conversation area) */
 .dispatch-collapsed-bar {
   display: flex;
@@ -8018,15 +8077,55 @@ html {
 }
 
 .dashboard-main.split-enabled > .session-view {
-  flex: 1;
   min-width: 0;
 }
 
-.split-divider {
-  width: 1px;
-  background: var(--border-color);
-  flex-shrink: 0;
+/* Split view divider */
+.split-divider-area {
+  flex: 0 0 9px;
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
+  cursor: col-resize;
+  z-index: 1;
+  user-select: none;
   position: relative;
+}
+
+.split-divider-area:hover .split-divider-line,
+.split-divider-area.dragging .split-divider-line {
+  background: #3b82f6;
+  width: 3px;
+}
+
+.split-divider-line {
+  width: 1px;
+  background: #374151;
+  transition: width 0.15s, background 0.15s;
+}
+
+.split-snap-indicators {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  pointer-events: none;
+  z-index: 9999;
+}
+
+.split-snap-line {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: rgba(59, 130, 246, 0.15);
+  transition: background 0.15s, box-shadow 0.15s;
+}
+
+.split-snap-line.active {
+  background: rgba(59, 130, 246, 0.5);
+  box-shadow: 0 0 8px rgba(59, 130, 246, 0.3);
 }
 
 .split-close-btn {

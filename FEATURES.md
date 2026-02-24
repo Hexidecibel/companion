@@ -423,6 +423,52 @@ Per-session toggle to show or hide tool call cards in conversation view.
 - ExitPlanMode cards always shown regardless of toggle
 - State persisted per session in localStorage
 
+## Skeleton Loading Screens
+Shimmer placeholder cards for loading states instead of spinners.
+
+- Animated skeleton cards for dashboard, sidebar, and session views
+- Shimmer gradient animation with CSS keyframes
+- Replaces generic spinners with layout-aware placeholders matching final content shape
+
+## Split Snap Layouts
+Draggable divider with snap zones for split-view session arrangements.
+
+- Snap zones at 33%, 50%, and 67% width splits
+- Visual snap zone indicators appear when dragging near thresholds
+- Smooth snapping animation with configurable dead zones
+- Persistent split ratio per session in localStorage
+
+## Vite Code Splitting
+React.lazy loading for modals and routes to reduce initial bundle size.
+
+- Main chunk reduced from 498 KB to 332 KB
+- Lazy-loaded: modals, usage dashboard, and heavy route components
+- Suspense boundaries with skeleton fallbacks during chunk loading
+
+## WebSocket Handler Modules
+Daemon websocket.ts split from monolithic 4,386-line file into focused handler modules.
+
+- Main websocket.ts reduced to 522 lines (routing + connection management)
+- 8 handler modules: files, input, notifications, session, skills, tmux, usage, workgroups
+- Shared handler context type for consistent dependency injection
+- No behavior changes — pure refactor
+
+## Disconnected Server Persistence
+Servers remain visible in sidebar when offline instead of disappearing.
+
+- Disconnected servers shown grayed out in sidebar and dashboard
+- Connection status indicators (green/yellow/red) reflect live state
+- Server summary data cached from last successful connection
+- Reconnection attempts continue in background
+
+## Agent Dismissal
+Dismiss completed agents from the dispatch panel with auto-reappear on new activity.
+
+- Dismiss button on completed agent cards in dispatch panel
+- Dismissed agents reappear if new activity is detected
+- Dismiss state tracked per agent, resets on new messages
+- Works in both desktop tiled view and mobile card list
+
 ## Test Suite
 Comprehensive automated tests for daemon parser and web client services.
 

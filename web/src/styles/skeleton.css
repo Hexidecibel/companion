@@ -1,0 +1,47 @@
+/* Skeleton shimmer animation */
+@keyframes shimmer {
+  0% { background-position: -200px 0; }
+  100% { background-position: calc(200px + 100%) 0; }
+}
+
+.skeleton-shimmer {
+  background: linear-gradient(90deg, #374151 0px, rgba(255,255,255,0.05) 40px, #374151 80px);
+  background-size: 200px 100%;
+  animation: shimmer 1.5s ease-in-out infinite;
+  border-radius: 4px;
+}
+
+.skeleton-bubble {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 16px;
+  border-radius: 12px;
+  background: #1f2937;
+  max-width: 75%;
+}
+
+.skeleton-bubble.left {
+  align-self: flex-start;
+  border-bottom-left-radius: 4px;
+}
+
+.skeleton-bubble.right {
+  align-self: flex-end;
+  border-bottom-right-radius: 4px;
+}
+
+.skeleton-session-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  border-radius: 8px;
+  background: #1f2937;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton-shimmer {
+    animation: none;
+  }
+}

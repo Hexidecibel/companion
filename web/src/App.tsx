@@ -1,12 +1,13 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, lazy, Suspense } from 'react';
 import { ConnectionProvider } from './context/ConnectionContext';
 import { ThemeProvider } from './context/ThemeContext';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { StatusPage } from './components/StatusPage';
 import { Dashboard } from './components/Dashboard';
-import { SettingsScreen } from './components/SettingsScreen';
-import { UsageDashboard } from './components/UsageDashboard';
 import { CommandPalette, CommandAction } from './components/CommandPalette';
+
+const SettingsScreen = lazy(() => import('./components/SettingsScreen').then(m => ({ default: m.SettingsScreen })));
+const UsageDashboard = lazy(() => import('./components/UsageDashboard').then(m => ({ default: m.UsageDashboard })));
 
 type Screen =
   | { name: 'dashboard' }
@@ -164,15 +165,19 @@ export function App() {
               <StatusPage />
             )}
             {screen.name === 'settings' && (
-              <SettingsScreen
-                onBack={() => setScreen({ name: 'dashboard' })}
-              />
+              <Suspense fallback={<div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', color: '#9ca3af' }}>Loading...</div>}>
+                <SettingsScreen
+                  onBack={() => setScreen({ name: 'dashboard' })}
+                />
+              </Suspense>
             )}
             {screen.name === 'cost-dashboard' && (
-              <UsageDashboard
-                serverId={screen.serverId}
-                onBack={() => setScreen({ name: 'dashboard' })}
-              />
+              <Suspense fallback={<div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', color: '#9ca3af' }}>Loading...</div>}>
+                <UsageDashboard
+                  serverId={screen.serverId}
+                  onBack={() => setScreen({ name: 'dashboard' })}
+                />
+              </Suspense>
             )}
 
             {showCommandPalette && (

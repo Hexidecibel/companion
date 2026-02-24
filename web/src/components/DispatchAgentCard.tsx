@@ -3,6 +3,7 @@ import { SubAgent } from '../types';
 interface DispatchAgentCardProps {
   agent: SubAgent;
   onClick: () => void;
+  onDismiss?: () => void;
 }
 
 function formatDuration(start: number, end?: number): string {
@@ -16,7 +17,7 @@ function formatDuration(start: number, end?: number): string {
   return `${hrs}h ${mins % 60}m`;
 }
 
-export function DispatchAgentCard({ agent, onClick }: DispatchAgentCardProps) {
+export function DispatchAgentCard({ agent, onClick, onDismiss }: DispatchAgentCardProps) {
   const statusClass =
     agent.status === 'running'
       ? 'dispatch-card-running'
@@ -37,6 +38,15 @@ export function DispatchAgentCard({ agent, onClick }: DispatchAgentCardProps) {
         <span className="dispatch-card-duration">
           {formatDuration(agent.startedAt, agent.completedAt)}
         </span>
+        {onDismiss && (
+          <button
+            className="dispatch-card-dismiss"
+            onClick={(e) => { e.stopPropagation(); onDismiss(); }}
+            title="Dismiss"
+          >
+            {'\u00D7'}
+          </button>
+        )}
       </div>
       {subtitle && (
         <div className="dispatch-card-row2">

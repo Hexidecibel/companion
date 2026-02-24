@@ -1,6 +1,7 @@
 import { useRef, useState, useEffect, useLayoutEffect, useCallback } from 'react';
 import { ConversationHighlight } from '../types';
 import { MessageBubble } from './MessageBubble';
+import { SkeletonMessageBubble } from './Skeleton';
 
 interface MessageListProps {
   highlights: ConversationHighlight[];
@@ -159,9 +160,12 @@ export function MessageList({
 
   if (loading) {
     return (
-      <div className="msg-list-empty">
-        <div className="spinner" />
-        <span>Loading conversation...</span>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: '16px' }}>
+        <SkeletonMessageBubble side="left" lines={2} />
+        <SkeletonMessageBubble side="right" lines={3} />
+        <SkeletonMessageBubble side="left" lines={4} />
+        <SkeletonMessageBubble side="right" lines={2} />
+        <SkeletonMessageBubble side="left" lines={3} />
       </div>
     );
   }

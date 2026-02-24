@@ -6,9 +6,10 @@ import { MessageBubble } from './MessageBubble';
 interface AgentTileProps {
   serverId: string;
   agent: SubAgent;
+  onDismiss?: () => void;
 }
 
-export function AgentTile({ serverId, agent }: AgentTileProps) {
+export function AgentTile({ serverId, agent, onDismiss }: AgentTileProps) {
   const { highlights, loading } = useSubAgentDetail(serverId, agent.agentId);
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -35,6 +36,15 @@ export function AgentTile({ serverId, agent }: AgentTileProps) {
         >
           {agent.slug}
         </span>
+        {onDismiss && (
+          <button
+            className="dispatch-tile-dismiss"
+            onClick={(e) => { e.stopPropagation(); onDismiss(); }}
+            title="Dismiss"
+          >
+            {'\u00D7'}
+          </button>
+        )}
       </div>
       <div className="dispatch-tile-conversation" ref={scrollRef}>
         {loading && (

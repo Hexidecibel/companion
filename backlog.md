@@ -50,3 +50,19 @@ When implementing a multi-file plan, the current workflow blocks the main conver
 **Why it matters:** Keeps the human-in-the-loop experience responsive. The user's time is the bottleneck, not the AI's — so the AI should never hold the conversation hostage during mechanical work.
 
 **Rough scope:** ~3-5 days. Touches daemon (task orchestration), web (progress UI), and the CLI integration layer.
+
+## Tiling Window Manager Layouts
+
+**Type:** Enhancement (replaces current split snap)
+**Priority:** Medium
+
+Drag-to-edge snap system like Windows 11 or tiling WMs. Instead of just a draggable divider between two panels, allow dragging sessions to edges/corners to trigger layout changes:
+
+- Drag to left/right edge → snap to half
+- Drag to corner → snap to quadrant
+- Drag to top → fullscreen
+- Visual drop zone indicators showing where the session will land
+- Support for 2-4 pane layouts (halves, thirds, quadrants)
+- Would replace the current split divider mechanism with something much more flexible
+
+**Inspiration:** VS Code editor groups, Windows snap layouts, i3/sway tiling

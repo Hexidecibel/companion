@@ -1,18 +1,20 @@
-import { useState, useMemo, useRef, useCallback, useEffect } from 'react';
+import { useState, useMemo, useRef, useCallback, useEffect, lazy, Suspense } from 'react';
 import { ServerSummary, SessionSummary, ActiveSession } from '../types';
 import { useConnections } from '../hooks/useConnections';
 import { useServers } from '../hooks/useServers';
 import { useSessionMute } from '../hooks/useSessionMute';
 import { ServerForm } from './ServerForm';
 import { NewSessionPanel } from './NewSessionPanel';
-import { NewProjectModal } from './NewProjectModal';
 import { TmuxModal } from './TmuxModal';
+
+const NewProjectModal = lazy(() => import('./NewProjectModal').then(m => ({ default: m.NewProjectModal })));
 import { ContextMenu, ContextMenuEntry } from './ContextMenu';
 import { ConnectionSnapshot } from '../services/ConnectionManager';
 import { Sparkline } from './Sparkline';
 import { connectionManager } from '../services/ConnectionManager';
 import { DigestData } from '../hooks/useAwayDigest';
 import { AwayDigest } from './AwayDigest';
+import { SkeletonSessionCard } from './Skeleton';
 
 const STATUS_DOT_CLASS: Record<SessionSummary['status'], string> = {
   waiting: 'status-dot-blue status-dot-pulse',
@@ -256,23 +258,25 @@ export function MobileDashboard({
       </div>
 
       {newProjectServerId && (
-        <NewProjectModal
-          serverId={newProjectServerId}
-          onClose={() => setNewProjectServerId(null)}
-          onComplete={(projectPath, sessionName) => {
-            const serverId = newProjectServerId;
-            setNewProjectServerId(null);
-            if (sessionName) {
-              onSelectSession(serverId, sessionName);
-            } else {
-              const summary = summaries.get(serverId);
-              const newSession = summary?.sessions.find(s => s.projectPath === projectPath);
-              if (newSession) {
-                onSelectSession(serverId, newSession.id);
+        <Suspense fallback={null}>
+          <NewProjectModal
+            serverId={newProjectServerId}
+            onClose={() => setNewProjectServerId(null)}
+            onComplete={(projectPath, sessionName) => {
+              const serverId = newProjectServerId;
+              setNewProjectServerId(null);
+              if (sessionName) {
+                onSelectSession(serverId, sessionName);
+              } else {
+                const summary = summaries.get(serverId);
+                const newSession = summary?.sessions.find(s => s.projectPath === projectPath);
+                if (newSession) {
+                  onSelectSession(serverId, newSession.id);
+                }
               }
-            }
-          }}
-        />
+            }}
+          />
+        </Suspense>
       )}
 
       {tmuxServerId && (
@@ -519,9 +523,17 @@ function ServerCard({ snap, summary, onSelectSession, onToggleEnabled, onDelete,
         </div>
       </div>
 
-      {!isConnected && (
+      {!isConnected && isConnecting && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '8px 12px' }}>
+          <SkeletonSessionCard />
+          <SkeletonSessionCard />
+          <SkeletonSessionCard />
+        </div>
+      )}
+
+      {!isConnected && !isConnecting && (
         <div className="mobile-server-status">
-          {isConnecting ? 'Connecting...' : snap.state.error || 'Disconnected'}
+          {snap.state.error || 'Disconnected'}
         </div>
       )}
 
