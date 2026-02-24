@@ -81,6 +81,14 @@ export function SessionView({
   const bypass = useBypassPermissions(serverId, sessionId);
   const sessionMute = useSessionMute(serverId);
   const { skills } = useSkills(serverId);
+  // Image send error state (auto-clears after 5s)
+  const [imageSendError, setImageSendError] = useState<string | null>(null);
+  useEffect(() => {
+    if (!imageSendError) return;
+    const t = setTimeout(() => setImageSendError(null), 5000);
+    return () => clearTimeout(t);
+  }, [imageSendError]);
+
   // Dispatch panel state
   const DISPATCH_HEIGHT_KEY = 'dispatch-panel-height';
   const [dispatchCollapsed, setDispatchCollapsed] = useState(true);
@@ -370,7 +378,8 @@ export function SessionView({
           });
 
           if (!response.success) {
-            console.log('Image upload failed:', response.error);
+            console.error('Image upload failed:', response.error);
+            setImageSendError('Image upload failed');
             return false;
           }
 
@@ -385,15 +394,24 @@ export function SessionView({
           message: text,
           imagePaths,
           tmuxSessionName,
+          sessionId,
         });
+
+        if (!response.success) {
+          const errMsg = response.error === 'tmux_session_not_found'
+            ? 'tmux session not found'
+            : (response.error || 'Failed to send images');
+          setImageSendError(errMsg);
+        }
 
         return response.success;
       } catch (err) {
-        console.log('Failed to send images:', err);
+        console.error('Failed to send images:', err);
+        setImageSendError('Failed to send images');
         return false;
       }
     },
-    [serverId],
+    [serverId, sessionId, tmuxSessionName],
   );
 
   const handleViewFile = useCallback((path: string) => {
@@ -700,7 +718,7 @@ export function SessionView({
 
       <div className="session-conversation" onClick={handleConversationClick} style={{ display: showTerminal || showWorkGroupPanel ? 'none' : undefined }}>
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minHeight: 0 }}>
-            <WaitingIndicator status={status} />
+            <WaitingIndicator status={status} serverId={serverId} sessionId={sessionId} tmuxSessionName={tmuxSessionName} />
 
             {workGroup && (workGroup.status === 'active' || workGroup.status === 'merging' || workGroup.status === 'completed' || workGroup.status === 'failed') && (
               <WorkGroupBar
@@ -726,6 +744,9 @@ export function SessionView({
             )}
             {agentsError && (
               <FetchErrorBanner message={`Agents: ${agentsError}`} />
+            )}
+            {imageSendError && (
+              <FetchErrorBanner message={imageSendError} onDismiss={() => setImageSendError(null)} />
             )}
 
             {!mobile && dispatchCollapsed && totalAgents > 0 && serverId && (

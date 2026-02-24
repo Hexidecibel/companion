@@ -82,9 +82,9 @@ async function main(): Promise<void> {
   }
 
   // Initialize components
-  const watcher = new SessionWatcher(config.codeHome);
-  const subAgentWatcher = new SubAgentWatcher(config.codeHome);
   const injector = new InputInjector(config.tmuxSession);
+  const watcher = new SessionWatcher(config.codeHome, injector);
+  const subAgentWatcher = new SubAgentWatcher(config.codeHome);
   const notificationStore = new NotificationStore();
   const push = new PushNotificationService(
     config.fcmCredentialsPath,

@@ -4,7 +4,8 @@ import * as chokidar from 'chokidar';
 import { EventEmitter } from 'events';
 import { exec } from 'child_process';
 import { promisify } from 'util';
-import { ConversationFile, ConversationMessage, SessionStatus, TmuxSession } from './types';
+import { ConversationFile, ConversationMessage, FeedbackPrompt, SessionStatus, TmuxSession } from './types';
+import { InputInjector } from './input-injector';
 import {
   parseConversationFile,
   extractHighlights,
@@ -35,6 +36,36 @@ import {
 } from './constants';
 
 const execAsync = promisify(exec);
+
+/**
+ * Parse a feedback prompt from tmux terminal output.
+ * The Claude CLI shows this at session end:
+ *   * How is Claude doing this session? (optional)
+ *     1: Bad    2: Fine    3: Good    0: Dismiss
+ */
+function parseFeedbackPrompt(tmuxText: string): FeedbackPrompt | null {
+  // Strip ANSI escape codes
+  const clean = tmuxText.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
+
+  // Look for the question
+  const questionMatch = clean.match(/How is Claude doing this session/i);
+  if (!questionMatch) return null;
+
+  // Extract digit:label pairs from nearby text
+  const optionRegex = /(\d)\s*:\s*(\w+)/g;
+  const options: Array<{ key: string; label: string }> = [];
+  let match;
+  while ((match = optionRegex.exec(clean)) !== null) {
+    options.push({ key: match[1], label: match[2] });
+  }
+
+  if (options.length === 0) return null;
+
+  return {
+    question: 'How is Claude doing this session?',
+    options,
+  };
+}
 
 interface TaskSummary {
   total: number;
@@ -86,9 +117,19 @@ export class SessionWatcher extends EventEmitter {
   private static readonly DEBOUNCE_MS = 150; // Debounce file changes per session
   private static readonly WAITING_DEBOUNCE_MS = 3000; // Delay before confirming "waiting" for non-interactive tools
 
-  constructor(codeHome: string) {
+  // Feedback prompt detection
+  private inputInjector: InputInjector | null = null;
+  private feedbackPollTimer: NodeJS.Timeout | null = null;
+  private feedbackPollCount: number = 0;
+  private feedbackPrompt: FeedbackPrompt | null = null;
+  private feedbackSessionId: string | null = null; // tmux session name that has the feedback prompt
+  private static readonly FEEDBACK_POLL_INTERVAL_MS = 3000;
+  private static readonly FEEDBACK_POLL_MAX_ATTEMPTS = 10;
+
+  constructor(codeHome: string, inputInjector?: InputInjector) {
     super();
     this.codeHome = codeHome;
+    this.inputInjector = inputInjector || null;
     this.loadPersistedMappings();
     // Refresh tmux paths periodically
     this.refreshTmuxPaths();
@@ -336,6 +377,84 @@ export class SessionWatcher extends EventEmitter {
       clearTimeout(timer);
     }
     this.waitingDebounceTimers.clear();
+    // Clear feedback poll timer
+    this.stopFeedbackPolling();
+  }
+
+  /**
+   * Start polling the tmux pane for a feedback prompt.
+   * Called when a session transitions to "waiting for input" with no pending tool approvals.
+   */
+  private startFeedbackPolling(tmuxSessionName: string): void {
+    // Don't poll if we don't have an injector
+    if (!this.inputInjector) return;
+
+    // Clear any existing timer
+    this.stopFeedbackPolling();
+
+    this.feedbackPollCount = 0;
+    this.feedbackSessionId = tmuxSessionName;
+
+    this.feedbackPollTimer = setInterval(async () => {
+      this.feedbackPollCount++;
+
+      // Give up after max attempts
+      if (this.feedbackPollCount > SessionWatcher.FEEDBACK_POLL_MAX_ATTEMPTS) {
+        this.stopFeedbackPolling();
+        return;
+      }
+
+      try {
+        const paneText = await this.inputInjector!.captureTmuxPane(tmuxSessionName);
+        if (!paneText) return;
+
+        const prompt = parseFeedbackPrompt(paneText);
+        if (prompt) {
+          this.feedbackPrompt = prompt;
+          this.stopFeedbackPolling();
+
+          // Emit feedback-prompt-detected event and a status-change so clients get it
+          this.emit('feedback-prompt-detected', {
+            sessionId: tmuxSessionName,
+            feedbackPrompt: prompt,
+          });
+          this.emit('status-change', {
+            sessionId: tmuxSessionName,
+            isWaitingForInput: true,
+            currentActivity: undefined,
+            lastMessage: undefined,
+            feedbackPrompt: prompt,
+          });
+        }
+      } catch {
+        // Silent fail — polling is best-effort
+      }
+    }, SessionWatcher.FEEDBACK_POLL_INTERVAL_MS);
+  }
+
+  private stopFeedbackPolling(): void {
+    if (this.feedbackPollTimer) {
+      clearInterval(this.feedbackPollTimer);
+      this.feedbackPollTimer = null;
+    }
+    this.feedbackPollCount = 0;
+  }
+
+  /**
+   * Get the current feedback prompt (if any).
+   */
+  getFeedbackPrompt(sessionId?: string): FeedbackPrompt | null {
+    if (sessionId && sessionId !== this.feedbackSessionId) return null;
+    return this.feedbackPrompt;
+  }
+
+  /**
+   * Clear the feedback prompt (after feedback is sent or session state changes).
+   */
+  clearFeedbackPrompt(): void {
+    this.feedbackPrompt = null;
+    this.feedbackSessionId = null;
+    this.stopFeedbackPolling();
   }
 
   private handleFileChange(filePath: string): void {
@@ -719,12 +838,25 @@ export class SessionWatcher extends EventEmitter {
     const lastMessage = messages[messages.length - 1];
     const currentActivity = detectCurrentActivity(messages);
 
+    // Feedback prompt polling: start when transitioning to waiting with no pending tool approvals
+    const hasPendingToolCalls = lastMessage?.type === 'assistant' &&
+      lastMessage.toolCalls?.some((tc) => tc.status === 'pending');
+    if (waitingStatusChanged && conversationWaiting && !hasPendingToolCalls) {
+      this.startFeedbackPolling(sessionId);
+    } else if (waitingStatusChanged && !conversationWaiting) {
+      // Session stopped waiting — clear feedback prompt
+      if (this.feedbackSessionId === sessionId) {
+        this.clearFeedbackPrompt();
+      }
+    }
+
     if (waitingStatusChanged || hasNewMessages) {
       this.emit('status-change', {
         sessionId,
         isWaitingForInput: conversationWaiting,
         currentActivity,
         lastMessage,
+        feedbackPrompt: this.feedbackSessionId === sessionId ? this.feedbackPrompt : undefined,
       });
     }
 
@@ -1315,6 +1447,12 @@ export class SessionWatcher extends EventEmitter {
     const messages = tracked.cachedMessages || parseConversationFile(tracked.path);
     const lastMessage = messages[messages.length - 1];
 
+    // Determine if this session has a feedback prompt
+    // sessionId here is a tmux session name; feedbackSessionId is also a tmux session name
+    const feedbackPrompt = sessionId && this.feedbackSessionId === sessionId
+      ? this.feedbackPrompt
+      : undefined;
+
     return {
       isRunning: true,
       isWaitingForInput: tracked.isWaitingForInput,
@@ -1323,6 +1461,7 @@ export class SessionWatcher extends EventEmitter {
       projectPath: tracked.projectPath,
       currentActivity: detectCurrentActivity(messages),
       recentActivity: getRecentActivity(messages, RECENT_ACTIVITY_LIMIT),
+      feedbackPrompt: feedbackPrompt || undefined,
     };
   }
 
@@ -1397,6 +1536,7 @@ export class SessionWatcher extends EventEmitter {
       isWaitingForInput: this.isWaitingForInput,
       currentActivity: detectCurrentActivity(messages),
       lastMessage: messages[messages.length - 1],
+      feedbackPrompt: this.feedbackSessionId === sessionId ? this.feedbackPrompt : undefined,
     });
 
     return true;

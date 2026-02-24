@@ -738,9 +738,16 @@ export class WebSocketHandler {
         // Send message with image paths combined
         this.handleSendWithImages(
           client,
-          payload as { imagePaths: string[]; message: string },
+          payload as { imagePaths: string[]; message: string; tmuxSessionName?: string; sessionId?: string },
           requestId
         );
+        // Acknowledge session — user is responding, cancel push escalation
+        {
+          const activeSessionId = this.watcher.getActiveSessionId();
+          if (activeSessionId) {
+            this.escalation.acknowledgeSession(activeSessionId);
+          }
+        }
         break;
 
       case 'register_push':
@@ -1556,6 +1563,14 @@ export class WebSocketHandler {
         );
         break;
 
+      case 'send_feedback':
+        this.handleSendFeedback(
+          client,
+          payload as { key: string; sessionId?: string },
+          requestId
+        );
+        break;
+
       default:
         this.send(client.ws, {
           type: 'error',
@@ -1756,6 +1771,53 @@ export class WebSocketHandler {
       error: success ? undefined : 'Failed to send input to session',
       requestId,
     });
+  }
+
+  private async handleSendFeedback(
+    client: AuthenticatedClient,
+    payload: { key: string; sessionId?: string } | undefined,
+    requestId?: string
+  ): Promise<void> {
+    const feedbackKey = payload?.key;
+    if (!feedbackKey || !['0', '1', '2', '3'].includes(feedbackKey)) {
+      this.send(client.ws, {
+        type: 'feedback_sent',
+        success: false,
+        error: 'Invalid feedback key. Must be "0", "1", "2", or "3".',
+        requestId,
+      });
+      return;
+    }
+
+    const feedbackSessionId =
+      payload?.sessionId || client.subscribedSessionId || this.watcher.getActiveSessionId();
+
+    try {
+      await this.injector.sendKeypress(feedbackKey, feedbackSessionId || undefined);
+      this.watcher.clearFeedbackPrompt();
+      this.send(client.ws, {
+        type: 'feedback_sent',
+        success: true,
+        requestId,
+      });
+      // Broadcast status update to clear feedback prompt on all clients
+      if (feedbackSessionId) {
+        this.broadcast('status_change', {
+          sessionId: feedbackSessionId,
+          isWaitingForInput: false,
+          currentActivity: undefined,
+          lastMessage: undefined,
+          feedbackPrompt: undefined,
+        }, feedbackSessionId);
+      }
+    } catch (err) {
+      this.send(client.ws, {
+        type: 'feedback_sent',
+        success: false,
+        error: `Failed to send feedback: ${err}`,
+        requestId,
+      });
+    }
   }
 
   private async handleSendChoice(
@@ -1960,7 +2022,7 @@ export class WebSocketHandler {
 
   private async handleSendWithImages(
     client: AuthenticatedClient,
-    payload: { imagePaths: string[]; message: string; tmuxSessionName?: string } | undefined,
+    payload: { imagePaths: string[]; message: string; tmuxSessionName?: string; sessionId?: string } | undefined,
     requestId?: string
   ): Promise<void> {
     if (!payload) {
@@ -1998,8 +2060,43 @@ export class WebSocketHandler {
       return;
     }
 
-    const targetSession = payload.tmuxSessionName || this.injector.getActiveSession();
-    const success = await this.injector.sendInput(combinedMessage, targetSession);
+    // Resolve sessionId to tmux session name
+    let sessionToUse: string;
+    if (payload.tmuxSessionName) {
+      sessionToUse = payload.tmuxSessionName;
+    } else if (payload.sessionId) {
+      const resolved = await this.resolveTmuxSession(payload.sessionId);
+      sessionToUse = resolved || payload.sessionId;
+    } else {
+      sessionToUse = this.injector.getActiveSession();
+    }
+
+    // Check if the target session exists before trying to send
+    const sessionExists = await this.injector.checkSessionExists(sessionToUse);
+
+    if (!sessionExists) {
+      const savedConfig = this.tmuxSessionConfigs.get(sessionToUse);
+
+      this.send(client.ws, {
+        type: 'message_sent',
+        success: false,
+        error: 'tmux_session_not_found',
+        payload: {
+          sessionName: sessionToUse,
+          canRecreate: !!savedConfig,
+          savedConfig: savedConfig
+            ? {
+                name: savedConfig.name,
+                workingDir: savedConfig.workingDir,
+              }
+            : undefined,
+        },
+        requestId,
+      });
+      return;
+    }
+
+    const success = await this.injector.sendInput(combinedMessage, sessionToUse);
     this.send(client.ws, {
       type: 'message_sent',
       success,

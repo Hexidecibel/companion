@@ -9035,3 +9035,84 @@ html {
 .fetch-error-banner-btn:hover {
   background-color: rgba(239, 68, 68, 0.15);
 }
+
+/* ========================================
+   Feedback Prompt (CLI session rating)
+   ======================================== */
+
+.feedback-prompt {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 16px;
+  background-color: rgba(59, 130, 246, 0.1);
+  border-bottom: 1px solid rgba(59, 130, 246, 0.15);
+  flex-shrink: 0;
+  animation: fadeIn 0.2s ease-out;
+}
+
+.feedback-prompt-sent {
+  opacity: 0.6;
+}
+
+.feedback-prompt-question {
+  font-size: 13px;
+  color: var(--accent-blue);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.feedback-prompt-buttons {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.feedback-prompt-btn {
+  padding: 4px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  font-size: 12px;
+  cursor: pointer;
+  transition: background-color 0.15s, border-color 0.15s;
+  white-space: nowrap;
+}
+
+.feedback-prompt-btn:hover {
+  background: var(--bg-hover);
+  border-color: var(--accent-blue);
+}
+
+.feedback-prompt-btn:active {
+  background: rgba(59, 130, 246, 0.2);
+}
+
+.feedback-prompt-btn.dismiss {
+  color: var(--text-muted);
+  border-color: transparent;
+  background: transparent;
+}
+
+.feedback-prompt-btn.dismiss:hover {
+  color: var(--text-secondary);
+  background: var(--bg-tertiary);
+  border-color: var(--border-color);
+}
+
+@media (max-width: 768px) {
+  .feedback-prompt {
+    padding: 6px 12px;
+    gap: 8px;
+  }
+
+  .feedback-prompt-question {
+    font-size: 12px;
+  }
+
+  .feedback-prompt-btn {
+    padding: 6px 14px;
+    font-size: 13px;
+  }
+}

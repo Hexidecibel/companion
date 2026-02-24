@@ -72,6 +72,18 @@ export interface ConversationHighlight {
   skillName?: string; // User message is an expanded skill invocation (e.g., "todo", "apk")
 }
 
+// Feedback prompt types (CLI session rating)
+
+export interface FeedbackOption {
+  key: string;    // "0", "1", "2", "3"
+  label: string;  // "Dismiss", "Bad", "Fine", "Good"
+}
+
+export interface FeedbackPrompt {
+  question: string;
+  options: FeedbackOption[];
+}
+
 // Session types
 
 export interface ActivityDetail {
@@ -90,6 +102,7 @@ export interface SessionStatus {
   projectPath?: string;
   currentActivity?: string;
   recentActivity?: ActivityDetail[];
+  feedbackPrompt?: FeedbackPrompt;
 }
 
 export interface SessionSummary {

@@ -308,6 +308,40 @@ export class InputInjector {
     return (result.stdout?.toString() || '').trim();
   }
 
+  /**
+   * Capture the tmux pane content (last 30 lines by default).
+   * Returns the captured text, or empty string on error.
+   */
+  async captureTmuxPane(targetSession?: string, lines = 30): Promise<string> {
+    try {
+      const session = targetSession || this.activeSession;
+      const { spawnSync } = require('child_process');
+      const result = spawnSync('tmux', ['capture-pane', '-t', session, '-p', '-S', `-${lines}`], {
+        timeout: TMUX_OPERATION_TIMEOUT_MS,
+      });
+      if (result.status !== 0) return '';
+      return (result.stdout?.toString() || '').trim();
+    } catch {
+      return '';
+    }
+  }
+
+  /**
+   * Send a single keypress to tmux (no Enter).
+   * Used for feedback prompts that auto-submit after a keypress.
+   */
+  async sendKeypress(key: string, targetSession?: string): Promise<void> {
+    try {
+      const session = targetSession || this.activeSession;
+      const { spawnSync } = require('child_process');
+      spawnSync('tmux', ['send-keys', '-t', session, key], {
+        timeout: TMUX_OPERATION_TIMEOUT_MS,
+      });
+    } catch {
+      // Silent fail — don't crash if tmux isn't available
+    }
+  }
+
   // Deprecated - use setActiveSession
   setSession(sessionName: string): void {
     this.activeSession = sessionName;

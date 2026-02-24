@@ -27,6 +27,16 @@ export interface DaemonConfig {
   anthropicAdminApiKey?: string;
 }
 
+export interface FeedbackOption {
+  key: string;    // "0", "1", "2", "3"
+  label: string;  // "Dismiss", "Bad", "Fine", "Good"
+}
+
+export interface FeedbackPrompt {
+  question: string;
+  options: FeedbackOption[];
+}
+
 export interface QuestionOption {
   label: string;
   description: string;
@@ -93,6 +103,7 @@ export interface SessionStatus {
   projectPath?: string;
   currentActivity?: string;
   recentActivity?: ActivityDetail[];
+  feedbackPrompt?: FeedbackPrompt;
 }
 
 export interface TmuxSession {
