@@ -145,6 +145,7 @@ export const MessageBubble = memo(function MessageBubble({ message, onSelectOpti
   // Long-press touch handling for mobile context menu
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const touchStartPos = useRef<{ x: number; y: number } | null>(null);
+  const touchStartTime = useRef<number>(0);
   const didLongPress = useRef(false);
   const touchContext = useRef<{
     type: 'link' | 'image' | 'text' | 'message';
@@ -170,6 +171,7 @@ export const MessageBubble = memo(function MessageBubble({ message, onSelectOpti
     didLongPress.current = false;
     const touch = e.touches[0];
     touchStartPos.current = { x: touch.clientX, y: touch.clientY };
+    touchStartTime.current = Date.now();
 
     // Determine what was touched
     const target = e.target as HTMLElement;
@@ -215,8 +217,26 @@ export const MessageBubble = memo(function MessageBubble({ message, onSelectOpti
     }
     if (didLongPress.current) {
       e.preventDefault(); // Prevent click after long press
+      return;
     }
-  }, []);
+
+    // If the user drag-selected text (without triggering long-press), show context menu
+    const touchDuration = Date.now() - touchStartTime.current;
+    if (touchDuration > 300) {
+      const selection = window.getSelection()?.toString();
+      if (selection && selection.length > 0) {
+        // Small delay to let the browser finalize the selection
+        setTimeout(() => {
+          const sel = window.getSelection()?.toString();
+          if (sel && sel.length > 0) {
+            touchContext.current = { type: 'text', selectedText: sel };
+            const touch = e.changedTouches[0];
+            openMenu(touch.clientX, touch.clientY - 20);
+          }
+        }, 100);
+      }
+    }
+  }, [openMenu]);
 
   const contextMenuItems = useCallback((): ContextMenuEntry[] => {
     const items: ContextMenuEntry[] = [];
