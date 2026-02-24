@@ -15,6 +15,7 @@ Quick capture for ideas and tasks. Run `/plan` to process into detailed plans.
 - TestFlight beta -- submit iOS build for beta testing before public release
 
 ## Upcoming
+- ~~Tiled agent conversations~~ done -- dispatch panel tiles agent conversations side-by-side on desktop
 - Split snap layouts -- show snap zone boxes (like Windows/macOS) when dragging/splitting sessions into different configurations
 - ~~Theme customization~~ done -- choosable theme presets (sent message gradient, text color, button color, accents). Curated set of options, not too many
 - Mobile button rearrange -- move on/off toggles (Notify, Auto, Tools) to header, move Files/Search/Terminal to bottom bar. Cancel stays in bottom

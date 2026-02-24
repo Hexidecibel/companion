@@ -178,6 +178,15 @@ Prominent bottom drawer panel showing subagents as first-class UI, replacing the
 - Adaptive polling: 2s when agents running, 5s when idle
 - CLAUDE.md instructions for dispatch mode included in all scaffold templates
 
+## Tiled Agent Conversations
+Dispatch panel shows agent conversations tiled side-by-side on desktop instead of card list + single detail view.
+
+- Each tile independently fetches and renders its agent's conversation
+- Status dot (green pulse/blue/red) + slug header per tile
+- Equal-width tiles with min-width 280px, horizontal scroll for 5+ agents
+- Auto-scrolls to latest messages
+- Mobile unchanged: card list + detail overlay
+
 ## Permission Bypass Toggle
 File-based permission bypass that works for all sessions and subagents in a project, replacing the old tmux-injection auto-approve.
 

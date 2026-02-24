@@ -3,6 +3,7 @@ import { SubAgent, ConversationHighlight } from '../types';
 import { useSubAgentDetail } from '../hooks/useSubAgentDetail';
 import { DispatchAgentCard } from './DispatchAgentCard';
 import { MessageBubble } from './MessageBubble';
+import { AgentTile } from './AgentTile';
 import { isMobileViewport } from '../utils/platform';
 
 interface DispatchPanelProps {
@@ -172,39 +173,25 @@ export function DispatchPanel({
 
   return (
     <div className="dispatch-panel" style={{ height }}>
-      {focusedAgentId ? (
-        <DetailView
-          serverId={serverId}
-          agentId={focusedAgentId}
-          onBack={() => setFocusedAgentId(null)}
-        />
-      ) : (
-        <>
-          <div className="dispatch-toolbar">
-            <div className="dispatch-toolbar-left">
-              <span className="dispatch-toolbar-label">
-                {runningCount > 0
-                  ? `${runningCount} agent${runningCount !== 1 ? 's' : ''} running`
-                  : `${totalAgents} agent${totalAgents !== 1 ? 's' : ''}`}
-                {completedCount > 0 && runningCount > 0 &&
-                  ` / ${completedCount} done`}
-              </span>
-            </div>
-            <button className="dispatch-collapse-btn" onClick={onCollapse} title="Collapse panel">
-              {'\u25BC'}
-            </button>
-          </div>
-          <div className="dispatch-card-list">
-            {sorted.map((agent) => (
-              <DispatchAgentCard
-                key={agent.agentId}
-                agent={agent}
-                onClick={() => setFocusedAgentId(agent.agentId)}
-              />
-            ))}
-          </div>
-        </>
-      )}
+      <div className="dispatch-toolbar">
+        <div className="dispatch-toolbar-left">
+          <span className="dispatch-toolbar-label">
+            {runningCount > 0
+              ? `${runningCount} agent${runningCount !== 1 ? 's' : ''} running`
+              : `${totalAgents} agent${totalAgents !== 1 ? 's' : ''}`}
+            {completedCount > 0 && runningCount > 0 &&
+              ` / ${completedCount} done`}
+          </span>
+        </div>
+        <button className="dispatch-collapse-btn" onClick={onCollapse} title="Collapse panel">
+          {'\u25BC'}
+        </button>
+      </div>
+      <div className="dispatch-tile-container">
+        {sorted.map(agent => (
+          <AgentTile key={agent.agentId} serverId={serverId} agent={agent} />
+        ))}
+      </div>
     </div>
   );
 }
