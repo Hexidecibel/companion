@@ -34,7 +34,7 @@ export function ContextMenu({ items, position, onClose }: ContextMenuProps) {
   }, [position]);
 
   useEffect(() => {
-    const handleMouseDown = (e: MouseEvent) => {
+    const handlePointerDown = (e: MouseEvent | TouchEvent) => {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
         onClose();
       }
@@ -44,12 +44,14 @@ export function ContextMenu({ items, position, onClose }: ContextMenuProps) {
     };
     const handleScroll = () => onClose();
 
-    document.addEventListener('mousedown', handleMouseDown);
+    document.addEventListener('mousedown', handlePointerDown);
+    document.addEventListener('touchstart', handlePointerDown);
     document.addEventListener('keydown', handleKeyDown);
     window.addEventListener('scroll', handleScroll, true);
 
     return () => {
-      document.removeEventListener('mousedown', handleMouseDown);
+      document.removeEventListener('mousedown', handlePointerDown);
+      document.removeEventListener('touchstart', handlePointerDown);
       document.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('scroll', handleScroll, true);
     };

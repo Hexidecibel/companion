@@ -132,6 +132,17 @@ export const MessageBubble = memo(function MessageBubble({ message, onSelectOpti
 
   const showContextMenu = !isSystem && !message.isPending;
 
+  // Long-press touch handling for mobile context menu
+  const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const touchStartPos = useRef<{ x: number; y: number } | null>(null);
+  const didLongPress = useRef(false);
+  const touchContext = useRef<{
+    type: 'link' | 'image' | 'text' | 'message';
+    href?: string;
+    selectedText?: string;
+    imgSrc?: string;
+  }>({ type: 'message' });
+
   const openMenu = useCallback((x: number, y: number) => {
     setContextMenu({ x, y });
     if (navigator.vibrate) navigator.vibrate(50);
@@ -140,11 +151,97 @@ export const MessageBubble = memo(function MessageBubble({ message, onSelectOpti
   const handleContextMenu = useCallback((e: React.MouseEvent) => {
     if (!showContextMenu) return;
     e.preventDefault();
+    touchContext.current = { type: 'message' };
     openMenu(e.clientX, e.clientY);
   }, [showContextMenu, openMenu]);
 
+  const handleTouchStart = useCallback((e: React.TouchEvent) => {
+    if (!showContextMenu) return;
+    didLongPress.current = false;
+    const touch = e.touches[0];
+    touchStartPos.current = { x: touch.clientX, y: touch.clientY };
+
+    // Determine what was touched
+    const target = e.target as HTMLElement;
+    const link = target.closest('a');
+    const img = target.closest('img');
+
+    longPressTimer.current = setTimeout(() => {
+      didLongPress.current = true;
+
+      // Check for text selection
+      const selection = window.getSelection()?.toString();
+
+      if (link) {
+        touchContext.current = { type: 'link', href: link.href };
+      } else if (img) {
+        touchContext.current = { type: 'image', imgSrc: img.src };
+      } else if (selection) {
+        touchContext.current = { type: 'text', selectedText: selection };
+      } else {
+        touchContext.current = { type: 'message' };
+      }
+
+      // Open menu offset above finger so it's not covered
+      openMenu(touch.clientX, touch.clientY - 20);
+    }, 500);
+  }, [showContextMenu, openMenu]);
+
+  const handleTouchMove = useCallback((e: React.TouchEvent) => {
+    if (!touchStartPos.current || !longPressTimer.current) return;
+    const touch = e.touches[0];
+    const dx = touch.clientX - touchStartPos.current.x;
+    const dy = touch.clientY - touchStartPos.current.y;
+    if (Math.sqrt(dx * dx + dy * dy) > 10) {
+      clearTimeout(longPressTimer.current);
+      longPressTimer.current = null;
+    }
+  }, []);
+
+  const handleTouchEnd = useCallback((e: React.TouchEvent) => {
+    if (longPressTimer.current) {
+      clearTimeout(longPressTimer.current);
+      longPressTimer.current = null;
+    }
+    if (didLongPress.current) {
+      e.preventDefault(); // Prevent click after long press
+    }
+  }, []);
+
   const contextMenuItems = useCallback((): ContextMenuEntry[] => {
     const items: ContextMenuEntry[] = [];
+    const ctx = touchContext.current;
+
+    // Context-specific items first
+    if (ctx.type === 'text' && ctx.selectedText) {
+      items.push({
+        label: 'Copy selection',
+        onClick: () => navigator.clipboard.writeText(ctx.selectedText!),
+      });
+    }
+    if (ctx.type === 'link' && ctx.href) {
+      items.push({
+        label: 'Copy link',
+        onClick: () => navigator.clipboard.writeText(ctx.href!),
+      });
+      items.push({
+        label: 'Open link',
+        onClick: () => window.open(ctx.href, '_blank'),
+      });
+    }
+    if (ctx.type === 'image' && ctx.imgSrc) {
+      items.push({
+        label: 'Save image',
+        onClick: () => window.open(ctx.imgSrc, '_blank'),
+      });
+    }
+
+    // Add divider if we have context-specific items
+    if (items.length > 0) {
+      items.push(null);
+    }
+
+    // Standard items
     if (isUser) {
       items.push({
         label: 'Copy message',
@@ -223,6 +320,9 @@ export const MessageBubble = memo(function MessageBubble({ message, onSelectOpti
           ref={bubbleRef}
           className={`msg-bubble ${isUser ? 'msg-bubble-user' : 'msg-bubble-assistant'} ${isUser && message.isPending ? 'msg-bubble-pending' : ''} ${isBookmarked ? 'msg-bubble-bookmarked' : ''}`}
           onContextMenu={handleContextMenu}
+          onTouchStart={handleTouchStart}
+          onTouchMove={handleTouchMove}
+          onTouchEnd={handleTouchEnd}
         >
           {searchTerm ? (
             <pre className="msg-content">
