@@ -814,6 +814,7 @@ export function SessionView({
                   addBookmark(messageId, sessionId, content);
                 }
               }}
+              serverId={serverId}
             />
 
             <FileTabBar

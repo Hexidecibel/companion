@@ -1,9 +1,10 @@
-import { useState, useCallback, useRef, memo } from 'react';
+import { useState, useCallback, useRef, useMemo, memo } from 'react';
 import { ConversationHighlight } from '../types';
 import { ToolCard } from './ToolCard';
-import { MarkdownRenderer } from './MarkdownRenderer';
+import { MarkdownRenderer, extractFilePaths } from './MarkdownRenderer';
 import { ContextMenu, ContextMenuEntry } from './ContextMenu';
 import { QuestionBlock, MultiQuestionFlow, ChoiceData } from './QuestionBlock';
+import { useFileExistence } from '../hooks/useFileExistence';
 
 export type { ChoiceData } from './QuestionBlock';
 
@@ -22,6 +23,7 @@ interface MessageBubbleProps {
   hideTools?: boolean;
   isBookmarked?: boolean;
   onToggleBookmark?: (messageId: string, content: string) => void;
+  serverId?: string | null;
 }
 
 // Highlight search matches in text
@@ -105,7 +107,7 @@ function CompactionMessage({ content }: { content: string }) {
   );
 }
 
-function SkillCard({ skillName, content, onViewFile }: { skillName: string; content: string; onViewFile?: (path: string) => void }) {
+function SkillCard({ skillName, content, onViewFile, existingFiles }: { skillName: string; content: string; onViewFile?: (path: string) => void; existingFiles?: Set<string> }) {
   const [expanded, setExpanded] = useState(false);
   return (
     <div className={`skill-card ${expanded ? 'expanded' : ''}`} onClick={() => setExpanded(!expanded)}>
@@ -115,20 +117,28 @@ function SkillCard({ skillName, content, onViewFile }: { skillName: string; cont
       </div>
       {expanded && (
         <div className="skill-card-body" onClick={(e) => e.stopPropagation()}>
-          <MarkdownRenderer content={content} onFileClick={onViewFile} />
+          <MarkdownRenderer content={content} onFileClick={onViewFile} existingFiles={existingFiles} />
         </div>
       )}
     </div>
   );
 }
 
-export const MessageBubble = memo(function MessageBubble({ message, onSelectOption, onSelectChoice, onCancelMessage, onViewFile, onViewArtifact, searchTerm, isCurrentMatch, planFilePath, hideTools, isBookmarked, onToggleBookmark }: MessageBubbleProps) {
+export const MessageBubble = memo(function MessageBubble({ message, onSelectOption, onSelectChoice, onCancelMessage, onViewFile, onViewArtifact, searchTerm, isCurrentMatch, planFilePath, hideTools, isBookmarked, onToggleBookmark, serverId }: MessageBubbleProps) {
   const isUser = message.type === 'user';
   const isSystem = message.type === 'system';
   const [allExpanded, setAllExpanded] = useState<boolean | undefined>(undefined);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
   const bubbleRef = useRef<HTMLDivElement>(null);
   const [batchApproving, setBatchApproving] = useState<{ current: number; total: number } | null>(null);
+
+  // Extract file paths from assistant messages for existence checking
+  const filePaths = useMemo(() => {
+    if (isUser || isSystem || !message.content) return [];
+    return extractFilePaths(message.content);
+  }, [message.content, isUser, isSystem]);
+
+  const existingFiles = useFileExistence(serverId ?? undefined, filePaths);
 
   const showContextMenu = !isSystem && !message.isPending;
 
@@ -314,7 +324,7 @@ export const MessageBubble = memo(function MessageBubble({ message, onSelectOpti
       data-highlight-id={message.id}
     >
       {hasContent && message.skillName ? (
-        <SkillCard skillName={message.skillName} content={message.content} onViewFile={onViewFile} />
+        <SkillCard skillName={message.skillName} content={message.content} onViewFile={onViewFile} existingFiles={filePaths.length > 0 ? existingFiles : undefined} />
       ) : hasContent && (
         <div
           ref={bubbleRef}
@@ -334,6 +344,7 @@ export const MessageBubble = memo(function MessageBubble({ message, onSelectOpti
             <MarkdownRenderer
               content={message.content}
               onFileClick={onViewFile}
+              existingFiles={filePaths.length > 0 ? existingFiles : undefined}
               className="msg-markdown"
             />
           )}

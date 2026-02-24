@@ -21,6 +21,7 @@ async function openExternalUrl(url: string): Promise<void> {
 interface MarkdownRendererProps {
   content: string;
   onFileClick?: (path: string) => void;
+  existingFiles?: Set<string>;
   className?: string;
 }
 
@@ -55,6 +56,49 @@ function looksLikeFilePath(text: string): boolean {
   // Relative path with extension
   if (/^(?:\.\.?\/)?(?:[\w.-]+\/)*[\w.-]+\.\w{1,10}$/.test(text)) return true;
   return false;
+}
+
+/**
+ * Extract all file paths detected in markdown content.
+ * Reuses the same detection logic as the renderer (BARE_PATH_RE, looksLikeFilePath, isFilePath).
+ * Used by parent components to pre-check path existence.
+ */
+export function extractFilePaths(content: string): string[] {
+  const paths = new Set<string>();
+  const lines = content.split('\n');
+
+  for (const line of lines) {
+    // Skip fenced code block markers
+    if (line.startsWith('```')) continue;
+
+    // Find inline code spans that look like file paths
+    const codeRe = /`([^`]+)`/g;
+    let codeMatch: RegExpExecArray | null;
+    while ((codeMatch = codeRe.exec(line)) !== null) {
+      if (looksLikeFilePath(codeMatch[1])) {
+        paths.add(codeMatch[1]);
+      }
+    }
+
+    // Find markdown links with file-path hrefs: [text](path)
+    const linkRe = /\[([^\]]+)\]\(([^)]+)\)/g;
+    let linkMatch: RegExpExecArray | null;
+    while ((linkMatch = linkRe.exec(line)) !== null) {
+      if (isFilePath(linkMatch[2])) {
+        paths.add(linkMatch[2]);
+      }
+    }
+
+    // Find bare file paths in text (after stripping inline code and links)
+    const stripped = line.replace(/`[^`]+`/g, '   ').replace(/\[[^\]]+\]\([^)]+\)/g, '   ');
+    BARE_PATH_RE.lastIndex = 0;
+    let bareMatch: RegExpExecArray | null;
+    while ((bareMatch = BARE_PATH_RE.exec(stripped)) !== null) {
+      paths.add(bareMatch[1]);
+    }
+  }
+
+  return Array.from(paths);
 }
 
 function parseInline(text: string): InlineNode[] {
@@ -137,7 +181,7 @@ function parseInline(text: string): InlineNode[] {
   return expanded;
 }
 
-function renderInline(text: string, keyPrefix: string, onFileClick?: (path: string) => void) {
+function renderInline(text: string, keyPrefix: string, onFileClick?: (path: string) => void, existingFiles?: Set<string>) {
   const nodes = parseInline(text);
   return nodes.map((node, i) => {
     const key = `${keyPrefix}-${i}`;
@@ -147,8 +191,8 @@ function renderInline(text: string, keyPrefix: string, onFileClick?: (path: stri
       case 'italic':
         return <em key={key}>{node.text}</em>;
       case 'code':
-        // Make code spans clickable if they look like file paths
-        if (looksLikeFilePath(node.text) && onFileClick) {
+        // Make code spans clickable if they look like file paths AND file exists (or existence not checked)
+        if (looksLikeFilePath(node.text) && onFileClick && (!existingFiles || existingFiles.has(node.text))) {
           return (
             <code
               key={key}
@@ -178,16 +222,21 @@ function renderInline(text: string, keyPrefix: string, onFileClick?: (path: stri
           </a>
         );
       case 'fileLink':
-        return (
-          <span
-            key={key}
-            className="md-file-link"
-            role="button"
-            onClick={() => onFileClick?.(node.path)}
-          >
-            {node.text}
-          </span>
-        );
+        // Only make clickable if file exists (or existence not checked)
+        if (onFileClick && (!existingFiles || existingFiles.has(node.path))) {
+          return (
+            <span
+              key={key}
+              className="md-file-link"
+              role="button"
+              onClick={() => onFileClick(node.path)}
+            >
+              {node.text}
+            </span>
+          );
+        }
+        // Non-existent file: render as plain text
+        return <span key={key}>{node.text}</span>;
       default:
         return <span key={key}>{node.text}</span>;
     }
@@ -377,11 +426,11 @@ function renderListItem(item: ListItem, key: string, ri: (text: string, keyPrefi
   return <li key={key}>{ri(item.text, key)}</li>;
 }
 
-export function MarkdownRenderer({ content, onFileClick, className }: MarkdownRendererProps) {
+export function MarkdownRenderer({ content, onFileClick, existingFiles, className }: MarkdownRendererProps) {
   const blocks = useMemo(() => parseBlocks(content), [content]);
   const ri = useCallback(
-    (text: string, keyPrefix: string) => renderInline(text, keyPrefix, onFileClick),
-    [onFileClick]
+    (text: string, keyPrefix: string) => renderInline(text, keyPrefix, onFileClick, existingFiles),
+    [onFileClick, existingFiles]
   );
 
   return (

@@ -21,6 +21,7 @@ interface MessageListProps {
   hideTools?: boolean;
   isBookmarked?: (messageId: string) => boolean;
   onToggleBookmark?: (messageId: string, content: string) => void;
+  serverId?: string | null;
 }
 
 export function MessageList({
@@ -41,6 +42,7 @@ export function MessageList({
   hideTools,
   isBookmarked,
   onToggleBookmark,
+  serverId,
 }: MessageListProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -214,6 +216,7 @@ export function MessageList({
           hideTools={hideTools}
           isBookmarked={isBookmarked?.(msg.id)}
           onToggleBookmark={onToggleBookmark}
+          serverId={serverId}
         />
       ))}
       <div ref={bottomRef} />
