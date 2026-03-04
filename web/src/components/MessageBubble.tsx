@@ -5,8 +5,25 @@ import { MarkdownRenderer, extractFilePaths } from './MarkdownRenderer';
 import { ContextMenu, ContextMenuEntry } from './ContextMenu';
 import { QuestionBlock, MultiQuestionFlow, ChoiceData } from './QuestionBlock';
 import { useFileExistence } from '../hooks/useFileExistence';
+import { isTauri } from '../utils/platform';
 
 export type { ChoiceData } from './QuestionBlock';
+
+/**
+ * Open external URL - uses Tauri shell.open when in desktop app
+ */
+async function openExternalUrl(url: string): Promise<void> {
+  if (isTauri()) {
+    try {
+      const { open } = await import('@tauri-apps/plugin-shell');
+      await open(url);
+    } catch {
+      window.open(url, '_blank');
+    }
+  } else {
+    window.open(url, '_blank');
+  }
+}
 
 const ARTIFACT_THRESHOLD = 100; // lines
 
@@ -49,6 +66,62 @@ function HighlightedText({ text, term }: { text: string; term: string }) {
       )}
     </>
   );
+}
+
+// Linkify: detect bare URLs in plain text and render them as clickable <a> tags
+function Linkify({ text }: { text: string }) {
+  const URL_RE = /https?:\/\/[^\s<>]+/g;
+  const elements: React.ReactNode[] = [];
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = URL_RE.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      elements.push(<span key={`t-${lastIndex}`}>{text.slice(lastIndex, match.index)}</span>);
+    }
+
+    let url = match[0];
+    const trailingPunct = /[.,;:!?\])]+$/.exec(url);
+    let suffix = '';
+    if (trailingPunct) {
+      suffix = trailingPunct[0];
+      url = url.slice(0, -suffix.length);
+    }
+
+    elements.push(
+      <a
+        key={`u-${match.index}`}
+        href={url}
+        target="_blank"
+        rel="noopener noreferrer"
+        style={{ color: 'var(--accent-blue)', textDecoration: 'underline' }}
+        onClick={(e) => {
+          if (isTauri()) {
+            e.preventDefault();
+            openExternalUrl(url);
+          }
+        }}
+      >
+        {url}
+      </a>
+    );
+
+    if (suffix) {
+      elements.push(<span key={`s-${match.index}`}>{suffix}</span>);
+    }
+
+    lastIndex = match.index + match[0].length;
+  }
+
+  if (lastIndex < text.length) {
+    elements.push(<span key={`t-${lastIndex}`}>{text.slice(lastIndex)}</span>);
+  }
+
+  if (elements.length === 0) {
+    return <>{text}</>;
+  }
+
+  return <>{elements}</>;
 }
 
 // Detect plan file paths in content text
@@ -359,7 +432,7 @@ export const MessageBubble = memo(function MessageBubble({ message, onSelectOpti
               <HighlightedText text={message.content} term={searchTerm} />
             </pre>
           ) : isUser ? (
-            <pre className="msg-content">{message.content}</pre>
+            <pre className="msg-content"><Linkify text={message.content} /></pre>
           ) : (
             <MarkdownRenderer
               content={message.content}

@@ -334,6 +334,12 @@ export class ServerConnection {
     }
   }
 
+  switchSession(sessionId: string): void {
+    if (this.isConnected()) {
+      this.send({ type: 'switch_session', payload: { sessionId } }).catch(() => {});
+    }
+  }
+
   reconnect(): void {
     this.connectionState.reconnectAttempts = 0;
     this.disconnect();

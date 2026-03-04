@@ -54,6 +54,37 @@ interface AskUserQuestionInput {
 
 const MAX_MESSAGES = Infinity; // No cap — full conversation available for infinite scroll
 
+/**
+ * Strip cross-session noise from compaction summary content.
+ * Claude Code's context compaction includes system-reminder blocks (CLAUDE.md, MEMORY.md),
+ * injected file contents, and internal XML tags. These reference other sessions/projects
+ * and confuse users when displayed in the Companion app.
+ */
+function cleanCompactionSummary(text: string): string {
+  let cleaned = text;
+
+  // Remove <system-reminder>...</system-reminder> blocks (may span many lines)
+  cleaned = cleaned.replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, '');
+
+  // Remove <command-name>...</command-name> tags (system-injected skill markers)
+  cleaned = cleaned.replace(/<command-name>[^<]*<\/command-name>/g, '');
+
+  // Remove "Contents of /path/to/file" header lines (injected file contents)
+  cleaned = cleaned.replace(/^[ \t]*Contents of \/[^\n]*$/gm, '');
+
+  // Remove lines referencing CLAUDE.md or MEMORY.md paths
+  cleaned = cleaned.replace(/^[^\n]*(?:CLAUDE\.md|MEMORY\.md)[^\n]*$/gm, '');
+
+  // Collapse multiple blank lines into one
+  cleaned = cleaned.replace(/\n{3,}/g, '\n\n');
+
+  // Trim leading/trailing whitespace
+  cleaned = cleaned.trim();
+
+  // If everything was stripped, return a generic marker
+  return cleaned || 'Context compacted';
+}
+
 // KNOWN_TOOLS alias for backward compatibility in this file
 const KNOWN_TOOLS = KNOWN_TOOL_NAMES;
 
@@ -236,7 +267,7 @@ export function parseConversationFile(
           messages.unshift({
             id: `compaction-${timestamp}`,
             type: 'system',
-            content: entry.summary,
+            content: cleanCompactionSummary(entry.summary),
             timestamp,
             isCompaction: true,
           });
@@ -246,10 +277,12 @@ export function parseConversationFile(
         const timestamp = entry.timestamp ? new Date(entry.timestamp).getTime() : Date.now();
         if (messages.length > 0 && messages[0].type === 'user') {
           // Convert the summary user message into a compaction system message
+          // and clean cross-session noise from the summary content
           messages[0] = {
             ...messages[0],
             id: `compaction-${timestamp}`,
             type: 'system',
+            content: cleanCompactionSummary(messages[0].content),
             isCompaction: true,
           };
         } else {
@@ -1004,7 +1037,7 @@ export function detectCompaction(
           sessionId,
           sessionName,
           projectPath,
-          summary: entry.summary,
+          summary: cleanCompactionSummary(entry.summary),
           timestamp,
         };
       }
@@ -1034,7 +1067,7 @@ export function detectCompaction(
           sessionId,
           sessionName,
           projectPath,
-          summary,
+          summary: cleanCompactionSummary(summary),
           timestamp,
         };
       }

@@ -3306,6 +3306,16 @@ html {
   color: var(--text-primary);
 }
 
+.dispatch-collapsed-bar.dispatch-flash {
+  animation: dispatch-bar-flash 2s ease-out;
+}
+
+@keyframes dispatch-bar-flash {
+  0%, 20%, 40% { background: rgba(59, 130, 246, 0.25); }
+  10%, 30% { background: rgba(59, 130, 246, 0.08); }
+  100% { background: rgba(59, 130, 246, 0.08); }
+}
+
 /* Mobile bar (collapsed) */
 .dispatch-mobile-bar {
   display: flex;

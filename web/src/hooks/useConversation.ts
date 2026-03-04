@@ -133,6 +133,9 @@ export function useConversation(
       return;
     }
 
+    // Tell the daemon which session we're viewing so broadcast filtering works
+    conn.switchSession(sessionId);
+
     let cancelled = false;
     let pollTimer: ReturnType<typeof setInterval> | null = null;
 
@@ -280,7 +283,7 @@ export function useConversation(
 
   const sendInput = useCallback(
     async (text: string, opts?: { skipOptimistic?: boolean }): Promise<boolean> => {
-      if (!serverId || !sessionId) return false;
+      if (!serverId || (!sessionId && !tmuxSessionName)) return false;
       const conn = connectionManager.getConnection(serverId);
       if (!conn || !conn.isConnected()) return false;
 

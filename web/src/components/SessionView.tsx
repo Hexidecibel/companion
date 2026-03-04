@@ -100,7 +100,6 @@ export function SessionView({
     return stored ? parseInt(stored, 10) : 280;
   });
   const dispatchDraggingRef = useRef(false);
-  const prevRunningRef = useRef(0);
 
   // File viewer state
   const [viewingFile, setViewingFile] = useState<string | null>(null);
@@ -176,39 +175,6 @@ export function SessionView({
     }
     return null;
   }, [highlights, latestPlanFile]);
-
-  // Auto-show dispatch panel when agents START running (desktop only, not on initial load)
-  // Auto-collapse ~3s after all agents finish (desktop only)
-  const hasMountedRef = useRef(false);
-  const autoCollapseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => {
-    // Clear any pending auto-collapse timer
-    if (autoCollapseTimerRef.current) {
-      clearTimeout(autoCollapseTimerRef.current);
-      autoCollapseTimerRef.current = null;
-    }
-
-    if (hasMountedRef.current && !isMobileViewport()) {
-      // Auto-open when agents start running
-      if (runningCount > 0 && prevRunningRef.current === 0) {
-        setDispatchCollapsed(false);
-      }
-      // Auto-collapse after all agents complete (brief delay so user sees "done" state)
-      if (runningCount === 0 && prevRunningRef.current > 0) {
-        autoCollapseTimerRef.current = setTimeout(() => {
-          setDispatchCollapsed(true);
-        }, 3000);
-      }
-    }
-    prevRunningRef.current = runningCount;
-    hasMountedRef.current = true;
-
-    return () => {
-      if (autoCollapseTimerRef.current) {
-        clearTimeout(autoCollapseTimerRef.current);
-      }
-    };
-  }, [runningCount]);
 
   const showDispatchPanel = !dispatchCollapsed && totalAgents > 0;
 

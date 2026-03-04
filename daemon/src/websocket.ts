@@ -504,7 +504,12 @@ export class WebSocketHandler {
     });
 
     for (const client of this.clients.values()) {
-      if (client.authenticated && client.subscribed && client.ws.readyState === WebSocket.OPEN) {
+      if (
+        client.authenticated &&
+        client.subscribed &&
+        client.ws.readyState === WebSocket.OPEN &&
+        (!activeSessionId || client.subscribedSessionId === activeSessionId)
+      ) {
         client.ws.send(message);
       }
     }

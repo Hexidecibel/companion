@@ -217,6 +217,8 @@ export function MultiQuestionFlow({ questions, onSelectOption, onSelectChoice }:
   const [step, setStep] = useState(0);
   const [answers, setAnswers] = useState<Map<number, AnswerData>>(new Map());
   const [reviewing, setReviewing] = useState(false);
+  const [isSending, setIsSending] = useState(false);
+  const [sendError, setSendError] = useState(false);
   const total = questions.length;
 
   const handleAnswer = useCallback((questionIdx: number, answer: AnswerData) => {
@@ -249,24 +251,37 @@ export function MultiQuestionFlow({ questions, onSelectOption, onSelectChoice }:
   }, []);
 
   const handleSubmitAll = useCallback(async () => {
-    for (let i = 0; i < total; i++) {
-      const answer = answers.get(i);
-      const q = questions[i];
-      if (onSelectChoice && answer) {
-        await onSelectChoice({
-          selectedIndices: answer.indices,
-          optionCount: q.options.length,
-          multiSelect: q.multiSelect,
-          otherText: answer.otherText,
-        });
-      } else {
-        await onSelectOption(answer?.text || '');
+    if (isSending) return;
+    setIsSending(true);
+    setSendError(false);
+    try {
+      for (let i = 0; i < total; i++) {
+        const answer = answers.get(i);
+        const q = questions[i];
+        if (onSelectChoice && answer) {
+          const result = await onSelectChoice({
+            selectedIndices: answer.indices,
+            optionCount: q.options.length,
+            multiSelect: q.multiSelect,
+            otherText: answer.otherText,
+          });
+          if (result === false) {
+            setSendError(true);
+            return;
+          }
+        } else {
+          await onSelectOption(answer?.text || '');
+        }
+        if (i < total - 1) {
+          await new Promise((resolve) => setTimeout(resolve, 500));
+        }
       }
-      if (i < total - 1) {
-        await new Promise((resolve) => setTimeout(resolve, 500));
-      }
+    } catch {
+      setSendError(true);
+    } finally {
+      setIsSending(false);
     }
-  }, [answers, total, questions, onSelectOption, onSelectChoice]);
+  }, [isSending, answers, total, questions, onSelectOption, onSelectChoice]);
 
   if (reviewing) {
     return (
@@ -284,14 +299,19 @@ export function MultiQuestionFlow({ questions, onSelectOption, onSelectChoice }:
           ))}
         </div>
         <div className="multi-question-nav">
-          <button onClick={handleBack}>Back</button>
+          <button onClick={handleBack} disabled={isSending}>Back</button>
           <button
             className="multi-question-submit"
             onClick={handleSubmitAll}
-            disabled={answers.size < total}
+            disabled={answers.size < total || isSending}
           >
-            Submit All
+            {isSending ? 'Sending...' : 'Submit All'}
           </button>
+          {sendError && (
+            <div className="choice-send-error" onClick={() => { setSendError(false); handleSubmitAll(); }}>
+              Failed — tap to retry
+            </div>
+          )}
         </div>
       </div>
     );
