@@ -39,6 +39,15 @@ const AgentToasts = React.memo(function AgentToasts({ toasts, onDismiss, onClick
         >
           <span className="agent-toast-dot" />
           <span className="agent-toast-text">{formatToastText(toast)}</span>
+          <button
+            className="agent-toast-dismiss"
+            onClick={(e) => {
+              e.stopPropagation();
+              onDismiss(toast.id);
+            }}
+          >
+            &times;
+          </button>
         </div>
       ))}
     </div>

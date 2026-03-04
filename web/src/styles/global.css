@@ -9297,6 +9297,22 @@ html {
   text-overflow: ellipsis;
 }
 
+.agent-toast-dismiss {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 0 0 4px;
+  flex-shrink: 0;
+  transition: color 0.15s ease;
+}
+
+.agent-toast-dismiss:hover {
+  color: var(--text-primary);
+}
+
 @keyframes toast-slide-up {
   from {
     opacity: 0;

@@ -191,6 +191,25 @@ function renderInline(text: string, keyPrefix: string, onFileClick?: (path: stri
       case 'italic':
         return <em key={key}>{node.text}</em>;
       case 'code':
+        // Make code spans clickable if they look like URLs
+        if (/^https?:\/\//.test(node.text)) {
+          return (
+            <a
+              key={key}
+              href={node.text}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={(e) => {
+                if (isTauri()) {
+                  e.preventDefault();
+                  openExternalUrl(node.text);
+                }
+              }}
+            >
+              <code>{node.text}</code>
+            </a>
+          );
+        }
         // Make code spans clickable if they look like file paths AND file exists (or existence not checked)
         if (looksLikeFilePath(node.text) && onFileClick && (!existingFiles || existingFiles.has(node.text))) {
           return (
