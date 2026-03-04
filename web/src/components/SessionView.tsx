@@ -29,6 +29,8 @@ import { FileFinder } from './FileFinder';
 import { useBookmarks } from '../hooks/useBookmarks';
 import { BookmarkList } from './BookmarkList';
 import { FetchErrorBanner } from './FetchErrorBanner';
+import { useAgentToasts } from '../hooks/useAgentToasts';
+import AgentToasts from './AgentToasts';
 import { hideToolsKey } from '../services/storageKeys';
 
 const CodeReviewModal = lazy(() => import('./CodeReviewModal').then(m => ({ default: m.CodeReviewModal })));
@@ -81,6 +83,7 @@ export function SessionView({
   const { tasks, loading: tasksLoading, error: tasksError, refresh: refreshTasks } = useTasks(serverId, sessionId);
   const { fileChanges, loading: reviewLoading, error: reviewError, refresh: refreshReview } = useCodeReview(serverId, sessionId);
   const { agents, runningCount, totalAgents, error: agentsError } = useSubAgents(serverId, sessionId);
+  const { toasts, dismissToast } = useAgentToasts(agents);
   const bypass = useBypassPermissions(serverId, sessionId);
   const sessionMute = useSessionMute(serverId);
   const { skills } = useSkills(serverId);
@@ -300,6 +303,10 @@ export function SessionView({
   }, [showTerminal, serverId, sessionId]);
 
   // Click on conversation area focuses textarea (desktop only)
+  const handleToastClick = useCallback(() => {
+    setDispatchCollapsed(false);
+  }, []);
+
   const handleConversationClick = useCallback((e: React.MouseEvent) => {
     if (isMobileViewport()) return;
     const target = e.target as HTMLElement;
@@ -799,6 +806,7 @@ export function SessionView({
               </div>
             </div>
           )}
+          <AgentToasts toasts={toasts} onDismiss={dismissToast} onClick={handleToastClick} />
       </div>
 
       {showDispatchPanel && !mobile && (

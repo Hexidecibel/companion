@@ -743,6 +743,7 @@ body {
 }
 
 .session-conversation {
+  position: relative;
   flex: 1;
   display: flex;
   flex-direction: column;
@@ -9232,5 +9233,84 @@ html {
   .feedback-prompt-btn {
     padding: 6px 14px;
     font-size: 13px;
+  }
+}
+
+/* Agent toast notifications */
+.agent-toasts-container {
+  position: absolute;
+  bottom: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 50;
+  display: flex;
+  flex-direction: column-reverse;
+  gap: 6px;
+  pointer-events: none;
+  max-width: 90%;
+}
+
+.agent-toast {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-radius: 8px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  font-size: 13px;
+  color: var(--text-primary);
+  cursor: pointer;
+  pointer-events: auto;
+  white-space: nowrap;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  animation: toast-slide-up 0.2s ease-out;
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+
+.agent-toast:hover {
+  background: var(--bg-tertiary);
+  transform: translateY(-1px);
+}
+
+.agent-toast-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.agent-toast-started .agent-toast-dot {
+  background: var(--accent-blue);
+}
+
+.agent-toast-completed .agent-toast-dot {
+  background: var(--accent-green);
+}
+
+.agent-toast-error .agent-toast-dot {
+  background: var(--accent-red);
+}
+
+.agent-toast-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+@keyframes toast-slide-up {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Mobile: raise toasts above bottom bar */
+@media (max-width: 768px) {
+  .agent-toasts-container {
+    bottom: 52px;
   }
 }
