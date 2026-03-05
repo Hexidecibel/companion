@@ -205,7 +205,8 @@ export function registerFileHandlers(
 
         resolvedPath = path.normalize(resolvedPath);
 
-        const allowedPaths = [homeDir, '/tmp', '/var/tmp'];
+        const configPaths = (ctx.config.allowedPaths || []).map((p) => path.normalize(p));
+        const allowedPaths = [homeDir, '/tmp', '/var/tmp', ...configPaths];
         const isAllowed = allowedPaths.some((allowed) => resolvedPath.startsWith(allowed));
 
         if (!isAllowed) {
@@ -418,7 +419,8 @@ export function registerFileHandlers(
 
         resolvedPath = path.normalize(resolvedPath);
 
-        const allowedPaths = [homeDir, '/tmp', '/var/tmp'];
+        const configPaths = (ctx.config.allowedPaths || []).map((p) => path.normalize(p));
+        const allowedPaths = [homeDir, '/tmp', '/var/tmp', ...configPaths];
         const isAllowed = allowedPaths.some((allowed) => resolvedPath.startsWith(allowed));
 
         if (!isAllowed) {
@@ -509,7 +511,8 @@ export function registerFileHandlers(
 
         resolvedPath = path.normalize(resolvedPath);
 
-        const allowedPaths = [homeDir, '/tmp', '/var/tmp'];
+        const configPaths = (ctx.config.allowedPaths || []).map((p) => path.normalize(p));
+        const allowedPaths = [homeDir, '/tmp', '/var/tmp', ...configPaths];
         const isAllowed = allowedPaths.some((allowed) => resolvedPath.startsWith(allowed));
 
         if (!isAllowed) {

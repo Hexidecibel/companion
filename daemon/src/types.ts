@@ -25,6 +25,8 @@ export interface DaemonConfig {
   git: boolean;
   // Anthropic Admin API key for fetching organization usage (sk-ant-admin-...)
   anthropicAdminApiKey?: string;
+  // Additional allowed paths for file access (merged with defaults: homeDir, /tmp, /var/tmp)
+  allowedPaths?: string[];
 }
 
 export interface FeedbackOption {
