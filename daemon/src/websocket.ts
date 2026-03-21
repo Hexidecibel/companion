@@ -66,6 +66,9 @@ export class WebSocketHandler {
   private usageMonitor: UsageMonitor;
   private sessionNameStore: SessionNameStore;
   private handlers: Map<string, MessageHandler>;
+  private deadConnectionInterval: ReturnType<typeof setInterval>;
+  private static readonly PONG_TIMEOUT_MS = 90_000;
+  private static readonly DEAD_CHECK_INTERVAL_MS = 60_000;
 
   constructor(
     servers: { server: Server; listener: ListenerConfig }[],
@@ -177,6 +180,22 @@ export class WebSocketHandler {
 
     this.loadTmuxSessionConfigs();
 
+    // Periodically close dead connections that haven't sent a ping recently
+    this.deadConnectionInterval = setInterval(() => {
+      const now = Date.now();
+      for (const [id, client] of this.clients) {
+        if (now - client.lastPongTime > WebSocketHandler.PONG_TIMEOUT_MS) {
+          console.log(`WebSocket: Closing dead connection (${id}) — no ping for ${Math.round((now - client.lastPongTime) / 1000)}s`);
+          try {
+            client.ws.close(1000, 'Ping timeout');
+          } catch {
+            client.ws.terminate();
+          }
+          this.clients.delete(id);
+        }
+      }
+    }, WebSocketHandler.DEAD_CHECK_INTERVAL_MS);
+
     console.log('WebSocket: Server initialized');
   }
 
@@ -273,6 +292,7 @@ export class WebSocketHandler {
       subscribed: false,
       listenerPort,
       isLocal,
+      lastPongTime: Date.now(),
     };
 
     this.clients.set(clientId, client);
@@ -358,6 +378,7 @@ export class WebSocketHandler {
 
     // Trivial inline handlers
     if (type === 'ping') {
+      client.lastPongTime = Date.now();
       if (client.deviceId) {
         this.push.updateDeviceLastSeen(client.deviceId);
       }
@@ -377,7 +398,19 @@ export class WebSocketHandler {
     // Dispatch to registered handlers
     const handler = this.handlers.get(type);
     if (handler) {
-      const result = handler(client, payload, requestId);
+      let result;
+      try {
+        result = handler(client, payload, requestId);
+      } catch (err) {
+        console.error(`Handler error for ${type}:`, err);
+        this.send(client.ws, {
+          type: 'error',
+          success: false,
+          error: `Internal error handling ${type}`,
+          requestId,
+        });
+        return;
+      }
       // If handler returns a promise, catch any unhandled errors
       if (result && typeof (result as Promise<void>).catch === 'function') {
         (result as Promise<void>).catch((err) => {
@@ -523,5 +556,9 @@ export class WebSocketHandler {
 
   getAuthenticatedClientCount(): number {
     return Array.from(this.clients.values()).filter((c) => c.authenticated).length;
+  }
+
+  shutdown(): void {
+    clearInterval(this.deadConnectionInterval);
   }
 }

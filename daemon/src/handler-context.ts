@@ -21,6 +21,7 @@ export interface AuthenticatedClient {
   subscribedSessionId?: string;
   listenerPort?: number;
   isLocal: boolean;
+  lastPongTime: number;
 }
 
 export interface ClientError {

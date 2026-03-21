@@ -7,6 +7,7 @@ const MAX_RECONNECT_ATTEMPTS = Infinity;
 const INITIAL_RECONNECT_DELAY = 1000;
 const MAX_RECONNECT_DELAY = 30000;
 const PING_INTERVAL = 25000;
+const PONG_TIMEOUT = 15000;
 const CONNECTION_TIMEOUT = 10000;
 
 export class ServerConnection {
@@ -26,8 +27,10 @@ export class ServerConnection {
 
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private pingTimer: ReturnType<typeof setInterval> | null = null;
+  private pongTimer: ReturnType<typeof setTimeout> | null = null;
   private connectionTimer: ReturnType<typeof setTimeout> | null = null;
   private requestCounter = 0;
+  private lastSessionId: string | undefined;
 
   constructor(server: Server) {
     this.server = server;
@@ -110,7 +113,11 @@ export class ServerConnection {
         this._gitEnabled = (response as unknown as { gitEnabled?: boolean }).gitEnabled !== false;
 
         // Subscribe to broadcasts so we receive real-time status_change events
-        await this.send({ type: 'subscribe', requestId: `req_${++this.requestCounter}` });
+        const subscribePayload = this.lastSessionId ? { sessionId: this.lastSessionId } : undefined;
+        const subResponse = await this.sendRequest('subscribe', subscribePayload, 10000);
+        if (subResponse.type === 'subscribed' && (subResponse as unknown as { sessionId?: string }).sessionId) {
+          this.lastSessionId = (subResponse as unknown as { sessionId?: string }).sessionId;
+        }
 
         this.updateState({
           status: 'connected',
@@ -134,6 +141,11 @@ export class ServerConnection {
   private handleMessage(event: MessageEvent): void {
     try {
       const message: WebSocketResponse = JSON.parse(event.data as string);
+
+      if (message.type === 'pong') {
+        this.clearPongTimer();
+        return;
+      }
 
       if (message.requestId && this.pendingRequests.has(message.requestId)) {
         const { resolve } = this.pendingRequests.get(message.requestId)!;
@@ -170,10 +182,12 @@ export class ServerConnection {
 
     if (this.server.enabled !== false && this.connectionState.reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
       const attempts = this.connectionState.reconnectAttempts + 1;
-      const delay = Math.min(
+      const baseDelay = Math.min(
         INITIAL_RECONNECT_DELAY * Math.pow(2, attempts - 1),
         MAX_RECONNECT_DELAY,
       );
+      const jitter = Math.random() * 1000;
+      const delay = baseDelay + jitter;
 
       this.updateState({
         status: 'reconnecting',
@@ -215,6 +229,7 @@ export class ServerConnection {
     this.clearConnectionTimer();
     this.clearReconnectTimer();
     this.clearPingInterval();
+    this.clearPongTimer();
   }
 
   private clearConnectionTimer(): void {
@@ -238,11 +253,23 @@ export class ServerConnection {
     }
   }
 
+  private clearPongTimer(): void {
+    if (this.pongTimer) {
+      clearTimeout(this.pongTimer);
+      this.pongTimer = null;
+    }
+  }
+
   private startPingInterval(): void {
     this.clearPingInterval();
     this.pingTimer = setInterval(() => {
       if (this.isConnected()) {
         this.send({ type: 'ping' }).catch(() => {});
+        this.clearPongTimer();
+        this.pongTimer = setTimeout(() => {
+          console.warn(`[${this.serverId}] Pong timeout — connection dead, reconnecting`);
+          this.ws?.close();
+        }, PONG_TIMEOUT);
       }
     }, PING_INTERVAL);
   }
@@ -335,8 +362,16 @@ export class ServerConnection {
   }
 
   switchSession(sessionId: string): void {
+    this.lastSessionId = sessionId;
     if (this.isConnected()) {
       this.send({ type: 'switch_session', payload: { sessionId } }).catch(() => {});
+    }
+  }
+
+  clearSessionSubscription(): void {
+    this.lastSessionId = undefined;
+    if (this.isConnected()) {
+      this.send({ type: 'switch_session', payload: { sessionId: null } }).catch(() => {});
     }
   }
 

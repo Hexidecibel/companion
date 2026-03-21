@@ -63,10 +63,12 @@ export function registerSessionHandlers(
       console.log(
         `WebSocket: Client subscribed (${client.id}) to session ${client.subscribedSessionId}`
       );
+      const sessions = ctx.watcher.getSessions();
       ctx.send(client.ws, {
         type: 'subscribed',
         success: true,
         sessionId: client.subscribedSessionId,
+        sessions,
         requestId,
       } as WebSocketResponse);
     },
@@ -398,7 +400,21 @@ export function registerSessionHandlers(
     },
 
     async switch_session(client, payload, requestId) {
-      const switchPayload = payload as { sessionId: string; epoch?: number } | undefined;
+      const switchPayload = payload as { sessionId: string | null; epoch?: number } | undefined;
+
+      // Clear subscription when sessionId is null
+      if (switchPayload && switchPayload.sessionId === null) {
+        client.subscribedSessionId = undefined;
+        console.log('WebSocket: Cleared session subscription');
+        ctx.send(client.ws, {
+          type: 'session_switched',
+          success: true,
+          payload: { sessionId: null },
+          requestId,
+        });
+        return;
+      }
+
       if (!switchPayload?.sessionId) {
         ctx.send(client.ws, {
           type: 'session_switched',
