@@ -15,6 +15,16 @@ import { createQRRequestHandler } from './qr-server';
 import { dispatchCli, writePidFile, removePidFile } from './cli';
 import { APPROVAL_SEND_DELAY_MS, AUTO_APPROVAL_MAX_TRACKED_IDS, SHUTDOWN_TIMEOUT_MS, STATUS_LOG_INTERVAL_MS } from './constants';
 
+// Crash handlers — ensure crash reasons are always logged before exit
+process.on('uncaughtException', (err) => {
+  console.error('Uncaught exception:', err);
+  process.exit(1);
+});
+process.on('unhandledRejection', (reason) => {
+  console.error('Unhandled rejection:', reason);
+  process.exit(1);
+});
+
 // Check CLI commands before starting daemon
 const cliArgs = process.argv.slice(2);
 dispatchCli(cliArgs).then((handled) => {
@@ -280,14 +290,35 @@ async function main(): Promise<void> {
   // Write PID file for CLI management
   writePidFile();
 
-  // Start HTTP servers for all listeners
+  // Start HTTP servers for all listeners (with EADDRINUSE retry)
+  const LISTEN_MAX_RETRIES = 5;
+  const LISTEN_RETRY_DELAY_MS = 3000;
+
   for (const { server, listener } of servers) {
-    server.listen(listener.port, () => {
-      const protocol = listener.tls ? 's' : '';
-      console.log(`Server listening on port ${listener.port}`);
-      console.log(`WebSocket endpoint: ws${protocol}://localhost:${listener.port}`);
-      console.log(`QR code setup: http${protocol}://localhost:${listener.port}/qr`);
+    let attempt = 0;
+    const tryListen = (): void => {
+      attempt++;
+      server.listen(listener.port, () => {
+        const protocol = listener.tls ? 's' : '';
+        console.log(`Server listening on port ${listener.port}`);
+        console.log(`WebSocket endpoint: ws${protocol}://localhost:${listener.port}`);
+        console.log(`QR code setup: http${protocol}://localhost:${listener.port}/qr`);
+      });
+    };
+
+    server.on('error', (err: NodeJS.ErrnoException) => {
+      if (err.code === 'EADDRINUSE' && attempt < LISTEN_MAX_RETRIES) {
+        console.warn(
+          `Port ${listener.port} in use, retrying in ${LISTEN_RETRY_DELAY_MS / 1000}s (attempt ${attempt}/${LISTEN_MAX_RETRIES})...`
+        );
+        setTimeout(tryListen, LISTEN_RETRY_DELAY_MS);
+      } else {
+        console.error(`Failed to start server on port ${listener.port}:`, err);
+        process.exit(1);
+      }
     });
+
+    tryListen();
   }
 
   // Graceful shutdown

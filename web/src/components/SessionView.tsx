@@ -26,6 +26,7 @@ import { TerminalPanel } from './TerminalPanel';
 import { WorkGroupBar } from './WorkGroupBar';
 import { WorkGroupPanel } from './WorkGroupPanel';
 import { FileFinder } from './FileFinder';
+import { VoiceMode } from './VoiceMode';
 import { useBookmarks } from '../hooks/useBookmarks';
 import { BookmarkList } from './BookmarkList';
 import { FetchErrorBanner } from './FetchErrorBanner';
@@ -128,6 +129,9 @@ export function SessionView({
   // Code review modal state
   const [showCodeReviewModal, setShowCodeReviewModal] = useState(false);
 
+  // Voice mode state
+  const [showVoiceMode, setShowVoiceMode] = useState(false);
+
   // Bookmarks
   const { addBookmark, removeBookmark, isBookmarked, sessionBookmarks } = useBookmarks(serverId);
   const [showBookmarks, setShowBookmarks] = useState(false);
@@ -218,10 +222,10 @@ export function SessionView({
 
   // Signal to Dashboard that an overlay is open (for back gesture coordination)
   useEffect(() => {
-    const isOverlay = showTerminal || showWorkGroupPanel || showConversationSearch || showFileFinder || showCodeReviewModal || dispatchOverlayOpen || !!viewingFile || !!artifactContent || showBookmarks;
+    const isOverlay = showTerminal || showWorkGroupPanel || showConversationSearch || showFileFinder || showCodeReviewModal || dispatchOverlayOpen || !!viewingFile || !!artifactContent || showBookmarks || showVoiceMode;
     document.body.dataset.overlay = isOverlay ? 'true' : '';
     return () => { document.body.dataset.overlay = ''; };
-  }, [showTerminal, showWorkGroupPanel, showConversationSearch, showFileFinder, showCodeReviewModal, dispatchOverlayOpen, viewingFile, artifactContent, showBookmarks]);
+  }, [showTerminal, showWorkGroupPanel, showConversationSearch, showFileFinder, showCodeReviewModal, dispatchOverlayOpen, viewingFile, artifactContent, showBookmarks, showVoiceMode]);
 
   // Listen for close-overlay event from Dashboard's back gesture handler
   useEffect(() => {
@@ -229,6 +233,7 @@ export function SessionView({
       // Close innermost/topmost overlay first
       if (artifactContent) setArtifactContent(null);
       else if (viewingFile) setViewingFile(null);
+      else if (showVoiceMode) setShowVoiceMode(false);
       else if (dispatchOverlayOpen) setDispatchCollapsed(true);
       else if (showCodeReviewModal) setShowCodeReviewModal(false);
       else if (showConversationSearch) setShowConversationSearch(false);
@@ -239,12 +244,13 @@ export function SessionView({
     };
     window.addEventListener('close-overlay', handler);
     return () => window.removeEventListener('close-overlay', handler);
-  }, [showTerminal, showWorkGroupPanel, showConversationSearch, showFileFinder, showCodeReviewModal, dispatchOverlayOpen, viewingFile, artifactContent, showBookmarks]);
+  }, [showTerminal, showWorkGroupPanel, showConversationSearch, showFileFinder, showCodeReviewModal, dispatchOverlayOpen, viewingFile, artifactContent, showBookmarks, showVoiceMode]);
 
   // Reset views when session changes, auto-focus on desktop only
   useEffect(() => {
     setShowTerminal(false);
     setShowWorkGroupPanel(false);
+    setShowVoiceMode(false);
     setViewingFile(null);
     if (serverId && sessionId && !isMobileViewport()) {
       requestAnimationFrame(() => {
@@ -616,6 +622,13 @@ export function SessionView({
           Terminal
         </button>
       )}
+      <button
+        className="session-header-btn"
+        onClick={() => setShowVoiceMode(true)}
+        title="Voice mode"
+      >
+        Voice
+      </button>
     </>
   );
 
@@ -871,6 +884,15 @@ export function SessionView({
           sessionId={sessionId || undefined}
           onSelectFile={handleViewFile}
           onClose={() => setShowFileFinder(false)}
+        />
+      )}
+
+      {showVoiceMode && (
+        <VoiceMode
+          highlights={highlights}
+          status={status}
+          sendInput={handleSend}
+          onClose={() => setShowVoiceMode(false)}
         />
       )}
     </div>
