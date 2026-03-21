@@ -1,4 +1,4 @@
-import { useMemo, useCallback } from 'react';
+import { useMemo, useCallback, useState } from 'react';
 import { isTauri } from '../utils/platform';
 
 /**
@@ -15,6 +15,18 @@ async function openExternalUrl(url: string): Promise<void> {
     }
   } else {
     window.open(url, '_blank');
+  }
+}
+
+// Helper to extract domain from URL for link pills
+function formatLinkDomain(url: string): string {
+  try {
+    const u = new URL(url);
+    const domain = u.hostname.replace(/^www\./, '');
+    const hasPath = u.pathname !== '/' || u.search || u.hash;
+    return hasPath ? `${domain}/\u2026` : domain;
+  } catch {
+    return url;
   }
 }
 
@@ -199,14 +211,15 @@ function renderInline(text: string, keyPrefix: string, onFileClick?: (path: stri
               href={node.text}
               target="_blank"
               rel="noopener noreferrer"
+              className="link-pill"
+              title={node.text}
               onClick={(e) => {
-                if (isTauri()) {
-                  e.preventDefault();
-                  openExternalUrl(node.text);
-                }
+                e.preventDefault();
+                openExternalUrl(node.text);
               }}
             >
-              <code>{node.text}</code>
+              <span className="link-pill-icon">{'\u2197'}</span>
+              <span className="link-pill-text">{formatLinkDomain(node.text)}</span>
             </a>
           );
         }
@@ -223,23 +236,30 @@ function renderInline(text: string, keyPrefix: string, onFileClick?: (path: stri
           );
         }
         return <code key={key}>{node.text}</code>;
-      case 'link':
+      case 'link': {
+        const isBareUrl = node.text === node.href;
         return (
           <a
             key={key}
             href={node.href}
             target="_blank"
             rel="noopener noreferrer"
+            className={isBareUrl ? 'link-pill' : undefined}
+            title={isBareUrl ? node.href : undefined}
             onClick={(e) => {
-              if (isTauri()) {
-                e.preventDefault();
-                openExternalUrl(node.href);
-              }
+              e.preventDefault();
+              openExternalUrl(node.href);
             }}
           >
-            {node.text}
+            {isBareUrl ? (
+              <>
+                <span className="link-pill-icon">{'\u2197'}</span>
+                <span className="link-pill-text">{formatLinkDomain(node.href)}</span>
+              </>
+            ) : node.text}
           </a>
         );
+      }
       case 'fileLink':
         // Only make clickable if file exists (or existence not checked)
         if (onFileClick && (!existingFiles || existingFiles.has(node.path))) {
@@ -445,6 +465,30 @@ function renderListItem(item: ListItem, key: string, ri: (text: string, keyPrefi
   return <li key={key}>{ri(item.text, key)}</li>;
 }
 
+function CodeBlock({ lang, lines, keyProp }: { lang: string; lines: string[]; keyProp: string }) {
+  const [copied, setCopied] = useState(false);
+  const code = lines.join('\n');
+
+  return (
+    <pre key={keyProp} className="md-code-block">
+      <div className="md-code-header">
+        {lang && <span className="md-code-lang">{lang}</span>}
+        <button
+          className="md-code-copy-btn"
+          onClick={() => {
+            navigator.clipboard.writeText(code);
+            setCopied(true);
+            setTimeout(() => setCopied(false), 1500);
+          }}
+        >
+          {copied ? 'Copied!' : 'Copy'}
+        </button>
+      </div>
+      <code>{code}</code>
+    </pre>
+  );
+}
+
 export function MarkdownRenderer({ content, onFileClick, existingFiles, className }: MarkdownRendererProps) {
   const blocks = useMemo(() => parseBlocks(content), [content]);
   const ri = useCallback(
@@ -462,12 +506,7 @@ export function MarkdownRenderer({ content, onFileClick, existingFiles, classNam
             return <Tag key={key}>{ri(block.text, key)}</Tag>;
           }
           case 'code':
-            return (
-              <pre key={key}>
-                {block.lang && <span className="md-code-lang">{block.lang}</span>}
-                <code>{block.lines.join('\n')}</code>
-              </pre>
-            );
+            return <CodeBlock key={key} lang={block.lang} lines={block.lines} keyProp={key} />;
           case 'blockquote':
             return (
               <blockquote key={key}>

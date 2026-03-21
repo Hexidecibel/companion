@@ -3,12 +3,13 @@ import ReactDOM from 'react-dom/client';
 import { App } from './App';
 import { applyFontScale } from './services/storage';
 import { initStorage } from './services/persistentStorage';
-import { applySafeAreaInsets, initKeyboardHeightListener } from './utils/platform';
+import { applySafeAreaInsets, initKeyboardHeightListener, installExternalLinkHandler } from './utils/platform';
 import './styles/variables.css';
 import './styles/global.css';
 
 applySafeAreaInsets();
 initKeyboardHeightListener();
+installExternalLinkHandler();
 
 // Initialize persistent storage (restores Tauri store to localStorage),
 // then apply settings and render.

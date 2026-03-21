@@ -152,3 +152,35 @@ export function initKeyboardHeightListener(): void {
   vv.addEventListener('resize', () => handler.handleResize(vv.height));
   // Do NOT set --app-height on init — let CSS 100dvh handle the default
 }
+
+/**
+ * Install a global click interceptor for external links.
+ * On Tauri, routes all http(s) links through shell.open to open
+ * in the system browser instead of navigating the webview.
+ * Should be called once at app startup.
+ */
+export function installExternalLinkHandler(): void {
+  if (!isTauri()) return;
+
+  document.addEventListener('click', (e) => {
+    const link = (e.target as HTMLElement).closest('a');
+    if (!link) return;
+
+    const href = link.getAttribute('href');
+    if (!href) return;
+
+    // Only intercept external URLs
+    if (!href.startsWith('http://') && !href.startsWith('https://')) return;
+
+    e.preventDefault();
+    e.stopPropagation();
+
+    // Use dynamic import to avoid bundling shell plugin in browser builds
+    import('@tauri-apps/plugin-shell').then(({ open }) => {
+      open(href);
+    }).catch(() => {
+      // Last resort fallback — shouldn't happen if plugin is configured
+      console.warn('shell.open failed for:', href);
+    });
+  }, true); // useCapture: true — fires before React handlers and before default behavior
+}

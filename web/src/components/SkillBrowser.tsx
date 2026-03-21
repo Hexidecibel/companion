@@ -24,6 +24,7 @@ export function SkillBrowser({ serverId, onClose }: SkillBrowserProps) {
   const [category, setCategory] = useState<Category>('all');
   const [search, setSearch] = useState('');
   const [installing, setInstalling] = useState<string | null>(null);
+  const [installTarget, setInstallTarget] = useState<'project' | 'global'>('project');
 
   const filtered = useMemo(() => {
     let list = skills;
@@ -47,7 +48,7 @@ export function SkillBrowser({ serverId, onClose }: SkillBrowserProps) {
 
   const handleInstall = async (skill: Skill) => {
     setInstalling(skill.id);
-    await installSkill(skill.id, 'project');
+    await installSkill(skill.id, installTarget);
     setInstalling(null);
   };
 
@@ -70,6 +71,22 @@ export function SkillBrowser({ serverId, onClose }: SkillBrowserProps) {
         <div className="skill-browser-stats">
           <span className="skill-stat">{installedCount} installed</span>
           <span className="skill-stat">{catalogCount} available</span>
+        </div>
+
+        <div className="skill-browser-target">
+          <span className="skill-target-label">Install to:</span>
+          <button
+            className={`skill-target-btn ${installTarget === 'project' ? 'active' : ''}`}
+            onClick={() => setInstallTarget('project')}
+          >
+            Project
+          </button>
+          <button
+            className={`skill-target-btn ${installTarget === 'global' ? 'active' : ''}`}
+            onClick={() => setInstallTarget('global')}
+          >
+            Home
+          </button>
         </div>
 
         <div className="skill-browser-search">

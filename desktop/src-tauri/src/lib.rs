@@ -10,6 +10,44 @@ pub fn run() {
         .plugin(tauri_plugin_fcm::init())
         .plugin(tauri_plugin_store::Builder::default().build());
 
+    // On mobile, intercept external link navigation and open in system browser
+    #[cfg(mobile)]
+    {
+        builder = builder.plugin(
+            tauri::plugin::Builder::<tauri::Wry, ()>::new("external-links")
+                .on_navigation(|webview, url| {
+                    use tauri::Manager;
+                    use tauri_plugin_shell::ShellExt;
+
+                    let scheme = url.scheme();
+
+                    // Allow internal URLs
+                    if scheme == "tauri" || scheme == "asset" {
+                        return true;
+                    }
+
+                    if scheme == "http" || scheme == "https" {
+                        if let Some(host) = url.host_str() {
+                            // Allow local/dev URLs
+                            if host == "localhost"
+                                || host == "tauri.localhost"
+                                || host == "0.0.0.0"
+                                || host == "127.0.0.1"
+                            {
+                                return true;
+                            }
+                        }
+                        // External URL — open in system browser, block webview navigation
+                        let _ = webview.app_handle().shell().open(url.as_str(), None);
+                        return false;
+                    }
+
+                    true
+                })
+                .build(),
+        );
+    }
+
     // Desktop-only plugins
     #[cfg(desktop)]
     {
@@ -21,9 +59,12 @@ pub fn run() {
         ]);
     }
 
-    builder = builder.setup(|_app| {
+    builder = builder.setup(|app| {
         #[cfg(desktop)]
-        desktop::setup_desktop(_app)?;
+        desktop::setup_desktop(app)?;
+
+        // Desktop-only setup is handled above
+        let _ = app;
 
         Ok(())
     });

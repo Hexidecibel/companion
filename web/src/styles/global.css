@@ -1548,6 +1548,79 @@ body {
   border-bottom-left-radius: 4px;
 }
 
+/* Quick copy button on message bubbles (touch devices) */
+.msg-copy-btn {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--border-color);
+  color: var(--text-muted);
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+  opacity: 0.5;
+  transition: opacity 0.15s;
+  z-index: 1;
+  line-height: 1.2;
+}
+
+.msg-copy-btn:active {
+  opacity: 1;
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.msg-bubble-user .msg-copy-btn {
+  background: rgba(255, 255, 255, 0.15);
+  border-color: rgba(255, 255, 255, 0.3);
+  color: rgba(255, 255, 255, 0.7);
+}
+
+/* Link pills */
+.link-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 12px;
+  background: rgba(59, 130, 246, 0.12);
+  color: var(--accent-blue) !important;
+  text-decoration: none !important;
+  font-size: 13px;
+  line-height: 1.4;
+  max-width: 240px;
+  vertical-align: baseline;
+  border: 1px solid rgba(59, 130, 246, 0.2);
+  transition: background 0.15s;
+}
+
+.link-pill:active {
+  background: rgba(59, 130, 246, 0.25);
+}
+
+.link-pill-icon {
+  font-size: 11px;
+  flex-shrink: 0;
+}
+
+.link-pill-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* User bubble link pills have lighter styling */
+.msg-bubble-user .link-pill {
+  background: rgba(255, 255, 255, 0.15);
+  border-color: rgba(255, 255, 255, 0.3);
+  color: white !important;
+}
+
+.msg-bubble-user .link-pill:active {
+  background: rgba(255, 255, 255, 0.3);
+}
+
 .msg-content {
   white-space: pre-wrap;
   font-family: inherit;
@@ -3834,6 +3907,46 @@ html {
   accent-color: var(--accent-green);
   margin: 0;
   pointer-events: none;
+}
+
+/* Code block with copy button */
+.md-code-block {
+  position: relative;
+}
+
+.md-code-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border-color);
+  min-height: 24px;
+}
+
+.md-code-header .md-code-lang {
+  margin-bottom: 0;
+}
+
+.md-code-copy-btn {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--border-color);
+  color: var(--text-muted);
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+  margin-left: auto;
+}
+
+.md-code-copy-btn:hover {
+  background: rgba(255, 255, 255, 0.15);
+  color: var(--text-primary);
+}
+
+.md-code-copy-btn:active {
+  background: rgba(255, 255, 255, 0.2);
+  color: var(--text-primary);
 }
 
 /* Code block language label */
@@ -7667,6 +7780,36 @@ html {
   color: white;
 }
 
+.skill-browser-target {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 16px;
+  margin-bottom: 8px;
+}
+
+.skill-target-label {
+  font-size: 12px;
+  color: #9ca3af;
+  margin-right: 4px;
+}
+
+.skill-target-btn {
+  font-size: 12px;
+  padding: 3px 10px;
+  border-radius: 4px;
+  border: 1px solid #374151;
+  background: #1f2937;
+  color: #9ca3af;
+  cursor: pointer;
+}
+
+.skill-target-btn.active {
+  background: #3b82f6;
+  color: #f3f4f6;
+  border-color: #3b82f6;
+}
+
 .skill-browser-body {
   flex: 1;
   overflow-y: auto;
@@ -9233,100 +9376,5 @@ html {
   .feedback-prompt-btn {
     padding: 6px 14px;
     font-size: 13px;
-  }
-}
-
-/* Agent toast notifications */
-.agent-toasts-container {
-  position: absolute;
-  bottom: 8px;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 50;
-  display: flex;
-  flex-direction: column-reverse;
-  gap: 6px;
-  pointer-events: none;
-  max-width: 90%;
-}
-
-.agent-toast {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 14px;
-  border-radius: 8px;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-color);
-  font-size: 13px;
-  color: var(--text-primary);
-  cursor: pointer;
-  pointer-events: auto;
-  white-space: nowrap;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-  animation: toast-slide-up 0.2s ease-out;
-  transition: opacity 0.15s ease, transform 0.15s ease;
-}
-
-.agent-toast:hover {
-  background: var(--bg-tertiary);
-  transform: translateY(-1px);
-}
-
-.agent-toast-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
-
-.agent-toast-started .agent-toast-dot {
-  background: var(--accent-blue);
-}
-
-.agent-toast-completed .agent-toast-dot {
-  background: var(--accent-green);
-}
-
-.agent-toast-error .agent-toast-dot {
-  background: var(--accent-red);
-}
-
-.agent-toast-text {
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.agent-toast-dismiss {
-  background: none;
-  border: none;
-  color: var(--text-secondary);
-  font-size: 16px;
-  line-height: 1;
-  cursor: pointer;
-  padding: 0 0 0 4px;
-  flex-shrink: 0;
-  transition: color 0.15s ease;
-}
-
-.agent-toast-dismiss:hover {
-  color: var(--text-primary);
-}
-
-@keyframes toast-slide-up {
-  from {
-    opacity: 0;
-    transform: translateY(8px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-/* Mobile: raise toasts above bottom bar */
-@media (max-width: 768px) {
-  .agent-toasts-container {
-    bottom: 52px;
   }
 }

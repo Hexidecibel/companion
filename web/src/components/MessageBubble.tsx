@@ -5,7 +5,7 @@ import { MarkdownRenderer, extractFilePaths } from './MarkdownRenderer';
 import { ContextMenu, ContextMenuEntry } from './ContextMenu';
 import { QuestionBlock, MultiQuestionFlow, ChoiceData } from './QuestionBlock';
 import { useFileExistence } from '../hooks/useFileExistence';
-import { isTauri } from '../utils/platform';
+import { isTauri, isTouchDevice } from '../utils/platform';
 
 export type { ChoiceData } from './QuestionBlock';
 
@@ -68,6 +68,18 @@ function HighlightedText({ text, term }: { text: string; term: string }) {
   );
 }
 
+// Helper to extract domain from URL for link pills
+function formatLinkDomain(url: string): string {
+  try {
+    const u = new URL(url);
+    const domain = u.hostname.replace(/^www\./, '');
+    const hasPath = u.pathname !== '/' || u.search || u.hash;
+    return hasPath ? `${domain}/\u2026` : domain;
+  } catch {
+    return url;
+  }
+}
+
 // Linkify: detect bare URLs in plain text and render them as clickable <a> tags
 function Linkify({ text }: { text: string }) {
   const URL_RE = /https?:\/\/[^\s<>]+/g;
@@ -94,15 +106,15 @@ function Linkify({ text }: { text: string }) {
         href={url}
         target="_blank"
         rel="noopener noreferrer"
-        style={{ color: 'var(--accent-blue)', textDecoration: 'underline' }}
+        className="link-pill"
+        title={url}
         onClick={(e) => {
-          if (isTauri()) {
-            e.preventDefault();
-            openExternalUrl(url);
-          }
+          e.preventDefault();
+          openExternalUrl(url);
         }}
       >
-        {url}
+        <span className="link-pill-icon">{'\u2197'}</span>
+        <span className="link-pill-text">{formatLinkDomain(url)}</span>
       </a>
     );
 
@@ -204,6 +216,7 @@ export const MessageBubble = memo(function MessageBubble({ message, onSelectOpti
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
   const bubbleRef = useRef<HTMLDivElement>(null);
   const [batchApproving, setBatchApproving] = useState<{ current: number; total: number } | null>(null);
+  const [copied, setCopied] = useState(false);
 
   // Extract file paths from assistant messages for existence checking
   const filePaths = useMemo(() => {
@@ -257,7 +270,7 @@ export const MessageBubble = memo(function MessageBubble({ message, onSelectOpti
       // Check for text selection
       const selection = window.getSelection()?.toString();
 
-      if (link) {
+      if (link && link.href) {
         touchContext.current = { type: 'link', href: link.href };
       } else if (img) {
         touchContext.current = { type: 'image', imgSrc: img.src };
@@ -269,7 +282,7 @@ export const MessageBubble = memo(function MessageBubble({ message, onSelectOpti
 
       // Open menu offset above finger so it's not covered
       openMenu(touch.clientX, touch.clientY - 20);
-    }, 500);
+    }, 600);
   }, [showContextMenu, openMenu]);
 
   const handleTouchMove = useCallback((e: React.TouchEvent) => {
@@ -290,6 +303,15 @@ export const MessageBubble = memo(function MessageBubble({ message, onSelectOpti
     }
     if (didLongPress.current) {
       e.preventDefault(); // Prevent click after long press
+      return;
+    }
+
+    // Quick tap on a link — open it externally
+    const target = e.target as HTMLElement;
+    const link = target.closest('a');
+    if (link && link.href && /^https?:\/\//.test(link.href)) {
+      e.preventDefault();
+      openExternalUrl(link.href);
       return;
     }
 
@@ -329,7 +351,7 @@ export const MessageBubble = memo(function MessageBubble({ message, onSelectOpti
       });
       items.push({
         label: 'Open link',
-        onClick: () => window.open(ctx.href, '_blank'),
+        onClick: () => openExternalUrl(ctx.href!),
       });
     }
     if (ctx.type === 'image' && ctx.imgSrc) {
@@ -353,13 +375,6 @@ export const MessageBubble = memo(function MessageBubble({ message, onSelectOpti
     } else {
       items.push({
         label: 'Copy message',
-        onClick: () => {
-          const text = bubbleRef.current?.innerText || message.content;
-          navigator.clipboard.writeText(text);
-        },
-      });
-      items.push({
-        label: 'Copy as Markdown',
         onClick: () => navigator.clipboard.writeText(message.content),
       });
     }
@@ -448,6 +463,20 @@ export const MessageBubble = memo(function MessageBubble({ message, onSelectOpti
               title="Cancel and edit"
             >
               &#x2715;
+            </button>
+          )}
+          {isTouchDevice() && (
+            <button
+              className="msg-copy-btn"
+              onClick={(e) => {
+                e.stopPropagation();
+                navigator.clipboard.writeText(message.content);
+                setCopied(true);
+                setTimeout(() => setCopied(false), 1500);
+              }}
+              title="Copy message"
+            >
+              {copied ? 'Copied!' : '\u29C9'}
             </button>
           )}
           {showContextMenu && contextMenu && (
