@@ -154,10 +154,14 @@ export function initKeyboardHeightListener(): void {
 }
 
 /**
- * Install a global click interceptor for external links.
- * On Tauri, routes all http(s) links through shell.open to open
- * in the system browser instead of navigating the webview.
- * Should be called once at app startup.
+ * Install a global click interceptor for external links on Tauri.
+ *
+ * Links with target="_blank" trigger a new-window request which the Rust
+ * navigation interceptor doesn't catch. Instead, we intercept clicks on
+ * external <a> tags, prevent the default behavior, and do a same-window
+ * navigation via window.location.href. The Rust interceptor catches the
+ * same-window navigation, opens it in the system browser, and blocks it
+ * so the webview stays on the app.
  */
 export function installExternalLinkHandler(): void {
   if (!isTauri()) return;
@@ -175,12 +179,8 @@ export function installExternalLinkHandler(): void {
     e.preventDefault();
     e.stopPropagation();
 
-    // Use dynamic import to avoid bundling shell plugin in browser builds
-    import('@tauri-apps/plugin-shell').then(({ open }) => {
-      open(href);
-    }).catch(() => {
-      // Last resort fallback — shouldn't happen if plugin is configured
-      console.warn('shell.open failed for:', href);
-    });
-  }, true); // useCapture: true — fires before React handlers and before default behavior
+    // Trigger same-window navigation — Rust interceptor catches external URLs,
+    // opens them in the system browser, and blocks the navigation
+    window.location.href = href;
+  }, true);
 }

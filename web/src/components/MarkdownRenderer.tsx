@@ -1,34 +1,8 @@
 import { useMemo, useCallback, useState } from 'react';
-import { isTauri } from '../utils/platform';
+import { TRAILING_PUNCT_RE, ensureProtocol, formatLinkDomain as formatLinkDomainShared } from '../utils/urls';
 
-/**
- * Open external URL - uses Tauri shell.open when in desktop app
- */
-async function openExternalUrl(url: string): Promise<void> {
-  if (isTauri()) {
-    try {
-      const { open } = await import('@tauri-apps/plugin-shell');
-      await open(url);
-    } catch {
-      // Fallback if plugin not available
-      window.open(url, '_blank');
-    }
-  } else {
-    window.open(url, '_blank');
-  }
-}
-
-// Helper to extract domain from URL for link pills
-function formatLinkDomain(url: string): string {
-  try {
-    const u = new URL(url);
-    const domain = u.hostname.replace(/^www\./, '');
-    const hasPath = u.pathname !== '/' || u.search || u.hash;
-    return hasPath ? `${domain}/\u2026` : domain;
-  } catch {
-    return url;
-  }
-}
+// Re-export shared formatLinkDomain
+const formatLinkDomain = formatLinkDomainShared;
 
 interface MarkdownRendererProps {
   content: string;
@@ -113,10 +87,46 @@ export function extractFilePaths(content: string): string[] {
   return Array.from(paths);
 }
 
+// Inline URL pattern — same as shared URL_PATTERN_SOURCE but with \]) added to the
+// negative character classes so URLs don't eat into markdown link syntax.
+// This is a CAPTURING group so it becomes match[7] in the combined regex.
+const INLINE_URL_RE_SRC = '(https?:\\/\\/[^\\s<>\\])]+|\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}(?::\\d{1,5})?(?:\\/[^\\s<>\\])]*)?|localhost:\\d{1,5}(?:\\/[^\\s<>\\])]*)?|[\\w.-]+\\.\\w+:\\d{1,5}(?:\\/[^\\s<>\\])]*)?)'
+
+// Pre-compiled regex for checking if a code span is a URL (anchored version of the URL pattern)
+const CODE_URL_RE = new RegExp('^(?:' + INLINE_URL_RE_SRC.slice(1, -1) + ')$');
+
+// Non-anchored version for finding URLs within code spans
+const CODE_URL_FIND_RE = new RegExp(INLINE_URL_RE_SRC, 'g');
+
+function splitByUrls(text: string): Array<{ text: string; isUrl: boolean }> {
+  const parts: Array<{ text: string; isUrl: boolean }> = [];
+  CODE_URL_FIND_RE.lastIndex = 0;
+  let last = 0;
+  let match: RegExpExecArray | null;
+  while ((match = CODE_URL_FIND_RE.exec(text)) !== null) {
+    if (match.index > last) {
+      parts.push({ text: text.slice(last, match.index), isUrl: false });
+    }
+    let url = match[0];
+    const trailingPunct = /[.,;:!?)]+$/.exec(url);
+    if (trailingPunct) {
+      url = url.slice(0, -trailingPunct[0].length);
+    }
+    parts.push({ text: url, isUrl: true });
+    last = match.index + url.length;
+    CODE_URL_FIND_RE.lastIndex = last;
+  }
+  if (last < text.length) {
+    parts.push({ text: text.slice(last), isUrl: false });
+  }
+  return parts;
+}
+
 function parseInline(text: string): InlineNode[] {
   const nodes: InlineNode[] = [];
-  // Regex handles: **bold**, *italic*, `code`, [text](url), bare URLs
-  const re = /(\*\*(.+?)\*\*|\*(.+?)\*|`([^`]+)`|\[([^\]]+)\]\(([^)]+)\)|(https?:\/\/[^\s<>\])]+))/g;
+  // Regex handles: **bold**, *italic*, `code`, [text](url), bare URLs (incl. bare IPs, localhost:port, host:port)
+  // Groups: 1=full, 2=bold, 3=italic, 4=code, 5=linkText, 6=linkHref, 7=bareURL
+  const re = new RegExp('(\\*\\*(.+?)\\*\\*|\\*(.+?)\\*|`([^`]+)`|\\[([^\\]]+)\\]\\(([^)]+)\\)|' + INLINE_URL_RE_SRC + ')', 'g');
   let last = 0;
   let match: RegExpExecArray | null;
 
@@ -140,11 +150,12 @@ function parseInline(text: string): InlineNode[] {
       }
     } else if (match[7] !== undefined) {
       let url = match[7];
-      const trailingPunct = /[.,;:!?)]+$/.exec(url);
+      const trailingPunct = TRAILING_PUNCT_RE.exec(url);
       if (trailingPunct) {
         url = url.slice(0, -trailingPunct[0].length);
       }
-      nodes.push({ type: 'link', text: url, href: url });
+      const href = ensureProtocol(url);
+      nodes.push({ type: 'link', text: url, href });
       last = match.index + match[0].length - (trailingPunct ? trailingPunct[0].length : 0);
       continue;
     }
@@ -202,25 +213,47 @@ function renderInline(text: string, keyPrefix: string, onFileClick?: (path: stri
         return <strong key={key}>{node.text}</strong>;
       case 'italic':
         return <em key={key}>{node.text}</em>;
-      case 'code':
-        // Make code spans clickable if they look like URLs
-        if (/^https?:\/\//.test(node.text)) {
+      case 'code': {
+        // Make code spans clickable if they look like URLs (including bare IPs, localhost:port, host:port)
+        if (CODE_URL_RE.test(node.text)) {
+          const codeHref = ensureProtocol(node.text);
           return (
             <a
               key={key}
-              href={node.text}
+              href={codeHref}
               target="_blank"
               rel="noopener noreferrer"
               className="link-pill"
               title={node.text}
-              onClick={(e) => {
-                e.preventDefault();
-                openExternalUrl(node.text);
-              }}
             >
               <span className="link-pill-icon">{'\u2197'}</span>
               <span className="link-pill-text">{formatLinkDomain(node.text)}</span>
             </a>
+          );
+        }
+        // Code span contains URL(s) among other text — render code with inline link pills
+        const urlParts = splitByUrls(node.text);
+        if (urlParts.some(p => p.isUrl)) {
+          return (
+            <code key={key}>
+              {urlParts.map((part, j) =>
+                part.isUrl ? (
+                  <a
+                    key={j}
+                    href={ensureProtocol(part.text)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="link-pill"
+                    title={part.text}
+                  >
+                    <span className="link-pill-icon">{'\u2197'}</span>
+                    <span className="link-pill-text">{formatLinkDomain(part.text)}</span>
+                  </a>
+                ) : (
+                  <span key={j}>{part.text}</span>
+                )
+              )}
+            </code>
           );
         }
         // Make code spans clickable if they look like file paths AND file exists (or existence not checked)
@@ -236,25 +269,24 @@ function renderInline(text: string, keyPrefix: string, onFileClick?: (path: stri
           );
         }
         return <code key={key}>{node.text}</code>;
+      }
       case 'link': {
-        const isBareUrl = node.text === node.href;
+        // Bare URL: text matches original URL (before protocol was added)
+        const isBareUrl = node.text === node.href || ensureProtocol(node.text) === node.href;
+        const linkHref = ensureProtocol(node.href);
         return (
           <a
             key={key}
-            href={node.href}
+            href={linkHref}
             target="_blank"
             rel="noopener noreferrer"
             className={isBareUrl ? 'link-pill' : undefined}
-            title={isBareUrl ? node.href : undefined}
-            onClick={(e) => {
-              e.preventDefault();
-              openExternalUrl(node.href);
-            }}
+            title={isBareUrl ? node.text : undefined}
           >
             {isBareUrl ? (
               <>
                 <span className="link-pill-icon">{'\u2197'}</span>
-                <span className="link-pill-text">{formatLinkDomain(node.href)}</span>
+                <span className="link-pill-text">{formatLinkDomain(node.text)}</span>
               </>
             ) : node.text}
           </a>

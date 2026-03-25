@@ -6,6 +6,7 @@ pub fn run() {
     let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_opener::init())
         // FCM push notifications (no-op on desktop, active on mobile)
         .plugin(tauri_plugin_fcm::init())
         .plugin(tauri_plugin_store::Builder::default().build());
@@ -17,7 +18,6 @@ pub fn run() {
             tauri::plugin::Builder::<tauri::Wry, ()>::new("external-links")
                 .on_navigation(|webview, url| {
                     use tauri::Manager;
-                    use tauri_plugin_shell::ShellExt;
 
                     let scheme = url.scheme();
 
@@ -37,8 +37,13 @@ pub fn run() {
                                 return true;
                             }
                         }
-                        // External URL — open in system browser, block webview navigation
-                        let _ = webview.app_handle().shell().open(url.as_str(), None);
+                        // Open in system browser on a background thread to avoid ANR
+                        let handle = webview.app_handle().clone();
+                        let url_string = url.as_str().to_string();
+                        std::thread::spawn(move || {
+                            use tauri_plugin_opener::OpenerExt;
+                            let _ = handle.opener().open_url(&url_string, None::<&str>);
+                        });
                         return false;
                     }
 

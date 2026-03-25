@@ -18,6 +18,7 @@
     "notification:allow-request-permission",
     "notification:allow-notify",
     "shell:allow-open",
+    "opener:default",
     "fcm:default",
     "store:default"
   ]

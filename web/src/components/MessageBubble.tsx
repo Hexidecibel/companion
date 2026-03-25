@@ -6,20 +6,21 @@ import { ContextMenu, ContextMenuEntry } from './ContextMenu';
 import { QuestionBlock, MultiQuestionFlow, ChoiceData } from './QuestionBlock';
 import { useFileExistence } from '../hooks/useFileExistence';
 import { isTauri, isTouchDevice } from '../utils/platform';
+import { URL_RE, TRAILING_PUNCT_RE, ensureProtocol, formatLinkDomain as formatLinkDomainShared, extractUrls } from '../utils/urls';
 
 export type { ChoiceData } from './QuestionBlock';
 
 /**
- * Open external URL - uses Tauri shell.open when in desktop app
+ * Open external URL.
+ * On Tauri, triggers a same-window navigation so the Rust-side interceptor
+ * catches it, opens in the system browser, and blocks the navigation.
+ * On regular browsers, uses window.open with target="_blank".
  */
-async function openExternalUrl(url: string): Promise<void> {
+function openExternalUrl(url: string): void {
   if (isTauri()) {
-    try {
-      const { open } = await import('@tauri-apps/plugin-shell');
-      await open(url);
-    } catch {
-      window.open(url, '_blank');
-    }
+    // Trigger same-window navigation — Rust interceptor catches external URLs,
+    // opens them in the system browser, and blocks the navigation
+    window.location.href = url;
   } else {
     window.open(url, '_blank');
   }
@@ -68,50 +69,39 @@ function HighlightedText({ text, term }: { text: string; term: string }) {
   );
 }
 
-// Helper to extract domain from URL for link pills
-function formatLinkDomain(url: string): string {
-  try {
-    const u = new URL(url);
-    const domain = u.hostname.replace(/^www\./, '');
-    const hasPath = u.pathname !== '/' || u.search || u.hash;
-    return hasPath ? `${domain}/\u2026` : domain;
-  } catch {
-    return url;
-  }
-}
+// Re-export shared formatLinkDomain
+const formatLinkDomain = formatLinkDomainShared;
 
 // Linkify: detect bare URLs in plain text and render them as clickable <a> tags
 function Linkify({ text }: { text: string }) {
-  const URL_RE = /https?:\/\/[^\s<>]+/g;
+  const re = new RegExp(URL_RE.source, 'g');
   const elements: React.ReactNode[] = [];
   let lastIndex = 0;
   let match: RegExpExecArray | null;
 
-  while ((match = URL_RE.exec(text)) !== null) {
+  while ((match = re.exec(text)) !== null) {
     if (match.index > lastIndex) {
       elements.push(<span key={`t-${lastIndex}`}>{text.slice(lastIndex, match.index)}</span>);
     }
 
     let url = match[0];
-    const trailingPunct = /[.,;:!?\])]+$/.exec(url);
+    const trailingPunct = TRAILING_PUNCT_RE.exec(url);
     let suffix = '';
     if (trailingPunct) {
       suffix = trailingPunct[0];
       url = url.slice(0, -suffix.length);
     }
 
+    const href = ensureProtocol(url);
+
     elements.push(
       <a
         key={`u-${match.index}`}
-        href={url}
+        href={href}
         target="_blank"
         rel="noopener noreferrer"
         className="link-pill"
         title={url}
-        onClick={(e) => {
-          e.preventDefault();
-          openExternalUrl(url);
-        }}
       >
         <span className="link-pill-icon">{'\u2197'}</span>
         <span className="link-pill-text">{formatLinkDomain(url)}</span>
@@ -306,15 +296,6 @@ export const MessageBubble = memo(function MessageBubble({ message, onSelectOpti
       return;
     }
 
-    // Quick tap on a link — open it externally
-    const target = e.target as HTMLElement;
-    const link = target.closest('a');
-    if (link && link.href && /^https?:\/\//.test(link.href)) {
-      e.preventDefault();
-      openExternalUrl(link.href);
-      return;
-    }
-
     // If the user drag-selected text (without triggering long-press), show context menu
     const touchDuration = Date.now() - touchStartTime.current;
     if (touchDuration > 300) {
@@ -359,6 +340,20 @@ export const MessageBubble = memo(function MessageBubble({ message, onSelectOpti
         label: 'Save image',
         onClick: () => window.open(ctx.imgSrc, '_blank'),
       });
+    }
+
+    // Add links found in message content
+    if (message.content) {
+      const messageUrls = extractUrls(message.content);
+      if (messageUrls.length > 0) {
+        if (items.length > 0) items.push(null);
+        for (const u of messageUrls.slice(0, 5)) {
+          items.push({
+            label: `Copy ${formatLinkDomain(u)}`,
+            onClick: () => navigator.clipboard.writeText(u),
+          });
+        }
+      }
     }
 
     // Add divider if we have context-specific items
