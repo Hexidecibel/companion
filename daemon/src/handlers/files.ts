@@ -18,6 +18,7 @@ import {
   FUZZY_SCORE_CONSECUTIVE_MULTIPLIER,
   FUZZY_SCORE_LENGTH_MULTIPLIER,
 } from '../constants';
+import { BoundedMap } from '../utils';
 
 // --- File tree cache and helpers (moved from WebSocketHandler) ---
 
@@ -43,8 +44,9 @@ const IGNORE_DIRS = new Set([
 ]);
 
 const FILE_TREE_TTL = 30_000; // 30s cache
+const MAX_FILE_TREE_CACHE_ENTRIES = 50;
 
-let fileTreeCache: { files: string[]; projectRoot: string; timestamp: number } | null = null;
+const fileTreeCache = new BoundedMap<string, { files: string[]; timestamp: number }>(MAX_FILE_TREE_CACHE_ENTRIES);
 
 function walkDirectory(dir: string, root: string, files: string[], depth: number = 0): void {
   if (depth > MAX_DIRECTORY_TRAVERSAL_DEPTH) return;
@@ -67,17 +69,14 @@ function walkDirectory(dir: string, root: string, files: string[], depth: number
 
 function getFileTree(projectRoot: string): string[] {
   const now = Date.now();
-  if (
-    fileTreeCache &&
-    fileTreeCache.projectRoot === projectRoot &&
-    now - fileTreeCache.timestamp < FILE_TREE_TTL
-  ) {
-    return fileTreeCache.files;
+  const cached = fileTreeCache.get(projectRoot);
+  if (cached && now - cached.timestamp < FILE_TREE_TTL) {
+    return cached.files;
   }
 
   const files: string[] = [];
   walkDirectory(projectRoot, projectRoot, files);
-  fileTreeCache = { files, projectRoot, timestamp: now };
+  fileTreeCache.set(projectRoot, { files, timestamp: now });
   return files;
 }
 

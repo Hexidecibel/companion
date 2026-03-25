@@ -218,6 +218,7 @@ export function MultiQuestionFlow({ questions, onSelectOption, onSelectChoice }:
   const [answers, setAnswers] = useState<Map<number, AnswerData>>(new Map());
   const [reviewing, setReviewing] = useState(false);
   const [isSending, setIsSending] = useState(false);
+  const isSendingRef = useRef(false);
   const [sendError, setSendError] = useState(false);
   const total = questions.length;
 
@@ -229,29 +230,9 @@ export function MultiQuestionFlow({ questions, onSelectOption, onSelectChoice }:
     });
   }, []);
 
-  const handleNext = useCallback(() => {
-    if (step < total - 1) {
-      setStep(step + 1);
-    } else {
-      setReviewing(true);
-    }
-  }, [step, total]);
-
-  const handleBack = useCallback(() => {
-    if (reviewing) {
-      setReviewing(false);
-    } else if (step > 0) {
-      setStep(step - 1);
-    }
-  }, [step, reviewing]);
-
-  const handleEditFromReview = useCallback((idx: number) => {
-    setReviewing(false);
-    setStep(idx);
-  }, []);
-
   const handleSubmitAll = useCallback(async () => {
-    if (isSending) return;
+    if (isSendingRef.current) return;
+    isSendingRef.current = true;
     setIsSending(true);
     setSendError(false);
     try {
@@ -279,9 +260,34 @@ export function MultiQuestionFlow({ questions, onSelectOption, onSelectChoice }:
     } catch {
       setSendError(true);
     } finally {
+      isSendingRef.current = false;
       setIsSending(false);
     }
-  }, [isSending, answers, total, questions, onSelectOption, onSelectChoice]);
+  }, [answers, total, questions, onSelectOption, onSelectChoice]);
+
+  const handleNext = useCallback(() => {
+    if (step < total - 1) {
+      setStep(step + 1);
+    } else if (answers.size >= total) {
+      // All answered — submit directly, skip review
+      handleSubmitAll();
+    } else {
+      setReviewing(true);
+    }
+  }, [step, total, answers.size, handleSubmitAll]);
+
+  const handleBack = useCallback(() => {
+    if (reviewing) {
+      setReviewing(false);
+    } else if (step > 0) {
+      setStep(step - 1);
+    }
+  }, [step, reviewing]);
+
+  const handleEditFromReview = useCallback((idx: number) => {
+    setReviewing(false);
+    setStep(idx);
+  }, []);
 
   if (reviewing) {
     return (
@@ -342,8 +348,8 @@ export function MultiQuestionFlow({ questions, onSelectOption, onSelectChoice }:
 
       <div className="multi-question-nav">
         <button onClick={handleBack} disabled={step === 0}>Back</button>
-        <button onClick={handleNext} disabled={!currentAnswer}>
-          {step === total - 1 ? 'Review' : 'Next'}
+        <button onClick={handleNext} disabled={!currentAnswer || isSending}>
+          {step === total - 1 ? (answers.size >= total ? (isSending ? 'Sending...' : 'Submit') : 'Review') : 'Next'}
         </button>
       </div>
     </div>

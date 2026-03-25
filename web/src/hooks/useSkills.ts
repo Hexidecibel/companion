@@ -11,7 +11,7 @@ interface UseSkillsReturn {
   refresh: () => void;
 }
 
-export function useSkills(serverId: string | null): UseSkillsReturn {
+export function useSkills(serverId: string | null, sessionId?: string): UseSkillsReturn {
   const [skills, setSkills] = useState<Skill[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -32,7 +32,7 @@ export function useSkills(serverId: string | null): UseSkillsReturn {
     setError(null);
 
     conn
-      .sendRequest('list_skills')
+      .sendRequest('list_skills', { sessionId })
       .then((response) => {
         if (response.success && response.payload) {
           const payload = response.payload as { skills: Skill[] };
@@ -47,7 +47,7 @@ export function useSkills(serverId: string | null): UseSkillsReturn {
       .finally(() => {
         setLoading(false);
       });
-  }, [serverId]);
+  }, [serverId, sessionId]);
 
   useEffect(() => {
     fetchSkills();
@@ -60,7 +60,7 @@ export function useSkills(serverId: string | null): UseSkillsReturn {
       if (!conn || !conn.isConnected()) return false;
 
       try {
-        const response = await conn.sendRequest('install_skill', { skillId, target });
+        const response = await conn.sendRequest('install_skill', { skillId, target, sessionId });
         if (response.success) {
           fetchSkills(); // Refresh list
           return true;
@@ -70,7 +70,7 @@ export function useSkills(serverId: string | null): UseSkillsReturn {
         return false;
       }
     },
-    [serverId, fetchSkills]
+    [serverId, sessionId, fetchSkills]
   );
 
   const uninstallSkill = useCallback(
@@ -80,7 +80,7 @@ export function useSkills(serverId: string | null): UseSkillsReturn {
       if (!conn || !conn.isConnected()) return false;
 
       try {
-        const response = await conn.sendRequest('uninstall_skill', { skillId, source });
+        const response = await conn.sendRequest('uninstall_skill', { skillId, source, sessionId });
         if (response.success) {
           fetchSkills(); // Refresh list
           return true;
@@ -90,7 +90,7 @@ export function useSkills(serverId: string | null): UseSkillsReturn {
         return false;
       }
     },
-    [serverId, fetchSkills]
+    [serverId, sessionId, fetchSkills]
   );
 
   return { skills, loading, error, installSkill, uninstallSkill, refresh: fetchSkills };

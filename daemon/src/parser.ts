@@ -12,7 +12,9 @@ import {
   FileChange,
 } from './types';
 import { APPROVAL_TOOLS, KNOWN_TOOL_NAMES, getToolDescription, isKnownTool } from './tool-config';
+import { incrementMessagesParsed } from './metrics';
 import { PARSER_WARNING_RATE_LIMIT_MS, PARSER_DEDUP_KEY_PREVIEW_LENGTH, FILE_ACTIVITY_READ_BUFFER_SIZE, COMMAND_LOG_PREVIEW_LENGTH, QUESTION_PREVIEW_LENGTH, TOOL_DESCRIPTION_PREVIEW_LENGTH, TOOL_APPROVAL_PREVIEW_LENGTH, SHORT_COMMAND_DISPLAY_LENGTH, TOOL_INPUT_SUMMARY_LENGTH, MAX_TOOL_OUTPUT_SIZE, MAX_SUMMARY_TEXT_LENGTH } from './constants';
+import { BoundedMap } from './utils';
 
 // Re-export TaskItem for tests
 export { TaskItem } from './types';
@@ -89,7 +91,7 @@ function cleanCompactionSummary(text: string): string {
 const KNOWN_TOOLS = KNOWN_TOOL_NAMES;
 
 // Rate-limit parser warnings: max one per key per 60s
-const _warnedRecently = new Map<string, number>();
+const _warnedRecently = new BoundedMap<string, number>(1000);
 function logParserWarning(type: string, details: string): void {
   const key = `${type}:${details.substring(0, PARSER_DEDUP_KEY_PREVIEW_LENGTH)}`;
   const now = Date.now();
@@ -208,6 +210,7 @@ export function parseConversationFile(
   }
 
   const lines = content.split('\n').filter((line) => line.trim());
+  incrementMessagesParsed(lines.length);
 
   // First pass: collect all tool results, start times, and completion times
   const toolResults = new Map<string, string>();

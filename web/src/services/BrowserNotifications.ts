@@ -1,3 +1,4 @@
+import { eventBus } from '../utils/eventBus';
 import { BROWSER_NOTIFICATIONS_KEY } from './storageKeys';
 
 const STORAGE_KEY = BROWSER_NOTIFICATIONS_KEY;
@@ -89,9 +90,7 @@ class BrowserNotificationService {
     // Don't show if window is focused (unless forced)
     if (!options?.force && document.hasFocus()) {
       // Emit in-app notification event so sidebar/dashboard can show inline indicator
-      window.dispatchEvent(new CustomEvent('companion-in-app-notification', {
-        detail: { title, body: options?.body, tag: options?.tag },
-      }));
+      eventBus.emit('companion-in-app-notification', { title, body: options?.body, tag: options?.tag });
       return;
     }
 

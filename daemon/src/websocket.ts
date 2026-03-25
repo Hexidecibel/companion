@@ -18,6 +18,7 @@ import {
   ListenerConfig,
 } from './types';
 import { loadConfig, saveConfig } from './config';
+import { atomicWriteFileSync, registerShutdownCallback } from './utils';
 import { SubAgentWatcher } from './subagent-watcher';
 import { WorkGroupManager } from './work-group-manager';
 import { SkillCatalog } from './skill-catalog';
@@ -29,6 +30,7 @@ import { SessionNameStore } from './session-names';
 
 import { AuthenticatedClient, ClientError, HandlerContext, MessageHandler } from './handler-context';
 import { registerAllHandlers } from './handlers';
+import { updateLastActivity } from './metrics';
 
 // File for persisting tmux session configs
 const TMUX_CONFIGS_FILE = path.join(os.homedir(), '.companion', 'tmux-sessions.json');
@@ -196,6 +198,9 @@ export class WebSocketHandler {
       }
     }, WebSocketHandler.DEAD_CHECK_INTERVAL_MS);
 
+    // Register timer cleanup for graceful shutdown
+    registerShutdownCallback(() => this.shutdown());
+
     console.log('WebSocket: Server initialized');
   }
 
@@ -259,7 +264,7 @@ export class WebSocketHandler {
         fs.mkdirSync(dir, { recursive: true });
       }
       const configs = Array.from(this.tmuxSessionConfigs.values());
-      fs.writeFileSync(TMUX_CONFIGS_FILE, JSON.stringify(configs, null, 2));
+      atomicWriteFileSync(TMUX_CONFIGS_FILE, JSON.stringify(configs, null, 2));
     } catch (err) {
       console.error('Failed to save tmux session configs:', err);
     }
@@ -332,6 +337,7 @@ export class WebSocketHandler {
     const { type, token, payload, requestId } = message;
     if (type !== 'ping') {
       console.log(`WebSocket: >> recv ${type} (${requestId || 'no-id'}) from ${client.id}`);
+      updateLastActivity();
     }
 
     // Authenticate first
@@ -560,5 +566,7 @@ export class WebSocketHandler {
 
   shutdown(): void {
     clearInterval(this.deadConnectionInterval);
+    this.escalation.destroy();
+    this.usageMonitor.stop();
   }
 }

@@ -9,6 +9,7 @@ import {
   NotificationHistoryEntry,
   PersistedNotificationState,
 } from './types';
+import { atomicWriteFileSync } from './utils';
 
 const COMPANION_DIR = path.join(os.homedir(), '.companion');
 const STATE_FILE = path.join(COMPANION_DIR, 'notification-state.json');
@@ -138,7 +139,7 @@ export class NotificationStore {
         devices: Array.from(this.devices.values()),
         mutedSessions: Array.from(this.mutedSessions),
       };
-      fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));
+      atomicWriteFileSync(STATE_FILE, JSON.stringify(state, null, 2));
     } catch (err) {
       console.error('NotificationStore: Failed to save state:', err);
     }
@@ -146,7 +147,7 @@ export class NotificationStore {
 
   private saveHistory(): void {
     try {
-      fs.writeFileSync(HISTORY_FILE, JSON.stringify(this.history, null, 2));
+      atomicWriteFileSync(HISTORY_FILE, JSON.stringify(this.history, null, 2));
     } catch (err) {
       console.error('NotificationStore: Failed to save history:', err);
     }

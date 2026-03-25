@@ -4,6 +4,7 @@ import * as os from 'os';
 import * as crypto from 'crypto';
 import QRCode from 'qrcode';
 import { DaemonConfig, ListenerConfig } from './types';
+import { atomicWriteFileSync } from './utils';
 
 const HOME_DIR = process.env.HOME || '/root';
 const CONFIG_DIR = path.join(HOME_DIR, '.companion');
@@ -246,5 +247,5 @@ export function saveConfig(config: DaemonConfig): void {
     }));
   }
 
-  fs.writeFileSync(configPath, JSON.stringify(fileConfig, null, 2));
+  atomicWriteFileSync(configPath, JSON.stringify(fileConfig, null, 2));
 }

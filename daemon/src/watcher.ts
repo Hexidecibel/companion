@@ -34,6 +34,7 @@ import {
   USER_LINE_LOG_LENGTH,
   RECENT_ACTIVITY_LIMIT,
 } from './constants';
+import { atomicWriteFileSync, registerShutdownCallback } from './utils';
 
 const execAsync = promisify(exec);
 
@@ -133,7 +134,8 @@ export class SessionWatcher extends EventEmitter {
     this.loadPersistedMappings();
     // Refresh tmux paths periodically
     this.refreshTmuxPaths();
-    setInterval(() => this.refreshTmuxPaths(), TMUX_PATH_REFRESH_INTERVAL_MS);
+    const tmuxRefreshInterval = setInterval(() => this.refreshTmuxPaths(), TMUX_PATH_REFRESH_INTERVAL_MS);
+    registerShutdownCallback(() => clearInterval(tmuxRefreshInterval));
   }
 
   private get mappingsPath(): string {
@@ -190,7 +192,7 @@ export class SessionWatcher extends EventEmitter {
         }
       }
 
-      fs.writeFileSync(this.mappingsPath, JSON.stringify({ mappings, history }));
+      atomicWriteFileSync(this.mappingsPath, JSON.stringify({ mappings, history }));
     } catch {
       // Not critical
     }

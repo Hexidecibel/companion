@@ -12,7 +12,8 @@ export function registerSkillHandlers(
   return {
     list_skills(client, _payload, requestId) {
       try {
-        const projectRoot = ctx.getProjectRoot();
+        const listPayload = _payload as { sessionId?: string } | undefined;
+        const projectRoot = ctx.getProjectRoot(listPayload?.sessionId);
         const projectSkills = projectRoot ? scanProjectSkills(projectRoot) : [];
         const globalSkills = scanGlobalSkills();
 
@@ -23,27 +24,36 @@ export function registerSkillHandlers(
           ...globalSkills.map((s) => s.id),
         ]);
 
-        const skills = [
-          ...projectSkills.map((s) => ({
-            id: s.id,
-            name: s.name,
-            description: s.description,
-            category: 'installed',
-            scope: 'universal' as const,
-            installed: true,
-            source: s.source,
-          })),
-          ...globalSkills
-            .filter((s) => !projectSkills.some((p) => p.id === s.id))
-            .map((s) => ({
+        const enrichInstalled = (s: { id: string; name: string; description: string; source: string }) => {
+          const catalogEntry = ctx.skillCatalog.getSkill(s.id);
+          if (catalogEntry) {
+            return {
               id: s.id,
               name: s.name,
               description: s.description,
-              category: 'installed',
-              scope: 'universal' as const,
+              category: catalogEntry.category,
+              scope: catalogEntry.scope,
+              prerequisites: catalogEntry.prerequisites,
               installed: true,
               source: s.source,
-            })),
+            };
+          }
+          return {
+            id: s.id,
+            name: s.name,
+            description: s.description,
+            category: 'custom',
+            scope: 'universal' as const,
+            installed: true,
+            source: s.source,
+          };
+        };
+
+        const skills = [
+          ...projectSkills.map(enrichInstalled),
+          ...globalSkills
+            .filter((s) => !projectSkills.some((p) => p.id === s.id))
+            .map(enrichInstalled),
           ...catalogSkills
             .filter((s) => !installedIds.has(s.id))
             .map((s) => ({
@@ -75,7 +85,7 @@ export function registerSkillHandlers(
 
     install_skill(client, payload, requestId) {
       try {
-        const installPayload = payload as { skillId: string; target: 'project' | 'global' } | undefined;
+        const installPayload = payload as { skillId: string; target: 'project' | 'global'; sessionId?: string } | undefined;
         if (!installPayload?.skillId) {
           ctx.send(client.ws, {
             type: 'skill_installed',
@@ -86,7 +96,7 @@ export function registerSkillHandlers(
           return;
         }
 
-        const projectRoot = ctx.getProjectRoot() || os.homedir();
+        const projectRoot = ctx.getProjectRoot(installPayload.sessionId) || os.homedir();
         ctx.skillCatalog.installSkill(installPayload.skillId, installPayload.target, projectRoot);
 
         ctx.send(client.ws, {
@@ -107,7 +117,7 @@ export function registerSkillHandlers(
 
     uninstall_skill(client, payload, requestId) {
       try {
-        const uninstallPayload = payload as { skillId: string; source: 'project' | 'global' } | undefined;
+        const uninstallPayload = payload as { skillId: string; source: 'project' | 'global'; sessionId?: string } | undefined;
         if (!uninstallPayload?.skillId) {
           ctx.send(client.ws, {
             type: 'skill_uninstalled',
@@ -118,7 +128,7 @@ export function registerSkillHandlers(
           return;
         }
 
-        const projectRoot = ctx.getProjectRoot() || os.homedir();
+        const projectRoot = ctx.getProjectRoot(uninstallPayload.sessionId) || os.homedir();
         ctx.skillCatalog.uninstallSkill(uninstallPayload.skillId, uninstallPayload.source, projectRoot);
 
         ctx.send(client.ws, {

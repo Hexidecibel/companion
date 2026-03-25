@@ -4,10 +4,12 @@ import { useSkills } from '../hooks/useSkills';
 
 interface SkillBrowserProps {
   serverId: string;
+  sessionId?: string;
+  projectPath?: string;
   onClose: () => void;
 }
 
-const CATEGORIES = ['all', 'workflow', 'dev', 'git', 'ops', 'search'] as const;
+const CATEGORIES = ['all', 'workflow', 'dev', 'git', 'ops', 'search', 'custom'] as const;
 type Category = typeof CATEGORIES[number];
 
 const CATEGORY_LABELS: Record<Category, string> = {
@@ -17,14 +19,17 @@ const CATEGORY_LABELS: Record<Category, string> = {
   git: 'Git',
   ops: 'Operations',
   search: 'Search',
+  custom: 'Custom',
 };
 
-export function SkillBrowser({ serverId, onClose }: SkillBrowserProps) {
-  const { skills, loading, error, installSkill, uninstallSkill, refresh } = useSkills(serverId);
+export function SkillBrowser({ serverId, sessionId, projectPath, onClose }: SkillBrowserProps) {
+  const { skills, loading, error, installSkill, uninstallSkill, refresh } = useSkills(serverId, sessionId);
   const [category, setCategory] = useState<Category>('all');
   const [search, setSearch] = useState('');
   const [installing, setInstalling] = useState<string | null>(null);
-  const [installTarget, setInstallTarget] = useState<'project' | 'global'>('project');
+  const [installTarget, setInstallTarget] = useState<'project' | 'global'>(projectPath ? 'project' : 'global');
+
+  const projectName = projectPath ? projectPath.split('/').filter(Boolean).pop() || 'project' : null;
 
   const filtered = useMemo(() => {
     let list = skills;
@@ -73,21 +78,27 @@ export function SkillBrowser({ serverId, onClose }: SkillBrowserProps) {
           <span className="skill-stat">{catalogCount} available</span>
         </div>
 
-        <div className="skill-browser-target">
-          <span className="skill-target-label">Install to:</span>
-          <button
-            className={`skill-target-btn ${installTarget === 'project' ? 'active' : ''}`}
-            onClick={() => setInstallTarget('project')}
-          >
-            Project
-          </button>
-          <button
-            className={`skill-target-btn ${installTarget === 'global' ? 'active' : ''}`}
-            onClick={() => setInstallTarget('global')}
-          >
-            Home
-          </button>
-        </div>
+        {projectPath ? (
+          <div className="skill-browser-target">
+            <span className="skill-target-label">Install to:</span>
+            <button
+              className={`skill-target-btn ${installTarget === 'project' ? 'active' : ''}`}
+              onClick={() => setInstallTarget('project')}
+            >
+              {projectName}
+            </button>
+            <button
+              className={`skill-target-btn ${installTarget === 'global' ? 'active' : ''}`}
+              onClick={() => setInstallTarget('global')}
+            >
+              Global
+            </button>
+          </div>
+        ) : (
+          <div className="skill-browser-target">
+            <span className="skill-target-label">Installing to: Global</span>
+          </div>
+        )}
 
         <div className="skill-browser-search">
           <input
@@ -134,7 +145,7 @@ export function SkillBrowser({ serverId, onClose }: SkillBrowserProps) {
                 {skill.installed ? (
                   <>
                     <span className="skill-card-badge">
-                      Installed ({skill.source})
+                      Installed ({skill.source === 'project' ? projectName || 'project' : 'global'})
                     </span>
                     <button
                       className="skill-card-btn skill-card-btn-remove"

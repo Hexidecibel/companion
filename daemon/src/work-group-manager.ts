@@ -9,6 +9,7 @@ import { WorkGroup, WorkerSession, WorkerQuestion } from './types';
 import { TmuxManager } from './tmux-manager';
 import { InputInjector } from './input-injector';
 import { SessionWatcher } from './watcher';
+import { atomicWriteFileSync } from './utils';
 
 const execAsync = promisify(exec);
 
@@ -690,7 +691,7 @@ export class WorkGroupManager extends EventEmitter {
         fs.mkdirSync(dir, { recursive: true });
       }
       const groups = Array.from(this.groups.values());
-      fs.writeFileSync(STATE_FILE, JSON.stringify(groups, null, 2));
+      atomicWriteFileSync(STATE_FILE, JSON.stringify(groups, null, 2));
     } catch (err) {
       console.error('WorkGroupManager: Failed to save state:', err);
     }

@@ -3,6 +3,7 @@ import { PendingImage, Skill } from '../types';
 import { useUndoHistory } from '../hooks/useUndoHistory';
 import { SlashMenu, SlashMenuItem } from './SlashMenu';
 import { isMobileViewport } from '../utils/platform';
+import { compressImage } from '../utils/imageCompression';
 
 interface InputBarProps {
   onSend: (text: string) => Promise<boolean>;
@@ -56,10 +57,11 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
     return match ? match[1] : '';
   }, [text, showSlashMenu]);
 
-  const addImages = useCallback((files: File[]) => {
+  const addImages = useCallback(async (files: File[]) => {
     const imageFiles = files.filter((f) => f.type.startsWith('image/'));
     if (imageFiles.length === 0) return;
-    setImages((prev) => [...prev, ...imageFiles.map(fileToPreview)]);
+    const compressed = await Promise.all(imageFiles.map((f) => compressImage(f)));
+    setImages((prev) => [...prev, ...compressed.map(fileToPreview)]);
   }, []);
 
   const removeImage = useCallback((id: string) => {

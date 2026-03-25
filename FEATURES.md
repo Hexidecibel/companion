@@ -469,6 +469,15 @@ Dismiss completed agents from the dispatch panel with auto-reappear on new activ
 - Dismiss state tracked per agent, resets on new messages
 - Works in both desktop tiled view and mobile card list
 
+## Standalone Conversation Parser
+Extracted the JSONL conversation parser into a standalone npm package at `/home/hexi/local/src/claude-conversation-parser/`.
+
+- 17 exported functions: parseConversationFile, extractHighlights, detectWaitingForInput, extractTasks, extractFileChanges, getSessionStatus, and more
+- 10 exported types: ConversationMessage, ToolCall, SessionStatus, TaskItem, FileChange, etc.
+- Ships with Claude Code tool definitions (approval requirements, display names, summary fields)
+- Zero dependencies beyond Node.js built-ins and TypeScript
+- Reusable across any project that needs to read Claude Code conversation logs
+
 ## Test Suite
 Comprehensive automated tests for daemon parser and web client services.
 

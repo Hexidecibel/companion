@@ -6,8 +6,9 @@ import { useConnections } from '../hooks/useConnections';
 import { useWorkGroups } from '../hooks/useWorkGroups';
 import { SessionSidebar } from './SessionSidebar';
 import { SessionView } from './SessionView';
-import { MobileDashboard, ServerCard } from './MobileDashboard';
+import { MobileDashboard } from './MobileDashboard';
 import { ShortcutHelpOverlay } from './ShortcutHelpOverlay';
+import { ComponentErrorBoundary } from './ComponentErrorBoundary';
 import { useSessionMute } from '../hooks/useSessionMute';
 
 const NotificationSettingsModal = lazy(() => import('./NotificationSettingsModal').then(m => ({ default: m.NotificationSettingsModal })));
@@ -44,11 +45,10 @@ export function Dashboard({ onSettings }: DashboardProps) {
   const [splitDragging, setSplitDragging] = useState(false);
   const [splitPreviewRatio, setSplitPreviewRatio] = useState<number | null>(null);
   const splitContainerRef = useRef<HTMLElement | null>(null);
-  const [dashboardMode, setDashboardMode] = useState(false);
   const summaries = useAllServerSummaries();
   const sessionMute = useSessionMute(activeSession?.serverId ?? null);
   const { snapshots } = useConnections();
-  const { servers, isParallelWorkersEnabled } = useServers();
+  const { isParallelWorkersEnabled } = useServers();
 
   // Use work groups for the active server (only if enabled and git is available)
   const gitEnabled = activeSession
@@ -181,7 +181,7 @@ export function Dashboard({ onSettings }: DashboardProps) {
     return result;
   }, [snapshots, summaries]);
 
-  // Jump number map: sessionId → 1-based index (max 9) for Ctrl+Alt badge display
+  // Jump number map: sessionId -> 1-based index (max 9) for Ctrl+Alt badge display
   const jumpNumberMap = useMemo(() => {
     const map = new Map<string, number>();
     for (let i = 0; i < Math.min(flatSessions.length, 9); i++) {
@@ -229,11 +229,6 @@ export function Dashboard({ onSettings }: DashboardProps) {
   }, [flatSessions, activeSession]);
 
   const handleSelectSession = useCallback((serverId: string, sessionId: string) => {
-    if (dashboardMode) {
-      setDashboardMode(false);
-      setActiveSession({ serverId, sessionId });
-      return;
-    }
     setActiveSession({ serverId, sessionId });
     if (isMobile) {
       setSidebarOpen(false);
@@ -241,7 +236,7 @@ export function Dashboard({ onSettings }: DashboardProps) {
       // We always push here so the popstate handler has an entry to pop.
       history.pushState({ session: true }, '');
     }
-  }, [dashboardMode, isMobile]);
+  }, [isMobile]);
 
   // Ensure the base history entry has the 'base' flag on mobile so the popstate
   // handler recognizes it as the floor. App.tsx sets { screen, base } on mount;
@@ -500,30 +495,28 @@ export function Dashboard({ onSettings }: DashboardProps) {
     setSecondarySession(null);
   }, []);
 
-  const handleToggleDashboardMode = useCallback(() => {
-    setDashboardMode(prev => !prev);
-  }, []);
-
   // --- Mobile layout: MobileDashboard or full-screen SessionView ---
   if (isMobile) {
     if (activeSession) {
       return (
         <div className="dashboard">
           <main className="dashboard-main" style={{ width: '100%' }}>
-            <SessionView
-              serverId={activeSession.serverId}
-              sessionId={activeSession.sessionId}
-              tmuxSessionName={activeSessionSummary?.tmuxSessionName}
-              workGroup={isForemanView ? activeWorkGroup : undefined}
-              onViewWorker={handleViewWorker}
-              onSendWorkerInput={handleSendWorkerInput}
-              onMergeGroup={handleMergeGroup}
-              onCancelGroup={handleCancelGroup}
-              onRetryWorker={handleRetryWorker}
-              onDismissGroup={handleDismissGroup}
-              merging={merging}
-              onToggleSidebar={handleMobileBack}
-            />
+            <ComponentErrorBoundary name="SessionView">
+              <SessionView
+                serverId={activeSession.serverId}
+                sessionId={activeSession.sessionId}
+                tmuxSessionName={activeSessionSummary?.tmuxSessionName}
+                workGroup={isForemanView ? activeWorkGroup : undefined}
+                onViewWorker={handleViewWorker}
+                onSendWorkerInput={handleSendWorkerInput}
+                onMergeGroup={handleMergeGroup}
+                onCancelGroup={handleCancelGroup}
+                onRetryWorker={handleRetryWorker}
+                onDismissGroup={handleDismissGroup}
+                merging={merging}
+                onToggleSidebar={handleMobileBack}
+              />
+            </ComponentErrorBoundary>
           </main>
 
           {showNotifSettings && (
@@ -562,27 +555,27 @@ export function Dashboard({ onSettings }: DashboardProps) {
         className={`sidebar-backdrop${sidebarOpen ? ' visible' : ''}`}
         onClick={() => setSidebarOpen(false)}
       />
-      <SessionSidebar
-        summaries={summaries}
-        activeSession={activeSession}
-        onSelectSession={handleSelectSession}
-        onSessionCreated={handleSessionCreated}
-        onOpenInSplit={handleOpenInSplit}
-        onCloseSplit={handleCloseSplit}
-        secondarySession={secondarySession}
-        onToggleDashboardMode={handleToggleDashboardMode}
-        dashboardMode={dashboardMode}
-        onNotificationSettings={activeSession ? () => setShowNotifSettings(true) : undefined}
-        onCostDashboard={activeSession ? handleOpenCostDashboard : undefined}
-        onSettings={onSettings}
-        mutedSessions={sessionMute.mutedSessions}
-        onToggleMute={handleToggleMute}
-        workGroups={allWorkGroups}
-        mobileOpen={sidebarOpen}
-        showJumpNumbers={showJumpNumbers}
-        jumpNumberMap={jumpNumberMap}
-        style={{ width: sidebarWidth }}
-      />
+      <ComponentErrorBoundary name="SessionSidebar">
+        <SessionSidebar
+          summaries={summaries}
+          activeSession={activeSession}
+          onSelectSession={handleSelectSession}
+          onSessionCreated={handleSessionCreated}
+          onOpenInSplit={handleOpenInSplit}
+          onCloseSplit={handleCloseSplit}
+          secondarySession={secondarySession}
+          onNotificationSettings={activeSession ? () => setShowNotifSettings(true) : undefined}
+          onCostDashboard={activeSession ? handleOpenCostDashboard : undefined}
+          onSettings={onSettings}
+          mutedSessions={sessionMute.mutedSessions}
+          onToggleMute={handleToggleMute}
+          workGroups={allWorkGroups}
+          mobileOpen={sidebarOpen}
+          showJumpNumbers={showJumpNumbers}
+          jumpNumberMap={jumpNumberMap}
+          style={{ width: sidebarWidth }}
+        />
+      </ComponentErrorBoundary>
       <div className="sidebar-drag-handle" onMouseDown={handleDragStart} />
       <main
         className={`dashboard-main${secondarySession ? ' split-enabled' : ''}`}
@@ -604,67 +597,65 @@ export function Dashboard({ onSettings }: DashboardProps) {
             }}
           />
         )}
-        {dashboardMode ? (
-          <DashboardGrid
-            snapshots={snapshots}
-            summaries={summaries}
-            servers={servers}
-            onSelectSession={handleSelectSession}
+        <ComponentErrorBoundary name="SessionView">
+          <SessionView
+            serverId={activeSession?.serverId ?? null}
+            sessionId={activeSession?.sessionId ?? null}
+            tmuxSessionName={activeSessionSummary?.tmuxSessionName}
+            projectPath={activeSessionSummary?.projectPath}
+            workGroup={isForemanView ? activeWorkGroup : undefined}
+            onViewWorker={handleViewWorker}
+            onSendWorkerInput={handleSendWorkerInput}
+            onMergeGroup={handleMergeGroup}
+            onCancelGroup={handleCancelGroup}
+            onRetryWorker={handleRetryWorker}
+            onDismissGroup={handleDismissGroup}
+            merging={merging}
+            onToggleSidebar={toggleSidebar}
+            style={secondarySession ? { flex: `0 0 ${splitPreviewRatio ?? splitRatio}%` } : undefined}
           />
-        ) : (
+        </ComponentErrorBoundary>
+        {secondarySession && (
           <>
-            <SessionView
-              serverId={activeSession?.serverId ?? null}
-              sessionId={activeSession?.sessionId ?? null}
-              tmuxSessionName={activeSessionSummary?.tmuxSessionName}
-              workGroup={isForemanView ? activeWorkGroup : undefined}
-              onViewWorker={handleViewWorker}
-              onSendWorkerInput={handleSendWorkerInput}
-              onMergeGroup={handleMergeGroup}
-              onCancelGroup={handleCancelGroup}
-              onRetryWorker={handleRetryWorker}
-              onDismissGroup={handleDismissGroup}
-              merging={merging}
-              onToggleSidebar={toggleSidebar}
-              style={secondarySession ? { flex: `0 0 ${splitPreviewRatio ?? splitRatio}%` } : undefined}
-            />
-            {secondarySession && (
-              <>
-                <div
-                  className={`split-divider-area${splitDragging ? ' dragging' : ''}`}
-                  onMouseDown={handleSplitDragStart}
-                >
-                  <div className="split-divider-line" />
-                  <button
-                    className="split-close-btn"
-                    onClick={handleCloseSplit}
-                    title="Close split view"
-                  >
-                    &#x2715;
-                  </button>
-                </div>
-                {splitDragging && (
-                  <div className="split-snap-indicators">
-                    {[33, 50, 67].map(pos => (
-                      <div
-                        key={pos}
-                        className={`split-snap-line${Math.abs((splitPreviewRatio ?? splitRatio) - pos) < 8 ? ' active' : ''}`}
-                        style={{ left: `${pos}%` }}
-                      />
-                    ))}
-                  </div>
-                )}
-                <SessionView
-                  serverId={secondarySession.serverId}
-                  sessionId={secondarySession.sessionId}
-                  tmuxSessionName={(() => {
-                    const ss = summaries.get(secondarySession.serverId);
-                    return ss?.sessions.find(s => s.id === secondarySession.sessionId)?.tmuxSessionName;
-                  })()}
-                  style={{ flex: `0 0 ${100 - (splitPreviewRatio ?? splitRatio)}%` }}
-                />
-              </>
+            <div
+              className={`split-divider-area${splitDragging ? ' dragging' : ''}`}
+              onMouseDown={handleSplitDragStart}
+            >
+              <div className="split-divider-line" />
+              <button
+                className="split-close-btn"
+                onClick={handleCloseSplit}
+                title="Close split view"
+              >
+                &#x2715;
+              </button>
+            </div>
+            {splitDragging && (
+              <div className="split-snap-indicators">
+                {[33, 50, 67].map(pos => (
+                  <div
+                    key={pos}
+                    className={`split-snap-line${Math.abs((splitPreviewRatio ?? splitRatio) - pos) < 8 ? ' active' : ''}`}
+                    style={{ left: `${pos}%` }}
+                  />
+                ))}
+              </div>
             )}
+            <ComponentErrorBoundary name="SessionView (split)">
+              <SessionView
+                serverId={secondarySession.serverId}
+                sessionId={secondarySession.sessionId}
+                tmuxSessionName={(() => {
+                  const ss = summaries.get(secondarySession.serverId);
+                  return ss?.sessions.find(s => s.id === secondarySession.sessionId)?.tmuxSessionName;
+                })()}
+                projectPath={(() => {
+                  const ss = summaries.get(secondarySession.serverId);
+                  return ss?.sessions.find(s => s.id === secondarySession.sessionId)?.projectPath;
+                })()}
+                style={{ flex: `0 0 ${100 - (splitPreviewRatio ?? splitRatio)}%` }}
+              />
+            </ComponentErrorBoundary>
           </>
         )}
       </main>
@@ -681,44 +672,6 @@ export function Dashboard({ onSettings }: DashboardProps) {
       {showShortcutHelp && (
         <ShortcutHelpOverlay onClose={() => setShowShortcutHelp(false)} />
       )}
-    </div>
-  );
-}
-
-// Dashboard Grid: renders all server cards in a grid layout (desktop only)
-import { Server } from '../types';
-import { ConnectionSnapshot } from '../services/ConnectionManager';
-
-interface DashboardGridProps {
-  snapshots: ConnectionSnapshot[];
-  summaries: Map<string, import('../types').ServerSummary>;
-  servers: Server[];
-  onSelectSession: (serverId: string, sessionId: string) => void;
-}
-
-function DashboardGrid({ snapshots, summaries, servers, onSelectSession }: DashboardGridProps) {
-  return (
-    <div className="dashboard-grid">
-      {snapshots.map(snap => {
-        const server = servers.find(s => s.id === snap.serverId);
-        const isEnabled = server?.enabled !== false;
-        return (
-          <ServerCard
-            key={snap.serverId}
-            snap={snap}
-            summary={summaries.get(snap.serverId)}
-            onSelectSession={onSelectSession}
-            onToggleEnabled={() => {}}
-            onDelete={() => {}}
-            onEdit={() => {}}
-            isEnabled={isEnabled}
-            onNewSession={() => {}}
-            onNewProject={() => {}}
-            onTmuxSessions={() => {}}
-            newSessionOpen={false}
-          />
-        );
-      })}
     </div>
   );
 }

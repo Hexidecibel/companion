@@ -1,5 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import { atomicWriteFileSync } from './utils';
 
 /**
  * Simple JSON file store for user-assigned session friendly names.
@@ -24,7 +25,7 @@ export class SessionNameStore {
   }
 
   private save(): void {
-    fs.writeFileSync(this.filePath, JSON.stringify(this.names, null, 2));
+    atomicWriteFileSync(this.filePath, JSON.stringify(this.names, null, 2));
   }
 
   get(sessionId: string): string | undefined {

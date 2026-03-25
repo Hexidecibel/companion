@@ -1,3 +1,4 @@
+import { eventBus } from '../utils/eventBus';
 import { useState, useMemo, useRef, useCallback, useEffect, lazy, Suspense } from 'react';
 import { ServerSummary, SessionSummary, ActiveSession } from '../types';
 import { useConnections } from '../hooks/useConnections';
@@ -101,8 +102,7 @@ export function MobileDashboard({
       else if (editingServerId) setEditingServerId(undefined);
       else if (addingServer) setAddingServer(false);
     };
-    window.addEventListener('close-overlay', handler);
-    return () => window.removeEventListener('close-overlay', handler);
+    return eventBus.on('close-overlay', handler);
   }, [newSessionServerId, newProjectServerId, tmuxServerId, editingServerId, addingServer]);
 
   // Check if any session across all servers needs attention

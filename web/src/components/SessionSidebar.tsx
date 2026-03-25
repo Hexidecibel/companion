@@ -1,3 +1,4 @@
+import { eventBus } from '../utils/eventBus';
 import { useState, useMemo, useEffect, useCallback, lazy, Suspense } from 'react';
 import { ServerSummary, ActiveSession, SessionSummary, WorkGroup, WorkerSession } from '../types';
 import { useConnections } from '../hooks/useConnections';
@@ -12,6 +13,7 @@ import { ContextMenu, ContextMenuEntry } from './ContextMenu';
 import { getFontScale, saveFontScale } from '../services/storage';
 import { Sparkline } from './Sparkline';
 import { SkeletonSessionCard } from './Skeleton';
+import { useConnectionHealth, ServerHealth } from '../hooks/useConnectionHealth';
 
 interface SessionSidebarProps {
   summaries: Map<string, ServerSummary>;
@@ -21,8 +23,6 @@ interface SessionSidebarProps {
   onOpenInSplit?: (serverId: string, sessionId: string) => void;
   onCloseSplit?: () => void;
   secondarySession?: ActiveSession | null;
-  onToggleDashboardMode?: () => void;
-  dashboardMode?: boolean;
   onNotificationSettings?: () => void;
   onCostDashboard?: () => void;
   onSettings?: () => void;
@@ -77,6 +77,29 @@ function filterSessions(sessions: SessionSummary[], filter: StatusFilter): Sessi
   return sessions.filter((s) => s.status === filter);
 }
 
+function buildHealthTooltip(health: ServerHealth): string {
+  const parts: string[] = [];
+  parts.push(`Status: ${health.status}`);
+  if (health.latencyMs !== null) {
+    parts.push(`Latency: ${health.latencyMs}ms`);
+  }
+  if (health.reconnectCount > 0) {
+    parts.push(`Reconnects: ${health.reconnectCount}`);
+  }
+  if (health.lastMessageAt) {
+    const ago = Math.round((Date.now() - health.lastMessageAt) / 1000);
+    if (ago < 60) {
+      parts.push(`Last message: ${ago}s ago`);
+    } else if (ago < 3600) {
+      parts.push(`Last message: ${Math.floor(ago / 60)}m ago`);
+    }
+  }
+  if (health.error) {
+    parts.push(`Error: ${health.error}`);
+  }
+  return parts.join('\n');
+}
+
 const WORKER_STATUS_DOT: Record<string, string> = {
   spawning: 'status-dot-gray',
   working: 'status-dot-blue',
@@ -103,8 +126,6 @@ export function SessionSidebar({
   onOpenInSplit,
   onCloseSplit,
   secondarySession,
-  onToggleDashboardMode,
-  dashboardMode,
   onNotificationSettings,
   onCostDashboard,
   onSettings,
@@ -118,6 +139,12 @@ export function SessionSidebar({
 }: SessionSidebarProps) {
   const { snapshots } = useConnections();
   const { getServer, toggleEnabled, deleteServer } = useServers();
+  const healthEntries = useConnectionHealth();
+  const healthByServer = useMemo(() => {
+    const map = new Map<string, ServerHealth>();
+    for (const h of healthEntries) map.set(h.serverId, h);
+    return map;
+  }, [healthEntries]);
   const [newSessionServerId, setNewSessionServerId] = useState<string | null>(null);
   const [tmuxServerId, setTmuxServerId] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
@@ -134,8 +161,7 @@ export function SessionSidebar({
   // Listen for 'open-add-server' custom event (from command palette)
   useEffect(() => {
     const handler = () => setEditingServerId(null);
-    window.addEventListener('open-add-server', handler);
-    return () => window.removeEventListener('open-add-server', handler);
+    return eventBus.on('open-add-server', handler);
   }, []);
 
   // Listen for 'open-new-project' custom event (from command palette)
@@ -145,8 +171,7 @@ export function SessionSidebar({
       const connected = snapshots.find(s => s.state.status === 'connected');
       if (connected) setNewProjectServerId(connected.serverId);
     };
-    window.addEventListener('open-new-project', handler);
-    return () => window.removeEventListener('open-new-project', handler);
+    return eventBus.on('open-new-project', handler);
   }, [snapshots]);
 
   // Track sessions that go to "waiting" status while not active
@@ -189,9 +214,8 @@ export function SessionSidebar({
 
   // Listen for in-app notifications (when tab is focused but session is not active)
   useEffect(() => {
-    const handler = (e: Event) => {
-      const detail = (e as CustomEvent).detail;
-      const tag = detail?.tag as string;
+    const handler = (data: { title: string; body?: string; tag?: string }) => {
+      const tag = data.tag;
       if (!tag) return;
       // Try to find matching session row and add alert animation
       const row = document.querySelector(`[data-session-tag="${tag}"]`);
@@ -200,8 +224,7 @@ export function SessionSidebar({
         setTimeout(() => row.classList.remove('sidebar-session-alert'), 2000);
       }
     };
-    window.addEventListener('companion-in-app-notification', handler);
-    return () => window.removeEventListener('companion-in-app-notification', handler);
+    return eventBus.on('companion-in-app-notification', handler);
   }, []);
 
   // Count total sessions across all servers for filter visibility
@@ -411,15 +434,6 @@ export function SessionSidebar({
       <div className="sidebar-header">
         <span className="sidebar-title">Companion</span>
         <div className="sidebar-header-actions">
-          {onToggleDashboardMode && (
-            <button
-              className={`dashboard-mode-toggle ${dashboardMode ? 'active' : ''}`}
-              onClick={onToggleDashboardMode}
-              title={dashboardMode ? 'Exit dashboard view' : 'Dashboard view'}
-            >
-              Grid
-            </button>
-          )}
           {onNotificationSettings && (
             <button
               className="sidebar-bell-btn"
@@ -491,13 +505,19 @@ export function SessionSidebar({
           // Sessions that are NOT workers (foremen + regular sessions)
           const topLevelSessions = allSessions.filter(s => !workerSessionIds.has(s.id));
 
+          const health = healthByServer.get(snap.serverId);
+          const healthTooltip = health ? buildHealthTooltip(health) : snap.serverName;
+
           return (
             <div key={snap.serverId} className="sidebar-server-group">
               <div
                 className="sidebar-server-name"
                 onContextMenu={(e) => handleServerContextMenu(e, snap.serverId)}
               >
-                <span className={`status-dot ${isConnected ? 'status-dot-green' : 'status-dot-gray'}`} />
+                <span
+                  className={`status-dot ${isConnected ? 'status-dot-green' : snap.state.status === 'error' ? 'status-dot-red' : snap.state.status === 'reconnecting' || snap.state.status === 'connecting' ? 'status-dot-blue status-dot-pulse' : 'status-dot-gray'}`}
+                  title={healthTooltip}
+                />
                 <span>{snap.serverName}</span>
                 {isConnected && summary && summary.sessions.length > 0 && (
                   <span className="sidebar-session-count">{summary.sessions.length}</span>

@@ -119,6 +119,10 @@ apksigner sign --ks desktop/debug.keystore --ks-pass pass:android --key-pass pas
   desktop/src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release-unsigned.apk
 ```
 
+## Conversation Parser
+
+The JSONL conversation parser has been extracted into a standalone package at `/home/hexi/local/src/claude-conversation-parser/`. The daemon still has its own copy in `daemon/src/parser.ts` (not yet wired to the package). When making parser changes, consider syncing to the standalone package.
+
 ## Architecture
 
 1. User runs the CLI in tmux: `tmux new -s claude && claude`

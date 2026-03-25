@@ -1,5 +1,6 @@
 import { spawn } from 'child_process';
 import { TMUX_OPERATION_TIMEOUT_MS, INPUT_LOG_PREVIEW_LENGTH, POST_TEXT_DELAY_MS, POST_ENTER_DELAY_MS, POST_ENTER_BEFORE_TYPING_DELAY_MS, POST_OTHER_SELECT_DELAY_MS, POST_TEXT_INPUT_DELAY_MS, POST_CHOICE_DELAY_MS, DEFAULT_PANE_CAPTURE_LINES, OVERLAY_DISMISS_DELAY_MS, OVERLAY_DETECTION_LINES } from './constants';
+import { incrementTmuxOperations } from './metrics';
 
 export class InputInjector {
   private defaultSession: string;
@@ -104,6 +105,7 @@ export class InputInjector {
       await new Promise((resolve) => setTimeout(resolve, POST_ENTER_DELAY_MS));
 
       console.log(`Input sent successfully to tmux session '${session}'`);
+      incrementTmuxOperations();
       return true;
     } catch (err) {
       console.error('Error sending input to tmux:', err);
@@ -275,6 +277,7 @@ export class InputInjector {
 
       await new Promise((r) => setTimeout(r, POST_CHOICE_DELAY_MS));
       console.log(`Choice sent successfully to tmux session '${session}'`);
+      incrementTmuxOperations();
       return true;
     } catch (err) {
       console.error('Error sending choice to tmux:', err);

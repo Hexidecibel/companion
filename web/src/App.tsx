@@ -5,6 +5,7 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 import { StatusPage } from './components/StatusPage';
 import { Dashboard } from './components/Dashboard';
 import { CommandPalette, CommandAction } from './components/CommandPalette';
+import { eventBus } from './utils/eventBus';
 
 const SettingsScreen = lazy(() => import('./components/SettingsScreen').then(m => ({ default: m.SettingsScreen })));
 const UsageDashboard = lazy(() => import('./components/UsageDashboard').then(m => ({ default: m.UsageDashboard })));
@@ -72,7 +73,7 @@ export function App() {
 
       // If an overlay/modal is open in the current screen, close it first
       if (document.body.dataset.overlay === 'true') {
-        window.dispatchEvent(new CustomEvent('close-overlay'));
+        eventBus.emit('close-overlay');
         // Re-push the current screen's history entry so next back still works
         history.pushState({ screen: screen.name }, '');
         return;
@@ -86,15 +87,10 @@ export function App() {
 
   // Listen for open-cost-dashboard events from child components
   useEffect(() => {
-    const handler = (e: Event) => {
-      const detail = (e as CustomEvent<{ serverId: string }>).detail;
-      if (detail?.serverId) {
-        history.pushState({ screen: 'cost-dashboard' }, '');
-        setScreen({ name: 'cost-dashboard', serverId: detail.serverId });
-      }
-    };
-    window.addEventListener('open-cost-dashboard', handler);
-    return () => window.removeEventListener('open-cost-dashboard', handler);
+    return eventBus.on('open-cost-dashboard', ({ serverId }) => {
+      history.pushState({ screen: 'cost-dashboard' }, '');
+      setScreen({ name: 'cost-dashboard', serverId });
+    });
   }, []);
 
   const focusInput = useCallback(() => {
@@ -115,7 +111,7 @@ export function App() {
       icon: '+',
       execute: () => {
         navigateTo('dashboard');
-        window.dispatchEvent(new CustomEvent('open-add-server'));
+        eventBus.emit('open-add-server');
       },
     },
     {
@@ -130,7 +126,7 @@ export function App() {
       icon: '\u{1F514}',
       execute: () => {
         navigateTo('dashboard');
-        window.dispatchEvent(new CustomEvent('open-notification-settings'));
+        eventBus.emit('open-notification-settings');
       },
     },
     {
@@ -139,7 +135,7 @@ export function App() {
       icon: 'P',
       execute: () => {
         navigateTo('dashboard');
-        window.dispatchEvent(new CustomEvent('open-new-project'));
+        eventBus.emit('open-new-project');
       },
     },
     {

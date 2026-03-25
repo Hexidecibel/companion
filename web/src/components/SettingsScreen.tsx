@@ -1,3 +1,4 @@
+import { eventBus } from '../utils/eventBus';
 import { useState, useEffect, useCallback } from 'react';
 import { useConnections } from '../hooks/useConnections';
 import { connectionManager } from '../services/ConnectionManager';
@@ -118,8 +119,7 @@ export function SettingsScreen({ onBack }: SettingsScreenProps) {
         setNotifServerId(null);
       }
     };
-    window.addEventListener('close-overlay', handler);
-    return () => window.removeEventListener('close-overlay', handler);
+    return eventBus.on('close-overlay', handler);
   }, [skillBrowserServerId, notifServerId]);
 
   const connectedServers = snapshots.filter((s) => s.state.status === 'connected');

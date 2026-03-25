@@ -1,3 +1,5 @@
+import { eventBus } from '../utils/eventBus';
+import { useDraggable } from '../hooks/useDraggable';
 import { useState, useEffect, useCallback, useMemo, useRef, lazy, Suspense } from 'react';
 import { PendingImage, WorkGroup } from '../types';
 import { useConversation } from '../hooks/useConversation';
@@ -27,9 +29,11 @@ import { WorkGroupBar } from './WorkGroupBar';
 import { WorkGroupPanel } from './WorkGroupPanel';
 import { FileFinder } from './FileFinder';
 import { VoiceMode } from './VoiceMode';
+import { SkillBrowser } from './SkillBrowser';
 import { useBookmarks } from '../hooks/useBookmarks';
 import { BookmarkList } from './BookmarkList';
 import { FetchErrorBanner } from './FetchErrorBanner';
+import { ComponentErrorBoundary } from './ComponentErrorBoundary';
 import { hideToolsKey } from '../services/storageKeys';
 
 const CodeReviewModal = lazy(() => import('./CodeReviewModal').then(m => ({ default: m.CodeReviewModal })));
@@ -47,6 +51,7 @@ interface SessionViewProps {
   onRetryWorker?: (workerId: string) => void;
   onDismissGroup?: () => void;
   merging?: boolean;
+  projectPath?: string;
   onToggleSidebar?: () => void;
   style?: React.CSSProperties;
 }
@@ -63,6 +68,7 @@ export function SessionView({
   onRetryWorker,
   onDismissGroup,
   merging,
+  projectPath,
   onToggleSidebar,
   style,
 }: SessionViewProps) {
@@ -84,7 +90,7 @@ export function SessionView({
   const { agents, runningCount, totalAgents, error: agentsError } = useSubAgents(serverId, sessionId);
   const bypass = useBypassPermissions(serverId, sessionId);
   const sessionMute = useSessionMute(serverId);
-  const { skills } = useSkills(serverId);
+  const { skills } = useSkills(serverId, sessionId || undefined);
   // Image send error state (auto-clears after 5s)
   const [imageSendError, setImageSendError] = useState<string | null>(null);
   useEffect(() => {
@@ -96,11 +102,22 @@ export function SessionView({
   // Dispatch panel state
   const DISPATCH_HEIGHT_KEY = 'dispatch-panel-height';
   const [dispatchCollapsed, setDispatchCollapsed] = useState(true);
-  const [dispatchHeight, setDispatchHeight] = useState(() => {
-    const stored = localStorage.getItem(DISPATCH_HEIGHT_KEY);
-    return stored ? parseInt(stored, 10) : 280;
+  const dispatchDrag = useDraggable({
+    direction: 'vertical',
+    initialValue: 280,
+    min: 100,
+    max: 2000,
+    storageKey: DISPATCH_HEIGHT_KEY,
+    transform: (ev, startEvent) => {
+      const container = (startEvent.target as HTMLElement).closest('.session-view');
+      if (!container) return 280;
+      const rect = container.getBoundingClientRect();
+      return Math.min(
+        Math.max(rect.bottom - ev.clientY, 100),
+        rect.height - 100,
+      );
+    },
   });
-  const dispatchDraggingRef = useRef(false);
 
   // File viewer state
   const [viewingFile, setViewingFile] = useState<string | null>(null);
@@ -131,6 +148,9 @@ export function SessionView({
 
   // Voice mode state
   const [showVoiceMode, setShowVoiceMode] = useState(false);
+
+  // Skill browser state
+  const [showSkillBrowser, setShowSkillBrowser] = useState(false);
 
   // Bookmarks
   const { addBookmark, removeBookmark, isBookmarked, sessionBookmarks } = useBookmarks(serverId);
@@ -182,56 +202,24 @@ export function SessionView({
 
   const showDispatchPanel = !dispatchCollapsed && totalAgents > 0;
 
-  const handleDispatchDragStart = useCallback((e: React.MouseEvent) => {
-    e.preventDefault();
-    dispatchDraggingRef.current = true;
-    document.body.style.cursor = 'row-resize';
-    document.body.style.userSelect = 'none';
 
-    const container = (e.target as HTMLElement).closest('.session-view');
-    if (!container) return;
-    const containerRect = container.getBoundingClientRect();
-
-    const onMouseMove = (ev: MouseEvent) => {
-      if (!dispatchDraggingRef.current) return;
-      const newHeight = Math.min(
-        Math.max(containerRect.bottom - ev.clientY, 100),
-        containerRect.height - 100
-      );
-      setDispatchHeight(newHeight);
-    };
-
-    const onMouseUp = () => {
-      dispatchDraggingRef.current = false;
-      document.body.style.cursor = '';
-      document.body.style.userSelect = '';
-      document.removeEventListener('mousemove', onMouseMove);
-      document.removeEventListener('mouseup', onMouseUp);
-      setDispatchHeight((h) => {
-        localStorage.setItem(DISPATCH_HEIGHT_KEY, String(h));
-        return h;
-      });
-    };
-
-    document.addEventListener('mousemove', onMouseMove);
-    document.addEventListener('mouseup', onMouseUp);
-  }, []);
 
   // Track whether dispatch overlay is open on mobile (for back gesture)
   const dispatchOverlayOpen = isMobileViewport() && !dispatchCollapsed && totalAgents > 0;
 
   // Signal to Dashboard that an overlay is open (for back gesture coordination)
   useEffect(() => {
-    const isOverlay = showTerminal || showWorkGroupPanel || showConversationSearch || showFileFinder || showCodeReviewModal || dispatchOverlayOpen || !!viewingFile || !!artifactContent || showBookmarks || showVoiceMode;
+    const isOverlay = showTerminal || showWorkGroupPanel || showConversationSearch || showFileFinder || showCodeReviewModal || dispatchOverlayOpen || !!viewingFile || !!artifactContent || showBookmarks || showVoiceMode || showSkillBrowser;
     document.body.dataset.overlay = isOverlay ? 'true' : '';
     return () => { document.body.dataset.overlay = ''; };
-  }, [showTerminal, showWorkGroupPanel, showConversationSearch, showFileFinder, showCodeReviewModal, dispatchOverlayOpen, viewingFile, artifactContent, showBookmarks, showVoiceMode]);
+  }, [showTerminal, showWorkGroupPanel, showConversationSearch, showFileFinder, showCodeReviewModal, dispatchOverlayOpen, viewingFile, artifactContent, showBookmarks, showVoiceMode, showSkillBrowser]);
 
   // Listen for close-overlay event from Dashboard's back gesture handler
   useEffect(() => {
     const handler = () => {
       // Close innermost/topmost overlay first
-      if (artifactContent) setArtifactContent(null);
+      if (showSkillBrowser) setShowSkillBrowser(false);
+      else if (artifactContent) setArtifactContent(null);
       else if (viewingFile) setViewingFile(null);
       else if (showVoiceMode) setShowVoiceMode(false);
       else if (dispatchOverlayOpen) setDispatchCollapsed(true);
@@ -242,15 +230,15 @@ export function SessionView({
       else if (showTerminal) setShowTerminal(false);
       else if (showWorkGroupPanel) setShowWorkGroupPanel(false);
     };
-    window.addEventListener('close-overlay', handler);
-    return () => window.removeEventListener('close-overlay', handler);
-  }, [showTerminal, showWorkGroupPanel, showConversationSearch, showFileFinder, showCodeReviewModal, dispatchOverlayOpen, viewingFile, artifactContent, showBookmarks, showVoiceMode]);
+    return eventBus.on('close-overlay', handler);
+  }, [showTerminal, showWorkGroupPanel, showConversationSearch, showFileFinder, showCodeReviewModal, dispatchOverlayOpen, viewingFile, artifactContent, showBookmarks, showVoiceMode, showSkillBrowser]);
 
   // Reset views when session changes, auto-focus on desktop only
   useEffect(() => {
     setShowTerminal(false);
     setShowWorkGroupPanel(false);
     setShowVoiceMode(false);
+    setShowSkillBrowser(false);
     setViewingFile(null);
     if (serverId && sessionId && !isMobileViewport()) {
       requestAnimationFrame(() => {
@@ -479,27 +467,11 @@ export function SessionView({
     }
   }, [cancelMessage]);
 
-  if (!serverId || !sessionId) {
-    return (
-      <div className="session-view-empty" style={style}>
-        <p>Select a session from the sidebar</p>
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="session-view-empty" style={style}>
-        <p className="session-view-error">{error}</p>
-      </div>
-    );
-  }
-
-  const handleSelectOption = (label: string) => {
+  const handleSelectOption = useCallback((label: string) => {
     return sendInput(label, { skipOptimistic: true });
-  };
+  }, [sendInput]);
 
-  const handleSelectChoice = async (choice: {
+  const handleSelectChoice = useCallback(async (choice: {
     selectedIndices: number[];
     optionCount: number;
     multiSelect: boolean;
@@ -518,7 +490,23 @@ export function SessionView({
     } catch {
       return false;
     }
-  };
+  }, [serverId, sessionId, tmuxSessionName]);
+
+  if (!serverId || !sessionId) {
+    return (
+      <div className="session-view-empty" style={style}>
+        <p>Select a session from the sidebar</p>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="session-view-empty" style={style}>
+        <p className="session-view-error">{error}</p>
+      </div>
+    );
+  }
 
   const mobile = isMobileViewport();
 
@@ -574,6 +562,13 @@ export function SessionView({
           Review ({fileChanges.length})
         </button>
       )}
+      <button
+        className="session-header-btn"
+        onClick={() => setShowSkillBrowser(true)}
+        title="Browse and manage skills"
+      >
+        Skills
+      </button>
     </>
   );
 
@@ -768,33 +763,36 @@ export function SessionView({
               />
             )}
 
-            <MessageList
-              highlights={highlights}
-              loading={loading}
-              loadingMore={loadingMore}
-              hasMore={hasMore}
-              onLoadMore={loadMore}
-              onSelectOption={handleSelectOption}
-              onSelectChoice={handleSelectChoice}
-              onCancelMessage={handleCancelMessage}
-              onViewFile={handleViewFile}
-              onViewArtifact={(content, title) => setArtifactContent({ content, title })}
-              searchTerm={searchTerm}
-              currentMatchId={searchMatches.length > 0 ? searchMatches[currentMatchIndex]?.id : null}
-              scrollToBottom={!showTerminal}
-              planFilePath={latestPlanFile}
-              hideTools={hideTools}
-              isBookmarked={isBookmarked}
-              onToggleBookmark={(messageId, content) => {
-                if (!sessionId) return;
-                if (isBookmarked(messageId)) {
-                  removeBookmark(messageId);
-                } else {
-                  addBookmark(messageId, sessionId, content);
-                }
-              }}
-              serverId={serverId}
-            />
+            <ComponentErrorBoundary name="MessageList">
+              <MessageList
+                key={sessionId || 'none'}
+                highlights={highlights}
+                loading={loading}
+                loadingMore={loadingMore}
+                hasMore={hasMore}
+                onLoadMore={loadMore}
+                onSelectOption={handleSelectOption}
+                onSelectChoice={handleSelectChoice}
+                onCancelMessage={handleCancelMessage}
+                onViewFile={handleViewFile}
+                onViewArtifact={(content, title) => setArtifactContent({ content, title })}
+                searchTerm={searchTerm}
+                currentMatchId={searchMatches.length > 0 ? searchMatches[currentMatchIndex]?.id : null}
+                scrollToBottom={!showTerminal}
+                planFilePath={latestPlanFile}
+                hideTools={hideTools}
+                isBookmarked={isBookmarked}
+                onToggleBookmark={(messageId, content) => {
+                  if (!sessionId) return;
+                  if (isBookmarked(messageId)) {
+                    removeBookmark(messageId);
+                  } else {
+                    addBookmark(messageId, sessionId, content);
+                  }
+                }}
+                serverId={serverId}
+              />
+            </ComponentErrorBoundary>
 
             <FileTabBar
               files={openFiles.map(f => f.path)}
@@ -815,19 +813,21 @@ export function SessionView({
       </div>
 
       {showDispatchPanel && !mobile && (
-        <div className="dispatch-divider" onMouseDown={handleDispatchDragStart} />
+        <div className="dispatch-divider" onMouseDown={dispatchDrag.onMouseDown} />
       )}
 
       {serverId && totalAgents > 0 && (
-        <DispatchPanel
-          serverId={serverId}
-          agents={agents}
-          runningCount={runningCount}
-          totalAgents={totalAgents}
-          height={dispatchHeight}
-          collapsed={dispatchCollapsed}
-          onCollapse={() => setDispatchCollapsed(prev => !prev)}
-        />
+        <ComponentErrorBoundary name="DispatchPanel">
+          <DispatchPanel
+            serverId={serverId}
+            agents={agents}
+            runningCount={runningCount}
+            totalAgents={totalAgents}
+            height={dispatchDrag.value}
+            collapsed={dispatchCollapsed}
+            onCollapse={() => setDispatchCollapsed(prev => !prev)}
+          />
+        </ComponentErrorBoundary>
       )}
 
       <InputBar
@@ -893,6 +893,15 @@ export function SessionView({
           status={status}
           sendInput={handleSend}
           onClose={() => setShowVoiceMode(false)}
+        />
+      )}
+
+      {showSkillBrowser && serverId && (
+        <SkillBrowser
+          serverId={serverId}
+          sessionId={sessionId || undefined}
+          projectPath={projectPath}
+          onClose={() => setShowSkillBrowser(false)}
         />
       )}
     </div>
