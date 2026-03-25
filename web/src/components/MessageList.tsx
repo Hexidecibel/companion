@@ -1,4 +1,5 @@
-import { useRef, useState, useEffect, useLayoutEffect, useCallback } from 'react';
+import { useRef, useState, useEffect, useCallback } from 'react';
+import { Virtuoso, VirtuosoHandle } from 'react-virtuoso';
 import { ConversationHighlight } from '../types';
 import { MessageBubble } from './MessageBubble';
 import { SkeletonMessageBubble } from './Skeleton';
@@ -44,81 +45,86 @@ export function MessageList({
   onToggleBookmark,
   serverId,
 }: MessageListProps) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const bottomRef = useRef<HTMLDivElement>(null);
+  const virtuosoRef = useRef<VirtuosoHandle>(null);
   const isNearBottomRef = useRef(true);
-  const prevScrollHeightRef = useRef(0);
-  const isPrependRef = useRef(false);
   const [showScrollButton, setShowScrollButton] = useState(false);
-
-  // Track near-bottom state on every scroll
-  const updateNearBottom = useCallback(() => {
-    const el = containerRef.current;
-    if (!el) return;
-    const threshold = 120;
-    isNearBottomRef.current =
-      el.scrollHeight - el.scrollTop - el.clientHeight < threshold;
-    setShowScrollButton(!isNearBottomRef.current);
-  }, []);
-
-  const scrollToBottom = useCallback(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, []);
-
-  // Reset scroll-to-bottom state when highlights are replaced (session switch)
   const prevHighlightsLenRef = useRef(0);
-  const justSwitchedRef = useRef(false);
+  const initialIndexRef = useRef<number | undefined>(undefined);
+
+  // Capture initial scroll position once on first meaningful render
+  if (initialIndexRef.current === undefined && highlights.length > 0) {
+    initialIndexRef.current = highlights.length - 1;
+  }
+
+  // Track near-bottom state via Virtuoso's atBottomStateChange
+  const handleAtBottomStateChange = useCallback((atBottom: boolean) => {
+    isNearBottomRef.current = atBottom;
+    setShowScrollButton(!atBottom);
+  }, []);
+
+  // Scroll to bottom helper
+  const scrollToBottom = useCallback(() => {
+    virtuosoRef.current?.scrollToIndex({
+      index: 'LAST',
+      behavior: 'smooth',
+    });
+  }, []);
+
+  // Follow new messages (when near bottom) and handle session switches
   useEffect(() => {
-    // If highlights went from 0 to N (session switch/initial load), force scroll to bottom instantly
-    if (prevHighlightsLenRef.current === 0 && highlights.length > 0) {
+    const prevLen = prevHighlightsLenRef.current;
+    if (highlights.length > prevLen && prevLen > 0 && isNearBottomRef.current) {
+      // New messages appended while user is near bottom — follow
+      requestAnimationFrame(() => {
+        virtuosoRef.current?.scrollToIndex({
+          index: 'LAST',
+          behavior: 'smooth',
+        });
+      });
+    }
+    // Session switch: was empty, now has messages
+    if (prevLen === 0 && highlights.length > 0) {
       isNearBottomRef.current = true;
-      justSwitchedRef.current = true;
+      requestAnimationFrame(() => {
+        virtuosoRef.current?.scrollToIndex({
+          index: 'LAST',
+          behavior: 'auto',
+        });
+      });
     }
     prevHighlightsLenRef.current = highlights.length;
   }, [highlights.length]);
-
-  // Auto-scroll to bottom whenever highlights change (new messages OR content updates)
-  // if the user was already near the bottom
-  useEffect(() => {
-    if (isNearBottomRef.current) {
-      // Use instant scroll on session switch, smooth for incremental updates
-      const behavior = justSwitchedRef.current ? 'instant' as const : 'smooth' as const;
-      justSwitchedRef.current = false;
-      bottomRef.current?.scrollIntoView({ behavior });
-    }
-  }, [highlights]);
 
   // Scroll to bottom when switching back from terminal to chat
   useEffect(() => {
     if (scrollToBottomProp) {
       requestAnimationFrame(() => {
-        bottomRef.current?.scrollIntoView({ behavior: 'instant' });
+        virtuosoRef.current?.scrollToIndex({
+          index: 'LAST',
+          behavior: 'auto',
+        });
         isNearBottomRef.current = true;
       });
     }
   }, [scrollToBottomProp]);
 
-  // Scroll to bottom on viewport resize (keyboard open/close) if near bottom.
-  // Uses a threshold to ignore small fluctuations (URL bar, autocomplete).
+  // Scroll to bottom on viewport resize (keyboard open/close) if near bottom
   useEffect(() => {
     const vv = window.visualViewport;
     if (!vv) return;
     let lastHeight = vv.height;
     const onResize = () => {
       const diff = Math.abs(vv.height - lastHeight);
-      // Ignore small changes (< 100px) — URL bar, autocomplete bar
       if (diff < 100) return;
       lastHeight = vv.height;
-      const wasNearBottom = isNearBottomRef.current;
-      if (wasNearBottom) {
-        // Wait for keyboard animation and layout reflow to settle
+      if (isNearBottomRef.current) {
         setTimeout(() => {
-          const el = containerRef.current;
-          if (el) {
-            el.scrollTop = el.scrollHeight - el.clientHeight;
-            isNearBottomRef.current = true;
-            setShowScrollButton(false);
-          }
+          virtuosoRef.current?.scrollToIndex({
+            index: 'LAST',
+            behavior: 'auto',
+          });
+          isNearBottomRef.current = true;
+          setShowScrollButton(false);
         }, 150);
       }
     };
@@ -128,37 +134,66 @@ export function MessageList({
 
   // Scroll to current search match
   useEffect(() => {
-    if (!currentMatchId || !containerRef.current) return;
-    const el = containerRef.current.querySelector(`[data-highlight-id="${currentMatchId}"]`);
-    if (el) {
-      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    if (!currentMatchId) return;
+    const idx = highlights.findIndex(h => h.id === currentMatchId);
+    if (idx >= 0) {
+      virtuosoRef.current?.scrollToIndex({
+        index: idx,
+        behavior: 'smooth',
+        align: 'center',
+      });
     }
-  }, [currentMatchId]);
+  }, [currentMatchId, highlights]);
 
-  // Preserve scroll position when prepending (load more) only — not on normal updates
-  useLayoutEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
+  // Load more when scrolling near top
+  const handleStartReached = useCallback(() => {
+    if (loadingMore || !hasMore) return;
+    onLoadMore();
+  }, [loadingMore, hasMore, onLoadMore]);
 
-    if (isPrependRef.current && prevScrollHeightRef.current > 0 && el.scrollHeight > prevScrollHeightRef.current) {
-      const diff = el.scrollHeight - prevScrollHeightRef.current;
-      el.scrollTop += diff;
+  // Render each message item
+  const itemContent = useCallback((_index: number, msg: ConversationHighlight) => {
+    return (
+      <MessageBubble
+        key={msg.id}
+        message={msg}
+        onSelectOption={onSelectOption}
+        onSelectChoice={onSelectChoice}
+        onCancelMessage={onCancelMessage}
+        onViewFile={onViewFile}
+        onViewArtifact={onViewArtifact}
+        searchTerm={searchTerm}
+        isCurrentMatch={msg.id === currentMatchId}
+        planFilePath={planFilePath}
+        hideTools={hideTools}
+        isBookmarked={isBookmarked?.(msg.id)}
+        onToggleBookmark={onToggleBookmark}
+        serverId={serverId}
+      />
+    );
+  }, [onSelectOption, onSelectChoice, onCancelMessage, onViewFile, onViewArtifact, searchTerm, currentMatchId, planFilePath, hideTools, isBookmarked, onToggleBookmark, serverId]);
+
+  // Header component shown when loading more
+  const Header = useCallback(() => {
+    if (!loadingMore) return null;
+    return (
+      <div className="msg-list-loading-more">
+        <div className="spinner small" />
+      </div>
+    );
+  }, [loadingMore]);
+
+  const handleClick = useCallback((e: React.MouseEvent) => {
+    const target = e.target as HTMLElement;
+    if (target.closest('button, a, code, pre, .option-btn, .tool-card')) return;
+    if (window.getSelection()?.toString()) return;
+    if ('ontouchstart' in window && document.activeElement instanceof HTMLElement) {
+      document.activeElement.blur();
+      return;
     }
-    prevScrollHeightRef.current = el.scrollHeight;
-    isPrependRef.current = false;
-  }, [highlights]);
-
-  // Scroll handler for load-more trigger + near-bottom tracking
-  const handleScroll = useCallback(() => {
-    updateNearBottom();
-    const el = containerRef.current;
-    if (!el || loadingMore || !hasMore) return;
-    if (el.scrollTop < 80) {
-      prevScrollHeightRef.current = el.scrollHeight;
-      isPrependRef.current = true;
-      onLoadMore();
-    }
-  }, [loadingMore, hasMore, onLoadMore, updateNearBottom]);
+    const textarea = document.querySelector('.input-bar-textarea') as HTMLElement | null;
+    textarea?.focus();
+  }, []);
 
   if (loading) {
     return (
@@ -180,46 +215,20 @@ export function MessageList({
     );
   }
 
-  const handleClick = (e: React.MouseEvent) => {
-    // Don't steal focus from interactive elements or text selection
-    const target = e.target as HTMLElement;
-    if (target.closest('button, a, code, pre, .option-btn, .tool-card')) return;
-    if (window.getSelection()?.toString()) return;
-    // On mobile/touch, dismiss keyboard instead of focusing input
-    if ('ontouchstart' in window && document.activeElement instanceof HTMLElement) {
-      document.activeElement.blur();
-      return;
-    }
-    const textarea = document.querySelector('.input-bar-textarea') as HTMLElement | null;
-    textarea?.focus();
-  };
-
   return (
-    <div className="msg-list" ref={containerRef} onScroll={handleScroll} onClick={handleClick}>
-      {loadingMore && (
-        <div className="msg-list-loading-more">
-          <div className="spinner small" />
-        </div>
-      )}
-      {highlights.map((msg) => (
-        <MessageBubble
-          key={msg.id}
-          message={msg}
-          onSelectOption={onSelectOption}
-          onSelectChoice={onSelectChoice}
-          onCancelMessage={onCancelMessage}
-          onViewFile={onViewFile}
-          onViewArtifact={onViewArtifact}
-          searchTerm={searchTerm}
-          isCurrentMatch={msg.id === currentMatchId}
-          planFilePath={planFilePath}
-          hideTools={hideTools}
-          isBookmarked={isBookmarked?.(msg.id)}
-          onToggleBookmark={onToggleBookmark}
-          serverId={serverId}
-        />
-      ))}
-      <div ref={bottomRef} />
+    <div className="msg-list" onClick={handleClick} style={{ position: 'relative' }}>
+      <Virtuoso
+        ref={virtuosoRef}
+        data={highlights}
+        itemContent={itemContent}
+        initialTopMostItemIndex={initialIndexRef.current}
+        computeItemKey={(_index, item) => item.id}
+        atBottomStateChange={handleAtBottomStateChange}
+        atBottomThreshold={200}
+        startReached={handleStartReached}
+        components={{ Header }}
+        increaseViewportBy={{ top: 400, bottom: 400 }}
+      />
       {showScrollButton && (
         <button
           className="scroll-to-bottom-btn"
