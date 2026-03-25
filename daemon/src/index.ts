@@ -13,10 +13,17 @@ import { createServer, validateTlsConfig } from './tls';
 import { certsExist, generateAndSaveCerts, getDefaultCertPaths } from './cert-generator';
 import { createQRRequestHandler } from './qr-server';
 import { dispatchCli, writePidFile, removePidFile } from './cli';
-import { APPROVAL_SEND_DELAY_MS, AUTO_APPROVAL_MAX_TRACKED_IDS, SHUTDOWN_TIMEOUT_MS, STATUS_LOG_INTERVAL_MS } from './constants';
+import { SHUTDOWN_TIMEOUT_MS, STATUS_LOG_INTERVAL_MS } from './constants';
+import { AutoApprovalService } from './auto-approval';
+import { registerShutdownCallback, runShutdownCallbacks } from './utils';
 
 // Crash handlers — ensure crash reasons are always logged before exit
-process.on('uncaughtException', (err) => {
+// EADDRINUSE errors are handled by server.on('error') retry logic — don't exit here
+process.on('uncaughtException', (err: NodeJS.ErrnoException) => {
+  if (err.code === 'EADDRINUSE') {
+    console.warn('Uncaught EADDRINUSE — deferring to server error handler');
+    return;
+  }
   console.error('Uncaught exception:', err);
   process.exit(1);
 });
@@ -180,119 +187,23 @@ async function main(): Promise<void> {
   subAgentWatcher.start();
 
   // Auto-approve tools (from config and/or per-session client toggle)
-  {
-    console.log(
-      `Auto-approve tools from config: ${config.autoApproveTools.length > 0 ? config.autoApproveTools.join(', ') : '(none - client toggle only)'}`
-    );
-    // Track approved tool IDs to avoid double-firing.
-    // Tool use IDs are unique UUIDs — once approved, never re-approve.
-    const approvedToolIds = new Set<string>();
+  const autoApproval = new AutoApprovalService({
+    autoApproveTools: config.autoApproveTools,
+    isSessionAutoApproveEnabled: (sessionId) => wsHandler.autoApproveSessions.has(sessionId),
+    injector,
+  });
 
-    watcher.on('pending-approval', async ({ sessionId, projectPath, tools }) => {
-      // tools is now Array<{name: string, id: string}>
-      const toolList = tools as Array<{ name: string; id: string }>;
-
-      // Check per-session toggle OR config-level tools
-      const sessionEnabled = wsHandler.autoApproveSessions.has(sessionId);
-      if (config.autoApproveTools.length === 0 && !sessionEnabled) {
-        return;
-      }
-
-      // Only approve tools in the config list OR if the session toggle is on
-      const autoApprovable = toolList.filter((tool) => {
-        if (config.autoApproveTools.includes(tool.name)) return true;
-        if (sessionEnabled) return true;
-        return false;
-      });
-
-      if (autoApprovable.length === 0) {
-        console.log(
-          `[AUTO-APPROVE] No auto-approvable tools in: [${toolList.map((t) => t.name).join(', ')}]`
-        );
-        return;
-      }
-
-      // Dedup by tool IDs — each unique tool use ID gets approved exactly once.
-      const toolIds = autoApprovable.map((t) => t.id);
-      const unapproved = autoApprovable.filter((t) => !approvedToolIds.has(t.id));
-      if (unapproved.length === 0) {
-        console.log(
-          `[AUTO-APPROVE] Dedup: all tool IDs already approved [${autoApprovable.map((t) => t.name).join(', ')}]`
-        );
-        return;
-      }
-
-      // Mark all tool IDs as approved before sending
-      toolIds.forEach((id) => approvedToolIds.add(id));
-
-      // Bounded cleanup: if set grows too large, clear it (old IDs are safe to forget)
-      if (approvedToolIds.size > AUTO_APPROVAL_MAX_TRACKED_IDS) {
-        console.log(`[AUTO-APPROVE] Clearing tracked IDs (exceeded ${AUTO_APPROVAL_MAX_TRACKED_IDS})`);
-        approvedToolIds.clear();
-      }
-
-      // Resolve tmux session: sessionId IS the tmux session name now (from watcher events),
-      // so use it directly. Fall back to path matching only if needed.
-      let targetTmuxSession: string | undefined = sessionId;
-      // Verify this is actually a tmux session name by checking if injector can target it
-      if (!targetTmuxSession && projectPath) {
-        const tmux = new TmuxManager('companion');
-        const tmuxSessions = await tmux.listSessions();
-        const normalizedPath = projectPath.replace(/\/+$/, '');
-        const match = tmuxSessions.find(
-          (ts) =>
-            ts.workingDir === projectPath || ts.workingDir?.replace(/\/+$/, '') === normalizedPath
-        );
-        if (match) {
-          targetTmuxSession = match.name;
-        }
-      }
-
-      const target = targetTmuxSession || undefined;
-      console.log(
-        `[AUTO-APPROVE] Approving [${autoApprovable.map((t) => t.name).join(', ')}] -> tmux="${target || 'active'}" (session: ${sessionId.substring(0, 8)})`
-      );
-
-      try {
-        // Check terminal for Claude Code's actual approval prompt format.
-        // Match patterns like "(Y)es / (N)o" or "Do you want to proceed?"
-        const approvalPromptRe =
-          /\(Y\)es\s*\/\s*\(N\)o|Do you want to (proceed|run|allow|execute)|Approve\?|Allow this|Yes\/No/i;
-
-        const paneContent = await injector.capturePaneContent(target);
-        const hasApprovalPrompt = approvalPromptRe.test(paneContent);
-
-        if (!hasApprovalPrompt) {
-          // Prompt may not have rendered yet — wait a short time and retry once
-          console.log(`[AUTO-APPROVE] No approval prompt detected, waiting ${APPROVAL_SEND_DELAY_MS}ms...`);
-          await new Promise((resolve) => setTimeout(resolve, APPROVAL_SEND_DELAY_MS));
-          const paneContent2 = await injector.capturePaneContent(target);
-          const hasPrompt2 = approvalPromptRe.test(paneContent2);
-          if (!hasPrompt2) {
-            console.log(`[AUTO-APPROVE] Still no prompt after wait, sending anyway`);
-          }
-        }
-
-        const success = await injector.sendInput('yes', target);
-        if (!success) {
-          console.log(`[AUTO-APPROVE] Send failed, retrying after ${APPROVAL_SEND_DELAY_MS}ms...`);
-          await new Promise((resolve) => setTimeout(resolve, APPROVAL_SEND_DELAY_MS));
-          await injector.sendInput('yes', target);
-        } else {
-          console.log(`[AUTO-APPROVE] Sent "yes" successfully`);
-        }
-      } catch (err) {
-        console.error(`[AUTO-APPROVE] Error: ${err}`);
-      }
-    });
-  }
+  watcher.on('pending-approval', async ({ sessionId, projectPath, tools }) => {
+    const toolList = tools as Array<{ name: string; id: string }>;
+    await autoApproval.handlePendingApproval(sessionId, projectPath, toolList);
+  });
 
   // Write PID file for CLI management
   writePidFile();
 
   // Start HTTP servers for all listeners (with EADDRINUSE retry)
-  const LISTEN_MAX_RETRIES = 5;
-  const LISTEN_RETRY_DELAY_MS = 3000;
+  const LISTEN_MAX_RETRIES = 10;
+  const LISTEN_RETRY_DELAY_MS = 2000;
 
   for (const { server, listener } of servers) {
     let attempt = 0;
@@ -311,7 +222,10 @@ async function main(): Promise<void> {
         console.warn(
           `Port ${listener.port} in use, retrying in ${LISTEN_RETRY_DELAY_MS / 1000}s (attempt ${attempt}/${LISTEN_MAX_RETRIES})...`
         );
-        setTimeout(tryListen, LISTEN_RETRY_DELAY_MS);
+        // Close the failed server before retrying so the socket is cleaned up
+        server.close(() => {
+          setTimeout(tryListen, LISTEN_RETRY_DELAY_MS);
+        });
       } else {
         console.error(`Failed to start server on port ${listener.port}:`, err);
         process.exit(1);
@@ -321,15 +235,30 @@ async function main(): Promise<void> {
     tryListen();
   }
 
+  // Register status log interval and track for shutdown
+  const statusInterval = setInterval(() => {
+    const status = watcher.getStatus();
+    console.log(
+      `Status: ${wsHandler.getAuthenticatedClientCount()} clients, ` +
+        `waiting: ${status.isWaitingForInput}, ` +
+        `push devices: ${push.getRegisteredDeviceCount()}`
+    );
+  }, STATUS_LOG_INTERVAL_MS);
+  registerShutdownCallback(() => clearInterval(statusInterval));
+
   // Graceful shutdown
   const shutdown = async (): Promise<void> => {
     console.log('\nShutting down...');
+
+    // Clear all registered timers (status interval, etc.)
+    runShutdownCallbacks();
 
     removePidFile();
     notificationStore.flush();
     workGroupManager.stop();
     watcher.stop();
     subAgentWatcher.stop();
+    wsHandler.shutdown();
     if (mdns) mdns.stop();
 
     // Close all servers
@@ -353,16 +282,6 @@ async function main(): Promise<void> {
 
   process.on('SIGINT', shutdown);
   process.on('SIGTERM', shutdown);
-
-  // Log status periodically
-  setInterval(() => {
-    const status = watcher.getStatus();
-    console.log(
-      `Status: ${wsHandler.getAuthenticatedClientCount()} clients, ` +
-        `waiting: ${status.isWaitingForInput}, ` +
-        `push devices: ${push.getRegisteredDeviceCount()}`
-    );
-  }, STATUS_LOG_INTERVAL_MS);
 }
 
 // main() is called from the CLI dispatcher above
