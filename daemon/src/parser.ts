@@ -350,37 +350,10 @@ export function parseConversationFile(
   return trimmed;
 }
 
-function parseQueueOperation(entry: JsonlEntry): ConversationMessage | null {
-  const content = (entry as { content?: string }).content;
-  if (!content || !content.includes('<task-notification>')) return null;
-
-  // Parse XML fields with simple regex (no XML library needed for this structure)
-  const taskId = content.match(/<task-id>([^<]+)<\/task-id>/)?.[1] || '';
-  const outputFile = content.match(/<output-file>([^<]+)<\/output-file>/)?.[1] || '';
-  const status = content.match(/<status>([^<]+)<\/status>/)?.[1] || '';
-  const summary = content.match(/<summary>([^<]+)<\/summary>/)?.[1] || '';
-
-  if (!summary) return null;
-
-  const timestamp = entry.timestamp ? new Date(entry.timestamp).getTime() : Date.now();
-
-  return {
-    id: `task-${taskId}-${timestamp}`,
-    type: 'system',
-    content: summary,
-    timestamp,
-    toolCalls: outputFile
-      ? [
-          {
-            id: `task-output-${taskId}`,
-            name: 'TaskOutput',
-            input: { taskId, outputFile },
-            output: outputFile,
-            status: status === 'completed' ? 'completed' : status === 'error' ? 'error' : 'running',
-          },
-        ]
-      : undefined,
-  };
+function parseQueueOperation(_entry: JsonlEntry): ConversationMessage | null {
+  // Task notifications are internal plumbing — suppress from conversation UI entirely.
+  // The dispatch panel in the Companion app shows agent status separately.
+  return null;
 }
 
 /**
@@ -656,13 +629,22 @@ export function extractHighlights(messages: ConversationMessage[]): Conversation
   // Find the index of the last user message - anything before this has been "responded to"
   const rawHighlights = messages
     .filter((msg) => {
-      // Include user messages with content (but hide skill command triggers)
+      // Include user messages with content (but hide internal plumbing)
       if (msg.type === 'user' && msg.content && msg.content.trim()) {
         if (msg.content.includes('<command-name>')) return false;
+        if (msg.content.includes('<task-notification>')) return false;
+        // Skip messages that are only system-reminder blocks (no user-visible content)
+        if (msg.content.includes('<system-reminder>')) {
+          const stripped = msg.content.replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, '').trim();
+          if (!stripped) return false;
+        }
         return true;
       }
-      // Include system messages (task notifications, compaction summaries)
-      if (msg.type === 'system') return true;
+      // Include system messages (compaction summaries), but skip task notifications
+      if (msg.type === 'system') {
+        if (msg.content && msg.content.includes('<task-notification>')) return false;
+        return true;
+      }
       // Include assistant messages with content OR toolCalls
       if (msg.type === 'assistant') {
         const trimmed = msg.content?.trim();
@@ -729,10 +711,16 @@ export function extractHighlights(messages: ConversationMessage[]): Conversation
             )
           : msg.toolCalls;
 
+      // Strip <system-reminder> XML blocks from content (internal plumbing injected by the CLI)
+      let content = msg.content;
+      if (content && content.includes('<system-reminder>')) {
+        content = content.replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, '').trim();
+      }
+
       return {
         id: msg.id,
         type: msg.type as 'user' | 'assistant',
-        content: msg.content,
+        content,
         timestamp: msg.timestamp,
         options: showOptions ? msg.options : undefined,
         questions: showOptions ? msg.questions : undefined,
