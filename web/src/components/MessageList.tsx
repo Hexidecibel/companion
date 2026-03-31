@@ -1,5 +1,4 @@
-import { useRef, useState, useEffect, useCallback } from 'react';
-import { Virtuoso, VirtuosoHandle } from 'react-virtuoso';
+import { useRef, useState, useEffect, useCallback, memo } from 'react';
 import { ConversationHighlight } from '../types';
 import { MessageBubble } from './MessageBubble';
 import { SkeletonMessageBubble } from './Skeleton';
@@ -23,9 +22,10 @@ interface MessageListProps {
   isBookmarked?: (messageId: string) => boolean;
   onToggleBookmark?: (messageId: string, content: string) => void;
   serverId?: string | null;
+  sessionId?: string | null;
 }
 
-export function MessageList({
+export const MessageList = memo(function MessageList({
   highlights,
   loading,
   loadingMore,
@@ -44,69 +44,82 @@ export function MessageList({
   isBookmarked,
   onToggleBookmark,
   serverId,
+  sessionId,
 }: MessageListProps) {
-  const virtuosoRef = useRef<VirtuosoHandle>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
   const isNearBottomRef = useRef(true);
   const [showScrollButton, setShowScrollButton] = useState(false);
   const prevHighlightsLenRef = useRef(0);
-  const initialIndexRef = useRef<number | undefined>(undefined);
+  const needsScrollRef = useRef(true); // true initially for first load scroll
+  const loadMoreSentinelRef = useRef<HTMLDivElement>(null);
 
-  // Capture initial scroll position once on first meaningful render
-  if (initialIndexRef.current === undefined && highlights.length > 0) {
-    initialIndexRef.current = highlights.length - 1;
-  }
-
-  // Track near-bottom state via Virtuoso's atBottomStateChange
-  const handleAtBottomStateChange = useCallback((atBottom: boolean) => {
-    isNearBottomRef.current = atBottom;
-    setShowScrollButton(!atBottom);
-  }, []);
-
-  // Scroll to bottom helper
-  const scrollToBottom = useCallback(() => {
-    virtuosoRef.current?.scrollToIndex({
-      index: 'LAST',
-      behavior: 'smooth',
+  // Scroll handler - update refs, only setState when value changes
+  const handleScroll = useCallback(() => {
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 200;
+    isNearBottomRef.current = nearBottom;
+    setShowScrollButton(prev => {
+      const next = !nearBottom;
+      return prev === next ? prev : next;
     });
   }, []);
 
-  // Follow new messages (when near bottom) and handle session switches
+  // Scroll to bottom helper
+  const scrollToBottom = useCallback((smooth = true) => {
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    el.scrollTo({ top: el.scrollHeight, behavior: smooth ? 'smooth' : 'auto' });
+  }, []);
+
+  // Mark scroll needed on session switch
   useEffect(() => {
+    needsScrollRef.current = true;
+    prevHighlightsLenRef.current = 0;
+  }, [sessionId]);
+
+  // Session-switch scroll: waits for loading to finish and scroll container to exist
+  useEffect(() => {
+    if (!needsScrollRef.current) return;
+    if (loading) return; // still showing skeleton, container doesn't exist
+    const el = scrollContainerRef.current;
+    if (!el || highlights.length === 0) return;
+
+    needsScrollRef.current = false;
+    isNearBottomRef.current = true;
+    setShowScrollButton(false);
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => scrollToBottom(false));
+    });
+  }, [highlights.length, sessionId, loading, scrollToBottom]);
+
+  // Auto-follow: smooth scroll when new messages arrive and user is near bottom
+  useEffect(() => {
+    if (needsScrollRef.current) {
+      // Session switch in progress — handled by the effect above
+      prevHighlightsLenRef.current = highlights.length;
+      return;
+    }
+
     const prevLen = prevHighlightsLenRef.current;
-    if (highlights.length > prevLen && prevLen > 0 && isNearBottomRef.current) {
-      // New messages appended while user is near bottom — follow
-      requestAnimationFrame(() => {
-        virtuosoRef.current?.scrollToIndex({
-          index: 'LAST',
-          behavior: 'smooth',
-        });
-      });
-    }
-    // Session switch: was empty, now has messages
-    if (prevLen === 0 && highlights.length > 0) {
-      isNearBottomRef.current = true;
-      requestAnimationFrame(() => {
-        virtuosoRef.current?.scrollToIndex({
-          index: 'LAST',
-          behavior: 'auto',
-        });
-      });
-    }
     prevHighlightsLenRef.current = highlights.length;
-  }, [highlights.length]);
+
+    // New messages appended while following
+    if (highlights.length > prevLen && prevLen > 0 && isNearBottomRef.current) {
+      requestAnimationFrame(() => scrollToBottom(true));
+    }
+  }, [highlights.length, scrollToBottom]);
 
   // Scroll to bottom when switching back from terminal to chat
   useEffect(() => {
     if (scrollToBottomProp) {
       requestAnimationFrame(() => {
-        virtuosoRef.current?.scrollToIndex({
-          index: 'LAST',
-          behavior: 'auto',
-        });
+        scrollToBottom(false);
         isNearBottomRef.current = true;
+        setShowScrollButton(false);
       });
     }
-  }, [scrollToBottomProp]);
+  }, [scrollToBottomProp, scrollToBottom]);
 
   // Scroll to bottom on viewport resize (keyboard open/close) if near bottom
   useEffect(() => {
@@ -119,10 +132,7 @@ export function MessageList({
       lastHeight = vv.height;
       if (isNearBottomRef.current) {
         setTimeout(() => {
-          virtuosoRef.current?.scrollToIndex({
-            index: 'LAST',
-            behavior: 'auto',
-          });
+          scrollToBottom(false);
           isNearBottomRef.current = true;
           setShowScrollButton(false);
         }, 150);
@@ -130,58 +140,32 @@ export function MessageList({
     };
     vv.addEventListener('resize', onResize);
     return () => vv.removeEventListener('resize', onResize);
-  }, []);
+  }, [scrollToBottom]);
 
   // Scroll to current search match
   useEffect(() => {
     if (!currentMatchId) return;
-    const idx = highlights.findIndex(h => h.id === currentMatchId);
-    if (idx >= 0) {
-      virtuosoRef.current?.scrollToIndex({
-        index: idx,
-        behavior: 'smooth',
-        align: 'center',
-      });
+    const el = document.getElementById(`msg-${currentMatchId}`);
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }
-  }, [currentMatchId, highlights]);
+  }, [currentMatchId]);
 
-  // Load more when scrolling near top
-  const handleStartReached = useCallback(() => {
-    if (loadingMore || !hasMore) return;
-    onLoadMore();
-  }, [loadingMore, hasMore, onLoadMore]);
-
-  // Render each message item
-  const itemContent = useCallback((_index: number, msg: ConversationHighlight) => {
-    return (
-      <MessageBubble
-        key={msg.id}
-        message={msg}
-        onSelectOption={onSelectOption}
-        onSelectChoice={onSelectChoice}
-        onCancelMessage={onCancelMessage}
-        onViewFile={onViewFile}
-        onViewArtifact={onViewArtifact}
-        searchTerm={searchTerm}
-        isCurrentMatch={msg.id === currentMatchId}
-        planFilePath={planFilePath}
-        hideTools={hideTools}
-        isBookmarked={isBookmarked?.(msg.id)}
-        onToggleBookmark={onToggleBookmark}
-        serverId={serverId}
-      />
+  // IntersectionObserver for load-more at top
+  useEffect(() => {
+    const sentinel = loadMoreSentinelRef.current;
+    if (!sentinel) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting && hasMore && !loadingMore) {
+          onLoadMore();
+        }
+      },
+      { root: scrollContainerRef.current, rootMargin: '200px 0px 0px 0px' }
     );
-  }, [onSelectOption, onSelectChoice, onCancelMessage, onViewFile, onViewArtifact, searchTerm, currentMatchId, planFilePath, hideTools, isBookmarked, onToggleBookmark, serverId]);
-
-  // Header component shown when loading more
-  const Header = useCallback(() => {
-    if (!loadingMore) return null;
-    return (
-      <div className="msg-list-loading-more">
-        <div className="spinner small" />
-      </div>
-    );
-  }, [loadingMore]);
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [hasMore, loadingMore, onLoadMore]);
 
   const handleClick = useCallback((e: React.MouseEvent) => {
     const target = e.target as HTMLElement;
@@ -217,22 +201,51 @@ export function MessageList({
 
   return (
     <div className="msg-list" onClick={handleClick} style={{ position: 'relative' }}>
-      <Virtuoso
-        ref={virtuosoRef}
-        data={highlights}
-        itemContent={itemContent}
-        initialTopMostItemIndex={initialIndexRef.current}
-        computeItemKey={(_index, item) => item.id}
-        atBottomStateChange={handleAtBottomStateChange}
-        atBottomThreshold={200}
-        startReached={handleStartReached}
-        components={{ Header }}
-        increaseViewportBy={{ top: 400, bottom: 400 }}
-      />
+      <div
+        ref={scrollContainerRef}
+        className="msg-list-scroll"
+        onScroll={handleScroll}
+        style={{ flex: 1, overflowY: 'auto', overflowAnchor: 'auto' } as React.CSSProperties}
+      >
+        {/* Load-more sentinel */}
+        <div ref={loadMoreSentinelRef} style={{ height: 1 }} />
+        {loadingMore && (
+          <div className="msg-list-loading-more">
+            <div className="spinner small" />
+          </div>
+        )}
+        {highlights.map((msg) => {
+          const filteredMsg = hideTools && msg.toolCalls
+            ? {
+                ...msg,
+                toolCalls: msg.toolCalls.filter(t => t.status === 'pending' || t.name === 'ExitPlanMode'),
+              }
+            : msg;
+
+          return (
+            <div key={msg.id} id={`msg-${msg.id}`}>
+              <MessageBubble
+                message={filteredMsg}
+                onSelectOption={onSelectOption}
+                onSelectChoice={onSelectChoice}
+                onCancelMessage={onCancelMessage}
+                onViewFile={onViewFile}
+                onViewArtifact={onViewArtifact}
+                searchTerm={searchTerm}
+                isCurrentMatch={msg.id === currentMatchId}
+                planFilePath={planFilePath}
+                isBookmarked={isBookmarked?.(msg.id)}
+                onToggleBookmark={onToggleBookmark}
+                serverId={serverId}
+              />
+            </div>
+          );
+        })}
+      </div>
       {showScrollButton && (
         <button
           className="scroll-to-bottom-btn"
-          onClick={scrollToBottom}
+          onClick={() => scrollToBottom()}
           title="Scroll to bottom"
           aria-label="Scroll to bottom"
         >
@@ -243,4 +256,4 @@ export function MessageList({
       )}
     </div>
   );
-}
+});

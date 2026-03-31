@@ -282,14 +282,26 @@ export function SessionView({
     };
     // Focus on any view change (terminal toggle, etc.)
     refocus();
+    // When user starts typing and focus isn't on an interactive element, redirect to textarea
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key.length !== 1) return; // Ignore non-printable keys (arrows, function keys, etc.)
+      if (e.ctrlKey || e.altKey || e.metaKey) return; // Ignore keyboard shortcuts
+      const active = document.activeElement;
+      if (active && active !== document.body) return;
+      const textarea = document.querySelector('.input-bar-textarea') as HTMLElement | null;
+      textarea?.focus();
+    };
+
     // Re-focus when clicks happen outside interactive elements
     document.addEventListener('focusout', refocus);
     document.addEventListener('mousedown', onMouseDown);
     document.addEventListener('mouseup', onMouseUp);
+    document.addEventListener('keydown', onKeyDown);
     return () => {
       document.removeEventListener('focusout', refocus);
       document.removeEventListener('mousedown', onMouseDown);
       document.removeEventListener('mouseup', onMouseUp);
+      document.removeEventListener('keydown', onKeyDown);
     };
   }, [showTerminal, serverId, sessionId]);
 
@@ -391,6 +403,19 @@ export function SessionView({
     closeAllFiles();
     setViewingFile(null);
   }, [closeAllFiles]);
+
+  const handleViewArtifact = useCallback((content: string, title?: string) => {
+    setArtifactContent({ content, title });
+  }, []);
+
+  const handleToggleBookmark = useCallback((messageId: string, content: string) => {
+    if (!sessionId) return;
+    if (isBookmarked(messageId)) {
+      removeBookmark(messageId);
+    } else {
+      addBookmark(messageId, sessionId, content);
+    }
+  }, [sessionId, isBookmarked, removeBookmark, addBookmark]);
 
   const handleCloseSearch = useCallback(() => {
     setShowSearch(false);
@@ -765,7 +790,7 @@ export function SessionView({
 
             <ComponentErrorBoundary name="MessageList">
               <MessageList
-                key={sessionId || 'none'}
+                key={sessionId}
                 highlights={highlights}
                 loading={loading}
                 loadingMore={loadingMore}
@@ -775,22 +800,16 @@ export function SessionView({
                 onSelectChoice={handleSelectChoice}
                 onCancelMessage={handleCancelMessage}
                 onViewFile={handleViewFile}
-                onViewArtifact={(content, title) => setArtifactContent({ content, title })}
+                onViewArtifact={handleViewArtifact}
                 searchTerm={searchTerm}
                 currentMatchId={searchMatches.length > 0 ? searchMatches[currentMatchIndex]?.id : null}
                 scrollToBottom={!showTerminal}
                 planFilePath={latestPlanFile}
                 hideTools={hideTools}
                 isBookmarked={isBookmarked}
-                onToggleBookmark={(messageId, content) => {
-                  if (!sessionId) return;
-                  if (isBookmarked(messageId)) {
-                    removeBookmark(messageId);
-                  } else {
-                    addBookmark(messageId, sessionId, content);
-                  }
-                }}
+                onToggleBookmark={handleToggleBookmark}
                 serverId={serverId}
+                sessionId={sessionId}
               />
             </ComponentErrorBoundary>
 

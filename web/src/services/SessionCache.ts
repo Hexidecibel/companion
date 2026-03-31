@@ -46,6 +46,27 @@ export function clearAllCache(): void {
 }
 
 /**
+ * Compare two individual highlights for equality.
+ * Checks id, content, choice state, and tool call statuses.
+ */
+export function highlightEqual(
+  a: ConversationHighlight,
+  b: ConversationHighlight,
+): boolean {
+  if (a.id !== b.id) return false;
+  if (a.content !== b.content) return false;
+  if (a.isWaitingForChoice !== b.isWaitingForChoice) return false;
+  if (a.timestamp !== b.timestamp) return false;
+  const tcA = a.toolCalls || [];
+  const tcB = b.toolCalls || [];
+  if (tcA.length !== tcB.length) return false;
+  for (let i = 0; i < tcA.length; i++) {
+    if (tcA[i].status !== tcB[i].status) return false;
+  }
+  return true;
+}
+
+/**
  * Compare highlights arrays to skip no-op re-renders.
  * Checks all IDs for structural equality, plus content and tool status
  * of the last item to catch streaming/status updates.

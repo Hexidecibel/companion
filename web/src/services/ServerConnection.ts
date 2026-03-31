@@ -361,11 +361,17 @@ export class ServerConnection {
     }
   }
 
-  switchSession(sessionId: string): void {
+  async switchSession(sessionId: string): Promise<boolean> {
     this.lastSessionId = sessionId;
     if (this.isConnected()) {
-      this.send({ type: 'switch_session', payload: { sessionId } }).catch(() => {});
+      try {
+        const response = await this.sendRequest('switch_session', { sessionId });
+        return response.success;
+      } catch {
+        return false;
+      }
     }
+    return false;
   }
 
   clearSessionSubscription(): void {

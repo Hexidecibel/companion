@@ -149,7 +149,7 @@ export class WebSocketHandler {
     });
 
     this.watcher.on('compaction', (data) => {
-      this.broadcast('compaction', data);
+      this.broadcast('compaction', data, data.sessionId);
     });
 
     const handleEscalationEvent = (
@@ -533,22 +533,35 @@ export class WebSocketHandler {
   }
 
   private broadcast(type: string, payload: unknown, sessionId?: string): void {
-    const activeSessionId = sessionId || this.watcher.getActiveSessionId();
+    const SESSION_SCOPED_TYPES = new Set([
+      'conversation_update', 'status_change', 'compaction'
+    ]);
+
+    // Session-scoped events without a sessionId are dropped — never broadcast to everyone
+    if (SESSION_SCOPED_TYPES.has(type) && !sessionId) {
+      console.log(`WebSocket: Dropping session-scoped broadcast "${type}" with no sessionId`);
+      return;
+    }
 
     const message = JSON.stringify({
       type,
       success: true,
       payload,
-      sessionId: activeSessionId,
+      sessionId: sessionId || undefined,
     });
 
     for (const client of this.clients.values()) {
-      if (
-        client.authenticated &&
-        client.subscribed &&
-        client.ws.readyState === WebSocket.OPEN &&
-        (!activeSessionId || client.subscribedSessionId === activeSessionId)
-      ) {
+      if (!client.authenticated || !client.subscribed || client.ws.readyState !== WebSocket.OPEN) {
+        continue;
+      }
+
+      if (sessionId) {
+        // Session-scoped: only deliver to clients subscribed to this exact session
+        if (client.subscribedSessionId === sessionId) {
+          client.ws.send(message);
+        }
+      } else {
+        // Global events (other_session_activity, usage_warning, work_group_update, etc.): deliver to all
         client.ws.send(message);
       }
     }

@@ -1390,6 +1390,56 @@ export class SessionWatcher extends EventEmitter {
     };
   }
 
+  /**
+   * Ensure a conversation is loaded for the given session ID.
+   * If the session's conversation isn't tracked yet (e.g., skipped by the
+   * initial age filter), this searches on disk and force-loads the most
+   * recent JSONL file. Returns true if a conversation is available afterward.
+   */
+  ensureConversationLoaded(sessionId: string): boolean {
+    // Already tracked?
+    if (this.resolveConversationForSession(sessionId)) {
+      return true;
+    }
+
+    // Need the encoded project path to find files on disk
+    const encodedPath = this.tmuxPathBySession.get(sessionId);
+    if (!encodedPath) return false;
+
+    const projectDir = path.join(this.codeHome, 'projects', encodedPath);
+    if (!fs.existsSync(projectDir)) return false;
+
+    try {
+      const entries = fs.readdirSync(projectDir);
+      const jsonlFiles = entries
+        .filter((f) => f.endsWith('.jsonl') && !f.includes('subagents'))
+        .map((f) => {
+          const fullPath = path.join(projectDir, f);
+          try {
+            const stats = fs.statSync(fullPath);
+            return { path: fullPath, mtime: stats.mtimeMs };
+          } catch {
+            return null;
+          }
+        })
+        .filter((f): f is { path: string; mtime: number } => f !== null)
+        .sort((a, b) => b.mtime - a.mtime);
+
+      if (jsonlFiles.length === 0) return false;
+
+      // Load the most recent file
+      const best = jsonlFiles[0];
+      const convId = path.basename(best.path, '.jsonl');
+      console.log(`Watcher: On-demand loading conversation ${convId} for session ${sessionId}`);
+      this.processFileChange(best.path, convId);
+
+      // Verify it loaded
+      return this.resolveConversationForSession(sessionId) !== null;
+    } catch {
+      return false;
+    }
+  }
+
   getConversationInfo(sessionId: string): ConversationFile | null {
     const resolved = this.resolveConversationForSession(sessionId);
     if (!resolved) return null;
@@ -1550,20 +1600,10 @@ export class SessionWatcher extends EventEmitter {
     this.isWaitingForInput = false;
     this.lastMessageCount = 0;
 
-    // Emit empty update so clients clear their UI
-    this.emit('conversation-update', {
-      path: '',
-      sessionId: null,
-      messages: [],
-      highlights: [],
-    });
-
-    this.emit('status-change', {
-      sessionId: null,
-      isWaitingForInput: false,
-      currentActivity: undefined,
-      lastMessage: undefined,
-    });
+    // Emit a distinct event so clients know the active session cleared.
+    // Do NOT emit conversation-update or status-change with null sessionId —
+    // those are session-scoped and would be dropped by broadcast filtering.
+    this.emit('active-session-cleared', {});
   }
 
   isWaiting(): boolean {

@@ -5,10 +5,11 @@ import {
   getCachedHighlights,
   setCachedHighlights,
   highlightsEqual,
+  highlightEqual,
 } from '../services/SessionCache';
 import { beginSwitch, isValid } from '../services/SessionGuard';
 
-const POLL_INTERVAL = 5000;
+const POLL_INTERVAL = 30000;
 const PAGE_SIZE = 50;
 
 interface UseConversationReturn {
@@ -18,6 +19,7 @@ interface UseConversationReturn {
   loadingMore: boolean;
   hasMore: boolean;
   error: string | null;
+  firstItemIndex: number;
   sendInput: (text: string, opts?: { skipOptimistic?: boolean }) => Promise<boolean>;
   cancelMessage: (clientMessageId: string) => Promise<string | null>;
   addOptimisticMessage: (text: string) => void;
@@ -98,9 +100,12 @@ export function useConversation(
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [firstItemIndex, setFirstItemIndex] = useState(1_000_000);
 
   const highlightsRef = useRef(highlights);
   highlightsRef.current = highlights;
+  const statusRef = useRef(status);
+  statusRef.current = status;
   const epochRef = useRef(0);
 
   // Fetch highlights and status when session changes
@@ -111,6 +116,7 @@ export function useConversation(
       setLoading(false);
       setError(null);
       setHasMore(false);
+      setFirstItemIndex(1_000_000);
       return;
     }
 
@@ -133,11 +139,11 @@ export function useConversation(
       return;
     }
 
-    // Tell the daemon which session we're viewing so broadcast filtering works
-    conn.switchSession(sessionId);
-
     let cancelled = false;
     let pollTimer: ReturnType<typeof setInterval> | null = null;
+    let pollInFlight = false;
+    let pollDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+    let unsubMessage: (() => void) | null = null;
 
     async function fetchData() {
       if (!conn || cancelled) return;
@@ -166,7 +172,11 @@ export function useConversation(
         }
 
         if (statusResponse.success && statusResponse.payload) {
-          setStatus(statusResponse.payload as SessionStatus);
+          const ns = statusResponse.payload as SessionStatus;
+          const cur = statusRef.current;
+          if (!cur || ns.isRunning !== cur.isRunning || ns.isWaitingForInput !== cur.isWaitingForInput || ns.lastActivity !== cur.lastActivity || ns.currentActivity !== cur.currentActivity || ns.conversationId !== cur.conversationId || (ns.feedbackPrompt != null) !== (cur.feedbackPrompt != null)) {
+            setStatus(ns);
+          }
         }
 
         setError(null);
@@ -184,8 +194,9 @@ export function useConversation(
     // Poll for updates
     async function pollUpdates() {
       if (!conn || cancelled || !isValid(serverId!, sessionId!, guardEpoch)) return;
+      if (pollInFlight) return;
+      pollInFlight = true;
       try {
-        // Request at least as many items as currently loaded so load-more results aren't wiped
         const pollLimit = Math.max(PAGE_SIZE, highlightsRef.current.length);
         const [hlResponse, statusResponse] = await Promise.all([
           conn.sendRequest('get_highlights', { limit: pollLimit, sessionId }),
@@ -200,49 +211,117 @@ export function useConversation(
             total: number;
             hasMore: boolean;
           };
+          const serverData = payload.highlights;
           const hasOptimistic = highlightsRef.current.some(isOptimistic);
-          if (hasOptimistic || !highlightsEqual(payload.highlights, highlightsRef.current)) {
-            const merged = mergeWithOptimistic(highlightsRef.current, payload.highlights);
-            setHighlights(merged);
-            setCachedHighlights(serverId!, sessionId!, merged);
-          }
+
+          setHighlights(prev => {
+            // Filter out optimistic messages for comparison
+            const prevReal = prev.filter(h => !isOptimistic(h));
+
+            // Fast path: check if only new items appended or last item updated
+            if (serverData.length >= prevReal.length && prevReal.length > 0) {
+              // Check prefix stability (all items except possibly the last match by id)
+              let prefixMatch = true;
+              for (let i = 0; i < prevReal.length - 1; i++) {
+                if (prevReal[i].id !== serverData[i]?.id) {
+                  prefixMatch = false;
+                  break;
+                }
+              }
+
+              if (prefixMatch) {
+                const lastIdx = prevReal.length - 1;
+                const lastChanged = lastIdx >= 0 && serverData[lastIdx] &&
+                  !highlightEqual(prevReal[lastIdx], serverData[lastIdx]);
+
+                // No change at all — return same reference
+                if (!lastChanged && serverData.length === prevReal.length) {
+                  return prev;
+                }
+
+                // Build result preserving existing references where possible
+                const result = [...prevReal];
+                if (lastChanged && lastIdx >= 0) {
+                  result[lastIdx] = serverData[lastIdx];
+                }
+                for (let i = prevReal.length; i < serverData.length; i++) {
+                  result.push(serverData[i]);
+                }
+                const merged = mergeWithOptimistic(prev, result);
+                setCachedHighlights(serverId!, sessionId!, merged);
+                return merged;
+              }
+            }
+
+            // Fallback: full replacement
+            if (hasOptimistic || !highlightsEqual(serverData, prevReal)) {
+              const merged = mergeWithOptimistic(prev, serverData);
+              setCachedHighlights(serverId!, sessionId!, merged);
+              return merged;
+            }
+            return prev;
+          });
+
           setHasMore(payload.hasMore);
         }
 
         if (statusResponse.success && statusResponse.payload) {
-          setStatus(statusResponse.payload as SessionStatus);
+          const ns = statusResponse.payload as SessionStatus;
+          const cur = statusRef.current;
+          if (!cur || ns.isRunning !== cur.isRunning || ns.isWaitingForInput !== cur.isWaitingForInput || ns.lastActivity !== cur.lastActivity || ns.currentActivity !== cur.currentActivity || ns.conversationId !== cur.conversationId || (ns.feedbackPrompt != null) !== (cur.feedbackPrompt != null)) {
+            setStatus(ns);
+          }
         }
       } catch {
         // Silently ignore poll errors
+      } finally {
+        pollInFlight = false;
       }
     }
 
-    fetchData().then(() => {
-      if (!cancelled) {
-        pollTimer = setInterval(pollUpdates, POLL_INTERVAL);
-      }
-    });
-
-    // Listen for broadcast updates — only act on events for THIS session
-    const unsubMessage = conn.onMessage((msg) => {
+    // Register the broadcast listener BEFORE any async work so we don't miss
+    // conversation_update messages that arrive during switchSession/fetchData.
+    unsubMessage = conn.onMessage((msg) => {
       if (cancelled || !isValid(serverId!, sessionId!, guardEpoch)) return;
 
-      // Filter: only process broadcasts for this session (or unscoped ones)
-      if (msg.sessionId && msg.sessionId !== sessionId) return;
+      // Strict filter: session-scoped messages must match exactly (reject null/undefined too)
+      if (msg.type === 'conversation_update' || msg.type === 'status_change' || msg.type === 'compaction') {
+        if (msg.sessionId !== sessionId) return;
+      }
 
       if (msg.type === 'conversation_update' && msg.payload) {
-        // Broadcast received, re-fetch highlights
-        pollUpdates();
+        if (pollDebounceTimer) clearTimeout(pollDebounceTimer);
+        pollDebounceTimer = setTimeout(() => {
+          pollDebounceTimer = null;
+          pollUpdates();
+        }, 300);
       }
       if (msg.type === 'status_change' && msg.payload) {
-        setStatus(msg.payload as SessionStatus);
+        const ns = msg.payload as SessionStatus;
+        const cur = statusRef.current;
+        if (!cur || ns.isRunning !== cur.isRunning || ns.isWaitingForInput !== cur.isWaitingForInput || ns.lastActivity !== cur.lastActivity || ns.currentActivity !== cur.currentActivity || ns.conversationId !== cur.conversationId || (ns.feedbackPrompt != null) !== (cur.feedbackPrompt != null)) {
+          setStatus(ns);
+        }
       }
     });
+
+    // Tell the daemon which session we're viewing, then fetch data.
+    (async () => {
+      // Tell daemon to filter broadcasts for this session
+      await conn.switchSession(sessionId);
+      if (cancelled || !isValid(serverId!, sessionId!, guardEpoch)) return;
+
+      await fetchData();
+      if (cancelled) return;
+
+      pollTimer = setInterval(pollUpdates, POLL_INTERVAL);
+    })();
 
     return () => {
       cancelled = true;
       if (pollTimer) clearInterval(pollTimer);
-      unsubMessage();
+      if (pollDebounceTimer) clearTimeout(pollDebounceTimer);
+      if (unsubMessage) unsubMessage();
     };
   }, [serverId, sessionId]);
 
@@ -269,6 +348,8 @@ export function useConversation(
             total: number;
             hasMore: boolean;
           };
+          const prependCount = payload.highlights.length;
+          setFirstItemIndex(prev => prev - prependCount);
           setHighlights((prev) => [...payload.highlights, ...prev]);
           setHasMore(payload.hasMore);
         }
@@ -365,5 +446,5 @@ export function useConversation(
     ]);
   }, []);
 
-  return { highlights, status, loading, loadingMore, hasMore, error, sendInput, cancelMessage, addOptimisticMessage, loadMore };
+  return { highlights, status, loading, loadingMore, hasMore, error, firstItemIndex, sendInput, cancelMessage, addOptimisticMessage, loadMore };
 }

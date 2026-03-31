@@ -92,7 +92,15 @@ export function registerSessionHandlers(
       const limit = hlParams?.limit && hlParams.limit > 0 ? hlParams.limit : 0;
       const offset = hlParams?.offset || 0;
 
-      const chain = hlSessionId ? ctx.watcher.getConversationChain(hlSessionId) : [];
+      let chain = hlSessionId ? ctx.watcher.getConversationChain(hlSessionId) : [];
+
+      // If no chain found, try on-demand loading (conversation may exist on
+      // disk but was skipped by the watcher's initial age filter)
+      if (chain.length === 0 && hlSessionId) {
+        if (ctx.watcher.ensureConversationLoaded(hlSessionId)) {
+          chain = ctx.watcher.getConversationChain(hlSessionId);
+        }
+      }
 
       let resultHighlights: ReturnType<typeof extractHighlights>;
       let total: number;

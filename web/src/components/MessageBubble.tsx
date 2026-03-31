@@ -38,7 +38,6 @@ interface MessageBubbleProps {
   searchTerm?: string | null;
   isCurrentMatch?: boolean;
   planFilePath?: string | null;
-  hideTools?: boolean;
   isBookmarked?: boolean;
   onToggleBookmark?: (messageId: string, content: string) => void;
   serverId?: string | null;
@@ -199,7 +198,7 @@ function SkillCard({ skillName, content, onViewFile, existingFiles }: { skillNam
   );
 }
 
-export const MessageBubble = memo(function MessageBubble({ message, onSelectOption, onSelectChoice, onCancelMessage, onViewFile, onViewArtifact, searchTerm, isCurrentMatch, planFilePath, hideTools, isBookmarked, onToggleBookmark, serverId }: MessageBubbleProps) {
+export const MessageBubble = memo(function MessageBubble({ message, onSelectOption, onSelectChoice, onCancelMessage, onViewFile, onViewArtifact, searchTerm, isCurrentMatch, planFilePath, isBookmarked, onToggleBookmark, serverId }: MessageBubbleProps) {
   const isUser = message.type === 'user';
   const isSystem = message.type === 'system';
   const [allExpanded, setAllExpanded] = useState<boolean | undefined>(undefined);
@@ -494,11 +493,7 @@ export const MessageBubble = memo(function MessageBubble({ message, onSelectOpti
       )}
 
       {toolCalls && toolCalls.length > 0 && (() => {
-        // When hideTools is on, only show pending tools (need user action) and plan cards
-        const visibleTools = hideTools
-          ? toolCalls.filter(t => t.status === 'pending' || t.name === 'ExitPlanMode')
-          : toolCalls;
-        if (visibleTools.length === 0) return null;
+        if (toolCalls.length === 0) return null;
         const pendingTools = toolCalls.filter(t => t.status === 'pending' && t.name !== 'ExitPlanMode');
         const showBatchApprove = pendingTools.length >= 2 && (onSelectChoice || onSelectOption);
         const handleBatchApprove = async () => {
@@ -531,7 +526,7 @@ export const MessageBubble = memo(function MessageBubble({ message, onSelectOpti
               }
             </button>
           )}
-          {!hideTools && hasMultipleTools && (
+          {hasMultipleTools && (
             <button
               className="msg-tools-toggle"
               onClick={() => setAllExpanded(allExpanded === true ? false : true)}
@@ -539,7 +534,7 @@ export const MessageBubble = memo(function MessageBubble({ message, onSelectOpti
               {allExpanded === true ? 'Collapse All' : 'Expand All'}
             </button>
           )}
-          {visibleTools.map((tool) => {
+          {toolCalls.map((tool) => {
             if (tool.name === 'ExitPlanMode') {
               const planPath = extractPlanFilePath(message) || planFilePath;
               const inlinePlan = typeof tool.input?.plan === 'string' ? tool.input.plan : null;

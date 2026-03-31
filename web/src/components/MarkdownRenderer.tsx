@@ -1,4 +1,4 @@
-import { useMemo, useCallback, useState } from 'react';
+import { useMemo, useCallback, useState, Fragment } from 'react';
 import { TRAILING_PUNCT_RE, ensureProtocol, formatLinkDomain as formatLinkDomainShared } from '../utils/urls';
 
 // Re-export shared formatLinkDomain
@@ -521,12 +521,115 @@ function CodeBlock({ lang, lines, keyProp }: { lang: string; lines: string[]; ke
   );
 }
 
+// --- Task notification pill support ---
+
+interface TaskNotification {
+  summary: string;
+  status: string;
+}
+
+const TASK_NOTIFICATION_RE = /<task-notification>[\s\S]*?<\/task-notification>/g;
+const TASK_PLACEHOLDER = '\u200B__TASK_PILL_';
+
+function extractTag(xml: string, tag: string): string {
+  const re = new RegExp(`<${tag}>([\\s\\S]*?)<\\/${tag}>`);
+  const m = xml.match(re);
+  return m ? m[1].trim() : '';
+}
+
+function extractTaskNotifications(content: string): { cleaned: string; notifications: TaskNotification[] } {
+  const notifications: TaskNotification[] = [];
+  const cleaned = content.replace(TASK_NOTIFICATION_RE, (match) => {
+    const summary = extractTag(match, 'summary') || 'Agent task';
+    const status = extractTag(match, 'status') || 'completed';
+    const idx = notifications.length;
+    notifications.push({ summary, status });
+    return `${TASK_PLACEHOLDER}${idx}__\u200B`;
+  });
+  return { cleaned, notifications };
+}
+
+function TaskNotificationPill({ notification }: { notification: TaskNotification }) {
+  const dotClass = notification.status === 'completed' ? 'task-pill-dot-completed'
+    : notification.status === 'error' ? 'task-pill-dot-error'
+    : notification.status === 'running' ? 'task-pill-dot-running'
+    : 'task-pill-dot-unknown';
+  return (
+    <span className="task-notification-pill">
+      <span className={`task-notification-pill-dot ${dotClass}`} />
+      <span>{notification.summary}</span>
+    </span>
+  );
+}
+
+const PILL_PLACEHOLDER_RE = /\u200B__TASK_PILL_(\d+)__\u200B/g;
+
+function splitPillPlaceholders(
+  nodes: React.ReactNode,
+  notifications: TaskNotification[],
+  keyPrefix: string
+): React.ReactNode {
+  if (!Array.isArray(nodes)) return nodes;
+  const result: React.ReactNode[] = [];
+  let changed = false;
+
+  for (let i = 0; i < nodes.length; i++) {
+    const node = nodes[i];
+    // Check if this is a React element with string children (span with text)
+    if (node && typeof node === 'object' && 'props' in (node as any)) {
+      const el = node as React.ReactElement;
+      if (typeof el.props?.children === 'string') {
+        const text: string = el.props.children;
+        if (text.includes('\u200B__TASK_PILL_')) {
+          changed = true;
+          const parts: React.ReactNode[] = [];
+          let last = 0;
+          PILL_PLACEHOLDER_RE.lastIndex = 0;
+          let m: RegExpExecArray | null;
+          while ((m = PILL_PLACEHOLDER_RE.exec(text)) !== null) {
+            if (m.index > last) {
+              parts.push(<span key={`${keyPrefix}-tp-${i}-t-${last}`}>{text.slice(last, m.index)}</span>);
+            }
+            const idx = parseInt(m[1], 10);
+            if (notifications[idx]) {
+              parts.push(<TaskNotificationPill key={`${keyPrefix}-tp-${i}-p-${idx}`} notification={notifications[idx]} />);
+            }
+            last = m.index + m[0].length;
+          }
+          if (last < text.length) {
+            parts.push(<span key={`${keyPrefix}-tp-${i}-t-${last}`}>{text.slice(last)}</span>);
+          }
+          result.push(<Fragment key={`${keyPrefix}-tp-${i}`}>{parts}</Fragment>);
+          continue;
+        }
+      }
+    }
+    result.push(node);
+  }
+
+  return changed ? result : nodes;
+}
+
 export function MarkdownRenderer({ content, onFileClick, existingFiles, className }: MarkdownRendererProps) {
-  const blocks = useMemo(() => parseBlocks(content), [content]);
+  const { cleaned, notifications } = useMemo(() => extractTaskNotifications(content), [content]);
+  const blocks = useMemo(() => parseBlocks(cleaned), [cleaned]);
   const ri = useCallback(
     (text: string, keyPrefix: string) => renderInline(text, keyPrefix, onFileClick, existingFiles),
     [onFileClick, existingFiles]
   );
+
+  // Render inline text, then replace any task-notification placeholders with pill components
+  const riWithPills = useCallback(
+    (text: string, keyPrefix: string): React.ReactNode => {
+      const inlineNodes = renderInline(text, keyPrefix, onFileClick, existingFiles);
+      if (notifications.length === 0) return inlineNodes;
+      // Walk the rendered nodes looking for placeholder strings in text content
+      return splitPillPlaceholders(inlineNodes, notifications, keyPrefix);
+    },
+    [onFileClick, existingFiles, notifications]
+  );
+
+  const currentRi = notifications.length > 0 ? riWithPills : ri;
 
   return (
     <div className={`md-render ${className || ''}`}>
@@ -535,7 +638,7 @@ export function MarkdownRenderer({ content, onFileClick, existingFiles, classNam
         switch (block.type) {
           case 'heading': {
             const Tag = `h${block.level}` as keyof JSX.IntrinsicElements;
-            return <Tag key={key}>{ri(block.text, key)}</Tag>;
+            return <Tag key={key}>{currentRi(block.text, key)}</Tag>;
           }
           case 'code':
             return <CodeBlock key={key} lang={block.lang} lines={block.lines} keyProp={key} />;
@@ -543,20 +646,20 @@ export function MarkdownRenderer({ content, onFileClick, existingFiles, classNam
             return (
               <blockquote key={key}>
                 {block.lines.map((line, li) => (
-                  <p key={`${key}-${li}`}>{ri(line, `${key}-${li}`)}</p>
+                  <p key={`${key}-${li}`}>{currentRi(line, `${key}-${li}`)}</p>
                 ))}
               </blockquote>
             );
           case 'ul':
             return (
               <ul key={key}>
-                {block.items.map((item, li) => renderListItem(item, `${key}-${li}`, ri))}
+                {block.items.map((item, li) => renderListItem(item, `${key}-${li}`, currentRi))}
               </ul>
             );
           case 'ol':
             return (
               <ol key={key}>
-                {block.items.map((item, li) => renderListItem(item, `${key}-${li}`, ri))}
+                {block.items.map((item, li) => renderListItem(item, `${key}-${li}`, currentRi))}
               </ol>
             );
           case 'table':
@@ -567,7 +670,7 @@ export function MarkdownRenderer({ content, onFileClick, existingFiles, classNam
                     <tr>
                       {block.headers.map((h, hi) => (
                         <th key={hi} style={block.alignments[hi] ? { textAlign: block.alignments[hi]! } : undefined}>
-                          {ri(h, `${key}-th-${hi}`)}
+                          {currentRi(h, `${key}-th-${hi}`)}
                         </th>
                       ))}
                     </tr>
@@ -577,7 +680,7 @@ export function MarkdownRenderer({ content, onFileClick, existingFiles, classNam
                       <tr key={ri_idx}>
                         {row.map((cell, ci) => (
                           <td key={ci} style={block.alignments[ci] ? { textAlign: block.alignments[ci]! } : undefined}>
-                            {ri(cell, `${key}-${ri_idx}-${ci}`)}
+                            {currentRi(cell, `${key}-${ri_idx}-${ci}`)}
                           </td>
                         ))}
                       </tr>
@@ -589,7 +692,7 @@ export function MarkdownRenderer({ content, onFileClick, existingFiles, classNam
           case 'hr':
             return <hr key={key} />;
           case 'paragraph':
-            return <p key={key}>{ri(block.text, key)}</p>;
+            return <p key={key}>{currentRi(block.text, key)}</p>;
           default:
             return null;
         }
