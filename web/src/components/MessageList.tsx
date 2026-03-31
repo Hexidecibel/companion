@@ -1,4 +1,4 @@
-import { useRef, useState, useEffect, useCallback, memo } from 'react';
+import { useRef, useState, useEffect, useLayoutEffect, useCallback, memo } from 'react';
 import { ConversationHighlight } from '../types';
 import { MessageBubble } from './MessageBubble';
 import { SkeletonMessageBubble } from './Skeleton';
@@ -88,10 +88,47 @@ export const MessageList = memo(function MessageList({
     needsScrollRef.current = false;
     isNearBottomRef.current = true;
     setShowScrollButton(false);
+
+    const doScroll = () => {
+      const container = scrollContainerRef.current;
+      if (container) {
+        container.scrollTop = container.scrollHeight;
+      }
+    };
+
+    // Double-rAF for immediate scroll (works on desktop)
     requestAnimationFrame(() => {
-      requestAnimationFrame(() => scrollToBottom(false));
+      requestAnimationFrame(doScroll);
     });
-  }, [highlights.length, sessionId, loading, scrollToBottom]);
+
+    // On mobile, content layout can settle after rAFs when loading from cache.
+    // ResizeObserver catches when the scroll container actually gets its dimensions.
+    const ro = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        if (entry.contentRect.height > 0) {
+          doScroll();
+          ro.disconnect();
+        }
+      }
+    });
+    ro.observe(el);
+
+    const cleanup = setTimeout(() => ro.disconnect(), 1000);
+    return () => {
+      ro.disconnect();
+      clearTimeout(cleanup);
+    };
+  }, [highlights.length, sessionId, loading]);
+
+  // Force repaint on mobile after content transition (skeleton → messages).
+  // Mobile Chrome can defer painting the new DOM tree; reading offsetHeight
+  // forces synchronous layout/paint.
+  useLayoutEffect(() => {
+    const el = scrollContainerRef.current;
+    if (el && !loading && highlights.length > 0) {
+      void el.offsetHeight;
+    }
+  }, [loading, highlights.length, sessionId]);
 
   // Auto-follow: smooth scroll when new messages arrive and user is near bottom
   useEffect(() => {

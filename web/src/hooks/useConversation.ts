@@ -8,9 +8,10 @@ import {
   highlightEqual,
 } from '../services/SessionCache';
 import { beginSwitch, isValid } from '../services/SessionGuard';
+import { isMobileViewport } from '../utils/platform';
 
 const POLL_INTERVAL = 30000;
-const PAGE_SIZE = 50;
+const PAGE_SIZE = isMobileViewport() ? 20 : 50;
 
 interface UseConversationReturn {
   highlights: ConversationHighlight[];
