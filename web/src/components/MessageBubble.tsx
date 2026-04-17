@@ -7,6 +7,7 @@ import { QuestionBlock, MultiQuestionFlow, ChoiceData } from './QuestionBlock';
 import { useFileExistence } from '../hooks/useFileExistence';
 import { isTauri, isTouchDevice } from '../utils/platform';
 import { URL_RE, TRAILING_PUNCT_RE, ensureProtocol, formatLinkDomain as formatLinkDomainShared, extractUrls } from '../utils/urls';
+import { copyToClipboard } from '../utils/clipboard';
 
 export type { ChoiceData } from './QuestionBlock';
 
@@ -237,7 +238,23 @@ export const MessageBubble = memo(function MessageBubble({ message, onSelectOpti
   const handleContextMenu = useCallback((e: React.MouseEvent) => {
     if (!showContextMenu) return;
     e.preventDefault();
-    touchContext.current = { type: 'message' };
+
+    // Determine what was right-clicked
+    const target = e.target as HTMLElement;
+    const link = target.closest('a');
+    const img = target.closest('img');
+    const selection = window.getSelection()?.toString();
+
+    if (link && link.href) {
+      touchContext.current = { type: 'link', href: link.href };
+    } else if (img) {
+      touchContext.current = { type: 'image', imgSrc: img.src };
+    } else if (selection) {
+      touchContext.current = { type: 'text', selectedText: selection };
+    } else {
+      touchContext.current = { type: 'message' };
+    }
+
     openMenu(e.clientX, e.clientY);
   }, [showContextMenu, openMenu]);
 
@@ -321,13 +338,13 @@ export const MessageBubble = memo(function MessageBubble({ message, onSelectOpti
     if (ctx.type === 'text' && ctx.selectedText) {
       items.push({
         label: 'Copy selection',
-        onClick: () => navigator.clipboard.writeText(ctx.selectedText!),
+        onClick: () => copyToClipboard(ctx.selectedText!),
       });
     }
     if (ctx.type === 'link' && ctx.href) {
       items.push({
         label: 'Copy link',
-        onClick: () => navigator.clipboard.writeText(ctx.href!),
+        onClick: () => copyToClipboard(ctx.href!),
       });
       items.push({
         label: 'Open link',
@@ -349,7 +366,7 @@ export const MessageBubble = memo(function MessageBubble({ message, onSelectOpti
         for (const u of messageUrls.slice(0, 5)) {
           items.push({
             label: `Copy ${formatLinkDomain(u)}`,
-            onClick: () => navigator.clipboard.writeText(u),
+            onClick: () => copyToClipboard(u),
           });
         }
       }
@@ -364,12 +381,12 @@ export const MessageBubble = memo(function MessageBubble({ message, onSelectOpti
     if (isUser) {
       items.push({
         label: 'Copy message',
-        onClick: () => navigator.clipboard.writeText(message.content),
+        onClick: () => copyToClipboard(message.content),
       });
     } else {
       items.push({
         label: 'Copy message',
-        onClick: () => navigator.clipboard.writeText(message.content),
+        onClick: () => copyToClipboard(message.content),
       });
     }
     if (onToggleBookmark) {
@@ -464,9 +481,10 @@ export const MessageBubble = memo(function MessageBubble({ message, onSelectOpti
               className="msg-copy-btn"
               onClick={(e) => {
                 e.stopPropagation();
-                navigator.clipboard.writeText(message.content);
-                setCopied(true);
-                setTimeout(() => setCopied(false), 1500);
+                copyToClipboard(message.content).then(() => {
+                  setCopied(true);
+                  setTimeout(() => setCopied(false), 1500);
+                });
               }}
               title="Copy message"
             >

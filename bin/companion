@@ -86,7 +86,7 @@ build_daemon() {
 
   if needs_npm_install "$DAEMON_DIR"; then
     echo "Installing daemon dependencies..."
-    (cd "$DAEMON_DIR" && npm install) || { echo "ERROR: npm install failed in daemon/"; exit 1; }
+    (cd "$DAEMON_DIR" && npm install --include=dev) || { echo "ERROR: npm install failed in daemon/"; exit 1; }
     did_work=true
   fi
 
@@ -106,7 +106,7 @@ build_web() {
 
   if needs_npm_install "$WEB_DIR"; then
     echo "Installing web dependencies..."
-    (cd "$WEB_DIR" && npm install) || { echo "ERROR: npm install failed in web/"; exit 1; }
+    (cd "$WEB_DIR" && npm install --include=dev) || { echo "ERROR: npm install failed in web/"; exit 1; }
     did_work=true
   fi
 

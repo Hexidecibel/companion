@@ -259,7 +259,7 @@ export function SessionView({
       // After mouseup, refocus if no text was selected and focus isn't on an interactive element
       requestAnimationFrame(() => {
         const active = document.activeElement;
-        if (active && active.closest('input, textarea:not(.input-bar-textarea), [contenteditable], select')) return;
+        if (active && active.closest('input, textarea:not(.input-bar-textarea), [contenteditable], select, a, button, [role="button"], .context-menu')) return;
         const selection = window.getSelection();
         if (selection && selection.toString().length > 0) return;
         const textarea = document.querySelector('.input-bar-textarea') as HTMLElement | null;
@@ -272,7 +272,7 @@ export function SessionView({
         if (mouseDown) return;
         const active = document.activeElement;
         // Don't steal focus from other interactive elements
-        if (active && active.closest('input, textarea:not(.input-bar-textarea), [contenteditable], select')) return;
+        if (active && active.closest('input, textarea:not(.input-bar-textarea), [contenteditable], select, a, button, [role="button"], .context-menu')) return;
         // Don't steal focus if user is selecting text
         const selection = window.getSelection();
         if (selection && selection.toString().length > 0) return;

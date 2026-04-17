@@ -1,5 +1,6 @@
 import { useMemo, useCallback, useState, Fragment } from 'react';
 import { TRAILING_PUNCT_RE, ensureProtocol, formatLinkDomain as formatLinkDomainShared } from '../utils/urls';
+import { copyToClipboard } from '../utils/clipboard';
 
 // Re-export shared formatLinkDomain
 const formatLinkDomain = formatLinkDomainShared;
@@ -508,7 +509,7 @@ function CodeBlock({ lang, lines, keyProp }: { lang: string; lines: string[]; ke
         <button
           className="md-code-copy-btn"
           onClick={() => {
-            navigator.clipboard.writeText(code);
+            copyToClipboard(code);
             setCopied(true);
             setTimeout(() => setCopied(false), 1500);
           }}
