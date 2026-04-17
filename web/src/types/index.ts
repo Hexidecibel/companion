@@ -117,6 +117,8 @@ export interface SessionSummary {
   recentTimestamps?: number[];
   subagentRunning?: number;
   subagentTotal?: number;
+  /** True when session was restored from persistence but is no longer running in tmux. */
+  inactive?: boolean;
 }
 
 export interface ServerSummary {
@@ -354,4 +356,41 @@ export interface Skill {
   installed: boolean;
   source?: 'project' | 'global' | 'catalog';
   prerequisites?: string[];
+}
+
+// Remote capabilities / audit log types
+
+export interface RemoteCapabilities {
+  enabled: boolean;
+  exec: boolean;
+  dispatch: boolean;
+  write: { enabled: boolean; roots: string[] };
+}
+
+export interface DaemonCapabilities {
+  daemonVersion: string;
+  protocolVersion: number;
+  remoteCapabilities: RemoteCapabilities;
+}
+
+export interface AuditOrigin {
+  addr: string;
+  clientId: string;
+  isLocal: boolean;
+  tls: boolean;
+  origin: string | null;
+}
+
+export interface AuditEntry {
+  ts: number;
+  origin: AuditOrigin;
+  action: string;
+  payload?: Record<string, unknown>;
+  result: { ok: boolean; [k: string]: unknown };
+  durationMs?: number;
+}
+
+export interface AuditLogResponse {
+  entries: AuditEntry[];
+  hasMore: boolean;
 }

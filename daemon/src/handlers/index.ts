@@ -8,6 +8,7 @@ import { registerTmuxHandlers } from './tmux';
 import { registerInputHandlers } from './input';
 import { registerSessionHandlers } from './session';
 import { registerMetricsHandlers } from './metrics';
+import { registerRemoteHandlers } from './remote';
 
 export function registerAllHandlers(ctx: HandlerContext): Map<string, MessageHandler> {
   const handlers = new Map<string, MessageHandler>();
@@ -21,6 +22,7 @@ export function registerAllHandlers(ctx: HandlerContext): Map<string, MessageHan
     registerInputHandlers(ctx),
     registerSessionHandlers(ctx),
     registerMetricsHandlers(ctx),
+    registerRemoteHandlers(ctx),
   ];
   for (const mod of modules) {
     for (const [type, handler] of Object.entries(mod)) {

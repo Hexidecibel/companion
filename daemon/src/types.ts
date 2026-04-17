@@ -1,9 +1,19 @@
+export interface RemoteCapabilitiesConfig {
+  enabled: boolean;
+  exec?: { enabled: boolean; commandAllowlist?: string[] | null };
+  dispatch?: { enabled: boolean };
+  write?: { enabled: boolean; roots: string[] };
+  requireLoopbackOrTls?: boolean;
+  allowedOrigins?: string[];
+}
+
 export interface ListenerConfig {
   port: number;
   token: string;
   tls?: boolean;
   certPath?: string;
   keyPath?: string;
+  remoteCapabilities?: RemoteCapabilitiesConfig;
 }
 
 export interface DaemonConfig {
@@ -116,6 +126,8 @@ export interface TmuxSession {
   lastActivity: number;
   isWaitingForInput: boolean;
   messageCount: number;
+  /** True when the session was restored from a persisted snapshot but is no longer in tmux. */
+  inactive?: boolean;
 }
 
 export interface WebSocketMessage {

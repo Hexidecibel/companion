@@ -27,6 +27,8 @@ import { NotificationEventType } from './types';
 import { UsageTracker } from './usage-tracker';
 import { OAuthUsageFetcher, UsageMonitor } from './oauth-usage';
 import { SessionNameStore } from './session-names';
+import { AuditLog } from './audit-log';
+import { RateLimiter } from './rate-limiter';
 
 import { AuthenticatedClient, ClientError, HandlerContext, MessageHandler } from './handler-context';
 import { registerAllHandlers } from './handlers';
@@ -67,6 +69,8 @@ export class WebSocketHandler {
   private oauthUsageFetcher: OAuthUsageFetcher;
   private usageMonitor: UsageMonitor;
   private sessionNameStore: SessionNameStore;
+  private auditLog: AuditLog;
+  private rateLimiter: RateLimiter;
   private handlers: Map<string, MessageHandler>;
   private deadConnectionInterval: ReturnType<typeof setInterval>;
   private static readonly PONG_TIMEOUT_MS = 90_000;
@@ -94,6 +98,8 @@ export class WebSocketHandler {
     this.skillCatalog = new SkillCatalog();
     this.usageTracker = new UsageTracker(config.anthropicAdminApiKey);
     this.sessionNameStore = new SessionNameStore(path.join(os.homedir(), '.companion'));
+    this.auditLog = new AuditLog();
+    this.rateLimiter = new RateLimiter();
     this.oauthUsageFetcher = new OAuthUsageFetcher(config.codeHome);
     this.usageMonitor = new UsageMonitor(
       this.oauthUsageFetcher,
@@ -217,10 +223,13 @@ export class WebSocketHandler {
       oauthUsageFetcher: this.oauthUsageFetcher,
       sessionNameStore: this.sessionNameStore,
       subAgentWatcher: this.subAgentWatcher,
+      auditLog: this.auditLog,
+      rateLimiter: this.rateLimiter,
       config: this.config,
 
       send: (ws, response) => this.send(ws, response),
       broadcast: (type, payload, sessionId) => this.broadcast(type, payload, sessionId),
+      requireRemoteCapability: (client, action) => this.requireRemoteCapability(client, action),
 
       clients: this.clients,
       autoApproveSessions: this.autoApproveSessions,
@@ -298,6 +307,7 @@ export class WebSocketHandler {
       listenerPort,
       isLocal,
       lastPongTime: Date.now(),
+      origin: null,
     };
 
     this.clients.set(clientId, client);
@@ -347,8 +357,35 @@ export class WebSocketHandler {
         : undefined;
 
       if (expectedToken && token === expectedToken) {
+        const authPayload = (payload as { deviceId?: string; origin?: string }) || {};
+        const topLevelOrigin = (message as { origin?: unknown }).origin;
+        const providedOrigin =
+          typeof topLevelOrigin === 'string' && topLevelOrigin
+            ? topLevelOrigin
+            : typeof authPayload.origin === 'string' && authPayload.origin
+              ? authPayload.origin
+              : null;
+
+        const listener = this.config.listeners.find((l) => l.port === client.listenerPort);
+        const allowedOrigins = listener?.remoteCapabilities?.allowedOrigins;
+        if (Array.isArray(allowedOrigins) && allowedOrigins.length > 0) {
+          if (!providedOrigin || !allowedOrigins.includes(providedOrigin)) {
+            this.send(client.ws, {
+              type: 'authenticated',
+              success: false,
+              error: 'origin_not_allowed',
+              requestId,
+            });
+            console.log(
+              `WebSocket: Client rejected (${client.id}) on port ${client.listenerPort} — origin "${providedOrigin}" not in allowedOrigins`
+            );
+            return;
+          }
+        }
+
         client.authenticated = true;
-        client.deviceId = (payload as { deviceId?: string })?.deviceId;
+        client.deviceId = authPayload.deviceId;
+        client.origin = providedOrigin;
 
         this.send(client.ws, {
           type: 'authenticated',
@@ -358,7 +395,7 @@ export class WebSocketHandler {
           requestId,
         });
         console.log(
-          `WebSocket: Client authenticated (${client.id}) on port ${client.listenerPort} isLocal=${client.isLocal}`
+          `WebSocket: Client authenticated (${client.id}) on port ${client.listenerPort} isLocal=${client.isLocal} origin=${providedOrigin ?? 'none'}`
         );
       } else {
         this.send(client.ws, {
@@ -491,6 +528,31 @@ export class WebSocketHandler {
   }
 
   // --- Shared helpers ---
+
+  private requireRemoteCapability(
+    client: AuthenticatedClient,
+    action: 'exec' | 'dispatch' | 'write'
+  ): string | null {
+    const listener = this.config.listeners.find((l) => l.port === client.listenerPort);
+    const caps = listener?.remoteCapabilities;
+
+    if (!caps?.enabled) return 'capability_disabled';
+
+    let actionEnabled = false;
+    if (action === 'exec') actionEnabled = Boolean(caps.exec?.enabled);
+    else if (action === 'dispatch') actionEnabled = Boolean(caps.dispatch?.enabled);
+    else if (action === 'write') actionEnabled = Boolean(caps.write?.enabled);
+
+    if (!actionEnabled) return 'capability_disabled';
+
+    const requireSecure = caps.requireLoopbackOrTls !== false;
+    if (requireSecure) {
+      const isTls = Boolean(listener?.tls);
+      if (!client.isLocal && !isTls) return 'transport_insecure';
+    }
+
+    return null;
+  }
 
   private getProjectRoot(sessionId?: string): string | null {
     if (sessionId) {

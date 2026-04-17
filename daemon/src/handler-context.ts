@@ -10,6 +10,8 @@ import { UsageTracker } from './usage-tracker';
 import { OAuthUsageFetcher } from './oauth-usage';
 import { SessionNameStore } from './session-names';
 import { SubAgentWatcher } from './subagent-watcher';
+import { AuditLog } from './audit-log';
+import { RateLimiter } from './rate-limiter';
 import { DaemonConfig, TmuxSessionConfig, WebSocketResponse } from './types';
 
 export interface AuthenticatedClient {
@@ -22,6 +24,7 @@ export interface AuthenticatedClient {
   listenerPort?: number;
   isLocal: boolean;
   lastPongTime: number;
+  origin: string | null;
 }
 
 export interface ClientError {
@@ -51,11 +54,17 @@ export interface HandlerContext {
   oauthUsageFetcher: OAuthUsageFetcher;
   sessionNameStore: SessionNameStore;
   subAgentWatcher: SubAgentWatcher | null;
+  auditLog: AuditLog;
+  rateLimiter: RateLimiter;
   config: DaemonConfig;
 
   // Helper methods from WebSocketServer
   send: (ws: WebSocket, response: WebSocketResponse) => void;
   broadcast: (type: string, payload: unknown, sessionId?: string) => void;
+  requireRemoteCapability: (
+    client: AuthenticatedClient,
+    action: 'exec' | 'dispatch' | 'write'
+  ) => string | null;
 
   // Shared state
   clients: Map<string, AuthenticatedClient>;

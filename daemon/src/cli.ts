@@ -4,7 +4,7 @@ import * as path from 'path';
 import * as os from 'os';
 import * as net from 'net';
 import { execSync } from 'child_process';
-import { loadConfig, saveConfig } from './config';
+import { loadConfig, saveConfig, resolveConfigPath } from './config';
 import { DaemonConfig } from './types';
 
 const HOME_DIR = process.env.HOME || os.homedir();
@@ -37,6 +37,7 @@ ${bold('COMMANDS')}
   config              View or modify configuration
   token               Generate a new authentication token
   logs                Show recent daemon logs
+  enable-remote       Configure remote_capabilities (exec / dispatch / write)
   help                Show this help message
 
 ${bold('OPTIONS')}
@@ -60,6 +61,7 @@ ${bold('EXAMPLES')}
   companion config set port 8080
   companion token              Generate new auth token
   companion logs               Show recent logs
+  companion enable-remote      Turn on exec / dispatch / write capabilities
 `);
 }
 
@@ -152,7 +154,7 @@ async function cmdStatus(): Promise<void> {
     console.log(`  Port:     ${dim(`${port} (not listening)`)}`);
   }
 
-  const configPath = process.env.CONFIG_PATH || path.join(CONFIG_DIR, 'config.json');
+  const configPath = resolveConfigPath();
   console.log(`  Config:   ${fs.existsSync(configPath) ? configPath : dim('not found')}`);
   console.log(`  PID file: ${fs.existsSync(PID_FILE) ? PID_FILE : dim('not found')}`);
 
@@ -222,7 +224,7 @@ function cmdConfig(args: string[]): void {
   const subcommand = args[0];
 
   if (subcommand === 'path') {
-    const configPath = process.env.CONFIG_PATH || path.join(CONFIG_DIR, 'config.json');
+    const configPath = resolveConfigPath();
     console.log(configPath);
     return;
   }
@@ -302,9 +304,7 @@ function cmdConfig(args: string[]): void {
     console.log(`  auto_approve:    ${config.autoApproveTools.join(', ')}`);
   }
   console.log('');
-  console.log(
-    dim(`Config file: ${process.env.CONFIG_PATH || path.join(CONFIG_DIR, 'config.json')}`)
-  );
+  console.log(dim(`Config file: ${resolveConfigPath()}`));
 }
 
 async function cmdSetup(): Promise<void> {
@@ -312,7 +312,7 @@ async function cmdSetup(): Promise<void> {
 
   // loadConfig auto-creates ~/.companion/config.json with a generated token on first run
   const config = loadConfig();
-  const configPath = process.env.CONFIG_PATH || path.join(CONFIG_DIR, 'config.json');
+  const configPath = resolveConfigPath();
 
   await displayFirstRunWelcome(config, configPath);
 
@@ -639,6 +639,12 @@ export async function dispatchCli(args: string[]): Promise<boolean> {
     case 'logs':
       cmdLogs();
       return true;
+
+    case 'enable-remote': {
+      const { cmdEnableRemote } = await import('./remote-setup');
+      await cmdEnableRemote(args.slice(1));
+      return true;
+    }
 
     default:
       console.error(red(`Unknown command: ${command}`));

@@ -76,6 +76,18 @@ interface TaskSummary {
   activeTask?: string;
 }
 
+/** Snapshot of a session saved to disk for persistence across daemon restarts. */
+interface PersistedSessionSnapshot {
+  id: string;           // tmux session name
+  name: string;
+  projectPath: string;
+  conversationPath?: string;
+  lastActivity: number;
+  isWaitingForInput: boolean;
+  messageCount: number;
+  savedAt: number;      // when this snapshot was taken
+}
+
 interface TrackedConversation {
   path: string;
   projectPath: string;
@@ -118,6 +130,9 @@ export class SessionWatcher extends EventEmitter {
   private static readonly DEBOUNCE_MS = 150; // Debounce file changes per session
   private static readonly WAITING_DEBOUNCE_MS = 3000; // Delay before confirming "waiting" for non-interactive tools
 
+  // Persisted sessions — loaded from disk on startup, merged with live data
+  private persistedSessions: Map<string, PersistedSessionSnapshot> = new Map();
+
   // Feedback prompt detection
   private inputInjector: InputInjector | null = null;
   private feedbackPollTimer: NodeJS.Timeout | null = null;
@@ -132,10 +147,14 @@ export class SessionWatcher extends EventEmitter {
     this.codeHome = codeHome;
     this.inputInjector = inputInjector || null;
     this.loadPersistedMappings();
+    this.loadPersistedSessions();
     // Refresh tmux paths periodically
     this.refreshTmuxPaths();
     const tmuxRefreshInterval = setInterval(() => this.refreshTmuxPaths(), TMUX_PATH_REFRESH_INTERVAL_MS);
-    registerShutdownCallback(() => clearInterval(tmuxRefreshInterval));
+    registerShutdownCallback(() => {
+      clearInterval(tmuxRefreshInterval);
+      this.persistSessions();
+    });
   }
 
   private get mappingsPath(): string {
@@ -193,6 +212,51 @@ export class SessionWatcher extends EventEmitter {
       }
 
       atomicWriteFileSync(this.mappingsPath, JSON.stringify({ mappings, history }));
+    } catch {
+      // Not critical
+    }
+  }
+
+  private get sessionsSnapshotPath(): string {
+    return path.join(this.codeHome, 'companion-sessions-snapshot.json');
+  }
+
+  private loadPersistedSessions(): void {
+    try {
+      const data = fs.readFileSync(this.sessionsSnapshotPath, 'utf-8');
+      const snapshots: PersistedSessionSnapshot[] = JSON.parse(data);
+      let loaded = 0;
+      for (const snap of snapshots) {
+        // Only load if the conversation file still exists on disk
+        if (snap.conversationPath && !fs.existsSync(snap.conversationPath)) {
+          continue;
+        }
+        this.persistedSessions.set(snap.id, snap);
+        loaded++;
+      }
+      if (loaded > 0) {
+        console.log(`Watcher: Loaded ${loaded} persisted session snapshots`);
+      }
+    } catch {
+      // No persisted sessions or parse error — start fresh
+    }
+  }
+
+  /** Save current session list to disk. Called on session changes and shutdown. */
+  persistSessions(): void {
+    try {
+      const sessions = this.getSessionsInternal(true);
+      const snapshots: PersistedSessionSnapshot[] = sessions.map((s) => ({
+        id: s.id,
+        name: s.name,
+        projectPath: s.projectPath || '',
+        conversationPath: s.conversationPath,
+        lastActivity: s.lastActivity,
+        isWaitingForInput: s.isWaitingForInput,
+        messageCount: s.messageCount,
+        savedAt: Date.now(),
+      }));
+      atomicWriteFileSync(this.sessionsSnapshotPath, JSON.stringify(snapshots));
     } catch {
       // Not critical
     }
@@ -298,6 +362,9 @@ export class SessionWatcher extends EventEmitter {
 
       // Refresh direct session→conversation mappings (PID detection + elimination)
       await this.refreshConversationMappings();
+
+      // Persist session snapshots so they survive daemon restarts
+      this.persistSessions();
     } catch {
       // tmux not running or no sessions
       this.tmuxProjectPaths.clear();
@@ -1403,7 +1470,17 @@ export class SessionWatcher extends EventEmitter {
     }
 
     // Need the encoded project path to find files on disk
-    const encodedPath = this.tmuxPathBySession.get(sessionId);
+    let encodedPath = this.tmuxPathBySession.get(sessionId);
+
+    // For persisted inactive sessions, derive encoded path from conversationPath
+    if (!encodedPath) {
+      const snap = this.persistedSessions.get(sessionId);
+      if (snap?.conversationPath) {
+        const projectsDir = path.join(this.codeHome, 'projects');
+        const rel = path.relative(projectsDir, snap.conversationPath);
+        encodedPath = rel.split(path.sep)[0];
+      }
+    }
     if (!encodedPath) return false;
 
     const projectDir = path.join(this.codeHome, 'projects', encodedPath);
@@ -1442,12 +1519,23 @@ export class SessionWatcher extends EventEmitter {
 
   getConversationInfo(sessionId: string): ConversationFile | null {
     const resolved = this.resolveConversationForSession(sessionId);
-    if (!resolved) return null;
-    return {
-      path: resolved.conv.path,
-      projectPath: resolved.conv.projectPath,
-      lastModified: resolved.conv.lastModified,
-    };
+    if (resolved) {
+      return {
+        path: resolved.conv.path,
+        projectPath: resolved.conv.projectPath,
+        lastModified: resolved.conv.lastModified,
+      };
+    }
+    // Fall back to persisted session snapshot
+    const snap = this.persistedSessions.get(sessionId);
+    if (snap?.conversationPath && fs.existsSync(snap.conversationPath)) {
+      return {
+        path: snap.conversationPath,
+        projectPath: snap.projectPath,
+        lastModified: snap.lastActivity,
+      };
+    }
+    return null;
   }
 
   getMessages(sessionId?: string): ConversationMessage[] {
@@ -1520,10 +1608,13 @@ export class SessionWatcher extends EventEmitter {
   /**
    * Return one entry per tagged tmux session (instead of one per JSONL file).
    * Session ID = tmux session name.
+   * When liveOnly is true, skip persisted inactive sessions (used for snapshotting).
    */
-  getSessions(): TmuxSession[] {
+  private getSessionsInternal(liveOnly: boolean): TmuxSession[] {
     const sessions: TmuxSession[] = [];
+    const seenIds = new Set<string>();
 
+    // Live tmux sessions first
     for (const [tmuxName] of this.tmuxPathBySession) {
       const best = this.resolveConversationForSession(tmuxName);
       const workingDir = this.tmuxSessionWorkingDirs.get(tmuxName) || '';
@@ -1537,12 +1628,81 @@ export class SessionWatcher extends EventEmitter {
         isWaitingForInput: best?.conv.isWaitingForInput || false,
         messageCount: best?.conv.messageCount || 0,
       });
+      seenIds.add(tmuxName);
+    }
+
+    // Add persisted sessions that are no longer live in tmux
+    if (!liveOnly) {
+      for (const [id, snap] of this.persistedSessions) {
+        if (seenIds.has(id)) continue;
+        // Verify the conversation file still exists
+        if (snap.conversationPath && !fs.existsSync(snap.conversationPath)) {
+          this.persistedSessions.delete(id);
+          continue;
+        }
+        sessions.push({
+          id: snap.id,
+          name: snap.name,
+          projectPath: snap.projectPath,
+          conversationPath: snap.conversationPath,
+          lastActivity: snap.lastActivity,
+          isWaitingForInput: false, // Not live, can't be waiting
+          messageCount: snap.messageCount,
+          inactive: true,
+        });
+        seenIds.add(id);
+      }
     }
 
     // Sort by last activity (most recent first)
     sessions.sort((a, b) => b.lastActivity - a.lastActivity);
 
     return sessions;
+  }
+
+  getSessions(): TmuxSession[] {
+    return this.getSessionsInternal(false);
+  }
+
+  /**
+   * Wait up to `timeoutMs` for a JSONL conversation to be resolved for the given cwd.
+   * Returns the JSONL UUID (conversation id) or null if none appeared in time.
+   * Used by remote_dispatch_spawn to surface the session id of a freshly spawned Claude.
+   */
+  waitForSessionInCwd(cwd: string, timeoutMs: number): Promise<string | null> {
+    const normalizedCwd = cwd.replace(/\/+$/, '');
+
+    const findExisting = (): string | null => {
+      let best: { id: string; lastModified: number } | null = null;
+      for (const [id, conv] of this.conversations) {
+        if (conv.projectPath === normalizedCwd) {
+          if (!best || conv.lastModified > best.lastModified) {
+            best = { id, lastModified: conv.lastModified };
+          }
+        }
+      }
+      return best?.id || null;
+    };
+
+    const existing = findExisting();
+    if (existing) return Promise.resolve(existing);
+
+    return new Promise((resolve) => {
+      let resolved = false;
+      const finish = (id: string | null) => {
+        if (resolved) return;
+        resolved = true;
+        this.off('conversation-update', onUpdate);
+        clearTimeout(timer);
+        resolve(id);
+      };
+      const onUpdate = () => {
+        const id = findExisting();
+        if (id) finish(id);
+      };
+      const timer = setTimeout(() => finish(null), timeoutMs);
+      this.on('conversation-update', onUpdate);
+    });
   }
 
   getActiveSessionId(): string | null {
@@ -1626,7 +1786,16 @@ export class SessionWatcher extends EventEmitter {
     }
 
     // Resolve each history ID to a file path (oldest first)
-    const encodedPath = this.tmuxPathBySession.get(sessionId);
+    let encodedPath = this.tmuxPathBySession.get(sessionId);
+    if (!encodedPath) {
+      // Derive from persisted session snapshot
+      const snap = this.persistedSessions.get(sessionId);
+      if (snap?.conversationPath) {
+        const projectsDir = path.join(this.codeHome, 'projects');
+        const rel = path.relative(projectsDir, snap.conversationPath);
+        encodedPath = rel.split(path.sep)[0];
+      }
+    }
     const projectDir = encodedPath ? path.join(this.codeHome, 'projects', encodedPath) : null;
 
     const chain: string[] = [];
@@ -1693,6 +1862,7 @@ export class SessionWatcher extends EventEmitter {
       lastActivity: number;
       currentActivity?: string;
       tmuxSessionName?: string;
+      inactive?: boolean;
       taskSummary?: {
         total: number;
         pending: number;
@@ -1714,6 +1884,7 @@ export class SessionWatcher extends EventEmitter {
       lastActivity: number;
       currentActivity?: string;
       tmuxSessionName?: string;
+      inactive?: boolean;
       taskSummary?: {
         total: number;
         pending: number;
@@ -1786,6 +1957,26 @@ export class SessionWatcher extends EventEmitter {
         tmuxSessionName: ts.name,
         taskSummary,
         recentTimestamps,
+      });
+    }
+
+    // Add persisted inactive sessions not present in live tmux
+    const liveIds = new Set(sessions.map((s) => s.id));
+    for (const [id, snap] of this.persistedSessions) {
+      if (liveIds.has(id)) continue;
+      // Verify conversation file still exists
+      if (snap.conversationPath && !fs.existsSync(snap.conversationPath)) {
+        this.persistedSessions.delete(id);
+        continue;
+      }
+      sessions.push({
+        id: snap.id,
+        name: snap.name,
+        projectPath: snap.projectPath,
+        status: 'idle',
+        lastActivity: snap.lastActivity,
+        tmuxSessionName: snap.id,
+        inactive: true,
       });
     }
 

@@ -42,7 +42,12 @@ bin/companion stop
 bin/companion restart
 bin/companion status
 bin/companion logs
+
+# Configure remote_capabilities (exec / dispatch / write) interactively
+bin/companion enable-remote
 ```
+
+**Note:** Each non-interactive `enable-remote` invocation (flags like `--dispatch`, `--write-root`, `--allowed-origin`, etc.) **replaces** the entire `remote_capabilities` block — it does not merge with the existing config. Specify the complete desired state on every call. Interactive mode (no flags) uses existing values as defaults and lets you edit from there.
 
 ### Config options
 ```json
@@ -55,6 +60,9 @@ bin/companion logs
   "mdns_enabled": true
 }
 ```
+
+Config path is resolved from `COMPANION_CONFIG` (preferred), falling back to `CONFIG_PATH` (legacy alias), then `~/.companion/config.json`. `remote_capabilities` may be set at the root of a legacy flat config, or per-listener in the `listeners: [...]` array form.
+
 
 ## Web Client
 

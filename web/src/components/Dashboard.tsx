@@ -12,6 +12,7 @@ import { ComponentErrorBoundary } from './ComponentErrorBoundary';
 import { useSessionMute } from '../hooks/useSessionMute';
 
 const NotificationSettingsModal = lazy(() => import('./NotificationSettingsModal').then(m => ({ default: m.NotificationSettingsModal })));
+const RemoteCapabilitiesPanel = lazy(() => import('./RemoteCapabilitiesPanel').then(m => ({ default: m.RemoteCapabilitiesPanel })));
 import { useBrowserNotificationListener } from '../hooks/useBrowserNotificationListener';
 import { initPush, registerWithAllServers } from '../services/push';
 import { isTauri, isTauriDesktop, isMobileViewport } from '../utils/platform';
@@ -27,6 +28,7 @@ interface DashboardProps {
 export function Dashboard({ onSettings }: DashboardProps) {
   const [activeSession, setActiveSession] = useState<ActiveSession | null>(null);
   const [showNotifSettings, setShowNotifSettings] = useState(false);
+  const [capabilitiesServerId, setCapabilitiesServerId] = useState<string | null>(null);
   const [showShortcutHelp, setShowShortcutHelp] = useState(false);
   const [merging, setMerging] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -532,19 +534,31 @@ export function Dashboard({ onSettings }: DashboardProps) {
     }
 
     return (
-      <MobileDashboard
-        summaries={summaries}
-        activeSession={activeSession}
-        onSelectSession={handleSelectSession}
-        onSessionCreated={handleSessionCreated}
-        onSettings={onSettings}
-        onCostDashboard={(serverId: string) => window.dispatchEvent(new CustomEvent('open-cost-dashboard', { detail: { serverId } }))}
-        onOpenInSplit={handleOpenInSplit}
-        onCloseSplit={handleCloseSplit}
-        secondarySession={secondarySession}
-        digest={awayDigest.digest && !awayDigest.dismissed ? awayDigest.digest : undefined}
-        onDismissDigest={awayDigest.dismiss}
-      />
+      <>
+        <MobileDashboard
+          summaries={summaries}
+          activeSession={activeSession}
+          onSelectSession={handleSelectSession}
+          onSessionCreated={handleSessionCreated}
+          onSettings={onSettings}
+          onCostDashboard={(serverId: string) => window.dispatchEvent(new CustomEvent('open-cost-dashboard', { detail: { serverId } }))}
+          onRemoteCapabilities={(serverId: string) => setCapabilitiesServerId(serverId)}
+          onOpenInSplit={handleOpenInSplit}
+          onCloseSplit={handleCloseSplit}
+          secondarySession={secondarySession}
+          digest={awayDigest.digest && !awayDigest.dismissed ? awayDigest.digest : undefined}
+          onDismissDigest={awayDigest.dismiss}
+        />
+        {capabilitiesServerId && (
+          <Suspense fallback={null}>
+            <RemoteCapabilitiesPanel
+              serverId={capabilitiesServerId}
+              serverName={snapshots.find(s => s.serverId === capabilitiesServerId)?.serverName ?? 'Server'}
+              onClose={() => setCapabilitiesServerId(null)}
+            />
+          </Suspense>
+        )}
+      </>
     );
   }
 
@@ -567,6 +581,7 @@ export function Dashboard({ onSettings }: DashboardProps) {
           onNotificationSettings={activeSession ? () => setShowNotifSettings(true) : undefined}
           onCostDashboard={activeSession ? handleOpenCostDashboard : undefined}
           onSettings={onSettings}
+          onRemoteCapabilities={(serverId) => setCapabilitiesServerId(serverId)}
           mutedSessions={sessionMute.mutedSessions}
           onToggleMute={handleToggleMute}
           workGroups={allWorkGroups}
@@ -665,6 +680,16 @@ export function Dashboard({ onSettings }: DashboardProps) {
           <NotificationSettingsModal
             serverId={activeSession.serverId}
             onClose={() => setShowNotifSettings(false)}
+          />
+        </Suspense>
+      )}
+
+      {capabilitiesServerId && (
+        <Suspense fallback={null}>
+          <RemoteCapabilitiesPanel
+            serverId={capabilitiesServerId}
+            serverName={snapshots.find(s => s.serverId === capabilitiesServerId)?.serverName ?? 'Server'}
+            onClose={() => setCapabilitiesServerId(null)}
           />
         </Suspense>
       )}

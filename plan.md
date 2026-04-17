@@ -503,3 +503,273 @@ Each preset needs to define:
 - Tap retries the same choice
 - Auto-dismisses after 5 seconds
 - Typecheck passes
+
+---
+
+## Item: `companion-remote` MCP server — cross-daemon dispatch
+**Status:** planned
+
+### Goals
+- A Model Context Protocol server that lets Claude running on one Companion box dispatch work to Claude (or raw shell) on another Companion box, going through each machine's existing daemon.
+- Three daemons (Linux, Windows, Mac) today only serve the Companion app; this adds a second kind of client — another daemon (via the MCP server) — without breaking the existing one.
+- "Sick af" centerpiece: `remote_dispatch` spawns `claude "<prompt>"` in a tmux session on the remote box. Because both daemons are already feeding the Companion app, the user watches Claude-A and Claude-B in the same dispatch panel in parallel — cross-machine foreman mode.
+- Secure by default: a compromised MCP server, a stolen auth token, or a malicious prompt on one box must not trivially escalate to "run arbitrary code anywhere."
+
+### Architecture
+
+#### Components
+- **`mcp/` top-level directory** (new) — mirrors `daemon/` and `web/` layout.
+  - `mcp/package.json` — separate npm package, depends on `@modelcontextprotocol/sdk` and `ws`.
+  - `mcp/src/index.ts` — MCP stdio server entry point.
+  - `mcp/src/tools/` — one file per tool (`remote_exec.ts`, `remote_dispatch.ts`, etc.).
+  - `mcp/src/daemon-client.ts` — WS client to Companion daemons, structurally a stripped-down `ServerConnection.ts` (reconnect, auth, requestId/response correlation) but Node-side with `ws` instead of browser WebSocket.
+  - `mcp/src/config.ts` — loads `~/.companion/mcp-servers.json`.
+  - `mcp/src/session-registry.ts` — in-memory map of dispatched remote Claude sessions (see `remote_dispatch`).
+- **Daemon** (existing, modified):
+  - New handlers module `daemon/src/handlers/remote.ts` registering `exec_command`, `read_file_raw`, `write_file`, `get_capabilities`, `remote_dispatch_spawn`.
+  - New `daemon/src/audit-log.ts` for append-only per-origin audit trail.
+  - Extend `handler-context` with a `requireRemoteCapability(client, action)` gate.
+
+#### Data flow for `remote_dispatch`
+1. Claude on box A calls MCP tool `remote_dispatch({ server: "mac", prompt, cwd })`.
+2. MCP server opens/uses a long-lived WS to Mac's daemon, authenticates, sends `remote_dispatch_spawn` with `{ prompt, cwd, tmuxName? }`.
+3. Mac's daemon calls `tmux.createSession(name, cwd, startCli=true)` — reusing the `create_tmux_session` pathway — then injects the prompt via `injector.sendInput(prompt, name)`.
+4. Daemon returns `{ sessionName, sessionId (JSONL uuid, resolved shortly after), createdAt }`.
+5. MCP server returns `{ sessionId, server, tmuxSessionName }` to dispatching Claude.
+6. Dispatching Claude polls `remote_get_conversation({ server, sessionId })` which proxies to the existing daemon `get_full` / `get_highlights` handler.
+7. Both daemons still emit their normal `conversation_update` / `status_change` broadcasts to the Companion app — user sees both sessions side by side.
+
+### Tool Contracts (MCP-exposed)
+
+Every tool takes `server: string` (key into `mcp-servers.json`). MCP server resolves that to a daemon connection.
+
+- **`remote_list_servers() -> { servers: Array<{ name, host, port, capabilities, connected }> }`**
+  - No daemon call; reads config + cached connection state.
+
+- **`remote_exec({ server, command, cwd?, timeout? }) -> { exitCode, stdout, stderr, truncated }`**
+  - Streams via a new daemon `exec_command` handler that spawns a child_process, enforces `timeout` (default 30s, max 300s), captures <=1 MiB stdout/stderr. Requires `exec` capability on the target daemon (see Security Model).
+
+- **`remote_read({ server, path }) -> { content, encoding, size }`**
+  - Proxies to existing daemon `read_file` (already enforces `allowedPaths`). No new handler needed for v1.
+
+- **`remote_write({ server, path, content, createDirs? }) -> { bytesWritten, path }`**
+  - New `write_file` daemon handler. Reuses the same `allowedPaths` check as `read_file` + an extra `writableRoots` list (subset of allowed, opt-in per daemon; default empty).
+
+- **`remote_dispatch({ server, prompt, cwd, sessionName? }) -> { sessionId, tmuxSessionName, startedAt }`**
+  - See data flow above. `sessionName` optional; daemon generates one from `cwd` if omitted (same rules as `create_tmux_session`).
+  - Requires `dispatch` capability.
+
+- **`remote_get_conversation({ server, sessionId, sinceMessageId? }) -> { messages, status, isWaitingForInput }`**
+  - Proxies to `get_highlights` (or `get_full` when `sinceMessageId` provided). Read-only; uses normal auth only.
+
+- **`remote_send_input({ server, sessionId, input }) -> { sent }`**
+  - Proxies to existing `send_input` handler. Read-write, so gated by `dispatch` capability (sending input counts as continuing a dispatched conversation). Not strictly needed for MVP but closes the loop.
+
+- **`remote_cancel({ server, sessionId }) -> { cancelled }`**
+  - Proxies to `cancel_input`. Required so a runaway remote Claude can be killed from the dispatching one.
+
+### Security Model
+
+This is the core of the design. Options presented where there's a real tradeoff.
+
+#### 1. Authentication — layered capability tokens
+**Recommendation:** Keep the single shared token for existing (read-oriented) daemon API, but introduce a **capability allowlist per listener** in `config.json` that gates the new destructive message types. No second token needed — the existing token proves identity, capabilities prove authorization.
+
+```json
+{
+  "listeners": [
+    {
+      "port": 9877,
+      "token": "...",
+      "remoteCapabilities": {
+        "enabled": false,
+        "exec": { "enabled": false },
+        "dispatch": { "enabled": true },
+        "write": { "enabled": false, "roots": ["/home/user/dispatched"] },
+        "requireLoopbackOrTls": true,
+        "allowedOrigins": ["mcp-a1b2..."],
+        "commandAllowlist": null
+      }
+    }
+  ]
+}
+```
+
+Rationale: a second token is tempting but would force users to track N^2 token pairs across machines, and rotating one breaks many flows. A single token + per-action gate is simpler and the gate is what actually provides protection — a leaked token that can only read still can't RCE.
+
+**Alternative considered:** a distinct `remoteToken` per listener that's required alongside the normal token for destructive ops. Rejected as too noisy for single-user infrastructure — the user would copy both tokens everywhere defeating the security benefit.
+
+#### 2. Command allowlist vs. freeform
+**Recommendation:** Freeform by default **when `exec.enabled` is true**, with optional per-daemon regex allowlist (`commandAllowlist`) for users who want belt-and-suspenders. `exec.enabled` itself defaults OFF and must be explicitly flipped in the daemon's config on each box the user wants to accept exec from.
+
+Rationale: this is the user's own three machines. If they wanted to lock down what Claude can run they'd write a tighter shell wrapper — heavy allowlisting pushes users to `exec("bash -c 'the real thing'")` which defeats the allowlist. The enabled/disabled flag is the real security control; the allowlist is for users with a specific threat model (e.g., "from the Linux box the Mac can only run `git fetch`-type stuff").
+
+#### 3. Transport
+**Recommendation:**
+- MCP server **refuses** to talk to a remote daemon unless one of: (a) target is loopback (`127.0.0.1` / `::1`), (b) connection is `wss://`, or (c) target host is explicitly marked `trustedNetwork: true` in `mcp-servers.json` (use case: Tailscale).
+- Daemon enforces the same on its side for remote-capability messages: if `remoteCapabilities.requireLoopbackOrTls` (default true) and the connection isn't loopback and isn't TLS, destructive messages return `transport_insecure` error.
+- The daemon already tracks `client.isLocal`; reuse that for the loopback check — no new code.
+
+#### 4. Filesystem scope
+**Recommendation:** Two-tier.
+- `remote_read` uses existing `allowedPaths` (homeDir, /tmp, /var/tmp, config extras). Unchanged.
+- `remote_write` uses a **stricter** opt-in list `remoteCapabilities.write.roots` (default empty -> writes disabled). No fallback to `allowedPaths` — writing is scarier than reading, different control.
+- `remote_dispatch` can set `cwd` anywhere under `allowedPaths` (same as read) since it's just chdir, not write.
+
+#### 5. Audit log
+Every message handled via the remote-capability path writes an append-only JSONL line to `~/.companion/audit.log`:
+
+```json
+{"ts": 1713283200000, "origin": {"addr": "100.64.0.3", "clientId": "abc", "isLocal": false, "tls": true}, "action": "exec_command", "payload": {"command": "git status", "cwd": "/home/user/repo"}, "result": {"ok": true, "exitCode": 0}, "durationMs": 143}
+```
+
+- Rotated at 10 MB, 5 files retained.
+- Exposed via a new read-only handler `get_audit_log({ limit, since })` (gated behind normal auth) so the Companion app can surface a "cross-daemon actions" view.
+- Writes happen in a non-blocking `setImmediate` — never gates the response path.
+
+#### 6. Rate limiting
+**Recommendation:** Sliding-window limiter per `(clientId, action)`: 60 exec/min, 600 read/min, 10 dispatch/min. Exceeding returns `rate_limited` error. Values hardcoded for MVP; configurable in follow-up. Not critical for single-user but trivial to add and forces noisy misbehavior to be visible.
+
+### Configuration & Registration
+
+#### Daemon side
+Add `remoteCapabilities` to existing `ListenerConfig` (see `daemon/src/types.ts:1-7`). Upgrading daemons default to `enabled: false`, so zero behaviour change until the user opts in. A `bin/companion enable-remote` CLI helper flips the flag interactively and prints the matching `mcp-servers.json` snippet.
+
+#### MCP config
+Location: `~/.companion/mcp-servers.json` (shape mirrors `web/src/types/index.ts:1-11`):
+
+```json
+{
+  "version": 1,
+  "servers": [
+    {
+      "name": "mac",
+      "host": "100.64.0.3",
+      "port": 9877,
+      "token": "...",
+      "useTls": true,
+      "trustedNetwork": false,
+      "capabilities": ["exec", "dispatch", "read", "write"]
+    }
+  ]
+}
+```
+
+The `capabilities` field on the MCP side is a **client-side** hint — actual enforcement is on the daemon. It's there so `remote_list_servers` can tell Claude what each server is expected to support without a round trip.
+
+#### Claude Code registration
+Document in README: `claude mcp add companion-remote -- node /path/to/mcp/dist/index.js`. The MCP server discovers its config from `~/.companion/mcp-servers.json` automatically — no `.mcp.json` per-project config needed, but an env var `COMPANION_MCP_CONFIG` can override.
+
+### Capability Negotiation
+
+Currently there is no version handshake. An older daemon receiving `exec_command` would hit the `Unknown message type` branch in `daemon/src/websocket.ts:432-438`. That's fine as a signal — the MCP server treats `Unknown message type: <remote_*>` response as "capability not supported" and surfaces a clear error to Claude.
+
+But we should also add a proactive handshake:
+- New `get_capabilities` handler on the daemon. Cheap, no side effects, usable pre-auth? No — keep it post-auth to avoid fingerprinting. Returns `{ daemonVersion, protocolVersion, remoteCapabilities: { exec: bool, dispatch: bool, write: { enabled, roots } } }`.
+- MCP's `daemon-client.ts` calls `get_capabilities` immediately after authenticating and caches the result per connection. Tool calls that need a missing capability fail fast with a clear error.
+- Bonus: expose this in the Companion app UI too so users can audit remote-capability settings per daemon.
+
+### Dispatch-specific Concerns
+
+#### Where does Claude get spawned?
+Two options:
+- **(A) Always create a new tmux session**, named deterministically from `cwd` (reusing `generateSessionName`). If an existing session matches, append `-dN`. This is what `remote_dispatch_spawn` does. Pro: isolated; each dispatch has its own session visible in the Companion app. Con: sessions accumulate.
+- **(B) Require the caller to pre-create a session and pass its name.** Pro: explicit. Con: extra step, and the dispatching Claude has to learn about tmux.
+
+**Recommendation:** (A) for MVP (that's the "sick af" vibe — just works), with an explicit `sessionName` override for users who want to target an existing one. Add a daemon-side "remote-dispatch TTL" that cleans up idle dispatched sessions after N hours (default 24h) so they don't accumulate forever. Store an opt-in tag (`metadata.remoteDispatch = true`) on the tmux config so cleanup only touches dispatched sessions.
+
+#### Reconnect / daemon restart mid-dispatch
+- Dispatched Claude sessions live in tmux — they survive daemon restart automatically.
+- MCP server's connection to the daemon reconnects with exponential backoff (reuse `ServerConnection.ts` logic).
+- Pending `remote_exec` / `remote_dispatch` calls in flight at disconnect: reject with `disconnected`, let the dispatching Claude retry. Don't try to dedupe — remote_exec is potentially non-idempotent and we shouldn't guess.
+- After reconnect, `remote_get_conversation` just works (JSONL is the source of truth on the remote box).
+
+### Phased Rollout
+
+**MVP (Phase 1) — one PR worth:**
+- `mcp/` package scaffolding + daemon-client.
+- Tools: `remote_list_servers`, `remote_read`, `remote_get_conversation`. Read-only, no new daemon handlers needed (reuses `read_file`, `get_highlights`).
+- Daemon: `get_capabilities` handler only. No destructive handlers yet.
+- Config loading from `~/.companion/mcp-servers.json`.
+- `claude mcp add companion-remote` instructions.
+- Demonstrates the cross-daemon plumbing end-to-end with zero new attack surface.
+
+**Phase 2 — the magic:**
+- Daemon: `remote_dispatch_spawn` handler (reuses `create_tmux_session` + `send_input`).
+- MCP: `remote_dispatch`, `remote_send_input`, `remote_cancel`.
+- Capability flag `dispatch` + audit log infrastructure.
+- This is the headline feature. Most code here is glue.
+
+**Phase 3 — filesystem writes + exec:**
+- Daemon: `write_file`, `exec_command` handlers.
+- MCP: `remote_write`, `remote_exec`.
+- `remoteCapabilities.write.roots`, `exec.enabled`, rate limiting, audit log rotation.
+- TLS/loopback enforcement made strict.
+
+**Phase 4 — polish:**
+- Companion app UI for audit log + capability toggles per daemon.
+- Command allowlist / regex support.
+- `bin/companion enable-remote` interactive CLI.
+- Optional origin pinning (MCP identifies itself with an `origin` field in auth; daemon can pin to a specific origin).
+
+### Files to Add
+
+- `mcp/package.json` — MCP package manifest.
+- `mcp/tsconfig.json` — TS config.
+- `mcp/src/index.ts` — MCP stdio server bootstrap (registers tools, wires `DaemonClient`).
+- `mcp/src/daemon-client.ts` — WS client with auth, reconnect, `sendRequest`. Structured after `web/src/services/ServerConnection.ts:1-400` but in Node.
+- `mcp/src/session-registry.ts` — maps `{server, sessionId}` to dispatch metadata so tools can look up dispatches.
+- `mcp/src/config.ts` — loads `~/.companion/mcp-servers.json`, watches for changes.
+- `mcp/src/tools/remote_list_servers.ts`
+- `mcp/src/tools/remote_read.ts`
+- `mcp/src/tools/remote_write.ts`
+- `mcp/src/tools/remote_exec.ts`
+- `mcp/src/tools/remote_dispatch.ts`
+- `mcp/src/tools/remote_get_conversation.ts`
+- `mcp/src/tools/remote_send_input.ts`
+- `mcp/src/tools/remote_cancel.ts`
+- `mcp/src/errors.ts` — shared error types (`TransportInsecure`, `CapabilityDisabled`, `RateLimited`).
+- `daemon/src/handlers/remote.ts` — new handler module registering `get_capabilities`, `exec_command`, `write_file`, `remote_dispatch_spawn`.
+- `daemon/src/audit-log.ts` — append-only JSONL audit writer with rotation.
+- `daemon/src/rate-limiter.ts` — sliding window per `(clientId, action)`.
+- `docs/companion-remote.md` — user-facing docs: config shape, capability explanation, `claude mcp add` instructions.
+
+### Files to Modify
+
+- `daemon/src/types.ts` — add `RemoteCapabilitiesConfig` interface, extend `ListenerConfig` with optional `remoteCapabilities`.
+- `daemon/src/handlers/index.ts` — register `registerRemoteHandlers`.
+- `daemon/src/handler-context.ts` — add `auditLog`, `rateLimiter`, `requireRemoteCapability(client, action) -> error | null`.
+- `daemon/src/websocket.ts` — thread new context fields through `createHandlerContext()` around line 207-241. No changes to the router — handlers self-register.
+- `daemon/src/config.ts` — default-fill `remoteCapabilities: { enabled: false }` when absent.
+- `README.md` / `CLAUDE.md` — document the new `mcp/` directory and setup flow.
+
+### Open Questions
+
+1. **Stream vs. buffer for `remote_exec` output.** MCP tools don't natively stream results mid-call. Proposal: accumulate up to `maxOutputBytes`, then return all at once with `truncated: true` if exceeded. Streaming would require a companion `remote_exec_stream` tool that pushes progress notifications — worth it? (Lean: skip for MVP, revisit if Claude complains about timeouts.)
+
+2. **Does `remote_dispatch` block or return immediately?** Current design: returns immediately with `sessionId`, caller polls. Alternative: `remote_dispatch_wait` variant that blocks until the remote Claude reaches `isWaitingForInput` or completes. Probably worth adding in Phase 2 — makes trivial sequential cross-machine workflows nicer.
+
+3. **Shared `DaemonClient` with the web codebase.** `web/src/services/ServerConnection.ts` is browser-WebSocket. The MCP's is Node `ws`. Worth factoring into a shared package in `packages/daemon-client`? Probably yes eventually, but not for MVP — lift after Phase 3 when the contracts stabilize.
+
+4. **Origin pinning.** Should the daemon know which MCP instance is talking to it? Useful if the user wants to say "only the Linux box's MCP can trigger dispatch on Mac." Implementation: MCP sends an `origin` string (stable UUID in config) in `authenticate`; daemon pins via `allowedOrigins`. Moved to Phase 4; the `enabled: false`-by-default gate makes it low priority.
+
+5. **Multi-MCP connections to the same daemon.** If both box A and box B point their MCP servers at box C's daemon, they'll each get their own WS connection. That's fine; the daemon already supports N clients. Just noting it works.
+
+6. **What happens if `remote_dispatch` target machine has no `claude` on PATH?** Need a clear error — currently `create_tmux_session` with `startCli=true` runs `claude` unconditionally and silently fails inside the tmux. Should add a pre-check: daemon's `remote_dispatch_spawn` runs `which claude` first, returns `claude_not_found` error with the PATH it checked. Small win, big UX improvement.
+
+7. **Does the MCP server need its own long-running process, or can it launch on demand?** MCP SDK supports both. Recommendation: stdio (launched on demand by Claude Code). State is per-invocation — the session registry is ephemeral, remote Claude sessions live in tmux anyway.
+
+### Tests Needed
+- Daemon: new handlers have unit tests mocking `tmux.createSession` / `injector.sendInput`.
+- Capability gate: requests with `enabled: false` return `capability_disabled` error; `enabled: true` + insecure transport returns `transport_insecure`.
+- Audit log: every destructive handler writes exactly one entry with correct fields; rotation works at 10 MB.
+- Rate limiter: 61st exec in 60s returns `rate_limited`.
+- MCP: mock daemon WS, assert each tool sends the right request and surfaces errors cleanly.
+- End-to-end manual: two daemons on loopback, MCP server in between, dispatch a prompt A -> B, verify both sessions show up in the Companion app.
+
+### Critical Files for Implementation
+- /home/hexi/local/src/companion/daemon/src/websocket.ts
+- /home/hexi/local/src/companion/daemon/src/handler-context.ts
+- /home/hexi/local/src/companion/daemon/src/handlers/tmux.ts
+- /home/hexi/local/src/companion/daemon/src/handlers/input.ts
+- /home/hexi/local/src/companion/web/src/services/ServerConnection.ts

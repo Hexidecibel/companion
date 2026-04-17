@@ -3,17 +3,64 @@ import * as path from 'path';
 import * as os from 'os';
 import * as crypto from 'crypto';
 import QRCode from 'qrcode';
-import { DaemonConfig, ListenerConfig } from './types';
+import { DaemonConfig, ListenerConfig, RemoteCapabilitiesConfig } from './types';
 import { atomicWriteFileSync } from './utils';
 
 const HOME_DIR = process.env.HOME || '/root';
 const CONFIG_DIR = path.join(HOME_DIR, '.companion');
 
 /**
+ * Resolve the daemon config file path.
+ *
+ * Precedence:
+ *   1. COMPANION_CONFIG (preferred)
+ *   2. CONFIG_PATH (legacy alias, kept for backward compatibility)
+ *   3. ~/.companion/config.json (default)
+ */
+export function resolveConfigPath(): string {
+  return (
+    process.env.COMPANION_CONFIG ||
+    process.env.CONFIG_PATH ||
+    path.join(CONFIG_DIR, 'config.json')
+  );
+}
+
+/**
  * Generate a random authentication token
  */
 function generateToken(): string {
   return crypto.randomBytes(16).toString('hex');
+}
+
+function parseRemoteCapabilities(raw: any): RemoteCapabilitiesConfig | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const result: RemoteCapabilitiesConfig = {
+    enabled: Boolean(raw.enabled),
+  };
+  if (raw.exec && typeof raw.exec === 'object') {
+    result.exec = {
+      enabled: Boolean(raw.exec.enabled),
+      commandAllowlist: raw.exec.command_allowlist ?? raw.exec.commandAllowlist ?? null,
+    };
+  }
+  if (raw.dispatch && typeof raw.dispatch === 'object') {
+    result.dispatch = { enabled: Boolean(raw.dispatch.enabled) };
+  }
+  if (raw.write && typeof raw.write === 'object') {
+    result.write = {
+      enabled: Boolean(raw.write.enabled),
+      roots: Array.isArray(raw.write.roots) ? raw.write.roots : [],
+    };
+  }
+  if (raw.require_loopback_or_tls !== undefined || raw.requireLoopbackOrTls !== undefined) {
+    result.requireLoopbackOrTls = Boolean(raw.require_loopback_or_tls ?? raw.requireLoopbackOrTls);
+  }
+  if (Array.isArray(raw.allowed_origins)) {
+    result.allowedOrigins = raw.allowed_origins;
+  } else if (Array.isArray(raw.allowedOrigins)) {
+    result.allowedOrigins = raw.allowedOrigins;
+  }
+  return result;
 }
 
 /**
@@ -103,10 +150,11 @@ const DEFAULT_CONFIG: Omit<DaemonConfig, 'listeners'> & { listeners?: ListenerCo
 };
 
 export function loadConfig(): DaemonConfig {
-  const configPath = process.env.CONFIG_PATH || path.join(CONFIG_DIR, 'config.json');
+  const configPath = resolveConfigPath();
 
   let fileConfig: Partial<DaemonConfig> & { listeners?: ListenerConfig[] } = {};
   let parsedListeners: ListenerConfig[] | undefined;
+  let legacyRemoteCapabilities: RemoteCapabilitiesConfig | undefined;
 
   let isFirstRun = false;
 
@@ -123,8 +171,12 @@ export function loadConfig(): DaemonConfig {
           tls: l.tls,
           certPath: l.cert_path,
           keyPath: l.key_path,
+          remoteCapabilities: parseRemoteCapabilities(l.remote_capabilities),
         }));
       }
+
+      // Legacy flat-config root-level remote_capabilities
+      legacyRemoteCapabilities = parseRemoteCapabilities(parsed.remote_capabilities);
 
       // Map snake_case from config file to camelCase
       fileConfig = {
@@ -176,6 +228,7 @@ export function loadConfig(): DaemonConfig {
         tls: config.tls,
         certPath: config.certPath,
         keyPath: config.keyPath,
+        remoteCapabilities: legacyRemoteCapabilities,
       },
     ];
   }
@@ -210,13 +263,16 @@ export function loadConfig(): DaemonConfig {
       console.error(`Error: Listener ${i} (port ${listener.port}) missing token`);
       process.exit(1);
     }
+    if (!listener.remoteCapabilities) {
+      listener.remoteCapabilities = { enabled: false };
+    }
   }
 
   return config;
 }
 
 export function saveConfig(config: DaemonConfig): void {
-  const configPath = process.env.CONFIG_PATH || path.join(CONFIG_DIR, 'config.json');
+  const configPath = resolveConfigPath();
 
   // Convert to snake_case for file
   // Use new listeners format if we have multiple listeners
@@ -236,6 +292,9 @@ export function saveConfig(config: DaemonConfig): void {
     fileConfig.tls = listener.tls;
     fileConfig.cert_path = listener.certPath;
     fileConfig.key_path = listener.keyPath;
+    if (listener.remoteCapabilities) {
+      fileConfig.remote_capabilities = listener.remoteCapabilities;
+    }
   } else {
     // Multiple listeners: use new format
     fileConfig.listeners = config.listeners.map((l) => ({
@@ -244,6 +303,7 @@ export function saveConfig(config: DaemonConfig): void {
       tls: l.tls,
       cert_path: l.certPath,
       key_path: l.keyPath,
+      remote_capabilities: l.remoteCapabilities,
     }));
   }
 

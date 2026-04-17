@@ -26,6 +26,7 @@ interface SessionSidebarProps {
   onNotificationSettings?: () => void;
   onCostDashboard?: () => void;
   onSettings?: () => void;
+  onRemoteCapabilities?: (serverId: string) => void;
   mutedSessions?: Set<string>;
   onToggleMute?: (serverId: string, sessionId: string) => void;
   workGroups?: Map<string, WorkGroup[]>;
@@ -129,6 +130,7 @@ export function SessionSidebar({
   onNotificationSettings,
   onCostDashboard,
   onSettings,
+  onRemoteCapabilities,
   mutedSessions,
   onToggleMute,
   workGroups,
@@ -340,8 +342,17 @@ export function SessionSidebar({
     const items: ContextMenuEntry[] = [
       { label: 'Edit Server', onClick: () => setEditingServerId(serverId) },
       { label: 'New Session', onClick: () => setNewSessionServerId(serverId), disabled: !isConnected },
-      null,
     ];
+
+    if (onRemoteCapabilities) {
+      items.push({
+        label: 'Remote Capabilities',
+        onClick: () => onRemoteCapabilities(serverId),
+        disabled: !isConnected,
+      });
+    }
+
+    items.push(null);
 
     if (!isConnected) {
       items.push({ label: 'Connect', onClick: () => { if (server) connectionManager.connectServer(server); }, disabled: isDisabled });
@@ -366,7 +377,7 @@ export function SessionSidebar({
     });
 
     return items;
-  }, [snapshots, getServer, toggleEnabled, deleteServer]);
+  }, [snapshots, getServer, toggleEnabled, deleteServer, onRemoteCapabilities]);
 
   const buildSessionMenuItems = useCallback((serverId: string, sessionId: string, tmuxSessionName?: string): ContextMenuEntry[] => {
     const isMuted = mutedSessions?.has(sessionId) ?? false;
@@ -553,6 +564,15 @@ export function SessionSidebar({
                     >
                       T
                     </button>
+                    {onRemoteCapabilities && (
+                      <button
+                        className="sidebar-tmux-btn"
+                        onClick={() => onRemoteCapabilities(snap.serverId)}
+                        title="Remote capabilities & audit log"
+                      >
+                        R
+                      </button>
+                    )}
                   </>
                 )}
               </div>
