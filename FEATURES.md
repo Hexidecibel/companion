@@ -486,3 +486,14 @@ Comprehensive automated tests for daemon parser and web client services.
 - **Web client:** Vitest + @testing-library/react + jsdom infrastructure
 - ServerConnection tests (23): connection lifecycle, auth handshake, reconnection, request/response matching, message handlers, config updates
 - ConnectionManager tests (14): multi-server management, snapshots, connect/disconnect, change handlers
+
+## Cross-Daemon Dispatch (companion-remote MCP)
+MCP server that lets Claude on one Companion box dispatch work to Claude on another, routed through each machine's daemon. See `mcp/` and `daemon/src/handlers/remote.ts`.
+
+- `remote_dispatch` spawns a tmux session + Claude on a remote daemon and injects the prompt, returning `{ tmuxSessionName, sessionId }` once the JSONL file is observed
+- **Prompt-readiness poll:** daemon polls `tmux capture-pane` for Claude's startup markers (prompt glyph, "for shortcuts", etc.) up to 10s before injection instead of using a fixed 500ms sleep — prevents lost keystrokes when the REPL hasn't finished initializing
+- **`oneShot: true` mode:** launches `claude -p "<prompt>"` directly as the tmux window command so the session auto-terminates when Claude finishes responding — no zombie sessions for fire-and-forget prompts
+- Read-only tools (`remote_read`, `remote_get_conversation`, `remote_list_servers`) and destructive tools (`remote_exec`, `remote_write`, `remote_send_input`, `remote_cancel`) gated per-daemon via `remote_capabilities` config
+- Append-only audit log at `~/.companion/audit.log` with rotation, surfaced via `get_audit_log` handler
+- Transport hardening: destructive ops refuse non-loopback / non-TLS connections unless explicitly marked `trustedNetwork`
+- `bin/companion enable-remote` CLI for interactive capability configuration

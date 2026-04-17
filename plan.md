@@ -507,7 +507,7 @@ Each preset needs to define:
 ---
 
 ## Item: `companion-remote` MCP server — cross-daemon dispatch
-**Status:** planned
+**Status:** done
 
 ### Goals
 - A Model Context Protocol server that lets Claude running on one Companion box dispatch work to Claude (or raw shell) on another Companion box, going through each machine's existing daemon.

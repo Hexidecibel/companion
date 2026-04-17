@@ -30,7 +30,13 @@ export interface RemoteDispatchResult {
 
 export async function remoteDispatch(
   pool: DaemonPool,
-  args: { server: string; prompt: string; cwd: string; sessionName?: string }
+  args: {
+    server: string;
+    prompt: string;
+    cwd: string;
+    sessionName?: string;
+    oneShot?: boolean;
+  }
 ): Promise<RemoteDispatchResult> {
   const client = pool.get(args.server);
   await client.ensureConnected();
@@ -42,6 +48,7 @@ export async function remoteDispatch(
       prompt: args.prompt,
       cwd: args.cwd,
       sessionName: args.sessionName,
+      oneShot: args.oneShot === true ? true : undefined,
     }
   );
 

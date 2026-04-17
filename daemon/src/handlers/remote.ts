@@ -1,6 +1,6 @@
 import * as path from 'path';
 import * as fs from 'fs';
-import { execSync, spawn } from 'child_process';
+import { execSync, spawn, spawnSync } from 'child_process';
 import { HandlerContext, MessageHandler, AuthenticatedClient } from '../handler-context';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const daemonPackage = require('../../package.json');
@@ -20,6 +20,7 @@ interface DispatchSpawnPayload {
   prompt?: string;
   cwd?: string;
   sessionName?: string;
+  oneShot?: boolean;
 }
 
 interface DispatchSpawnResult {
@@ -61,7 +62,10 @@ const EXEC_RESPONSE_TYPE = 'command_executed';
 const WRITE_RESPONSE_TYPE = 'file_written';
 const AUDIT_LOG_RESPONSE_TYPE = 'audit_log';
 const SESSION_ID_WAIT_MS = 5000;
-const POST_SPAWN_DELAY_MS = 500;
+const POST_SPAWN_DELAY_MS = 300;
+const CLAUDE_READY_TIMEOUT_MS = 10_000;
+const CLAUDE_READY_POLL_INTERVAL_MS = 250;
+const TMUX_CAPTURE_TIMEOUT_MS = 2_000;
 const EXEC_DEFAULT_TIMEOUT_MS = 30_000;
 const EXEC_MAX_TIMEOUT_MS = 300_000;
 const EXEC_OUTPUT_CAP_BYTES = 1_048_576;
@@ -108,6 +112,31 @@ async function uniqueSessionName(ctx: HandlerContext, base: string): Promise<str
   return candidate;
 }
 
+/**
+ * Poll the tmux pane until Claude's REPL is ready to receive input, or until
+ * `timeoutMs` elapses. Looks for the prompt character or other stable startup
+ * markers. Returns true if readiness was detected, false on timeout.
+ */
+async function waitForClaudeReady(sessionName: string, timeoutMs: number): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  const readyMarkers = ['❯', 'for shortcuts', 'Try "', 'shortcuts'];
+  while (Date.now() < deadline) {
+    const result = spawnSync(
+      'tmux',
+      ['capture-pane', '-t', sessionName, '-p', '-S', '-200'],
+      { timeout: TMUX_CAPTURE_TIMEOUT_MS }
+    );
+    if (result.status === 0) {
+      const pane = (result.stdout?.toString() || '');
+      if (readyMarkers.some((m) => pane.includes(m))) {
+        return true;
+      }
+    }
+    await new Promise((resolve) => setTimeout(resolve, CLAUDE_READY_POLL_INTERVAL_MS));
+  }
+  return false;
+}
+
 export function registerRemoteHandlers(
   ctx: HandlerContext
 ): Record<string, MessageHandler> {
@@ -150,11 +179,13 @@ export function registerRemoteHandlers(
         typeof dispatchPayload.sessionName === 'string' && dispatchPayload.sessionName
           ? dispatchPayload.sessionName
           : undefined;
+      const oneShot = dispatchPayload.oneShot === true;
 
       const auditPayload = {
         promptLength: prompt.length,
         cwd,
         sessionName: requestedName,
+        oneShot,
       };
 
       const sendError = (errorCode: string, extra?: Record<string, unknown>) => {
@@ -228,6 +259,68 @@ export function registerRemoteHandlers(
       const baseName = requestedName || ctx.tmux.generateSessionName(cwd);
       const tmuxSessionName = await uniqueSessionName(ctx, baseName);
 
+      if (oneShot) {
+        // Headless mode: launch claude -p "<prompt>" directly as the tmux window
+        // command so the session auto-terminates when claude prints its response
+        // and exits. No REPL injection; no readiness polling.
+        const safeName = tmuxSessionName.replace(/[^a-zA-Z0-9_-]/g, '_');
+        // Single-quote escape the prompt for /bin/sh:  ' -> '\''
+        const shQuoted = `'${prompt.replace(/'/g, `'\\''`)}'`;
+        // Use the resolved absolute claude path so PATH differences between
+        // the daemon's environment and an interactive shell don't matter.
+        const shCmd = `${claudePath} -p ${shQuoted}`;
+        try {
+          execSync(
+            `tmux new-session -d -s "${safeName}" -c "${cwd}" ${JSON.stringify(shCmd)}`,
+            { stdio: 'pipe' }
+          );
+          execSync(`tmux set-environment -t "${safeName}" COMPANION_APP 1`, { stdio: 'pipe' });
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          sendError('tmux_create_failed', { detail: message });
+          return;
+        }
+
+        ctx.storeTmuxSessionConfig(tmuxSessionName, cwd, true);
+        ctx.watcher.markSessionAsNew(tmuxSessionName);
+        await ctx.watcher.refreshTmuxPaths();
+        ctx.broadcast('tmux_sessions_changed', { action: 'created', sessionName: tmuxSessionName });
+
+        // Try to resolve sessionId from the watcher. Short window — for a
+        // very fast-completing prompt the session may die before the JSONL
+        // file is observed. Null is an acceptable result per design.
+        const sessionId = await ctx.watcher.waitForSessionInCwd(cwd, SESSION_ID_WAIT_MS);
+
+        const result: DispatchSpawnResult = {
+          tmuxSessionName,
+          createdAt: startedAt,
+          sessionId,
+          claudePath,
+        };
+
+        ctx.send(client.ws, {
+          type: DISPATCH_RESPONSE_TYPE,
+          success: true,
+          payload: result,
+          requestId,
+        });
+
+        ctx.auditLog.append({
+          ts: startedAt,
+          origin: getOrigin(client, listenerTls),
+          action: 'remote_dispatch_spawn',
+          payload: auditPayload,
+          result: {
+            ok: true,
+            tmuxSessionName,
+            sessionId,
+            oneShot: true,
+          },
+          durationMs: Date.now() - startedAt,
+        });
+        return;
+      }
+
       const createResult = await ctx.tmux.createSession(tmuxSessionName, cwd, true);
       if (!createResult.success) {
         sendError('tmux_create_failed', { detail: createResult.error });
@@ -242,6 +335,12 @@ export function registerRemoteHandlers(
       ctx.broadcast('tmux_sessions_changed', { action: 'created', sessionName: tmuxSessionName });
 
       await new Promise((resolve) => setTimeout(resolve, POST_SPAWN_DELAY_MS));
+      const ready = await waitForClaudeReady(tmuxSessionName, CLAUDE_READY_TIMEOUT_MS);
+      if (!ready) {
+        console.warn(
+          `[remote_dispatch_spawn] Claude readiness not detected in ${tmuxSessionName} after ${CLAUDE_READY_TIMEOUT_MS}ms; attempting injection anyway`
+        );
+      }
       await ctx.injector.sendInput(prompt, tmuxSessionName);
 
       const sessionId = await ctx.watcher.waitForSessionInCwd(cwd, SESSION_ID_WAIT_MS);

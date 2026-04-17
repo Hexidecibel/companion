@@ -86,6 +86,14 @@ const TOOLS = [
           type: 'string',
           description: 'Optional tmux session name; daemon picks one if omitted',
         },
+        oneShot: {
+          type: 'boolean',
+          description:
+            'If true, runs claude in headless/print mode with the prompt as a CLI argument; ' +
+            'the tmux session auto-terminates after the response completes. No REPL injection ' +
+            'occurs. sessionId may be null if the tmux session exits before the watcher ' +
+            'observes the JSONL file. Default: false (interactive REPL).',
+        },
       },
       required: ['server', 'prompt', 'cwd'],
       additionalProperties: false,
@@ -195,7 +203,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case 'remote_dispatch':
         result = await remoteDispatch(
           pool,
-          args as { server: string; prompt: string; cwd: string; sessionName?: string }
+          args as {
+            server: string;
+            prompt: string;
+            cwd: string;
+            sessionName?: string;
+            oneShot?: boolean;
+          }
         );
         break;
       case 'remote_send_input':
