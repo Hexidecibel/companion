@@ -125,6 +125,7 @@ export class SessionWatcher extends EventEmitter {
   private tmuxFilterEnabled: boolean = true;
   private newlyCreatedSessions: Map<string, number> = new Map(); // session name -> creation timestamp
   private compactedSessions: Set<string> = new Set(); // sessions expecting a new JSONL after compaction
+  private detectInFlight: Set<string> = new Set(); // sessions currently being probed by detectConversationForSession
   private debounceTimers: Map<string, NodeJS.Timeout> = new Map();
   private waitingDebounceTimers: Map<string, NodeJS.Timeout> = new Map();
   private static readonly DEBOUNCE_MS = 150; // Debounce file changes per session
@@ -1111,23 +1112,48 @@ export class SessionWatcher extends EventEmitter {
    * Uses /proc/<pid>/fd/ to find open file descriptors pointing to JSONL files.
    */
   private async detectConversationForSession(sessionName: string): Promise<string | null> {
+    // Guard against concurrent probes for the same session — if pstree/tmux
+    // hangs on a wedged PID, stacked invocations fan out unboundedly.
+    if (this.detectInFlight.has(sessionName)) return null;
+    this.detectInFlight.add(sessionName);
+    try {
+      return await this.detectConversationForSessionInner(sessionName);
+    } finally {
+      this.detectInFlight.delete(sessionName);
+    }
+  }
+
+  private async detectConversationForSessionInner(sessionName: string): Promise<string | null> {
     const projectsDir = path.join(this.codeHome, 'projects');
     try {
       const { stdout: pidOut } = await execAsync(
-        `tmux display-message -t "${sessionName}" -p "#{pane_pid}" 2>/dev/null`
+        `tmux display-message -t "${sessionName}" -p "#{pane_pid}" 2>/dev/null`,
+        { timeout: 2000, killSignal: 'SIGKILL' }
       );
       const rootPid = pidOut.trim();
       if (!rootPid) return null;
 
-      // Get all descendant PIDs using pstree (single command)
+      // If the pane's root PID is gone, skip — nothing to trace.
+      try {
+        process.kill(Number(rootPid), 0);
+      } catch {
+        return null;
+      }
+
+      // Get all descendant PIDs using pstree (single command, bounded).
+      // Without a timeout + SIGKILL, a wedged pstree keeps the shell child alive
+      // and stacks up across the 5s refresh interval.
       const pids: string[] = [rootPid];
       try {
-        const { stdout: tree } = await execAsync(`pstree -p ${rootPid} 2>/dev/null`);
+        const { stdout: tree } = await execAsync(`pstree -p ${rootPid} 2>/dev/null`, {
+          timeout: 2000,
+          killSignal: 'SIGKILL',
+        });
         for (const match of tree.matchAll(/\((\d+)\)/g)) {
           if (match[1] !== rootPid) pids.push(match[1]);
         }
       } catch {
-        /* pstree not available */
+        /* pstree not available or hung — fall back to root PID only */
       }
 
       // Check /proc/<pid>/fd/ for open JSONL files in the projects directory
