@@ -110,6 +110,18 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Select latest Xcode (iOS 26 SDK required by App Store Connect)
+        run: |
+          XCODE_PATH=$(ls -d /Applications/Xcode_*.app 2>/dev/null | sort -V | tail -1)
+          if [ -z "$XCODE_PATH" ]; then
+            echo "::error::No Xcode_*.app found under /Applications"
+            ls /Applications | grep -i xcode || true
+            exit 1
+          fi
+          echo "Selecting $XCODE_PATH"
+          sudo xcode-select -s "$XCODE_PATH"
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
