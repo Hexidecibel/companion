@@ -241,39 +241,69 @@ jobs:
           EOPLIST
           echo "Wrote $EXPORT_PLIST:"
           cat "$EXPORT_PLIST"
-      - name: Build iOS IPA via Tauri (build + archive + export)
+      - name: Build + archive iOS via Tauri (export step expected to fail)
         env:
           APPLE_DEVELOPMENT_TEAM: ${{ secrets.APPLE_TEAM_ID }}
-          # Tauri's auth_credentials_from_env() (crates/tauri-cli/src/mobile/ios/build.rs)
-          # reads APPLE_API_KEY (key id), APPLE_API_ISSUER, and APPLE_API_KEY_PATH.
-          # When all three are set, Tauri passes -authenticationKey{Path,ID,IssuerID}
-          # to `xcodebuild -exportArchive`, which is required by Xcode 16/26 even with
-          # signingStyle=manual + a pre-installed provisioning profile because Tauri
-          # also sets -allowProvisioningUpdates. Without these, the export step fails
-          # with "exportArchive No Accounts" / "No profiles for 'com.hexidecibel.companion'".
-          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY_ID }}
-          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
-          APPLE_API_KEY_PATH: /Users/runner/private_keys/AuthKey_${{ secrets.APPLE_API_KEY_ID }}.p8
         run: |
-          # Tauri 2.x runs xcodebuild build, then archive, then export, all
-          # within one orchestrator process. This means the "Build Rust Code"
-          # PhaseScript (which calls back to the parent via WebSocket on a
-          # local port written to a temp file) works correctly. Earlier
-          # workflow attempts split this into a separate `xcodebuild archive`
-          # step, which broke the IPC and caused the connection-refused panic.
-          cd desktop && npx tauri ios build --export-method app-store-connect
-      - name: Locate IPA
-        id: locate_ipa
-        run: |
-          echo "=== iOS build artifacts present ==="
-          find desktop/src-tauri/gen/apple/build -maxdepth 3 -type f \( -name '*.ipa' -o -name '*.xcarchive' \) 2>/dev/null || true
-          echo "==="
-          IPA=$(find desktop/src-tauri/gen/apple/build -name '*.ipa' | head -1)
-          if [ -z "$IPA" ]; then
-            echo "::error::No .ipa produced by tauri ios build"
+          # Tauri 2.10 runs xcodebuild build -> archive -> exportArchive in one
+          # orchestrator process. The build+archive phases work (the "Build
+          # Rust Code" PhaseScript IPC stays in-process), but Tauri ALWAYS
+          # passes `-allowProvisioningUpdates` to `xcodebuild -exportArchive`
+          # (cargo-mobile2 src/apple/target.rs ExportConfig). On a CI runner
+          # with no signed-in Apple ID this triggers `exportArchive No
+          # Accounts` / `No profiles for 'com.hexidecibel.companion'` even
+          # when ExportOptions.plist has signingStyle=manual + the profile is
+          # locally installed. Tauri exposes no flag to disable that.
+          #
+          # Strategy: let Tauri build + archive (the .xcarchive is written to
+          # gen/apple/build/ before the broken export step runs), capture
+          # whether the archive succeeded, then manually run our own
+          # `xcodebuild -exportArchive` *without* -allowProvisioningUpdates
+          # so Xcode uses the local manual provisioning profile.
+          cd desktop
+          set +e
+          npx tauri ios build --export-method app-store-connect 2>&1 | tee /tmp/tauri-ios.log
+          TAURI_RC=${PIPESTATUS[0]}
+          set -e
+          echo "tauri ios build exit code: $TAURI_RC"
+          ARCHIVE=$(find src-tauri/gen/apple/build -maxdepth 3 -name '*.xcarchive' -type d | head -1)
+          if [ -z "$ARCHIVE" ]; then
+            echo "::error::No .xcarchive produced — build/archive failed before export"
             exit 1
           fi
-          echo "Found IPA: $IPA"
+          echo "Archive present at: $ARCHIVE"
+          # If Tauri only failed at the export step (which we expect), the
+          # archive is good. We continue.
+          if [ $TAURI_RC -ne 0 ] && ! grep -q 'failed to export iOS app' /tmp/tauri-ios.log; then
+            echo "::error::Tauri failed for a reason other than export"
+            exit $TAURI_RC
+          fi
+      - name: Manually export IPA (xcodebuild -exportArchive without -allowProvisioningUpdates)
+        id: locate_ipa
+        run: |
+          ARCHIVE=$(find desktop/src-tauri/gen/apple/build -maxdepth 3 -name '*.xcarchive' -type d | head -1)
+          if [ -z "$ARCHIVE" ]; then
+            echo "::error::No .xcarchive found"
+            exit 1
+          fi
+          # Use the same ExportOptions.plist we already wrote (manual signing
+          # + provisioning profile mapping). xcodebuild will resolve the named
+          # profile from ~/Library/MobileDevice/Provisioning Profiles/ where
+          # we installed it earlier.
+          EXPORT_PLIST="desktop/src-tauri/gen/apple/ExportOptions.plist"
+          EXPORT_DIR="desktop/src-tauri/gen/apple/build/manual-export"
+          mkdir -p "$EXPORT_DIR"
+          xcodebuild -exportArchive \
+            -archivePath "$ARCHIVE" \
+            -exportOptionsPlist "$EXPORT_PLIST" \
+            -exportPath "$EXPORT_DIR"
+          IPA=$(find "$EXPORT_DIR" -name '*.ipa' | head -1)
+          if [ -z "$IPA" ]; then
+            echo "::error::Manual export produced no .ipa"
+            ls -la "$EXPORT_DIR"
+            exit 1
+          fi
+          echo "Exported IPA: $IPA"
           echo "ipa_path=$IPA" >> "$GITHUB_OUTPUT"
       - name: Upload IPA to TestFlight
         if: ${{ github.event_name == 'push' || inputs.skip_testflight != true }}
