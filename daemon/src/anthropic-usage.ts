@@ -1,15 +1,22 @@
 import { AnthropicUsageResponse, ApiUsageStats, DailyUsageBucket } from './types';
 
-// Approximate pricing per million tokens (USD) - update as needed
+// Approximate pricing per million tokens (USD) - update as needed.
+// 5-minute cache write rates. Source: docs.anthropic.com/en/docs/about-claude/pricing
 const PRICING: Record<
   string,
   { input: number; output: number; cacheWrite: number; cacheRead: number }
 > = {
-  'claude-opus-4-6-20260210': { input: 15, output: 75, cacheWrite: 18.75, cacheRead: 1.5 },
+  // Current generation (base names returned by Admin API)
+  'claude-opus-4-7': { input: 5, output: 25, cacheWrite: 6.25, cacheRead: 0.5 },
+  'claude-opus-4-6': { input: 5, output: 25, cacheWrite: 6.25, cacheRead: 0.5 },
+  'claude-sonnet-4-6': { input: 3, output: 15, cacheWrite: 3.75, cacheRead: 0.3 },
+  'claude-haiku-4-5': { input: 1, output: 5, cacheWrite: 1.25, cacheRead: 0.1 },
+  // Dated variants (kept for historical buckets)
+  'claude-opus-4-6-20260210': { input: 5, output: 25, cacheWrite: 6.25, cacheRead: 0.5 },
   'claude-opus-4-5-20251101': { input: 15, output: 75, cacheWrite: 18.75, cacheRead: 1.5 },
   'claude-sonnet-4-5-20250929': { input: 3, output: 15, cacheWrite: 3.75, cacheRead: 0.3 },
   'claude-sonnet-4-5-20251101': { input: 3, output: 15, cacheWrite: 3.75, cacheRead: 0.3 },
-  'claude-haiku-4-5-20251001': { input: 0.8, output: 4, cacheWrite: 1, cacheRead: 0.08 },
+  'claude-haiku-4-5-20251001': { input: 1, output: 5, cacheWrite: 1.25, cacheRead: 0.1 },
   'claude-sonnet-4-20250514': { input: 3, output: 15, cacheWrite: 3.75, cacheRead: 0.3 },
   'claude-3-5-sonnet-20241022': { input: 3, output: 15, cacheWrite: 3.75, cacheRead: 0.3 },
   'claude-3-5-haiku-20241022': { input: 0.8, output: 4, cacheWrite: 1, cacheRead: 0.08 },
@@ -18,24 +25,51 @@ const PRICING: Record<
   'claude-3-haiku-20240307': { input: 0.25, output: 1.25, cacheWrite: 0.3, cacheRead: 0.03 },
 };
 
+// Strip a trailing -YYYYMMDD date suffix from a model id so we can compare family-version segments.
+function stripDateSuffix(model: string): string {
+  return model.replace(/-\d{8}$/, '');
+}
+
+// Track which unknown models we've already warned about so logs aren't spammed.
+const warnedUnknownModels = new Set<string>();
+
 function getModelPricing(model: string): {
   input: number;
   output: number;
   cacheWrite: number;
   cacheRead: number;
 } {
-  // Try exact match first
+  // 1. Exact match
   if (PRICING[model]) return PRICING[model];
 
-  // Try partial match (model names often have date suffixes)
+  // 2. Bidirectional family-version match.
+  // Compare segments after stripping any trailing -YYYYMMDD suffix on either side.
+  // e.g. "claude-opus-4-7-20260301" -> ["claude","opus","4","7"] matches
+  //      "claude-opus-4-7"          -> ["claude","opus","4","7"]
+  const modelSegs = stripDateSuffix(model).split('-');
   for (const [key, value] of Object.entries(PRICING)) {
-    if (model.includes(key.split('-').slice(0, -1).join('-'))) {
-      return value;
+    const keySegs = stripDateSuffix(key).split('-');
+    if (modelSegs.length !== keySegs.length) continue;
+    let matches = true;
+    for (let i = 0; i < keySegs.length; i++) {
+      if (modelSegs[i] !== keySegs[i]) {
+        matches = false;
+        break;
+      }
     }
+    if (matches) return value;
   }
 
-  // Default to Sonnet pricing as fallback
-  return { input: 3, output: 15, cacheWrite: 3.75, cacheRead: 0.3 };
+  // 3. No match — log once and return zero rates so unknown models surface as
+  // visibly $0 in the dashboard rather than silently undercharging at Sonnet rates.
+  if (!warnedUnknownModels.has(model)) {
+    warnedUnknownModels.add(model);
+    console.warn(
+      `[anthropic-usage] No pricing entry for model "${model}" — cost will report as $0. ` +
+        `Add it to PRICING in daemon/src/anthropic-usage.ts.`
+    );
+  }
+  return { input: 0, output: 0, cacheWrite: 0, cacheRead: 0 };
 }
 
 export async function fetchAnthropicUsage(

@@ -13,8 +13,6 @@ import { ContextMenu, ContextMenuEntry } from './ContextMenu';
 import { ConnectionSnapshot } from '../services/ConnectionManager';
 import { Sparkline } from './Sparkline';
 import { connectionManager } from '../services/ConnectionManager';
-import { DigestData } from '../hooks/useAwayDigest';
-import { AwayDigest } from './AwayDigest';
 import { SkeletonSessionCard } from './Skeleton';
 
 const STATUS_DOT_CLASS: Record<SessionSummary['status'], string> = {
@@ -61,8 +59,6 @@ interface MobileDashboardProps {
   onOpenInSplit?: (serverId: string, sessionId: string) => void;
   onCloseSplit?: () => void;
   secondarySession?: ActiveSession | null;
-  digest?: DigestData;
-  onDismissDigest?: () => void;
 }
 
 export function MobileDashboard({
@@ -75,8 +71,6 @@ export function MobileDashboard({
   onOpenInSplit,
   onCloseSplit,
   secondarySession,
-  digest,
-  onDismissDigest,
 }: MobileDashboardProps) {
   const { snapshots } = useConnections();
   const { servers, toggleEnabled, deleteServer } = useServers();
@@ -142,24 +136,6 @@ export function MobileDashboard({
       </header>
 
       <div className="mobile-dashboard-content">
-        {digest && onDismissDigest && (
-          <AwayDigest
-            digest={digest}
-            onDismiss={onDismissDigest}
-            onSelectSession={(sessionId) => {
-              // Find which server has this session
-              for (const snap of snapshots) {
-                const summary = summaries.get(snap.serverId);
-                if (summary?.sessions.some(s => s.id === sessionId)) {
-                  onSelectSession(snap.serverId, sessionId);
-                  onDismissDigest();
-                  return;
-                }
-              }
-            }}
-          />
-        )}
-
         {snapshots.length === 0 && !addingServer && (
           <div className="mobile-empty-state">
             <div className="mobile-empty-icon">&#x1F4E1;</div>

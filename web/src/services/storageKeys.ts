@@ -9,7 +9,6 @@ export const DEVICE_ID_KEY = 'companion_device_id';
 export const BROWSER_NOTIFICATIONS_KEY = 'companion_browser_notifications';
 export const RECENT_DIRS_KEY = 'companion_recent_dirs';
 export const HISTORY_KEY = 'companion_history';
-export const AWAY_KEY = 'companion_last_active';
 export const AUTO_APPROVE_KEY = 'companion_auto_approve_sessions';
 export const SIDEBAR_WIDTH_KEY = 'companion_sidebar_width';
 export const SPLIT_RATIO_KEY = 'companion_split_ratio';

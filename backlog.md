@@ -66,3 +66,22 @@ Drag-to-edge snap system like Windows 11 or tiling WMs. Instead of just a dragga
 - Would replace the current split divider mechanism with something much more flexible
 
 **Inspiration:** VS Code editor groups, Windows snap layouts, i3/sway tiling
+
+## Cross-Daemon Routing — Smart `remote_dispatch` Across Multiple Servers
+
+Today `companion-remote`'s `remote_dispatch` requires the caller to name a specific server. With a Mac mini joining the LAN alongside the Linux box and MacBook, manual `server: "mac"` becomes a bad default — each machine has different strengths (CPU, GPU, Xcode/iOS sim, licensed tools, idle vs. busy).
+
+**Idea:** Intelligent routing where `remote_dispatch` (or a new `remote_pick_server` tool) picks the best daemon based on a hint plus runtime signals.
+
+**Rough design:**
+- Extend each daemon's advertised `capabilities` with runtime signals: active-session count (idle/busy), OS, labels (`gpu`, `xcode`, `build-server`).
+- New MCP tool `remote_pick_server` or a flag on `remote_dispatch` taking hints like `{ prefer: "idle", requires: ["macos"] }`.
+- Start with an opinionated scoring function in the MCP; expose raw signals too so callers can override.
+
+**Tradeoff:** Bake scoring into the MCP (simple, opinionated) vs. expose raw signals and let the caller decide (flexible but more per-call prompting).
+
+**Blocker / when worth building:** Once the Mac mini is online and there are 3+ daemons. Not urgent with only 2.
+
+## /dispatch-remote skill — wrap remote_dispatch flows
+
+Once the cross-host dispatch flow is exercised regularly, wrap the common pattern (spawn remote Claude via `remote_dispatch` -> poll or inject follow-ups with `remote_send_input` -> surface results) as a slash skill. Hold off until there's a clear repeatable shape — MCP tools alone are fine for ad-hoc use.

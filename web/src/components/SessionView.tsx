@@ -28,12 +28,13 @@ import { TerminalPanel } from './TerminalPanel';
 import { WorkGroupBar } from './WorkGroupBar';
 import { WorkGroupPanel } from './WorkGroupPanel';
 import { FileFinder } from './FileFinder';
-import { VoiceMode } from './VoiceMode';
 import { SkillBrowser } from './SkillBrowser';
 import { useBookmarks } from '../hooks/useBookmarks';
 import { BookmarkList } from './BookmarkList';
 import { FetchErrorBanner } from './FetchErrorBanner';
 import { ComponentErrorBoundary } from './ComponentErrorBoundary';
+import { ScrollDebugPanel } from './ScrollDebugPanel';
+import { SettingsModal } from './SettingsModal';
 import { hideToolsKey } from '../services/storageKeys';
 
 const CodeReviewModal = lazy(() => import('./CodeReviewModal').then(m => ({ default: m.CodeReviewModal })));
@@ -146,31 +147,46 @@ export function SessionView({
   // Code review modal state
   const [showCodeReviewModal, setShowCodeReviewModal] = useState(false);
 
-  // Voice mode state
-  const [showVoiceMode, setShowVoiceMode] = useState(false);
-
   // Skill browser state
   const [showSkillBrowser, setShowSkillBrowser] = useState(false);
+
+  // Settings modal state (gear icon in header)
+  const [showSettings, setShowSettings] = useState(false);
+
+  // Scroll debug panel state (Cmd+Alt+Shift+D)
+  const [showScrollDebugPanel, setShowScrollDebugPanel] = useState(false);
 
   // Bookmarks
   const { addBookmark, removeBookmark, isBookmarked, sessionBookmarks } = useBookmarks(serverId);
   const [showBookmarks, setShowBookmarks] = useState(false);
   const currentBookmarks = sessionId ? sessionBookmarks(sessionId) : [];
 
-  // Tool card visibility (persisted per session in localStorage)
+  // Tool card visibility (persisted per session in localStorage).
+  //
+  // We use the "derived state with sync update during render" pattern
+  // (see https://react.dev/reference/react/useState#storing-information-from-previous-renders)
+  // so that on a session change, the very first render sees the correct
+  // `hideTools` value rather than the stale value from the prior session.
+  // A useEffect-based resync would leave a one-frame window where the
+  // MessageList rendered against the wrong filter state — historically that
+  // window was visible as a "blank chat until you toggle the filter" bug,
+  // because the inline per-message filter ran against a mismatched snapshot.
   const toolsKey = sessionId ? hideToolsKey(sessionId) : null;
-  const [hideTools, setHideToolsRaw] = useState(() => {
-    if (!toolsKey) return false;
-    return localStorage.getItem(toolsKey) === '1';
-  });
+  const readHideTools = (key: string | null) =>
+    key ? localStorage.getItem(key) === '1' : false;
+  const [hideToolsState, setHideToolsState] = useState<{ key: string | null; value: boolean }>(
+    () => ({ key: toolsKey, value: readHideTools(toolsKey) }),
+  );
+  if (hideToolsState.key !== toolsKey) {
+    // Sync recompute during render — no extra commit, no stale first paint.
+    setHideToolsState({ key: toolsKey, value: readHideTools(toolsKey) });
+  }
+  const hideTools = hideToolsState.key === toolsKey
+    ? hideToolsState.value
+    : readHideTools(toolsKey);
   const setHideTools = useCallback((hide: boolean) => {
-    setHideToolsRaw(hide);
+    setHideToolsState({ key: toolsKey, value: hide });
     if (toolsKey) localStorage.setItem(toolsKey, hide ? '1' : '0');
-  }, [toolsKey]);
-
-  // Sync hideTools when session changes
-  useEffect(() => {
-    setHideToolsRaw(toolsKey ? localStorage.getItem(toolsKey) === '1' : false);
   }, [toolsKey]);
 
   const searchMatches = useMemo(() => {
@@ -209,19 +225,19 @@ export function SessionView({
 
   // Signal to Dashboard that an overlay is open (for back gesture coordination)
   useEffect(() => {
-    const isOverlay = showTerminal || showWorkGroupPanel || showConversationSearch || showFileFinder || showCodeReviewModal || dispatchOverlayOpen || !!viewingFile || !!artifactContent || showBookmarks || showVoiceMode || showSkillBrowser;
+    const isOverlay = showTerminal || showWorkGroupPanel || showConversationSearch || showFileFinder || showCodeReviewModal || dispatchOverlayOpen || !!viewingFile || !!artifactContent || showBookmarks || showSkillBrowser || showSettings;
     document.body.dataset.overlay = isOverlay ? 'true' : '';
     return () => { document.body.dataset.overlay = ''; };
-  }, [showTerminal, showWorkGroupPanel, showConversationSearch, showFileFinder, showCodeReviewModal, dispatchOverlayOpen, viewingFile, artifactContent, showBookmarks, showVoiceMode, showSkillBrowser]);
+  }, [showTerminal, showWorkGroupPanel, showConversationSearch, showFileFinder, showCodeReviewModal, dispatchOverlayOpen, viewingFile, artifactContent, showBookmarks, showSkillBrowser, showSettings]);
 
   // Listen for close-overlay event from Dashboard's back gesture handler
   useEffect(() => {
     const handler = () => {
       // Close innermost/topmost overlay first
-      if (showSkillBrowser) setShowSkillBrowser(false);
+      if (showSettings) setShowSettings(false);
+      else if (showSkillBrowser) setShowSkillBrowser(false);
       else if (artifactContent) setArtifactContent(null);
       else if (viewingFile) setViewingFile(null);
-      else if (showVoiceMode) setShowVoiceMode(false);
       else if (dispatchOverlayOpen) setDispatchCollapsed(true);
       else if (showCodeReviewModal) setShowCodeReviewModal(false);
       else if (showConversationSearch) setShowConversationSearch(false);
@@ -231,13 +247,12 @@ export function SessionView({
       else if (showWorkGroupPanel) setShowWorkGroupPanel(false);
     };
     return eventBus.on('close-overlay', handler);
-  }, [showTerminal, showWorkGroupPanel, showConversationSearch, showFileFinder, showCodeReviewModal, dispatchOverlayOpen, viewingFile, artifactContent, showBookmarks, showVoiceMode, showSkillBrowser]);
+  }, [showTerminal, showWorkGroupPanel, showConversationSearch, showFileFinder, showCodeReviewModal, dispatchOverlayOpen, viewingFile, artifactContent, showBookmarks, showSkillBrowser, showSettings]);
 
   // Reset views when session changes, auto-focus on desktop only
   useEffect(() => {
     setShowTerminal(false);
     setShowWorkGroupPanel(false);
-    setShowVoiceMode(false);
     setShowSkillBrowser(false);
     setViewingFile(null);
     if (serverId && sessionId && !isMobileViewport()) {
@@ -440,6 +455,7 @@ export function SessionView({
     { key: 't', meta: true, alt: true, handler: () => { if (tmuxSessionName) setShowTerminal(prev => !prev); } },
     { key: 'a', meta: true, alt: true, shift: true, handler: () => bypass.toggle() },
     { key: 'm', meta: true, alt: true, shift: true, handler: () => { if (sessionId) sessionMute.toggleMute(sessionId); } },
+    { key: 'd', meta: true, alt: true, shift: true, handler: () => setShowScrollDebugPanel(prev => !prev) },
     { key: 'Escape', handler: () => {
       if (showCodeReviewModal) setShowCodeReviewModal(false);
       else if (showFileFinder) setShowFileFinder(false);
@@ -597,8 +613,9 @@ export function SessionView({
     </>
   );
 
-  // Operational buttons — shown in bottom bar on mobile, in header bar on desktop
-  const operationalButtons = (
+  // Transient / view-mode buttons — stay in header (not settings).
+  // Cancel: only when running. Terminal: only when tmux is attached.
+  const transientButtons = (
     <>
       {status?.isRunning && !status?.isWaitingForInput && tmuxSessionName && (
         <button
@@ -609,30 +626,6 @@ export function SessionView({
           Cancel
         </button>
       )}
-      {sessionId && (
-        <button
-          className={`auto-approve-btn ${!sessionMute.isMuted(sessionId) ? 'auto-approve-btn-active' : ''}`}
-          onClick={() => sessionMute.toggleMute(sessionId)}
-          title={sessionMute.isMuted(sessionId) ? 'Unmute notifications' : 'Mute notifications'}
-        >
-          {sessionMute.isMuted(sessionId) ? 'Notify: OFF' : 'Notify: ON'}
-        </button>
-      )}
-      <button
-        className={`auto-approve-btn ${bypass.enabled ? 'auto-approve-btn-active' : ''}`}
-        onClick={bypass.toggle}
-        disabled={bypass.loading}
-        title={bypass.enabled ? 'Permission bypass enabled — tools run without prompts' : 'Permission bypass disabled'}
-      >
-        {bypass.enabled ? 'Bypass: ON' : 'Bypass: OFF'}
-      </button>
-      <button
-        className={`auto-approve-btn ${!hideTools ? 'auto-approve-btn-active' : ''}`}
-        onClick={() => setHideTools(!hideTools)}
-        title={hideTools ? 'Show tool cards' : 'Hide tool cards'}
-      >
-        {hideTools ? 'Tools: OFF' : 'Tools: ON'}
-      </button>
       {tmuxSessionName && (
         <button
           className={`session-header-btn ${showTerminal ? 'terminal-active' : ''}`}
@@ -642,21 +635,48 @@ export function SessionView({
           Terminal
         </button>
       )}
-      <button
-        className="session-header-btn"
-        onClick={() => setShowVoiceMode(true)}
-        title="Voice mode"
-      >
-        Voice
-      </button>
     </>
+  );
+
+  // Agent dispatch pill — moved from below message list to header.
+  // Renders only when there are agents to surface.
+  const agentPill = (totalAgents > 0 && serverId && dispatchCollapsed) ? (
+    <button
+      className="session-agent-pill"
+      onClick={() => setDispatchCollapsed(false)}
+      title="Open dispatch panel"
+    >
+      <span className={`dispatch-mobile-dot ${runningCount > 0 ? 'dispatch-dot-running' : 'dispatch-dot-done'}`} />
+      <span className="session-agent-pill-label">
+        {runningCount > 0
+          ? `${runningCount} running`
+          : `${totalAgents} done`}
+        {(totalAgents - runningCount) > 0 && runningCount > 0 &&
+          ` / ${totalAgents - runningCount} done`}
+      </span>
+    </button>
+  ) : null;
+
+  // Gear icon — opens SettingsModal
+  const gearButton = (
+    <button
+      className="session-header-gear"
+      onClick={() => setShowSettings(true)}
+      title="Session settings"
+      aria-label="Open session settings"
+    >
+      {/* Unicode gear glyph */}
+      {'⚙'}
+    </button>
   );
 
   // Combined for desktop header
   const actionButtons = (
     <div className="session-header-actions">
-      {operationalButtons}
+      {transientButtons}
       {viewButtons}
+      {agentPill}
+      {gearButton}
     </div>
   );
 
@@ -687,7 +707,10 @@ export function SessionView({
         )}
         {mobile ? (
           <div className="session-header-actions">
+            {transientButtons}
             {viewButtons}
+            {agentPill}
+            {gearButton}
           </div>
         ) : actionButtons}
       </div>
@@ -720,14 +743,42 @@ export function SessionView({
 
       <div className="session-conversation" onClick={handleConversationClick} style={{ display: showTerminal || showWorkGroupPanel ? 'none' : undefined }}>
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minHeight: 0 }}>
-            <WaitingIndicator status={status} serverId={serverId} sessionId={sessionId} tmuxSessionName={tmuxSessionName} />
-
-            {workGroup && (workGroup.status === 'active' || workGroup.status === 'merging' || workGroup.status === 'completed' || workGroup.status === 'failed') && (
-              <WorkGroupBar
-                group={workGroup}
-                onClick={() => setShowWorkGroupPanel(true)}
-              />
-            )}
+            {(() => {
+              const hasWaiting = !!status && (
+                !!status.feedbackPrompt ||
+                status.isWaitingForInput ||
+                !!status.currentActivity
+              );
+              const hasWorkGroup = !!workGroup && (
+                workGroup.status === 'active' ||
+                workGroup.status === 'merging' ||
+                workGroup.status === 'completed' ||
+                workGroup.status === 'failed'
+              );
+              if (!hasWaiting && !hasWorkGroup) return null;
+              return (
+                <div className="session-bars-row">
+                  {hasWaiting && (
+                    <div className="session-bars-cell">
+                      <WaitingIndicator
+                        status={status}
+                        serverId={serverId}
+                        sessionId={sessionId}
+                        tmuxSessionName={tmuxSessionName}
+                      />
+                    </div>
+                  )}
+                  {hasWorkGroup && workGroup && (
+                    <div className="session-bars-cell">
+                      <WorkGroupBar
+                        group={workGroup}
+                        onClick={() => setShowWorkGroupPanel(true)}
+                      />
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
 
             <TaskList tasks={tasks} loading={tasksLoading} />
 
@@ -749,20 +800,6 @@ export function SessionView({
             )}
             {imageSendError && (
               <FetchErrorBanner message={imageSendError} onDismiss={() => setImageSendError(null)} />
-            )}
-
-            {!mobile && dispatchCollapsed && totalAgents > 0 && serverId && (
-              <div className="dispatch-collapsed-bar" onClick={() => setDispatchCollapsed(false)}>
-                <span className={`dispatch-mobile-dot ${runningCount > 0 ? 'dispatch-dot-running' : 'dispatch-dot-done'}`} />
-                <span className="dispatch-collapsed-label">
-                  {runningCount > 0
-                    ? `${runningCount} agent${runningCount !== 1 ? 's' : ''} running`
-                    : `${totalAgents} agent${totalAgents !== 1 ? 's' : ''} done`}
-                  {(totalAgents - runningCount) > 0 && runningCount > 0 &&
-                    ` / ${totalAgents - runningCount} done`}
-                </span>
-                <span className="dispatch-collapsed-expand">{'\u25B2'}</span>
-              </div>
             )}
 
             {showSearch && (
@@ -822,13 +859,6 @@ export function SessionView({
             />
           </div>
 
-          {mobile && (
-            <div className="session-bottom-bar">
-              <div className="session-header-actions">
-                {operationalButtons}
-              </div>
-            </div>
-          )}
       </div>
 
       {showDispatchPanel && !mobile && (
@@ -906,15 +936,6 @@ export function SessionView({
         />
       )}
 
-      {showVoiceMode && (
-        <VoiceMode
-          highlights={highlights}
-          status={status}
-          sendInput={handleSend}
-          onClose={() => setShowVoiceMode(false)}
-        />
-      )}
-
       {showSkillBrowser && serverId && (
         <SkillBrowser
           serverId={serverId}
@@ -923,6 +944,25 @@ export function SessionView({
           onClose={() => setShowSkillBrowser(false)}
         />
       )}
+
+      {showScrollDebugPanel && (
+        <ScrollDebugPanel
+          sessionId={sessionId}
+          onClose={() => setShowScrollDebugPanel(false)}
+        />
+      )}
+
+      <SettingsModal
+        open={showSettings}
+        onClose={() => setShowSettings(false)}
+        notifyEnabled={sessionId ? !sessionMute.isMuted(sessionId) : false}
+        onToggleNotify={() => { if (sessionId) sessionMute.toggleMute(sessionId); }}
+        bypassEnabled={bypass.enabled}
+        bypassLoading={bypass.loading}
+        onToggleBypass={bypass.toggle}
+        hideTools={hideTools}
+        onToggleHideTools={() => setHideTools(!hideTools)}
+      />
     </div>
   );
 }

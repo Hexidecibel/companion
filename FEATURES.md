@@ -487,6 +487,21 @@ Comprehensive automated tests for daemon parser and web client services.
 - ServerConnection tests (23): connection lifecycle, auth handshake, reconnection, request/response matching, message handlers, config updates
 - ConnectionManager tests (14): multi-server management, snapshots, connect/disconnect, change handlers
 
+## UX Paper-Cut Round (2026-04-29)
+Batch of 11 fixes targeting friction points across session view, dashboards, costs, and platform-specific behaviors. Net -786 lines across 19 files.
+
+- **Blank chat on session open fixed** — `MessageList` filter moved into `useMemo([highlights, hideTools])`; `SessionView` `hideTools` refactored to derived-state-during-render (was a stale-frame `useEffect` resync)
+- **Stale disconnect errors cleared on reconnect** — `ServerConnection` emits `onReconnect` (with `hasConnectedBefore` flag, no double-fetch on initial mount); `useConversation` subscribes and refetches → clears red error banners
+- **Agent button moved to header** — relocated from `dispatch-collapsed-bar` to header right pill for visibility
+- **Voice input removed entirely** — deleted `VoiceMode.tsx`, `useSpeechRecognition.ts`, `useTextToSpeech.ts`, `useVoiceMode.ts`, `ttsPrep.ts` (~240 CSS lines too); Android `RECORD_AUDIO` / `MODIFY_AUDIO_SETTINGS` permissions removed
+- **Settings modal** — new `SettingsModal.tsx` triggered from header gear icon; houses Notify/Bypass/Tools toggles. Hooks still owned by SessionView, modal is presentational
+- **Bars on one row** — WaitingIndicator + WorkGroupBar wrap in flex container, 50/50 desktop, stacked at ≤768px, hidden when empty
+- **New session redesign** — `NewSessionPanel` rewritten with segmented Recent/Browse tabs; per-path scrollTop cache (Map ref) restores position on back-nav; last tab persisted per server in localStorage `new-session-tab:<serverId>`
+- **Scroll-jump diagnostics (telemetry only)** — new `scrollDebugger.ts` singleton (500-event ring buffer, FIFO, CSV export, gated on `localStorage.scroll-debug-enabled === 'true'`); new `ScrollDebugPanel.tsx`; 8 record sites in `MessageList`; hotkey Cmd/Ctrl+Alt+Shift+D in SessionView
+- **Copy/link context menu** — removed broken "Copy selection" (only copied first word; long-press drag-select branch and `selectedText` state were dead); added "Open Link" before "Copy link" for detected URLs
+- **"What's New" / AwayDigest removed** — `AwayDigest.tsx` + `useAwayDigest.ts` + CSS + `companion_last_active` storage key all gone. Daemon `get_digest` endpoint kept (referenced by a test)
+- **Cost dashboard pricing fix** — root cause: existing `claude-opus-4-6-20260210` entry had Opus-3-era pricing ($15/$75) which silently undercharged via partial-match. Added base names `claude-opus-4-7`, `claude-opus-4-6`, `claude-sonnet-4-6` at correct rates ($5/$25 / $5/$25 / $3/$15); Haiku 4.5 corrected ($0.80/$4 → $1/$5); bidirectional segment-based partial-match; on miss: `console.warn` once + return zero rates (visible $0 instead of silent undercharge); tokenizer warning banner for Opus 4.7
+
 ## Cross-Daemon Dispatch (companion-remote MCP)
 MCP server that lets Claude on one Companion box dispatch work to Claude on another, routed through each machine's daemon. See `mcp/` and `daemon/src/handlers/remote.ts`.
 

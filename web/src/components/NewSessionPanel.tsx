@@ -1,3 +1,4 @@
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useNewSession } from '../hooks/useNewSession';
 import { isMobileViewport } from '../utils/platform';
 
@@ -6,6 +7,28 @@ interface NewSessionPanelProps {
   serverName: string;
   onCreated: (serverId: string, sessionName: string) => void;
   onClose: () => void;
+}
+
+type Tab = 'recent' | 'browse';
+
+const TAB_STORAGE_PREFIX = 'new-session-tab:';
+
+function readStoredTab(serverId: string): Tab | null {
+  try {
+    const raw = localStorage.getItem(TAB_STORAGE_PREFIX + serverId);
+    if (raw === 'recent' || raw === 'browse') return raw;
+  } catch {
+    // ignore
+  }
+  return null;
+}
+
+function writeStoredTab(serverId: string, tab: Tab) {
+  try {
+    localStorage.setItem(TAB_STORAGE_PREFIX + serverId, tab);
+  } catch {
+    // ignore
+  }
 }
 
 export function NewSessionPanel({
@@ -32,6 +55,51 @@ export function NewSessionPanel({
   } = useNewSession(serverId);
 
   const mobile = isMobileViewport();
+
+  // Tab state — load from storage, fall back to mobile-default 'browse',
+  // desktop-default 'recent'.
+  const [tab, setTab] = useState<Tab>(() => {
+    const stored = readStoredTab(serverId);
+    if (stored) return stored;
+    return mobile ? 'browse' : 'recent';
+  });
+
+  // If recents are empty after loading and the user hasn't picked a tab
+  // explicitly this session, snap to 'browse'.
+  const userPickedRef = useRef(false);
+  useEffect(() => {
+    if (userPickedRef.current) return;
+    if (!recentsLoading && recents.length === 0 && tab === 'recent') {
+      setTab('browse');
+    }
+  }, [recentsLoading, recents.length, tab]);
+
+  const selectTab = (next: Tab) => {
+    userPickedRef.current = true;
+    setTab(next);
+    writeStoredTab(serverId, next);
+  };
+
+  // Per-path scroll cache. Key is the currentPath being viewed in Browse;
+  // value is the most recent scrollTop for that path's list. Preserved
+  // across navigations so '..' restores the previous position.
+  const scrollCache = useRef<Map<string, number>>(new Map());
+  const browseScrollRef = useRef<HTMLDivElement | null>(null);
+
+  // Restore scrollTop when entries for a new currentPath have rendered.
+  useLayoutEffect(() => {
+    if (tab !== 'browse') return;
+    const el = browseScrollRef.current;
+    if (!el) return;
+    const cached = scrollCache.current.get(currentPath);
+    el.scrollTop = cached ?? 0;
+  }, [currentPath, entries, tab]);
+
+  const handleBrowseScroll = () => {
+    const el = browseScrollRef.current;
+    if (!el) return;
+    scrollCache.current.set(currentPath, el.scrollTop);
+  };
 
   const handleCreate = async () => {
     const ok = await create();
@@ -64,10 +132,112 @@ export function NewSessionPanel({
     return p;
   };
 
-  const dirs = entries.filter((e) => e.isDirectory && e.name !== '..');
+  const dirs = useMemo(
+    () => entries.filter((e) => e.isDirectory && e.name !== '..'),
+    [entries],
+  );
   const parentPath = currentPath && currentPath !== '/'
     ? currentPath.replace(/\/[^/]+\/?$/, '') || '/'
     : null;
+
+  const recentBadge = recents.length;
+
+  const recentPanel = (
+    <div
+      className="new-session-tabpanel new-session-tabpanel-recent"
+      role="tabpanel"
+      id="new-session-panel-recent"
+      aria-labelledby="new-session-tab-recent"
+      hidden={tab !== 'recent'}
+    >
+      {recentsLoading && recents.length === 0 ? (
+        <div className="new-session-loading">Loading...</div>
+      ) : recents.length === 0 ? (
+        <div className="new-session-empty-state">
+          <div className="new-session-empty-title">No recent projects</div>
+          <div className="new-session-empty-hint">
+            Switch to Browse to pick a directory.
+          </div>
+        </div>
+      ) : (
+        <div className="new-session-recent-list">
+          {recents.map((r) => {
+            const isCreating = creating && creatingPath === r.path;
+            return (
+              <button
+                key={r.path}
+                className={`new-session-recent-card ${isCreating ? 'creating' : ''}`}
+                onClick={() => handleRecent(r.path)}
+                disabled={creating}
+              >
+                <span className="new-session-recent-name">{r.name}</span>
+                <span className="new-session-recent-path">{abbreviate(r.path)}</span>
+                {isCreating && <span className="new-session-recent-spinner" />}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+
+  const browsePanel = (
+    <div
+      className="new-session-tabpanel new-session-tabpanel-browse"
+      role="tabpanel"
+      id="new-session-panel-browse"
+      aria-labelledby="new-session-tab-browse"
+      hidden={tab !== 'browse'}
+      ref={browseScrollRef}
+      onScroll={handleBrowseScroll}
+    >
+      <div className="new-session-path-row">
+        <input
+          type="text"
+          className="new-session-input"
+          value={manualPath}
+          onChange={(e) => setManualPath(e.target.value)}
+          onKeyDown={handleKeyDown}
+          placeholder="/path/to/project"
+          spellCheck={false}
+          autoFocus={!mobile && tab === 'browse'}
+        />
+        <button
+          className="new-session-go-btn"
+          onClick={navigateToInput}
+          disabled={!manualPath.trim() || browsing}
+          title="Navigate to path"
+        >
+          {browsing ? '...' : '▸'}
+        </button>
+      </div>
+
+      <div className="new-session-browser-list">
+        {parentPath !== null && (
+          <button
+            className="new-session-browser-item"
+            onClick={() => browseTo(parentPath)}
+            disabled={browsing}
+          >
+            <span className="new-session-folder-icon">..</span>
+          </button>
+        )}
+        {dirs.map((entry) => (
+          <button
+            key={entry.path}
+            className="new-session-browser-item"
+            onClick={() => browseTo(entry.path)}
+            disabled={browsing}
+          >
+            <span className="new-session-folder-icon">{entry.name}</span>
+          </button>
+        ))}
+        {!browsing && dirs.length === 0 && currentPath && (
+          <div className="new-session-empty-dir">No subdirectories</div>
+        )}
+      </div>
+    </div>
+  );
 
   const content = (
     <div className={`new-session-panel ${mobile ? 'new-session-sheet' : ''}`}>
@@ -78,98 +248,56 @@ export function NewSessionPanel({
         </button>
       </div>
 
-      <div className="new-session-body">
-        {/* Unified path input */}
-        <div className="new-session-path-row">
-          <input
-            type="text"
-            className="new-session-input"
-            value={manualPath}
-            onChange={(e) => setManualPath(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder="/path/to/project"
-            spellCheck={false}
-            autoFocus={!mobile}
-          />
-          <button
-            className="new-session-go-btn"
-            onClick={navigateToInput}
-            disabled={!manualPath.trim() || browsing}
-            title="Navigate to path"
-          >
-            {browsing ? '...' : '\u25B8'}
-          </button>
-        </div>
-
-        {error && <div className="new-session-error">{error}</div>}
-
-        {/* Recent Projects */}
-        {recents.length > 0 && (
-          <div className="new-session-section">
-            <div className="new-session-section-title">Recent</div>
-            <div className="new-session-recent-list">
-              {recents.map((r) => {
-                const isCreating = creating && creatingPath === r.path;
-                return (
-                  <button
-                    key={r.path}
-                    className={`new-session-recent-card ${isCreating ? 'creating' : ''}`}
-                    onClick={() => handleRecent(r.path)}
-                    disabled={creating}
-                  >
-                    <span className="new-session-recent-name">{r.name}</span>
-                    <span className="new-session-recent-path">{abbreviate(r.path)}</span>
-                    {isCreating && <span className="new-session-recent-spinner" />}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
-        {recentsLoading && recents.length === 0 && (
-          <div className="new-session-loading">Loading...</div>
-        )}
-
-        {/* Directory Browser */}
-        <div className="new-session-section new-session-browser-section">
-          <div className="new-session-section-title">Browse</div>
-          <div className="new-session-browser-list">
-            {parentPath !== null && (
-              <button
-                className="new-session-browser-item"
-                onClick={() => browseTo(parentPath)}
-                disabled={browsing}
-              >
-                <span className="new-session-folder-icon">..</span>
-              </button>
-            )}
-            {dirs.map((entry) => (
-              <button
-                key={entry.path}
-                className="new-session-browser-item"
-                onClick={() => browseTo(entry.path)}
-                disabled={browsing}
-              >
-                <span className="new-session-folder-icon">{entry.name}</span>
-              </button>
-            ))}
-            {!browsing && dirs.length === 0 && currentPath && (
-              <div className="new-session-empty-dir">No subdirectories</div>
-            )}
-          </div>
-        </div>
-      </div>
-
-      <div className="new-session-footer">
+      <div
+        className="new-session-tabs"
+        role="tablist"
+        aria-label="New session source"
+      >
         <button
-          className="new-session-create-btn"
-          disabled={!manualPath.trim() || creating}
-          onClick={handleCreate}
+          id="new-session-tab-recent"
+          className={`new-session-tab ${tab === 'recent' ? 'active' : ''}`}
+          role="tab"
+          aria-selected={tab === 'recent'}
+          aria-controls="new-session-panel-recent"
+          tabIndex={tab === 'recent' ? 0 : -1}
+          onClick={() => selectTab('recent')}
         >
-          {creating && !creatingPath ? 'Creating...' : 'Create Session'}
+          <span className="new-session-tab-label">Recent</span>
+          {recentBadge > 0 && (
+            <span className="new-session-tab-badge">{recentBadge}</span>
+          )}
+        </button>
+        <button
+          id="new-session-tab-browse"
+          className={`new-session-tab ${tab === 'browse' ? 'active' : ''}`}
+          role="tab"
+          aria-selected={tab === 'browse'}
+          aria-controls="new-session-panel-browse"
+          tabIndex={tab === 'browse' ? 0 : -1}
+          onClick={() => selectTab('browse')}
+        >
+          <span className="new-session-tab-label">Browse</span>
         </button>
       </div>
+
+      {error && <div className="new-session-error">{error}</div>}
+
+      <div className="new-session-body">
+        {recentPanel}
+        {browsePanel}
+      </div>
+
+      {tab === 'browse' && (
+        <div className="new-session-footer">
+          <button
+            className="new-session-create-btn"
+            disabled={!manualPath.trim() || creating}
+            onClick={handleCreate}
+          >
+            {creating && !creatingPath ? 'Creating...' : 'Create Session'}
+          </button>
+        </div>
+      )}
     </div>
   );
 

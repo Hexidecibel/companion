@@ -221,12 +221,10 @@ export const MessageBubble = memo(function MessageBubble({ message, onSelectOpti
   // Long-press touch handling for mobile context menu
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const touchStartPos = useRef<{ x: number; y: number } | null>(null);
-  const touchStartTime = useRef<number>(0);
   const didLongPress = useRef(false);
   const touchContext = useRef<{
-    type: 'link' | 'image' | 'text' | 'message';
+    type: 'link' | 'image' | 'message';
     href?: string;
-    selectedText?: string;
     imgSrc?: string;
   }>({ type: 'message' });
 
@@ -243,14 +241,11 @@ export const MessageBubble = memo(function MessageBubble({ message, onSelectOpti
     const target = e.target as HTMLElement;
     const link = target.closest('a');
     const img = target.closest('img');
-    const selection = window.getSelection()?.toString();
 
     if (link && link.href) {
       touchContext.current = { type: 'link', href: link.href };
     } else if (img) {
       touchContext.current = { type: 'image', imgSrc: img.src };
-    } else if (selection) {
-      touchContext.current = { type: 'text', selectedText: selection };
     } else {
       touchContext.current = { type: 'message' };
     }
@@ -263,7 +258,6 @@ export const MessageBubble = memo(function MessageBubble({ message, onSelectOpti
     didLongPress.current = false;
     const touch = e.touches[0];
     touchStartPos.current = { x: touch.clientX, y: touch.clientY };
-    touchStartTime.current = Date.now();
 
     // Determine what was touched
     const target = e.target as HTMLElement;
@@ -273,15 +267,10 @@ export const MessageBubble = memo(function MessageBubble({ message, onSelectOpti
     longPressTimer.current = setTimeout(() => {
       didLongPress.current = true;
 
-      // Check for text selection
-      const selection = window.getSelection()?.toString();
-
       if (link && link.href) {
         touchContext.current = { type: 'link', href: link.href };
       } else if (img) {
         touchContext.current = { type: 'image', imgSrc: img.src };
-      } else if (selection) {
-        touchContext.current = { type: 'text', selectedText: selection };
       } else {
         touchContext.current = { type: 'message' };
       }
@@ -311,44 +300,21 @@ export const MessageBubble = memo(function MessageBubble({ message, onSelectOpti
       e.preventDefault(); // Prevent click after long press
       return;
     }
-
-    // If the user drag-selected text (without triggering long-press), show context menu
-    const touchDuration = Date.now() - touchStartTime.current;
-    if (touchDuration > 300) {
-      const selection = window.getSelection()?.toString();
-      if (selection && selection.length > 0) {
-        // Small delay to let the browser finalize the selection
-        setTimeout(() => {
-          const sel = window.getSelection()?.toString();
-          if (sel && sel.length > 0) {
-            touchContext.current = { type: 'text', selectedText: sel };
-            const touch = e.changedTouches[0];
-            openMenu(touch.clientX, touch.clientY - 20);
-          }
-        }, 100);
-      }
-    }
-  }, [openMenu]);
+  }, []);
 
   const contextMenuItems = useCallback((): ContextMenuEntry[] => {
     const items: ContextMenuEntry[] = [];
     const ctx = touchContext.current;
 
     // Context-specific items first
-    if (ctx.type === 'text' && ctx.selectedText) {
-      items.push({
-        label: 'Copy selection',
-        onClick: () => copyToClipboard(ctx.selectedText!),
-      });
-    }
     if (ctx.type === 'link' && ctx.href) {
+      items.push({
+        label: 'Open Link',
+        onClick: () => openExternalUrl(ctx.href!),
+      });
       items.push({
         label: 'Copy link',
         onClick: () => copyToClipboard(ctx.href!),
-      });
-      items.push({
-        label: 'Open link',
-        onClick: () => openExternalUrl(ctx.href!),
       });
     }
     if (ctx.type === 'image' && ctx.imgSrc) {

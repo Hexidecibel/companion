@@ -17,8 +17,6 @@ import { useBrowserNotificationListener } from '../hooks/useBrowserNotificationL
 import { initPush, registerWithAllServers } from '../services/push';
 import { isTauri, isTauriDesktop, isMobileViewport } from '../utils/platform';
 import { useServers } from '../hooks/useServers';
-import { useAwayDigest } from '../hooks/useAwayDigest';
-import { AwayDigest } from './AwayDigest';
 import { SIDEBAR_WIDTH_KEY, SPLIT_RATIO_KEY } from '../services/storageKeys';
 
 interface DashboardProps {
@@ -58,9 +56,6 @@ export function Dashboard({ onSettings }: DashboardProps) {
     : true;
   const workersEnabled = gitEnabled && (activeSession ? isParallelWorkersEnabled(activeSession.serverId) : true);
   const activeWorkGroups = useWorkGroups(activeSession?.serverId ?? null);
-
-  // Away digest - shows what happened while the user was away
-  const awayDigest = useAwayDigest();
 
   // Browser notification listener - listens on ALL connected servers
   useBrowserNotificationListener();
@@ -546,8 +541,6 @@ export function Dashboard({ onSettings }: DashboardProps) {
           onOpenInSplit={handleOpenInSplit}
           onCloseSplit={handleCloseSplit}
           secondarySession={secondarySession}
-          digest={awayDigest.digest && !awayDigest.dismissed ? awayDigest.digest : undefined}
-          onDismissDigest={awayDigest.dismiss}
         />
         {capabilitiesServerId && (
           <Suspense fallback={null}>
@@ -596,22 +589,6 @@ export function Dashboard({ onSettings }: DashboardProps) {
         className={`dashboard-main${secondarySession ? ' split-enabled' : ''}`}
         ref={splitContainerRef as React.RefObject<HTMLElement>}
       >
-        {awayDigest.digest && !awayDigest.dismissed && (
-          <AwayDigest
-            digest={awayDigest.digest}
-            onDismiss={awayDigest.dismiss}
-            onSelectSession={(sessionId) => {
-              const snap = snapshots.find(s => {
-                const summary = summaries.get(s.serverId);
-                return summary?.sessions.some(sess => sess.id === sessionId);
-              });
-              if (snap) {
-                handleSelectSession(snap.serverId, sessionId);
-                awayDigest.dismiss();
-              }
-            }}
-          />
-        )}
         <ComponentErrorBoundary name="SessionView">
           <SessionView
             serverId={activeSession?.serverId ?? null}

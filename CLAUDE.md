@@ -131,6 +131,14 @@ apksigner sign --ks desktop/debug.keystore --ks-pass pass:android --key-pass pas
 
 The JSONL conversation parser has been extracted into a standalone package at `/home/hexi/local/src/claude-conversation-parser/`. The daemon still has its own copy in `daemon/src/parser.ts` (not yet wired to the package). When making parser changes, consider syncing to the standalone package.
 
+## MCP Server (companion-remote)
+
+Lives at `mcp/`. Exposes cross-daemon dispatch tools (`remote_list_servers`, `remote_read`, `remote_get_conversation`, `remote_dispatch`, `remote_send_input`, `remote_cancel`, `remote_exec`, `remote_write`) over stdio MCP. Consumed by any Claude Code session that registers it with `claude mcp add --scope user companion-remote -- node /home/hexi/local/src/companion/mcp/dist/index.js`.
+
+Build: `cd mcp && npm install && npm run build`. Rebuild after changes — Claude Code re-invokes the stdio binary per session, so the next session picks up new output.
+
+Full setup and tool reference: `mcp/README.md`. Daemon-side capability enablement (`remote_capabilities`) is covered in the Daemon config section above; flip caps per-host with `bin/companion enable-remote`.
+
 ## Architecture
 
 1. User runs the CLI in tmux: `tmux new -s claude && claude`

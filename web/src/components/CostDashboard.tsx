@@ -119,10 +119,42 @@ export function CostDashboard({ serverId, onBack }: CostDashboardProps) {
             <DailyUsageChart daily={data.daily} />
           </div>
 
+          {/* Tokenizer note */}
+          <TokenizerNote />
+
           {/* Model breakdown */}
           {data.daily.length > 0 && <ModelBreakdown daily={data.daily} />}
         </>
       )}
+    </div>
+  );
+}
+
+function TokenizerNote() {
+  return (
+    <div
+      style={{
+        display: 'flex',
+        gap: '0.5rem',
+        alignItems: 'flex-start',
+        background: '#1f2937',
+        border: '1px solid #374151',
+        borderLeft: '3px solid #f59e0b',
+        borderRadius: '6px',
+        padding: '0.625rem 0.75rem',
+        marginBottom: '1rem',
+        fontSize: '0.75rem',
+        lineHeight: 1.4,
+        color: '#9ca3af',
+      }}
+    >
+      <span aria-hidden="true" style={{ color: '#f59e0b', fontWeight: 700, flexShrink: 0 }}>
+        !
+      </span>
+      <span>
+        Opus 4.7 uses a new tokenizer that may produce up to 35% more tokens than 4.6/4.5 for the
+        same text &mdash; actual cost per request is higher than the per-token rate alone suggests.
+      </span>
     </div>
   );
 }

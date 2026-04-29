@@ -2,6 +2,7 @@ import { Server, ConnectionState, WebSocketMessage, WebSocketResponse } from '..
 
 type MessageHandler = (message: WebSocketResponse) => void;
 type StateChangeHandler = (state: ConnectionState) => void;
+type ReconnectHandler = () => void;
 
 const MAX_RECONNECT_ATTEMPTS = Infinity;
 const INITIAL_RECONNECT_DELAY = 1000;
@@ -23,6 +24,8 @@ export class ServerConnection {
 
   private messageHandlers: Set<MessageHandler> = new Set();
   private stateChangeHandlers: Set<StateChangeHandler> = new Set();
+  private reconnectHandlers: Set<ReconnectHandler> = new Set();
+  private hasConnectedBefore = false;
   private pendingRequests: Map<string, { resolve: (r: WebSocketResponse) => void; reject: (e: Error) => void }> = new Map();
 
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -126,6 +129,20 @@ export class ServerConnection {
           reconnectAttempts: 0,
         });
         this.startPingInterval();
+
+        // Fire reconnect event only on subsequent connections (not the first).
+        // Subscribers (e.g. useConversation) use this to refetch state that may
+        // have drifted while the socket was down.
+        if (this.hasConnectedBefore) {
+          this.reconnectHandlers.forEach((handler) => {
+            try {
+              handler();
+            } catch (error) {
+              console.error('Reconnect handler error:', error);
+            }
+          });
+        }
+        this.hasConnectedBefore = true;
       } else {
         this.updateState({
           status: 'error',
@@ -396,5 +413,16 @@ export class ServerConnection {
     this.stateChangeHandlers.add(handler);
     handler(this.connectionState);
     return () => this.stateChangeHandlers.delete(handler);
+  }
+
+  /**
+   * Subscribe to reconnect events. Fires once per successful re-auth + re-subscribe
+   * AFTER the connection had previously been established and dropped. Does NOT fire
+   * on the initial connect — only on subsequent reconnections. Use this to refetch
+   * state that may have drifted while the socket was down.
+   */
+  onReconnect(handler: ReconnectHandler): () => void {
+    this.reconnectHandlers.add(handler);
+    return () => this.reconnectHandlers.delete(handler);
   }
 }

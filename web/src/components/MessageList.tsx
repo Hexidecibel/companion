@@ -1,7 +1,8 @@
-import { useRef, useState, useEffect, useLayoutEffect, useCallback, memo } from 'react';
+import { useRef, useState, useEffect, useLayoutEffect, useCallback, useMemo, memo } from 'react';
 import { ConversationHighlight } from '../types';
 import { MessageBubble } from './MessageBubble';
 import { SkeletonMessageBubble } from './Skeleton';
+import scrollDebugger from '../utils/scrollDebugger';
 
 interface MessageListProps {
   highlights: ConversationHighlight[];
@@ -58,7 +59,20 @@ export const MessageList = memo(function MessageList({
     const el = scrollContainerRef.current;
     if (!el) return;
     const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 200;
+    const prevNearBottom = isNearBottomRef.current;
     isNearBottomRef.current = nearBottom;
+    if (scrollDebugger.enabled && prevNearBottom !== nearBottom) {
+      scrollDebugger.record({
+        timestamp: performance.now(),
+        type: 'user-scroll',
+        scrollTop: el.scrollTop,
+        scrollHeight: el.scrollHeight,
+        clientHeight: el.clientHeight,
+        messageCount: prevHighlightsLenRef.current,
+        nearBottom,
+        source: 'handleScroll-nearBottom-toggle',
+      });
+    }
     setShowScrollButton(prev => {
       const next = !nearBottom;
       return prev === next ? prev : next;
@@ -85,20 +99,50 @@ export const MessageList = memo(function MessageList({
     const el = scrollContainerRef.current;
     if (!el || highlights.length === 0) return;
 
+    if (scrollDebugger.enabled) {
+      scrollDebugger.record({
+        timestamp: performance.now(),
+        type: 'effect-fired',
+        scrollTop: el.scrollTop,
+        scrollHeight: el.scrollHeight,
+        clientHeight: el.clientHeight,
+        messageCount: highlights.length,
+        nearBottom: isNearBottomRef.current,
+        source: 'session-switch-effect-entry',
+      });
+    }
+
     needsScrollRef.current = false;
     isNearBottomRef.current = true;
     setShowScrollButton(false);
 
-    const doScroll = () => {
+    let rAFCount = 0;
+    const doScroll = (source: string) => {
       const container = scrollContainerRef.current;
       if (container) {
+        if (scrollDebugger.enabled) {
+          rAFCount += 1;
+          const before = container.scrollTop;
+          scrollDebugger.record({
+            timestamp: performance.now(),
+            type: 'effect-fired',
+            scrollTop: container.scrollTop,
+            scrollHeight: container.scrollHeight,
+            clientHeight: container.clientHeight,
+            messageCount: highlights.length,
+            nearBottom: isNearBottomRef.current,
+            source,
+            rAFCount,
+            layoutShiftDelta: container.scrollHeight - before - container.clientHeight,
+          });
+        }
         container.scrollTop = container.scrollHeight;
       }
     };
 
     // Double-rAF for immediate scroll (works on desktop)
     requestAnimationFrame(() => {
-      requestAnimationFrame(doScroll);
+      requestAnimationFrame(() => doScroll('session-switch-raf'));
     });
 
     // On mobile, content layout can settle after rAFs when loading from cache.
@@ -106,7 +150,21 @@ export const MessageList = memo(function MessageList({
     const ro = new ResizeObserver((entries) => {
       for (const entry of entries) {
         if (entry.contentRect.height > 0) {
-          doScroll();
+          if (scrollDebugger.enabled) {
+            const container = scrollContainerRef.current;
+            scrollDebugger.record({
+              timestamp: performance.now(),
+              type: 'resize-observer',
+              scrollTop: container?.scrollTop ?? 0,
+              scrollHeight: container?.scrollHeight ?? 0,
+              clientHeight: container?.clientHeight ?? 0,
+              messageCount: highlights.length,
+              nearBottom: isNearBottomRef.current,
+              source: 'session-switch-resize-observer',
+              layoutShiftDelta: entry.contentRect.height,
+            });
+          }
+          doScroll('session-switch-resize-observer-doScroll');
           ro.disconnect();
         }
       }
@@ -143,13 +201,56 @@ export const MessageList = memo(function MessageList({
 
     // New messages appended while following
     if (highlights.length > prevLen && prevLen > 0 && isNearBottomRef.current) {
+      if (scrollDebugger.enabled) {
+        const el = scrollContainerRef.current;
+        scrollDebugger.record({
+          timestamp: performance.now(),
+          type: 'effect-fired',
+          scrollTop: el?.scrollTop ?? 0,
+          scrollHeight: el?.scrollHeight ?? 0,
+          clientHeight: el?.clientHeight ?? 0,
+          messageCount: highlights.length,
+          prevMessageCount: prevLen,
+          nearBottom: isNearBottomRef.current,
+          source: 'auto-follow',
+        });
+      }
       requestAnimationFrame(() => scrollToBottom(true));
+    } else if (scrollDebugger.enabled && highlights.length !== prevLen) {
+      // Detect potential jump: messageCount unchanged but scroll may have moved
+      const el = scrollContainerRef.current;
+      if (el) {
+        scrollDebugger.record({
+          timestamp: performance.now(),
+          type: 'jump-detected',
+          scrollTop: el.scrollTop,
+          scrollHeight: el.scrollHeight,
+          clientHeight: el.clientHeight,
+          messageCount: highlights.length,
+          prevMessageCount: prevLen,
+          nearBottom: isNearBottomRef.current,
+          source: 'auto-follow-skipped',
+        });
+      }
     }
   }, [highlights.length, scrollToBottom]);
 
   // Scroll to bottom when switching back from terminal to chat
   useEffect(() => {
     if (scrollToBottomProp) {
+      if (scrollDebugger.enabled) {
+        const el = scrollContainerRef.current;
+        scrollDebugger.record({
+          timestamp: performance.now(),
+          type: 'effect-fired',
+          scrollTop: el?.scrollTop ?? 0,
+          scrollHeight: el?.scrollHeight ?? 0,
+          clientHeight: el?.clientHeight ?? 0,
+          messageCount: prevHighlightsLenRef.current,
+          nearBottom: isNearBottomRef.current,
+          source: 'terminal-to-chat',
+        });
+      }
       requestAnimationFrame(() => {
         scrollToBottom(false);
         isNearBottomRef.current = true;
@@ -168,6 +269,20 @@ export const MessageList = memo(function MessageList({
       if (diff < 100) return;
       lastHeight = vv.height;
       if (isNearBottomRef.current) {
+        if (scrollDebugger.enabled) {
+          const el = scrollContainerRef.current;
+          scrollDebugger.record({
+            timestamp: performance.now(),
+            type: 'effect-fired',
+            scrollTop: el?.scrollTop ?? 0,
+            scrollHeight: el?.scrollHeight ?? 0,
+            clientHeight: el?.clientHeight ?? 0,
+            messageCount: prevHighlightsLenRef.current,
+            nearBottom: isNearBottomRef.current,
+            source: 'keyboard-resize',
+            layoutShiftDelta: diff,
+          });
+        }
         setTimeout(() => {
           scrollToBottom(false);
           isNearBottomRef.current = true;
@@ -203,6 +318,24 @@ export const MessageList = memo(function MessageList({
     observer.observe(sentinel);
     return () => observer.disconnect();
   }, [hasMore, loadingMore, onLoadMore]);
+
+  // Memoize the visible message list at the slice level so a single recompute
+  // happens per [highlights, hideTools] change instead of an inline filter
+  // running per-message during render. Doing this inline left a window where
+  // the rendered list could be computed against a stale highlights snapshot
+  // (e.g. while highlights had just populated but the parent hadn't pushed a
+  // fresh `hideTools` value yet) — toggling the filter forced a recompute and
+  // the list "appeared". Memoizing at this level closes that timing gap.
+  const visibleMessages = useMemo(() => {
+    if (!hideTools) return highlights;
+    return highlights.map((msg) => {
+      if (!msg.toolCalls) return msg;
+      return {
+        ...msg,
+        toolCalls: msg.toolCalls.filter(t => t.status === 'pending' || t.name === 'ExitPlanMode'),
+      };
+    });
+  }, [highlights, hideTools]);
 
   const handleClick = useCallback((e: React.MouseEvent) => {
     const target = e.target as HTMLElement;
@@ -251,33 +384,24 @@ export const MessageList = memo(function MessageList({
             <div className="spinner small" />
           </div>
         )}
-        {highlights.map((msg) => {
-          const filteredMsg = hideTools && msg.toolCalls
-            ? {
-                ...msg,
-                toolCalls: msg.toolCalls.filter(t => t.status === 'pending' || t.name === 'ExitPlanMode'),
-              }
-            : msg;
-
-          return (
-            <div key={msg.id} id={`msg-${msg.id}`}>
-              <MessageBubble
-                message={filteredMsg}
-                onSelectOption={onSelectOption}
-                onSelectChoice={onSelectChoice}
-                onCancelMessage={onCancelMessage}
-                onViewFile={onViewFile}
-                onViewArtifact={onViewArtifact}
-                searchTerm={searchTerm}
-                isCurrentMatch={msg.id === currentMatchId}
-                planFilePath={planFilePath}
-                isBookmarked={isBookmarked?.(msg.id)}
-                onToggleBookmark={onToggleBookmark}
-                serverId={serverId}
-              />
-            </div>
-          );
-        })}
+        {visibleMessages.map((msg) => (
+          <div key={msg.id} id={`msg-${msg.id}`}>
+            <MessageBubble
+              message={msg}
+              onSelectOption={onSelectOption}
+              onSelectChoice={onSelectChoice}
+              onCancelMessage={onCancelMessage}
+              onViewFile={onViewFile}
+              onViewArtifact={onViewArtifact}
+              searchTerm={searchTerm}
+              isCurrentMatch={msg.id === currentMatchId}
+              planFilePath={planFilePath}
+              isBookmarked={isBookmarked?.(msg.id)}
+              onToggleBookmark={onToggleBookmark}
+              serverId={serverId}
+            />
+          </div>
+        ))}
       </div>
       {showScrollButton && (
         <button

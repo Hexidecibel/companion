@@ -145,6 +145,7 @@ export function useConversation(
     let pollInFlight = false;
     let pollDebounceTimer: ReturnType<typeof setTimeout> | null = null;
     let unsubMessage: (() => void) | null = null;
+    let unsubReconnect: (() => void) | null = null;
 
     async function fetchData() {
       if (!conn || cancelled) return;
@@ -306,6 +307,23 @@ export function useConversation(
       }
     });
 
+    // On reconnect, the daemon-side per-client session subscription is lost
+    // (a fresh socket means fresh state). Re-issue switchSession and refetch
+    // so any "Server not connected" / fetch error banner clears automatically
+    // and we pick up anything that arrived while the socket was down.
+    unsubReconnect = conn.onReconnect(() => {
+      if (cancelled || !isValid(serverId!, sessionId!, guardEpoch)) return;
+      (async () => {
+        try {
+          await conn.switchSession(sessionId!);
+          if (cancelled || !isValid(serverId!, sessionId!, guardEpoch)) return;
+          await fetchData();
+        } catch {
+          // fetchData handles its own error state
+        }
+      })();
+    });
+
     // Tell the daemon which session we're viewing, then fetch data.
     (async () => {
       // Tell daemon to filter broadcasts for this session
@@ -323,6 +341,7 @@ export function useConversation(
       if (pollTimer) clearInterval(pollTimer);
       if (pollDebounceTimer) clearTimeout(pollDebounceTimer);
       if (unsubMessage) unsubMessage();
+      if (unsubReconnect) unsubReconnect();
     };
   }, [serverId, sessionId]);
 
