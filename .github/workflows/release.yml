@@ -244,6 +244,16 @@ jobs:
       - name: Build iOS IPA via Tauri (build + archive + export)
         env:
           APPLE_DEVELOPMENT_TEAM: ${{ secrets.APPLE_TEAM_ID }}
+          # Tauri's auth_credentials_from_env() (crates/tauri-cli/src/mobile/ios/build.rs)
+          # reads APPLE_API_KEY (key id), APPLE_API_ISSUER, and APPLE_API_KEY_PATH.
+          # When all three are set, Tauri passes -authenticationKey{Path,ID,IssuerID}
+          # to `xcodebuild -exportArchive`, which is required by Xcode 16/26 even with
+          # signingStyle=manual + a pre-installed provisioning profile because Tauri
+          # also sets -allowProvisioningUpdates. Without these, the export step fails
+          # with "exportArchive No Accounts" / "No profiles for 'com.hexidecibel.companion'".
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY_PATH: /Users/runner/private_keys/AuthKey_${{ secrets.APPLE_API_KEY_ID }}.p8
         run: |
           # Tauri 2.x runs xcodebuild build, then archive, then export, all
           # within one orchestrator process. This means the "Build Rust Code"
