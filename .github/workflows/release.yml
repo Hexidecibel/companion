@@ -182,8 +182,9 @@ jobs:
           # Raise iOS deployment target so Xcode 26 doesn't try to link the
           # missing Swift 5.6 backwards-compatibility shims (swiftCompatibility56,
           # swiftCompatibilityConcurrency, swiftCompatibilityPacks) that aren't
-          # shipped in the iOS 26 SDK. 15.0 is enough to drop them.
-          sed -i '' 's/IPHONEOS_DEPLOYMENT_TARGET = [0-9.]*/IPHONEOS_DEPLOYMENT_TARGET = 15.0/g' "$PBXPROJ"
+          # shipped in the iOS 26 SDK. 17.0 is enough to drop them and covers
+          # most actively-used iPhones/iPads.
+          sed -i '' 's/IPHONEOS_DEPLOYMENT_TARGET = [0-9.]*/IPHONEOS_DEPLOYMENT_TARGET = 17.0/g' "$PBXPROJ"
       - name: Decode GoogleService-Info.plist
         env:
           GOOGLE_SERVICE_INFO_PLIST_B64: ${{ secrets.GOOGLE_SERVICE_INFO_PLIST_B64 }}
@@ -224,7 +225,7 @@ jobs:
             -sdk iphoneos \
             -destination 'generic/platform=iOS' \
             -archivePath desktop/src-tauri/gen/apple/build/Companion.xcarchive \
-            IPHONEOS_DEPLOYMENT_TARGET=15.0 \
+            IPHONEOS_DEPLOYMENT_TARGET=17.0 \
             CODE_SIGN_STYLE=Manual \
             CODE_SIGN_IDENTITY="Apple Distribution" \
             DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \

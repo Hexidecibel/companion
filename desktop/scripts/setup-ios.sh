@@ -3,6 +3,10 @@
 #
 # This script patches the generated iOS project to:
 # 1. Copy custom app icons into the Xcode asset catalog
+# 2. Raise IPHONEOS_DEPLOYMENT_TARGET to 17.0 so Xcode 26 / iOS 26 SDK
+#    doesn't auto-link missing Swift compatibility shims
+#    (swiftCompatibility56, swiftCompatibilityConcurrency,
+#    swiftCompatibilityPacks) when linking libapp.a.
 #
 # Usage: cd desktop && bash scripts/setup-ios.sh
 
@@ -62,6 +66,30 @@ else
   if [ ! -d "$APPICONSET" ]; then
     echo "WARNING: AppIcon.appiconset not found at $APPICONSET"
   fi
+fi
+
+# 2. Bump IPHONEOS_DEPLOYMENT_TARGET to 17.0 in the generated pbxproj.
+#    Xcode 26 / iOS 26 SDK no longer ships the swiftCompatibility* shim
+#    libraries. Tauri's libapp.a auto-links them when the deployment target
+#    is too old, which causes:
+#      ld: Undefined symbols: __swift_FORCE_LOAD_$_swiftCompatibility56, ...
+#    Raising the target stops the auto-link and lets the iOS archive build.
+PBXPROJ_GLOB="$GEN_APPLE"/*.xcodeproj/project.pbxproj
+shopt -s nullglob
+PBXPROJS=( $PBXPROJ_GLOB )
+shopt -u nullglob
+if [ ${#PBXPROJS[@]} -gt 0 ]; then
+  for PBXPROJ in "${PBXPROJS[@]}"; do
+    echo "Patching IPHONEOS_DEPLOYMENT_TARGET -> 17.0 in $PBXPROJ"
+    # macOS sed needs a backup suffix; Linux sed is fine with empty quotes.
+    if sed --version >/dev/null 2>&1; then
+      sed -i 's/IPHONEOS_DEPLOYMENT_TARGET = [0-9.]*/IPHONEOS_DEPLOYMENT_TARGET = 17.0/g' "$PBXPROJ"
+    else
+      sed -i '' 's/IPHONEOS_DEPLOYMENT_TARGET = [0-9.]*/IPHONEOS_DEPLOYMENT_TARGET = 17.0/g' "$PBXPROJ"
+    fi
+  done
+else
+  echo "WARNING: No .xcodeproj/project.pbxproj found under $GEN_APPLE — skipping deployment target bump"
 fi
 
 echo ""
