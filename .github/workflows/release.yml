@@ -179,6 +179,11 @@ jobs:
           sed -i '' "s/DEVELOPMENT_TEAM = .*/DEVELOPMENT_TEAM = \"$APPLE_TEAM_ID\";/" "$PBXPROJ"
           sed -i '' '/CODE_SIGN_IDENTITY/a\'$'\n\t\t\t\t'"PROVISIONING_PROFILE_SPECIFIER = \"$PROFILE_NAME\";" "$PBXPROJ"
           sed -i '' 's/CODE_SIGN_STYLE = Automatic/CODE_SIGN_STYLE = Manual/' "$PBXPROJ"
+          # Raise iOS deployment target so Xcode 26 doesn't try to link the
+          # missing Swift 5.6 backwards-compatibility shims (swiftCompatibility56,
+          # swiftCompatibilityConcurrency, swiftCompatibilityPacks) that aren't
+          # shipped in the iOS 26 SDK. 15.0 is enough to drop them.
+          sed -i '' 's/IPHONEOS_DEPLOYMENT_TARGET = [0-9.]*/IPHONEOS_DEPLOYMENT_TARGET = 15.0/g' "$PBXPROJ"
       - name: Decode GoogleService-Info.plist
         env:
           GOOGLE_SERVICE_INFO_PLIST_B64: ${{ secrets.GOOGLE_SERVICE_INFO_PLIST_B64 }}
@@ -196,22 +201,57 @@ jobs:
         run: |
           mkdir -p ~/private_keys
           echo "$APPLE_API_KEY_B64" | base64 --decode > ~/private_keys/AuthKey_${APPLE_API_KEY_ID}.p8
-      - name: Build iOS
+      - name: Build Rust libraries for iOS
         env:
           APPLE_DEVELOPMENT_TEAM: ${{ secrets.APPLE_TEAM_ID }}
-        run: cd desktop && npx tauri ios build --export-method app-store-connect || true
-      - name: Export IPA manually
+        run: |
+          # Tauri's `tauri ios build` runs `xcodebuild ... build` (not
+          # `archive`), so it never produces a .xcarchive we can export from.
+          # We invoke it once to compile the Rust libraries and stage assets
+          # into gen/apple, then run `xcodebuild archive` ourselves below.
+          # The Rust build is the slow part; xcodebuild itself is cheap.
+          cd desktop && npx tauri ios build --export-method app-store-connect || true
+      - name: Archive iOS app
+        env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          PROFILE_NAME=$(/usr/libexec/PlistBuddy -c "Print Name" /dev/stdin <<< $(security cms -D -i ~/Library/MobileDevice/Provisioning\ Profiles/companion.mobileprovision))
+          mkdir -p desktop/src-tauri/gen/apple/build
+          xcodebuild archive \
+            -workspace desktop/src-tauri/gen/apple/companion-desktop.xcodeproj/project.xcworkspace \
+            -scheme companion-desktop_iOS \
+            -configuration release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -archivePath desktop/src-tauri/gen/apple/build/Companion.xcarchive \
+            IPHONEOS_DEPLOYMENT_TARGET=15.0 \
+            CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_IDENTITY="Apple Distribution" \
+            DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
+            PROVISIONING_PROFILE_SPECIFIER="$PROFILE_NAME" \
+            -allowProvisioningUpdates
+      - name: Export IPA from archive
         env:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
         run: |
+          echo "=== iOS build artifacts present ==="
+          ls -la desktop/src-tauri/gen/apple/build/ 2>/dev/null || echo "No build/ directory"
+          find desktop/src-tauri/gen/apple -maxdepth 4 \( -name '*.xcarchive' -o -name '*.ipa' \) 2>/dev/null
+          find ~/Library/Developer/Xcode/DerivedData -name '*.xcarchive' 2>/dev/null | head -5
+          echo "==="
           PROFILE_NAME=$(/usr/libexec/PlistBuddy -c "Print Name" /dev/stdin <<< $(security cms -D -i ~/Library/MobileDevice/Provisioning\ Profiles/companion.mobileprovision))
-          # Find the .xcarchive produced by tauri
-          ARCHIVE=$(find ~/Library/Developer/Xcode/DerivedData -name '*.xcarchive' -type d | head -1)
-          if [ -z "$ARCHIVE" ]; then
-            echo "No archive found, checking alternative paths..."
-            ARCHIVE=$(find desktop/src-tauri/gen/apple/build -name '*.xcarchive' -type d | head -1)
+          ARCHIVE="desktop/src-tauri/gen/apple/build/Companion.xcarchive"
+          if [ ! -d "$ARCHIVE" ]; then
+            ARCHIVE=$(find desktop/src-tauri/gen/apple -name '*.xcarchive' -type d | head -1)
+          fi
+          if [ -z "$ARCHIVE" ] || [ ! -d "$ARCHIVE" ]; then
+            ARCHIVE=$(find ~/Library/Developer/Xcode/DerivedData -name '*.xcarchive' -type d | head -1)
+          fi
+          if [ -z "$ARCHIVE" ] || [ ! -d "$ARCHIVE" ]; then
+            echo "::error::No .xcarchive produced by archive step"
+            exit 1
           fi
           echo "Using archive: $ARCHIVE"
           # Write ExportOptions.plist with manual signing
