@@ -4,6 +4,13 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      skip_testflight:
+        description: 'Skip TestFlight upload (just build IPA)'
+        required: false
+        default: 'false'
+        type: boolean
 
 permissions:
   contents: write
@@ -202,61 +209,18 @@ jobs:
         run: |
           mkdir -p ~/private_keys
           echo "$APPLE_API_KEY_B64" | base64 --decode > ~/private_keys/AuthKey_${APPLE_API_KEY_ID}.p8
-      - name: Build Rust libraries for iOS
-        env:
-          APPLE_DEVELOPMENT_TEAM: ${{ secrets.APPLE_TEAM_ID }}
-        run: |
-          # Tauri's `tauri ios build` runs `xcodebuild ... build` (not
-          # `archive`), so it never produces a .xcarchive we can export from.
-          # We invoke it once to compile the Rust libraries and stage assets
-          # into gen/apple, then run `xcodebuild archive` ourselves below.
-          # The Rust build is the slow part; xcodebuild itself is cheap.
-          cd desktop && npx tauri ios build --export-method app-store-connect || true
-      - name: Archive iOS app
+      - name: Write ExportOptions.plist for signing
         env:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
+          # Tauri's `tauri ios build --export-method app-store-connect` does
+          # the full build -> archive -> export pipeline itself. It only sets
+          # the `method` field in ExportOptions.plist; we must pre-write the
+          # rest (teamID, manual signingStyle, provisioning profile mapping)
+          # at gen/apple/ExportOptions.plist where Tauri reads it.
           PROFILE_NAME=$(/usr/libexec/PlistBuddy -c "Print Name" /dev/stdin <<< $(security cms -D -i ~/Library/MobileDevice/Provisioning\ Profiles/companion.mobileprovision))
-          mkdir -p desktop/src-tauri/gen/apple/build
-          xcodebuild archive \
-            -workspace desktop/src-tauri/gen/apple/companion-desktop.xcodeproj/project.xcworkspace \
-            -scheme companion-desktop_iOS \
-            -configuration release \
-            -sdk iphoneos \
-            -destination 'generic/platform=iOS' \
-            -archivePath desktop/src-tauri/gen/apple/build/Companion.xcarchive \
-            IPHONEOS_DEPLOYMENT_TARGET=17.0 \
-            CODE_SIGN_STYLE=Manual \
-            CODE_SIGN_IDENTITY="Apple Distribution" \
-            DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
-            PROVISIONING_PROFILE_SPECIFIER="$PROFILE_NAME" \
-            -allowProvisioningUpdates
-      - name: Export IPA from archive
-        env:
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
-          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
-        run: |
-          echo "=== iOS build artifacts present ==="
-          ls -la desktop/src-tauri/gen/apple/build/ 2>/dev/null || echo "No build/ directory"
-          find desktop/src-tauri/gen/apple -maxdepth 4 \( -name '*.xcarchive' -o -name '*.ipa' \) 2>/dev/null
-          find ~/Library/Developer/Xcode/DerivedData -name '*.xcarchive' 2>/dev/null | head -5
-          echo "==="
-          PROFILE_NAME=$(/usr/libexec/PlistBuddy -c "Print Name" /dev/stdin <<< $(security cms -D -i ~/Library/MobileDevice/Provisioning\ Profiles/companion.mobileprovision))
-          ARCHIVE="desktop/src-tauri/gen/apple/build/Companion.xcarchive"
-          if [ ! -d "$ARCHIVE" ]; then
-            ARCHIVE=$(find desktop/src-tauri/gen/apple -name '*.xcarchive' -type d | head -1)
-          fi
-          if [ -z "$ARCHIVE" ] || [ ! -d "$ARCHIVE" ]; then
-            ARCHIVE=$(find ~/Library/Developer/Xcode/DerivedData -name '*.xcarchive' -type d | head -1)
-          fi
-          if [ -z "$ARCHIVE" ] || [ ! -d "$ARCHIVE" ]; then
-            echo "::error::No .xcarchive produced by archive step"
-            exit 1
-          fi
-          echo "Using archive: $ARCHIVE"
-          # Write ExportOptions.plist with manual signing
-          cat > /tmp/ExportOptions.plist << EOPLIST
+          EXPORT_PLIST="desktop/src-tauri/gen/apple/ExportOptions.plist"
+          cat > "$EXPORT_PLIST" << EOPLIST
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
           <plist version="1.0">
@@ -275,30 +239,47 @@ jobs:
           </dict>
           </plist>
           EOPLIST
-          mkdir -p desktop/src-tauri/gen/apple/build/arm64
-          xcodebuild -exportArchive \
-            -archivePath "$ARCHIVE" \
-            -exportOptionsPlist /tmp/ExportOptions.plist \
-            -exportPath desktop/src-tauri/gen/apple/build/arm64 \
-            -authenticationKeyPath ~/private_keys/AuthKey_${APPLE_API_KEY_ID}.p8 \
-            -authenticationKeyID "$APPLE_API_KEY_ID" \
-            -authenticationKeyIssuerID "$APPLE_API_ISSUER" \
-            -allowProvisioningUpdates
+          echo "Wrote $EXPORT_PLIST:"
+          cat "$EXPORT_PLIST"
+      - name: Build iOS IPA via Tauri (build + archive + export)
+        env:
+          APPLE_DEVELOPMENT_TEAM: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          # Tauri 2.x runs xcodebuild build, then archive, then export, all
+          # within one orchestrator process. This means the "Build Rust Code"
+          # PhaseScript (which calls back to the parent via WebSocket on a
+          # local port written to a temp file) works correctly. Earlier
+          # workflow attempts split this into a separate `xcodebuild archive`
+          # step, which broke the IPC and caused the connection-refused panic.
+          cd desktop && npx tauri ios build --export-method app-store-connect
+      - name: Locate IPA
+        id: locate_ipa
+        run: |
+          echo "=== iOS build artifacts present ==="
+          find desktop/src-tauri/gen/apple/build -maxdepth 3 -type f \( -name '*.ipa' -o -name '*.xcarchive' \) 2>/dev/null || true
+          echo "==="
+          IPA=$(find desktop/src-tauri/gen/apple/build -name '*.ipa' | head -1)
+          if [ -z "$IPA" ]; then
+            echo "::error::No .ipa produced by tauri ios build"
+            exit 1
+          fi
+          echo "Found IPA: $IPA"
+          echo "ipa_path=$IPA" >> "$GITHUB_OUTPUT"
       - name: Upload IPA to TestFlight
+        if: ${{ github.event_name == 'push' || inputs.skip_testflight != true }}
         env:
           APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
         run: |
-          IPA=$(find desktop/src-tauri/gen/apple/build -name '*.ipa' | head -1)
           xcrun altool --upload-app --type ios \
-            --file "$IPA" \
+            --file "${{ steps.locate_ipa.outputs.ipa_path }}" \
             --apiKey "$APPLE_API_KEY_ID" \
             --apiIssuer "$APPLE_API_ISSUER"
       - name: Upload IPA artifact
         uses: actions/upload-artifact@v4
         with:
           name: ios-ipa
-          path: desktop/src-tauri/gen/apple/build/arm64/*.ipa
+          path: desktop/src-tauri/gen/apple/build/**/*.ipa
 
   build-desktop:
     name: Build Desktop (${{ matrix.os_name }})
