@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { FileChange } from '../types';
 import { isMobileViewport } from '../utils/platform';
+import { copyToClipboard } from '../utils/clipboard';
 import { ContextMenu, ContextMenuEntry } from './ContextMenu';
 import { crmCommentsKey } from '../services/storageKeys';
 
@@ -327,7 +328,7 @@ export function CodeReviewModal({ fileChanges, onViewFile, onRefresh, onClose, o
             {
               label: 'Copy line',
               onClick: () => {
-                navigator.clipboard.writeText(contextLine.lineText);
+                copyToClipboard(contextLine.lineText);
               },
             },
           ] as ContextMenuEntry[]}

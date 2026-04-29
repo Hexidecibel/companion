@@ -1,4 +1,5 @@
 import { MarkdownRenderer } from './MarkdownRenderer';
+import { copyToClipboard } from '../utils/clipboard';
 
 interface ArtifactViewerModalProps {
   content: string;
@@ -21,7 +22,7 @@ export function ArtifactViewerModal({ content, title, onClose, onFileClick }: Ar
             <button
               className="file-viewer-editor-btn"
               onClick={() => {
-                navigator.clipboard.writeText(content);
+                copyToClipboard(content);
               }}
               title="Copy to clipboard"
             >

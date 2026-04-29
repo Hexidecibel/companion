@@ -14,19 +14,64 @@ export class ConnectionManager {
   private connections: Map<string, ServerConnection> = new Map();
   private changeHandlers: Set<ChangeHandler> = new Set();
   private cleanupFns: Map<string, () => void> = new Map();
+  private lastKick = 0;
 
   constructor() {
-    // Reconnect dropped connections when app returns from background
+    // Reconnect dropped connections when app returns from background.
+    // iOS WebView (Tauri/iPad) doesn't reliably fire `visibilitychange` on
+    // resume from suspension, so wire up multiple resume signals.
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible') {
-        for (const conn of this.connections.values()) {
-          const state = conn.getState();
-          if (conn.getServer().enabled !== false && state.status !== 'connected' && state.status !== 'connecting') {
-            conn.reconnect();
-          }
-        }
+        this.kickReconnects();
       }
     });
+
+    // pageshow fires on iOS BFCache restore even when visibilitychange doesn't.
+    window.addEventListener('pageshow', (e: PageTransitionEvent) => {
+      if (e.persisted || document.visibilityState === 'visible') {
+        this.kickReconnects();
+      }
+    });
+
+    // Backup signals: window focus and network restoration.
+    window.addEventListener('focus', () => this.kickReconnects());
+    window.addEventListener('online', () => this.kickReconnects());
+
+    // Tauri 2 mobile resume hook (best-effort, no-op outside Tauri).
+    // The dynamic import + nested .catch() ensures this never breaks the
+    // browser/desktop builds if the package or events aren't available.
+    try {
+      import('@tauri-apps/api/event')
+        .then(({ listen }) => {
+          listen('tauri://resume', () => this.kickReconnects()).catch(() => {});
+          listen('tauri://app-resume', () => this.kickReconnects()).catch(() => {});
+        })
+        .catch(() => {});
+    } catch {
+      // ignore — non-Tauri environment
+    }
+  }
+
+  /**
+   * Iterate connections and reconnect any enabled, non-connected server.
+   * Throttled to 500ms to dedupe near-simultaneous resume signals
+   * (visibilitychange + focus + pageshow can all fire on the same resume).
+   */
+  private kickReconnects(): void {
+    const now = Date.now();
+    if (now - this.lastKick < 500) return;
+    this.lastKick = now;
+
+    for (const conn of this.connections.values()) {
+      const state = conn.getState();
+      if (
+        conn.getServer().enabled !== false &&
+        state.status !== 'connected' &&
+        state.status !== 'connecting'
+      ) {
+        conn.reconnect();
+      }
+    }
   }
 
   connectServer(server: Server): void {

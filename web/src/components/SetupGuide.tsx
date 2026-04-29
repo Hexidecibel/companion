@@ -1,4 +1,5 @@
 import { useState, useCallback } from 'react';
+import { copyToClipboard } from '../utils/clipboard';
 
 const INSTALL_SCRIPT = `git clone https://github.com/Hexidecibel/companion.git
 cd companion/daemon
@@ -12,17 +13,7 @@ export function SetupGuide({ onAddServer }: SetupGuideProps) {
   const [copied, setCopied] = useState<string | null>(null);
 
   const copyText = useCallback((text: string, label: string) => {
-    navigator.clipboard.writeText(text).then(() => {
-      setCopied(label);
-      setTimeout(() => setCopied(null), 2000);
-    }).catch(() => {
-      // Fallback for older browsers
-      const ta = document.createElement('textarea');
-      ta.value = text;
-      document.body.appendChild(ta);
-      ta.select();
-      document.execCommand('copy');
-      document.body.removeChild(ta);
+    copyToClipboard(text).then(() => {
       setCopied(label);
       setTimeout(() => setCopied(null), 2000);
     });

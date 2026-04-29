@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { ToolCall } from '../types';
 import { MarkdownRenderer } from './MarkdownRenderer';
+import { copyToClipboard } from '../utils/clipboard';
 
 interface ToolCardProps {
   tool: ToolCall;
@@ -97,7 +98,7 @@ function CopyButton({ text, label }: { text: string; label: string }) {
 
   const handleCopy = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
-    navigator.clipboard.writeText(text).then(() => {
+    copyToClipboard(text).then(() => {
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     });

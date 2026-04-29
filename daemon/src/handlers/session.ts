@@ -793,6 +793,103 @@ export function registerSessionHandlers(
       });
     },
 
+    async remove_session(client, payload, requestId) {
+      const removePayload = payload as { sessionId: string } | undefined;
+      if (!removePayload?.sessionId) {
+        ctx.send(client.ws, {
+          type: 'session_removed',
+          success: false,
+          error: 'Missing sessionId',
+          requestId,
+        });
+        return;
+      }
+
+      const sessionId = removePayload.sessionId;
+      console.log(`WebSocket: remove_session "${sessionId}"`);
+
+      // Capture conversation file path BEFORE we forget the session — once
+      // the watcher drops it, getConversationInfo() may not find it anymore.
+      const convInfo = ctx.watcher.getConversationInfo(sessionId);
+      const conversationPath = convInfo?.path;
+
+      // Step 1: best-effort tmux kill (ignore "already dead").
+      let tmuxKilled = false;
+      try {
+        const exists = await ctx.tmux.sessionExists(sessionId);
+        if (exists) {
+          const result = await ctx.tmux.killSession(sessionId);
+          tmuxKilled = result.success;
+          if (!result.success) {
+            console.log(
+              `WebSocket: remove_session tmux kill failed for "${sessionId}": ${result.error}`
+            );
+          }
+          const tmuxConfig = ctx.tmuxSessionConfigs.get(sessionId);
+          if (tmuxConfig?.isWorktree && tmuxConfig.mainRepoDir) {
+            await ctx.tmux.removeWorktree(tmuxConfig.mainRepoDir, tmuxConfig.workingDir);
+          }
+        } else {
+          console.log(`WebSocket: remove_session tmux session "${sessionId}" already gone`);
+        }
+      } catch (err) {
+        console.log(`WebSocket: remove_session tmux check error: ${err}`);
+      }
+
+      // Step 2 & 3: drop persisted snapshot, conversations, mappings.
+      const forgot = ctx.watcher.forgetSession(sessionId);
+
+      // Drop friendly name + tmux session config too — these are session-bound.
+      ctx.sessionNameStore.delete(sessionId);
+      if (ctx.tmuxSessionConfigs.delete(sessionId)) {
+        ctx.saveTmuxSessionConfigs();
+      }
+      ctx.autoApproveSessions.delete(sessionId);
+
+      // Step 4: archive the JSONL by renaming with a `.removed` suffix.
+      // The watcher's chokidar pattern is `*.jsonl` so `.jsonl.removed` is
+      // outside the glob and will not be re-discovered.
+      let jsonlArchived = false;
+      let archivePath: string | undefined;
+      if (conversationPath) {
+        try {
+          if (fs.existsSync(conversationPath)) {
+            const ts = Date.now();
+            archivePath = `${conversationPath}.${ts}.removed`;
+            fs.renameSync(conversationPath, archivePath);
+            jsonlArchived = true;
+            console.log(`WebSocket: remove_session archived JSONL → ${archivePath}`);
+          } else {
+            console.log(`WebSocket: remove_session JSONL already missing: ${conversationPath}`);
+          }
+        } catch (err) {
+          console.error(`WebSocket: remove_session failed to archive JSONL: ${err}`);
+        }
+      }
+
+      ctx.send(client.ws, {
+        type: 'session_removed',
+        success: true,
+        payload: {
+          sessionId,
+          tmuxKilled,
+          persistedRemoved: forgot.persistedRemoved,
+          conversationsRemoved: forgot.conversationsRemoved,
+          mappingRemoved: forgot.mappingRemoved,
+          jsonlArchived,
+          archivePath,
+        },
+        requestId,
+      });
+
+      // Notify other connected clients so dashboards can refresh promptly.
+      ctx.broadcast('session_removed', { sessionId });
+      ctx.broadcast('tmux_sessions_changed', {
+        action: 'removed',
+        sessionName: sessionId,
+      });
+    },
+
     set_auto_approve(client, payload, requestId) {
       const autoApprovePayload = payload as { enabled: boolean; sessionId?: string };
       const targetSessionId = autoApprovePayload?.sessionId || ctx.watcher.getActiveSessionId();

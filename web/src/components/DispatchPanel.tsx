@@ -161,13 +161,14 @@ export function DispatchPanel({
   // Mobile: full-screen overlay
   if (mobile) {
     if (collapsed) {
+      // Only show the bar while agents are actively running. Once everything
+      // has finished we hide it instead of leaving a "X agents done" pill.
+      if (runningCount === 0) return null;
       return (
         <div className="dispatch-mobile-bar" onClick={(e) => { e.stopPropagation(); onCollapse(); }}>
-          <span className={`dispatch-mobile-dot ${runningCount > 0 ? 'dispatch-dot-running' : 'dispatch-dot-done'}`} />
+          <span className="dispatch-mobile-dot dispatch-dot-running" />
           <span className="dispatch-mobile-label">
-            {runningCount > 0
-              ? `${runningCount} agent${runningCount !== 1 ? 's' : ''} running`
-              : `${totalAgents} agent${totalAgents !== 1 ? 's' : ''} done`}
+            {`${runningCount} agent${runningCount !== 1 ? 's' : ''} running`}
           </span>
         </div>
       );

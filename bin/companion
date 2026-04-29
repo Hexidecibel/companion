@@ -71,13 +71,19 @@ needs_daemon_build() {
 
 needs_web_build() {
   # No build output at all
-  if [ ! -d "$WEB_DIR/dist" ]; then
+  if [ ! -f "$WEB_DIR/dist/index.html" ]; then
     return 0
   fi
-  # Any .ts/.tsx source newer than dist/index.html
-  if find "$WEB_DIR/src" \( -name '*.ts' -o -name '*.tsx' \) -newer "$WEB_DIR/dist/index.html" -print -quit 2>/dev/null | grep -q .; then
+  # Any source file under web/src/ newer than dist/index.html
+  if find "$WEB_DIR/src" -type f -newer "$WEB_DIR/dist/index.html" -print -quit 2>/dev/null | grep -q .; then
     return 0
   fi
+  # Top-level config/entry files newer than dist/index.html
+  for f in "$WEB_DIR/package.json" "$WEB_DIR/package-lock.json" "$WEB_DIR/vite.config.ts" "$WEB_DIR/vite.config.js" "$WEB_DIR/index.html" "$WEB_DIR/tsconfig.json"; do
+    if [ -f "$f" ] && [ "$f" -nt "$WEB_DIR/dist/index.html" ]; then
+      return 0
+    fi
+  done
   return 1
 }
 
@@ -191,6 +197,11 @@ if [ "${1:-}" = "" ] || [ "${1:-}" = "start" ]; then
   echo "Daemon started (PID $DAEMON_PID)"
   echo "  Logs: $LOG_FILE"
   exit 0
+fi
+
+# --- Restart: rebuild web client too (daemon serves it) ---
+if [ "${1:-}" = "restart" ]; then
+  build_web
 fi
 
 # --- All other commands delegate to node CLI ---

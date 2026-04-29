@@ -356,6 +356,18 @@ function MobileSessionItem({ session, serverId, onSelect, onOpenInSplit, onClose
       items.push(null);
       items.push({ label: killing ? 'Killing...' : 'Kill Session', onClick: handleKill, danger: true, disabled: killing });
     }
+    items.push({
+      label: 'Remove Session',
+      danger: true,
+      onClick: () => {
+        const ok = window.confirm(
+          'Remove this session?\n\nThe conversation log will be archived and the session will disappear from the list. This cannot be undone via the app.'
+        );
+        if (!ok) return;
+        const conn = connectionManager.getConnection(serverId);
+        if (conn) conn.sendRequest('remove_session', { sessionId: session.id });
+      },
+    });
     return items;
   }, [isSecondary, onCloseSplit, onOpenInSplit, onToggleMute, isMuted, session, serverId, killing, handleKill]);
 

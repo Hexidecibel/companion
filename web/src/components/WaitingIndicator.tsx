@@ -7,9 +7,11 @@ interface WaitingIndicatorProps {
   serverId?: string | null;
   sessionId?: string | null;
   tmuxSessionName?: string;
+  canCancel?: boolean;
+  onCancel?: () => void;
 }
 
-export function WaitingIndicator({ status, serverId, sessionId, tmuxSessionName }: WaitingIndicatorProps) {
+export function WaitingIndicator({ status, serverId, sessionId, tmuxSessionName, canCancel, onCancel }: WaitingIndicatorProps) {
   const [feedbackSent, setFeedbackSent] = useState(false);
 
   // Reset sent state when feedback prompt changes (new prompt appears)
@@ -79,6 +81,16 @@ export function WaitingIndicator({ status, serverId, sessionId, tmuxSessionName 
       <div className="waiting-banner waiting-banner-blue">
         <div className="spinner small" />
         <span>{status.currentActivity}</span>
+        {canCancel && onCancel && (
+          <button
+            className="cancel-btn"
+            onClick={onCancel}
+            title="Send Ctrl+C to cancel"
+            style={{ marginLeft: 'auto' }}
+          >
+            Cancel
+          </button>
+        )}
       </div>
     );
   }

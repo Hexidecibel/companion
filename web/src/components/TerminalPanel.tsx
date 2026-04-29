@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { parseAnsiText, AnsiSpan } from '../utils/ansiParser';
+import { copyToClipboard } from '../utils/clipboard';
 import { connectionManager } from '../services/ConnectionManager';
 import { useServers } from '../hooks/useServers';
 
@@ -166,7 +167,7 @@ export function TerminalPanel({ serverId, tmuxSessionName, fastPoll, onClose }: 
 
   const handleCopy = useCallback(() => {
     if (!sshCommand) return;
-    navigator.clipboard.writeText(sshCommand).then(() => {
+    copyToClipboard(sshCommand).then(() => {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     });

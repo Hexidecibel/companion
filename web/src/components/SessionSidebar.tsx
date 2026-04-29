@@ -437,6 +437,21 @@ export function SessionSidebar({
       });
     }
 
+    items.push({
+      label: 'Remove Session',
+      danger: true,
+      onClick: () => {
+        const ok = window.confirm(
+          'Remove this session?\n\nThe conversation log will be archived and the session will disappear from the list. This cannot be undone via the app.'
+        );
+        if (!ok) return;
+        const conn = connectionManager.getConnection(serverId);
+        if (conn) {
+          conn.sendRequest('remove_session', { sessionId });
+        }
+      },
+    });
+
     return items;
   }, [mutedSessions, onToggleMute, onOpenInSplit, onCloseSplit, secondarySession, activeSession, summaries]);
 

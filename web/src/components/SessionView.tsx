@@ -614,18 +614,9 @@ export function SessionView({
   );
 
   // Transient / view-mode buttons — stay in header (not settings).
-  // Cancel: only when running. Terminal: only when tmux is attached.
+  // Terminal: only when tmux is attached.
   const transientButtons = (
     <>
-      {status?.isRunning && !status?.isWaitingForInput && tmuxSessionName && (
-        <button
-          className="cancel-btn"
-          onClick={handleCancel}
-          title="Send Ctrl+C to cancel"
-        >
-          Cancel
-        </button>
-      )}
       {tmuxSessionName && (
         <button
           className={`session-header-btn ${showTerminal ? 'terminal-active' : ''}`}
@@ -639,19 +630,19 @@ export function SessionView({
   );
 
   // Agent dispatch pill — moved from below message list to header.
-  // Renders only when there are agents to surface.
-  const agentPill = (totalAgents > 0 && serverId && dispatchCollapsed) ? (
+  // Renders only while at least one agent is actively running, so the pill
+  // disappears once everything has finished instead of lingering as
+  // "X done" forever.
+  const agentPill = (runningCount > 0 && serverId && dispatchCollapsed) ? (
     <button
       className="session-agent-pill"
       onClick={() => setDispatchCollapsed(false)}
       title="Open dispatch panel"
     >
-      <span className={`dispatch-mobile-dot ${runningCount > 0 ? 'dispatch-dot-running' : 'dispatch-dot-done'}`} />
+      <span className="dispatch-mobile-dot dispatch-dot-running" />
       <span className="session-agent-pill-label">
-        {runningCount > 0
-          ? `${runningCount} running`
-          : `${totalAgents} done`}
-        {(totalAgents - runningCount) > 0 && runningCount > 0 &&
+        {`${runningCount} running`}
+        {(totalAgents - runningCount) > 0 &&
           ` / ${totalAgents - runningCount} done`}
       </span>
     </button>
@@ -765,6 +756,8 @@ export function SessionView({
                         serverId={serverId}
                         sessionId={sessionId}
                         tmuxSessionName={tmuxSessionName}
+                        canCancel={!!(status?.isRunning && !status?.isWaitingForInput && tmuxSessionName)}
+                        onCancel={handleCancel}
                       />
                     </div>
                   )}

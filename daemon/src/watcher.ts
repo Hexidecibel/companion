@@ -1080,6 +1080,80 @@ export class SessionWatcher extends EventEmitter {
   }
 
   /**
+   * Drop all watcher state for a session: persisted snapshot, in-memory
+   * conversations matching the session, tmux mapping, and history. Used by
+   * the `remove_session` handler so a removed session does not get
+   * re-discovered. The caller is responsible for archiving the JSONL.
+   *
+   * Returns flags describing what was removed.
+   */
+  forgetSession(sessionId: string): {
+    persistedRemoved: boolean;
+    conversationsRemoved: number;
+    mappingRemoved: boolean;
+  } {
+    let persistedRemoved = false;
+    let mappingRemoved = false;
+    let conversationsRemoved = 0;
+
+    // Drop persisted snapshot
+    if (this.persistedSessions.delete(sessionId)) {
+      persistedRemoved = true;
+    }
+
+    // Collect conversation UUIDs associated with this tmux session, both via
+    // direct mapping and via history (post-compaction chains).
+    const convIds = new Set<string>();
+    const direct = this.tmuxConversationIds.get(sessionId);
+    if (direct) convIds.add(direct);
+    const history = this.tmuxConversationHistory.get(sessionId);
+    if (history) {
+      for (const id of history) convIds.add(id);
+    }
+
+    // Also accept the session id itself if it happens to be a JSONL UUID
+    // (some persisted entries use the conversation UUID as the id).
+    if (this.conversations.has(sessionId)) {
+      convIds.add(sessionId);
+    }
+
+    for (const id of convIds) {
+      const existed = this.conversations.delete(id);
+      if (existed) conversationsRemoved++;
+      const timer = this.debounceTimers.get(id);
+      if (timer) {
+        clearTimeout(timer);
+        this.debounceTimers.delete(id);
+      }
+      const wTimer = this.waitingDebounceTimers.get(id);
+      if (wTimer) {
+        clearTimeout(wTimer);
+        this.waitingDebounceTimers.delete(id);
+      }
+    }
+
+    if (this.tmuxConversationIds.delete(sessionId)) mappingRemoved = true;
+    if (this.tmuxConversationHistory.delete(sessionId)) mappingRemoved = true;
+    this.newlyCreatedSessions.delete(sessionId);
+    this.compactedSessions.delete(sessionId);
+
+    if (this.activeTmuxSession === sessionId) {
+      this.activeTmuxSession = null;
+      this.activeConversationId = null;
+    }
+    if (this.feedbackSessionId === sessionId) {
+      this.feedbackPrompt = null;
+      this.feedbackSessionId = null;
+    }
+
+    // Persist updated state to disk so the snapshot/mappings on disk match.
+    this.persistMappings();
+    this.persistSessions();
+
+    return { persistedRemoved, conversationsRemoved, mappingRemoved };
+  }
+
+  /**
    * Resolve tmux session name to the conversation it's running.
    * Uses direct PID-based mapping first, falls back to path-based best-match.
    */
