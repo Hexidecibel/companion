@@ -421,6 +421,11 @@ body {
   display: flex;
   height: var(--app-height, 100dvh);
   overflow: hidden;
+  padding-top: var(--safe-top);
+  padding-bottom: var(--safe-bottom);
+  padding-left: var(--safe-left);
+  padding-right: var(--safe-right);
+  box-sizing: border-box;
 }
 
 .dashboard-main {

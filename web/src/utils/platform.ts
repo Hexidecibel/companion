@@ -33,9 +33,15 @@ export function isTauriDesktop(): boolean {
  * Apply safe area insets for Tauri mobile.
  * On Android, env(safe-area-inset-top) often returns 0 even with edge-to-edge,
  * so we set CSS custom properties with a JS fallback.
+ *
+ * Gate the fallback on Android UA specifically — on iOS Tauri, viewport-fit=cover
+ * is set and WKWebView honors env() with real values (top ~24-44pt, bottom 0
+ * on home-button iPads, ~20pt on home-indicator iPads). Injecting Android's
+ * 48px / 24px fallback there would clobber correct iOS values.
  */
 export function applySafeAreaInsets(): void {
-  if (!isTauriMobile()) return;
+  const ua = navigator.userAgent.toLowerCase();
+  if (!ua.includes('android')) return;
   const style = document.documentElement.style;
   // Android status bar is typically 24dp; with edge-to-edge on high-DPI
   // devices this is around 48px. Check if env() already provides a value.
