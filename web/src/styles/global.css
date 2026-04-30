@@ -422,7 +422,6 @@ body {
   height: var(--app-height, 100dvh);
   overflow: hidden;
   padding-top: var(--safe-top);
-  padding-bottom: var(--safe-bottom);
   padding-left: var(--safe-left);
   padding-right: var(--safe-right);
   box-sizing: border-box;
@@ -1996,6 +1995,7 @@ body {
   align-items: flex-end;
   gap: 8px;
   padding: 12px 16px;
+  padding-bottom: max(12px, var(--safe-bottom));
   background-color: var(--bg-secondary);
   border-top: 1px solid var(--border-color);
   flex-shrink: 0;
