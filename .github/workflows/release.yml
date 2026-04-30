@@ -287,12 +287,20 @@ jobs:
             find desktop/src-tauri/gen/apple/build -maxdepth 4 -type d | head -20
             exit 1
           fi
-          APP_PLIST=$(find "$ARCHIVE/Products/Applications" -name 'Info.plist' | head -1)
+          APP_PLIST=$(find "$ARCHIVE/Products/Applications" -maxdepth 2 -name 'Info.plist' | head -1)
           if [ -z "$APP_PLIST" ]; then
             echo "::error::No Info.plist found inside archive Applications dir"
             ls -la "$ARCHIVE/Products/Applications/" || true
             exit 1
           fi
+          case "$APP_PLIST" in
+            *.app/Info.plist) ;;
+            *)
+              echo "::error::Resolved plist is not <app>.app/Info.plist: $APP_PLIST"
+              find "$ARCHIVE/Products/Applications" -name 'Info.plist' | head -10
+              exit 1
+              ;;
+          esac
           /usr/libexec/PlistBuddy -c "Add :CFBundleVersion string ${{ github.run_number }}" "$APP_PLIST" 2>/dev/null || \
             /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${{ github.run_number }}" "$APP_PLIST"
           echo "Set CFBundleVersion to ${{ github.run_number }} in $APP_PLIST"
