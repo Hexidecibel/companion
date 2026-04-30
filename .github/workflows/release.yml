@@ -293,7 +293,8 @@ jobs:
             ls -la "$ARCHIVE/Products/Applications/" || true
             exit 1
           fi
-          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${{ github.run_number }}" "$APP_PLIST"
+          /usr/libexec/PlistBuddy -c "Add :CFBundleVersion string ${{ github.run_number }}" "$APP_PLIST" 2>/dev/null || \
+            /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${{ github.run_number }}" "$APP_PLIST"
           echo "Set CFBundleVersion to ${{ github.run_number }} in $APP_PLIST"
           /usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$APP_PLIST"
       - name: Manually export IPA (xcodebuild -exportArchive without -allowProvisioningUpdates)
