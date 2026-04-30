@@ -23,6 +23,8 @@ jest.mock('fs', () => ({
   writeFileSync: jest.fn(),
   mkdirSync: jest.fn(),
   statSync: jest.fn(),
+  renameSync: jest.fn(),
+  unlinkSync: jest.fn(),
 }));
 
 // Import the mocked fs after jest.mock
@@ -660,16 +662,22 @@ describe('WorkGroupManager', () => {
   describe('state persistence', () => {
     it('saveState writes groups to STATE_FILE as JSON', async () => {
       const writeSpy = fs.writeFileSync as jest.Mock;
+      const renameSpy = fs.renameSync as jest.Mock;
 
       await createGroupWithTimers();
 
-      // saveState is called during createWorkGroup
+      // saveState uses atomicWriteFileSync: write to tmp file, then rename to STATE_FILE.
       expect(writeSpy).toHaveBeenCalled();
+      expect(renameSpy).toHaveBeenCalled();
 
-      const lastCall = writeSpy.mock.calls[writeSpy.mock.calls.length - 1];
-      expect(lastCall[0]).toBe(STATE_FILE);
+      const lastRename = renameSpy.mock.calls[renameSpy.mock.calls.length - 1];
+      expect(lastRename[1]).toBe(STATE_FILE);
 
-      const written = JSON.parse(lastCall[1]);
+      // The tmp file is sibling of STATE_FILE; data is written there before rename.
+      const lastWrite = writeSpy.mock.calls[writeSpy.mock.calls.length - 1];
+      expect(lastWrite[0]).toBe(lastRename[0]);
+
+      const written = JSON.parse(lastWrite[1]);
       expect(Array.isArray(written)).toBe(true);
       expect(written).toHaveLength(1);
       expect(written[0].name).toBe('Test Group');

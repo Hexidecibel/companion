@@ -12,10 +12,18 @@ import WebSocket from 'ws';
 import { Server } from 'http';
 import * as fs from 'fs';
 
-// Mock fs.existsSync to always return true in tests
+// Mock fs to isolate from the real filesystem. The create_tmux_session handler
+// writes a bypass-permissions settings.json into the working dir (which doesn't
+// exist on disk in tests), and storeTmuxSessionConfig persists a sidecar JSON
+// via atomicWriteFileSync, so all file-mutating calls must be stubbed.
 jest.mock('fs', () => ({
   ...jest.requireActual('fs'),
   existsSync: jest.fn().mockReturnValue(true),
+  writeFileSync: jest.fn(),
+  mkdirSync: jest.fn(),
+  readFileSync: jest.fn().mockReturnValue('{}'),
+  renameSync: jest.fn(),
+  unlinkSync: jest.fn(),
 }));
 
 // ========================================
@@ -835,8 +843,16 @@ describe('Session Management', () => {
 
   describe('status broadcasting', () => {
     it('should broadcast status changes to subscribed clients', () => {
-      // Subscribe
-      client.emit('message', JSON.stringify({ type: 'subscribe', requestId: 'sub-1' }));
+      // Subscribe to the exact session — broadcast() filters session-scoped
+      // events (status_change, conversation_update, compaction) by sessionId.
+      client.emit(
+        'message',
+        JSON.stringify({
+          type: 'subscribe',
+          payload: { sessionId: 'test-session' },
+          requestId: 'sub-1',
+        })
+      );
       client.send.mockClear();
 
       // Emit status change from watcher

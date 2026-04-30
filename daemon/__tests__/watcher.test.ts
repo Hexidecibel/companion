@@ -751,9 +751,10 @@ describe('SessionWatcher', () => {
       await (watcher as any).refreshTmuxPaths();
       jest.useFakeTimers();
 
-      expect(mockFs.writeFileSync).toHaveBeenCalledWith(
-        MAPPINGS_PATH,
-        expect.any(String)
+      // persistMappings uses atomicWriteFileSync: write to tmp, then rename to MAPPINGS_PATH.
+      expect(mockFs.renameSync).toHaveBeenCalledWith(
+        expect.any(String),
+        MAPPINGS_PATH
       );
     });
 

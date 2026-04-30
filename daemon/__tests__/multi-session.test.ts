@@ -19,10 +19,18 @@ import WebSocket from 'ws';
 import { Server } from 'http';
 import * as fs from 'fs';
 
-// Mock fs.existsSync to always return true in tests
+// Mock fs to isolate from the real filesystem. The create_tmux_session handler
+// writes a bypass-permissions settings.json into the working dir (which doesn't
+// exist on disk in tests), and storeTmuxSessionConfig persists a sidecar JSON
+// via atomicWriteFileSync, so all file-mutating calls must be stubbed.
 jest.mock('fs', () => ({
   ...jest.requireActual('fs'),
   existsSync: jest.fn().mockReturnValue(true),
+  writeFileSync: jest.fn(),
+  mkdirSync: jest.fn(),
+  readFileSync: jest.fn().mockReturnValue('{}'),
+  renameSync: jest.fn(),
+  unlinkSync: jest.fn(),
 }));
 
 // ========================================
@@ -1103,7 +1111,7 @@ describe('Multi-Session Support', () => {
       expect(update).toBeDefined();
     });
 
-    it('should include sessionId in broadcasts so client can filter', () => {
+    it('should not deliver broadcasts for other sessions to the subscribed client', () => {
       // Subscribe to session 1
       client.emit(
         'message',
@@ -1121,12 +1129,32 @@ describe('Multi-Session Support', () => {
         highlights: [],
       });
 
+      // Server-side filtering: session-scoped broadcasts only reach clients
+      // whose subscribedSessionId matches the event's sessionId.
       const sent = client.send.mock.calls.map((c: any) => JSON.parse(c[0]));
       const update = sent.find((s) => s.type === 'conversation_update');
-      // Broadcasts go to all subscribed clients; sessionId is included
-      // so the client can filter on its side
+      expect(update).toBeUndefined();
+    });
+
+    it('should include sessionId in broadcasts so client can confirm origin', () => {
+      // Subscribe to session 1
+      client.emit(
+        'message',
+        JSON.stringify({ type: 'subscribe', payload: { sessionId: UUID_SAME_1 }, requestId: 'sub' })
+      );
+      client.send.mockClear();
+
+      mockWatcher.emit('conversation-update', {
+        path: PATH_SAME_1,
+        sessionId: UUID_SAME_1,
+        messages: [],
+        highlights: [],
+      });
+
+      const sent = client.send.mock.calls.map((c: any) => JSON.parse(c[0]));
+      const update = sent.find((s) => s.type === 'conversation_update');
       expect(update).toBeDefined();
-      expect(update.sessionId).toBe(UUID_SAME_2);
+      expect(update.sessionId).toBe(UUID_SAME_1);
     });
   });
 

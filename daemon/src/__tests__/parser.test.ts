@@ -388,7 +388,9 @@ describe('parseConversationFile', () => {
     expect(asst?.toolCalls?.[0].output).toBe('line1\nline2');
   });
 
-  it('handles queue-operation entries with task-notification', () => {
+  it('suppresses queue-operation entries with task-notification from conversation UI', () => {
+    // Task notifications are internal plumbing and intentionally hidden from
+    // the conversation view — the dispatch panel surfaces agent status separately.
     const queueOp = {
       type: 'queue-operation',
       content:
@@ -396,11 +398,7 @@ describe('parseConversationFile', () => {
       timestamp: '2026-01-28T10:05:00.000Z',
     };
     const msgs = parseConversationFile('test.jsonl', Infinity, JSON.stringify(queueOp));
-    expect(msgs).toHaveLength(1);
-    expect(msgs[0].type).toBe('system');
-    expect(msgs[0].content).toBe('Agent finished research');
-    expect(msgs[0].toolCalls?.[0].name).toBe('TaskOutput');
-    expect(msgs[0].toolCalls?.[0].status).toBe('completed');
+    expect(msgs).toHaveLength(0);
   });
 });
 

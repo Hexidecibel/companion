@@ -42,6 +42,7 @@ mockWatcher.clearActiveSession = jest.fn();
 mockWatcher.refreshTmuxPaths = jest.fn().mockResolvedValue(undefined);
 mockWatcher.markSessionAsNew = jest.fn();
 mockWatcher.getTmuxSessionForConversation = jest.fn().mockReturnValue(null);
+mockWatcher.ensureConversationLoaded = jest.fn().mockReturnValue(false);
 mockWatcher.getServerSummary = jest
   .fn()
   .mockResolvedValue({ sessions: [], totalSessions: 0, waitingCount: 0, workingCount: 0 });
@@ -542,13 +543,22 @@ describe('WebSocketHandler', () => {
       mockWss.clients.add(mockClient);
       mockWss.emit('connection', mockClient, { socket: { remoteAddress: '127.0.0.1' } });
 
-      // Authenticate and subscribe
+      // Authenticate and subscribe to a specific session — broadcast() filters
+      // session-scoped events (conversation_update, status_change, compaction)
+      // by sessionId, so the client must be subscribed to the same id.
       mockClient.emit('message', JSON.stringify({ type: 'authenticate', token: 'test-token' }));
-      mockClient.emit('message', JSON.stringify({ type: 'subscribe' }));
+      mockClient.emit(
+        'message',
+        JSON.stringify({ type: 'subscribe', payload: { sessionId: 'test-session' } })
+      );
       mockClient.send.mockClear();
 
-      // Simulate watcher event
-      mockWatcher.emit('conversation-update', { messages: [], highlights: [] });
+      // Simulate watcher event with a matching sessionId
+      mockWatcher.emit('conversation-update', {
+        sessionId: 'test-session',
+        messages: [],
+        highlights: [],
+      });
 
       expect(mockClient.send).toHaveBeenCalledWith(
         expect.stringContaining('"type":"conversation_update"')
@@ -560,13 +570,17 @@ describe('WebSocketHandler', () => {
       mockWss.clients.add(mockClient);
       mockWss.emit('connection', mockClient, { socket: { remoteAddress: '127.0.0.1' } });
 
-      // Authenticate and subscribe
+      // Authenticate and subscribe to a specific session
       mockClient.emit('message', JSON.stringify({ type: 'authenticate', token: 'test-token' }));
-      mockClient.emit('message', JSON.stringify({ type: 'subscribe' }));
+      mockClient.emit(
+        'message',
+        JSON.stringify({ type: 'subscribe', payload: { sessionId: 'test-session' } })
+      );
       mockClient.send.mockClear();
 
-      // Simulate watcher status change with waiting for input
+      // Simulate watcher status change with matching sessionId
       mockWatcher.emit('status-change', {
+        sessionId: 'test-session',
         isWaitingForInput: true,
         lastMessage: { content: 'What should I do?' },
       });
