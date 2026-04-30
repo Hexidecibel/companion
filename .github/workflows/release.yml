@@ -143,7 +143,7 @@ jobs:
         run: cd desktop && npx tauri ios init
       - name: Patch iOS project (icons)
         run: cd desktop && bash scripts/setup-ios.sh
-      - name: Set iOS display name
+      - name: Set iOS display name and build number
         run: |
           INFO_PLIST=$(find desktop/src-tauri/gen/apple -name 'Info.plist' -path '*_iOS*' | head -1)
           if [ -n "$INFO_PLIST" ]; then
@@ -152,6 +152,8 @@ jobs:
             /usr/libexec/PlistBuddy -c "Set :CFBundleName Hexi\'s Companion" "$INFO_PLIST"
             /usr/libexec/PlistBuddy -c "Add :ITSAppUsesNonExemptEncryption bool false" "$INFO_PLIST" 2>/dev/null || \
               /usr/libexec/PlistBuddy -c "Set :ITSAppUsesNonExemptEncryption false" "$INFO_PLIST"
+            /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${{ github.run_number }}" "$INFO_PLIST"
+            echo "Set CFBundleVersion to ${{ github.run_number }}"
           fi
       - name: Import Apple Distribution certificate
         env:
@@ -311,10 +313,23 @@ jobs:
           APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
         run: |
+          set -o pipefail
           xcrun altool --upload-app --type ios \
             --file "${{ steps.locate_ipa.outputs.ipa_path }}" \
             --apiKey "$APPLE_API_KEY_ID" \
-            --apiIssuer "$APPLE_API_ISSUER"
+            --apiIssuer "$APPLE_API_ISSUER" 2>&1 | tee /tmp/altool-upload.log
+          ALTOOL_RC=${PIPESTATUS[0]}
+          echo "altool exit code: $ALTOOL_RC"
+          if [ $ALTOOL_RC -ne 0 ]; then
+            echo "::error::altool exited with code $ALTOOL_RC — TestFlight upload failed"
+            exit $ALTOOL_RC
+          fi
+          # altool occasionally exits 0 even when the upload failed (it logs the
+          # error to stdout but doesn't propagate it). Detect known error markers.
+          if grep -Eq 'ERROR ITMS|UNEXPECTED_ERROR|ENTITY_ERROR|Error Domain' /tmp/altool-upload.log; then
+            echo "::error::altool reported an upload error (see log above)"
+            exit 1
+          fi
       - name: Upload IPA artifact
         uses: actions/upload-artifact@v4
         with:
