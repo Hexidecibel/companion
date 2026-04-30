@@ -301,6 +301,12 @@ jobs:
               exit 1
               ;;
           esac
+          ARCHIVE_PLIST="$ARCHIVE/Info.plist"
+          if [ -f "$ARCHIVE_PLIST" ]; then
+            /usr/libexec/PlistBuddy -c "Set :ApplicationProperties:CFBundleVersion ${{ github.run_number }}" "$ARCHIVE_PLIST" 2>/dev/null || \
+              /usr/libexec/PlistBuddy -c "Add :ApplicationProperties:CFBundleVersion string ${{ github.run_number }}" "$ARCHIVE_PLIST"
+            echo "Set archive ApplicationProperties.CFBundleVersion to ${{ github.run_number }}"
+          fi
           /usr/libexec/PlistBuddy -c "Add :CFBundleVersion string ${{ github.run_number }}" "$APP_PLIST" 2>/dev/null || \
             /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${{ github.run_number }}" "$APP_PLIST"
           echo "Set CFBundleVersion to ${{ github.run_number }} in $APP_PLIST"
@@ -332,6 +338,38 @@ jobs:
           fi
           echo "Exported IPA: $IPA"
           echo "ipa_path=$IPA" >> "$GITHUB_OUTPUT"
+      - name: Verify CFBundleVersion in produced IPA
+        run: |
+          set -e
+          IPA=$(find desktop/src-tauri/gen/apple/build -name '*.ipa' | head -1)
+          if [ -z "$IPA" ]; then
+            echo "::error::No IPA found"
+            find desktop/src-tauri/gen/apple/build -maxdepth 6 -type f -name '*.ipa' || true
+            exit 1
+          fi
+          echo "Inspecting $IPA"
+          TMPDIR=$(mktemp -d)
+          unzip -q "$IPA" -d "$TMPDIR"
+          APP_DIR=$(find "$TMPDIR/Payload" -maxdepth 1 -name '*.app' -type d | head -1)
+          if [ -z "$APP_DIR" ]; then
+            echo "::error::No .app inside Payload/"
+            ls -la "$TMPDIR/Payload" || true
+            exit 1
+          fi
+          echo "App bundle: $APP_DIR"
+          echo "--- Info.plist (CFBundleVersion + CFBundleShortVersionString) ---"
+          /usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$APP_DIR/Info.plist"
+          /usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$APP_DIR/Info.plist"
+          echo "--- All top-level keys ---"
+          /usr/libexec/PlistBuddy -c "Print" "$APP_DIR/Info.plist" | head -40
+          # Also check the archive's Info.plist for sanity
+          ARCHIVE_PLIST=$(find desktop/src-tauri/gen/apple/build -name '*.xcarchive' -type d | head -1)/Info.plist
+          if [ -f "$ARCHIVE_PLIST" ]; then
+            echo "--- Archive's top-level Info.plist (xcarchive metadata) ---"
+            /usr/libexec/PlistBuddy -c "Print :ApplicationProperties:CFBundleVersion" "$ARCHIVE_PLIST" 2>/dev/null || echo "no ApplicationProperties.CFBundleVersion"
+            /usr/libexec/PlistBuddy -c "Print :ApplicationProperties:CFBundleShortVersionString" "$ARCHIVE_PLIST" 2>/dev/null || echo "no ApplicationProperties.CFBundleShortVersionString"
+          fi
+          rm -rf "$TMPDIR"
       - name: Upload IPA to TestFlight
         if: ${{ github.event_name == 'push' || inputs.skip_testflight != true }}
         env:
