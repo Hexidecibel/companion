@@ -143,7 +143,7 @@ jobs:
         run: cd desktop && npx tauri ios init
       - name: Patch iOS project (icons)
         run: cd desktop && bash scripts/setup-ios.sh
-      - name: Set iOS display name and build number
+      - name: Set iOS display name
         run: |
           INFO_PLIST=$(find desktop/src-tauri/gen/apple -name 'Info.plist' -path '*_iOS*' | head -1)
           if [ -n "$INFO_PLIST" ]; then
@@ -152,8 +152,6 @@ jobs:
             /usr/libexec/PlistBuddy -c "Set :CFBundleName Hexi\'s Companion" "$INFO_PLIST"
             /usr/libexec/PlistBuddy -c "Add :ITSAppUsesNonExemptEncryption bool false" "$INFO_PLIST" 2>/dev/null || \
               /usr/libexec/PlistBuddy -c "Set :ITSAppUsesNonExemptEncryption false" "$INFO_PLIST"
-            /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${{ github.run_number }}" "$INFO_PLIST"
-            echo "Set CFBundleVersion to ${{ github.run_number }}"
           fi
       - name: Import Apple Distribution certificate
         env:
@@ -280,6 +278,24 @@ jobs:
             echo "::error::Tauri failed for a reason other than export"
             exit $TAURI_RC
           fi
+      - name: Set CFBundleVersion in archive
+        run: |
+          set -e
+          ARCHIVE=$(find desktop/src-tauri/gen/apple/build -name '*.xcarchive' -type d | head -1)
+          if [ -z "$ARCHIVE" ]; then
+            echo "::error::No .xcarchive found under desktop/src-tauri/gen/apple/build"
+            find desktop/src-tauri/gen/apple/build -maxdepth 4 -type d | head -20
+            exit 1
+          fi
+          APP_PLIST=$(find "$ARCHIVE/Products/Applications" -name 'Info.plist' | head -1)
+          if [ -z "$APP_PLIST" ]; then
+            echo "::error::No Info.plist found inside archive Applications dir"
+            ls -la "$ARCHIVE/Products/Applications/" || true
+            exit 1
+          fi
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${{ github.run_number }}" "$APP_PLIST"
+          echo "Set CFBundleVersion to ${{ github.run_number }} in $APP_PLIST"
+          /usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$APP_PLIST"
       - name: Manually export IPA (xcodebuild -exportArchive without -allowProvisioningUpdates)
         id: locate_ipa
         run: |
