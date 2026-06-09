@@ -4,7 +4,7 @@
   "version": "1.0.0",
   "identifier": "com.hexidecibel.companion",
   "build": {
-    "frontendDist": "../../web/dist",
+    "frontendDist": "../../web/dist-desktop",
     "devUrl": "http://localhost:5173",
     "beforeBuildCommand": "cd ../web && npm run build:desktop",
     "beforeDevCommand": "cd ../web && npx vite --base /"
