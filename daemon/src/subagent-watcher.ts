@@ -5,6 +5,13 @@ import { EventEmitter } from 'events';
 import { SubAgent, AgentTree, ConversationHighlight } from './types';
 import { parseConversationFile, extractHighlights } from './parser';
 
+// On the initial chokidar scan, skip sub-agent files that haven't been written
+// to recently. Without this guard the watcher reads + JSON-parses every historical
+// sub-agent file (potentially thousands, hundreds of MB total) on startup and on
+// every poll tick, pegging the CPU. Active agents are always tracked because their
+// file mtime is fresh; once tracked they keep updating regardless of age.
+const SUBAGENT_INITIAL_MAX_AGE_MS = 10 * 60 * 1000; // 10 min
+
 interface SubAgentJsonlEntry {
   agentId?: string;
   slug?: string;
@@ -38,6 +45,9 @@ export class SubAgentWatcher extends EventEmitter {
   private watcher: chokidar.FSWatcher | null = null;
   private agents: Map<string, TrackedSubAgent> = new Map();
   private cleanupInterval: NodeJS.Timeout | null = null;
+  // True until the initial chokidar scan has settled. While true we ignore stale
+  // historical files so startup doesn't parse the entire sub-agent backlog.
+  private initialScanActive = true;
 
   constructor(codeHome: string) {
     super();
@@ -74,13 +84,22 @@ export class SubAgentWatcher extends EventEmitter {
       },
       depth: 4,
       usePolling: true,
-      interval: 200,
+      // Poll less aggressively. With many historical sub-agent files (this can be
+      // thousands), a 200ms interval stat-walks the whole tree 5x/sec and pegs the
+      // CPU. 1s is responsive enough for the dispatch panel.
+      interval: 1000,
+      binaryInterval: 1000,
     });
 
     this.watcher.on('add', (filePath) => this.handleFileChange(filePath));
     this.watcher.on('change', (filePath) => this.handleFileChange(filePath));
     this.watcher.on('error', (error) => {
       console.error('SubAgentWatcher error:', error);
+    });
+    // Once the initial scan completes, stop ignoring stale files so that an old
+    // file which genuinely gets re-touched later is still picked up.
+    this.watcher.on('ready', () => {
+      this.initialScanActive = false;
     });
 
     // Run cleanup every hour
@@ -102,12 +121,38 @@ export class SubAgentWatcher extends EventEmitter {
 
   private handleFileChange(filePath: string): void {
     try {
+      // During the initial scan, skip files that haven't been touched recently.
+      // This avoids parsing the entire historical sub-agent backlog (which can be
+      // hundreds of MB across thousands of files) on every startup poll tick.
+      // Files already tracked, and any file touched after startup, are never skipped.
+      if (this.initialScanActive) {
+        const key = this.fileKeyIfTracked(filePath);
+        if (!key) {
+          let ageMs = Infinity;
+          try {
+            ageMs = Date.now() - fs.statSync(filePath).mtimeMs;
+          } catch {
+            return;
+          }
+          if (ageMs > SUBAGENT_INITIAL_MAX_AGE_MS) return;
+        }
+      }
+
       const agentData = this.parseSubAgentFile(filePath);
       if (!agentData) return;
 
       const key = `${agentData.sessionId}:${agentData.agentId}`;
       const existing = this.agents.get(key);
       const isNew = !existing;
+
+      // Latch completion: once an agent has been seen as complete, keep it complete.
+      // Sub-agent JSONL can append later lines that make the heuristic flip
+      // isComplete back to false, which would otherwise re-emit "completed"
+      // repeatedly and thrash listeners.
+      if (existing?.isComplete && !agentData.isComplete) {
+        agentData.isComplete = true;
+        agentData.completedAt = existing.completedAt ?? agentData.completedAt ?? agentData.lastActivity;
+      }
 
       this.agents.set(key, agentData);
 
@@ -123,6 +168,14 @@ export class SubAgentWatcher extends EventEmitter {
     } catch (err) {
       console.error(`SubAgentWatcher: Error parsing ${filePath}:`, err);
     }
+  }
+
+  /** Return the tracking key if a file path is already tracked, else null. */
+  private fileKeyIfTracked(filePath: string): string | null {
+    for (const [key, agent] of this.agents.entries()) {
+      if (agent.filePath === filePath) return key;
+    }
+    return null;
   }
 
   private parseSubAgentFile(filePath: string): TrackedSubAgent | null {
