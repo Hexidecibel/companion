@@ -14,8 +14,8 @@ interface MarkdownRendererProps {
 
 type InlineNode =
   | { type: 'text'; text: string }
-  | { type: 'bold'; text: string }
-  | { type: 'italic'; text: string }
+  | { type: 'bold'; children: InlineNode[] }
+  | { type: 'italic'; children: InlineNode[] }
   | { type: 'code'; text: string }
   | { type: 'link'; text: string; href: string }
   | { type: 'fileLink'; text: string; path: string };
@@ -137,9 +137,10 @@ function parseInline(text: string): InlineNode[] {
     }
 
     if (match[2] !== undefined) {
-      nodes.push({ type: 'bold', text: match[2] });
+      // Recurse so URLs / nested emphasis inside **bold** are still parsed.
+      nodes.push({ type: 'bold', children: parseInline(match[2]) });
     } else if (match[3] !== undefined) {
-      nodes.push({ type: 'italic', text: match[3] });
+      nodes.push({ type: 'italic', children: parseInline(match[3]) });
     } else if (match[4] !== undefined) {
       nodes.push({ type: 'code', text: match[4] });
     } else if (match[5] !== undefined && match[6] !== undefined) {
@@ -206,14 +207,17 @@ function parseInline(text: string): InlineNode[] {
 }
 
 function renderInline(text: string, keyPrefix: string, onFileClick?: (path: string) => void, existingFiles?: Set<string>) {
-  const nodes = parseInline(text);
+  return renderNodes(parseInline(text), keyPrefix, onFileClick, existingFiles);
+}
+
+function renderNodes(nodes: InlineNode[], keyPrefix: string, onFileClick?: (path: string) => void, existingFiles?: Set<string>) {
   return nodes.map((node, i) => {
     const key = `${keyPrefix}-${i}`;
     switch (node.type) {
       case 'bold':
-        return <strong key={key}>{node.text}</strong>;
+        return <strong key={key}>{renderNodes(node.children, key, onFileClick, existingFiles)}</strong>;
       case 'italic':
-        return <em key={key}>{node.text}</em>;
+        return <em key={key}>{renderNodes(node.children, key, onFileClick, existingFiles)}</em>;
       case 'code': {
         // Make code spans clickable if they look like URLs (including bare IPs, localhost:port, host:port)
         if (CODE_URL_RE.test(node.text)) {

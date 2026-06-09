@@ -524,3 +524,10 @@ Batch of fixes across link handling, terminal-mode navigation/choices, multi-cho
 - **Hide Tools defaults ON** — `SessionView.tsx` `readHideTools` now treats absence as enabled (`!== '0' : true`), so tool cards are hidden by default for cleaner reading
 - **Settings header safe-area hardened** — `global.css` uses `max(28px, calc(... + env(safe-area-inset-top)))` on `.form-header` and the settings modal header; overlay padding zeroed to avoid double-applying the inset
 - **Orchestrator / concierge POC** — `docs/orchestrator-design.md`, `bin/concierge`, `bin/companion-sessions`, and a `concierge/` scaffold (`CLAUDE.md`, `projects.json`, `.mcp.json.template`); rendered per-machine `concierge/.mcp.json` is gitignored
+
+## Mobile Header Refinement & Link Autolink (2026-06-09)
+Follow-up fixes layered on the Mobile UX round above: walks back the activity-row header relocation in favor of a compact top button row, fixes a doubled status-bar inset, and makes URLs inside markdown emphasis tappable.
+
+- **Compact top-row mobile header** — buttons now stay in a single top row (Back · Terminal · Plan · Bookmarks · Tools ▾ · gear); Files/Search/Skills/Review collapsed into a "Tools" dropdown. The `SessionActionBar` (which had moved buttons into the activity/processing row) was removed and the activity row is conditional again. `HeaderOverflowMenu.tsx` gained an optional `label` prop to render as "Tools ▾"; `web/src/components/SessionActionBar.tsx` deleted
+- **Doubled header inset fixed** — `.dashboard` already applies `var(--safe-top)`, and `.session-header-mobile` was applying it again, creating an excessive top band. Inset now applied once plus a 6px gap (`global.css` mobile media queries)
+- **Autolink URLs inside emphasis** — `MarkdownRenderer.tsx` previously stored bold/italic inner text as a raw string and never re-parsed it, so URLs inside `**…**` / `*…*` never became links. Bold/italic now carry children and recurse, so URLs (plus code/file links and nested emphasis) inside emphasis render as the accent link pill, enabling long-press → Open Link / Copy link

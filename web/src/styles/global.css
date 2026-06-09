@@ -2817,10 +2817,12 @@ body {
     border-radius: 22px;
   }
 
-  /* Session header compact — only back arrow on mobile */
+  /* Session header compact — single row on phones. The status-bar / notch inset
+     is already applied once by the ancestor `.dashboard` (padding-top:
+     var(--safe-top)), so the header itself only needs a small breathing gap
+     below it — do NOT re-add the safe-area inset here or it double-stacks. */
   .session-header-mobile {
-    padding: 8px;
-    padding-top: calc(14px + var(--safe-top));
+    padding: 6px 8px;
   }
 
   /* Sidebar header with safe area */
@@ -2932,14 +2934,22 @@ html {
   gap: 8px;
 }
 
+/* Mobile chat header: ONE compact row (Back + actions). The status-bar / notch
+   inset is owned by the ancestor `.dashboard` (padding-top: var(--safe-top)),
+   which is applied exactly once for the full-screen mobile session view. The
+   header therefore only adds a small fixed breathing gap (6px) below the status
+   bar — re-adding var(--safe-top) here previously double-stacked the inset and
+   produced a large (~60px) empty band above Back. */
 .session-header-mobile {
   justify-content: flex-start;
-  padding-top: calc(14px + var(--safe-top));
-  min-height: calc(48px + var(--safe-top));
+  flex-wrap: nowrap;
+  padding: 6px 8px;
+  min-height: 0;
 }
 
 .session-header-mobile .session-header-actions {
   flex: 1;
+  min-width: 0;
   justify-content: flex-end;
 }
 
@@ -9486,6 +9496,48 @@ html {
     min-width: 36px;
     min-height: 36px;
   }
+}
+
+/* Mobile single-row header overflow safety: the action cluster scrolls
+   horizontally if the buttons can't all fit, but the trailing gear is pinned
+   to the right edge so it is ALWAYS visible/tappable. The middle buttons never
+   push it off-screen. */
+.session-header-mobile .session-header-actions {
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+
+.session-header-mobile .session-header-actions::-webkit-scrollbar {
+  display: none;
+}
+
+.session-header-mobile .session-header-actions > * {
+  flex-shrink: 0;
+}
+
+.session-header-mobile .session-header-gear {
+  position: sticky;
+  right: 0;
+  /* Sit above scrolling siblings so nothing slides visibly underneath it. */
+  z-index: 1;
+  margin-left: auto;
+}
+
+/* Labeled "Tools" dropdown trigger (mobile). Small button reading "Tools" with
+   a down chevron, styled like the other header buttons. */
+.session-header-tools-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.session-header-tools-chevron {
+  font-size: 10px;
+  line-height: 1;
+  opacity: 0.8;
 }
 
 /* Mobile header overflow ("kebab") menu */

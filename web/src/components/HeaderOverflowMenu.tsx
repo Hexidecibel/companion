@@ -14,18 +14,25 @@ export interface OverflowMenuItem {
 
 interface HeaderOverflowMenuProps {
   items: OverflowMenuItem[];
+  /**
+   * Optional visible label for the trigger. When provided, the trigger renders
+   * as a labeled button ("<label> ▾") instead of the bare "⋮" kebab — used for
+   * the mobile "Tools" dropdown.
+   */
+  label?: string;
 }
 
 /**
- * Compact overflow ("kebab") menu for the session header on mobile.
+ * Compact dropdown menu for the session header on mobile.
  *
- * Renders a single "⋮" trigger button that opens a dropdown anchored to the
- * trigger. Reuses the app's existing `.context-menu` popup styling so it
- * matches the message context menu / other dropdowns. Closes on selection,
- * outside tap, scroll, and Escape. Each item invokes the same handler the
- * original header button used — no behavior change.
+ * Renders a trigger button (either a labeled "<label> ▾" control or the bare
+ * "⋮" kebab) that opens a dropdown anchored to the trigger. Reuses the app's
+ * existing `.context-menu` popup styling so it matches the message context
+ * menu / other dropdowns. Closes on selection, outside tap, scroll, and
+ * Escape. Each item invokes the same handler the original header button used —
+ * no behavior change.
  */
-export function HeaderOverflowMenu({ items }: HeaderOverflowMenuProps) {
+export function HeaderOverflowMenu({ items, label }: HeaderOverflowMenuProps) {
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState<{ top: number; right: number } | null>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -75,15 +82,23 @@ export function HeaderOverflowMenu({ items }: HeaderOverflowMenuProps) {
     <>
       <button
         ref={triggerRef}
-        className="session-header-overflow-btn"
+        className={label ? 'session-header-btn session-header-tools-btn' : 'session-header-overflow-btn'}
         onClick={() => setOpen((v) => !v)}
-        title="More actions"
-        aria-label="More actions"
+        title={label ?? 'More actions'}
+        aria-label={label ?? 'More actions'}
         aria-haspopup="menu"
         aria-expanded={open}
       >
-        {/* Vertical ellipsis (kebab) */}
-        {'⋮'}
+        {label ? (
+          <>
+            <span>{label}</span>
+            {/* Down chevron */}
+            <span className="session-header-tools-chevron">{'▾'}</span>
+          </>
+        ) : (
+          /* Vertical ellipsis (kebab) */
+          '⋮'
+        )}
       </button>
       {open && pos &&
         createPortal(

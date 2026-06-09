@@ -35,8 +35,7 @@ import { FetchErrorBanner } from './FetchErrorBanner';
 import { ComponentErrorBoundary } from './ComponentErrorBoundary';
 import { ScrollDebugPanel } from './ScrollDebugPanel';
 import { SettingsModal } from './SettingsModal';
-import { OverflowMenuItem } from './HeaderOverflowMenu';
-import { SessionActionBar } from './SessionActionBar';
+import { HeaderOverflowMenu, OverflowMenuItem } from './HeaderOverflowMenu';
 import { hideToolsKey } from '../services/storageKeys';
 
 const CodeReviewModal = lazy(() => import('./CodeReviewModal').then(m => ({ default: m.CodeReviewModal })));
@@ -673,57 +672,64 @@ export function SessionView({
     </div>
   );
 
-  // Mobile: the action cluster lives in the activity row (SessionActionBar),
-  // not the top header. A few high-value actions stay inline, right-aligned;
-  // the rest collapse behind the "⋮" overflow kebab.
-  //
-  // Inline priority (most-used / stateful first): Terminal (only when tmux is
-  // attached, with active highlight) then Files, Search, Skills. Plan,
-  // Bookmarks, Review (conditional, with badges) and Settings spill into the
-  // kebab. The transient agent pill sits with the status indicator on the left.
-  // Each item invokes the exact same handler/state setter as its original
-  // header button, so behavior is unchanged.
-  const mobileInlineActions = (
-    <>
-      {transientButtons}
-      <button
-        className="session-header-btn"
-        onClick={() => setShowFileFinder(true)}
-        title="Search files (Cmd+P)"
-      >
-        Files
-      </button>
-      <button
-        className="session-header-btn"
-        onClick={() => setShowConversationSearch(true)}
-        title="Search past conversations"
-      >
-        Search
-      </button>
-      <button
-        className="session-header-btn"
-        onClick={() => setShowSkillBrowser(true)}
-        title="Browse and manage skills"
-      >
-        Skills
-      </button>
-    </>
-  );
+  // Mobile: a single compact top-header row holds the action cluster, in order:
+  //   Back · Terminal · Plan · Bookmarks · [Tools ▾] · ⚙(Settings)
+  // plus the transient agent pill when active. Terminal/Plan/Bookmarks render
+  // only under their existing conditions. The "Tools" control reuses the
+  // HeaderOverflowMenu as a labeled dropdown holding the lower-frequency
+  // navigation actions (Files, Search, Skills, Review) so the row never
+  // overflows and the gear always stays visible. Each item invokes the exact
+  // same handler/state setter as its original header button.
+  const mobilePlanButton = latestPlanFile ? (
+    <button
+      className="session-header-btn plan-btn"
+      onClick={() => handleViewFile(latestPlanFile)}
+      title={`View plan: ${latestPlanFile}`}
+    >
+      Plan
+    </button>
+  ) : latestInlinePlan ? (
+    <button
+      className="session-header-btn plan-btn"
+      onClick={() => setArtifactContent({ content: latestInlinePlan, title: 'Plan' })}
+      title="View plan"
+    >
+      Plan
+    </button>
+  ) : null;
 
-  const mobileOverflowItems: OverflowMenuItem[] = [
-    ...(latestPlanFile
-      ? [{ label: 'Plan', onClick: () => handleViewFile(latestPlanFile) }]
-      : latestInlinePlan
-        ? [{ label: 'Plan', onClick: () => setArtifactContent({ content: latestInlinePlan, title: 'Plan' }) }]
-        : []),
-    ...(currentBookmarks.length > 0
-      ? [{ label: 'Bookmarks', badge: currentBookmarks.length, active: showBookmarks, onClick: () => setShowBookmarks(!showBookmarks) }]
-      : []),
+  const mobileBookmarksButton = currentBookmarks.length > 0 ? (
+    <button
+      className={`session-header-btn ${showBookmarks ? 'terminal-active' : ''}`}
+      onClick={() => setShowBookmarks(!showBookmarks)}
+      title="View bookmarks"
+    >
+      Bookmarks ({currentBookmarks.length})
+    </button>
+  ) : null;
+
+  // "Tools" dropdown items (mobile only). Review preserves its badge count.
+  const mobileToolsItems: OverflowMenuItem[] = [
+    { label: 'Files', onClick: () => setShowFileFinder(true) },
+    { label: 'Search', onClick: () => setShowConversationSearch(true) },
+    { label: 'Skills', onClick: () => setShowSkillBrowser(true) },
     ...(fileChanges.length > 0
       ? [{ label: 'Review', badge: fileChanges.length, onClick: () => setShowCodeReviewModal(true) }]
       : []),
-    { label: 'Settings', onClick: () => setShowSettings(true) },
   ];
+
+  // Mobile top-row action cluster (right of Back). Single compact row that must
+  // never overflow off-screen; the gear stays pinned visible at the end.
+  const mobileActionButtons = (
+    <div className="session-header-actions">
+      {transientButtons}
+      {mobilePlanButton}
+      {mobileBookmarksButton}
+      <HeaderOverflowMenu items={mobileToolsItems} label="Tools" />
+      {agentPill}
+      {gearButton}
+    </div>
+  );
 
   return (
     <div className="session-view" style={style}>
@@ -750,9 +756,10 @@ export function SessionView({
             </button>
           )
         )}
-        {/* Desktop: full action cluster in the header. Mobile: header is just
-            Back — the action cluster lives in the activity row below. */}
-        {!mobile && actionButtons}
+        {/* Both desktop and mobile render the full action cluster inline in
+            this single top header row. Mobile uses a compact variant where the
+            lower-frequency actions collapse into the "Tools" dropdown. */}
+        {mobile ? mobileActionButtons : actionButtons}
       </div>
 
       {showTerminal && tmuxSessionName && serverId && (
@@ -818,28 +825,11 @@ export function SessionView({
                 </div>
               ) : null;
 
-              // Mobile: the activity row is the persistent action toolbar.
-              // Status (spinner/"Processing…"/work-group) + transient agent
-              // pill sit on the left; action buttons + overflow kebab fill the
-              // right. Always rendered so the toolbar stays visible when idle.
-              if (mobile) {
-                return (
-                  <SessionActionBar
-                    status={
-                      <>
-                        {waitingCell}
-                        {workGroupCell}
-                        {agentPill}
-                      </>
-                    }
-                    inlineActions={mobileInlineActions}
-                    overflowItems={mobileOverflowItems}
-                  />
-                );
-              }
-
-              // Desktop: unchanged — only render the bars row when there's an
-              // active status or work group to show.
+              // Activity row (both platforms): only render when there's an
+              // active status or work group to show. The action cluster lives
+              // in the top header, not here, so this row is purely the
+              // WaitingIndicator + WorkGroupBar — conditional on both desktop
+              // and mobile.
               if (!hasWaiting && !hasWorkGroup) return null;
               return (
                 <div className="session-bars-row">
