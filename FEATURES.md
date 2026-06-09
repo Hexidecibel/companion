@@ -512,3 +512,15 @@ MCP server that lets Claude on one Companion box dispatch work to Claude on anot
 - Append-only audit log at `~/.companion/audit.log` with rotation, surfaced via `get_audit_log` handler
 - Transport hardening: destructive ops refuse non-loopback / non-TLS connections unless explicitly marked `trustedNetwork`
 - `bin/companion enable-remote` CLI for interactive capability configuration
+
+## Mobile UX & Prompt-Handling Round (2026-06-09)
+Batch of fixes across link handling, terminal-mode navigation/choices, multi-choice prompt detection, and mobile chat chrome, plus an orchestrator proof-of-concept.
+
+- **Copy-link / Open-link reliability** — `cleanUrl` helper in `web/src/utils/urls.ts` with a widened trailing-punctuation regex (strips trailing `**`, brackets, quotes) and leading-junk strip; long-press "Open Link" / "Copy link" now resolve a clean URL in `MessageBubble.tsx` and `MarkdownRenderer.tsx`
+- **Terminal-mode swipe-back fix** — `Dashboard.tsx` emits close-overlay through the shared `eventBus` instead of dispatching a raw DOM `window` event, so the Android back gesture reliably closes the terminal overlay
+- **Wider multi-choice prompt detection** — `parser.ts` `parseTextChoicePrompt` now recognizes `1.` / `1)` / `(1)` / `❯` arrow / lettered list styles with false-positive guards; covered by new cases in `daemon/src/__tests__/permission-prompts.test.ts`. Web rendering hardened in `QuestionBlock.tsx` + `MessageBubble.tsx` (option normalization, empty `questions[]` handling)
+- **Tappable terminal-mode choice overlay** — daemon detects an active `❯ N.` selector in the pane tail (`handlers/tmux.ts`, `types.ts`) and attaches a `choicePrompt` to `terminal_output`; new `web/src/components/TerminalChoiceOverlay.tsx` renders tappable options in `TerminalPanel.tsx` (web `types/index.ts` updated)
+- **Mobile chat header buttons relocated** — header actions moved into the activity/processing row with a kebab overflow menu; new `web/src/components/SessionActionBar.tsx` + `HeaderOverflowMenu.tsx`, wired into the mobile branch of `SessionView.tsx`. Desktop layout unchanged
+- **Hide Tools defaults ON** — `SessionView.tsx` `readHideTools` now treats absence as enabled (`!== '0' : true`), so tool cards are hidden by default for cleaner reading
+- **Settings header safe-area hardened** — `global.css` uses `max(28px, calc(... + env(safe-area-inset-top)))` on `.form-header` and the settings modal header; overlay padding zeroed to avoid double-applying the inset
+- **Orchestrator / concierge POC** — `docs/orchestrator-design.md`, `bin/concierge`, `bin/companion-sessions`, and a `concierge/` scaffold (`CLAUDE.md`, `projects.json`, `.mcp.json.template`); rendered per-machine `concierge/.mcp.json` is gitignored

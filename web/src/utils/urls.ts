@@ -24,8 +24,41 @@ export const URL_PATTERN_SOURCE = `(?:${PROTOCOL_URL}|${BARE_IP}|${LOCALHOST_POR
 // Standalone regex for finding URLs in text (global)
 export const URL_RE = new RegExp(URL_PATTERN_SOURCE, 'g');
 
-// Trailing punctuation to strip from matched URLs
-export const TRAILING_PUNCT_RE = /[.,;:!?\])]+$/;
+// Trailing punctuation to strip from matched URLs.
+// Includes markdown emphasis characters (*, _, backtick) so that a URL coming
+// from markdown like `**https://example.com**` doesn't keep the trailing `**`.
+export const TRAILING_PUNCT_RE = /[.,;:!?\])*_`]+$/;
+
+// Leading markdown emphasis / punctuation to strip from matched URLs.
+const LEADING_PUNCT_RE = /^[*_`([{]+/;
+
+/**
+ * Strip leading and trailing markdown emphasis characters and punctuation from
+ * a detected URL token. Used by both the linkify path and the copy path so the
+ * href that gets copied/opened is the cleaned URL, not the raw matched token.
+ *
+ * Returns the cleaned url plus the prefix/suffix that were removed, so callers
+ * that render surrounding text (linkify) can re-emit them.
+ */
+export function cleanUrl(raw: string): { url: string; prefix: string; suffix: string } {
+  let url = raw;
+  let prefix = '';
+  let suffix = '';
+
+  const leading = LEADING_PUNCT_RE.exec(url);
+  if (leading) {
+    prefix = leading[0];
+    url = url.slice(prefix.length);
+  }
+
+  const trailing = TRAILING_PUNCT_RE.exec(url);
+  if (trailing) {
+    suffix = trailing[0];
+    url = url.slice(0, -suffix.length);
+  }
+
+  return { url, prefix, suffix };
+}
 
 /**
  * Prepend http:// if the URL has no protocol.
@@ -59,11 +92,7 @@ export function extractUrls(text: string): string[] {
   const re = new RegExp(URL_PATTERN_SOURCE, 'g');
   let match: RegExpExecArray | null;
   while ((match = re.exec(text)) !== null) {
-    let url = match[0];
-    const trailing = TRAILING_PUNCT_RE.exec(url);
-    if (trailing) {
-      url = url.slice(0, -trailing[0].length);
-    }
+    const { url } = cleanUrl(match[0]);
     if (url.length > 0) {
       urls.push(url);
     }

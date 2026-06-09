@@ -1,0 +1,9 @@
+{
+  "_comment": "Project-scoped MCP registration for the concierge session. bin/concierge copies this to .mcp.json with the correct absolute path filled in. This gives ONLY the concierge session the companion-remote routing tools.",
+  "mcpServers": {
+    "companion-remote": {
+      "command": "node",
+      "args": ["__MCP_DIST_INDEX__"]
+    }
+  }
+}

@@ -1,5 +1,46 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
-import { Question } from '../types';
+import { Question, QuestionOption } from '../types';
+
+/**
+ * Coerce an arbitrary option shape into a QuestionOption.
+ * The daemon may emit options as plain strings (numbered-choice lists parsed
+ * from text), as objects with only `.label`, or as full {label, description}
+ * objects. Render defensively against all of these.
+ */
+export function normalizeOption(opt: unknown): QuestionOption {
+  if (typeof opt === 'string') {
+    return { label: opt, description: '' };
+  }
+  if (opt && typeof opt === 'object') {
+    const o = opt as Record<string, unknown>;
+    const label =
+      typeof o.label === 'string' ? o.label
+      : typeof o.text === 'string' ? o.text
+      : typeof o.value === 'string' ? o.value
+      : String(o.label ?? '');
+    const description = typeof o.description === 'string' ? o.description : '';
+    return { label, description };
+  }
+  return { label: String(opt ?? ''), description: '' };
+}
+
+export function normalizeOptions(opts: unknown): QuestionOption[] {
+  if (!Array.isArray(opts)) return [];
+  return opts.map(normalizeOption).filter((o) => o.label.length > 0);
+}
+
+/**
+ * Coerce an arbitrary question shape into a Question with normalized options.
+ */
+export function normalizeQuestion(q: unknown): Question {
+  const obj = (q && typeof q === 'object' ? q : {}) as Record<string, unknown>;
+  return {
+    question: typeof obj.question === 'string' ? obj.question : '',
+    header: typeof obj.header === 'string' ? obj.header : '',
+    options: normalizeOptions(obj.options),
+    multiSelect: obj.multiSelect === true,
+  };
+}
 
 export interface ChoiceData {
   selectedIndices: number[];
@@ -14,7 +55,8 @@ interface QuestionBlockProps {
   onSelectChoice?: (choice: ChoiceData) => Promise<boolean>;
 }
 
-export function QuestionBlock({ question, onSelectOption, onSelectChoice }: QuestionBlockProps) {
+export function QuestionBlock({ question: rawQuestion, onSelectOption, onSelectChoice }: QuestionBlockProps) {
+  const question = normalizeQuestion(rawQuestion);
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [showOther, setShowOther] = useState(false);
   const [otherText, setOtherText] = useState('');
@@ -213,7 +255,8 @@ interface MultiQuestionFlowProps {
   onSelectChoice?: (choice: ChoiceData) => Promise<boolean>;
 }
 
-export function MultiQuestionFlow({ questions, onSelectOption, onSelectChoice }: MultiQuestionFlowProps) {
+export function MultiQuestionFlow({ questions: rawQuestions, onSelectOption, onSelectChoice }: MultiQuestionFlowProps) {
+  const questions = rawQuestions.map(normalizeQuestion);
   const [step, setStep] = useState(0);
   const [answers, setAnswers] = useState<Map<number, AnswerData>>(new Map());
   const [reviewing, setReviewing] = useState(false);

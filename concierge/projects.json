@@ -1,0 +1,21 @@
+{
+  "_comment": "Concierge routing table. EDIT the `cwd` of each project to its REAL project root — that is the value the daemon matches against to find the project's live session (routing resolves by working directory, NOT by tmux name). Keywords help the concierge infer the target from natural language. The `server` is the entry name in ~/.companion/mcp-servers.json that points at the daemon hosting these sessions (bin/concierge seeds a `local` loopback entry).",
+  "server": "local",
+  "projects": [
+    {
+      "label": "android",
+      "cwd": "/home/hexi/local/src/CHANGE-ME-android-project-root",
+      "keywords": ["android", "apk", "gradle", "play store", "kotlin", "google play"]
+    },
+    {
+      "label": "ios",
+      "cwd": "/home/hexi/local/src/CHANGE-ME-ios-project-root",
+      "keywords": ["ios", "iphone", "ipad", "xcode", "testflight", "ipa", "app store", "swift", "apns"]
+    },
+    {
+      "label": "web&server",
+      "cwd": "/home/hexi/local/src/CHANGE-ME-web-server-project-root",
+      "keywords": ["web", "server", "daemon", "api", "backend", "frontend", "vite", "react", "postgres", "database", "deploy"]
+    }
+  ]
+}

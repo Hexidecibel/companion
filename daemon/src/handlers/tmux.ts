@@ -2,6 +2,8 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { HandlerContext, MessageHandler } from '../handler-context';
 import { DEFAULT_TOOL_CONFIG } from '../tool-config';
+import { parseTextChoicePrompt } from '../parser';
+import type { TerminalChoicePrompt } from '../types';
 import {
   DEFAULT_TERMINAL_LINES,
   CLI_READY_POLL_INTERVAL_MS,
@@ -13,6 +15,50 @@ function dirToFriendlyName(dirPath: string): string {
   return base
     .replace(/[-_]+/g, ' ')
     .replace(/\b\w/g, c => c.toUpperCase());
+}
+
+// Number of trailing non-empty lines that count as the "live" region of the pane.
+// A choice prompt is only surfaced if its option block lives within this tail, so
+// stale scrollback selectors and vitest "❯ stackframe" lines don't trigger it.
+const ACTIVE_PROMPT_TAIL_LINES = 15;
+
+/**
+ * Detect a CURRENTLY ACTIVE text choice prompt in a captured tmux pane.
+ *
+ * parseTextChoicePrompt already guards against false positives (requires >=2
+ * enumerated items plus a strong interactive signal). On top of that we require the
+ * option block to sit near the END of the capture: we re-run the parser on only the
+ * last ACTIVE_PROMPT_TAIL_LINES non-empty lines (plus a little leading context so an
+ * adjacent question line / affordance survives), so only a live selector at the
+ * bottom of the pane is offered as tappable.
+ */
+function detectActiveChoicePrompt(paneOutput: string): TerminalChoicePrompt | null {
+  if (!paneOutput) return null;
+
+  // Build a tail window: walk back from the end collecting non-empty lines until we
+  // have ACTIVE_PROMPT_TAIL_LINES of them, then keep everything from that point on
+  // (preserving blank lines / surrounding context inside the window).
+  const lines = paneOutput.split('\n');
+  let nonEmptySeen = 0;
+  let startIdx = 0;
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (lines[i].trim() !== '') {
+      nonEmptySeen++;
+      if (nonEmptySeen >= ACTIVE_PROMPT_TAIL_LINES) {
+        startIdx = i;
+        break;
+      }
+    }
+  }
+  const tail = lines.slice(startIdx).join('\n');
+
+  const parsed = parseTextChoicePrompt(tail);
+  if (!parsed) return null;
+
+  return {
+    question: parsed.question,
+    options: parsed.options.map(o => ({ label: o.label, description: o.description })),
+  };
 }
 
 export function registerTmuxHandlers(
@@ -56,10 +102,16 @@ export function registerTmuxHandlers(
             termPayload.lines || DEFAULT_TERMINAL_LINES,
             termPayload.offset || 0
           );
+          // Only surface a tappable choice prompt for the live view (offset 0);
+          // paginated history captures should never drive the selector.
+          const choicePrompt =
+            (termPayload.offset || 0) === 0
+              ? detectActiveChoicePrompt(output)
+              : null;
           ctx.send(client.ws, {
             type: 'terminal_output',
             success: true,
-            payload: { output, sessionName: termPayload.sessionName },
+            payload: { output, sessionName: termPayload.sessionName, choicePrompt },
             requestId,
           });
         } catch {

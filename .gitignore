@@ -55,3 +55,6 @@ app/
 
 # Tauri generated
 desktop/src-tauri/gen/
+
+# Concierge orchestrator (rendered per-machine from .mcp.json.template)
+concierge/.mcp.json

@@ -54,6 +54,17 @@ export interface QuestionOption {
   description: string;
 }
 
+/**
+ * A multiple-choice selector detected in raw terminal output (e.g. Claude Code's
+ * "❯ 1. Yes / 2. No" box). Surfaced to the client so it can render tappable options
+ * in terminal mode. Only sent when the prompt is currently active near the tail of
+ * the captured pane.
+ */
+export interface TerminalChoicePrompt {
+  question: string;
+  options: { label: string; description?: string }[];
+}
+
 export interface Question {
   question: string;
   header: string;

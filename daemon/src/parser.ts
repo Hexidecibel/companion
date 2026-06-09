@@ -409,6 +409,193 @@ export function mapPermissionLabel(label: string): string {
   return lower;
 }
 
+// Matches a single enumerated option line. Captures:
+//   [1] optional selector marker (❯ or >)
+//   [2] the enumerated index token (1. / 1) / (1) / a. / a))
+//   [3] the label text
+// Supported styles per line:
+//   "❯ 1. label"  "> 1) label"  "  1. label"  "1) label"  "(1) label"  "a. label"  "a) label"
+const TEXT_CHOICE_LINE =
+  /^[ \t]*([❯>])?[ \t]*(?:\((\d{1,2})\)|(\d{1,2})[.)]|([a-zA-Z])[.)])[ \t]+(\S.*?)[ \t]*$/;
+
+// A leading question / instruction line that, when immediately followed by an
+// enumerated list, is a strong signal of an interactive chooser.
+const TEXT_CHOICE_QUESTION =
+  /(?:^|\n)[ \t]*((?:Do you want|Would you like|Select|Choose|Which|Pick|How would you like|What would you like)[^\n]*\?)[ \t]*$/i;
+
+// Trailing affordance the CLI prints under an interactive selector.
+const TEXT_CHOICE_AFFORDANCE =
+  /(Esc to (?:cancel|interrupt|go back|close)|Press \d|\bto cancel\b\s*[·•]|↑\/↓|use arrow keys|Tab to amend)/i;
+
+// Lines that look like test runner / stack frame output, NOT chooser options.
+// e.g. vitest: "❯ src/foo.test.ts:132:31", "❯ buildTool src/x.ts:12:3",
+// "src/assurance.test.ts (9 tests | 2 failed) 10ms". Matches a file path with a
+// trailing :line[:col], OR a "(N tests …)" / "(N | M failed)" test-summary suffix.
+const LOOKS_LIKE_STACK_FRAME =
+  /\.[a-z]{1,4}:\d+(?::\d+)?\b|\([^)]*\b(?:tests?|passed|failed|skipped)\b[^)]*\)/i;
+
+interface ParsedTextChoice {
+  question: string;
+  options: QuestionOption[];
+  cleanContent: string;
+}
+
+/**
+ * Detect an interactive multi-choice prompt rendered as plain TEXT (no AskUserQuestion
+ * / approval tool_use). This is the path that matters for terminal-mode raw captures,
+ * where the CLI's selector box (e.g. "❯ 1. Yes / 2. No") is the only representation.
+ *
+ * SAFETY: prose numbered lists in normal answers MUST NOT match. We require BOTH:
+ *   (a) a structured enumerated list of >= 2 items in a single contiguous block, AND
+ *   (b) a strong interactive signal — an arrow selector (❯/>) on a list line, OR a
+ *       question line ("Do you want…/Select…/Choose…/Which…?") immediately preceding
+ *       the list, OR a trailing affordance ("Esc to cancel", "Press 1-N", arrow keys).
+ *
+ * The arrow alone is not trusted (vitest stack traces use "❯ src/x.ts:12:3"); stack-frame
+ * shaped item labels are rejected.
+ *
+ * Returns null when no safe match is found.
+ */
+export function parseTextChoicePrompt(content: string): ParsedTextChoice | null {
+  if (!content || (!/[❯>]/.test(content) && !/\b(?:Do you want|Select|Choose|Which|Pick|Would you like)\b/i.test(content) && !TEXT_CHOICE_AFFORDANCE.test(content))) {
+    return null;
+  }
+
+  const lines = content.split('\n');
+
+  // Find the longest contiguous run of enumerated option lines.
+  let bestStart = -1;
+  let bestEnd = -1; // exclusive
+  let hasArrowInBlock = false;
+
+  let runStart = -1;
+  let runArrow = false;
+  let runExpectIndex = 1; // for numeric runs we expect 1,2,3...
+  let runIsNumeric = false;
+
+  const finalize = (end: number) => {
+    if (runStart !== -1 && end - runStart >= 2 && end - runStart > bestEnd - bestStart) {
+      bestStart = runStart;
+      bestEnd = end;
+      hasArrowInBlock = runArrow;
+    }
+  };
+
+  for (let i = 0; i < lines.length; i++) {
+    const m = lines[i].match(TEXT_CHOICE_LINE);
+    if (!m) {
+      finalize(i);
+      runStart = -1;
+      runArrow = false;
+      continue;
+    }
+    const marker = m[1];
+    const numTok = m[2] || m[3]; // (1) or 1. / 1)
+    const label = m[5];
+
+    // Reject stack-frame / file-path shaped labels (vitest, etc.)
+    if (LOOKS_LIKE_STACK_FRAME.test(label)) {
+      finalize(i);
+      runStart = -1;
+      runArrow = false;
+      continue;
+    }
+
+    if (runStart === -1) {
+      runStart = i;
+      runArrow = false;
+      runIsNumeric = !!numTok;
+      runExpectIndex = numTok ? parseInt(numTok, 10) : 1;
+    } else if (runIsNumeric && numTok) {
+      // Enforce ascending sequence for numeric lists so unrelated lines that
+      // happen to start with a number don't get glued together.
+      const n = parseInt(numTok, 10);
+      if (n !== runExpectIndex + 1) {
+        finalize(i);
+        runStart = i;
+        runArrow = false;
+        runIsNumeric = !!numTok;
+        runExpectIndex = n - 1;
+      }
+    }
+    if (numTok) runExpectIndex = parseInt(numTok, 10);
+    if (marker) runArrow = true;
+  }
+  finalize(lines.length);
+
+  if (bestStart === -1) return null;
+
+  // Strong-signal check.
+  const blockLines = lines.slice(bestStart, bestEnd);
+  const precedingText = lines.slice(0, bestStart).join('\n');
+  const followingText = lines.slice(bestEnd).join('\n');
+
+  const questionMatch = precedingText.match(TEXT_CHOICE_QUESTION);
+  // The question must be the LAST non-empty line before the block.
+  let questionIsAdjacent = false;
+  let question = '';
+  if (questionMatch) {
+    const beforeLines = precedingText.split('\n');
+    let li = beforeLines.length - 1;
+    while (li >= 0 && beforeLines[li].trim() === '') li--;
+    if (li >= 0 && /^[ \t]*(?:Do you want|Would you like|Select|Choose|Which|Pick|How would you like|What would you like)[^\n]*\?[ \t]*$/i.test(beforeLines[li])) {
+      questionIsAdjacent = true;
+      question = beforeLines[li].trim();
+    }
+  }
+
+  const hasAffordance = TEXT_CHOICE_AFFORDANCE.test(followingText) || TEXT_CHOICE_AFFORDANCE.test(precedingText);
+
+  // Require at least one strong interactive signal.
+  if (!hasArrowInBlock && !questionIsAdjacent && !hasAffordance) {
+    return null;
+  }
+
+  // Build options.
+  const options: QuestionOption[] = [];
+  for (const line of blockLines) {
+    const m = line.match(TEXT_CHOICE_LINE);
+    if (!m) continue;
+    let label = m[5].trim();
+    // Strip trailing keyboard-shortcut hints like "(y)" / "(shift+tab)".
+    label = label.replace(/\s*\([^)]*\)\s*$/, '').trim();
+    if (!label) continue;
+    options.push({ label, description: question });
+  }
+  if (options.length < 2) return null;
+
+  if (!question) {
+    // Fall back to a generic question label so the UI has a header.
+    question = questionIsAdjacent ? question : 'Select an option';
+  }
+
+  // Strip the block (and an adjacent question line / trailing affordance) from content.
+  const cleanLines = [...lines];
+  // Remove trailing affordance line(s) immediately after the block.
+  let endStrip = bestEnd;
+  while (endStrip < cleanLines.length && (cleanLines[endStrip].trim() === '' || TEXT_CHOICE_AFFORDANCE.test(cleanLines[endStrip]))) {
+    if (TEXT_CHOICE_AFFORDANCE.test(cleanLines[endStrip])) {
+      endStrip++;
+    } else if (endStrip + 1 < cleanLines.length && TEXT_CHOICE_AFFORDANCE.test(cleanLines[endStrip + 1])) {
+      endStrip++;
+    } else {
+      break;
+    }
+  }
+  let startStrip = bestStart;
+  if (questionIsAdjacent) {
+    // Remove the question line too.
+    let li = bestStart - 1;
+    while (li >= 0 && cleanLines[li].trim() === '') li--;
+    if (li >= 0) startStrip = li;
+  }
+  const cleanContent = [...cleanLines.slice(0, startStrip), ...cleanLines.slice(endStrip)]
+    .join('\n')
+    .trim();
+
+  return { question, options, cleanContent };
+}
+
 function parseEntry(
   entry: JsonlEntry,
   toolResults: Map<string, string>,
@@ -540,13 +727,37 @@ function parseEntry(
     }
   }
 
-  // Detect permission prompts in text content and strip the prompt block.
-  // Tool-based detection (lines 488-526) is the source of truth for options.
-  // Don't set options from text regex — prevents false positives when the CLI
-  // emits prompt text while actively working (no pending approval tool).
-  const permissionPrompt = parsePermissionPrompt(content);
-  if (permissionPrompt) {
-    content = permissionPrompt.cleanContent;
+  // SAFE text-based multi-choice detection. Runs only when the tool/AskUserQuestion
+  // path did NOT already populate options. Requires a structured enumerated list
+  // (>= 2 items) AND a strong interactive signal (arrow selector, adjacent
+  // question line, or Esc/Press affordance). See parseTextChoicePrompt for guards
+  // that keep prose numbered lists and vitest stack traces from matching.
+  // This runs BEFORE parsePermissionPrompt so it owns the choice block and can
+  // both set options and strip the block.
+  let textChoiceMatched = false;
+  if (!options && !questions) {
+    const textChoice = parseTextChoicePrompt(content);
+    if (textChoice) {
+      options = textChoice.options;
+      content = textChoice.cleanContent;
+      isWaitingForChoice = true;
+      textChoiceMatched = true;
+      console.log(
+        `Parser: Detected text-based choice prompt with ${options.length} options: "${textChoice.question.substring(0, QUESTION_PREVIEW_LENGTH)}"`
+      );
+    }
+  }
+
+  // Legacy permission-box stripping. Tool-based detection above is the source of
+  // truth for approval options, so for the "Do you want to…?" box we only STRIP
+  // the text (never override tool-derived options) — this avoids false positives
+  // when the CLI emits prompt text while a pending approval tool already exists.
+  // Skipped if the text-choice detector already consumed the block.
+  if (!textChoiceMatched) {
+    const permissionPrompt = parsePermissionPrompt(content);
+    if (permissionPrompt) {
+      content = permissionPrompt.cleanContent;
+    }
   }
 
   const timestamp = entry.timestamp ? new Date(entry.timestamp).getTime() : Date.now();

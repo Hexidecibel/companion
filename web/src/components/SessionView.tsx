@@ -35,6 +35,8 @@ import { FetchErrorBanner } from './FetchErrorBanner';
 import { ComponentErrorBoundary } from './ComponentErrorBoundary';
 import { ScrollDebugPanel } from './ScrollDebugPanel';
 import { SettingsModal } from './SettingsModal';
+import { OverflowMenuItem } from './HeaderOverflowMenu';
+import { SessionActionBar } from './SessionActionBar';
 import { hideToolsKey } from '../services/storageKeys';
 
 const CodeReviewModal = lazy(() => import('./CodeReviewModal').then(m => ({ default: m.CodeReviewModal })));
@@ -173,7 +175,7 @@ export function SessionView({
   // because the inline per-message filter ran against a mismatched snapshot.
   const toolsKey = sessionId ? hideToolsKey(sessionId) : null;
   const readHideTools = (key: string | null) =>
-    key ? localStorage.getItem(key) === '1' : false;
+    key ? localStorage.getItem(key) !== '0' : true;
   const [hideToolsState, setHideToolsState] = useState<{ key: string | null; value: boolean }>(
     () => ({ key: toolsKey, value: readHideTools(toolsKey) }),
   );
@@ -671,6 +673,58 @@ export function SessionView({
     </div>
   );
 
+  // Mobile: the action cluster lives in the activity row (SessionActionBar),
+  // not the top header. A few high-value actions stay inline, right-aligned;
+  // the rest collapse behind the "⋮" overflow kebab.
+  //
+  // Inline priority (most-used / stateful first): Terminal (only when tmux is
+  // attached, with active highlight) then Files, Search, Skills. Plan,
+  // Bookmarks, Review (conditional, with badges) and Settings spill into the
+  // kebab. The transient agent pill sits with the status indicator on the left.
+  // Each item invokes the exact same handler/state setter as its original
+  // header button, so behavior is unchanged.
+  const mobileInlineActions = (
+    <>
+      {transientButtons}
+      <button
+        className="session-header-btn"
+        onClick={() => setShowFileFinder(true)}
+        title="Search files (Cmd+P)"
+      >
+        Files
+      </button>
+      <button
+        className="session-header-btn"
+        onClick={() => setShowConversationSearch(true)}
+        title="Search past conversations"
+      >
+        Search
+      </button>
+      <button
+        className="session-header-btn"
+        onClick={() => setShowSkillBrowser(true)}
+        title="Browse and manage skills"
+      >
+        Skills
+      </button>
+    </>
+  );
+
+  const mobileOverflowItems: OverflowMenuItem[] = [
+    ...(latestPlanFile
+      ? [{ label: 'Plan', onClick: () => handleViewFile(latestPlanFile) }]
+      : latestInlinePlan
+        ? [{ label: 'Plan', onClick: () => setArtifactContent({ content: latestInlinePlan, title: 'Plan' }) }]
+        : []),
+    ...(currentBookmarks.length > 0
+      ? [{ label: 'Bookmarks', badge: currentBookmarks.length, active: showBookmarks, onClick: () => setShowBookmarks(!showBookmarks) }]
+      : []),
+    ...(fileChanges.length > 0
+      ? [{ label: 'Review', badge: fileChanges.length, onClick: () => setShowCodeReviewModal(true) }]
+      : []),
+    { label: 'Settings', onClick: () => setShowSettings(true) },
+  ];
+
   return (
     <div className="session-view" style={style}>
       {/* Top header: back arrow on mobile, full header on desktop */}
@@ -696,14 +750,9 @@ export function SessionView({
             </button>
           )
         )}
-        {mobile ? (
-          <div className="session-header-actions">
-            {transientButtons}
-            {viewButtons}
-            {agentPill}
-            {gearButton}
-          </div>
-        ) : actionButtons}
+        {/* Desktop: full action cluster in the header. Mobile: header is just
+            Back — the action cluster lives in the activity row below. */}
+        {!mobile && actionButtons}
       </div>
 
       {showTerminal && tmuxSessionName && serverId && (
@@ -746,29 +795,56 @@ export function SessionView({
                 workGroup.status === 'completed' ||
                 workGroup.status === 'failed'
               );
+
+              const waitingCell = hasWaiting ? (
+                <div className="session-bars-cell">
+                  <WaitingIndicator
+                    status={status}
+                    serverId={serverId}
+                    sessionId={sessionId}
+                    tmuxSessionName={tmuxSessionName}
+                    canCancel={!!(status?.isRunning && !status?.isWaitingForInput && tmuxSessionName)}
+                    onCancel={handleCancel}
+                  />
+                </div>
+              ) : null;
+
+              const workGroupCell = (hasWorkGroup && workGroup) ? (
+                <div className="session-bars-cell">
+                  <WorkGroupBar
+                    group={workGroup}
+                    onClick={() => setShowWorkGroupPanel(true)}
+                  />
+                </div>
+              ) : null;
+
+              // Mobile: the activity row is the persistent action toolbar.
+              // Status (spinner/"Processing…"/work-group) + transient agent
+              // pill sit on the left; action buttons + overflow kebab fill the
+              // right. Always rendered so the toolbar stays visible when idle.
+              if (mobile) {
+                return (
+                  <SessionActionBar
+                    status={
+                      <>
+                        {waitingCell}
+                        {workGroupCell}
+                        {agentPill}
+                      </>
+                    }
+                    inlineActions={mobileInlineActions}
+                    overflowItems={mobileOverflowItems}
+                  />
+                );
+              }
+
+              // Desktop: unchanged — only render the bars row when there's an
+              // active status or work group to show.
               if (!hasWaiting && !hasWorkGroup) return null;
               return (
                 <div className="session-bars-row">
-                  {hasWaiting && (
-                    <div className="session-bars-cell">
-                      <WaitingIndicator
-                        status={status}
-                        serverId={serverId}
-                        sessionId={sessionId}
-                        tmuxSessionName={tmuxSessionName}
-                        canCancel={!!(status?.isRunning && !status?.isWaitingForInput && tmuxSessionName)}
-                        onCancel={handleCancel}
-                      />
-                    </div>
-                  )}
-                  {hasWorkGroup && workGroup && (
-                    <div className="session-bars-cell">
-                      <WorkGroupBar
-                        group={workGroup}
-                        onClick={() => setShowWorkGroupPanel(true)}
-                      />
-                    </div>
-                  )}
+                  {waitingCell}
+                  {workGroupCell}
                 </div>
               );
             })()}

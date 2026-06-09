@@ -18,6 +18,7 @@ import { initPush, registerWithAllServers } from '../services/push';
 import { isTauri, isTauriDesktop, isMobileViewport } from '../utils/platform';
 import { useServers } from '../hooks/useServers';
 import { SIDEBAR_WIDTH_KEY, SPLIT_RATIO_KEY } from '../services/storageKeys';
+import { eventBus } from '../utils/eventBus';
 
 interface DashboardProps {
   onSettings?: () => void;
@@ -261,8 +262,12 @@ export function Dashboard({ onSettings }: DashboardProps) {
         setShowNotifSettings(false);
         history.pushState({ session: true }, '');
       } else if (document.body.dataset.overlay === 'true') {
-        // An overlay panel (terminal, work group) is open — close it first
-        window.dispatchEvent(new CustomEvent('close-overlay'));
+        // An overlay panel (terminal, work group) is open — close it first.
+        // Use the in-memory eventBus, not a DOM CustomEvent: all overlay
+        // listeners (SessionView, MobileDashboard) subscribe via eventBus.on,
+        // so a window CustomEvent would never reach them and the overlay
+        // (e.g. terminal) would not close on back.
+        eventBus.emit('close-overlay');
         // Re-push so the next back still has an entry to pop
         if (activeSession) {
           history.pushState({ session: true }, '');

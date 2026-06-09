@@ -1,0 +1,221 @@
+#!/bin/bash
+# concierge — launch the orchestrator "concierge" Claude session.
+#
+# The concierge is a normal Claude session running in a tmux session named
+# "concierge". Because it's just another Claude session under ~/.claude/projects,
+# the Companion daemon watches it automatically and it shows up in the app like
+# any other session — you talk to it there. It then ROUTES your requests to the
+# always-on per-project sessions (android / ios / web&server) via the
+# companion-remote MCP tools and relays the results back.
+#
+# See docs/orchestrator-design.md for the full design and limitations.
+#
+# ── ONE-TIME SETUP (do this once) ───────────────────────────────────────────
+#  1. Keep your 3 project Claude sessions always-on, each in its own tmux
+#     session whose cwd is the project root, e.g.:
+#         tmux new -s android -c /path/to/android 'claude'
+#         tmux new -s ios     -c /path/to/ios     'claude'
+#         tmux new -s web     -c /path/to/web     'claude'
+#     (tmux NAMES don't matter; routing resolves by working directory.)
+#  2. Edit concierge/projects.json — set each project's `cwd` to its real root.
+#  3. Make sure the local daemon has the `dispatch` capability enabled
+#     (bin/companion enable-remote --dispatch ...). This script checks it.
+#  This script auto-seeds a `local` loopback entry in ~/.companion/mcp-servers.json
+#  and renders concierge/.mcp.json from the template.
+#
+# ── DAILY USE ────────────────────────────────────────────────────────────────
+#     bin/concierge            # launch (or re-attach to) the concierge session
+#  Then open Companion, pick the "concierge" session, and talk to it. Example:
+#     "tell the android project to bump the version"
+#
+# ── OPTIONS ──────────────────────────────────────────────────────────────────
+#     bin/concierge            launch detached + print how to talk to it
+#     bin/concierge --attach   launch and attach this terminal to it
+#     bin/concierge --restart  kill an existing concierge session and relaunch
+#     bin/concierge status     show whether the concierge session is running
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+ROOT="$(dirname "$SCRIPT_DIR")"
+CONCIERGE_DIR="$ROOT/concierge"
+MCP_DIR="$ROOT/mcp"
+MCP_ENTRY="$MCP_DIR/dist/index.js"
+CONFIG="$HOME/.companion/config.json"
+MCP_SERVERS="$HOME/.companion/mcp-servers.json"
+TMUX_SESSION="concierge"
+
+err()  { echo "ERROR: $*" >&2; }
+info() { echo "  $*"; }
+
+# --- prerequisites ---
+command -v tmux >/dev/null 2>&1 || { err "tmux is not installed."; exit 1; }
+command -v node >/dev/null 2>&1 || { err "node is not installed."; exit 1; }
+
+CLAUDE_BIN="$(command -v claude || true)"
+if [ -z "$CLAUDE_BIN" ]; then
+  err "the 'claude' CLI is not on PATH. Install it or add it to PATH."
+  exit 1
+fi
+
+# --- status subcommand ---
+if [ "${1:-}" = "status" ]; then
+  if tmux has-session -t "$TMUX_SESSION" 2>/dev/null; then
+    echo "concierge session is RUNNING (tmux: $TMUX_SESSION)"
+    echo "Attach with:  tmux attach -t $TMUX_SESSION"
+    echo "Or talk to it in the Companion app (look for the 'concierge' session)."
+    exit 0
+  else
+    echo "concierge session is NOT running. Start it with: bin/concierge"
+    exit 0
+  fi
+fi
+
+ATTACH=false
+RESTART=false
+for arg in "$@"; do
+  case "$arg" in
+    --attach)  ATTACH=true ;;
+    --restart) RESTART=true ;;
+    *) err "unknown option: $arg"; exit 1 ;;
+  esac
+done
+
+# --- build the MCP server if missing ---
+if [ ! -f "$MCP_ENTRY" ]; then
+  echo "Building companion-remote MCP server (one-time)..."
+  ( cd "$MCP_DIR" && npm install && npm run build ) \
+    || { err "failed to build mcp/. Build it manually: cd mcp && npm install && npm run build"; exit 1; }
+  echo ""
+fi
+
+# --- seed the `local` loopback entry in mcp-servers.json ---
+# Reads the daemon token + first listener port from the daemon config.
+seed_local_server() {
+  if [ ! -f "$CONFIG" ]; then
+    err "no daemon config at $CONFIG — start the daemon (bin/companion setup) first."
+    exit 1
+  fi
+
+  node - "$CONFIG" "$MCP_SERVERS" <<'NODE'
+const fs = require('fs');
+const [, , configPath, mcpServersPath] = process.argv;
+
+const cfg = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+let port, token, caps;
+if (Array.isArray(cfg.listeners) && cfg.listeners.length > 0) {
+  const l = cfg.listeners[0];
+  port = l.port || 9877;
+  token = l.token;
+  caps = l.remote_capabilities;
+} else {
+  port = cfg.port || 9877;
+  token = cfg.token;
+  caps = cfg.remote_capabilities;
+}
+
+if (!token) {
+  console.error('TOKEN_MISSING');
+  process.exit(2);
+}
+
+// Warn (don't fail) if dispatch capability isn't enabled — the concierge needs it.
+const dispatchOn = !!(caps && caps.enabled && caps.dispatch && caps.dispatch.enabled);
+if (!dispatchOn) {
+  console.error('DISPATCH_DISABLED');
+}
+
+let mcp = { version: 1, servers: [] };
+try { mcp = JSON.parse(fs.readFileSync(mcpServersPath, 'utf-8')); } catch {}
+if (!Array.isArray(mcp.servers)) mcp.servers = [];
+
+const existing = mcp.servers.find((s) => s.name === 'local');
+const entry = {
+  name: 'local',
+  host: '127.0.0.1',
+  port,
+  token,
+  useTls: false,
+  trustedNetwork: true,
+};
+if (existing) {
+  Object.assign(existing, entry);
+} else {
+  mcp.servers.push(entry);
+}
+fs.writeFileSync(mcpServersPath, JSON.stringify(mcp, null, 2) + '\n');
+console.log(`LOCAL_PORT=${port}`);
+NODE
+}
+
+SEED_OUT="$(seed_local_server)" || {
+  case "$SEED_OUT" in
+    *TOKEN_MISSING*) err "daemon config has no token; cannot seed the 'local' MCP entry."; exit 1 ;;
+    *) err "failed to seed mcp-servers.json"; exit 1 ;;
+  esac
+}
+if echo "$SEED_OUT" | grep -q DISPATCH_DISABLED; then
+  echo "WARNING: the local daemon does NOT have the 'dispatch' capability enabled."
+  echo "         The concierge needs it to send_input to project sessions."
+  echo "         Enable with: bin/companion enable-remote --dispatch (plus your other caps)"
+  echo ""
+fi
+
+# --- render concierge/.mcp.json from template (project-scoped MCP) ---
+if [ -f "$CONCIERGE_DIR/.mcp.json.template" ]; then
+  node - "$CONCIERGE_DIR/.mcp.json.template" "$CONCIERGE_DIR/.mcp.json" "$MCP_ENTRY" <<'NODE'
+const fs = require('fs');
+const [, , tpl, out, entry] = process.argv;
+const raw = fs.readFileSync(tpl, 'utf-8').replace(/__MCP_DIST_INDEX__/g, entry);
+const obj = JSON.parse(raw);
+delete obj._comment;
+fs.writeFileSync(out, JSON.stringify(obj, null, 2) + '\n');
+NODE
+fi
+
+# --- warn about unconfigured project cwds ---
+if grep -q 'CHANGE-ME' "$CONCIERGE_DIR/projects.json" 2>/dev/null; then
+  echo "NOTE: concierge/projects.json still has placeholder cwds (CHANGE-ME-*)."
+  echo "      Edit it so each project's \"cwd\" is its real project root, or the"
+  echo "      concierge won't be able to find your project sessions."
+  echo ""
+fi
+
+# --- handle restart ---
+if tmux has-session -t "$TMUX_SESSION" 2>/dev/null; then
+  if $RESTART; then
+    echo "Killing existing concierge session..."
+    tmux kill-session -t "$TMUX_SESSION"
+  else
+    echo "concierge session is already running."
+    if $ATTACH; then
+      exec tmux attach -t "$TMUX_SESSION"
+    fi
+    echo "Attach with:  tmux attach -t $TMUX_SESSION"
+    echo "Or talk to it in the Companion app (the 'concierge' session)."
+    exit 0
+  fi
+fi
+
+# --- launch the concierge session ---
+# Run claude in the concierge dir so it picks up CLAUDE.md (routing rules) and
+# the project-scoped .mcp.json (companion-remote tools). --dangerously-skip-permissions
+# lets it call the routing tools without prompting; this session is fully trusted
+# on this box (see the design doc's auth limitation).
+LAUNCH_CMD="$CLAUDE_BIN --dangerously-skip-permissions"
+tmux new-session -d -s "$TMUX_SESSION" -c "$CONCIERGE_DIR" "$LAUNCH_CMD"
+
+echo ""
+echo "Concierge launched (tmux session: $TMUX_SESSION, cwd: $CONCIERGE_DIR)."
+echo ""
+echo "  → Open the Companion app and pick the 'concierge' session."
+echo "    Then talk to it, e.g.:  \"tell the android project to bump the version\""
+echo ""
+echo "  Attach a terminal to it directly:  tmux attach -t $TMUX_SESSION"
+echo "  Restart it:                        bin/concierge --restart"
+echo "  Status:                            bin/concierge status"
+echo ""
+
+if $ATTACH; then
+  exec tmux attach -t "$TMUX_SESSION"
+fi

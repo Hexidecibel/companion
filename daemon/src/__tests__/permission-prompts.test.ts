@@ -1,5 +1,6 @@
 import {
   parsePermissionPrompt,
+  parseTextChoicePrompt,
   mapPermissionLabel,
   parseConversationFile,
   extractHighlights,
@@ -311,14 +312,17 @@ describe('text prompt stripping (the fix)', () => {
     const msgs = parseConversationFile('test.jsonl', Infinity, content);
     const asst = msgs.find((m) => m.type === 'assistant');
 
-    // Content should be stripped of the prompt text
+    // Content should be stripped of the prompt text (question line + options block)
     expect(asst!.content).toBe('Let me run this command.');
-    // No options should be set (Read is not an approval tool, and text-based path no longer sets options)
-    expect(asst!.options).toBeUndefined();
+    // Read is not an approval tool, but the SAFE text-choice detector now fires
+    // because there is an arrow selector + adjacent "Do you want…?" question line.
+    expect(asst!.options).toHaveLength(3);
+    expect(asst!.isWaitingForChoice).toBe(true);
   });
 
-  it('does NOT set options from text regex alone', () => {
-    // Text has a permission prompt but there's no pending approval tool
+  it('sets options from a text-only choice prompt with an arrow selector', () => {
+    // Text has an interactive choice box but there's no pending approval tool —
+    // this is the terminal-mode / text-rendered case the detector must cover.
     const promptText = [
       'Do you want to allow this edit?',
       '❯ 1. Yes',
@@ -339,11 +343,13 @@ describe('text prompt stripping (the fix)', () => {
     );
 
     const msgs = parseConversationFile('test.jsonl', Infinity, content);
-    // Content should be cleaned
+    // The question line + options block are stripped from content.
     expect(msgs[0].content).toBe('');
-    // Options must NOT be set from text regex
-    expect(msgs[0].options).toBeUndefined();
-    expect(msgs[0].isWaitingForChoice).toBeFalsy();
+    // Options ARE set now (arrow selector is a strong interactive signal).
+    expect(msgs[0].options).toHaveLength(2);
+    expect(msgs[0].options![0].label).toBe('Yes');
+    expect(msgs[0].options![1].label).toBe('No');
+    expect(msgs[0].isWaitingForChoice).toBe(true);
   });
 
   it('preserves tool-based options when text prompt is also present', () => {
@@ -521,8 +527,9 @@ describe('end-to-end permission prompt scenarios', () => {
     expect(assistantMsg?.options).toBeUndefined();
   });
 
-  it('text prompt with no matching tool does not create options', () => {
-    // Simulates the false-positive scenario: permission text but no pending approval tool
+  it('text choice prompt with no matching tool still yields options (terminal-mode case)', () => {
+    // A real interactive choice rendered only as text (no tool_use). With a question
+    // line + arrow selector, the safe detector populates options.
     const promptText = [
       'Here is the analysis.',
       'Do you want to allow this edit?',
@@ -549,9 +556,9 @@ describe('end-to-end permission prompt scenarios', () => {
     const asst = highlights.find((h) => h.type === 'assistant');
     // Content cleaned of prompt text
     expect(asst!.content).toBe('Here is the analysis.');
-    // No options — the fix prevents false positives
-    expect(asst?.options).toBeUndefined();
-    expect(asst?.isWaitingForChoice).toBe(false);
+    // Options set from the safe text-choice detector (it is the last message).
+    expect(asst?.options).toHaveLength(2);
+    expect(asst?.isWaitingForChoice).toBe(true);
   });
 
   it('multiple tools: only the approval tool generates options', () => {
@@ -596,5 +603,122 @@ describe('end-to-end permission prompt scenarios', () => {
     // Options come from tool-based path
     expect(asst.options).toHaveLength(3);
     expect(asst.options![0].description).toContain('rm -rf /tmp/test');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 7. parseTextChoicePrompt — safe text-based multi-choice detection
+// ---------------------------------------------------------------------------
+
+describe('parseTextChoicePrompt — enumeration styles', () => {
+  it('matches "N." numbered list with arrow selector', () => {
+    const text = ['Pick a deploy mode:', '❯ 1. Candidate', '  2. One-shot'].join('\n');
+    const r = parseTextChoicePrompt(text);
+    expect(r).not.toBeNull();
+    expect(r!.options.map((o) => o.label)).toEqual(['Candidate', 'One-shot']);
+  });
+
+  it('matches "N)" paren-numbered list with a question line', () => {
+    const text = ['Which path do you want?', '1) Fast path', '2) Safe path'].join('\n');
+    const r = parseTextChoicePrompt(text);
+    expect(r).not.toBeNull();
+    expect(r!.options).toHaveLength(2);
+    expect(r!.question).toBe('Which path do you want?');
+  });
+
+  it('matches "(N)" bracket-numbered list with an Esc affordance', () => {
+    const text = ['(1) Yes', '(2) No', 'Esc to cancel · Tab to amend'].join('\n');
+    const r = parseTextChoicePrompt(text);
+    expect(r).not.toBeNull();
+    expect(r!.options.map((o) => o.label)).toEqual(['Yes', 'No']);
+    expect(r!.cleanContent).not.toContain('Esc to cancel');
+  });
+
+  it('matches arrow-prefixed "❯ N." and strips the marker', () => {
+    const text = ['Choose one:', '❯ 1. Alpha', '  2. Beta', '  3. Gamma'].join('\n');
+    const r = parseTextChoicePrompt(text);
+    expect(r).not.toBeNull();
+    expect(r!.options).toHaveLength(3);
+    expect(r!.options[0].label).toBe('Alpha'); // marker stripped
+  });
+
+  it('matches ">"-prefixed current-selection marker', () => {
+    const text = ['Select an option:', '  1. One', '> 2. Two'].join('\n');
+    const r = parseTextChoicePrompt(text);
+    expect(r).not.toBeNull();
+    expect(r!.options[1].label).toBe('Two');
+  });
+
+  it('matches lettered "a." / "b." list with a question line', () => {
+    const text = ['Which option would you like?', 'a. Apple', 'b. Banana'].join('\n');
+    const r = parseTextChoicePrompt(text);
+    expect(r).not.toBeNull();
+    expect(r!.options.map((o) => o.label)).toEqual(['Apple', 'Banana']);
+  });
+
+  it('strips keyboard-shortcut hints from labels', () => {
+    const text = ['Do you want to allow this?', '❯ 1. Yes (y)', '  2. No (n)'].join('\n');
+    const r = parseTextChoicePrompt(text);
+    expect(r!.options[0].label).toBe('Yes');
+    expect(r!.options[1].label).toBe('No');
+  });
+
+  it('strips the question line and option block from cleanContent', () => {
+    const text = [
+      'Here is some context.',
+      'Do you want to continue?',
+      '❯ 1. Yes',
+      '  2. No',
+    ].join('\n');
+    const r = parseTextChoicePrompt(text);
+    expect(r!.cleanContent).toBe('Here is some context.');
+  });
+});
+
+describe('parseTextChoicePrompt — false-positive guards', () => {
+  it('does NOT match a prose numbered list with no interactive signal', () => {
+    const text = [
+      'Here are the steps I will take:',
+      '1. Read the file',
+      '2. Edit the function',
+      '3. Run the tests',
+    ].join('\n');
+    expect(parseTextChoicePrompt(text)).toBeNull();
+  });
+
+  it('does NOT match a single enumerated item even with a question', () => {
+    const text = ['Do you want to proceed?', '❯ 1. Yes'].join('\n');
+    expect(parseTextChoicePrompt(text)).toBeNull();
+  });
+
+  it('does NOT match vitest stack-frame output that uses the ❯ arrow', () => {
+    const text = [
+      ' FAIL  src/assurance.test.ts',
+      'TypeError: Cannot read properties of undefined',
+      ' ❯ buildInternalTool src/configTemplates.ts:132:31',
+      ' ❯ src/configTemplates.ts:151:35',
+      ' ❯ src/index.ts:25:31',
+    ].join('\n');
+    expect(parseTextChoicePrompt(text)).toBeNull();
+  });
+
+  it('does NOT match a vitest failed-test summary with ❯ test file lines', () => {
+    const text = [
+      ' ❯ src/assurance.test.ts (9 tests | 2 failed) 10ms',
+      '   × evaluateAssurance > baseline level boundaries 5ms',
+    ].join('\n');
+    expect(parseTextChoicePrompt(text)).toBeNull();
+  });
+
+  it('does NOT match plain prose without any list', () => {
+    expect(parseTextChoicePrompt('Do you want me to build the web UI now?')).toBeNull();
+    expect(parseTextChoicePrompt('Just some regular output text.')).toBeNull();
+    expect(parseTextChoicePrompt('')).toBeNull();
+  });
+
+  it('does NOT glue together a non-sequential numbered run', () => {
+    // "1." then "5." are not a contiguous ascending list -> not a chooser
+    const text = ['Choose:', '1. First thing', '5. Unrelated line'].join('\n');
+    expect(parseTextChoicePrompt(text)).toBeNull();
   });
 });

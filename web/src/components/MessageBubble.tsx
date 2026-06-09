@@ -3,10 +3,10 @@ import { ConversationHighlight } from '../types';
 import { ToolCard } from './ToolCard';
 import { MarkdownRenderer, extractFilePaths } from './MarkdownRenderer';
 import { ContextMenu, ContextMenuEntry } from './ContextMenu';
-import { QuestionBlock, MultiQuestionFlow, ChoiceData } from './QuestionBlock';
+import { QuestionBlock, MultiQuestionFlow, ChoiceData, normalizeOptions } from './QuestionBlock';
 import { useFileExistence } from '../hooks/useFileExistence';
 import { isTauri, isTouchDevice } from '../utils/platform';
-import { URL_RE, TRAILING_PUNCT_RE, ensureProtocol, formatLinkDomain as formatLinkDomainShared, extractUrls } from '../utils/urls';
+import { URL_RE, ensureProtocol, formatLinkDomain as formatLinkDomainShared, extractUrls, cleanUrl } from '../utils/urls';
 import { copyToClipboard } from '../utils/clipboard';
 
 export type { ChoiceData } from './QuestionBlock';
@@ -84,12 +84,10 @@ function Linkify({ text }: { text: string }) {
       elements.push(<span key={`t-${lastIndex}`}>{text.slice(lastIndex, match.index)}</span>);
     }
 
-    let url = match[0];
-    const trailingPunct = TRAILING_PUNCT_RE.exec(url);
-    let suffix = '';
-    if (trailingPunct) {
-      suffix = trailingPunct[0];
-      url = url.slice(0, -suffix.length);
+    const { url, prefix, suffix } = cleanUrl(match[0]);
+
+    if (prefix) {
+      elements.push(<span key={`p-${match.index}`}>{prefix}</span>);
     }
 
     const href = ensureProtocol(url);
@@ -243,7 +241,7 @@ export const MessageBubble = memo(function MessageBubble({ message, onSelectOpti
     const img = target.closest('img');
 
     if (link && link.href) {
-      touchContext.current = { type: 'link', href: link.href };
+      touchContext.current = { type: 'link', href: cleanUrl(link.href).url };
     } else if (img) {
       touchContext.current = { type: 'image', imgSrc: img.src };
     } else {
@@ -268,7 +266,7 @@ export const MessageBubble = memo(function MessageBubble({ message, onSelectOpti
       didLongPress.current = true;
 
       if (link && link.href) {
-        touchContext.current = { type: 'link', href: link.href };
+        touchContext.current = { type: 'link', href: cleanUrl(link.href).url };
       } else if (img) {
         touchContext.current = { type: 'image', imgSrc: img.src };
       } else {
@@ -584,52 +582,74 @@ export const MessageBubble = memo(function MessageBubble({ message, onSelectOpti
         );
       })()}
 
-      {message.isWaitingForChoice && message.questions && onSelectOption && (
-        message.questions.length > 1 ? (
-          <MultiQuestionFlow questions={message.questions} onSelectOption={onSelectOption} onSelectChoice={onSelectChoice} />
-        ) : (
-          <>
-            {message.questions.map((q, i) => (
-              <QuestionBlock key={i} question={q} onSelectOption={onSelectOption} onSelectChoice={onSelectChoice} />
-            ))}
-          </>
-        )
-      )}
+      {message.isWaitingForChoice && (onSelectChoice || onSelectOption) && (() => {
+        // Defensive rendering against every shape the daemon may emit:
+        //  (a) full questions[] from AskUserQuestion (multi-question or single)
+        //  (b) a single options[] approval list (yes/no/always)
+        //  (c) a numbered-choice list where options are bare strings or {label}
+        // Only treat questions[] as authoritative if it has a usable entry.
+        const usableQuestions = Array.isArray(message.questions)
+          ? message.questions.filter((q) => Array.isArray(q?.options) && q.options.length > 0)
+          : [];
 
-      {message.isWaitingForChoice && !message.questions && message.options && (onSelectChoice || onSelectOption) && (
-        <div className="msg-approval-prompt">
-          {message.options[0]?.description && (
-            <div className="msg-approval-description">{message.options[0].description}</div>
-          )}
-          <div className="msg-options">
-            {message.options.map((opt, idx) => {
-              const isApprove = opt.label === 'yes';
-              const isReject = opt.label === 'no';
-              const isAlways = opt.label.startsWith('yes, and don');
-              return (
-                <button
-                  key={opt.label}
-                  className={`msg-option-btn ${isApprove ? 'approve' : isReject ? 'reject' : isAlways ? 'always' : ''}`}
-                  onClick={() => {
-                    if (onSelectChoice) {
-                      onSelectChoice({
-                        selectedIndices: [idx],
-                        optionCount: message.options!.length,
-                        multiSelect: false,
-                      });
-                    } else if (onSelectOption) {
-                      onSelectOption(opt.label);
-                    }
-                  }}
-                  title={opt.description}
-                >
-                  {isApprove ? 'Approve' : isReject ? 'Reject' : isAlways ? 'Always Allow' : opt.label}
-                </button>
-              );
-            })}
+        if (usableQuestions.length > 0 && onSelectOption) {
+          if (usableQuestions.length > 1) {
+            return (
+              <MultiQuestionFlow
+                questions={usableQuestions}
+                onSelectOption={onSelectOption}
+                onSelectChoice={onSelectChoice}
+              />
+            );
+          }
+          return (
+            <>
+              {usableQuestions.map((q, i) => (
+                <QuestionBlock key={i} question={q} onSelectOption={onSelectOption} onSelectChoice={onSelectChoice} />
+              ))}
+            </>
+          );
+        }
+
+        // Fall back to a bare options[] list (coerced to {label, description}).
+        const options = normalizeOptions(message.options);
+        if (options.length === 0) return null;
+
+        return (
+          <div className="msg-approval-prompt">
+            {options[0]?.description && (
+              <div className="msg-approval-description">{options[0].description}</div>
+            )}
+            <div className="msg-options">
+              {options.map((opt, idx) => {
+                const isApprove = opt.label === 'yes';
+                const isReject = opt.label === 'no';
+                const isAlways = opt.label.startsWith('yes, and don');
+                return (
+                  <button
+                    key={`${idx}-${opt.label}`}
+                    className={`msg-option-btn ${isApprove ? 'approve' : isReject ? 'reject' : isAlways ? 'always' : ''}`}
+                    onClick={() => {
+                      if (onSelectChoice) {
+                        onSelectChoice({
+                          selectedIndices: [idx],
+                          optionCount: options.length,
+                          multiSelect: false,
+                        });
+                      } else if (onSelectOption) {
+                        onSelectOption(opt.label);
+                      }
+                    }}
+                    title={opt.description}
+                  >
+                    {isApprove ? 'Approve' : isReject ? 'Reject' : isAlways ? 'Always Allow' : opt.label}
+                  </button>
+                );
+              })}
+            </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
     </div>
   );
 });

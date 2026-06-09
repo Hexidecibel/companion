@@ -2733,9 +2733,12 @@ body {
     max-width: 90%;
   }
 
-  /* Safe area: push headers below status bar on mobile */
+  /* Safe area: push headers below status bar on mobile.
+     Use max(minimum, env) rather than calc(fixed + env) so that webviews
+     which under-report safe-area-inset-top (env resolves to 0px) still get a
+     guaranteed minimum that clears the status bar. */
   .form-header {
-    padding-top: calc(16px + var(--safe-top));
+    padding-top: max(28px, calc(16px + var(--safe-top)));
   }
 
   .session-header-actions {
@@ -2747,7 +2750,7 @@ body {
 @media (max-width: 480px) {
   .form-header {
     padding: 12px 16px;
-    padding-top: calc(12px + var(--safe-top));
+    padding-top: max(28px, calc(12px + var(--safe-top)));
   }
 
   .form-header h2 {
@@ -9485,6 +9488,60 @@ html {
   }
 }
 
+/* Mobile header overflow ("kebab") menu */
+.session-header-overflow-btn {
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  border: none;
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background-color 0.15s, color 0.15s;
+}
+
+.session-header-overflow-btn:hover {
+  background-color: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.header-overflow-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.header-overflow-item.active {
+  color: var(--accent-blue);
+}
+
+.header-overflow-label {
+  flex: 1;
+  text-align: left;
+}
+
+.header-overflow-badge {
+  flex-shrink: 0;
+  min-width: 18px;
+  padding: 0 6px;
+  border-radius: 9px;
+  background-color: var(--bg-tertiary);
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 18px;
+  text-align: center;
+}
+
+@media (pointer: coarse) {
+  .session-header-overflow-btn {
+    min-width: 36px;
+    min-height: 36px;
+  }
+}
+
 /* ========================================
    Settings Modal (session-level toggles)
    ======================================== */
@@ -9540,5 +9597,17 @@ html {
   }
   .settings-modal-body {
     flex: 1;
+  }
+  /* Fullscreen modal fills the viewport, so the overlay's safe-area padding
+     can't push it down — and it gets cancelled below to avoid clipping the
+     bottom of a 100dvh modal. Apply the top inset directly to the header
+     instead, using max(minimum, env) so under-reporting webviews still clear
+     the status bar / notch and the close (×) button stays tappable. */
+  .modal-overlay:has(.settings-modal) {
+    padding-top: 0;
+    padding-bottom: 0;
+  }
+  .settings-modal .modal-header {
+    padding-top: max(28px, calc(14px + var(--safe-top)));
   }
 }
