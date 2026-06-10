@@ -19,6 +19,7 @@ import { isTauri, isTauriDesktop, isMobileViewport } from '../utils/platform';
 import { useServers } from '../hooks/useServers';
 import { SIDEBAR_WIDTH_KEY, SPLIT_RATIO_KEY } from '../services/storageKeys';
 import { eventBus } from '../utils/eventBus';
+import { connectionManager } from '../services/ConnectionManager';
 
 interface DashboardProps {
   onSettings?: () => void;
@@ -368,6 +369,58 @@ export function Dashboard({ onSettings }: DashboardProps) {
     }
   }, [activeSession]);
 
+  // Open (or spawn) the concierge session hosted on the given server. The daemon
+  // refreshes the concierge's MCP config from the bootstrap server list before
+  // launching, then returns the session handle which we route to ConciergeView.
+  const [conciergeBusy, setConciergeBusy] = useState(false);
+  const handleOpenConcierge = useCallback(async (serverId: string) => {
+    if (conciergeBusy) return;
+    const conn = connectionManager.getConnection(serverId);
+    if (!conn || !conn.isConnected()) {
+      eventBus.emit('companion-in-app-notification', {
+        title: 'Concierge',
+        body: 'Server not connected',
+        tag: 'concierge',
+      });
+      return;
+    }
+    setConciergeBusy(true);
+    try {
+      const servers = connectionManager.getServersForMcpBootstrap();
+      const resp = await conn.sendRequest('concierge_open', { servers }, 60000);
+      if (!resp.success) {
+        eventBus.emit('companion-in-app-notification', {
+          title: 'Concierge',
+          body: resp.error || 'Failed to open concierge',
+          tag: 'concierge',
+        });
+        return;
+      }
+      const payload = (resp.payload || {}) as {
+        sessionId: string | null;
+        tmuxSessionName?: string;
+        created?: boolean;
+      };
+      if (!payload.sessionId) {
+        eventBus.emit('companion-in-app-notification', {
+          title: 'Concierge',
+          body: 'Concierge starting, try again in a moment',
+          tag: 'concierge',
+        });
+        return;
+      }
+      eventBus.emit('open-concierge', { serverId, sessionId: payload.sessionId });
+    } catch (err) {
+      eventBus.emit('companion-in-app-notification', {
+        title: 'Concierge',
+        body: err instanceof Error ? err.message : 'Failed to open concierge',
+        tag: 'concierge',
+      });
+    } finally {
+      setConciergeBusy(false);
+    }
+  }, [conciergeBusy]);
+
   // Work group action handlers
   const handleViewWorker = useCallback((workerSessionId: string) => {
     if (activeSession) {
@@ -543,6 +596,7 @@ export function Dashboard({ onSettings }: DashboardProps) {
           onSettings={onSettings}
           onCostDashboard={(serverId: string) => window.dispatchEvent(new CustomEvent('open-cost-dashboard', { detail: { serverId } }))}
           onRemoteCapabilities={(serverId: string) => setCapabilitiesServerId(serverId)}
+          onConcierge={handleOpenConcierge}
           onOpenInSplit={handleOpenInSplit}
           onCloseSplit={handleCloseSplit}
           secondarySession={secondarySession}
@@ -580,6 +634,7 @@ export function Dashboard({ onSettings }: DashboardProps) {
           onCostDashboard={activeSession ? handleOpenCostDashboard : undefined}
           onSettings={onSettings}
           onRemoteCapabilities={(serverId) => setCapabilitiesServerId(serverId)}
+          onConcierge={handleOpenConcierge}
           mutedSessions={sessionMute.mutedSessions}
           onToggleMute={handleToggleMute}
           workGroups={allWorkGroups}

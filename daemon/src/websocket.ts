@@ -356,17 +356,46 @@ export class WebSocketHandler {
         ? this.tokenMap.get(client.listenerPort)
         : undefined;
 
-      if (expectedToken && token === expectedToken) {
-        const authPayload = (payload as { deviceId?: string; origin?: string }) || {};
-        const topLevelOrigin = (message as { origin?: unknown }).origin;
-        const providedOrigin =
-          typeof topLevelOrigin === 'string' && topLevelOrigin
-            ? topLevelOrigin
-            : typeof authPayload.origin === 'string' && authPayload.origin
-              ? authPayload.origin
-              : null;
+      const authPayload = (payload as { deviceId?: string; origin?: string }) || {};
+      const topLevelOrigin = (message as { origin?: unknown }).origin;
+      const providedOrigin =
+        typeof topLevelOrigin === 'string' && topLevelOrigin
+          ? topLevelOrigin
+          : typeof authPayload.origin === 'string' && authPayload.origin
+            ? authPayload.origin
+            : null;
 
-        const listener = this.config.listeners.find((l) => l.port === client.listenerPort);
+      const listener = this.config.listeners.find((l) => l.port === client.listenerPort);
+      const origins = listener?.remoteCapabilities?.origins;
+
+      // --- Per-origin credential path (only when origins[] is configured) ---
+      if (Array.isArray(origins) && origins.length > 0) {
+        const matched = origins.find(
+          (o) => !o.disabled && o.origin === providedOrigin && o.token === token
+        );
+        if (matched) {
+          client.authenticated = true;
+          client.deviceId = authPayload.deviceId;
+          client.origin = providedOrigin;
+          client.originCredential = matched;
+
+          this.send(client.ws, {
+            type: 'authenticated',
+            success: true,
+            isLocal: client.isLocal,
+            gitEnabled: this.config.git,
+            requestId,
+          });
+          console.log(
+            `WebSocket: Client authenticated (${client.id}) on port ${client.listenerPort} via per-origin credential origin=${providedOrigin ?? 'none'}`
+          );
+          return;
+        }
+        // No matching per-origin credential — fall through to the listener-token
+        // path below (so a valid listener token still works alongside origins[]).
+      }
+
+      if (expectedToken && token === expectedToken) {
         const allowedOrigins = listener?.remoteCapabilities?.allowedOrigins;
         if (Array.isArray(allowedOrigins) && allowedOrigins.length > 0) {
           if (!providedOrigin || !allowedOrigins.includes(providedOrigin)) {
@@ -544,6 +573,14 @@ export class WebSocketHandler {
     else if (action === 'write') actionEnabled = Boolean(caps.write?.enabled);
 
     if (!actionEnabled) return 'capability_disabled';
+
+    // Per-origin capability narrowing: when the client authenticated against an
+    // origins[] credential that explicitly disables this action, deny even if the
+    // listener allows it. An absent per-origin cap leaves the listener decision intact.
+    const originCaps = client.originCredential?.capabilities;
+    if (originCaps && originCaps[action] === false) {
+      return 'capability_disabled';
+    }
 
     const requireSecure = caps.requireLoopbackOrTls !== false;
     if (requireSecure) {

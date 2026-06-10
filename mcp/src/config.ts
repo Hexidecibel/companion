@@ -9,6 +9,7 @@ export interface ServerConfig {
   token: string;
   useTls: boolean;
   trustedNetwork?: boolean;
+  certFingerprint?: string;
 }
 
 export interface McpConfig {

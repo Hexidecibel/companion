@@ -13,6 +13,7 @@ import { getOrCreateOrigin } from './origin';
 import { remoteListServers } from './tools/remote_list_servers';
 import { remoteRead } from './tools/remote_read';
 import { remoteGetConversation } from './tools/remote_get_conversation';
+import { remoteListSessions } from './tools/remote_list_sessions';
 import { remoteDispatch } from './tools/remote_dispatch';
 import { remoteSendInput } from './tools/remote_send_input';
 import { remoteCancel } from './tools/remote_cancel';
@@ -70,12 +71,32 @@ const TOOLS = [
     },
   },
   {
+    name: 'remote_list_sessions',
+    description:
+      "List a remote daemon's live watched sessions; optionally resolve cwd→sessionId " +
+      '(newest wins, resolved:null if none) — cross-machine equivalent of bin/companion-sessions.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        server: { type: 'string', description: 'Server name from mcp-servers.json' },
+        cwd: {
+          type: 'string',
+          description:
+            'Optional absolute project path; when given, resolved = newest matching sessionId (or null).',
+        },
+      },
+      required: ['server'],
+      additionalProperties: false,
+    },
+  },
+  {
     name: 'remote_dispatch',
     description:
       'Spawn a new Claude session on a remote Companion daemon inside tmux. Requires the ' +
       'daemon to have the "dispatch" capability enabled. Returns the tmux session name, ' +
-      'creation timestamp, resolved JSONL sessionId (null if not resolved within 5s), ' +
-      'and the absolute path of the claude binary used.',
+      'creation timestamp, resolved JSONL sessionId, and the absolute path of the claude ' +
+      'binary used. A null sessionId is now rare; if it happens, re-resolve via ' +
+      'remote_list_sessions({server, cwd}).',
     inputSchema: {
       type: 'object',
       properties: {
@@ -93,6 +114,13 @@ const TOOLS = [
             'the tmux session auto-terminates after the response completes. No REPL injection ' +
             'occurs. sessionId may be null if the tmux session exits before the watcher ' +
             'observes the JSONL file. Default: false (interactive REPL).',
+        },
+        resolveTimeoutMs: {
+          type: 'number',
+          description:
+            'Optional max time (ms) the daemon waits to resolve the JSONL sessionId before ' +
+            'returning. Clamped server-side to ≤60000. Larger values make a non-null sessionId ' +
+            'far more likely.',
         },
       },
       required: ['server', 'prompt', 'cwd'],
@@ -200,6 +228,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           args as { server: string; sessionId: string; mode?: 'highlights' | 'full' }
         );
         break;
+      case 'remote_list_sessions':
+        result = await remoteListSessions(
+          pool,
+          args as { server: string; cwd?: string }
+        );
+        break;
       case 'remote_dispatch':
         result = await remoteDispatch(
           pool,
@@ -209,6 +243,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             cwd: string;
             sessionName?: string;
             oneShot?: boolean;
+            resolveTimeoutMs?: number;
           }
         );
         break;

@@ -36,6 +36,7 @@ export async function remoteDispatch(
     cwd: string;
     sessionName?: string;
     oneShot?: boolean;
+    resolveTimeoutMs?: number;
   }
 ): Promise<RemoteDispatchResult> {
   const client = pool.get(args.server);
@@ -49,6 +50,7 @@ export async function remoteDispatch(
       cwd: args.cwd,
       sessionName: args.sessionName,
       oneShot: args.oneShot === true ? true : undefined,
+      resolveTimeoutMs: args.resolveTimeoutMs,
     }
   );
 

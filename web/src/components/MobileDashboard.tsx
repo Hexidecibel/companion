@@ -56,6 +56,7 @@ interface MobileDashboardProps {
   onSettings?: () => void;
   onCostDashboard?: (serverId: string) => void;
   onRemoteCapabilities?: (serverId: string) => void;
+  onConcierge?: (serverId: string) => void;
   onOpenInSplit?: (serverId: string, sessionId: string) => void;
   onCloseSplit?: () => void;
   secondarySession?: ActiveSession | null;
@@ -68,6 +69,7 @@ export function MobileDashboard({
   onSettings,
   onCostDashboard,
   onRemoteCapabilities,
+  onConcierge,
   onOpenInSplit,
   onCloseSplit,
   secondarySession,
@@ -183,6 +185,7 @@ export function MobileDashboard({
                 }
                 onCostDashboard={onCostDashboard ? () => onCostDashboard(snap.serverId) : undefined}
                 onRemoteCapabilities={onRemoteCapabilities ? () => onRemoteCapabilities(snap.serverId) : undefined}
+                onConcierge={onConcierge ? () => onConcierge(snap.serverId) : undefined}
                 onOpenInSplit={onOpenInSplit}
                 onCloseSplit={onCloseSplit}
                 secondarySessionId={secondarySession?.serverId === snap.serverId ? secondarySession.sessionId : null}
@@ -432,6 +435,7 @@ interface ServerCardProps {
   onTmuxSessions: () => void;
   onCostDashboard?: () => void;
   onRemoteCapabilities?: () => void;
+  onConcierge?: () => void;
   onOpenInSplit?: (serverId: string, sessionId: string) => void;
   onCloseSplit?: () => void;
   secondarySessionId?: string | null;
@@ -441,7 +445,7 @@ interface ServerCardProps {
 export { ServerCard };
 export type { ServerCardProps };
 
-function ServerCard({ snap, summary, onSelectSession, onToggleEnabled, onDelete, onEdit, isEnabled, onNewSession, onNewProject, onTmuxSessions, onCostDashboard, onRemoteCapabilities, onOpenInSplit, onCloseSplit, secondarySessionId, newSessionOpen }: ServerCardProps) {
+function ServerCard({ snap, summary, onSelectSession, onToggleEnabled, onDelete, onEdit, isEnabled, onNewSession, onNewProject, onTmuxSessions, onCostDashboard, onRemoteCapabilities, onConcierge, onOpenInSplit, onCloseSplit, secondarySessionId, newSessionOpen }: ServerCardProps) {
   const isConnected = snap.state.status === 'connected';
   const isConnecting = snap.state.status === 'connecting' || snap.state.status === 'reconnecting';
   const sessions = summary ? sortSessions(summary.sessions) : [];
@@ -504,6 +508,15 @@ function ServerCard({ snap, summary, onSelectSession, onToggleEnabled, onDelete,
                   title="Remote capabilities & audit log"
                 >
                   R
+                </button>
+              )}
+              {onConcierge && (
+                <button
+                  className="mobile-server-tmux-btn"
+                  onClick={onConcierge}
+                  title="Concierge — fans work out across your servers"
+                >
+                  C
                 </button>
               )}
             </>

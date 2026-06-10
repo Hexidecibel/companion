@@ -60,6 +60,23 @@ function parseRemoteCapabilities(raw: any): RemoteCapabilitiesConfig | undefined
   } else if (Array.isArray(raw.allowedOrigins)) {
     result.allowedOrigins = raw.allowedOrigins;
   }
+  if (Array.isArray(raw.origins)) {
+    result.origins = raw.origins
+      .filter((o: any) => o && typeof o === 'object' && typeof o.origin === 'string' && typeof o.token === 'string')
+      .map((o: any) => {
+        const cred: any = { origin: o.origin, token: o.token };
+        if (typeof o.label === 'string') cred.label = o.label;
+        if (o.capabilities && typeof o.capabilities === 'object') {
+          cred.capabilities = {
+            ...(typeof o.capabilities.exec === 'boolean' ? { exec: o.capabilities.exec } : {}),
+            ...(typeof o.capabilities.dispatch === 'boolean' ? { dispatch: o.capabilities.dispatch } : {}),
+            ...(typeof o.capabilities.write === 'boolean' ? { write: o.capabilities.write } : {}),
+          };
+        }
+        if (typeof o.disabled === 'boolean') cred.disabled = o.disabled;
+        return cred;
+      });
+  }
   return result;
 }
 
@@ -193,6 +210,7 @@ export function loadConfig(): DaemonConfig {
         autoApproveTools: parsed.auto_approve_tools,
         git: parsed.git,
         anthropicAdminApiKey: parsed.anthropic_admin_api_key,
+        concierge_dir: parsed.concierge_dir,
       };
     } catch (err) {
       console.error(`Error loading config from ${configPath}:`, err);
@@ -283,6 +301,9 @@ export function saveConfig(config: DaemonConfig): void {
     fcm_credentials_path: config.fcmCredentialsPath,
     push_delay_ms: config.pushDelayMs,
   };
+  if (config.concierge_dir) {
+    fileConfig.concierge_dir = config.concierge_dir;
+  }
 
   if (config.listeners.length === 1) {
     // Single listener: use legacy format for backward compatibility

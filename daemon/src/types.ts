@@ -1,3 +1,11 @@
+export interface OriginCredential {
+  origin: string;
+  token: string;
+  label?: string;
+  capabilities?: { exec?: boolean; dispatch?: boolean; write?: boolean };
+  disabled?: boolean;
+}
+
 export interface RemoteCapabilitiesConfig {
   enabled: boolean;
   exec?: { enabled: boolean; commandAllowlist?: string[] | null };
@@ -5,6 +13,7 @@ export interface RemoteCapabilitiesConfig {
   write?: { enabled: boolean; roots: string[] };
   requireLoopbackOrTls?: boolean;
   allowedOrigins?: string[];
+  origins?: OriginCredential[];
 }
 
 export interface ListenerConfig {
@@ -37,6 +46,9 @@ export interface DaemonConfig {
   anthropicAdminApiKey?: string;
   // Additional allowed paths for file access (merged with defaults: homeDir, /tmp, /var/tmp)
   allowedPaths?: string[];
+  // Override for the concierge directory (containing .mcp.json.template). If unset,
+  // the daemon walks up from its install dir to find <repo>/concierge.
+  concierge_dir?: string;
 }
 
 export interface FeedbackOption {

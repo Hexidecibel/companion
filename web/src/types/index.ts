@@ -8,6 +8,7 @@ export interface Server {
   enabled?: boolean;
   sshUser?: string;
   parallelWorkersEnabled?: boolean;
+  certFingerprint?: string;
 }
 
 export interface ConnectionState {

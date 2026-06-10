@@ -2,8 +2,11 @@ import WebSocket from 'ws';
 import { randomUUID } from 'crypto';
 
 import { ServerConfig } from './config';
+import type { TLSSocket } from 'tls';
+
 import {
   CapabilityDisabled,
+  CertPinMismatch,
   DaemonRequestFailed,
   DaemonUnreachable,
   OriginNotAllowed,
@@ -157,6 +160,11 @@ export class DaemonClient {
     const protocol = this.config.useTls ? 'wss' : 'ws';
     const url = `${protocol}://${this.config.host}:${this.config.port}`;
 
+    const pinFingerprint =
+      this.config.useTls && this.config.certFingerprint
+        ? this.config.certFingerprint
+        : null;
+
     await new Promise<void>((resolve, reject) => {
       let settled = false;
       const ws = new WebSocket(url);
@@ -171,9 +179,43 @@ export class DaemonClient {
         reject(new DaemonUnreachable(this.config.name, 'connection timeout'));
       }, CONNECTION_TIMEOUT);
 
+      // Capture the underlying TLS socket from the HTTP upgrade response so we
+      // can pin the peer certificate. The `ws` client emits `upgrade` with the
+      // IncomingMessage whose `.socket` is the TLSSocket, before `open` fires.
+      let pinnedSocket: TLSSocket | null = null;
+      if (pinFingerprint) {
+        ws.on('upgrade', (res) => {
+          pinnedSocket = (res.socket as TLSSocket) ?? null;
+        });
+      }
+
       ws.on('open', () => {
         clearTimeout(connectTimer);
         if (settled) return;
+
+        if (pinFingerprint) {
+          const cert = pinnedSocket?.getPeerCertificate?.();
+          const actual = cert?.fingerprint256 || '';
+          // Compare verbatim — both are Node's colon-separated uppercase hex
+          // from fingerprint256. Do NOT reformat or lowercase.
+          if (actual !== pinFingerprint) {
+            settled = true;
+            try {
+              ws.terminate();
+            } catch {
+              /* ignore */
+            }
+            reject(
+              new CertPinMismatch(
+                this.config.name,
+                pinFingerprint,
+                actual || '(none)'
+              )
+            );
+            return;
+          }
+        }
+
         settled = true;
         this.ws = ws;
         this.wireWs(ws);

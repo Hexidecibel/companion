@@ -21,6 +21,7 @@ interface DispatchSpawnPayload {
   cwd?: string;
   sessionName?: string;
   oneShot?: boolean;
+  resolveTimeoutMs?: number;
 }
 
 interface DispatchSpawnResult {
@@ -61,7 +62,8 @@ const DISPATCH_RESPONSE_TYPE = 'remote_dispatch_spawned';
 const EXEC_RESPONSE_TYPE = 'command_executed';
 const WRITE_RESPONSE_TYPE = 'file_written';
 const AUDIT_LOG_RESPONSE_TYPE = 'audit_log';
-const SESSION_ID_WAIT_MS = 5000;
+const SESSION_ID_WAIT_MS = 20000;
+const SESSION_ID_WAIT_MAX_MS = 60000;
 const POST_SPAWN_DELAY_MS = 300;
 const CLAUDE_READY_TIMEOUT_MS = 10_000;
 const CLAUDE_READY_POLL_INTERVAL_MS = 250;
@@ -180,6 +182,10 @@ export function registerRemoteHandlers(
           ? dispatchPayload.sessionName
           : undefined;
       const oneShot = dispatchPayload.oneShot === true;
+      const resolveTimeoutMs =
+        typeof dispatchPayload.resolveTimeoutMs === 'number' && dispatchPayload.resolveTimeoutMs > 0
+          ? Math.min(dispatchPayload.resolveTimeoutMs, SESSION_ID_WAIT_MAX_MS)
+          : SESSION_ID_WAIT_MS;
 
       const auditPayload = {
         promptLength: prompt.length,
@@ -289,7 +295,10 @@ export function registerRemoteHandlers(
         // Try to resolve sessionId from the watcher. Short window — for a
         // very fast-completing prompt the session may die before the JSONL
         // file is observed. Null is an acceptable result per design.
-        const sessionId = await ctx.watcher.waitForSessionInCwd(cwd, SESSION_ID_WAIT_MS);
+        let sessionId = await ctx.watcher.waitForSessionInCwd(cwd, resolveTimeoutMs);
+        if (!sessionId) {
+          sessionId = ctx.watcher.resolveSessionByTmuxName(tmuxSessionName, cwd);
+        }
 
         const result: DispatchSpawnResult = {
           tmuxSessionName,
@@ -343,7 +352,10 @@ export function registerRemoteHandlers(
       }
       await ctx.injector.sendInput(prompt, tmuxSessionName);
 
-      const sessionId = await ctx.watcher.waitForSessionInCwd(cwd, SESSION_ID_WAIT_MS);
+      let sessionId = await ctx.watcher.waitForSessionInCwd(cwd, resolveTimeoutMs);
+      if (!sessionId) {
+        sessionId = ctx.watcher.resolveSessionByTmuxName(tmuxSessionName, cwd);
+      }
 
       const result: DispatchSpawnResult = {
         tmuxSessionName,

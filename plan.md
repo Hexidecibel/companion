@@ -4,6 +4,38 @@ Detailed plans for upcoming work items. Completed items are moved to FEATURES.md
 
 ---
 
+## Item: Global Concierge — cross-machine fan-out
+**Status:** done
+
+A per-server "C" button spawns/attaches a long-running concierge Claude session
+on that daemon's host, which fans work out to real project sessions on ANY
+connected daemon via the `companion-remote` MCP and relays one consolidated
+wait-and-aggregate summary. Full design in
+`/home/hexi/.claude/plans/purrfect-leaping-frost.md`; rollout/verification steps
+in `NEXT_TIME.md`.
+
+Shipped:
+- Auto-derived `~/.companion/mcp-servers.json` (`concierge_sync_mcp`) — no
+  hand-editing; always includes a `local` loopback entry, preserves manual
+  entries.
+- `concierge_open` — spawn/attach the `concierge` tmux session from the UI.
+- `remote_list_sessions` MCP tool — cross-machine session resolver (proxies
+  `get_sessions`, returns newest `resolved` for a `cwd`).
+- Reliable dispatch handle — clamped `resolveTimeoutMs`, raised default,
+  `resolveSessionByTmuxName` fallback, always-returned `tmuxSessionName`.
+- Security: per-origin tokens (`origins[]` + `concierge_register_origin`,
+  additive with legacy listener token) and TLS cert pinning
+  (`get_cert_fingerprint` + MCP `certFingerprint` → `CertPinMismatch`).
+- Web: `ConciergeView`, "C" button (sidebar + mobile), routing,
+  `getServersForMcpBootstrap()`.
+- Concierge routing rules (`concierge/CLAUDE.md`) rewritten for cross-machine
+  wait-and-aggregate; per-project `server` in `projects.json`.
+
+Builds green (daemon/mcp/web). NOT yet deployed to running daemons or
+E2E-verified — see `NEXT_TIME.md`.
+
+---
+
 ## Item: Theme customization — Phase 1: Clean up hardcoded colors
 **Status:** done
 

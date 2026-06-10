@@ -10,6 +10,21 @@ export interface ConnectionSnapshot {
 
 type ChangeHandler = (snapshots: ConnectionSnapshot[]) => void;
 
+/**
+ * Sanitize a server display name into a safe MCP server name:
+ * lowercase, spaces -> hyphens, strip anything other than [a-z0-9_-].
+ */
+function sanitizeMcpServerName(name: string): string {
+  const safe = name
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, '-')
+    .replace(/[^a-z0-9_-]/g, '')
+    .replace(/-+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  return safe || 'server';
+}
+
 export class ConnectionManager {
   private connections: Map<string, ServerConnection> = new Map();
   private changeHandlers: Set<ChangeHandler> = new Set();
@@ -153,6 +168,50 @@ export class ConnectionManager {
       });
     }
     return snapshots;
+  }
+
+  /**
+   * Derive the server list the daemon needs to bootstrap the concierge's MCP
+   * config. One entry per connected daemon. The element shape MUST equal the
+   * `concierge_open` / `concierge_sync_mcp` `servers[]` contract:
+   *   { name, host, port, token, useTls, trustedNetwork?, certFingerprint? }
+   * The `name` is the display name sanitized to a safe MCP server name
+   * (lowercase, spaces -> hyphens).
+   */
+  getServersForMcpBootstrap(): Array<{
+    name: string;
+    host: string;
+    port: number;
+    token: string;
+    useTls: boolean;
+    trustedNetwork?: boolean;
+    certFingerprint?: string;
+  }> {
+    const result: Array<{
+      name: string;
+      host: string;
+      port: number;
+      token: string;
+      useTls: boolean;
+      trustedNetwork?: boolean;
+      certFingerprint?: string;
+    }> = [];
+
+    for (const snap of this.getSnapshots()) {
+      const conn = this.connections.get(snap.serverId);
+      if (!conn) continue;
+      const server = conn.getServer();
+      result.push({
+        name: sanitizeMcpServerName(server.name),
+        host: server.host,
+        port: server.port,
+        token: server.token,
+        useTls: server.useTls,
+        certFingerprint: server.certFingerprint,
+      });
+    }
+
+    return result;
   }
 
   getConnectedCount(): number {

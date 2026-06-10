@@ -17,6 +17,20 @@ export class TransportInsecure extends McpRemoteError {
   }
 }
 
+export class CertPinMismatch extends McpRemoteError {
+  public expected: string;
+  public actual: string;
+  constructor(server: string, expected: string, actual: string) {
+    super(
+      `TLS certificate pin mismatch for daemon "${server}": expected fingerprint256 ${expected} but peer presented ${actual}. ` +
+        `Update certFingerprint in mcp-servers.json if the daemon's cert legitimately changed.`,
+      'cert_pin_mismatch'
+    );
+    this.expected = expected;
+    this.actual = actual;
+  }
+}
+
 export class CapabilityDisabled extends McpRemoteError {
   constructor(capability: string, server: string) {
     super(`Capability "${capability}" is disabled on daemon "${server}"`, 'capability_disabled');

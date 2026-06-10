@@ -12,7 +12,7 @@ import { SessionNameStore } from './session-names';
 import { SubAgentWatcher } from './subagent-watcher';
 import { AuditLog } from './audit-log';
 import { RateLimiter } from './rate-limiter';
-import { DaemonConfig, TmuxSessionConfig, WebSocketResponse } from './types';
+import { DaemonConfig, OriginCredential, TmuxSessionConfig, WebSocketResponse } from './types';
 
 export interface AuthenticatedClient {
   id: string;
@@ -25,6 +25,9 @@ export interface AuthenticatedClient {
   isLocal: boolean;
   lastPongTime: number;
   origin: string | null;
+  // Set when the client authenticated against a per-origin credential
+  // (remoteCapabilities.origins[]). Used to narrow capabilities per origin.
+  originCredential?: OriginCredential;
 }
 
 export interface ClientError {

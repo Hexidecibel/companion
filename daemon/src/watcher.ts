@@ -1805,6 +1805,30 @@ export class SessionWatcher extends EventEmitter {
     });
   }
 
+  /**
+   * Resolve the newest conversation id for a given tmux session name. Tries the
+   * tmux-name → conversation mapping first (same path setActiveSession uses), then
+   * falls back to the cwd → newest-conversation scan used by waitForSessionInCwd.
+   * Returns null if nothing matches.
+   */
+  resolveSessionByTmuxName(tmuxSessionName: string, cwd: string): string | null {
+    // 1. Direct tmux-name → conversation mapping (most accurate).
+    const direct = this.resolveConversationForSession(tmuxSessionName);
+    if (direct) return direct.id;
+
+    // 2. Fall back to newest conversation whose projectPath matches cwd.
+    const normalizedCwd = cwd.replace(/\/+$/, '');
+    let best: { id: string; lastModified: number } | null = null;
+    for (const [id, conv] of this.conversations) {
+      if (conv.projectPath === normalizedCwd) {
+        if (!best || conv.lastModified > best.lastModified) {
+          best = { id, lastModified: conv.lastModified };
+        }
+      }
+    }
+    return best?.id || null;
+  }
+
   getActiveSessionId(): string | null {
     return this.activeTmuxSession;
   }

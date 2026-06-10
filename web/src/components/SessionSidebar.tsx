@@ -27,6 +27,7 @@ interface SessionSidebarProps {
   onCostDashboard?: () => void;
   onSettings?: () => void;
   onRemoteCapabilities?: (serverId: string) => void;
+  onConcierge?: (serverId: string) => void;
   mutedSessions?: Set<string>;
   onToggleMute?: (serverId: string, sessionId: string) => void;
   workGroups?: Map<string, WorkGroup[]>;
@@ -131,6 +132,7 @@ export function SessionSidebar({
   onCostDashboard,
   onSettings,
   onRemoteCapabilities,
+  onConcierge,
   mutedSessions,
   onToggleMute,
   workGroups,
@@ -352,6 +354,14 @@ export function SessionSidebar({
       });
     }
 
+    if (onConcierge) {
+      items.push({
+        label: 'Open Concierge',
+        onClick: () => onConcierge(serverId),
+        disabled: !isConnected,
+      });
+    }
+
     items.push(null);
 
     if (!isConnected) {
@@ -377,7 +387,7 @@ export function SessionSidebar({
     });
 
     return items;
-  }, [snapshots, getServer, toggleEnabled, deleteServer, onRemoteCapabilities]);
+  }, [snapshots, getServer, toggleEnabled, deleteServer, onRemoteCapabilities, onConcierge]);
 
   const buildSessionMenuItems = useCallback((serverId: string, sessionId: string, tmuxSessionName?: string): ContextMenuEntry[] => {
     const isMuted = mutedSessions?.has(sessionId) ?? false;
@@ -586,6 +596,15 @@ export function SessionSidebar({
                         title="Remote capabilities & audit log"
                       >
                         R
+                      </button>
+                    )}
+                    {onConcierge && (
+                      <button
+                        className="sidebar-tmux-btn"
+                        onClick={() => onConcierge(snap.serverId)}
+                        title="Concierge — fans work out across your servers"
+                      >
+                        C
                       </button>
                     )}
                   </>

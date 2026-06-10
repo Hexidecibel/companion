@@ -1,5 +1,5 @@
 {
-  "_comment": "Concierge routing table. EDIT the `cwd` of each project to its REAL project root — that is the value the daemon matches against to find the project's live session (routing resolves by working directory, NOT by tmux name). Keywords help the concierge infer the target from natural language. The `server` is the entry name in ~/.companion/mcp-servers.json that points at the daemon hosting these sessions (bin/concierge seeds a `local` loopback entry).",
+  "_comment": "Concierge routing table. EDIT the `cwd` of each project to its REAL project root — that is the value the daemon matches against to find the project's live session (routing resolves by working directory, NOT by tmux name). Keywords help the concierge infer the target from natural language. `server` is the entry name in the AUTO-DERIVED ~/.companion/mcp-servers.json that points at the daemon hosting that project's sessions — the Companion app writes this file when the concierge is opened, so you do NOT hand-edit it. `server` may be set per-project (so different projects can live on different machines); when a project omits `server`, the top-level default `server` below is used.",
   "server": "local",
   "projects": [
     {

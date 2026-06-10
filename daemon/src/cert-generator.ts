@@ -327,6 +327,25 @@ export function generateAndSaveCerts(certPath: string, keyPath: string): CertPat
   return { certPath, keyPath };
 }
 
+/**
+ * Compute the SHA-256 fingerprint of the certificate at `certPath`, in Node's
+ * colon-separated uppercase hex form (e.g. "AB:CD:..."), matching the value
+ * `socket.getPeerCertificate().fingerprint256` returns. The MCP client compares
+ * against this verbatim, so DO NOT reformat. Returns null if the cert is missing
+ * or cannot be parsed.
+ */
+export function getCertFingerprint(certPath: string): string | null {
+  try {
+    if (!certPath || !fs.existsSync(certPath)) return null;
+    const pem = fs.readFileSync(certPath, 'utf-8');
+    const x509 = new crypto.X509Certificate(pem);
+    return x509.fingerprint256 || null;
+  } catch (err) {
+    console.warn(`getCertFingerprint: failed to read/parse ${certPath}:`, err);
+    return null;
+  }
+}
+
 export function getDefaultCertPaths(): CertPaths {
   const certsDir = process.env.CERTS_DIR || '/etc/companion/certs';
   return {
