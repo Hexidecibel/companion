@@ -9446,33 +9446,8 @@ html {
 }
 
 /* ========================================
-   Session Header — Agent Pill & Gear Button
+   Session Header — Gear Button
    ======================================== */
-
-.session-agent-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 10px;
-  background-color: rgba(59, 130, 246, 0.12);
-  border: 1px solid rgba(59, 130, 246, 0.25);
-  border-radius: 14px;
-  color: var(--accent-blue);
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: background-color 0.15s, border-color 0.15s;
-  white-space: nowrap;
-}
-
-.session-agent-pill:hover {
-  background-color: rgba(59, 130, 246, 0.2);
-  border-color: rgba(59, 130, 246, 0.4);
-}
-
-.session-agent-pill-label {
-  line-height: 1;
-}
 
 .session-header-gear {
   background: var(--bg-tertiary);

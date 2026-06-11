@@ -630,25 +630,6 @@ export function SessionView({
     </>
   );
 
-  // Agent dispatch pill — moved from below message list to header.
-  // Renders only while at least one agent is actively running, so the pill
-  // disappears once everything has finished instead of lingering as
-  // "X done" forever.
-  const agentPill = (runningCount > 0 && serverId && dispatchCollapsed) ? (
-    <button
-      className="session-agent-pill"
-      onClick={() => setDispatchCollapsed(false)}
-      title="Open dispatch panel"
-    >
-      <span className="dispatch-mobile-dot dispatch-dot-running" />
-      <span className="session-agent-pill-label">
-        {`${runningCount} running`}
-        {(totalAgents - runningCount) > 0 &&
-          ` / ${totalAgents - runningCount} done`}
-      </span>
-    </button>
-  ) : null;
-
   // Gear icon — opens SettingsModal
   const gearButton = (
     <button
@@ -667,14 +648,13 @@ export function SessionView({
     <div className="session-header-actions">
       {transientButtons}
       {viewButtons}
-      {agentPill}
       {gearButton}
     </div>
   );
 
   // Mobile: a single compact top-header row holds the action cluster, in order:
   //   Back · Terminal · Plan · Bookmarks · [Tools ▾] · ⚙(Settings)
-  // plus the transient agent pill when active. Terminal/Plan/Bookmarks render
+  // Terminal/Plan/Bookmarks render
   // only under their existing conditions. The "Tools" control reuses the
   // HeaderOverflowMenu as a labeled dropdown holding the lower-frequency
   // navigation actions (Files, Search, Skills, Review) so the row never
@@ -726,7 +706,6 @@ export function SessionView({
       {mobilePlanButton}
       {mobileBookmarksButton}
       <HeaderOverflowMenu items={mobileToolsItems} label="Tools" />
-      {agentPill}
       {gearButton}
     </div>
   );
