@@ -112,7 +112,7 @@ cd desktop && npm run build     # Release build (.deb, .dmg, etc.)
 # Android
 cd desktop && cargo tauri android init          # One-time setup
 cd desktop && bash scripts/setup-android.sh     # Patch for FCM
-cd desktop && cargo tauri android build --target aarch64  # Build APK
+cd desktop && npm run android:build              # Build APK (auto-increments versionCode)
 
 # iOS (requires macOS + Xcode)
 cd desktop && cargo tauri ios init              # One-time setup

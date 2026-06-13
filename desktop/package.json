@@ -6,6 +6,8 @@
     "tauri": "tauri",
     "dev": "tauri dev",
     "build": "tauri build",
+    "android:version": "node scripts/android-version.cjs",
+    "android:build": "node scripts/android-version.cjs && tauri android build --target aarch64 --config src-tauri/android-version.conf.json",
     "typecheck": "echo 'No TypeScript in desktop — run cd ../web && npm run typecheck'"
   },
   "devDependencies": {

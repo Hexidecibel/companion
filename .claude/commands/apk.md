@@ -6,7 +6,16 @@ Build the Companion Android APK using Tauri and install it to the connected devi
 
 1. Build the web frontend and Tauri Android APK:
 ```bash
-cd desktop && cargo tauri android build --target aarch64
+cd desktop && npm run android:build
+```
+
+This runs `scripts/android-version.cjs` to generate an auto-incrementing
+`versionCode` (base 1000000 + git commit count, written to the untracked
+`src-tauri/android-version.conf.json` overlay) and then builds with that overlay
+via `--config`. This guarantees each new APK has a higher `versionCode` than the
+previously sideloaded build so it installs as an upgrade. The raw command it wraps:
+```bash
+node scripts/android-version.cjs && cargo tauri android build --target aarch64 --config src-tauri/android-version.conf.json
 ```
 
 The APK will be at:
