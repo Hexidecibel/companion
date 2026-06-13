@@ -469,58 +469,6 @@ function ServerCard({ snap, summary, onSelectSession, onToggleEnabled, onDelete,
           <span className="mobile-attention-dot" />
         )}
         <div className="mobile-server-actions">
-          {isConnected && (
-            <>
-              <button
-                className={`mobile-server-new-btn ${newSessionOpen ? 'active' : ''}`}
-                onClick={onNewSession}
-                title="New session"
-              >
-                +
-              </button>
-              <button
-                className="mobile-server-tmux-btn"
-                onClick={onNewProject}
-                title="New project"
-              >
-                P
-              </button>
-              <button
-                className="mobile-server-tmux-btn"
-                onClick={onTmuxSessions}
-                title="Tmux sessions"
-              >
-                T
-              </button>
-              {onCostDashboard && (
-                <button
-                  className="mobile-server-tmux-btn"
-                  onClick={onCostDashboard}
-                  title="Cost dashboard"
-                >
-                  $
-                </button>
-              )}
-              {onRemoteCapabilities && (
-                <button
-                  className="mobile-server-tmux-btn"
-                  onClick={onRemoteCapabilities}
-                  title="Remote capabilities & audit log"
-                >
-                  R
-                </button>
-              )}
-              {onConcierge && (
-                <button
-                  className="mobile-server-tmux-btn"
-                  onClick={onConcierge}
-                  title="Concierge — fans work out across your servers"
-                >
-                  C
-                </button>
-              )}
-            </>
-          )}
           <button
             className={`mobile-server-toggle-btn ${isEnabled ? 'active' : ''}`}
             onClick={onToggleEnabled}
@@ -536,6 +484,59 @@ function ServerCard({ snap, summary, onSelectSession, onToggleEnabled, onDelete,
           </button>
         </div>
       </div>
+
+      {isConnected && (
+        <div className="mobile-server-action-row">
+          <button
+            className={`mobile-server-new-btn ${newSessionOpen ? 'active' : ''}`}
+            onClick={onNewSession}
+            title="New session"
+          >
+            +
+          </button>
+          <button
+            className="mobile-server-tmux-btn"
+            onClick={onNewProject}
+            title="New project"
+          >
+            P
+          </button>
+          <button
+            className="mobile-server-tmux-btn"
+            onClick={onTmuxSessions}
+            title="Tmux sessions"
+          >
+            T
+          </button>
+          {onCostDashboard && (
+            <button
+              className="mobile-server-tmux-btn"
+              onClick={onCostDashboard}
+              title="Cost dashboard"
+            >
+              $
+            </button>
+          )}
+          {onRemoteCapabilities && (
+            <button
+              className="mobile-server-tmux-btn"
+              onClick={onRemoteCapabilities}
+              title="Remote capabilities & audit log"
+            >
+              R
+            </button>
+          )}
+          {onConcierge && (
+            <button
+              className="mobile-server-tmux-btn"
+              onClick={onConcierge}
+              title="Concierge — fans work out across your servers"
+            >
+              C
+            </button>
+          )}
+        </div>
+      )}
 
       {!isConnected && isConnecting && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '8px 12px' }}>

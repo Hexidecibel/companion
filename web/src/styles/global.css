@@ -7621,6 +7621,14 @@ html {
   margin-left: auto;
 }
 
+.mobile-server-action-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+
 .mobile-server-new-btn,
 .mobile-server-tmux-btn {
   background: none;
