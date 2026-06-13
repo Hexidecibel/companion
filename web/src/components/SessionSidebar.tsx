@@ -24,7 +24,6 @@ interface SessionSidebarProps {
   onCloseSplit?: () => void;
   secondarySession?: ActiveSession | null;
   onNotificationSettings?: () => void;
-  onCostDashboard?: () => void;
   onSettings?: () => void;
   onRemoteCapabilities?: (serverId: string) => void;
   onConcierge?: (serverId: string) => void;
@@ -129,7 +128,6 @@ export function SessionSidebar({
   onCloseSplit,
   secondarySession,
   onNotificationSettings,
-  onCostDashboard,
   onSettings,
   onRemoteCapabilities,
   onConcierge,
@@ -477,15 +475,6 @@ export function SessionSidebar({
               title="Notification settings"
             >
               &#x1F514;
-            </button>
-          )}
-          {onCostDashboard && (
-            <button
-              className="sidebar-settings-btn"
-              onClick={onCostDashboard}
-              title="Cost dashboard"
-            >
-              $
             </button>
           )}
           {onSettings && (

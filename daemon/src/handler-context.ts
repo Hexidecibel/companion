@@ -6,8 +6,6 @@ import { TmuxManager } from './tmux-manager';
 import { EscalationService } from './escalation';
 import { WorkGroupManager } from './work-group-manager';
 import { SkillCatalog } from './skill-catalog';
-import { UsageTracker } from './usage-tracker';
-import { OAuthUsageFetcher } from './oauth-usage';
 import { SessionNameStore } from './session-names';
 import { SubAgentWatcher } from './subagent-watcher';
 import { AuditLog } from './audit-log';
@@ -53,8 +51,6 @@ export interface HandlerContext {
   escalation: EscalationService;
   workGroupManager: WorkGroupManager | null;
   skillCatalog: SkillCatalog;
-  usageTracker: UsageTracker;
-  oauthUsageFetcher: OAuthUsageFetcher;
   sessionNameStore: SessionNameStore;
   subAgentWatcher: SubAgentWatcher | null;
   auditLog: AuditLog;

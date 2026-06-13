@@ -1,6 +1,5 @@
 import { HandlerContext, MessageHandler } from '../handler-context';
 import { registerNotificationHandlers } from './notifications';
-import { registerUsageHandlers } from './usage';
 import { registerSkillHandlers } from './skills';
 import { registerWorkgroupHandlers } from './workgroups';
 import { registerFileHandlers } from './files';
@@ -15,7 +14,6 @@ export function registerAllHandlers(ctx: HandlerContext): Map<string, MessageHan
   const handlers = new Map<string, MessageHandler>();
   const modules = [
     registerNotificationHandlers(ctx),
-    registerUsageHandlers(ctx),
     registerSkillHandlers(ctx),
     registerWorkgroupHandlers(ctx),
     registerFileHandlers(ctx),

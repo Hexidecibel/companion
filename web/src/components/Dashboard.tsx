@@ -363,12 +363,6 @@ export function Dashboard({ onSettings }: DashboardProps) {
     return () => window.removeEventListener('open-notification-settings', handler);
   }, []);
 
-  const handleOpenCostDashboard = useCallback(() => {
-    if (activeSession) {
-      window.dispatchEvent(new CustomEvent('open-cost-dashboard', { detail: { serverId: activeSession.serverId } }));
-    }
-  }, [activeSession]);
-
   // Open (or spawn) the concierge session hosted on the given server. The daemon
   // refreshes the concierge's MCP config from the bootstrap server list before
   // launching, then returns the session handle which we route to ConciergeView.
@@ -594,7 +588,6 @@ export function Dashboard({ onSettings }: DashboardProps) {
           onSelectSession={handleSelectSession}
           onSessionCreated={handleSessionCreated}
           onSettings={onSettings}
-          onCostDashboard={(serverId: string) => window.dispatchEvent(new CustomEvent('open-cost-dashboard', { detail: { serverId } }))}
           onRemoteCapabilities={(serverId: string) => setCapabilitiesServerId(serverId)}
           onConcierge={handleOpenConcierge}
           onOpenInSplit={handleOpenInSplit}
@@ -631,7 +624,6 @@ export function Dashboard({ onSettings }: DashboardProps) {
           onCloseSplit={handleCloseSplit}
           secondarySession={secondarySession}
           onNotificationSettings={activeSession ? () => setShowNotifSettings(true) : undefined}
-          onCostDashboard={activeSession ? handleOpenCostDashboard : undefined}
           onSettings={onSettings}
           onRemoteCapabilities={(serverId) => setCapabilitiesServerId(serverId)}
           onConcierge={handleOpenConcierge}

@@ -24,7 +24,6 @@ import { WorkGroupManager } from './work-group-manager';
 import { SkillCatalog } from './skill-catalog';
 import { EscalationService, EscalationEvent } from './escalation';
 import { NotificationEventType } from './types';
-import { UsageTracker } from './usage-tracker';
 import { OAuthUsageFetcher, UsageMonitor } from './oauth-usage';
 import { SessionNameStore } from './session-names';
 import { AuditLog } from './audit-log';
@@ -65,7 +64,6 @@ export class WebSocketHandler {
   private escalation: EscalationService;
   private workGroupManager: WorkGroupManager | null;
   private skillCatalog: SkillCatalog;
-  private usageTracker: UsageTracker;
   private oauthUsageFetcher: OAuthUsageFetcher;
   private usageMonitor: UsageMonitor;
   private sessionNameStore: SessionNameStore;
@@ -96,7 +94,6 @@ export class WebSocketHandler {
 
     this.escalation = new EscalationService(this.push.getStore(), this.push);
     this.skillCatalog = new SkillCatalog();
-    this.usageTracker = new UsageTracker(config.anthropicAdminApiKey);
     this.sessionNameStore = new SessionNameStore(path.join(os.homedir(), '.companion'));
     this.auditLog = new AuditLog();
     this.rateLimiter = new RateLimiter();
@@ -219,8 +216,6 @@ export class WebSocketHandler {
       escalation: this.escalation,
       workGroupManager: this.workGroupManager,
       skillCatalog: this.skillCatalog,
-      usageTracker: this.usageTracker,
-      oauthUsageFetcher: this.oauthUsageFetcher,
       sessionNameStore: this.sessionNameStore,
       subAgentWatcher: this.subAgentWatcher,
       auditLog: this.auditLog,

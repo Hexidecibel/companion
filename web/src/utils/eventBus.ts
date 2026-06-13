@@ -3,7 +3,6 @@ type EventMap = {
   'open-add-server': void;
   'open-notification-settings': void;
   'open-new-project': void;
-  'open-cost-dashboard': { serverId: string };
   'open-concierge': { serverId: string; sessionId: string };
   'companion-in-app-notification': { title: string; body?: string; tag?: string };
 };

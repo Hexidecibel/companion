@@ -8,14 +8,12 @@ import { CommandPalette, CommandAction } from './components/CommandPalette';
 import { eventBus } from './utils/eventBus';
 
 const SettingsScreen = lazy(() => import('./components/SettingsScreen').then(m => ({ default: m.SettingsScreen })));
-const UsageDashboard = lazy(() => import('./components/UsageDashboard').then(m => ({ default: m.UsageDashboard })));
 const ConciergeView = lazy(() => import('./components/ConciergeView').then(m => ({ default: m.ConciergeView })));
 
 type Screen =
   | { name: 'dashboard' }
   | { name: 'status' }
   | { name: 'settings' }
-  | { name: 'cost-dashboard'; serverId: string }
   | { name: 'concierge'; serverId: string; sessionId: string };
 
 export function App() {
@@ -86,14 +84,6 @@ export function App() {
     window.addEventListener('popstate', handler);
     return () => window.removeEventListener('popstate', handler);
   }, [screen.name]);
-
-  // Listen for open-cost-dashboard events from child components
-  useEffect(() => {
-    return eventBus.on('open-cost-dashboard', ({ serverId }) => {
-      history.pushState({ screen: 'cost-dashboard' }, '');
-      setScreen({ name: 'cost-dashboard', serverId });
-    });
-  }, []);
 
   // Listen for open-concierge events (emitted after concierge_open resolves)
   useEffect(() => {
@@ -173,14 +163,6 @@ export function App() {
             {screen.name === 'settings' && (
               <Suspense fallback={<div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', color: '#9ca3af' }}>Loading...</div>}>
                 <SettingsScreen
-                  onBack={() => setScreen({ name: 'dashboard' })}
-                />
-              </Suspense>
-            )}
-            {screen.name === 'cost-dashboard' && (
-              <Suspense fallback={<div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', color: '#9ca3af' }}>Loading...</div>}>
-                <UsageDashboard
-                  serverId={screen.serverId}
                   onBack={() => setScreen({ name: 'dashboard' })}
                 />
               </Suspense>

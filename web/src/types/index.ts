@@ -294,62 +294,6 @@ export interface WorkGroup {
   error?: string;
 }
 
-// OAuth Usage Dashboard types
-
-export interface OAuthUsageWindow {
-  utilization: number;
-  resets_at: string;
-}
-
-export interface OAuthExtraUsage {
-  is_enabled: boolean;
-  monthly_limit: number | null;
-  used_credits: number | null;
-  utilization: number | null;
-}
-
-export interface UsageDashboardData {
-  available: boolean;
-  subscriptionType?: string;
-  rateLimitTier?: string;
-  fiveHour?: OAuthUsageWindow | null;
-  sevenDay?: OAuthUsageWindow | null;
-  sevenDayOpus?: OAuthUsageWindow | null;
-  sevenDaySonnet?: OAuthUsageWindow | null;
-  sevenDayCowork?: OAuthUsageWindow | null;
-  extraUsage?: OAuthExtraUsage | null;
-}
-
-// Cost Dashboard types
-
-export interface DailyUsageBucket {
-  date: string; // YYYY-MM-DD
-  inputTokens: number;
-  outputTokens: number;
-  cacheCreationTokens: number;
-  cacheReadTokens: number;
-  estimatedCostUsd: number;
-  byModel: Record<string, {
-    inputTokens: number;
-    outputTokens: number;
-    cacheCreationTokens: number;
-    cacheReadTokens: number;
-    costUsd: number;
-  }>;
-}
-
-export interface CostDashboardData {
-  daily: DailyUsageBucket[];
-  totalCostUsd: number;
-  totalInputTokens: number;
-  totalOutputTokens: number;
-  totalCacheCreationTokens: number;
-  totalCacheReadTokens: number;
-  periodStart: string;
-  periodEnd: string;
-  hasAdminKey: boolean;
-}
-
 // Active session tracking
 
 export interface ActiveSession {
