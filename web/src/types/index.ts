@@ -196,11 +196,16 @@ export interface TmuxSessionInfo {
   tagged?: boolean;
 }
 
-// Pending image for upload
-export interface PendingImage {
+// Pending attachment for upload (image or any other file type)
+export interface PendingAttachment {
   id: string;
   file: File;
-  previewUrl: string;
+  name: string;
+  mimeType: string;
+  size: number;
+  isImage: boolean;
+  // Only set for images (object URL for thumbnail preview)
+  previewUrl?: string;
 }
 
 // Code review types (file changes extracted from session)

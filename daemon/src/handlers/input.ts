@@ -2,6 +2,49 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { HandlerContext, MessageHandler } from '../handler-context';
+import { MAX_ATTACHMENT_FILE_SIZE_BYTES } from '../constants';
+
+// Known image file extensions (lowercase, with leading dot).
+const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.svg']);
+
+// Fallback mimeType -> extension mapping for deriving an on-disk extension
+// when the supplied filename has none.
+const MIME_EXTENSION_MAP: Record<string, string> = {
+  'image/png': '.png',
+  'image/jpeg': '.jpg',
+  'image/gif': '.gif',
+  'image/webp': '.webp',
+  'image/bmp': '.bmp',
+  'image/svg+xml': '.svg',
+  'application/pdf': '.pdf',
+  'text/plain': '.txt',
+  'application/json': '.json',
+  'text/csv': '.csv',
+};
+
+/**
+ * Sanitize a client-supplied filename into a safe on-disk base name.
+ * Strips any directory components (path traversal), control characters, and
+ * leading-dot traversal sequences. Returns '' if nothing usable remains.
+ */
+function sanitizeFilename(name: string): string {
+  if (!name) return '';
+  // Take only the final path component — defeats "../../etc/passwd" and "a/b.txt".
+  let base = path.basename(name);
+  // Strip control chars and path separators that basename may not catch.
+  base = base.replace(/[\x00-\x1f/\\]/g, '');
+  // Collapse any leading dots to avoid hidden/traversal-style names like "..".
+  base = base.replace(/^\.+/, '');
+  // Allow only a conservative set of filename characters.
+  base = base.replace(/[^A-Za-z0-9._-]/g, '_');
+  return base;
+}
+
+/** True if the attachment is an image, by mimeType or known extension. */
+function isImageAttachment(mimeType: string | undefined, ext: string): boolean {
+  if (mimeType && mimeType.startsWith('image/')) return true;
+  return IMAGE_EXTENSIONS.has(ext.toLowerCase());
+}
 
 /**
  * Resolve a sessionId to a tmux session name.
@@ -259,39 +302,75 @@ export function registerInputHandlers(
     },
 
     async upload_image(client, payload, requestId) {
-      const uploadPayload = payload as { base64: string; mimeType: string } | undefined;
+      // Handles ANY file type (the request name is kept for compatibility).
+      const uploadPayload = payload as {
+        base64: string;
+        mimeType?: string;
+        filename?: string;
+      } | undefined;
       if (!uploadPayload?.base64) {
         ctx.send(client.ws, {
           type: 'image_uploaded',
           success: false,
-          error: 'Missing image data',
+          error: 'Missing file data',
           requestId,
         });
         return;
       }
 
       try {
-        const ext = uploadPayload.mimeType === 'image/png' ? 'png' : 'jpg';
-        const filename = `companion-${Date.now()}.${ext}`;
+        const buffer = Buffer.from(uploadPayload.base64, 'base64');
+
+        // Enforce the size cap on the decoded buffer; do not write if oversized.
+        if (buffer.length > MAX_ATTACHMENT_FILE_SIZE_BYTES) {
+          const maxMb = Math.round(MAX_ATTACHMENT_FILE_SIZE_BYTES / (1024 * 1024));
+          ctx.send(client.ws, {
+            type: 'image_uploaded',
+            success: false,
+            error: `Attachment exceeds maximum size of ${maxMb} MB`,
+            requestId,
+          });
+          return;
+        }
+
+        const safeName = sanitizeFilename(uploadPayload.filename || '');
+
+        // Derive the on-disk extension: prefer the real extension from the
+        // (sanitized) filename, fall back to a mimeType mapping, default .bin.
+        let ext = path.extname(safeName).toLowerCase();
+        if (!ext) {
+          ext = (uploadPayload.mimeType && MIME_EXTENSION_MAP[uploadPayload.mimeType]) || '.bin';
+        }
+
+        const isImage = isImageAttachment(uploadPayload.mimeType, ext);
+
+        // Build a final on-disk name: companion-<ts>-<safeName>, ensuring it
+        // carries the derived extension even if the supplied name lacked one.
+        let onDiskName = safeName;
+        if (!onDiskName) {
+          onDiskName = `file${ext}`;
+        } else if (!path.extname(onDiskName)) {
+          onDiskName = `${onDiskName}${ext}`;
+        }
+        const filename = `companion-${Date.now()}-${onDiskName}`;
         const filepath = path.join(os.tmpdir(), filename);
 
-        const buffer = Buffer.from(uploadPayload.base64, 'base64');
         fs.writeFileSync(filepath, buffer);
 
-        console.log(`Image uploaded to: ${filepath}`);
+        console.log(`Attachment uploaded to: ${filepath} (isImage=${isImage})`);
 
         ctx.send(client.ws, {
           type: 'image_uploaded',
           success: true,
-          payload: { filepath },
+          payload: { filepath, isImage },
           requestId,
         });
       } catch (err) {
-        console.error('Error uploading image:', err);
+        console.error('Error uploading attachment:', err);
         ctx.send(client.ws, {
           type: 'image_uploaded',
           success: false,
-          error: 'Failed to save image',
+          error: 'Failed to save attachment',
           requestId,
         });
       }
@@ -318,8 +397,19 @@ export function registerInputHandlers(
       const parts: string[] = [];
 
       if (msgPayload.imagePaths && msgPayload.imagePaths.length > 0) {
-        for (const imgPath of msgPayload.imagePaths) {
-          parts.push(`[image: ${imgPath}]`);
+        for (const attPath of msgPayload.imagePaths) {
+          const ext = path.extname(attPath).toLowerCase();
+          if (IMAGE_EXTENSIONS.has(ext)) {
+            // Images keep the exact existing marker format (unchanged behavior).
+            parts.push(`[image: ${attPath}]`);
+          } else {
+            // Non-image files: instruct claude to read the file from disk.
+            // We use this explicit-instruction form rather than the Claude Code
+            // `@<path>` file-mention because `@` can trigger tmux send-keys
+            // autocomplete issues. NOTE: this still needs LIVE verification that
+            // claude actually reads the file given this phrasing.
+            parts.push(`Read the attached file at ${attPath}`);
+          }
         }
       }
 

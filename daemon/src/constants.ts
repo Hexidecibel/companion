@@ -21,6 +21,7 @@ export const OVERLAY_DETECTION_LINES = 10;
 export const MAX_IMAGE_FILE_SIZE_BYTES = 5 * 1024 * 1024;     // 5MB
 export const MAX_TEXT_FILE_SIZE_BYTES = 1024 * 1024;           // 1MB
 export const MAX_APK_FILE_SIZE_BYTES = 150 * 1024 * 1024;     // 150MB
+export const MAX_ATTACHMENT_FILE_SIZE_BYTES = 50 * 1024 * 1024; // 50MB
 
 // ========================================
 // Buffer Sizes

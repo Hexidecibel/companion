@@ -26,6 +26,10 @@ High-level features of the Companion daemon, web client, and desktop/mobile apps
 
 ## Mobile Input
 - Send text and images to the CLI from your phone
+- **File attachments (any type):** attach images or arbitrary files (PDF, text, JSON, CSV, etc.) — images send as `[image: ...]` markers, non-image files are uploaded to the daemon and referenced with a "Read the attached file at ..." instruction
+- Non-image attachments render as a labeled file chip (name + size); images keep the thumbnail preview
+- Mobile attach menu (Photo Library / Camera / Files) with distinct native pickers; desktop/browser uses a single file picker
+- Attachment size cap enforced on both client and daemon (50 MB), with sanitized on-disk filenames (path-traversal safe)
 - Quick reply chips and slash commands
 - Multi-question answering with per-question selection and "Other" freetext
 - Multi-select checkbox UI for questions that allow multiple answers with send-in-flight guard (buttons disabled, "Sending..." text during async submit)

@@ -1,7 +1,7 @@
 import { eventBus } from '../utils/eventBus';
 import { useDraggable } from '../hooks/useDraggable';
 import { useState, useEffect, useCallback, useMemo, useRef, lazy, Suspense } from 'react';
-import { PendingImage, WorkGroup } from '../types';
+import { PendingAttachment, WorkGroup } from '../types';
 import { useConversation } from '../hooks/useConversation';
 import { useTasks } from '../hooks/useTasks';
 import { useCodeReview } from '../hooks/useCodeReview';
@@ -341,36 +341,47 @@ export function SessionView({
     [sendInput],
   );
 
-  const handleSendWithImages = useCallback(
-    async (text: string, images: PendingImage[]): Promise<boolean> => {
+  const handleSendWithAttachments = useCallback(
+    async (text: string, attachments: PendingAttachment[]): Promise<boolean> => {
       if (!serverId) return false;
       const conn = connectionManager.getConnection(serverId);
       if (!conn) return false;
 
+      // Client-side size cap (mirrors the daemon's MAX_ATTACHMENT_FILE_SIZE_BYTES).
+      const MAX_ATTACHMENT_FILE_SIZE_BYTES = 50 * 1024 * 1024;
+
       try {
-        // Upload each image via send_image
+        // Upload each attachment, collecting the on-disk paths the daemon wrote.
+        // The request/field names stay 'upload_image' / 'imagePaths' to minimize
+        // churn — the daemon handles non-image files behind the same names.
         const imagePaths: string[] = [];
-        for (const img of images) {
+        for (const att of attachments) {
+          if (att.size > MAX_ATTACHMENT_FILE_SIZE_BYTES) {
+            setImageSendError(`"${att.name}" is too large (max 50 MB)`);
+            return false;
+          }
+
           const reader = new FileReader();
           const base64 = await new Promise<string>((resolve, reject) => {
             reader.onload = () => {
               const result = reader.result as string;
-              // Strip data:image/...;base64, prefix
+              // Strip data:<mime>;base64, prefix
               const b64 = result.includes(',') ? result.split(',')[1] : result;
               resolve(b64);
             };
             reader.onerror = reject;
-            reader.readAsDataURL(img.file);
+            reader.readAsDataURL(att.file);
           });
 
           const response = await conn.sendRequest('upload_image', {
             base64,
-            mimeType: img.file.type,
+            mimeType: att.mimeType,
+            filename: att.name,
           });
 
           if (!response.success) {
-            console.error('Image upload failed:', response.error);
-            setImageSendError('Image upload failed');
+            console.error('Attachment upload failed:', response.error);
+            setImageSendError(response.error || 'Attachment upload failed');
             return false;
           }
 
@@ -380,7 +391,7 @@ export function SessionView({
           }
         }
 
-        // Send message with image paths
+        // Send message with attachment paths
         const response = await conn.sendRequest('send_with_images', {
           message: text,
           imagePaths,
@@ -391,14 +402,14 @@ export function SessionView({
         if (!response.success) {
           const errMsg = response.error === 'tmux_session_not_found'
             ? 'tmux session not found'
-            : (response.error || 'Failed to send images');
+            : (response.error || 'Failed to send attachments');
           setImageSendError(errMsg);
         }
 
         return response.success;
       } catch (err) {
-        console.error('Failed to send images:', err);
-        setImageSendError('Failed to send images');
+        console.error('Failed to send attachments:', err);
+        setImageSendError('Failed to send attachments');
         return false;
       }
     },
@@ -920,7 +931,7 @@ export function SessionView({
       <InputBar
         ref={inputBarRef}
         onSend={handleSend}
-        onSendWithImages={handleSendWithImages}
+        onSendWithImages={handleSendWithAttachments}
         disabled={false}
         skills={skills}
         terminalMode={showTerminal}

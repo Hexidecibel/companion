@@ -1,13 +1,14 @@
-import { useState, useRef, useCallback, useMemo, forwardRef, useImperativeHandle, type KeyboardEvent, type ClipboardEvent, type DragEvent } from 'react';
-import { PendingImage, Skill } from '../types';
+import { useState, useRef, useCallback, useMemo, useEffect, forwardRef, useImperativeHandle, type KeyboardEvent, type ClipboardEvent, type DragEvent } from 'react';
+import { createPortal } from 'react-dom';
+import { PendingAttachment, Skill } from '../types';
 import { useUndoHistory } from '../hooks/useUndoHistory';
 import { SlashMenu, SlashMenuItem } from './SlashMenu';
-import { isMobileViewport } from '../utils/platform';
+import { isMobileViewport, isTauriMobile } from '../utils/platform';
 import { compressImage } from '../utils/imageCompression';
 
 interface InputBarProps {
   onSend: (text: string) => Promise<boolean>;
-  onSendWithImages?: (text: string, images: PendingImage[]) => Promise<boolean>;
+  onSendWithImages?: (text: string, images: PendingAttachment[]) => Promise<boolean>;
   disabled?: boolean;
   skills?: Skill[];
   terminalMode?: boolean;
@@ -19,24 +20,48 @@ export interface InputBarHandle {
   prefill: (text: string) => void;
 }
 
-let imageIdCounter = 0;
+let attachmentIdCounter = 0;
 
-function fileToPreview(file: File): PendingImage {
+function fileToAttachment(file: File): PendingAttachment {
+  const isImage = file.type.startsWith('image/');
   return {
-    id: `img-${++imageIdCounter}`,
+    id: `att-${++attachmentIdCounter}`,
     file,
-    previewUrl: URL.createObjectURL(file),
+    name: file.name,
+    mimeType: file.type,
+    size: file.size,
+    isImage,
+    previewUrl: isImage ? URL.createObjectURL(file) : undefined,
   };
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  const units = ['KB', 'MB', 'GB'];
+  let value = bytes / 1024;
+  let i = 0;
+  while (value >= 1024 && i < units.length - 1) {
+    value /= 1024;
+    i++;
+  }
+  return `${value < 10 ? value.toFixed(1) : Math.round(value)} ${units[i]}`;
 }
 
 export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function InputBar({ onSend, onSendWithImages, disabled, skills = [], terminalMode, onTerminalSend, onTerminalKey }, ref) {
   const { value: text, onChange: setText, undo, redo, reset: resetHistory } = useUndoHistory();
   const [sending, setSending] = useState(false);
-  const [images, setImages] = useState<PendingImage[]>([]);
+  const [images, setImages] = useState<PendingAttachment[]>([]);
   const [dragging, setDragging] = useState(false);
   const [showSlashMenu, setShowSlashMenu] = useState(false);
+  const [showAttachMenu, setShowAttachMenu] = useState(false);
+  const [attachMenuPos, setAttachMenuPos] = useState<{ left: number; bottom: number } | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const photoInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
+  const filesInputRef = useRef<HTMLInputElement>(null);
+  const attachBtnRef = useRef<HTMLButtonElement>(null);
+  const attachMenuRef = useRef<HTMLDivElement>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
 
   useImperativeHandle(ref, () => ({
@@ -57,17 +82,19 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
     return match ? match[1] : '';
   }, [text, showSlashMenu]);
 
-  const addImages = useCallback(async (files: File[]) => {
-    const imageFiles = files.filter((f) => f.type.startsWith('image/'));
-    if (imageFiles.length === 0) return;
-    const compressed = await Promise.all(imageFiles.map((f) => compressImage(f)));
-    setImages((prev) => [...prev, ...compressed.map(fileToPreview)]);
+  const addFiles = useCallback(async (files: File[]) => {
+    if (files.length === 0) return;
+    // Compress images only; non-image files pass through unmodified.
+    const processed = await Promise.all(
+      files.map(async (f) => (f.type.startsWith('image/') ? compressImage(f) : f)),
+    );
+    setImages((prev) => [...prev, ...processed.map(fileToAttachment)]);
   }, []);
 
   const removeImage = useCallback((id: string) => {
     setImages((prev) => {
       const img = prev.find((i) => i.id === id);
-      if (img) URL.revokeObjectURL(img.previewUrl);
+      if (img?.previewUrl) URL.revokeObjectURL(img.previewUrl);
       return prev.filter((i) => i.id !== id);
     });
   }, []);
@@ -99,7 +126,7 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
       setImages(savedImages);
     } else {
       // Clean up preview URLs
-      savedImages.forEach((img) => URL.revokeObjectURL(img.previewUrl));
+      savedImages.forEach((img) => { if (img.previewUrl) URL.revokeObjectURL(img.previewUrl); });
     }
     setSending(false);
     requestAnimationFrame(() => textareaRef.current?.focus());
@@ -122,7 +149,7 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
         setText(savedText);
         setImages(savedImages);
       } else {
-        savedImages.forEach((img) => URL.revokeObjectURL(img.previewUrl));
+        savedImages.forEach((img) => { if (img.previewUrl) URL.revokeObjectURL(img.previewUrl); });
       }
       setSending(false);
       requestAnimationFrame(() => textareaRef.current?.focus());
@@ -249,16 +276,16 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
     if (!items) return;
     const files: File[] = [];
     for (let i = 0; i < items.length; i++) {
-      if (items[i].type.startsWith('image/')) {
+      if (items[i].kind === 'file') {
         const file = items[i].getAsFile();
         if (file) files.push(file);
       }
     }
     if (files.length > 0) {
       e.preventDefault();
-      addImages(files);
+      addFiles(files);
     }
-  }, [addImages, terminalMode]);
+  }, [addFiles, terminalMode]);
 
   const handleDragOver = useCallback((e: DragEvent<HTMLDivElement>) => {
     e.preventDefault();
@@ -276,18 +303,64 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
     e.preventDefault();
     setDragging(false);
     const files = Array.from(e.dataTransfer.files);
-    addImages(files);
-  }, [addImages]);
+    addFiles(files);
+  }, [addFiles]);
+
+  // Mobile gets a "Photos / Camera / Files" chooser since native pickers map to
+  // distinct accept/capture attributes; desktop/browser keeps the single picker.
+  // isMobileViewport() also covers a narrow desktop window, matching the layout.
+  const useAttachMenu = isTauriMobile() || isMobileViewport();
 
   const handleFileSelect = useCallback(() => {
+    if (useAttachMenu) {
+      // Anchor the popover above the attach button.
+      const rect = attachBtnRef.current?.getBoundingClientRect();
+      if (rect) {
+        setAttachMenuPos({
+          left: Math.max(rect.left, 8),
+          bottom: Math.max(window.innerHeight - rect.top + 6, 8),
+        });
+      }
+      setShowAttachMenu((v) => !v);
+      return;
+    }
     fileInputRef.current?.click();
+  }, [useAttachMenu]);
+
+  // Shared change handler: works regardless of which hidden input fired.
+  const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const input = e.currentTarget;
+    const files = input.files ? Array.from(input.files) : [];
+    addFiles(files);
+    input.value = '';
+  }, [addFiles]);
+
+  const handleAttachChoice = useCallback((ref: React.RefObject<HTMLInputElement>) => {
+    setShowAttachMenu(false);
+    ref.current?.click();
   }, []);
 
-  const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files ? Array.from(e.target.files) : [];
-    addImages(files);
-    if (fileInputRef.current) fileInputRef.current.value = '';
-  }, [addImages]);
+  // Dismiss the attach menu on outside tap / Escape (matches HeaderOverflowMenu).
+  useEffect(() => {
+    if (!showAttachMenu) return;
+    const handlePointerDown = (e: MouseEvent | TouchEvent) => {
+      const target = e.target as Node;
+      if (attachMenuRef.current?.contains(target)) return;
+      if (attachBtnRef.current?.contains(target)) return;
+      setShowAttachMenu(false);
+    };
+    const handleKeyDown = (e: globalThis.KeyboardEvent) => {
+      if (e.key === 'Escape') setShowAttachMenu(false);
+    };
+    document.addEventListener('mousedown', handlePointerDown);
+    document.addEventListener('touchstart', handlePointerDown);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown);
+      document.removeEventListener('touchstart', handlePointerDown);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [showAttachMenu]);
 
   const mobile = isMobileViewport();
 
@@ -310,17 +383,37 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
       )}
       {images.length > 0 && (
         <div className="input-bar-images">
-          {images.map((img) => (
-            <div key={img.id} className="input-bar-image-preview">
-              <img src={img.previewUrl} alt="preview" />
-              <button
-                className="input-bar-image-remove"
-                onClick={() => removeImage(img.id)}
-                title="Remove image"
-              >
-                x
-              </button>
-            </div>
+          {images.map((att) => (
+            att.isImage && att.previewUrl ? (
+              <div key={att.id} className="input-bar-image-preview">
+                <img src={att.previewUrl} alt="preview" />
+                <button
+                  className="input-bar-image-remove"
+                  onClick={() => removeImage(att.id)}
+                  title="Remove attachment"
+                >
+                  x
+                </button>
+              </div>
+            ) : (
+              <div key={att.id} className="input-bar-file-chip" title={att.name}>
+                <svg className="input-bar-file-icon" width="16" height="16" viewBox="0 0 16 16" fill="none">
+                  <path d="M9 1.5H4a1 1 0 00-1 1v11a1 1 0 001 1h8a1 1 0 001-1V5.5L9 1.5z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round"/>
+                  <path d="M9 1.5V5.5h4" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round"/>
+                </svg>
+                <div className="input-bar-file-meta">
+                  <span className="input-bar-file-name">{att.name || 'file'}</span>
+                  <span className="input-bar-file-size">{formatBytes(att.size)}</span>
+                </div>
+                <button
+                  className="input-bar-file-remove"
+                  onClick={() => removeImage(att.id)}
+                  title="Remove attachment"
+                >
+                  x
+                </button>
+              </div>
+            )
           ))}
         </div>
       )}
@@ -328,22 +421,83 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
         {!terminalMode && (
           <>
             <button
+              ref={attachBtnRef}
               className="input-bar-attach-btn"
               onClick={handleFileSelect}
-              title="Attach image"
+              title="Attach file"
+              aria-haspopup={useAttachMenu ? 'menu' : undefined}
+              aria-expanded={useAttachMenu ? showAttachMenu : undefined}
             >
               <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
                 <path d="M17.5 9.31l-7.12 7.12a4.5 4.5 0 01-6.36-6.36l7.12-7.12a3 3 0 014.24 4.24l-7.12 7.13a1.5 1.5 0 01-2.12-2.13L13.26 5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
               </svg>
             </button>
+            {/* Desktop/browser single picker (accepts anything). */}
             <input
               ref={fileInputRef}
+              type="file"
+              accept="*/*"
+              multiple
+              style={{ display: 'none' }}
+              onChange={handleFileChange}
+            />
+            {/* Mobile chooser targets — distinct accept/capture, shared handler. */}
+            <input
+              ref={photoInputRef}
               type="file"
               accept="image/*"
               multiple
               style={{ display: 'none' }}
               onChange={handleFileChange}
             />
+            <input
+              ref={cameraInputRef}
+              type="file"
+              accept="image/*"
+              capture="environment"
+              style={{ display: 'none' }}
+              onChange={handleFileChange}
+            />
+            <input
+              ref={filesInputRef}
+              type="file"
+              accept="*/*"
+              multiple
+              style={{ display: 'none' }}
+              onChange={handleFileChange}
+            />
+            {showAttachMenu && attachMenuPos &&
+              createPortal(
+                <div
+                  ref={attachMenuRef}
+                  className="context-menu"
+                  role="menu"
+                  style={{ left: attachMenuPos.left, bottom: attachMenuPos.bottom }}
+                >
+                  <button
+                    role="menuitem"
+                    className="context-menu-item"
+                    onClick={() => handleAttachChoice(photoInputRef)}
+                  >
+                    Photo Library
+                  </button>
+                  <button
+                    role="menuitem"
+                    className="context-menu-item"
+                    onClick={() => handleAttachChoice(cameraInputRef)}
+                  >
+                    Camera
+                  </button>
+                  <button
+                    role="menuitem"
+                    className="context-menu-item"
+                    onClick={() => handleAttachChoice(filesInputRef)}
+                  >
+                    Files
+                  </button>
+                </div>,
+                document.body,
+              )}
           </>
         )}
         <textarea
@@ -405,7 +559,7 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
       </div>
       {dragging && (
         <div className="input-bar-drop-overlay">
-          Drop images here
+          Drop files here
         </div>
       )}
     </div>
