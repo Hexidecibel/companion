@@ -47,7 +47,12 @@ export interface QuestionOption {
  */
 export interface TerminalChoicePrompt {
   question: string;
+  /** Short title/header rendered above the question, when one is detectable. */
+  header?: string;
   options: { label: string; description?: string }[];
+  /** True when the selector is a multi-select (checkbox) list, e.g. an
+   *  AskUserQuestion multiSelect question. */
+  multiSelect?: boolean;
 }
 
 export interface Question {
@@ -80,6 +85,7 @@ export interface ConversationHighlight {
   isCompaction?: boolean;
   isPending?: boolean; // Optimistic sent message not yet confirmed by JSONL
   skillName?: string; // User message is an expanded skill invocation (e.g., "todo", "apk")
+  liveSourced?: boolean; // Synthesized from a live terminal capture (e.g. active AskUserQuestion), not JSONL
 }
 
 // Feedback prompt types (CLI session rating)

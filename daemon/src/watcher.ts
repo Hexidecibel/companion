@@ -16,6 +16,7 @@ import {
   getPendingApprovalTools,
   detectCompaction,
   extractTasks,
+  detectActiveChoicePrompt,
 } from './parser';
 import { APPROVAL_TOOLS } from './tool-config';
 import {
@@ -364,6 +365,14 @@ export class SessionWatcher extends EventEmitter {
       // Refresh direct session→conversation mappings (PID detection + elimination)
       await this.refreshConversationMappings();
 
+      // Safety net: re-process any tracked conversation whose on-disk file has
+      // advanced past our cached snapshot. Chokidar (even with polling) can drop
+      // a 'change' event — observed with the assistant message carrying a pending
+      // AskUserQuestion tool_use, which then never re-parses or broadcasts, leaving
+      // the choice invisible in the app. This guarantees a conversation-update push
+      // (and a refreshed cache) within one refresh interval.
+      this.reconcileTrackedConversations();
+
       // Persist session snapshots so they survive daemon restarts
       this.persistSessions();
     } catch {
@@ -465,6 +474,10 @@ export class SessionWatcher extends EventEmitter {
     this.feedbackPollCount = 0;
     this.feedbackSessionId = tmuxSessionName;
 
+    // Emit a conversation-update at most once per poll session when we first see a
+    // live choice selector (e.g. an AskUserQuestion box), so clients refetch promptly.
+    let choiceNotified = false;
+
     this.feedbackPollTimer = setInterval(async () => {
       this.feedbackPollCount++;
 
@@ -495,6 +508,19 @@ export class SessionWatcher extends EventEmitter {
             lastMessage: undefined,
             feedbackPrompt: prompt,
           });
+        } else if (!choiceNotified) {
+          // Live AskUserQuestion / choice selector: the AUQ tool_use is never written
+          // to JSONL while pending, so no file change fires. When we spot the live box
+          // on the pane, nudge clients to refetch so get_highlights can surface the
+          // tappable options. The question itself is resolved on-demand in get_highlights.
+          const choice = detectActiveChoicePrompt(paneText);
+          if (choice) {
+            choiceNotified = true;
+            console.log(
+              `Watcher: Detected live choice prompt for "${tmuxSessionName}" (${choice.options.length} options, multiSelect: ${choice.multiSelect})`
+            );
+            this.emit('conversation-update', { sessionId: tmuxSessionName });
+          }
         }
       } catch {
         // Silent fail — polling is best-effort
@@ -1638,6 +1664,26 @@ export class SessionWatcher extends EventEmitter {
     return null;
   }
 
+  /**
+   * Re-process any tracked conversation whose on-disk file is newer than our
+   * cached snapshot. This is a safety net for missed/dropped file-watch events:
+   * processFileChange re-parses, refreshes the cache, and emits conversation-update
+   * (so clients with the session open update live). Called from the periodic tmux
+   * refresh. Iterates a snapshot so processFileChange's writes don't disturb it.
+   */
+  private reconcileTrackedConversations(): void {
+    for (const [convId, tracked] of [...this.conversations]) {
+      try {
+        const st = fs.statSync(tracked.path);
+        if (st.mtimeMs > tracked.lastModified) {
+          this.processFileChange(tracked.path, convId);
+        }
+      } catch {
+        // File missing/unreadable — leave for normal watcher handling.
+      }
+    }
+  }
+
   getMessages(sessionId?: string): ConversationMessage[] {
     const targetId = this.resolveToConversationId(sessionId);
     if (!targetId) return [];
@@ -1662,6 +1708,52 @@ export class SessionWatcher extends EventEmitter {
       return tracked.cachedMessages;
     }
     return parseConversationFile(tracked.path);
+  }
+
+  /**
+   * Like getMessages, but ALWAYS re-reads the conversation file from disk
+   * instead of trusting the cached snapshot. Used by the get_highlights latest
+   * page so a pending AskUserQuestion (whose tool_use lands in the JSONL before
+   * any file-watch event the watcher may have missed) is never hidden behind a
+   * frozen cache. Intentionally does NOT mutate tracked.lastModified so the
+   * periodic reconcile pass still detects the change and emits conversation-update.
+   */
+  getFreshMessages(sessionId?: string): ConversationMessage[] {
+    const targetId = this.resolveToConversationId(sessionId);
+    if (!targetId) return [];
+
+    const tracked = this.conversations.get(targetId);
+    if (!tracked) return this.getMessages(sessionId);
+
+    try {
+      const messages = parseConversationFile(tracked.path);
+      // Refresh the cached message snapshot (but not lastModified) so other
+      // cache readers (getStatus, etc.) stay consistent with what we just served.
+      tracked.cachedMessages = messages;
+      // A pending AskUserQuestion / ExitPlanMode can land on disk after a dropped
+      // file-watch event, leaving tracked.isWaitingForInput frozen on a stale
+      // "not waiting" value. get_status (polled alongside get_highlights) and the
+      // get_highlights "suppress options when not waiting" guard both read this
+      // flag, so a stale false can hide the live choice. Promote the flag here when
+      // the fresh parse shows a pending INTERACTIVE tool — mirroring processFileChange's
+      // instant-interactive rule. Never downgrade here: processFileChange owns clearing
+      // and the 3s debounce for non-interactive approval tools (Bash/Edit/Write).
+      const lastMsg = messages[messages.length - 1];
+      const hasInteractivePending =
+        lastMsg?.type === 'assistant' &&
+        (lastMsg.toolCalls?.some(
+          (tc) =>
+            tc.status === 'pending' &&
+            (tc.name === 'AskUserQuestion' || tc.name === 'ExitPlanMode')
+        ) ??
+          false);
+      if (hasInteractivePending) {
+        tracked.isWaitingForInput = true;
+      }
+      return messages;
+    } catch {
+      return tracked.cachedMessages || [];
+    }
   }
 
   getStatus(sessionId?: string): SessionStatus {

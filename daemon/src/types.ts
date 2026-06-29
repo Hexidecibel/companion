@@ -64,6 +64,9 @@ export interface FeedbackPrompt {
 export interface QuestionOption {
   label: string;
   description: string;
+  /** For multi-select (checkbox) prompts: whether this option is currently checked
+   *  in the live terminal capture. Undefined for single-select prompts. */
+  selected?: boolean;
 }
 
 /**
@@ -74,7 +77,12 @@ export interface QuestionOption {
  */
 export interface TerminalChoicePrompt {
   question: string;
-  options: { label: string; description?: string }[];
+  /** Short title/header rendered above the question, when one is detectable. */
+  header?: string;
+  options: { label: string; description?: string; selected?: boolean }[];
+  /** True when the selector is a multi-select (checkbox) list, e.g. an AskUserQuestion
+   *  multiSelect question. Drives how the response is injected (toggles + submit). */
+  multiSelect?: boolean;
 }
 
 export interface Question {
@@ -120,6 +128,9 @@ export interface ConversationHighlight {
   toolCalls?: ToolCall[];
   isCompaction?: boolean;
   skillName?: string;
+  /** True when this highlight was synthesized from a live terminal capture (e.g. an
+   *  active AskUserQuestion selector) rather than parsed from JSONL. */
+  liveSourced?: boolean;
 }
 
 export interface ActivityDetail {

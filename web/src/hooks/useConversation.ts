@@ -134,18 +134,25 @@ export function useConversation(
     }
 
     const conn = connectionManager.getConnection(serverId);
-    if (!conn || !conn.isConnected()) {
+    if (!conn) {
+      // No connection object at all (server removed) — nothing to wire up.
       setError('Server not connected');
       setLoading(false);
       return;
     }
 
+    const hadCache = !!cached;
     let cancelled = false;
     let pollTimer: ReturnType<typeof setInterval> | null = null;
     let pollInFlight = false;
     let pollDebounceTimer: ReturnType<typeof setTimeout> | null = null;
     let unsubMessage: (() => void) | null = null;
-    let unsubReconnect: (() => void) | null = null;
+    let unsubState: (() => void) | null = null;
+    // Tracks whether we've already subscribed + fetched for the current live
+    // socket. Reset whenever the socket drops so the next 'connected' transition
+    // re-activates this session (re-subscribe + refetch) without the user having
+    // to recreate it.
+    let activatedForConnection = false;
 
     async function fetchData() {
       if (!conn || cancelled) return;
@@ -307,41 +314,71 @@ export function useConversation(
       }
     });
 
-    // On reconnect, the daemon-side per-client session subscription is lost
-    // (a fresh socket means fresh state). Re-issue switchSession and refetch
-    // so any "Server not connected" / fetch error banner clears automatically
-    // and we pick up anything that arrived while the socket was down.
-    unsubReconnect = conn.onReconnect(() => {
+    // Subscribe to this session on the daemon and load it. Safe to call on every
+    // (re)connection — the daemon-side per-client subscription is lost whenever
+    // the socket is replaced, so we must re-issue switchSession + refetch to pick
+    // up anything that arrived while we were down and to clear any stale error.
+    async function activate() {
+      if (!conn || cancelled || !isValid(serverId!, sessionId!, guardEpoch)) return;
+      try {
+        // Tell daemon to filter broadcasts for this session
+        await conn.switchSession(sessionId!);
+        if (cancelled || !isValid(serverId!, sessionId!, guardEpoch)) return;
+
+        await fetchData();
+        if (cancelled) return;
+
+        // Reuse an existing poll interval across reconnects so timers can't stack.
+        if (!pollTimer) pollTimer = setInterval(pollUpdates, POLL_INTERVAL);
+      } catch {
+        // fetchData handles its own error state
+      }
+    }
+
+    // Drive (re)activation off the connection state. onStateChange fires
+    // immediately with the current state, so this handles the initial mount
+    // (connected OR still reconnecting), the cold-start case where the socket
+    // wasn't up yet (no prior connection => onReconnect would never fire), and
+    // every subsequent drop/restore — all without recreating the session.
+    unsubState = conn.onStateChange((state) => {
       if (cancelled || !isValid(serverId!, sessionId!, guardEpoch)) return;
-      (async () => {
-        try {
-          await conn.switchSession(sessionId!);
-          if (cancelled || !isValid(serverId!, sessionId!, guardEpoch)) return;
-          await fetchData();
-        } catch {
-          // fetchData handles its own error state
+
+      if (state.status === 'connected') {
+        if (!activatedForConnection) {
+          activatedForConnection = true;
+          setError(null);
+          activate();
         }
-      })();
+        return;
+      }
+
+      // Lost (or never had) a live socket. Forget the previous activation so the
+      // next 'connected' transition re-subscribes and refetches.
+      activatedForConnection = false;
+
+      if (state.status === 'disconnected') {
+        // Truly idle with no retry scheduled — nudge a reconnect so we don't sit
+        // dead. (We deliberately skip 'error': the WS layer drives it straight
+        // back to 'reconnecting' with its own backoff, so nudging here would just
+        // busy-loop on a persistent auth failure.)
+        conn.connect();
+      }
+
+      // 'connecting' / 'reconnecting' are transient and the WS layer is already
+      // retrying — keep showing cached data; surface a soft notice only when we
+      // have nothing cached to display so the user isn't staring at a blank view.
+      if (!hadCache && highlightsRef.current.length === 0) {
+        setLoading(false);
+        setError('Reconnecting…');
+      }
     });
-
-    // Tell the daemon which session we're viewing, then fetch data.
-    (async () => {
-      // Tell daemon to filter broadcasts for this session
-      await conn.switchSession(sessionId);
-      if (cancelled || !isValid(serverId!, sessionId!, guardEpoch)) return;
-
-      await fetchData();
-      if (cancelled) return;
-
-      pollTimer = setInterval(pollUpdates, POLL_INTERVAL);
-    })();
 
     return () => {
       cancelled = true;
       if (pollTimer) clearInterval(pollTimer);
       if (pollDebounceTimer) clearTimeout(pollDebounceTimer);
       if (unsubMessage) unsubMessage();
-      if (unsubReconnect) unsubReconnect();
+      if (unsubState) unsubState();
     };
   }, [serverId, sessionId]);
 
@@ -386,7 +423,15 @@ export function useConversation(
     async (text: string, opts?: { skipOptimistic?: boolean }): Promise<boolean> => {
       if (!serverId || (!sessionId && !tmuxSessionName)) return false;
       const conn = connectionManager.getConnection(serverId);
-      if (!conn || !conn.isConnected()) return false;
+      if (!conn) return false;
+      if (!conn.isConnected()) {
+        // Don't silently swallow the send. Kick an immediate reconnect (cancels
+        // any pending backoff) so the socket — and this session's subscription
+        // via the onStateChange activate path — recovers right away. The caller
+        // surfaces the failed send; the user can retry once we're back.
+        conn.connect();
+        return false;
+      }
 
       // Generate a unique client message ID for server-side tracking
       const clientMessageId = `sent-${Date.now()}-${++clientMessageCounter}`;

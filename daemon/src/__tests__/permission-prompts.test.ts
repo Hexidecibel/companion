@@ -1,6 +1,7 @@
 import {
   parsePermissionPrompt,
   parseTextChoicePrompt,
+  detectActiveChoicePrompt,
   mapPermissionLabel,
   parseConversationFile,
   extractHighlights,
@@ -720,5 +721,129 @@ describe('parseTextChoicePrompt — false-positive guards', () => {
     // "1." then "5." are not a contiguous ascending list -> not a chooser
     const text = ['Choose:', '1. First thing', '5. Unrelated line'].join('\n');
     expect(parseTextChoicePrompt(text)).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 8. Real AskUserQuestion box (regression) — captured from a live tmux pane.
+//
+// This is the exact on-screen shape that drives the Chat-view QuestionBlock for a
+// PENDING AskUserQuestion (which never reaches the JSONL until answered, so the
+// live tmux capture is the only source). It exercises the lenient parser against
+// the awkward bits of the real box:
+//   - a "☐ <header>" glyph line titling the box
+//   - multi-line wrapped question prose
+//   - options whose descriptions wrap onto deeper-indented continuation lines
+//   - an inner ──── divider sitting BETWEEN options 3 and 4 (option 4 is below it)
+//   - a "type your own answer" option ("3. Type something.")
+//   - the AskUserQuestion footer "Enter to select · ↑/↓ to navigate · Esc to cancel"
+//
+// Source fixture: scratchpad/auqsnaps/snap_70.txt (inlined here so the test does
+// not depend on a temp file). Both the PLAIN capture (tmux capture-pane -p) and the
+// ANSI capture (tmux capture-pane -p -e, used by the terminal panel) must parse —
+// stripAnsi runs before the option regex, so color codes around the arrow/digits
+// must not defeat detection.
+// ---------------------------------------------------------------------------
+
+describe('real AskUserQuestion box (snap_70 regression)', () => {
+  const DIVIDER = '─'.repeat(80);
+  // Plain capture, exactly as tmux capture-pane -p renders it.
+  const PLAIN_BOX = [
+    '  in chat. Right now it appears in terminal, not in chat — because the parser',
+    "  can't read the box's options.",
+    '',
+    "  Capture loop is running now. Here's the test box — please wait ~10 seconds",
+    '  before answering so I grab how the terminal draws it:',
+    DIVIDER,
+    ' ☐ Approach',
+    '',
+    'Test box for capturing the live terminal rendering — please wait ~10s, then',
+    'answer however. How thorough should the parser rewrite be once I see the real',
+    'format?',
+    '',
+    '❯ 1. Robust/lenient',
+    '     Handle numbered, cursor-only, and bulleted option layouts. Most resilient',
+    '     to Claude Code rendering changes.',
+    '  2. Match this exact format',
+    "     Tightly target the format I'm capturing now. Simpler, but may break if the",
+    '     CLI changes its rendering.',
+    '  3. Type something.',
+    DIVIDER,
+    '  4. Chat about this',
+    '',
+    'Enter to select · ↑/↓ to navigate · Esc to cancel',
+    '',
+  ].join('\n');
+
+  // ANSI capture: wrap the cursor arrow, the "N." enumerators, and the dividers in
+  // SGR color/intensity codes the way `tmux capture-pane -e` carries them. This must
+  // parse identically — stripAnsi runs per-input before the option regex.
+  const E = '\x1b';
+  const ANSI_BOX = PLAIN_BOX.split('\n')
+    .map((line) =>
+      line
+        .replace(/❯/g, `${E}[38;5;6m❯${E}[39m`)
+        .replace(/(\d+)\./g, `${E}[1m$1.${E}[22m`)
+        .replace(/(─+)/g, `${E}[2m$1${E}[22m`) + `${E}[0m`
+    )
+    .join('\n');
+
+  const EXPECTED_LABELS = [
+    'Robust/lenient',
+    'Match this exact format',
+    'Type something.',
+    'Chat about this',
+  ];
+
+  it('parseTextChoicePrompt extracts all 4 options from the PLAIN box', () => {
+    const r = parseTextChoicePrompt(PLAIN_BOX);
+    expect(r).not.toBeNull();
+    expect(r!.header).toBe('Approach');
+    expect(r!.options.map((o) => o.label)).toEqual(EXPECTED_LABELS);
+    // Wrapped descriptions are joined onto their option.
+    expect(r!.options[0].description).toContain('cursor-only');
+    expect(r!.options[1].description).toContain('break if the');
+    expect(r!.multiSelect).toBe(false);
+  });
+
+  it('includes option 4 even though an inner divider sits between options 3 and 4', () => {
+    // The pre-fix parser required a CONTIGUOUS option run, so the ──── divider broke
+    // the list at option 3 and "Chat about this" was dropped. Guard against regressing.
+    const r = parseTextChoicePrompt(PLAIN_BOX);
+    expect(r!.options.map((o) => o.label)).toContain('Chat about this');
+    expect(r!.options).toHaveLength(4);
+  });
+
+  it('parseTextChoicePrompt parses the ANSI capture identically (stripAnsi)', () => {
+    const r = parseTextChoicePrompt(ANSI_BOX);
+    expect(r).not.toBeNull();
+    expect(r!.header).toBe('Approach');
+    expect(r!.options.map((o) => o.label)).toEqual(EXPECTED_LABELS);
+  });
+
+  it('detectActiveChoicePrompt surfaces the live box (PLAIN) for the Chat view', () => {
+    const c = detectActiveChoicePrompt(PLAIN_BOX);
+    expect(c).not.toBeNull();
+    expect(c!.options.map((o) => o.label)).toEqual(EXPECTED_LABELS);
+    expect(c!.header).toBe('Approach');
+  });
+
+  it('detectActiveChoicePrompt surfaces the live box (ANSI) for the Chat view', () => {
+    const c = detectActiveChoicePrompt(ANSI_BOX);
+    expect(c).not.toBeNull();
+    expect(c!.options.map((o) => o.label)).toEqual(EXPECTED_LABELS);
+  });
+
+  it('treats the box as STALE once the normal input toolbar renders below it', () => {
+    // After the user answers, the selector collapses back to the normal "❯" input
+    // toolbar / "⏵⏵ bypass permissions" status line. A box with the toolbar below it
+    // must NOT be offered as a live tappable prompt.
+    const answered = [
+      PLAIN_BOX.trimEnd(),
+      '',
+      '⏵⏵ bypass permissions on (shift+tab to cycle)',
+      '❯ ',
+    ].join('\n');
+    expect(detectActiveChoicePrompt(answered)).toBeNull();
   });
 });

@@ -10,6 +10,7 @@ import {
   CompactionEvent,
   TaskItem,
   FileChange,
+  TerminalChoicePrompt,
 } from './types';
 import { APPROVAL_TOOLS, KNOWN_TOOL_NAMES, getToolDescription, isKnownTool } from './tool-config';
 import { incrementMessagesParsed } from './metrics';
@@ -434,11 +435,93 @@ const TEXT_CHOICE_AFFORDANCE =
 const LOOKS_LIKE_STACK_FRAME =
   /\.[a-z]{1,4}:\d+(?::\d+)?\b|\([^)]*\b(?:tests?|passed|failed|skipped)\b[^)]*\)/i;
 
+// Signals that an interactive selector is a MULTI-select (checkbox) list rather than
+// a single-pick radio list — e.g. an AskUserQuestion multiSelect question. We look for
+// checkbox glyphs on the option lines (☐ ◻ [ ] and their filled variants ☑ ◼ [x]) or a
+// "Submit"/"space to select" affordance the multi-select TUI prints. Only used to set a
+// flag; it never affects whether a prompt is detected.
+const TEXT_CHOICE_MULTISELECT =
+  /[☐☑◻◼◽◾☒]|\[[ xX]\]|\bSubmit(?:\s+(?:answers?|selection))?\b|\bspace\b[^\n]{0,24}\b(?:select|toggle|mark)\b/i;
+
+// Number of trailing non-empty lines that count as the "live" region of a captured pane.
+// A choice prompt is only surfaced if its option block lives within this tail, so stale
+// scrollback selectors and vitest "❯ stackframe" lines don't trigger it.
+const ACTIVE_PROMPT_TAIL_LINES = 15;
+
 interface ParsedTextChoice {
   question: string;
+  header?: string;
+  multiSelect: boolean;
   options: QuestionOption[];
   cleanContent: string;
 }
+
+/**
+ * Strip ANSI escape sequences (CSI color/cursor codes + OSC sequences) that a raw
+ * tmux `capture-pane` may include. The on-disk snapshot fixtures are already clean,
+ * but live captures can carry color codes around the selector box.
+ */
+// eslint-disable-next-line no-control-regex
+const ANSI_CSI = /\x1b\[[0-9;?]*[ -/]*[@-~]/g;
+// eslint-disable-next-line no-control-regex
+const ANSI_OSC = /\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g;
+function stripAnsi(s: string): string {
+  return s.replace(ANSI_CSI, '').replace(ANSI_OSC, '');
+}
+
+// A single enumerated option line inside an AskUserQuestion / selector box. Lenient
+// across enumeration styles AND across single-select vs multi-select (checkbox) rows:
+//   single: "❯ 1. Robust / lenient"  "  2. Strict / exact"  "3) Foo"  "> 1. Bar"
+//           "(1) Yes"  "a. Apple"  "b) Banana"
+//   multi:  "❯ 1. [ ] Persistence"  "  2. [x] Spawn flow"  "3. [✔] Both"  "4. ☐ Other"
+// The checkbox token (group [5]) sits BETWEEN the enumerator and the label and is
+// stripped out of the captured label so the option text is clean.
+// Captures: [1] optional selector arrow, [2] (N) digit, [3] N. / N) digit,
+//           [4] lettered index, [5] optional checkbox token, [6] label text.
+const AUQ_OPTION_LINE =
+  /^[ \t]*(❯|>)?[ \t]*(?:\((\d{1,2})\)|(\d{1,2})[.)]|([a-zA-Z])[.)])[ \t]+(?:(\[[ xX✔✓]\]|[☐☑◻◼◽◾▢▣☒])[ \t]+)?(\S.*?)[ \t]*$/;
+
+// Given a checkbox token captured from an option line, is it in the CHECKED state?
+// Checked: x / X inside brackets, a check glyph (✔ ✓), or a filled box glyph
+// (☑ ◼ ◾ ▣ ☒). Unchecked: "[ ]" and hollow box glyphs (☐ ◻ ◽ ▢).
+const AUQ_CHECKBOX_CHECKED = /[xX✔✓☑◼◾▣☒]/;
+
+// Map an option line's enumeration token to a comparable ordinal so ascending-run
+// detection works across numeric and lettered lists (a=1, b=2, …).
+function auqOptionOrdinal(m: RegExpMatchArray): number {
+  if (m[2]) return parseInt(m[2], 10); // (N)
+  if (m[3]) return parseInt(m[3], 10); // N. / N)
+  return (m[4] || 'a').toLowerCase().charCodeAt(0) - 96; // a. / b) → 1, 2
+}
+
+// A horizontal divider / box-drawing rule (outer frame or an inner separator between
+// options). It must NOT break a run of enumerated options.
+const AUQ_DIVIDER_LINE = /^[ \t]*[─—\-=━═_]{3,}[ \t]*$/;
+
+// The checkbox/header glyph line that titles a question, e.g. " ☐ Parser fix".
+const AUQ_HEADER_LINE = /^[ \t]*[☐☑◻◼◽◾▢▣✔✓][ \t]+(\S.*?)[ \t]*$/;
+
+// The trailing affordance the selector prints under the options. Strong "this is a
+// live chooser" signal. Broader than TEXT_CHOICE_AFFORDANCE so the AskUserQuestion
+// footer ("Enter to select · ↑/↓ to navigate · Esc to cancel") is recognized.
+const AUQ_FOOTER =
+  /(Enter to select|to navigate|to select|space to (?:select|toggle)|↑\/↓|↑ ↓|↓ to|Esc to (?:cancel|interrupt|go back|close)|use arrow keys|Tab to (?:amend|select))/i;
+
+// The NORMAL Claude Code input toolbar that only renders when NO selector is active
+// (a lone "❯" prompt bracketed by dividers, or the "⏵⏵ bypass permissions / esc to
+// interrupt / for agents" status line). If this appears BELOW a parsed box, the box
+// is stale scrollback (already answered) — not a live prompt.
+const NORMAL_PROMPT_TOOLBAR = /⏵⏵|bypass permissions|esc to interrupt|for agents|^[ \t]*❯[ \t]*$/;
+
+// Max lines (descriptions / dividers / blanks) tolerated between two consecutive
+// enumerated options before they stop being treated as one box. Guards against
+// gluing together distant numbered lists from scrollback.
+const AUQ_MAX_OPTION_GAP_LINES = 12;
+
+// Strict interrogative question form (kept as an additional strong signal for the
+// legacy "Do you want to …?" permission box rendered as plain text).
+const AUQ_STRICT_QUESTION =
+  /^(?:Do you want|Would you like|Select|Choose|Which|Pick|How would you like|What would you like)\b.*\?$/i;
 
 /**
  * Detect an interactive multi-choice prompt rendered as plain TEXT (no AskUserQuestion
@@ -457,143 +540,262 @@ interface ParsedTextChoice {
  * Returns null when no safe match is found.
  */
 export function parseTextChoicePrompt(content: string): ParsedTextChoice | null {
-  if (!content || (!/[❯>]/.test(content) && !/\b(?:Do you want|Select|Choose|Which|Pick|Would you like)\b/i.test(content) && !TEXT_CHOICE_AFFORDANCE.test(content))) {
+  if (!content) {
+    return null;
+  }
+  // Defensively strip ANSI before anything else — live captures may carry color codes.
+  const clean = stripAnsi(content);
+  const lines = clean.split('\n');
+
+  // Cheap pre-filter: need an arrow, a question keyword, or a footer affordance.
+  if (
+    !/[❯>]/.test(clean) &&
+    !/\b(?:Do you want|Select|Choose|Which|Pick|Would you like|should I)\b/i.test(clean) &&
+    !AUQ_FOOTER.test(clean) &&
+    !TEXT_CHOICE_AFFORDANCE.test(clean)
+  ) {
     return null;
   }
 
-  const lines = content.split('\n');
-
-  // Find the longest contiguous run of enumerated option lines.
-  let bestStart = -1;
-  let bestEnd = -1; // exclusive
-  let hasArrowInBlock = false;
-
-  let runStart = -1;
-  let runArrow = false;
-  let runExpectIndex = 1; // for numeric runs we expect 1,2,3...
-  let runIsNumeric = false;
-
-  const finalize = (end: number) => {
-    if (runStart !== -1 && end - runStart >= 2 && end - runStart > bestEnd - bestStart) {
-      bestStart = runStart;
-      bestEnd = end;
-      hasArrowInBlock = runArrow;
-    }
-  };
-
+  // 1. Collect EVERY enumerated option line (lenient; reject stack-frame labels).
+  //    We do NOT require contiguity: descriptions and dividers may sit between them.
+  interface OptLine {
+    li: number;
+    idx: number;
+    label: string;
+    marker: boolean;
+    hasCheckbox: boolean;
+    checked: boolean;
+  }
+  const optLines: OptLine[] = [];
   for (let i = 0; i < lines.length; i++) {
-    const m = lines[i].match(TEXT_CHOICE_LINE);
-    if (!m) {
-      finalize(i);
-      runStart = -1;
-      runArrow = false;
-      continue;
-    }
-    const marker = m[1];
-    const numTok = m[2] || m[3]; // (1) or 1. / 1)
-    const label = m[5];
+    const m = lines[i].match(AUQ_OPTION_LINE);
+    if (!m) continue;
+    const checkboxToken = m[5];
+    const label = m[6];
+    if (LOOKS_LIKE_STACK_FRAME.test(label)) continue;
+    optLines.push({
+      li: i,
+      idx: auqOptionOrdinal(m),
+      label,
+      marker: !!m[1],
+      hasCheckbox: !!checkboxToken,
+      checked: checkboxToken ? AUQ_CHECKBOX_CHECKED.test(checkboxToken) : false,
+    });
+  }
 
-    // Reject stack-frame / file-path shaped labels (vitest, etc.)
-    if (LOOKS_LIKE_STACK_FRAME.test(label)) {
-      finalize(i);
-      runStart = -1;
-      runArrow = false;
-      continue;
-    }
-
-    if (runStart === -1) {
-      runStart = i;
-      runArrow = false;
-      runIsNumeric = !!numTok;
-      runExpectIndex = numTok ? parseInt(numTok, 10) : 1;
-    } else if (runIsNumeric && numTok) {
-      // Enforce ascending sequence for numeric lists so unrelated lines that
-      // happen to start with a number don't get glued together.
-      const n = parseInt(numTok, 10);
-      if (n !== runExpectIndex + 1) {
-        finalize(i);
-        runStart = i;
-        runArrow = false;
-        runIsNumeric = !!numTok;
-        runExpectIndex = n - 1;
+  // 2. Group into the longest run of ascending indices (n, n+1, …) sitting close
+  //    together. Intervening descriptions / dividers / blanks do NOT break the run.
+  let bestRun: OptLine[] = [];
+  let run: OptLine[] = [];
+  for (const opt of optLines) {
+    if (run.length === 0) {
+      run = [opt];
+    } else {
+      const prev = run[run.length - 1];
+      if (opt.idx === prev.idx + 1 && opt.li - prev.li <= AUQ_MAX_OPTION_GAP_LINES) {
+        run.push(opt);
+      } else {
+        if (run.length > bestRun.length) bestRun = run;
+        run = [opt];
       }
     }
-    if (numTok) runExpectIndex = parseInt(numTok, 10);
-    if (marker) runArrow = true;
   }
-  finalize(lines.length);
+  if (run.length > bestRun.length) bestRun = run;
 
-  if (bestStart === -1) return null;
-
-  // Strong-signal check.
-  const blockLines = lines.slice(bestStart, bestEnd);
-  const precedingText = lines.slice(0, bestStart).join('\n');
-  const followingText = lines.slice(bestEnd).join('\n');
-
-  const questionMatch = precedingText.match(TEXT_CHOICE_QUESTION);
-  // The question must be the LAST non-empty line before the block.
-  let questionIsAdjacent = false;
-  let question = '';
-  if (questionMatch) {
-    const beforeLines = precedingText.split('\n');
-    let li = beforeLines.length - 1;
-    while (li >= 0 && beforeLines[li].trim() === '') li--;
-    if (li >= 0 && /^[ \t]*(?:Do you want|Would you like|Select|Choose|Which|Pick|How would you like|What would you like)[^\n]*\?[ \t]*$/i.test(beforeLines[li])) {
-      questionIsAdjacent = true;
-      question = beforeLines[li].trim();
-    }
-  }
-
-  const hasAffordance = TEXT_CHOICE_AFFORDANCE.test(followingText) || TEXT_CHOICE_AFFORDANCE.test(precedingText);
-
-  // Require at least one strong interactive signal.
-  if (!hasArrowInBlock && !questionIsAdjacent && !hasAffordance) {
+  if (bestRun.length < 2) {
     return null;
   }
 
-  // Build options.
-  const options: QuestionOption[] = [];
-  for (const line of blockLines) {
-    const m = line.match(TEXT_CHOICE_LINE);
-    if (!m) continue;
-    let label = m[5].trim();
-    // Strip trailing keyboard-shortcut hints like "(y)" / "(shift+tab)".
-    label = label.replace(/\s*\([^)]*\)\s*$/, '').trim();
-    if (!label) continue;
-    options.push({ label, description: question });
+  const firstOptLi = bestRun[0].li;
+  const lastOptLi = bestRun[bestRun.length - 1].li;
+
+  // 3. Find where the box ends: first footer-affordance line at/after the last option.
+  let footerLi = -1;
+  for (let i = lastOptLi + 1; i < lines.length; i++) {
+    if (AUQ_FOOTER.test(lines[i])) {
+      footerLi = i;
+      break;
+    }
+    if (i - lastOptLi > AUQ_MAX_OPTION_GAP_LINES) break;
   }
-  if (options.length < 2) return null;
+  const blockEnd = footerLi >= 0 ? footerLi : Math.min(lines.length, lastOptLi + AUQ_MAX_OPTION_GAP_LINES);
+
+  // 4. Build options, absorbing each option's indented multi-line description.
+  const options: QuestionOption[] = [];
+  for (let oi = 0; oi < bestRun.length; oi++) {
+    const cur = bestRun[oi];
+    const label = cur.label.replace(/\s*\([^)]*\)\s*$/, '').trim();
+    if (!label) continue;
+    const descUntil = oi + 1 < bestRun.length ? bestRun[oi + 1].li : blockEnd;
+    const descParts: string[] = [];
+    for (let j = cur.li + 1; j < descUntil; j++) {
+      const ln = lines[j];
+      if (ln.trim() === '') continue;
+      if (AUQ_DIVIDER_LINE.test(ln)) continue;
+      if (AUQ_OPTION_LINE.test(ln)) continue;
+      descParts.push(ln.trim());
+    }
+    options.push({
+      label,
+      description: descParts.join(' ').replace(/\s+/g, ' ').trim(),
+      ...(cur.hasCheckbox ? { selected: cur.checked } : {}),
+    });
+  }
+  if (options.length < 2) {
+    return null;
+  }
+
+  // 5. Extract the (possibly wrapped) question prose and the header glyph above the
+  //    first option. boxTopLi tracks the topmost line that belongs to the box, so
+  //    unrelated preceding prose is preserved in cleanContent.
+  let header: string | undefined;
+  let question = '';
+  let boxTopLi = firstOptLi;
+  {
+    let li = firstOptLi - 1;
+    while (li >= 0 && lines[li].trim() === '') li--; // skip blanks directly above options
+    const qParts: string[] = [];
+    while (li >= 0) {
+      const ln = lines[li];
+      const t = ln.trim();
+      if (t === '') break;
+      if (AUQ_DIVIDER_LINE.test(ln)) break;
+      const hdr = ln.match(AUQ_HEADER_LINE);
+      if (hdr) {
+        header = hdr[1].trim();
+        boxTopLi = li;
+        break;
+      }
+      if (AUQ_OPTION_LINE.test(ln)) break;
+      // Sentence-boundary stop: once the question's bottom line is captured, a line
+      // above it that ends a sentence is separate preceding prose (e.g. "Let me run
+      // this command." sitting above "Do you want to proceed?"). Keep it out.
+      if (qParts.length > 0 && /[.!?]$/.test(t)) break;
+      qParts.unshift(t);
+      boxTopLi = li;
+      li--;
+    }
+    question = qParts.join(' ').replace(/\s+/g, ' ').trim();
+    // Walk up past one blank to find a header glyph titling the box, if any.
+    if (!header) {
+      while (li >= 0 && lines[li].trim() === '') li--;
+      const hdr = li >= 0 ? lines[li].match(AUQ_HEADER_LINE) : null;
+      if (hdr) {
+        header = hdr[1].trim();
+        boxTopLi = li;
+      }
+    }
+  }
+
+  // 6. Strong-signal gate (defends against prose numbered lists in normal answers):
+  //    require an arrow selector, OR the selector footer, OR a strict interrogative.
+  const hasArrow = bestRun.some((o) => o.marker);
+  const hasFooter = footerLi >= 0;
+  const strictQuestion = AUQ_STRICT_QUESTION.test(question);
+  if (!hasArrow && !hasFooter && !strictQuestion) {
+    return null;
+  }
 
   if (!question) {
-    // Fall back to a generic question label so the UI has a header.
-    question = questionIsAdjacent ? question : 'Select an option';
+    question = header || 'Select an option';
   }
 
-  // Strip the block (and an adjacent question line / trailing affordance) from content.
-  const cleanLines = [...lines];
-  // Remove trailing affordance line(s) immediately after the block.
-  let endStrip = bestEnd;
-  while (endStrip < cleanLines.length && (cleanLines[endStrip].trim() === '' || TEXT_CHOICE_AFFORDANCE.test(cleanLines[endStrip]))) {
-    if (TEXT_CHOICE_AFFORDANCE.test(cleanLines[endStrip])) {
-      endStrip++;
-    } else if (endStrip + 1 < cleanLines.length && TEXT_CHOICE_AFFORDANCE.test(cleanLines[endStrip + 1])) {
-      endStrip++;
-    } else {
+  // 7. Multi-select: checkbox glyphs on the OPTION lines (NOT the header glyph) or a
+  //    submit/space affordance in the footer.
+  const optionRegion = lines.slice(firstOptLi, blockEnd).join('\n');
+  const footerRegion = footerLi >= 0 ? lines.slice(footerLi, footerLi + 2).join('\n') : '';
+  // Any matched option line carrying a checkbox token is the strongest multi-select
+  // signal; fall back to the region/footer glyph scan for boxes whose checkbox sits
+  // outside the captured option run.
+  const checkboxOptionCount = bestRun.filter((o) => o.hasCheckbox).length;
+  const multiSelect =
+    checkboxOptionCount > 0 ||
+    TEXT_CHOICE_MULTISELECT.test(optionRegion) ||
+    TEXT_CHOICE_MULTISELECT.test(footerRegion);
+
+  // 8. Strip the box (header + question prose + options + footer) from content so
+  //    JSONL inline rendering doesn't duplicate it. Unrelated prose above boxTopLi
+  //    is preserved.
+  let startStrip = boxTopLi;
+  while (startStrip > 0 && lines[startStrip - 1].trim() === '') startStrip--;
+  let endStrip = footerLi >= 0 ? footerLi + 1 : blockEnd;
+  while (endStrip < lines.length && lines[endStrip].trim() === '') endStrip++;
+  const cleanContent = [...lines.slice(0, startStrip), ...lines.slice(endStrip)].join('\n').trim();
+
+  return { question, header, multiSelect, options, cleanContent };
+}
+
+/**
+ * Detect a CURRENTLY ACTIVE text choice prompt in a captured tmux pane.
+ *
+ * parseTextChoicePrompt already guards against false positives (requires >=2
+ * enumerated items plus a strong interactive signal). On top of that we require the
+ * option block to sit near the END of the capture: we re-run the parser on only the
+ * last ACTIVE_PROMPT_TAIL_LINES non-empty lines (plus a little leading context so an
+ * adjacent question line / affordance survives), so only a live selector at the
+ * bottom of the pane is offered as tappable. Used both for the on-demand terminal
+ * view and to surface a live AskUserQuestion in the conversation view.
+ */
+export function detectActiveChoicePrompt(paneOutput: string): TerminalChoicePrompt | null {
+  if (!paneOutput) {
+    return null;
+  }
+
+  const lines = stripAnsi(paneOutput).split('\n');
+  let nonEmptySeen = 0;
+  let startIdx = 0;
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (lines[i].trim() !== '') {
+      nonEmptySeen++;
+      if (nonEmptySeen >= ACTIVE_PROMPT_TAIL_LINES) {
+        startIdx = i;
+        break;
+      }
+    }
+  }
+  const tail = lines.slice(startIdx).join('\n');
+
+  const parsed = parseTextChoicePrompt(tail);
+  if (!parsed) {
+    return null;
+  }
+
+  // Live-vs-stale guard: an ACTIVE selector sits at the bottom of the pane — its
+  // options/footer are the last meaningful content, and the normal input region is
+  // replaced by the selector. So if the NORMAL input toolbar (a lone "❯" prompt, or
+  // the "⏵⏵ bypass permissions / esc to interrupt / for agents" status line) appears
+  // BELOW the last option line, the box is either historical scrollback (already
+  // answered) or the assistant merely quoting the box format mid-stream — not a live
+  // prompt. Footer-independent so it also catches quoted boxes that lack a footer.
+  const tailLines = tail.split('\n');
+  let lastOptIdx = -1;
+  for (let i = tailLines.length - 1; i >= 0; i--) {
+    if (AUQ_OPTION_LINE.test(tailLines[i]) && !LOOKS_LIKE_STACK_FRAME.test(tailLines[i])) {
+      lastOptIdx = i;
       break;
     }
   }
-  let startStrip = bestStart;
-  if (questionIsAdjacent) {
-    // Remove the question line too.
-    let li = bestStart - 1;
-    while (li >= 0 && cleanLines[li].trim() === '') li--;
-    if (li >= 0) startStrip = li;
+  if (lastOptIdx >= 0) {
+    for (let i = lastOptIdx + 1; i < tailLines.length; i++) {
+      // The selector's own footer ("Enter to select · … · Esc to cancel") is allowed
+      // to follow the options; only the NORMAL input toolbar marks the box as inactive.
+      if (NORMAL_PROMPT_TOOLBAR.test(tailLines[i])) {
+        return null;
+      }
+    }
   }
-  const cleanContent = [...cleanLines.slice(0, startStrip), ...cleanLines.slice(endStrip)]
-    .join('\n')
-    .trim();
 
-  return { question, options, cleanContent };
+  return {
+    question: parsed.question,
+    header: parsed.header,
+    options: parsed.options.map((o) => ({
+      label: o.label,
+      description: o.description,
+      ...(o.selected !== undefined ? { selected: o.selected } : {}),
+    })),
+    multiSelect: parsed.multiSelect,
+  };
 }
 
 function parseEntry(

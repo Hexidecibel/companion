@@ -17,6 +17,7 @@ High-level features of the Companion daemon, web client, and desktop/mobile apps
 - Session mapping persistence across daemon restarts (`~/.claude/companion-session-mappings.json`)
 - Event-driven compaction re-mapping when context compaction creates new JSONL files
 - ExitPlanMode and AskUserQuestion detected as "waiting for input" (triggers status banner, push notifications)
+- Pending multiple-choice AskUserQuestion prompts render as tappable options in the Chat view — these are buffered by Claude Code and never hit the session JSONL until answered, so the live tmux pane is scraped and surfaced as a synthetic live highlight
 - Session status indicators (waiting, working, idle)
 - Sub-agent tracking with expandable tree view (status icons, activity, duration, message count)
 - Click-to-view sub-agent conversation detail

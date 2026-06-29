@@ -9,8 +9,9 @@ import {
   extractFileChanges,
   parseConversationChain,
   parseConversationFile,
+  detectActiveChoicePrompt,
 } from '../parser';
-import { WebSocketResponse } from '../types';
+import { WebSocketResponse, Question, ConversationHighlight } from '../types';
 import {
   SLOW_OPERATION_THRESHOLD_MS,
   EXEC_OPERATION_TIMEOUT_MS,
@@ -82,7 +83,7 @@ export function registerSessionHandlers(
       });
     },
 
-    get_highlights(client, payload, requestId) {
+    async get_highlights(client, payload, requestId) {
       const hlParams = payload as
         | { limit?: number; offset?: number; sessionId?: string }
         | undefined;
@@ -112,7 +113,17 @@ export function registerSessionHandlers(
         total = result.total;
         hasMore = result.hasMore;
       } else {
-        const messages = ctx.watcher.getMessages(hlSessionId || undefined);
+        // The latest page (offset 0) must reflect on-disk state immediately rather
+        // than trusting the watcher's in-memory cache. A pending AskUserQuestion
+        // tool_use is written to the JSONL ~seconds before it is answered; if a
+        // file-watch event is missed/dropped, the cache stays frozen on a stale
+        // message and the choice never reaches the client. A fresh re-parse of the
+        // resolved conversation file guarantees the pending choice surfaces (routed
+        // through the same extractHighlights that already handles it correctly).
+        const messages =
+          offset === 0
+            ? ctx.watcher.getFreshMessages(hlSessionId || undefined)
+            : ctx.watcher.getMessages(hlSessionId || undefined);
         const allHighlights = extractHighlights(messages);
         total = allHighlights.length;
 
@@ -140,10 +151,22 @@ export function registerSessionHandlers(
         }
       }
 
-      // Inject pending sent messages that haven't appeared in JSONL yet
-      const tmuxNameForPending = hlSessionId
-        ? ctx.watcher.getTmuxSessionForConversation(hlSessionId)
-        : null;
+      // Inject pending sent messages that haven't appeared in JSONL yet.
+      // hlSessionId is usually a tmux session NAME (the same id used above for
+      // getConversationChain/getStatus/getFreshMessages, all of which resolve via
+      // resolveConversationForSession(sessionName)), but can also be a conversation
+      // UUID. getTmuxSessionForConversation is a reverse lookup that expects a UUID and
+      // returns null for a tmux name — which previously nulled tmuxNameForPending and
+      // silently killed the live AskUserQuestion capture branch below. Resolve both:
+      // try the UUID reverse-lookup, then fall back to treating hlSessionId as a tmux
+      // session name (synchronous + non-throwing so get_highlights never fails here).
+      let tmuxNameForPending: string | null = null;
+      if (hlSessionId) {
+        tmuxNameForPending = ctx.watcher.getTmuxSessionForConversation(hlSessionId);
+        if (!tmuxNameForPending && ctx.watcher.getSessions().some((s) => s.name === hlSessionId)) {
+          tmuxNameForPending = hlSessionId;
+        }
+      }
       if (tmuxNameForPending) {
         const pending = ctx.pendingSentMessages.get(tmuxNameForPending);
         if (pending && pending.length > 0) {
@@ -166,6 +189,57 @@ export function registerSessionHandlers(
             });
           }
           total += unconfirmed.length;
+        }
+      }
+
+      // Live AskUserQuestion / terminal choice prompt. Claude Code buffers the AUQ
+      // tool_use and only flushes it to JSONL once answered, so the pending question
+      // never reaches the client from the file. When the session is waiting and nothing
+      // tappable is already shown, capture the live pane; if an active selector is
+      // present, surface it as a synthetic pending question so the existing QuestionBlock
+      // renders tappable options. Prefer a JSONL-sourced question if one exists (we only
+      // run when the last highlight isn't already a choice), and only on the latest page.
+      // NOTE: do NOT gate this on sessionStatus.isWaitingForInput. A pending AUQ
+      // prompt is buffered by Claude Code and not flushed to JSONL until answered,
+      // so isWaitingForInput is false exactly while a live choice box is on screen.
+      // Gate only on offset/tmux availability and let detectActiveChoicePrompt decide.
+      if (offset === 0 && tmuxNameForPending) {
+        const lastHl = resultHighlights[resultHighlights.length - 1];
+        const alreadyTappable = !!(
+          lastHl &&
+          lastHl.isWaitingForChoice &&
+          (((lastHl.questions?.length ?? 0) > 0) || ((lastHl.options?.length ?? 0) > 0))
+        );
+        if (!alreadyTappable) {
+          try {
+            const paneText = await ctx.injector.captureTmuxPane(tmuxNameForPending);
+            const choice = detectActiveChoicePrompt(paneText);
+            if (choice && choice.options.length >= 2) {
+              const liveQuestion: Question = {
+                question: choice.question || 'Select an option',
+                header: choice.header || '',
+                options: choice.options.map((o) => ({ label: o.label, description: o.description || '' })),
+                multiSelect: choice.multiSelect || false,
+              };
+              const liveHighlight: ConversationHighlight = {
+                id: `live-choice-${hlSessionId}`,
+                type: 'assistant',
+                content: liveQuestion.question,
+                timestamp: Date.now(),
+                isWaitingForChoice: true,
+                multiSelect: liveQuestion.multiSelect,
+                questions: [liveQuestion],
+                liveSourced: true,
+              };
+              resultHighlights.push(liveHighlight);
+              total += 1;
+              console.log(
+                `WebSocket: get_highlights surfaced live choice prompt for ${hlSessionId} (${liveQuestion.options.length} options, multiSelect: ${liveQuestion.multiSelect})`
+              );
+            }
+          } catch (err) {
+            // best-effort; ignore capture/parse failures
+          }
         }
       }
 

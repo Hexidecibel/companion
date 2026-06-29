@@ -45,15 +45,19 @@ export class ServerConnection {
       return;
     }
 
-    // Guard against double-connect
-    if (
-      this.connectionState.status === 'connecting' ||
-      this.connectionState.status === 'reconnecting' ||
-      (this.connectionState.status === 'connected' && this.ws?.readyState === WebSocket.OPEN)
-    ) {
+    // Only guard against a genuinely live or in-flight socket. We key off the
+    // actual WebSocket readyState rather than connectionState.status so that an
+    // explicit connect() can always break out of a pending backoff: while we sit
+    // in 'reconnecting' between retries there is no socket (handleDisconnect
+    // nulled it), so this guard correctly lets us reconnect immediately instead
+    // of waiting out the exponential delay.
+    if (this.ws && (this.ws.readyState === WebSocket.CONNECTING || this.ws.readyState === WebSocket.OPEN)) {
       return;
     }
 
+    // An explicit connect() means "retry now" — cancel any scheduled backoff so
+    // a stale timer can't fire a second doConnect() on top of this one.
+    this.clearReconnectTimer();
     this.doConnect();
   }
 
