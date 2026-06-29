@@ -1,0 +1,18 @@
+  What Phase 0 install looks like (all SSH-automatable except one click)
+  Clone the repo → copy its remote script into User Library\Remote Scripts\ →
+  set up the MCP server's Python env → you select "AbletonMCP" as Control
+  Surface in Live Prefs (the one GUI click) → round-trip test.
+  One genuine decision is yours before I start mutating cushbox:
+────────────────────────────────────────────────────────────────────────────────
+ ☐ CC locus
+Where should Claude Code run to drive Ableton? (All the Ableton MCP servers are
+stdio-only, so this affects setup.)
+❯ 1. On cushbox directly          ┌────────────────────────────────────────────┐
+    (Recommended)                 │ Claude Code (cushbox) → stdio →            │
+  2. From here, over tailnet      ├─── ✂ ─── 4 lines hidden ───────────────────┤
+ 3. Just prove the bridge         └────────────────────────────────────────────┘
+   first
+                                  Notes: press n to add notes
+────────────────────────────────────────────────────────────────────────────────
+  Chat about this
+Enter to select · ↑/↓ to navigate · n to add notes · Esc to cancel

@@ -507,6 +507,27 @@ const AUQ_HEADER_LINE = /^[ \t]*[☐☑◻◼◽◾▢▣✔✓][ \t]+(\S.*?)[ \
 const AUQ_FOOTER =
   /(Enter to select|to navigate|to select|space to (?:select|toggle)|↑\/↓|↑ ↓|↓ to|Esc to (?:cancel|interrupt|go back|close)|use arrow keys|Tab to (?:amend|select))/i;
 
+// Affordances the selector prints under/beside the options that belong to NO option's
+// description: the "press n to add notes" hint and the "Chat about this" entry. When a
+// right-hand preview panel pushes these onto the option rows (or just under them) they
+// otherwise bleed into the last option's description.
+const AUQ_BOX_AFFORDANCE =
+  /^[ \t]*(?:Notes:[ \t]*press n to add notes|press n to add notes|Chat about this)[ \t]*$/i;
+
+// Box-drawing glyphs that form the VERTICAL edges / corners of a box. A right-hand
+// option-preview panel (drawn beside the numbered options) is anchored by one of these
+// repeating down a single column. Horizontal rules (─ ━ ═) are intentionally EXCLUDED:
+// a full-width divider under the options is all horizontal glyphs and must NOT be
+// mistaken for a side panel.
+const PANEL_VERTICAL_RE = /[┌│├└┤┐┘╭╮╰╯]/;
+const PANEL_VERTICAL_GLYPHS = '┌│├└┤┐┘╭╮╰╯';
+// Any box-drawing / scissors glyph — used to recognise the panel body and pure box-art
+// leftover lines.
+const ANY_BOX_GLYPH_RE = /[┌│├└┤┐┘╭╮╰╯─━═✂]/;
+// A line that, after the side panel is stripped, consists only of box-art + whitespace
+// (e.g. a stray corner/edge fragment). Blank lines are handled separately upstream.
+const AUQ_BOX_ART_LINE = /^[\s┌│├└┤┐┘╭╮╰╯─━═✂]+$/;
+
 // The NORMAL Claude Code input toolbar that only renders when NO selector is active
 // (a lone "❯" prompt bracketed by dividers, or the "⏵⏵ bypass permissions / esc to
 // interrupt / for agents" status line). If this appears BELOW a parsed box, the box
@@ -539,13 +560,72 @@ const AUQ_STRICT_QUESTION =
  *
  * Returns null when no safe match is found.
  */
+
+/**
+ * Some AskUserQuestion prompts render an option-preview DIAGRAM in a right-hand panel,
+ * drawn with box-art on the SAME terminal rows as the numbered options:
+ *
+ *   ❯ 1. On cushbox directly          ┌──────────────┐
+ *       (Recommended)                 │ Claude Code … │
+ *     2. From here, over tailnet      ├─── ✂ … ──────┤
+ *     3. Just prove the bridge        └──────────────┘
+ *
+ * The parser has no concept of a second column, so the box-art bleeds into every option
+ * label and the footer affordances bleed into descriptions. Detect the panel's left
+ * edge — a vertical/corner glyph repeating at the SAME column across >= 2 rows, with
+ * real (non-box) text to its left and box content to its right — and truncate the panel
+ * rows at that column.
+ *
+ * GUARD: only fires for an ACTUAL side panel. A full-width frame box (vertical border at
+ * column 0 with no text to its left) and a lone horizontal divider do NOT trigger
+ * stripping, so single-column boxes are left completely untouched (zero behavior change).
+ */
+function stripSidePanel(lines: string[]): string[] {
+  // Tally, per column, the rows carrying a vertical/corner glyph there.
+  const colRows = new Map<number, number[]>();
+  for (let r = 0; r < lines.length; r++) {
+    const ln = lines[r];
+    for (let c = 0; c < ln.length; c++) {
+      if (PANEL_VERTICAL_GLYPHS.includes(ln[c])) {
+        const arr = colRows.get(c) || [];
+        arr.push(r);
+        colRows.set(c, arr);
+      }
+    }
+  }
+  // Leftmost column that looks like a panel's left edge.
+  let panelCol = -1;
+  for (const [c, rows] of [...colRows.entries()].sort((a, b) => a[0] - b[0])) {
+    if (rows.length < 2) continue; // the column must repeat down >= 2 rows
+    // Real text (not box-art, not whitespace) to the LEFT on >= 2 rows — i.e. the option
+    // labels. This excludes a full-width frame's LEFT border (only whitespace to its left).
+    const textLeft = rows.filter((r) => /[^\s┌│├└┤┐┘╭╮╰╯─━═✂]/.test(lines[r].slice(0, c)));
+    if (textLeft.length < 2) continue;
+    // Box content to the RIGHT on >= 1 row — the panel body. This excludes a full-width
+    // frame's RIGHT border, which has nothing (no further box-art) to its right.
+    const boxRight = rows.some((r) => ANY_BOX_GLYPH_RE.test(lines[r].slice(c + 1)));
+    if (!boxRight) continue;
+    panelCol = c;
+    break;
+  }
+  if (panelCol < 0) return lines; // no side panel detected → untouched
+  // Truncate ONLY the rows that actually carry the panel (a vertical/corner glyph at or
+  // past panelCol). Prose/divider lines that merely extend past panelCol are preserved.
+  return lines.map((ln) =>
+    PANEL_VERTICAL_RE.test(ln.slice(panelCol)) ? ln.slice(0, panelCol) : ln
+  );
+}
+
 export function parseTextChoicePrompt(content: string): ParsedTextChoice | null {
   if (!content) {
     return null;
   }
   // Defensively strip ANSI before anything else — live captures may carry color codes.
   const clean = stripAnsi(content);
-  const lines = clean.split('\n');
+  // Strip any right-hand option-preview panel BEFORE extraction so its box-art does not
+  // bleed into labels/descriptions. No-op (zero behavior change) unless a real side
+  // panel is detected (see stripSidePanel).
+  const lines = stripSidePanel(clean.split('\n'));
 
   // Cheap pre-filter: need an arrow, a question keyword, or a footer affordance.
   if (
@@ -634,6 +714,12 @@ export function parseTextChoicePrompt(content: string): ParsedTextChoice | null 
       if (ln.trim() === '') continue;
       if (AUQ_DIVIDER_LINE.test(ln)) continue;
       if (AUQ_OPTION_LINE.test(ln)) continue;
+      // Box-art leftover after the panel strip is not description text — skip it.
+      if (AUQ_BOX_ART_LINE.test(ln)) continue;
+      // The footer affordances ("press n to add notes", "Chat about this") and the
+      // selector footer belong to NO option — stop absorbing here so they don't bleed
+      // into the last option's description.
+      if (AUQ_FOOTER.test(ln) || AUQ_BOX_AFFORDANCE.test(ln)) break;
       descParts.push(ln.trim());
     }
     options.push({
