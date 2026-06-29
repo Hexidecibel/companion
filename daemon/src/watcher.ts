@@ -474,9 +474,14 @@ export class SessionWatcher extends EventEmitter {
     this.feedbackPollCount = 0;
     this.feedbackSessionId = tmuxSessionName;
 
-    // Emit a conversation-update at most once per poll session when we first see a
-    // live choice selector (e.g. an AskUserQuestion box), so clients refetch promptly.
-    let choiceNotified = false;
+    // Track the signature (header + question + option labels) of the last live choice
+    // we broadcast for. A single AskUserQuestion tool_use can hold multiple question
+    // groups that advance Q1 -> Q2 -> ... entirely on the tmux pane, with NO JSONL change
+    // (the tool_use is only flushed once fully answered). We must therefore re-emit a
+    // conversation-update whenever the on-pane question CONTENT changes — not just once —
+    // or the chat freezes on Q1 while the terminal moves on. A null signature means we
+    // have not broadcast for any choice yet this poll session.
+    let lastChoiceSig: string | null = null;
 
     this.feedbackPollTimer = setInterval(async () => {
       this.feedbackPollCount++;
@@ -508,18 +513,28 @@ export class SessionWatcher extends EventEmitter {
             lastMessage: undefined,
             feedbackPrompt: prompt,
           });
-        } else if (!choiceNotified) {
+        } else {
           // Live AskUserQuestion / choice selector: the AUQ tool_use is never written
           // to JSONL while pending, so no file change fires. When we spot the live box
           // on the pane, nudge clients to refetch so get_highlights can surface the
           // tappable options. The question itself is resolved on-demand in get_highlights.
+          // Re-broadcast whenever the question CONTENT changes (e.g. a multi-question AUQ
+          // advancing to the next question) so the chat keeps pace with the terminal,
+          // but stay quiet while the same question lingers across polls.
           const choice = detectActiveChoicePrompt(paneText);
           if (choice) {
-            choiceNotified = true;
-            console.log(
-              `Watcher: Detected live choice prompt for "${tmuxSessionName}" (${choice.options.length} options, multiSelect: ${choice.multiSelect})`
-            );
-            this.emit('conversation-update', { sessionId: tmuxSessionName });
+            const sig = [
+              choice.header || '',
+              choice.question || '',
+              ...choice.options.map((o) => o.label),
+            ].join(' ');
+            if (sig !== lastChoiceSig) {
+              lastChoiceSig = sig;
+              console.log(
+                `Watcher: Detected live choice prompt for "${tmuxSessionName}" (${choice.options.length} options, multiSelect: ${choice.multiSelect})`
+              );
+              this.emit('conversation-update', { sessionId: tmuxSessionName });
+            }
           }
         }
       } catch {
