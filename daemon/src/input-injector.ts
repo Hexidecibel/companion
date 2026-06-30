@@ -168,12 +168,24 @@ export class InputInjector {
 
   /**
    * Send a choice selection via key sequences for interactive CLI prompts.
-   * Works with AskUserQuestion — navigates with arrow keys, toggles with Space,
-   * and confirms with Enter.
    *
-   * For single-select: Down × selectedIndex, then Enter.
-   * For multi-select: walk all options, Space on selected indices, then Enter.
-   * For "Other": navigate to Other option, Enter, type text, Enter.
+   * Claude Code's AskUserQuestion picker renders NUMBERED options (1., 2., 3., ...).
+   * Pressing the option's digit is far more robust than positional arrow walking
+   * (no cumulative cursor drift), so this uses digit keys as the primary mechanism.
+   * Behaviour verified against a live picker (Claude Code 2.1.x):
+   *
+   *   - Single-select: pressing the option's digit SELECTS and SUBMITS in one keypress.
+   *   - Multi-select:  each option shows a [ ] checkbox; pressing its digit TOGGLES the
+   *                    checkbox in place (cursor does not move, no submit). After toggling
+   *                    all desired options, Right arrow opens a "Submit answers / Cancel"
+   *                    review screen; pressing "1" confirms.
+   *   - "Other":       the free-text choice ("Type something.") is rendered as the option
+   *                    AFTER the real options, i.e. numbered (optionCount + 1). Pressing
+   *                    that digit highlights it and enters inline text-edit mode WITHOUT
+   *                    submitting; we then type the text and press Enter to submit.
+   *
+   * Arrow-key fallbacks are kept for the (not-expected-for-AskUserQuestion) case of
+   * more than 9 options, where single digit keys can't address every row.
    */
   async sendChoice(
     selectedIndices: number[],
@@ -218,7 +230,9 @@ export class InputInjector {
   ): Promise<boolean> {
     try {
       const { spawnSync } = require('child_process');
-      const KEY_DELAY = 80; // ms between key presses
+      // The picker repaints between keypresses; give the TUI time to settle so a
+      // digit toggle / tab switch is fully rendered before the next key arrives.
+      const KEY_DELAY = 120; // ms between key presses
 
       const sendKey = (key: string): boolean => {
         const result = spawnSync('tmux', ['send-keys', '-t', session, key], { timeout: TMUX_OPERATION_TIMEOUT_MS });
@@ -228,54 +242,79 @@ export class InputInjector {
         }
         return true;
       };
+      const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
       if (otherText !== undefined) {
-        // "Other" option: navigate past all options to "Other", press Enter, type text, Enter
-        console.log(`Sending choice: Other "${otherText.substring(0, 60)}" to '${session}'`);
-        for (let i = 0; i < optionCount; i++) {
-          if (!sendKey('Down')) return false;
-          await new Promise((r) => setTimeout(r, KEY_DELAY));
-        }
-        if (!sendKey('Enter')) return false;
-        await new Promise((r) => setTimeout(r, POST_OTHER_SELECT_DELAY_MS));
+        // "Other" / free-text ("Type something.") is the numbered row AFTER the real
+        // options, i.e. position (optionCount + 1). Pressing its digit highlights it and
+        // opens an inline text field (no submit); then we type the text and press Enter.
+        const otherNumber = optionCount + 1; // 1-based position of "Type something."
+        console.log(`Sending choice: Other "${otherText.substring(0, 60)}" (option ${otherNumber}) to '${session}'`);
 
-        // Type the text
+        if (otherNumber <= 9) {
+          if (!sendKey(String(otherNumber))) return false;
+        } else {
+          // >9 options: digit can't address the Other row — walk down to it instead.
+          for (let i = 0; i < optionCount; i++) {
+            if (!sendKey('Down')) return false;
+            await delay(KEY_DELAY);
+          }
+          if (!sendKey('Enter')) return false;
+        }
+        // Wait for the inline text field to open before typing.
+        await delay(POST_OTHER_SELECT_DELAY_MS);
+
+        // Type the free-text (replaces the "Type something." label in place).
         const textResult = spawnSync('tmux', ['send-keys', '-t', session, '-l', '--', otherText], {
           timeout: TMUX_OPERATION_TIMEOUT_MS,
         });
-        if (textResult.status !== 0) return false;
-        await new Promise((r) => setTimeout(r, POST_TEXT_INPUT_DELAY_MS));
+        if (textResult.status !== 0) {
+          console.error('Failed to type Other text:', textResult.stderr?.toString());
+          return false;
+        }
+        await delay(POST_TEXT_INPUT_DELAY_MS);
         if (!sendKey('Enter')) return false;
       } else if (multiSelect) {
-        // Multi-select: walk through all options, Space on selected ones, then Enter
-        const selectedSet = new Set(selectedIndices);
-        console.log(`Sending multi-select choice: indices [${selectedIndices.join(',')}] of ${optionCount} to '${session}'`);
+        // Multi-select: each option has a [ ] checkbox. Pressing the option's digit
+        // toggles that checkbox in place (cursor stays put, nothing submits), so we can
+        // address selected options directly with no positional drift. After toggling,
+        // Right arrow opens the "Submit answers / Cancel" review screen and "1" confirms.
+        const sorted = [...new Set(selectedIndices)].sort((a, b) => a - b);
+        console.log(`Sending multi-select choice: indices [${sorted.join(',')}] of ${optionCount} to '${session}'`);
 
-        for (let i = 0; i < optionCount; i++) {
-          if (selectedSet.has(i)) {
-            if (!sendKey('Space')) return false;
-            await new Promise((r) => setTimeout(r, KEY_DELAY));
+        for (const idx of sorted) {
+          const num = idx + 1; // 1-based option number
+          if (num > 9) {
+            // Digit keys can't address rows past 9; AskUserQuestion never has this many.
+            console.warn(`Multi-select option ${num} exceeds digit range, skipping`);
+            continue;
           }
-          if (i < optionCount - 1) {
-            if (!sendKey('Down')) return false;
-            await new Promise((r) => setTimeout(r, KEY_DELAY));
-          }
+          if (!sendKey(String(num))) return false;
+          await delay(KEY_DELAY);
         }
-        // Submit
-        if (!sendKey('Enter')) return false;
+        // Open the review/Submit screen, then confirm with "1. Submit answers".
+        if (!sendKey('Right')) return false;
+        await delay(POST_OTHER_SELECT_DELAY_MS);
+        if (!sendKey('1')) return false;
       } else {
-        // Single-select: Down to the selected option, then Enter
+        // Single-select: pressing the option's digit selects AND submits in one keypress.
         const idx = selectedIndices[0] || 0;
-        console.log(`Sending single-select choice: index ${idx} of ${optionCount} to '${session}'`);
+        const num = idx + 1; // 1-based option number
+        console.log(`Sending single-select choice: index ${idx} (option ${num}) of ${optionCount} to '${session}'`);
 
-        for (let i = 0; i < idx; i++) {
-          if (!sendKey('Down')) return false;
-          await new Promise((r) => setTimeout(r, KEY_DELAY));
+        if (num <= 9) {
+          if (!sendKey(String(num))) return false;
+        } else {
+          // >9 options: fall back to arrow navigation + Enter.
+          for (let i = 0; i < idx; i++) {
+            if (!sendKey('Down')) return false;
+            await delay(KEY_DELAY);
+          }
+          if (!sendKey('Enter')) return false;
         }
-        if (!sendKey('Enter')) return false;
       }
 
-      await new Promise((r) => setTimeout(r, POST_CHOICE_DELAY_MS));
+      await delay(POST_CHOICE_DELAY_MS);
       console.log(`Choice sent successfully to tmux session '${session}'`);
       incrementTmuxOperations();
       return true;
@@ -319,12 +358,15 @@ export class InputInjector {
     try {
       const session = targetSession || this.activeSession;
       const { spawnSync } = require('child_process');
-      const result = spawnSync('tmux', ['capture-pane', '-t', session, '-p', '-S', `-${lines}`], {
+      const args = ['capture-pane', '-t', session, '-p', '-S', `-${lines}`];
+      const result = spawnSync('tmux', args, {
         timeout: TMUX_OPERATION_TIMEOUT_MS,
       });
-      if (result.status !== 0) return '';
+      if (result.status !== 0) {
+        return '';
+      }
       return (result.stdout?.toString() || '').trim();
-    } catch {
+    } catch (err) {
       return '';
     }
   }
