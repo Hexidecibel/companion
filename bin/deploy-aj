@@ -1,0 +1,115 @@
+#!/usr/bin/env bash
+# deploy-aj — Build Companion locally and deploy built artifacts to AJ's Mac mini.
+#
+# AJ's box runs the companion daemon under launchd (com.companion.daemon, uid 501).
+# It is NOT a git checkout — it's a file copy of built dist artifacts. This script:
+#   1. Builds web/dist (daemon-served, /web/ base) and daemon/dist locally.
+#   2. rsyncs daemon/dist/ and web/dist/ into the remote install tree.
+#   3. Restarts AJ's launchd daemon.
+#   4. Verifies launchd state + the public route at https://aj.cush.rocks/.
+#
+# It does NOT touch or restart the local hexi daemon.
+#
+# Usage:
+#   bin/deploy-aj
+#
+# Prerequisites: node, npm, rsync, ssh access to AJ's box.
+set -euo pipefail
+
+# --- Configuration -----------------------------------------------------------
+REMOTE_USER="ajconnor"
+REMOTE_HOST="100.107.77.12"
+REMOTE_UID="501"
+REMOTE_ROOT="/Users/ajconnor/companion"
+LAUNCHD_LABEL="com.companion.daemon"
+PUBLIC_URL="https://aj.cush.rocks/"
+# -----------------------------------------------------------------------------
+
+SSH_TARGET="${REMOTE_USER}@${REMOTE_HOST}"
+LAUNCHD_SVC="gui/${REMOTE_UID}/${LAUNCHD_LABEL}"
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+ROOT="$(dirname "$SCRIPT_DIR")"
+
+log() { echo "=== $* ==="; }
+
+if ! command -v node &>/dev/null; then
+  echo "ERROR: Node.js is not installed." >&2
+  exit 1
+fi
+if ! command -v rsync &>/dev/null; then
+  echo "ERROR: rsync is not installed." >&2
+  exit 1
+fi
+
+# --- 1. Build locally --------------------------------------------------------
+log "Building Web Client (/web/ base -> web/dist)"
+( cd "$ROOT/web" && npm run build )
+
+log "Building Daemon (-> daemon/dist)"
+( cd "$ROOT/daemon" && npm run build )
+
+if [ ! -d "$ROOT/web/dist" ] || [ ! -d "$ROOT/daemon/dist" ]; then
+  echo "ERROR: Build did not produce web/dist and daemon/dist. Aborting." >&2
+  exit 1
+fi
+
+# --- 2. Pre-flight: confirm remote dist dirs exist ---------------------------
+log "Checking remote install tree at ${SSH_TARGET}:${REMOTE_ROOT}"
+if ! ssh -o ConnectTimeout=15 "$SSH_TARGET" "test -d '${REMOTE_ROOT}/daemon/dist' && test -d '${REMOTE_ROOT}/web/dist'"; then
+  echo "ERROR: Remote ${REMOTE_ROOT}/daemon/dist or web/dist not found. Aborting." >&2
+  exit 1
+fi
+
+# --- 3. rsync built artifacts ------------------------------------------------
+log "Syncing daemon/dist -> remote"
+rsync -az --delete -e "ssh -o ConnectTimeout=15" \
+  "$ROOT/daemon/dist/" "${SSH_TARGET}:${REMOTE_ROOT}/daemon/dist/"
+
+log "Syncing web/dist -> remote"
+rsync -az --delete -e "ssh -o ConnectTimeout=15" \
+  "$ROOT/web/dist/" "${SSH_TARGET}:${REMOTE_ROOT}/web/dist/"
+
+log "Syncing daemon/package.json -> remote"
+rsync -az -e "ssh -o ConnectTimeout=15" \
+  "$ROOT/daemon/package.json" "${SSH_TARGET}:${REMOTE_ROOT}/daemon/package.json"
+
+# node_modules: only sync if remote is missing deps (otherwise assume present).
+if ssh -o ConnectTimeout=15 "$SSH_TARGET" "test -d '${REMOTE_ROOT}/daemon/node_modules'"; then
+  echo "Remote daemon/node_modules present — skipping node_modules sync."
+else
+  log "Remote daemon/node_modules MISSING — syncing node_modules (one-time)"
+  rsync -az -e "ssh -o ConnectTimeout=15" \
+    "$ROOT/daemon/node_modules/" "${SSH_TARGET}:${REMOTE_ROOT}/daemon/node_modules/"
+fi
+
+# --- 4. Restart AJ's launchd daemon ------------------------------------------
+log "Restarting AJ's daemon (${LAUNCHD_SVC})"
+ssh -o ConnectTimeout=15 "$SSH_TARGET" "launchctl kickstart -k '${LAUNCHD_SVC}'"
+
+# --- 5. Verify ---------------------------------------------------------------
+log "Verifying daemon state"
+sleep 3
+STATE="$(ssh -o ConnectTimeout=15 "$SSH_TARGET" "launchctl print '${LAUNCHD_SVC}' 2>/dev/null | grep -i 'state =' | head -1" || true)"
+echo "launchd: ${STATE:-<no state reported>}"
+
+log "Probing public route ${PUBLIC_URL}"
+HTTP_CODE="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 "$PUBLIC_URL" || echo "000")"
+echo "HTTP ${HTTP_CODE} from ${PUBLIC_URL}"
+
+OK_STATE=0
+OK_HTTP=0
+echo "$STATE" | grep -qi 'running' && OK_STATE=1
+case "$HTTP_CODE" in
+  200|401|426|400|403) OK_HTTP=1 ;;
+esac
+
+echo ""
+if [ "$OK_STATE" = 1 ] && [ "$OK_HTTP" = 1 ]; then
+  log "DEPLOY SUCCESS — daemon running, server answering (HTTP ${HTTP_CODE})"
+  exit 0
+else
+  log "DEPLOY WARNING — state OK=${OK_STATE}, http OK=${OK_HTTP} (code ${HTTP_CODE})"
+  echo "Daemon may still be starting; re-check https://aj.cush.rocks/ manually." >&2
+  exit 1
+fi

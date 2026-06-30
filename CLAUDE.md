@@ -16,6 +16,10 @@ desktop/        # Tauri 2.0 wrapper (desktop + mobile native builds)
 **Config:** `/etc/companion/config.json`
 **Service:** `companion` (systemd)
 
+### Daemon Restart Safety
+
+**NEVER restart or stop the companion daemon without explicit user sign-off in the current conversation.** This applies to `systemctl --user restart/stop companion` and `bin/companion restart/stop/start`. `KillMode=process` now protects spawned tmux sessions across a restart, but restarting still drops in-flight debugging state — notably pending-AUQ tmux-pane scrape state that is NOT persisted to disk. A PreToolUse hook (`.claude/hooks/guard-daemon-restart.sh`) enforces this and blocks the commands. Only override after the user approves, by including `COMPANION_ALLOW_RESTART=1` in the command. Daemon *builds* (`npm run build`) are not affected.
+
 ### Key files
 - `src/index.ts` - Entry point, initializes all services
 - `src/watcher.ts` - Watches `~/.claude/projects/` for JSONL conversation files
