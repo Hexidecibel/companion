@@ -33,4 +33,11 @@ impl<R: Runtime> HeraldNative<R> {
             .map(|_| ())
             .map_err(|e| e.to_string())
     }
+
+    /// Any method with any JSON payload (channels serialize to their id).
+    pub fn run(&self, method: &str, payload: impl Serialize) -> Result<serde_json::Value, String> {
+        self.0
+            .run_mobile_plugin::<serde_json::Value>(method, payload)
+            .map_err(|e| e.to_string())
+    }
 }

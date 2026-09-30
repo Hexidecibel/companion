@@ -1,3 +1,10 @@
 [default]
-description = "Herald native voice glue: earbud media button and audio focus"
-permissions = ["allow-set-media-session", "allow-set-audio-focus"]
+description = "Herald native voice glue: earbud media button, audio focus, audio route and native capture"
+permissions = [
+  "allow-set-media-session",
+  "allow-set-audio-focus",
+  "allow-get-audio-route",
+  "allow-start-capture",
+  "allow-stop-capture",
+  "allow-set-prefer-builtin-mic",
+]

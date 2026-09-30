@@ -22,6 +22,7 @@ import {
   type AudioNotice,
 } from '../services/voice/audioEnvironment';
 import type { BargeInDecision } from '../services/voice/bargeInMode';
+import { initNativeAudio, setPreferBuiltInMic } from '../services/voice/nativeAudio';
 import { nativePlatform } from '../utils/platform';
 import { DEFAULT_BRIEF_CHORD, DEFAULT_CHORD, formatChord, isChordRelease, matchesChordDown, parseChord, shouldStartSpacePtt } from '../services/voice/hotkeys';
 
@@ -337,9 +338,12 @@ export function useHeraldVoiceInput(host: VoiceInputHost): HeraldVoiceInput {
   const [bargeIn, setBargeIn] = useState<BargeInDecision>(getBargeInDecision);
   useEffect(() => onBargeInModeChange(setBargeIn), []);
 
-  // "Use built-in mic with Bluetooth headphones" -> the shared mic.
+  // Native apps: route info, and on Android the native microphone.
+  useEffect(() => initNativeAudio(), []);
+  // "Use built-in mic with Bluetooth headphones" -> the shared mic (and iOS's session).
   useEffect(() => {
     getMicCapture().setMicPrefs({ avoidBluetoothMic: prefs.builtInMicWithBluetooth });
+    void setPreferBuiltInMic(prefs.builtInMicWithBluetooth);
   }, [prefs.builtInMicWithBluetooth]);
 
   // Microphone notices: tell the user when the mic changed under them,

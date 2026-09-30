@@ -118,7 +118,7 @@ export class MicError extends Error {
 /** A microphone source other than getUserMedia (Android native capture). */
 export interface ExternalMicSource {
   /** Open it and return its node in the graph's context, and what cancels echo. */
-  open(ctx: AudioContext, opts: { avoidBluetooth: boolean }): Promise<{ node: AudioNode; mode: GraphAecMode; label: string; kind: InputKind }>;
+  open(ctx: AudioContext, opts: { avoidBluetooth: boolean; mode?: GraphAecMode }): Promise<{ node: AudioNode; mode: GraphAecMode; label: string; kind: InputKind }>;
   close(): void;
   /** The source stopped on its own (route change, error). */
   onEnded?: (cb: () => void) => void;
@@ -172,9 +172,13 @@ export class MicCapture {
 
   /** Change mic prefs; an open mic is re-opened when the choice changes. */
   setMicPrefs(p: Partial<MicPrefs>): void {
+    const before = this.prefs;
     this.prefs = { ...this.prefs, ...p };
     saveMicPrefs(this.prefs);
-    if (this.opened) void this.reevaluate('prefs');
+    if (!this.opened) return;
+    if (this.opened.stream) void this.reevaluate('prefs');
+    // Native capture decides the device itself: restart it with the new preference.
+    else if (before.avoidBluetoothMic !== this.prefs.avoidBluetoothMic) void this.reopen('prefs');
   }
 
   /** Use a native microphone source instead of getUserMedia (Android app). */
@@ -303,10 +307,13 @@ export class MicCapture {
     if (!ctx) throw new MicError('This browser cannot process audio.', 'unavailable');
     if (this.external) {
       try {
-        const r = await this.external.open(ctx, { avoidBluetooth: this.prefs.avoidBluetoothMic });
+        // The in-graph canceller has to be there before the native mic joins the graph.
+        const aecOk = this.forcedMode === 'native' ? false : await this.graph.ensureAec();
+        const r = await this.external.open(ctx, { avoidBluetooth: this.prefs.avoidBluetoothMic, mode: this.forcedMode ?? undefined });
         this.permission = 'granted';
         this.external.onEnded?.(() => void this.onLost());
-        return { stream: null, node: r.node, mode: r.mode, label: r.label, kind: r.kind, deviceId: null, pinnedId: null, choice: null };
+        const mode: GraphAecMode = r.mode === 'in-graph' && !aecOk ? 'none' : r.mode;
+        return { stream: null, node: r.node, mode, label: r.label, kind: r.kind, deviceId: null, pinnedId: null, choice: null };
       } catch (err) {
         const name = (err as { name?: string; message?: string })?.name;
         if (name === 'NotAllowedError') {

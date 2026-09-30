@@ -1,5 +1,6 @@
 package com.hexidecibel.companion.herald
 
+import android.Manifest
 import android.app.Activity
 import android.content.Context
 import android.content.Intent
@@ -12,9 +13,13 @@ import android.os.Build
 import android.util.Log
 import android.view.KeyEvent
 import android.webkit.WebView
+import app.tauri.PermissionState
 import app.tauri.annotation.Command
 import app.tauri.annotation.InvokeArg
+import app.tauri.annotation.Permission
+import app.tauri.annotation.PermissionCallback
 import app.tauri.annotation.TauriPlugin
+import app.tauri.plugin.Channel
 import app.tauri.plugin.Invoke
 import app.tauri.plugin.JSObject
 import app.tauri.plugin.Plugin
@@ -24,6 +29,15 @@ private const val TAG = "HeraldNative"
 @InvokeArg
 class ActiveArgs {
     var active: Boolean = false
+}
+
+@InvokeArg
+class CaptureArgs {
+    /** Platform echo cancellation (VOICE_COMMUNICATION + AcousticEchoCanceler). */
+    var aec: Boolean = false
+    /** Capture from the built-in mic even when a Bluetooth headset is connected (keeps it in A2DP). */
+    var avoidBluetooth: Boolean = true
+    lateinit var onAudio: Channel
 }
 
 /**
@@ -41,8 +55,9 @@ class ActiveArgs {
  * Audio focus: while Herald speaks we hold AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK,
  * so music and podcasts duck under Herald instead of fighting it.
  */
-@TauriPlugin
+@TauriPlugin(permissions = [Permission(strings = [Manifest.permission.RECORD_AUDIO], alias = "microphone")])
 class HeraldNativePlugin(private val activity: Activity) : Plugin(activity) {
+    private val audio = HeraldAudio(activity.applicationContext) { route -> trigger("audioRoute", route) }
     private var session: MediaSession? = null
     private var focusRequest: AudioFocusRequest? = null
     private val focusListener = AudioManager.OnAudioFocusChangeListener { }
@@ -55,6 +70,58 @@ class HeraldNativePlugin(private val activity: Activity) : Plugin(activity) {
         // wry already sets this; make the TTS autoplay requirement explicit so a
         // reply triggered by an earbud press (no touch gesture) can play.
         webView.settings.mediaPlaybackRequiresUserGesture = false
+        // Route changes (earbuds, headset, USB) go to the page as `audioRoute` events.
+        audio.listen()
+    }
+
+    override fun onDestroy() {
+        audio.dispose()
+        super.onDestroy()
+    }
+
+    /** Current output / input ports (see HeraldAudio.route). */
+    @Command
+    fun getAudioRoute(invoke: Invoke) {
+        try {
+            invoke.resolve(audio.route())
+        } catch (e: Exception) {
+            invoke.reject(e.message ?: "audio route failed")
+        }
+    }
+
+    /**
+     * Native microphone -> the page (16 kHz PCM16 base64 chunks on `onAudio`).
+     * Asks for RECORD_AUDIO first when needed (rejects with code NotAllowedError).
+     */
+    @Command
+    fun startCapture(invoke: Invoke) {
+        if (getPermissionState("microphone") != PermissionState.GRANTED) {
+            requestPermissionForAlias("microphone", invoke, "micPermissionCallback")
+            return
+        }
+        doStartCapture(invoke)
+    }
+
+    @PermissionCallback
+    private fun micPermissionCallback(invoke: Invoke) {
+        if (getPermissionState("microphone") == PermissionState.GRANTED) doStartCapture(invoke)
+        else invoke.reject("Microphone permission denied", "NotAllowedError")
+    }
+
+    private fun doStartCapture(invoke: Invoke) {
+        val args = invoke.parseArgs(CaptureArgs::class.java)
+        try {
+            invoke.resolve(audio.start(args.aec, args.avoidBluetooth, args.onAudio))
+        } catch (e: Exception) {
+            Log.e(TAG, "capture", e)
+            invoke.reject(e.message ?: "capture failed", "NotReadableError")
+        }
+    }
+
+    @Command
+    fun stopCapture(invoke: Invoke) {
+        audio.stop()
+        invoke.resolve()
     }
 
     @Command
