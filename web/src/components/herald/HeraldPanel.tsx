@@ -1,7 +1,9 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import type { HeraldAction, HeraldInboxItem, HeraldMessage, HeraldSessionRef, InboxPriority } from '../../types/herald';
 import { sortInbox, sortPendingByUrgency } from '../../services/heraldReducer';
-import { useHeraldData, useHeraldUi, useHeraldVoiceCtx } from '../../context/HeraldContext';
+import { useHeraldData, useHeraldUi, useHeraldVoiceCtx, useHeraldVoiceInputCtx } from '../../context/HeraldContext';
+import type { HeraldVoiceInput } from '../../hooks/useHeraldVoiceInput';
+import { HeraldListeningBar, HeraldMicButton, VoiceInputSettings } from './HeraldVoiceControls';
 import type { HeraldVoice } from '../../hooks/useHeraldVoice';
 import { RATE_MAX, RATE_MIN } from '../../hooks/useHeraldVoice';
 import { pickVoice, voicesForPicker } from '../../services/tts/voices';
@@ -264,12 +266,13 @@ function VoiceSettings({ voice }: { voice: HeraldVoice }) {
   );
 }
 
-function OverflowMenu({ model, onReset, onRefresh, disabled, voice }: {
+function OverflowMenu({ model, onReset, onRefresh, disabled, voice, input }: {
   model: string;
   onReset: () => Promise<boolean>;
   onRefresh: () => void;
   disabled: boolean;
   voice: HeraldVoice;
+  input: HeraldVoiceInput;
 }) {
   const [open, setOpen] = useState(false);
   const [confirming, setConfirming] = useState(false);
@@ -319,6 +322,8 @@ function OverflowMenu({ model, onReset, onRefresh, disabled, voice }: {
                   <VoiceSettings voice={voice} />
                 </>
               )}
+              <div className="herald-menu__sep" role="separator" />
+              <VoiceInputSettings input={input} />
             </>
           ) : (
             <div className="herald-menu__confirm">
@@ -423,9 +428,11 @@ export function HeraldPanel({ variant, onOpenSession, onClose }: HeraldPanelProp
   const ui = useHeraldUi();
   const h = useHeraldData();
   const voice = useHeraldVoiceCtx();
+  const input = useHeraldVoiceInputCtx();
   const { state, messages, connected, supported, loaded, skewMs, presence, displayName, available } = h;
   const speaking = voice.supported && voice.speaking;
-  const orbState = speaking ? 'speaking' as const : presence;
+  const listening = input.state.phase === 'starting' || input.state.phase === 'listening';
+  const orbState = listening ? 'listening' as const : speaking ? 'speaking' as const : presence;
 
   const enabled = state?.enabled ?? true;
   const busy = (state?.busy ?? false) || h.sending;
@@ -513,13 +520,20 @@ export function HeraldPanel({ variant, onOpenSession, onClose }: HeraldPanelProp
 
   // Escape while speaking is a barge-in: it only stops the voice (runs in the
   // capture phase so it beats echo-cancel and panel-close).
+  const cancelInput = input.cancel;
   const onKeyDownCapture = useCallback((e: ReactKeyboardEvent) => {
+    if (e.key === 'Escape' && listening) {
+      e.preventDefault();
+      e.stopPropagation();
+      cancelInput();
+      return;
+    }
     if (e.key === 'Escape' && speaking) {
       e.preventDefault();
       e.stopPropagation();
       stopVoice();
     }
-  }, [speaking, stopVoice]);
+  }, [speaking, stopVoice, listening, cancelInput]);
 
   // Escape closes the docked panel when focus is inside it.
   const onKeyDown = useCallback((e: ReactKeyboardEvent) => {
@@ -536,6 +550,7 @@ export function HeraldPanel({ variant, onOpenSession, onClose }: HeraldPanelProp
   else if (!connected) statusText = `Reaching ${ui.hostName || 'hub'}`;
   else if (supported === false) statusText = 'Unavailable';
   else if (!enabled) statusText = 'Paused';
+  else if (listening) statusText = 'Listening';
   else if (speaking) statusText = 'Speaking';
   else if (busy) statusText = 'Thinking';
   else if (h.unheardBlocked > 0) statusText = `${h.unheardBlocked} waiting on you`;
@@ -563,7 +578,7 @@ export function HeraldPanel({ variant, onOpenSession, onClose }: HeraldPanelProp
 
   return (
     <section
-      className={`herald herald--${variant} herald--${presence}${speaking ? ' herald--speaking' : ''}`}
+      className={`herald herald--${variant} herald--${presence}${speaking ? ' herald--speaking' : ''}${listening ? ' herald--listening' : ''}`}
       aria-label={displayName}
       onKeyDown={onKeyDown}
       onKeyDownCapture={onKeyDownCapture}
@@ -581,7 +596,7 @@ export function HeraldPanel({ variant, onOpenSession, onClose }: HeraldPanelProp
         </div>
         <div className="herald-header__title">
           <span className="herald-header__name">{displayName}</span>
-          <span className={`herald-header__status herald-header__status--${speaking ? 'speaking' : presence}`}>
+          <span className={`herald-header__status herald-header__status--${listening ? 'listening' : speaking ? 'speaking' : presence}`}>
             {statusText}
           </span>
         </div>
@@ -614,7 +629,7 @@ export function HeraldPanel({ variant, onOpenSession, onClose }: HeraldPanelProp
               {voice.voiceOn ? <IconSpeaker size={18} /> : <IconSpeakerOff size={18} />}
             </button>
           )}
-          <OverflowMenu model={state?.model ?? ''} onReset={h.reset} onRefresh={h.refresh} disabled={!available} voice={voice} />
+          <OverflowMenu model={state?.model ?? ''} onReset={h.reset} onRefresh={h.refresh} disabled={!available} voice={voice} input={input} />
           {variant === 'docked' && (
             <button
               type="button"
@@ -715,7 +730,9 @@ export function HeraldPanel({ variant, onOpenSession, onClose }: HeraldPanelProp
           />
         )}
 
-        {speaking && (
+        <HeraldListeningBar input={input} />
+
+        {speaking && !listening && (
           <div className="herald-speaking" role="status">
             <span className="herald-speaking__bars" aria-hidden="true"><span /><span /><span /><span /></span>
             <span className="herald-speaking__label">Speaking…</span>
@@ -734,10 +751,19 @@ export function HeraldPanel({ variant, onOpenSession, onClose }: HeraldPanelProp
           onEscape={pending.some((a) => a.tier === 'echo') ? cancelNewestEcho : undefined}
           autoFocus={variant === 'screen' ? false : undefined}
           onTyping={speaking ? stopVoice : undefined}
+          onVoiceKeyDown={input.onComposerKeyDown}
+          onVoiceKeyUp={input.onComposerKeyUp}
+          inject={input.transcript}
+          onInjected={input.consumeTranscript}
+          voiceSlot={<HeraldMicButton input={input} />}
+          placeholderOverride={listening ? 'Listening…' : undefined}
         />
         <div className="herald-hint" aria-hidden="true">
           <kbd>Enter</kbd> send <span className="herald-hint__sep" /> <kbd>Shift</kbd>+<kbd>Enter</kbd> newline
-          {speaking
+          {input.available && input.prefs.spaceToTalk && <><span className="herald-hint__sep" /> hold <kbd>Space</kbd> talk</>}
+          {listening
+            ? <><span className="herald-hint__sep" /><kbd>Esc</kbd> cancel</>
+            : speaking
             ? <><span className="herald-hint__sep" /><kbd>Esc</kbd> stop voice</>
             : pending.some((a) => a.tier === 'echo') && <><span className="herald-hint__sep" /><kbd>Esc</kbd> stop send</>}
         </div>

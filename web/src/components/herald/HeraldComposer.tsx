@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import type { InjectedTranscript } from '../../hooks/useHeraldVoiceInput';
 import { IconSend } from './heraldIcons';
 
 const DRAFT_KEY = 'herald_draft';
@@ -35,6 +36,16 @@ interface HeraldComposerProps {
   autoFocus?: boolean;
   /** The user typed (or dictated) into the draft: barge-in hook. */
   onTyping?: () => void;
+  /** Push-to-talk key hooks; return true when the key was consumed. */
+  onVoiceKeyDown?: (e: KeyboardEvent, value: string) => boolean;
+  onVoiceKeyUp?: (e: KeyboardEvent) => boolean;
+  /** A voice transcript to place in the draft (and send, if autoSend). */
+  inject?: InjectedTranscript | null;
+  onInjected?: (id: number) => void;
+  /** Extra control rendered before the send button (the mic). */
+  voiceSlot?: ReactNode;
+  /** Replaces the placeholder (e.g. "Listening…"). */
+  placeholderOverride?: string;
 }
 
 /**
@@ -42,7 +53,10 @@ interface HeraldComposerProps {
  * programmatically, so everything keys off `input` events and the textarea's
  * live value (read at send time), never keydown bookkeeping.
  */
-export function HeraldComposer({ displayName, onSend, disabled, busy, focusNonce, onEscape, autoFocus, onTyping }: HeraldComposerProps) {
+export function HeraldComposer({
+  displayName, onSend, disabled, busy, focusNonce, onEscape, autoFocus, onTyping,
+  onVoiceKeyDown, onVoiceKeyUp, inject, onInjected, voiceSlot, placeholderOverride,
+}: HeraldComposerProps) {
   const [draft, setDraft] = useState(loadDraft);
   const ref = useRef<HTMLTextAreaElement>(null);
   const onTypingRef = useRef(onTyping);
@@ -88,10 +102,8 @@ export function HeraldComposer({ displayName, onSend, disabled, busy, focusNonce
 
   const canSend = !disabled && !busy;
 
-  const submit = useCallback(async () => {
+  const sendText = useCallback(async (text: string) => {
     const el = ref.current;
-    const text = (el?.value ?? draft).trim();
-    if (!text || !canSend) return;
     setDraft('');
     if (el) el.value = '';
     const ok = await onSend(text);
@@ -99,7 +111,35 @@ export function HeraldComposer({ displayName, onSend, disabled, busy, focusNonce
       // Never lose what the user said: put it back unless they've started a new line.
       setDraft((cur) => (cur.trim() ? cur : text));
     }
-  }, [draft, canSend, onSend]);
+  }, [onSend]);
+
+  const submit = useCallback(async () => {
+    const text = (ref.current?.value ?? draft).trim();
+    if (!text || !canSend) return;
+    await sendText(text);
+  }, [draft, canSend, sendText]);
+
+  // Voice transcript: send it straight away when the box was empty and a turn
+  // can start; otherwise append it to the draft for review.
+  const lastInjected = useRef(0);
+  useEffect(() => {
+    if (!inject || inject.id === lastInjected.current) return;
+    lastInjected.current = inject.id;
+    onInjected?.(inject.id);
+    const current = ref.current?.value ?? '';
+    if (inject.autoSend && canSend && !current.trim()) {
+      void sendText(inject.text);
+      return;
+    }
+    const merged = current.trim() ? `${current.replace(/\s+$/, '')} ${inject.text}` : inject.text;
+    setDraft(merged);
+    requestAnimationFrame(() => {
+      const el = ref.current;
+      if (!el) return;
+      el.focus({ preventScroll: true });
+      el.setSelectionRange(el.value.length, el.value.length);
+    });
+  }, [inject, onInjected, canSend, sendText]);
 
   const hasText = draft.trim().length > 0;
 
@@ -114,10 +154,11 @@ export function HeraldComposer({ displayName, onSend, disabled, busy, focusNonce
         value={draft}
         rows={1}
         disabled={disabled}
-        placeholder={disabled ? `${displayName} is offline` : `Ask ${displayName} anything`}
+        placeholder={placeholderOverride ?? (disabled ? `${displayName} is offline` : `Ask ${displayName} anything`)}
         aria-label={`Message ${displayName}`}
         onChange={(e) => setDraft(e.target.value)}
         onKeyDown={(e) => {
+          if (onVoiceKeyDown?.(e.nativeEvent, ref.current?.value ?? '')) return;
           if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
             e.preventDefault();
             void submit();
@@ -126,10 +167,12 @@ export function HeraldComposer({ displayName, onSend, disabled, busy, focusNonce
             onEscape();
           }
         }}
+        onKeyUp={(e) => { onVoiceKeyUp?.(e.nativeEvent); }}
         enterKeyHint="send"
         autoComplete="off"
         spellCheck
       />
+      {voiceSlot}
       <button
         type="submit"
         className="herald-composer__send"

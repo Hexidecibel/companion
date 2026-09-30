@@ -9,6 +9,13 @@
 #   bin/herald-sandbox status    PID, port owner, and whether Herald's brain is configured
 #   bin/herald-sandbox logs [N]  Tail the sandbox daemon log (key-shaped strings redacted)
 #   bin/herald-sandbox env       Print the sandbox URL/port and config path (token not printed)
+#   bin/herald-sandbox https [on|off|status] [--tunnel]
+#                                HTTPS front door for the sandbox (browsers only expose the
+#                                microphone in secure contexts). Default: Tailscale serve on
+#                                https://<this-node>.ts.net:$HERALD_HTTPS_PORT (9890, tailnet only,
+#                                real cert). --tunnel: cush-tools tunnel instead
+#                                (https://herald-voice.tunnel.cush.rocks, expires after 1h;
+#                                extend with cush-tools bin/status extend herald-voice).
 #
 # Instances: the default instance (port 9887) is the one the user talks to; its
 # conversation is live history. Automated probing uses a SEPARATE instance:
@@ -269,6 +276,64 @@ cmd_status() {
   return $rc
 }
 
+HTTPS_PORT="${HERALD_HTTPS_PORT:-9890}"
+TUNNEL_NAME="${HERALD_TUNNEL_NAME:-herald-voice}"
+CUSH_TOOLS="${CUSH_TOOLS:-$HOME/local/src/cush-tools}"
+
+ts_host() {
+  tailscale status --json 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin)["Self"]["DNSName"].rstrip("."))' 2>/dev/null
+}
+
+cmd_https() {
+  local action="on" mode="tailscale" a
+  for a in "$@"; do
+    case "$a" in
+      --tunnel) mode="tunnel" ;;
+      *) action="$a" ;;
+    esac
+  done
+  [ "$INSTANCE" = "default" ] || { echo "ERROR: https is for the default (user) sandbox only"; exit 2; }
+
+  if [ "$mode" = "tunnel" ]; then
+    case "$action" in
+      on)
+        "$CUSH_TOOLS/bin/tunnel" "$PORT" "$TUNNEL_NAME" --bg
+        echo "Open: https://$TUNNEL_NAME.tunnel.cush.rocks/web/  (expires in 1h: $CUSH_TOOLS/bin/status extend $TUNNEL_NAME)"
+        echo "Note: *.tunnel.cush.rocks does not resolve back to this box (no hairpin NAT); check the frpc log for 'start proxy success'." ;;
+      off) "$CUSH_TOOLS/bin/status" close "$TUNNEL_NAME" ;;
+      status) "$CUSH_TOOLS/bin/status" | grep -E "$TUNNEL_NAME|NAME" || echo "No tunnel named $TUNNEL_NAME" ;;
+      *) echo "usage: bin/herald-sandbox https on|off|status [--tunnel]"; exit 2 ;;
+    esac
+    return
+  fi
+
+  command -v tailscale >/dev/null || { echo "ERROR: tailscale not installed; use --tunnel"; exit 1; }
+  local host
+  host="$(ts_host)"
+  [ -n "$host" ] || { echo "ERROR: tailscale not logged in; use --tunnel"; exit 1; }
+  # serve config is node-local (never tailnet-wide); it needs root unless an operator is set.
+  local ts=(tailscale)
+  [ "$(id -u)" = 0 ] || ts=(sudo -n tailscale)
+  case "$action" in
+    on)
+      if [ -n "$(port_owner "$HTTPS_PORT")" ] && ! "${ts[@]}" serve status 2>/dev/null | grep -q ":$HTTPS_PORT"; then
+        echo "ERROR: port $HTTPS_PORT is in use locally; set HERALD_HTTPS_PORT"; exit 1
+      fi
+      "${ts[@]}" serve --bg --https="$HTTPS_PORT" "http://127.0.0.1:$PORT" >/dev/null
+      local code
+      code="$(curl -sS -o /dev/null -m 10 -w '%{http_code}' "https://$host:$HTTPS_PORT/web/" 2>/dev/null || echo 000)"
+      echo "HTTPS (tailnet only): https://$host:$HTTPS_PORT/web/  -> GET /web/ $code"
+      echo "  Proxies to the sandbox on 127.0.0.1:$PORT. Persists across reboots until: bin/herald-sandbox https off"
+      echo "  First visit on a new device: add the server (host $host, port $HTTPS_PORT, TLS on) or append #token=<your token>." ;;
+    off)
+      "${ts[@]}" serve --https="$HTTPS_PORT" off >/dev/null 2>&1 || true
+      echo "Tailscale serve on :$HTTPS_PORT removed." ;;
+    status)
+      "${ts[@]}" serve status 2>/dev/null | grep -A1 ":$HTTPS_PORT" || echo "Not serving on :$HTTPS_PORT" ;;
+    *) echo "usage: bin/herald-sandbox https on|off|status [--tunnel]"; exit 2 ;;
+  esac
+}
+
 cmd_env() {
   echo "HERALD_SANDBOX_URL=ws://localhost:$PORT"
   echo "HERALD_SANDBOX_PORT=$PORT"
@@ -282,8 +347,9 @@ case "${1:-}" in
   status) cmd_status ;;
   logs) tail -n "${2:-80}" "$LOG_FILE" | redact ;;
   env) cmd_env ;;
+  https) shift; cmd_https "$@" ;;
   *)
-    sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '2,28p' "$0" | sed 's/^# \{0,1\}//'
     exit 2
     ;;
 esac

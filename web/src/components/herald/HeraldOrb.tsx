@@ -2,7 +2,7 @@ import { memo } from 'react';
 import type { HeraldPresence } from '../../services/heraldReducer';
 
 /** Presence plus the transient voice state (only the orb cares about it). */
-export type HeraldOrbState = HeraldPresence | 'speaking';
+export type HeraldOrbState = HeraldPresence | 'speaking' | 'listening';
 
 interface HeraldOrbProps {
   presence: HeraldOrbState;
@@ -14,6 +14,7 @@ interface HeraldOrbProps {
 
 const LABELS: Record<HeraldOrbState, string> = {
   speaking: 'Speaking',
+  listening: 'Listening',
   idle: 'Standing by',
   busy: 'Thinking',
   attention: 'Something needs you',

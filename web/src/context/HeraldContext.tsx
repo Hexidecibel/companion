@@ -1,7 +1,8 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useConnections } from '../hooks/useConnections';
 import { useHerald, type UseHeraldReturn } from '../hooks/useHerald';
 import { useHeraldVoice, type HeraldVoice } from '../hooks/useHeraldVoice';
+import { useHeraldVoiceInput, type HeraldVoiceInput } from '../hooks/useHeraldVoiceInput';
 import { HERALD_DEMO_SERVER_ID, isHeraldDemo } from '../services/heraldTransport';
 import { DEFAULT_DISPLAY_NAME, derivePresence, type HeraldPresence } from '../services/heraldReducer';
 import { isMobileViewport } from '../utils/platform';
@@ -60,6 +61,7 @@ export interface HeraldDataValue extends UseHeraldReturn {
 const HeraldUiContext = createContext<HeraldUiValue | null>(null);
 const HeraldDataContext = createContext<HeraldDataValue | null>(null);
 const HeraldVoiceContext = createContext<HeraldVoice | null>(null);
+const HeraldVoiceInputContext = createContext<HeraldVoiceInput | null>(null);
 
 /**
  * Two contexts on purpose: the UI context changes rarely (open/close, host),
@@ -153,6 +155,22 @@ export function HeraldProvider({ children }: { children: ReactNode }) {
     [herald.getTransport, herald.connected],
   );
   const voice = useHeraldVoice(herald.subscribeEvents, hostId, undefined, voiceHost);
+  const openRef = useRef(open);
+  openRef.current = open;
+  const voiceInput = useHeraldVoiceInput({
+    getTransport: herald.getTransport,
+    connected: herald.connected,
+    serverStatus: voice.serverStatus,
+    stopSpeech: voice.stop,
+    openPanel: () => {
+      const mobile = isMobileViewport();
+      if (!(mobile ? screenOpenRef.current : panelOpenRef.current)) openRef.current();
+    },
+  });
+  const panelOpenRef = useRef(panelOpen);
+  panelOpenRef.current = panelOpen;
+  const screenOpenRef = useRef(screenOpen);
+  screenOpenRef.current = screenOpen;
   const available = !!hostId && herald.connected && herald.supported !== false;
   const inbox = herald.state?.inbox;
   const { unheardCount, unheardBlocked } = useMemo(() => {
@@ -190,7 +208,9 @@ export function HeraldProvider({ children }: { children: ReactNode }) {
     <HeraldUiContext.Provider value={ui}>
       <HeraldDataContext.Provider value={data}>
         <HeraldVoiceContext.Provider value={voice}>
-          {children}
+          <HeraldVoiceInputContext.Provider value={voiceInput}>
+            {children}
+          </HeraldVoiceInputContext.Provider>
         </HeraldVoiceContext.Provider>
       </HeraldDataContext.Provider>
     </HeraldUiContext.Provider>
@@ -212,5 +232,11 @@ export function useHeraldData(): HeraldDataValue {
 export function useHeraldVoiceCtx(): HeraldVoice {
   const ctx = useContext(HeraldVoiceContext);
   if (!ctx) throw new Error('useHeraldVoiceCtx must be used within HeraldProvider');
+  return ctx;
+}
+
+export function useHeraldVoiceInputCtx(): HeraldVoiceInput {
+  const ctx = useContext(HeraldVoiceInputContext);
+  if (!ctx) throw new Error('useHeraldVoiceInputCtx must be used within HeraldProvider');
   return ctx;
 }

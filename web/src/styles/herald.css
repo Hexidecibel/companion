@@ -1613,6 +1613,110 @@
 }
 .herald-speaking__stop:hover { background: rgba(15, 118, 110, 0.35); border-color: rgba(94, 234, 212, 0.6); }
 
+/* --------------------------------------------------------------------------
+   Voice input: listening orb, mic button, listening bar
+   -------------------------------------------------------------------------- */
+
+.herald--listening { --h-glow: rgba(192, 132, 252, 0.16); }
+
+.herald-orb--listening {
+  --orb-a: #7c3aed;
+  --orb-b: #e879f9;
+  --orb-c: #c084fc;
+  --orb-glow: rgba(192, 132, 252, 0.6);
+  --orb-spin: 5s;
+  --orb-breathe: 1.2s;
+}
+.herald-orb--listening .herald-orb__halo { animation: herald-listen-halo 1.2s ease-in-out infinite; }
+
+@keyframes herald-listen-halo {
+  0%, 100% { transform: scale(1); opacity: 0.75; }
+  50% { transform: scale(1.12); opacity: 1; }
+}
+
+.herald-header__status--listening { color: #f0abfc; }
+.herald-header__status--listening::before { background: #e879f9; box-shadow: 0 0 8px #e879f9; animation: herald-blink 0.8s ease-in-out infinite; }
+
+.herald-composer__mic {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  margin-right: 6px;
+  border: 1px solid var(--h-border);
+  border-radius: 11px;
+  background: transparent;
+  color: var(--h-text-2);
+  cursor: pointer;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  transition: transform 120ms ease-out, background-color 150ms ease-out, color 150ms ease-out, border-color 150ms ease-out, box-shadow 150ms ease-out;
+}
+.herald-composer__mic:hover { color: #f0abfc; border-color: rgba(232, 121, 249, 0.45); }
+.herald-composer__mic:focus-visible { outline: 2px solid #c084fc; outline-offset: 2px; }
+.herald-composer__mic--live {
+  color: #fff;
+  border-color: transparent;
+  background: linear-gradient(135deg, #a855f7, #db2777);
+  box-shadow: 0 0 0 4px rgba(217, 70, 239, 0.18), 0 6px 18px -6px rgba(217, 70, 239, 0.9);
+  transform: scale(1.06);
+}
+.herald-composer__mic--busy { color: #f0abfc; border-color: rgba(232, 121, 249, 0.45); animation: herald-blink 0.9s ease-in-out infinite; }
+.herald-composer__mic--off { color: var(--h-text-3); opacity: 0.7; cursor: help; }
+.herald-composer__mic--off:hover { color: var(--h-text-2); border-color: var(--h-border); }
+
+.herald-listening {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 8px;
+  padding: 6px 6px 6px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(232, 121, 249, 0.3);
+  background: linear-gradient(90deg, rgba(88, 28, 135, 0.22), rgba(131, 24, 67, 0.14));
+  color: #fae8ff;
+  font-size: 12.5px;
+  min-height: 42px;
+  animation: herald-pop 160ms var(--h-ease) both;
+}
+.herald-listening--error {
+  border-color: rgba(245, 158, 11, 0.35);
+  background: rgba(120, 53, 15, 0.2);
+  color: #fde68a;
+}
+.herald-listening__label { flex: 1; min-width: 0; }
+.herald-listening__meter {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  height: 18px;
+}
+.herald-listening__meter span {
+  width: 3px;
+  height: 100%;
+  border-radius: 2px;
+  background: #e879f9;
+  transform-origin: center;
+  transition: transform 90ms linear;
+}
+.herald-listening--busy .herald-listening__meter span { animation: herald-eq 0.9s ease-in-out infinite; background: #c084fc; }
+.herald-listening--busy .herald-listening__meter span:nth-child(2n) { animation-delay: -0.3s; }
+.herald-listening--busy .herald-listening__meter span:nth-child(3n) { animation-delay: -0.55s; }
+
+.herald-voice-set__warn { color: #fcd34d; }
+.herald-voice-set__kbd {
+  margin-left: auto;
+  padding: 1px 6px;
+  border: 1px solid var(--h-border);
+  border-radius: 6px;
+  font-family: var(--h-mono);
+  font-size: 11px;
+  color: var(--h-text-2);
+}
+
 /* Menu: separator, section label, voice settings */
 .herald-menu__sep { height: 1px; margin: 6px 4px; background: var(--h-border-soft); }
 
@@ -1718,4 +1822,5 @@
   .herald-orb--speaking .herald-orb__core { transform: scale(1.06); }
   .herald-speaking__bars span { transform: scaleY(0.7); }
   .herald-orb__halo { opacity: 0.85; }
+  .herald-composer__mic--busy { animation: none; }
 }
