@@ -12,7 +12,8 @@ import { meterLevel } from './pcm';
 import { VoiceUplink, VoiceUplinkError } from './voiceUplink';
 
 export type VoiceInputPhase = 'idle' | 'starting' | 'listening' | 'transcribing';
-export type VoiceInputSource = 'button' | 'space' | 'chord' | 'interrupt' | 'wake';
+/** `trigger`: a remote trigger (hotkey on another machine) opened the mic; ends on VAD. */
+export type VoiceInputSource = 'button' | 'space' | 'chord' | 'interrupt' | 'wake' | 'trigger';
 
 export interface VoiceInputState {
   phase: VoiceInputPhase;

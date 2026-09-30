@@ -109,6 +109,14 @@ export interface HeraldVoiceInput {
   handsFreeNote: string | null;
   /** Toggle hands-free (call from a click: it may prompt for the mic). */
   setHandsFree: (on: boolean) => void;
+  /**
+   * Remote trigger: capture one utterance, ending on the VAD, and send it as a
+   * voice turn (never through the composer, so a draft is left alone). Resolves
+   * null once listening, else why not (the caller plays the error tone).
+   */
+  listen: () => Promise<string | null>;
+  /** Anything capturing right now (push-to-talk, VAD utterance, trigger listen). */
+  isCapturing: () => boolean;
 }
 
 export interface VoiceInputHost {
@@ -129,6 +137,11 @@ export interface VoiceInputHost {
   onVoiceTranscript?: (text: string, source: VoiceInputSource) => string | null;
   /** The "brief me" chord was pressed. */
   briefMe?: () => void;
+  /**
+   * Send a remote-trigger transcript straight to Herald as a voice turn. Without
+   * it, trigger transcripts go through the composer like any other.
+   */
+  sendVoice?: (text: string) => void;
 }
 
 export function useHeraldVoiceInput(host: VoiceInputHost): HeraldVoiceInput {
@@ -150,6 +163,14 @@ export function useHeraldVoiceInput(host: VoiceInputHost): HeraldVoiceInput {
           const hook = hostRef.current.onVoiceTranscript;
           const rest = hook ? hook(text, source) : text;
           if (!rest) return;
+          // Remote trigger: the user is somewhere else (mid-game), so it goes
+          // straight out as a voice turn. The composer (and any draft in it) is
+          // never touched.
+          const direct = hostRef.current.sendVoice;
+          if (source === 'trigger' && direct) {
+            direct(rest);
+            return;
+          }
           seq.current += 1;
           setTranscript({ id: seq.current, text: rest, autoSend: !prefsRef.current.reviewBeforeSend, mode: 'voice' });
         },
@@ -315,7 +336,31 @@ export function useHeraldVoiceInput(host: VoiceInputHost): HeraldVoiceInput {
     void controller.start(source);
   }, [controller]);
   const stop = useCallback(() => void controller.stop(), [controller]);
-  const cancel = useCallback(() => controller.cancel(), [controller]);
+  const cancel = useCallback(() => {
+    automation.cancelListen();
+    controller.cancel();
+  }, [automation, controller]);
+
+  const micGrantedRef = useRef(micGranted);
+  micGrantedRef.current = micGranted;
+  const listen = useCallback(async (): Promise<string | null> => {
+    if (!availableRef.current) return unavailableRef.current ?? 'Voice input unavailable';
+    // A hidden tab must never be the place a permission prompt appears (nobody
+    // would see it). Permission granted earlier works in the background.
+    const hidden = typeof document !== 'undefined' && document.visibilityState !== 'visible';
+    if (hidden && !micGrantedRef.current) {
+      return 'Microphone not allowed yet: use the mic once in this tab, then triggers can open it from anywhere';
+    }
+    try {
+      return (await automation.listen()) ? null : 'Already listening';
+    } catch (err) {
+      return (err as Error)?.message || 'Could not open the microphone';
+    }
+  }, [automation]);
+  const isCapturing = useCallback(
+    () => controller.state.phase !== 'idle' || automation.listenActive,
+    [automation, controller],
+  );
 
   // Global hold-to-talk chord. Exact match only; everything else passes through.
   useEffect(() => {
@@ -401,5 +446,7 @@ export function useHeraldVoiceInput(host: VoiceInputHost): HeraldVoiceInput {
     handsFreeActive,
     handsFreeNote,
     setHandsFree,
-  }), [available, unavailableReason, state, prefs, setPref, chord, briefChord, start, stop, cancel, onComposerKeyDown, onComposerKeyUp, transcript, consumeTranscript, controller, micGranted, handsFreeAvailable, handsFreeActive, handsFreeNote, setHandsFree]);
+    listen,
+    isCapturing,
+  }), [available, unavailableReason, state, prefs, setPref, chord, briefChord, start, stop, cancel, onComposerKeyDown, onComposerKeyUp, transcript, consumeTranscript, controller, micGranted, handsFreeAvailable, handsFreeActive, handsFreeNote, setHandsFree, listen, isCapturing]);
 }

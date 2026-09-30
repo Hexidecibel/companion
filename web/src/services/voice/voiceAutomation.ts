@@ -14,6 +14,11 @@
  * own waits (briefly) for the command as the next utterance. Utterances
  * without the wake word are discarded unheard (never transcribed).
  *
+ * Remote trigger `listen` (a hotkey on another machine): like a woken
+ * hands-free, minus the wake word. The VAD starts (if it was not running), the
+ * next utterance is captured whole and transcribed when the speaker pauses.
+ * Nothing heard within LISTEN_WAIT_MS gives up quietly.
+ *
  * Interrupt never opens the mic on its own (permission must already be
  * granted); hands-free is turned on by the user, which may prompt.
  */
@@ -56,10 +61,12 @@ export const INTERRUPT_GRACE_MS = 1500;
 export const COMMAND_WAIT_MS = 8000;
 /** A wake check may still be in flight when the speaker pauses: wait this long. */
 export const WAKE_SETTLE_MS = 600;
+/** A remote-trigger listen waits this long for speech to begin. */
+export const LISTEN_WAIT_MS = 8000;
 /** Pre-roll kept ahead of speech start (VAD frames are 32 ms). */
 const PREROLL_FRAMES = 20;
 
-type Capture = 'interrupt' | 'wake' | 'command';
+type Capture = 'interrupt' | 'wake' | 'command' | 'listen';
 
 interface WakeStream {
   uplink: VoiceUplink;
@@ -80,6 +87,10 @@ export class VoiceAutomation implements VadEvents {
   private wake: WakeStream | null = null;
   private awaitingUntil = 0;
   private awaitTimer: ReturnType<typeof setTimeout> | null = null;
+  /** A remote-trigger listen is waiting for speech to start. */
+  private listenWaiting = false;
+  private listenTimer: ReturnType<typeof setTimeout> | null = null;
+  private lastStartError: string | null = null;
   protected readonly now: () => number;
 
   constructor(protected deps: AutomationDeps) {
@@ -119,7 +130,7 @@ export class VoiceAutomation implements VadEvents {
   }
 
   protected wantVad(): boolean {
-    return this.interruptArmed || this.handsFreeActive || this.capturing !== null;
+    return this.interruptArmed || this.handsFreeActive || this.listenWaiting || this.capturing !== null;
   }
 
   protected reconcile(): void {
@@ -128,11 +139,16 @@ export class VoiceAutomation implements VadEvents {
     if (want === this.wantRunning) return;
     this.wantRunning = want;
     if (want) {
+      this.lastStartError = null;
       this.starting = this.deps.vad
         .start(this, this.cfg.sensitivity)
         .catch((err: unknown) => {
           this.wantRunning = false;
-          this.deps.onError?.(`Voice detection unavailable: ${(err as Error)?.message || err}`);
+          const message = (err as Error)?.message || String(err);
+          this.lastStartError = message;
+          // A trigger listen reports its own failure (tone + notice); the
+          // interrupt / hands-free path turns hands-free off via onError.
+          if (!this.listenWaiting) this.deps.onError?.(`Voice detection unavailable: ${message}`);
         })
         .finally(() => {
           this.starting = null;
@@ -147,9 +163,84 @@ export class VoiceAutomation implements VadEvents {
     }
   }
 
+  // ---- remote trigger: listen -------------------------------------------------
+
+  /** A trigger listen is armed or capturing. */
+  get listenActive(): boolean {
+    return this.listenWaiting || this.capturing === 'listen';
+  }
+
+  /**
+   * Capture ONE utterance for a remote trigger; it is transcribed (source
+   * `trigger`) when the speaker pauses. Resolves true once the VAD is running,
+   * false when another capture owns the input (push-to-talk held). Rejects when
+   * the microphone / VAD cannot start (e.g. a background tab without mic
+   * permission): the caller reports it.
+   */
+  async listen(): Promise<boolean> {
+    if (this.disposed) return false;
+    if (this.listenActive) return true;
+    if (this.capturing === 'interrupt' || this.capturing === 'command') return true; // already capturing speech
+    if (this.capturing === 'wake' && !this.wake?.woke) {
+      // Someone is mid-utterance and hands-free was checking it for the wake
+      // word: the trigger means "this is for you". The VAD delivers the whole
+      // utterance at its end, so nothing is lost.
+      this.dropWakeStream();
+      if (!this.deps.input.beginExternal('trigger')) return false;
+      this.capturing = 'listen';
+      return true;
+    }
+    if (this.capturing === 'wake') return true; // woken: already listening
+    if (!this.deps.input.beginExternal('trigger')) return false;
+    this.clearAwait();
+    this.armListenWait();
+    this.reconcile();
+    if (this.starting) await this.starting;
+    if (!this.deps.vad.running && this.listenActive) {
+      const reason = this.lastStartError;
+      this.cancelListen();
+      throw new Error(reason ? `Could not open the microphone: ${reason}` : 'Could not open the microphone');
+    }
+    return this.listenActive;
+  }
+
+  /** Abandon a trigger listen (stop / toggle again). True when one was running. */
+  cancelListen(): boolean {
+    const was = this.listenActive;
+    this.clearListenWait();
+    if (this.capturing === 'listen') this.capturing = null;
+    if (was) this.deps.input.endExternal();
+    this.reconcile();
+    return was;
+  }
+
+  private armListenWait(): void {
+    this.clearListenWait();
+    this.listenWaiting = true;
+    this.listenTimer = setTimeout(() => {
+      this.listenTimer = null;
+      if (!this.listenWaiting) return;
+      this.listenWaiting = false;
+      this.deps.input.endExternal();
+      this.deps.input.fail("Didn't hear anything");
+      this.reconcile();
+    }, LISTEN_WAIT_MS);
+  }
+
+  private clearListenWait(): void {
+    if (this.listenTimer) clearTimeout(this.listenTimer);
+    this.listenTimer = null;
+    this.listenWaiting = false;
+  }
+
   // ---- VAD events -----------------------------------------------------------
 
   onSpeechStart(): void {
+    if (this.listenWaiting && !this.capturing) {
+      this.clearListenWait();
+      this.capturing = 'listen';
+      return;
+    }
     // Interrupt waits for onSpeechRealStart (a single loud frame must not cut
     // Herald off). Hands-free starts streaming at once so the wake word's
     // first syllable is not lost; misfires are simply discarded.
@@ -193,6 +284,8 @@ export class VoiceAutomation implements VadEvents {
     else if (cap === 'command') {
       this.deps.input.endExternal();
       this.startAwait(); // still waiting for the actual command
+    } else if (cap === 'listen') {
+      this.armListenWait(); // a cough is not the question: keep waiting
     }
     this.reconcile();
   }
@@ -200,7 +293,9 @@ export class VoiceAutomation implements VadEvents {
   onSpeechEnd(audio: Float32Array): void {
     const cap = this.capturing;
     this.capturing = null;
-    if (cap === 'interrupt' || cap === 'command') {
+    if (cap === 'listen') {
+      void this.deps.input.transcribeUtterance(float32ToInt16Frames(audio), 'trigger');
+    } else if (cap === 'interrupt' || cap === 'command') {
       void this.deps.input.transcribeUtterance(float32ToInt16Frames(audio), cap === 'command' ? 'wake' : 'interrupt');
     } else if (cap === 'wake') {
       void this.finishWakeStream();
@@ -216,7 +311,7 @@ export class VoiceAutomation implements VadEvents {
       this.preroll.push(frame);
       if (this.preroll.length > PREROLL_FRAMES) this.preroll.shift();
     }
-    if (this.capturing === 'interrupt' || this.capturing === 'command' || (this.capturing === 'wake' && w?.woke)) {
+    if (this.capturing === 'interrupt' || this.capturing === 'command' || this.capturing === 'listen' || (this.capturing === 'wake' && w?.woke)) {
       this.deps.input.setLevel(meterLevel(rms16(floatToInt16(frame))));
     }
   }
@@ -241,6 +336,7 @@ export class VoiceAutomation implements VadEvents {
   dispose(): void {
     this.disposed = true;
     if (this.graceTimer) clearTimeout(this.graceTimer);
+    this.clearListenWait();
     this.clearAwait();
     this.dropWakeStream();
     this.deps.vad.destroy();

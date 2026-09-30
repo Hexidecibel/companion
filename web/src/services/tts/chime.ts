@@ -41,9 +41,11 @@ export function unlockChime(): void {
  *   finished - the motif descending and softer (settled: something is done)
  *   wake     - a quick bright two-note "I'm listening"
  *   ok       - one soft note (a voice command was taken)
+ *   error    - a low falling pair, off the motif (could not do that: e.g. the
+ *              mic is not available to a remote trigger in a background tab)
  * Quiet on purpose: about -26 dBFS peak at the default volume.
  */
-export type ToneKind = ChimeKind | 'wake' | 'ok';
+export type ToneKind = ChimeKind | 'wake' | 'ok' | 'error';
 
 interface Note {
   freq: number;
@@ -74,6 +76,10 @@ export const TONES: Record<ToneKind, Note[]> = {
     { freq: E6, at: 0.1, dur: 0.4, gain: 1 },
   ],
   ok: [{ freq: C6, at: 0, dur: 0.35, gain: 0.7 }],
+  error: [
+    { freq: 392.0, at: 0, dur: 0.22, gain: 0.8 },
+    { freq: 311.13, at: 0.14, dur: 0.4, gain: 0.8 },
+  ],
 };
 
 /** Total length of a tone in seconds (tests, scheduling). */

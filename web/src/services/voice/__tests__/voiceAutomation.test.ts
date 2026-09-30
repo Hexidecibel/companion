@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { COMMAND_WAIT_MS, INTERRUPT_GRACE_MS, VoiceAutomation, type AutomationConfig } from '../voiceAutomation';
+import { COMMAND_WAIT_MS, INTERRUPT_GRACE_MS, LISTEN_WAIT_MS, VoiceAutomation, type AutomationConfig } from '../voiceAutomation';
 import type { VadEvents, VadLike, VadSensitivity } from '../vadListener';
 import { VoiceInputController } from '../voiceInput';
 import { HybridTtsEngine } from '../../tts/hybridTtsEngine';
@@ -389,5 +389,103 @@ describe('VoiceAutomation (barge-in while hands-free)', () => {
     vad.events!.onSpeechRealStart();
     expect(stopSpeech).toHaveBeenCalled();
     expect(input.state.source).toBe('wake');
+  });
+});
+
+describe('VoiceAutomation (remote-trigger listen)', () => {
+  let now = 0;
+  beforeEach(() => {
+    vi.useFakeTimers();
+    now = 50_000;
+  });
+  afterEach(() => vi.useRealTimers());
+
+  function setup(sttText: string | string[] = 'what finished?', vad = fakeVad()) {
+    const tr = fakeTransport(sttText);
+    const onTranscript = vi.fn();
+    const input = new VoiceInputController({
+      mic: { permission: 'granted', start: async () => {}, stop: () => {} },
+      getTransport: () => tr.t,
+      onTranscript,
+      onBargeIn: () => {},
+      now: () => now,
+    });
+    const onError = vi.fn();
+    const auto = new VoiceAutomation({ vad, input, stopSpeech: vi.fn(), now: () => now, getTransport: () => tr.t, onError });
+    auto.update({ ...base, interrupt: false });
+    return { vad, input, auto, onTranscript, onError, ...tr };
+  }
+
+  it('starts the VAD, captures the next utterance and transcribes it as a trigger', async () => {
+    const { vad, input, auto, onTranscript } = setup();
+    expect(vad.starts).toBe(0);
+    await expect(auto.listen()).resolves.toBe(true);
+    expect(vad.starts).toBe(1);
+    expect(input.state).toMatchObject({ phase: 'listening', source: 'trigger' });
+    expect(auto.listenActive).toBe(true);
+    vad.events!.onSpeechStart();
+    vad.events!.onSpeechRealStart();
+    vad.events!.onSpeechEnd(new Float32Array(16000));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(onTranscript).toHaveBeenCalledWith('what finished?', 'trigger');
+    expect(auto.listenActive).toBe(false);
+    expect(vad.running).toBe(false); // nothing else wants it
+  });
+
+  it('a misfire keeps waiting; silence gives up after LISTEN_WAIT_MS', async () => {
+    const { input, auto, onTranscript, vad } = setup();
+    await auto.listen();
+    vad.events!.onSpeechStart();
+    vad.events!.onMisfire();
+    expect(auto.listenActive).toBe(true);
+    expect(input.state.phase).toBe('listening');
+    await vi.advanceTimersByTimeAsync(LISTEN_WAIT_MS + 10);
+    expect(auto.listenActive).toBe(false);
+    expect(input.state).toMatchObject({ phase: 'idle', error: "Didn't hear anything" });
+    expect(onTranscript).not.toHaveBeenCalled();
+    expect(vad.running).toBe(false);
+  });
+
+  it('cancelListen drops the capture: nothing is transcribed', async () => {
+    const { input, auto, onTranscript, vad, requests } = setup();
+    await auto.listen();
+    vad.events!.onSpeechStart();
+    expect(auto.cancelListen()).toBe(true);
+    vad.events!.onSpeechEnd(new Float32Array(16000));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(onTranscript).not.toHaveBeenCalled();
+    expect(requests.filter((r) => r.type === 'herald_voice_stream_end')).toHaveLength(0);
+    expect(input.state.phase).toBe('idle');
+    expect(auto.cancelListen()).toBe(false);
+  });
+
+  it('rejects when the mic cannot open, without the hands-free error path', async () => {
+    const vad = fakeVad();
+    vad.start = async () => {
+      throw new Error('Permission denied');
+    };
+    const { auto, input, onError } = setup(undefined, vad);
+    await expect(auto.listen()).rejects.toThrow(/Could not open the microphone: Permission denied/);
+    expect(onError).not.toHaveBeenCalled();
+    expect(auto.listenActive).toBe(false);
+    expect(input.state.phase).toBe('idle');
+  });
+
+  it('push-to-talk in progress: listen declines', async () => {
+    const { auto, input } = setup();
+    await input.start('button');
+    await expect(auto.listen()).resolves.toBe(false);
+  });
+
+  it('takes over an utterance hands-free was checking for the wake word', async () => {
+    const { vad, auto, onTranscript, requests } = setup();
+    auto.update({ ...base, interrupt: false, handsFree: true });
+    await vi.advanceTimersByTimeAsync(0);
+    vad.events!.onSpeechStart(); // opens a wake stream
+    expect(requests.some((r) => r.type === 'herald_voice_stream_start' && r.payload.purpose === 'wake')).toBe(true);
+    await expect(auto.listen()).resolves.toBe(true);
+    vad.events!.onSpeechEnd(new Float32Array(16000));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(onTranscript).toHaveBeenCalledWith('what finished?', 'trigger');
   });
 });

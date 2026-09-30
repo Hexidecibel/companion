@@ -10,6 +10,7 @@ import { eventBus } from '../utils/eventBus';
 import { routeVoiceTranscript } from '../services/voice/voiceCommandRouter';
 import type { HeraldIntent } from '../types/herald';
 import { playChime } from '../services/tts/chime';
+import { DeferredNotice, runHeraldTrigger, type TriggerActions } from '../services/voice/heraldTrigger';
 
 const PANEL_OPEN_KEY = 'herald_panel_open';
 /** A voice command waiting for the current turn to finish gives up after this. */
@@ -171,21 +172,25 @@ export function HeraldProvider({ children }: { children: ReactNode }) {
   heraldRef.current = herald;
   const voiceRef = useRef(voice);
   voiceRef.current = voice;
-  const pendingIntent = useRef<{ text: string; intent: HeraldIntent; at: number } | null>(null);
-  const sendIntent = useCallback((text: string, intent: HeraldIntent) => {
+  const pendingIntent = useRef<{ text: string; intent?: HeraldIntent; at: number } | null>(null);
+  /** A voice turn outside the composer (commands, remote-trigger speech). Waits for a running turn. */
+  const sendVoiceTurn = useCallback((text: string, intent?: HeraldIntent) => {
     const h = heraldRef.current;
     if ((h.state?.busy ?? false) || h.sending) {
       pendingIntent.current = { text, intent, at: Date.now() };
       return;
     }
-    void h.send(text, { mode: 'voice', intent });
+    void h.send(text, intent ? { mode: 'voice', intent } : { mode: 'voice' });
   }, []);
+  const sendIntent = useCallback((text: string, intent: HeraldIntent) => sendVoiceTurn(text, intent), [sendVoiceTurn]);
   const busyNow = (herald.state?.busy ?? false) || herald.sending;
   useEffect(() => {
     const p = pendingIntent.current;
     if (busyNow || !p) return;
     pendingIntent.current = null;
-    if (Date.now() - p.at < INTENT_WAIT_MS) void heraldRef.current.send(p.text, { mode: 'voice', intent: p.intent });
+    if (Date.now() - p.at < INTENT_WAIT_MS) {
+      void heraldRef.current.send(p.text, p.intent ? { mode: 'voice', intent: p.intent } : { mode: 'voice' });
+    }
   }, [busyNow]);
 
   // Esc stops Herald talking from anywhere on the page (hands-free: focus is
@@ -236,8 +241,49 @@ export function HeraldProvider({ children }: { children: ReactNode }) {
     },
     onVoiceTranscript,
     briefMe,
+    sendVoice: sendVoiceTurn,
   });
   voiceInputRef.current = voiceInput;
+
+  // Remote triggers (hotkeys on other machines): the daemon sends them only to
+  // the active device, i.e. this one. Works with the tab hidden; a failure is a
+  // tone now and a notice (panel opened) the next time the user looks.
+  const triggerNotice = useMemo(() => new DeferredNotice((m) => {
+    openRef.current();
+    voiceInputRef.current?.controller.fail(m);
+  }), []);
+  useEffect(() => {
+    const flush = () => triggerNotice.flush();
+    document.addEventListener('visibilitychange', flush);
+    window.addEventListener('focus', flush);
+    return () => {
+      document.removeEventListener('visibilitychange', flush);
+      window.removeEventListener('focus', flush);
+    };
+  }, [triggerNotice]);
+  const triggerActions = useMemo<TriggerActions>(() => ({
+    speaking: () => voiceRef.current.supported && voiceRef.current.speaking,
+    capturing: () => voiceInputRef.current?.isCapturing() ?? false,
+    stopSpeech: () => voiceRef.current.stopCommand(),
+    cancelCapture: () => voiceInputRef.current?.cancel(),
+    listen: () => voiceInputRef.current?.listen() ?? Promise.resolve('Voice input is not ready'),
+    brief: () => briefMe(),
+    repeat: () => voiceRef.current.repeat(),
+    allowBackground: () => voiceRef.current.allowBackground(),
+    tone: (kind) => {
+      // Listening / failed are functional feedback (you may be mid-game): always.
+      if (kind !== 'ok' || voiceRef.current.chimeOn) playChime(kind, kind === 'ok' ? 0.035 : 0.06);
+    },
+    notice: (m) => triggerNotice.post(m),
+  }), [briefMe, triggerNotice]);
+  const seenTriggers = useRef<string[]>([]);
+  const subscribeEvents = herald.subscribeEvents;
+  useEffect(() => subscribeEvents((event, source) => {
+    if (event.kind !== 'trigger' || source !== 'push') return;
+    if (seenTriggers.current.includes(event.id)) return;
+    seenTriggers.current = [...seenTriggers.current.slice(-19), event.id];
+    void runHeraldTrigger(event.action, triggerActions);
+  }), [subscribeEvents, triggerActions]);
   const panelOpenRef = useRef(panelOpen);
   panelOpenRef.current = panelOpen;
   const screenOpenRef = useRef(screenOpen);

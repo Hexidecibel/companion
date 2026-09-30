@@ -76,4 +76,24 @@ describe('useHeraldVoice', () => {
     expect(engine.spoken).toEqual(['One.']);
     expect(engine.cancels).toBeGreaterThan(0);
   });
+
+  it('a hidden tab stays quiet unless a remote trigger allowed background speech', () => {
+    const { engine, hook, emit } = setup();
+    Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true });
+    try {
+      emit(start('quiet'));
+      emit(delta('quiet', 'Nobody asked. '));
+      expect(engine.spoken).toEqual([]);
+      act(() => hook.result.current.allowBackground());
+      emit(start('asked'));
+      emit(delta('asked', 'Two sessions finished. '));
+      expect(engine.spoken).toEqual(['Two sessions finished.']);
+      act(() => hook.result.current.allowBackground(-1)); // grant over
+      emit(start('later'));
+      emit(delta('later', 'Unprompted. '));
+      expect(engine.spoken).toEqual(['Two sessions finished.']);
+    } finally {
+      Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true });
+    }
+  });
 });

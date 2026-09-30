@@ -75,6 +75,8 @@ const REMINDER_CHECK_MS = 20_000;
 const FLASH_MS = 1800;
 const STATUS_REFRESH_MS = 60_000;
 const STATUS_RETRY_MS = 10_000;
+/** How long a remote trigger lets replies play in a hidden tab (think + speak). */
+export const BACKGROUND_SPEECH_MS = 90_000;
 
 /** Voice side channel to the current hub. */
 export interface HeraldVoiceHost {
@@ -148,6 +150,11 @@ export interface HeraldVoice {
   neural: boolean;
   /** Re-probe the voice service now. */
   refreshStatus: () => void;
+  /**
+   * A remote trigger asked for speech: replies may play while this tab is hidden
+   * for a while (normally a background tab stays quiet).
+   */
+  allowBackground: (ms?: number) => void;
 }
 
 const TEST_LINE = "Hi, I'm Herald. Two sessions finished, and one is waiting on you.";
@@ -179,13 +186,14 @@ export function useHeraldVoice(
 
   const prefsRef = useRef(prefs);
   prefsRef.current = prefs;
+  const backgroundUntil = useRef(0);
   const voiceRef = useRef(voice);
   voiceRef.current = voice;
 
   const controller = useMemo(
     () => new HeraldSpeechController(engine, {
       isEnabled: () => prefsRef.current.voiceOn,
-      isVisible: pageVisible,
+      isVisible: () => pageVisible() || Date.now() < backgroundUntil.current,
       speakOptions: () => ({ rate: prefsRef.current.rate, voiceId: voiceRef.current?.id ?? null }),
       spokenLength: () => prefsRef.current.spokenLength,
     }),
@@ -349,6 +357,9 @@ export function useHeraldVoice(
   }, [connected, hostId]);
 
   const refreshStatus = useCallback(() => setStatusNonce((n) => n + 1), []);
+  const allowBackground = useCallback((ms: number = BACKGROUND_SPEECH_MS) => {
+    backgroundUntil.current = Date.now() + ms;
+  }, []);
   useEffect(() => () => hybrid?.dispose(), [hybrid]);
 
   const stop = useCallback(() => controller.stop(), [controller]);
@@ -431,5 +442,6 @@ export function useHeraldVoice(
     serverStatus,
     neural: !!hybrid && hybrid.server.available && voice?.engine === 'neural',
     refreshStatus,
-  }), [engine, hybrid, prefs, speaking, voices, voice, setVoiceOn, setChimeOn, setVoiceId, setRate, stop, stopCommand, repeat, goOn, stepRateCb, expectBriefing, setSpokenLength, setRemind, flash, announcer, testVoice, serverStatus, refreshStatus]);
+    allowBackground,
+  }), [engine, hybrid, prefs, speaking, voices, voice, setVoiceOn, setChimeOn, setVoiceId, setRate, stop, stopCommand, repeat, goOn, stepRateCb, expectBriefing, setSpokenLength, setRemind, flash, announcer, testVoice, serverStatus, refreshStatus, allowBackground]);
 }

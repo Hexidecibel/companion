@@ -83,7 +83,7 @@ export function HeraldListeningBar({ input }: { input: HeraldVoiceInput }) {
     ? 'Transcribing…'
     : state.phase === 'starting'
       ? 'Opening microphone…'
-      : state.source === 'interrupt' || state.source === 'wake'
+      : state.source === 'interrupt' || state.source === 'wake' || state.source === 'trigger'
         ? 'Listening… (pause to send)'
         : 'Listening… release to send';
   return (
