@@ -1,0 +1,428 @@
+/**
+ * SessionSource: Herald's read/act surface over coding sessions.
+ *
+ * The interface is deliberately transport-agnostic so a fleet (multi-daemon)
+ * implementation can plug in later; LocalSessionSource reads this daemon's
+ * watcher + tmux panes and acts through the existing InputInjector path.
+ */
+
+import { execFile } from 'child_process';
+import * as path from 'path';
+import { detectActiveChoicePrompt, getPendingApprovalTools } from '../parser';
+import type { ConversationMessage } from '../types';
+import { BoundedMap } from '../utils';
+import { fnv1a, oneLine, clip, trailingQuestion } from './text';
+
+export type HeraldSessionStatus = 'working' | 'waiting' | 'idle';
+
+export interface PendingChoice {
+  question: string;
+  header?: string;
+  options: Array<{ label: string; description?: string }>;
+  multiSelect: boolean;
+  /** Stable signature of (header, question, option labels) — detects a changed prompt. */
+  signature: string;
+}
+
+export interface PendingApproval {
+  tool: string;
+  detail: string;
+  /** tool_use id: unique per approval occurrence. */
+  toolUseId: string;
+}
+
+export interface SessionSnapshot {
+  serverId: string;
+  /** Stable id within the server (tmux session name for the local source). */
+  sessionId: string;
+  /** Display name: user-assigned friendly name, else tmux name. */
+  sessionName: string;
+  tmuxName: string;
+  projectPath: string;
+  projectName: string;
+  status: HeraldSessionStatus;
+  inactive: boolean;
+  lastActivity: number;
+  currentActivity?: string;
+  /** Live multiple-choice prompt on the terminal (AskUserQuestion / permission box). */
+  pendingChoice: PendingChoice | null;
+  /** Pending tool approval visible in the transcript. */
+  pendingApproval: PendingApproval | null;
+  /** The finished turn ended by asking the user something. */
+  pendingQuestion: string | null;
+  /** Identity of the most recent assistant turn (dedupe key for "finished"). */
+  lastTurnKey: string | null;
+  /** Deterministic one-line gist of the last assistant turn (for headlines). */
+  lastTurnGist: string | null;
+}
+
+export interface TranscriptTurn {
+  role: 'user' | 'assistant';
+  text: string;
+  at: number;
+}
+
+export interface RecentTranscript {
+  lastUserPrompt: TranscriptTurn | null;
+  /** Assistant turns, oldest first (a turn = consecutive assistant messages). */
+  assistantTurns: TranscriptTurn[];
+}
+
+export interface SessionSource {
+  readonly serverId: string;
+  listSessions(): Promise<SessionSnapshot[]>;
+  getRecentTranscript(sessionId: string, maxTurns: number): Promise<RecentTranscript>;
+  /**
+   * Fresh (uncached) read of the live choice prompt — used to re-validate before
+   * sending. Must REJECT when the screen cannot be read (never resolve null).
+   */
+  getLiveChoice(sessionId: string): Promise<PendingChoice | null>;
+  sessionExists(sessionId: string): Promise<boolean>;
+  sendText(sessionId: string, text: string, tag: string): Promise<boolean>;
+  sendChoice(
+    sessionId: string,
+    index: number,
+    optionCount: number,
+    multiSelect: boolean
+  ): Promise<boolean>;
+}
+
+// ---------------------------------------------------------------------------
+
+export function choiceSignature(q: {
+  header?: string;
+  question?: string;
+  options: Array<{ label: string }>;
+}): string {
+  return fnv1a([q.header || '', q.question || '', ...q.options.map((o) => o.label)].join('\u0001'));
+}
+
+/** Split messages into the last user prompt + trailing assistant turns. */
+export function extractRecentTranscript(
+  messages: ConversationMessage[],
+  maxTurns: number
+): RecentTranscript {
+  const turns: TranscriptTurn[] = [];
+  let lastUserPrompt: TranscriptTurn | null = null;
+  let current: TranscriptTurn | null = null;
+  // Walk backwards so we can stop early on huge transcripts.
+  const LIMIT_SCAN = 400;
+  let scanned = 0;
+  for (let i = messages.length - 1; i >= 0 && scanned < LIMIT_SCAN; i--, scanned++) {
+    const m = messages[i];
+    if (m.type === 'assistant') {
+      const text = (m.content || '').trim();
+      if (!text) continue;
+      if (!current) current = { role: 'assistant', text, at: m.timestamp };
+      else current.text = `${text}\n\n${current.text}`;
+    } else if (m.type === 'user') {
+      const text = (m.content || '').trim();
+      if (!text) continue;
+      if (current) {
+        turns.unshift(current);
+        current = null;
+      }
+      if (!lastUserPrompt) lastUserPrompt = { role: 'user', text, at: m.timestamp };
+      if (turns.length >= maxTurns) break;
+    }
+  }
+  if (current && turns.length < maxTurns) turns.unshift(current);
+  return { lastUserPrompt, assistantTurns: turns.slice(-maxTurns) };
+}
+
+function approvalDetail(input: Record<string, unknown> | undefined): string {
+  if (!input) return '';
+  const pick = ['command', 'file_path', 'path', 'url', 'pattern', 'description', 'plan'];
+  for (const k of pick) {
+    const v = input[k];
+    if (typeof v === 'string' && v.trim()) return clip(oneLine(v), 300);
+  }
+  return '';
+}
+
+// ---------------------------------------------------------------------------
+
+const TRANSCRIPT_LOAD_RETRY_MS = 30_000;
+
+interface ServerSummarySession {
+  id: string;
+  name: string;
+  projectPath: string;
+  status: 'idle' | 'working' | 'waiting' | 'error';
+  lastActivity: number;
+  currentActivity?: string;
+  tmuxSessionName?: string;
+  inactive?: boolean;
+}
+
+export interface LocalSourceDeps {
+  watcher: {
+    getServerSummary(): Promise<{ sessions: ServerSummarySession[] }>;
+    getMessages(sessionId?: string): ConversationMessage[];
+    /**
+     * Load a session's transcript on demand. After a daemon start the watcher only
+     * tracks recently modified files, so idle sessions have no messages until
+     * something asks for them.
+     */
+    ensureConversationLoaded?(sessionId: string): boolean;
+  };
+  injector: {
+    sendInput(input: string, targetSession?: string): Promise<boolean>;
+    sendChoice(
+      selectedIndices: number[],
+      optionCount: number,
+      multiSelect: boolean,
+      otherText: string | undefined,
+      targetSession?: string
+    ): Promise<boolean>;
+    checkSessionExists(sessionName?: string): Promise<boolean>;
+  };
+  sessionNames: { getAll(): Record<string, string> };
+  /** Override for tests; defaults to `tmux capture-pane` with a hard timeout. */
+  capturePane?: (tmuxName: string) => Promise<string>;
+  /** Called after a successful send (pending-sent bookkeeping, escalation ack). */
+  onSent?: (tmuxName: string, text: string, tag: string) => void;
+}
+
+const PANE_CAPTURE_TIMEOUT_MS = 2500;
+const PANE_CAPTURE_LINES = 60;
+/** Cap on panes captured per listing (most recently active live sessions first). */
+export const MAX_PANE_CAPTURES = 12;
+
+/** Capture a pane. Rejects on failure (timeout, missing session) so callers can fail closed. */
+export function defaultCapturePane(tmuxName: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    execFile(
+      'tmux',
+      ['capture-pane', '-p', '-t', tmuxName, '-S', `-${PANE_CAPTURE_LINES}`],
+      { timeout: PANE_CAPTURE_TIMEOUT_MS, maxBuffer: 1024 * 1024, killSignal: 'SIGKILL' },
+      (err, stdout) => (err ? reject(err) : resolve(String(stdout || '')))
+    );
+  });
+}
+
+interface DerivedTurnInfo {
+  pendingApproval: PendingApproval | null;
+  pendingQuestion: string | null;
+  lastTurnKey: string | null;
+  lastTurnGist: string | null;
+}
+
+export class LocalSessionSource implements SessionSource {
+  readonly serverId = 'local';
+  private deps: LocalSourceDeps;
+  private capture: (tmuxName: string) => Promise<string>;
+  // Transcript-derived info memoized per (session, lastActivity) so polling never
+  // re-parses an unchanged conversation.
+  private derivedCache = new BoundedMap<string, { key: number; info: DerivedTurnInfo }>(256);
+  private listInFlight: Promise<SessionSnapshot[]> | null = null;
+  /** Last on-demand transcript load attempt per session (throttles retries). */
+  private loadAttempts = new BoundedMap<string, number>(256);
+
+  constructor(deps: LocalSourceDeps) {
+    this.deps = deps;
+    this.capture = deps.capturePane || defaultCapturePane;
+  }
+
+  listSessions(): Promise<SessionSnapshot[]> {
+    // Share one in-flight listing between concurrent callers (poll + tool calls).
+    if (this.listInFlight) return this.listInFlight;
+    const p = this.doListSessions().finally(() => {
+      this.listInFlight = null;
+    });
+    this.listInFlight = p;
+    return p;
+  }
+
+  private derive(sessionId: string, lastActivity: number): DerivedTurnInfo {
+    const cached = this.derivedCache.get(sessionId);
+    if (cached && cached.key === lastActivity) return cached.info;
+    let info: DerivedTurnInfo = {
+      pendingApproval: null,
+      pendingQuestion: null,
+      lastTurnKey: null,
+      lastTurnGist: null,
+    };
+    try {
+      const messages = this.messagesFor(sessionId);
+      const last = messages[messages.length - 1];
+      const pendingTools = getPendingApprovalTools(messages);
+      let pendingApproval: PendingApproval | null = null;
+      if (pendingTools.length > 0 && last?.type === 'assistant') {
+        const tc = last.toolCalls?.find((t) => t.id === pendingTools[0].id);
+        pendingApproval = {
+          tool: pendingTools[0].name,
+          detail: approvalDetail(tc?.input),
+          toolUseId: pendingTools[0].id,
+        };
+      }
+      let lastAssistant: ConversationMessage | undefined;
+      for (let i = messages.length - 1; i >= 0 && i >= messages.length - 50; i--) {
+        if (messages[i].type === 'assistant' && (messages[i].content || '').trim()) {
+          lastAssistant = messages[i];
+          break;
+        }
+      }
+      const lastIsAssistant = last?.type === 'assistant';
+      info = {
+        pendingApproval,
+        pendingQuestion:
+          lastIsAssistant && lastAssistant ? trailingQuestion(lastAssistant.content) : null,
+        lastTurnKey: lastAssistant ? `${lastAssistant.id}:${lastAssistant.timestamp}` : null,
+        lastTurnGist: lastAssistant ? lastAssistant.content : null,
+      };
+    } catch (err) {
+      console.error(`Herald: failed to derive turn info for "${sessionId}":`, err);
+    }
+    // Only memoize a real read: an empty result (transcript not loaded yet) is retried next poll.
+    if (info.lastTurnKey || info.pendingApproval)
+      this.derivedCache.set(sessionId, { key: lastActivity, info });
+    return info;
+  }
+
+  /** Messages for a session, loading its transcript on demand if the watcher skipped it. */
+  private messagesFor(sessionId: string): ConversationMessage[] {
+    const messages = this.deps.watcher.getMessages(sessionId);
+    if (messages.length > 0 || !this.deps.watcher.ensureConversationLoaded) return messages;
+    const now = Date.now();
+    const last = this.loadAttempts.get(sessionId);
+    if (last !== undefined && now - last < TRANSCRIPT_LOAD_RETRY_MS) return messages;
+    this.loadAttempts.set(sessionId, now);
+    try {
+      if (!this.deps.watcher.ensureConversationLoaded(sessionId)) return messages;
+    } catch (err) {
+      console.error(`Herald: loading transcript for "${sessionId}" failed:`, err);
+      return messages;
+    }
+    return this.deps.watcher.getMessages(sessionId);
+  }
+
+  private async doListSessions(): Promise<SessionSnapshot[]> {
+    const summary = await this.deps.watcher.getServerSummary();
+    const names = this.deps.sessionNames.getAll();
+    const sessions = summary.sessions || [];
+
+    // Capture panes for the most recently active live sessions only.
+    const liveByRecency = sessions
+      .filter((s) => !s.inactive)
+      .sort((a, b) => b.lastActivity - a.lastActivity)
+      .slice(0, MAX_PANE_CAPTURES);
+    const choices = new Map<string, PendingChoice | null>();
+    await Promise.all(
+      liveByRecency.map(async (s) => {
+        choices.set(s.id, await this.readChoice(s.tmuxSessionName || s.id));
+      })
+    );
+
+    const out: SessionSnapshot[] = [];
+    for (const s of sessions) {
+      const tmuxName = s.tmuxSessionName || s.id;
+      const pendingChoice = choices.get(s.id) || null;
+      // Transcript-derived state only matters for live, non-working sessions.
+      const derived =
+        s.inactive || (s.status === 'working' && !pendingChoice)
+          ? null
+          : this.derive(s.id, s.lastActivity);
+      const pendingApproval = derived?.pendingApproval || null;
+      const pendingQuestion = derived?.pendingQuestion || null;
+      let status: HeraldSessionStatus;
+      if (pendingChoice || pendingApproval) status = 'waiting';
+      else if (s.status === 'working') status = 'working';
+      else if (pendingQuestion && s.status === 'waiting') status = 'waiting';
+      else status = 'idle';
+      const projectPath = s.projectPath || '';
+      out.push({
+        serverId: this.serverId,
+        sessionId: s.id,
+        sessionName: names[s.id] || s.name || s.id,
+        tmuxName,
+        projectPath,
+        projectName: projectPath ? path.basename(projectPath) : '',
+        status,
+        inactive: Boolean(s.inactive),
+        lastActivity: s.lastActivity || 0,
+        currentActivity: s.currentActivity,
+        pendingChoice,
+        pendingApproval,
+        pendingQuestion:
+          status === 'waiting' && !pendingChoice && !pendingApproval ? pendingQuestion : null,
+        lastTurnKey: derived?.lastTurnKey || null,
+        lastTurnGist: derived?.lastTurnGist || null,
+      });
+    }
+    return out;
+  }
+
+  /**
+   * Parse the live choice prompt from a pane. For listings a failed capture just
+   * means "no prompt known"; with `strict` (pre-send re-validation) it throws, so
+   * an unreadable pane can never be mistaken for "no prompt on screen" and let
+   * free text be typed into a choice box.
+   */
+  private async readChoice(tmuxName: string, strict = false): Promise<PendingChoice | null> {
+    let pane: string;
+    try {
+      pane = await this.capture(tmuxName);
+    } catch {
+      if (strict) throw new Error(`could not read ${tmuxName}'s screen to re-check it`);
+      return null;
+    }
+    try {
+      if (!pane) {
+        if (strict) throw new Error(`${tmuxName}'s screen came back empty`);
+        return null;
+      }
+      const choice = detectActiveChoicePrompt(pane);
+      if (!choice || choice.options.length < 2) return null;
+      const options = choice.options.map((o) => ({
+        label: o.label,
+        description: o.description || undefined,
+      }));
+      return {
+        question: choice.question || 'Select an option',
+        header: choice.header || undefined,
+        options,
+        multiSelect: Boolean(choice.multiSelect),
+        signature: choiceSignature({ header: choice.header, question: choice.question, options }),
+      };
+    } catch (err) {
+      if (strict) throw err;
+      return null;
+    }
+  }
+
+  async getRecentTranscript(sessionId: string, maxTurns: number): Promise<RecentTranscript> {
+    return extractRecentTranscript(this.messagesFor(sessionId), maxTurns);
+  }
+
+  getLiveChoice(sessionId: string): Promise<PendingChoice | null> {
+    return this.readChoice(sessionId, true);
+  }
+
+  sessionExists(sessionId: string): Promise<boolean> {
+    return this.deps.injector.checkSessionExists(sessionId);
+  }
+
+  async sendText(sessionId: string, text: string, tag: string): Promise<boolean> {
+    const ok = await this.deps.injector.sendInput(text, sessionId);
+    if (ok) this.deps.onSent?.(sessionId, text, tag);
+    return ok;
+  }
+
+  async sendChoice(
+    sessionId: string,
+    index: number,
+    optionCount: number,
+    multiSelect: boolean
+  ): Promise<boolean> {
+    const ok = await this.deps.injector.sendChoice(
+      [index],
+      optionCount,
+      multiSelect,
+      undefined,
+      sessionId
+    );
+    if (ok) this.deps.onSent?.(sessionId, '', 'choice');
+    return ok;
+  }
+}

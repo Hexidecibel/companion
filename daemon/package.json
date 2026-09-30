@@ -44,6 +44,7 @@
     "test:coverage": "jest --coverage"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.129.0",
     "bonjour-service": "^1.2.1",
     "chokidar": "^3.6.0",
     "firebase-admin": "^13.6.0",

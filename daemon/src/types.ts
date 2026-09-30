@@ -1,3 +1,4 @@
+import type { HeraldConfigBlock } from './herald/config';
 export interface OriginCredential {
   origin: string;
   token: string;
@@ -49,6 +50,8 @@ export interface DaemonConfig {
   // Override for the concierge directory (containing .mcp.json.template). If unset,
   // the daemon walks up from its install dir to find <repo>/concierge.
   concierge_dir?: string;
+  // Herald conversational front layer (raw snake_case block; see herald/config.ts).
+  herald?: HeraldConfigBlock;
 }
 
 export interface FeedbackOption {
