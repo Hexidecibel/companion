@@ -1,0 +1,8 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "herald-overlay",
+  "description": "Herald floating orb window: receive view updates only (its commands are app commands)",
+  "platforms": ["linux", "macOS", "windows"],
+  "windows": ["herald-overlay"],
+  "permissions": ["core:event:default"]
+}

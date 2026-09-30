@@ -12,7 +12,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = ["tray-icon", "image-png"] }
+tauri = { version = "2", features = ["tray-icon", "image-png", "macos-private-api"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tauri-plugin-notification = "2"
@@ -34,6 +34,10 @@ tauri-plugin-global-shortcut = "~2.3.2"
 # getUserMedia unless the app handles permission-request).
 [target.'cfg(target_os = "linux")'.dependencies]
 webkit2gtk = { version = "2.0", features = ["v2_40"] }
+
+# Herald floating orb: float over full-screen apps on every Space.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSWindow", "NSResponder"] }
 
 # Herald: allow the microphone for our own origin in WebView2 without a prompt.
 [target.'cfg(target_os = "windows")'.dependencies]

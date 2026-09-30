@@ -473,6 +473,7 @@ name = "companion-desktop"
 version = "1.0.0"
 dependencies = [
  "log",
+ "objc2-app-kit",
  "serde",
  "serde_json",
  "tauri",
