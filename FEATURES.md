@@ -554,6 +554,14 @@ Follow-up fixes layered on the Mobile UX round above: walks back the activity-ro
 - **Doubled header inset fixed** — `.dashboard` already applies `var(--safe-top)`, and `.session-header-mobile` was applying it again, creating an excessive top band. Inset now applied once plus a 6px gap (`global.css` mobile media queries)
 - **Autolink URLs inside emphasis** — `MarkdownRenderer.tsx` previously stored bold/italic inner text as a raw string and never re-parsed it, so URLs inside `**…**` / `*…*` never became links. Bold/italic now carry children and recurse, so URLs (plus code/file links and nested emphasis) inside emphasis render as the accent link pill, enabling long-press → Open Link / Copy link
 
+## Herald — quiet by default: voice commands, brevity, tones (2026-09-30)
+- Local voice commands, whole-utterance only (1-5 words after fillers and "Herald"/"Hey Jarvis"): "stop", "repeat that" (replays cached audio), "shorter", "go on", "slower"/"faster", "what's up"; "stop the build" is still a message. Works for push-to-talk, talking over Herald and hands-free
+- Spoken cap: at most two sentences / 40 words are read out, then "There's more on screen — say go on."; full text on screen. Setting: Spoken length Short / Full
+- Voice-mode replies: spoken messages ask the brain for 1-2 short sentences (about 30 words); reply length setting Auto / Brief / Normal / Detailed stored on the hub (follows you across devices), also changed by saying "keep it short from now on"
+- Herald never speaks up on its own: a signature tone (rising G-C-E; insistent for blocked, soft for finished) on one device only (the hands-free or most recently used one), optional reminder for unheard blocks. "Brief me" button, Ctrl+Shift+B, or "what's up" reads only what is new ("Nothing new." otherwise)
+- Better recognition: session names and jargon are passed to Whisper as vocabulary hints (A/B on Kokoro clips: 20.6% -> 3.6% word errors, no added latency)
+- Talking over Herald now works in hands-free mode (two fixes); Esc stops speech from anywhere on the page
+
 ## Herald — voice, Phase 2 (2026-09-30)
 - Live on the production daemon (2026-09-30): Herald on Haiku over the anthropic provider, voice service runs as the `herald-voice` systemd user unit (`bin/herald-voice install-unit`, survives reboots)
 - Neural voice: Kokoro TTS on a local voice service (`bin/herald-voice`, 127.0.0.1:9889), 27 English voices (default Heart), gapless per-sentence playback, falls back to browser voices per sentence if the service drops

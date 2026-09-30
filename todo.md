@@ -12,6 +12,8 @@ Quick capture for ideas and tasks. Run `/plan` to process into detailed plans.
 - TestFlight beta -- submit iOS build for beta testing before public release
 
 ## Upcoming
+- Custom "Herald" wake word -- train an openWakeWord model overnight on this box from synthetic Kokoro/Piper "Herald"/"Hey Herald" clips + negatives (bin/ script), load via HERALD_WAKE_MODELS, add spellings to WAKE_NAMES; keep "hey jarvis" as fallback. See plan.md 'Voice Front Layer' [planned]
+- Global triggers & native desktop Herald -- remote trigger API (brief/listen/stop/repeat routed to the active device; AutoHotkey, Raycast, curl), Tauri global shortcuts + tray orb, earbud media-button brief on mobile. See plan.md 'Voice Front Layer' [planned]
 - Herald go-live (Phase 1 text-only is merged to main, not live) -- needs sign-off for: `bin/companion install-secrets`, `bin/companion herald-provider anthropic`, build daemon + web in the main repo, daemon restart; then `/apk` for the native app UI. Sandbox demo: `bin/herald-sandbox` (port 9887) [in-progress]
 - Herald Phase 2 (desktop voice) -- push-to-talk + TTS; hide mic from Discord while PTT held (PipeWire, on by default); duck other audio while Herald speaks (lower/mute/off + level; phones via OS audio focus). See plan.md 'Voice Front Layer' [planned]
 - Cmd+Alt+Tab session switcher -- keyboard shortcut to cycle between session windows (MRU order like Alt+Tab, hold modifiers + tap Tab to step, release to switch). Confirm target: desktop Tauri app vs browser; check OS doesn't swallow the combo

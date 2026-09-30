@@ -1771,9 +1771,47 @@ Local voice service `bin/herald-voice` (Python/aiohttp, 127.0.0.1:9889, nice 10,
   capture to end-of-speech, send; one hands-free device at a time; visible indicator; paused when
   the tab is hidden (opt-out). Detection ~90 ms after the wake word; idle hands-free ~7% of one
   browser core, 0% voice service.
+- [x] **Step 5 Quiet by default** (done 2026-09-30). Local voice commands (whole utterance only,
+  `web/src/services/voice/voiceCommands.ts`): stop / repeat (cached audio) / shorter / go on /
+  slower / faster / what's up. Spoken cap 2 sentences / 40 words + "say go on" tail; herald_send
+  `mode` (voice -> brief per-turn [Reply style] note) and `intent` (shorter | more | brief);
+  verbosity Auto/Brief/Normal/Detailed in Herald state (menu, or the brain's `set_verbosity`).
+  Tones instead of unprompted speech: signature G-C-E earcon, one announcing device (daemon
+  `herald_presence` arbitration), reminders for unheard blocks; "Brief me" (button, Ctrl+Shift+B,
+  "what's up") reads only unheard items, max 3 + "and N more". Whisper vocabulary hints from live
+  session names + jargon: base.en WER 20.6% -> 3.6% on Kokoro clips, no added latency; small.en
+  measured 1.15-1.54 s for a 5 s clip idle (over the 1.2 s budget), not adopted. Barge-in fixed
+  for hands-free (interrupt now arms without the Permissions API; a wake stream open when Herald
+  starts speaking turns into an interrupt; "Hey Jarvis" always silences Herald).
 - [ ] Not done yet: Discord mic hiding (a) and ducking (b) above; native (Tauri/Android/iOS) mic
-  paths; a custom "Hey Herald" model (hook: `HERALD_WAKE_MODELS=/path/hey_herald.onnx` +
-  `daemon/src/herald/voice/wake-phrase.ts` WAKE_NAMES); GPU engines (swap in `voice/herald_voice/engines.py`).
+  paths; GPU engines (swap in `voice/herald_voice/engines.py`).
+
+#### Planned: custom "Herald" wake word
+**Status:** planned
+- Train an openWakeWord model on this box's CPU from synthetic clips (Kokoro and Piper voices saying
+  "Herald" / "Hey Herald", varied speed, pitch, room noise) plus negative data (similar words,
+  "Harold", everyday speech). Expect a few hours of CPU: run it as an overnight job through a
+  `bin/` script (e.g. `bin/herald-voice train-wake`), resumable, nice'd.
+- Load it with `HERALD_WAKE_MODELS=/path/hey_herald.onnx`; add its Whisper spellings to
+  `WAKE_NAMES` in `daemon/src/herald/voice/wake-phrase.ts` (and the web `voiceCommands.ts` names).
+- Keep "hey jarvis" loaded as a fallback option (setting to pick either or both).
+
+#### Planned: global triggers & native desktop Herald
+**Status:** planned. Machines: Windows gaming PC, this Linux box, a work Mac (Raycast). Mostly the
+native apps, the browser a lot too.
+1. **Remote trigger API (next up).** Authenticated daemon endpoint (HTTP POST + a WS message) with
+   actions `brief`, `listen` (start capture, ends by VAD), `stop`, `repeat`, routed by the daemon to
+   the ACTIVE device (same arbitration as tones and hands-free). Scoped trigger token, not the main
+   daemon token. Ship ready-made triggers: AutoHotkey v2 script (+ how to map a G Hub / Synapse mouse
+   side button to it) on Windows, a Raycast script command on the Mac, a `curl` one-liner for Stream
+   Deck and iOS Shortcuts. Pick default keys that do not clash with Discord push-to-talk.
+2. **Native desktop Herald (Tauri).** `tauri-plugin-global-shortcut` for system-wide shortcuts with
+   true hold-to-talk (press + release), a tray / menu-bar orb, an always-available mic. Bundle with
+   the Phase 2 audio items (hide the mic from Discord, duck other audio): both need native OS audio
+   control (PipeWire on Linux, Windows audio session APIs, macOS equivalents). Caveats: macOS mic +
+   input-monitoring permissions; limited global shortcuts on Linux Wayland.
+3. **Mobile.** An earbud / headset media-button tap triggers `brief` (Media Session / native media
+   button handling in the Tauri Android and iOS apps).
 
 Dependencies: Phase 1 needs Fleet Phase 1 (Fleet Inbox + capability handshake) or a minimal
 equivalent; later phases are independent of Fleet Phases 2-4, though Missions would give the front
