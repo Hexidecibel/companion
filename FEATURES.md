@@ -225,6 +225,11 @@ File-based permission bypass that works for all sessions and subagents in a proj
 - Session state recovery after reconnection
 - Double-connect guard prevents orphaned sockets
 - Exponential backoff reconnection with configurable max attempts
+- Zombie-socket detection on app resume: `checkAlive()` probes "connected" sockets that went silent while backgrounded and force-reconnects stale ones
+- Outbound send queue: input composed during a brief reconnect window is queued (capped at 100) and delivered after re-auth instead of being dropped
+- Tolerant liveness: 60s pong timeout with 2 missed-pong windows before a forced reconnect; daemon sends native WS pings every 30s so browsers auto-answer
+- Backoff hardening: once-per-drop disconnect latch, and the attempt counter only resets after 30s of stable uptime so flapping links keep widening their backoff
+- Non-blocking daemon I/O: tmux calls (async `execFile` with timeout + SIGKILL) and JSONL reads (`fs.promises`) no longer stall the event loop past the pong window
 
 ## Web Client Keyboard Shortcuts
 - Cmd/Ctrl+P: Fuzzy file finder

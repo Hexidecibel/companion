@@ -805,3 +805,957 @@ Two options:
 - /home/hexi/local/src/companion/daemon/src/handlers/tmux.ts
 - /home/hexi/local/src/companion/daemon/src/handlers/input.ts
 - /home/hexi/local/src/companion/web/src/services/ServerConnection.ts
+
+---
+
+## Item: Fleet (Inbox → Missions → Routing → Health)
+**Status:** planned
+
+### Goal & Rationale
+Anthropic's built-in Remote Control now covers the single-session phone remote (transcript,
+AskUserQuestion, permissions, push). Companion should stop competing on that and instead own the
+**fleet / orchestration layer**: many sessions, many machines, one place to see what needs you, what
+is being worked on, where work should run, and whether the fleet itself is healthy. Nothing in
+Remote Control spans machines or persists cross-session intent — that is the differentiator.
+
+Four phases, each shippable on its own:
+1. **Fleet Inbox** — one cross-daemon, attention-sorted list of every session; answer prompts inline.
+2. **Missions + mission notes** — durable object above sessions (goal, members on N machines,
+   results, notes that get injected into whichever session picks the work up).
+3. **Routing + fleet inventory** — what each host has (repos, toolchains, load); placement
+   suggestions when starting work.
+4. **Fleet health** — per-daemon build/version/drift, confirmed rolling updates.
+
+### Hard Constraints (apply to every phase)
+- **C1 Opt-in / additive.** The existing server→session Dashboard stays the default home. Inbox is a
+  separate view (toggle) with an optional setting to make it home. Missions exist only if created;
+  direct session use and plain concierge chat are unchanged. Routing is suggestion-only (never
+  auto-places). Health is read-only except explicitly confirmed actions.
+- **C2 Backward-compatible protocol.** Only ADD new WS message types and new optional fields. Never
+  rename, remove, or change semantics/shape of existing messages/fields. Unknown new fields on old
+  clients must be harmless.
+- **C3 Graceful degradation.** Older daemons keep working in all existing views. In new views they
+  are either shown with reduced data or labelled "needs update" — never an error state, never a
+  broken view. The web feature-detects per daemon (see "Capability handshake" below).
+- **C4 Zero cost when off.** If the user never opens the Inbox/Missions/Health views, the client
+  sends no new requests and daemons do no new work (no new timers, no pane scrapes).
+- **C5 Subprocess safety** (engineering rule, commit 3058a0a): every recurring or fan-out exec
+  (tmux capture-pane, git, `claude --version`, etc.) must have in-flight dedup + timeout with
+  SIGKILL + PID/session liveness check. Prefer on-demand + short TTL cache over intervals.
+- **C6 Never restart a daemon without explicit per-daemon sign-off** (project hard rule). No fleet
+  action may batch restarts.
+- **C7 Conventions.** New handler modules under `daemon/src/handlers/` registered in
+  `handlers/index.ts`; shared types mirrored in `daemon/src/types.ts` ↔ `web/src/types/index.ts`;
+  hooks in `web/src/hooks/` following the hooks pattern; localStorage keys in
+  `web/src/services/storageKeys.ts`; dark-theme CSS variables (no hardcoded hex); no emojis;
+  `console.log` daemon logging.
+
+### Decisions (2026-09-24)
+User answers to the open questions; no open user questions remain.
+1. **Unseen finished turns count as "Needs you"** by default (Q1), with a per-device setting to turn
+   it off.
+2. **"Seen" state is synced across devices** (Q3), not per device. Each session's own daemon stores
+   a monotonic (max-wins) `seenUpTo` watermark per tmux session in `~/.companion/inbox-seen.json`,
+   exposed via additive `mark_seen` → `session_seen` (live to fleet-subscribed clients) and
+   `seenUpTo` on `get_fleet_inbox` items; feature `inbox_seen_sync_v1`. Older daemons fall back to
+   per-device local seen state for those servers only. See Phase 1 design.
+3. **Mission home = the daemon where the concierge runs** (Q4); no separate "Fleet home" setting.
+4. **Phase 2 may install a Claude Code `SessionStart` hook into project repos** (Q5) to re-inject
+   mission notes after compaction — opt-in per repo, idempotent, merged into existing settings
+   (never clobbers hooks), easy uninstall, no-op without an active mission.
+5. **In-app per-daemon restart confirmation counts as the required sign-off** (Q9) for the Phase 4
+   rolling update; each restart is individually confirmed, no batch auto-restart.
+- Unanswered minor questions (Q2, Q6, Q7, Q8, Q10) proceed with the plan defaults written in their
+  phases; they are not blocking and can be revisited at each phase's kickoff.
+
+### Current-State Findings (research, 2026-09-24)
+- **Handshake already half-exists.** `get_capabilities` (`daemon/src/handlers/remote.ts`) returns
+  `{ daemonVersion, protocolVersion: 1, remoteCapabilities }`, and `web/src/hooks/useCapabilities.ts`
+  consumes it. But `daemonVersion` is `package.json` `1.0.0` on every build (useless for drift), and
+  there is no feature list. Daemons older than the MCP work answer `Unknown message type:
+  get_capabilities` → that response is itself a reliable "legacy" signal. The `authenticated` reply
+  carries only `isLocal` + `gitEnabled`.
+- **Cross-server aggregation already exists.** `web/src/hooks/useAllServerSummaries.ts` polls
+  `get_server_summary` on every connected server every 5s (used by `Dashboard.tsx`).
+  `SessionSummary.status` is `idle | working | waiting | error`, but the daemon never actually
+  emits `error` (`watcher.getServerSummary`), and `waiting` conflates "turn finished" with "blocked
+  on a permission/plan prompt".
+- **Pending live AUQ is invisible to status.** Claude Code only flushes the AUQ tool_use to JSONL
+  after it is answered, so `isWaitingForInput` is FALSE while an AUQ box is on screen (see the
+  `get_highlights` comment in `handlers/session.ts` and commits 5b4c68c..1028d5d). Only
+  `get_highlights` (offset 0) pane-scrapes via `detectActiveChoicePrompt`. The Inbox therefore needs a
+  gated pane probe for "stalled working" sessions — the summary alone will miss the most important
+  case.
+- **Answering already works without subscribing.** `send_input` and `send_choice`
+  (`handlers/input.ts`) accept `tmuxSessionName`; `send_worker_input` exists for workers. The Inbox
+  needs no new answer endpoints. `QuestionBlock.tsx` is already a standalone component
+  (`question`, `onSelectOption`, `onSelectChoice`), and SessionView answers permission prompts by
+  `send_input(label)`.
+- **Bug that matters for the Inbox:** after `send_input`/`send_choice`, the daemon calls
+  `escalation.acknowledgeSession(watcher.getActiveSessionId())` — the *active* session, not the one
+  that was answered. Answering from the Inbox would not cancel push escalation for that session.
+- **Pending permission tools are computed but not exposed.** The watcher emits `pending-approval`
+  (`getPendingApprovalTools`) only to auto-approval in `index.ts`; no client message carries it.
+  `status_change` is session-scoped (only the subscribed session gets it); `other_session_activity`,
+  `error_detected`, `session_completed`, `work_group_update` are global broadcasts.
+- **Away Digest's UI is gone.** `AwayDigest.tsx`/`useAwayDigest.ts` were deleted in 0248880; only the
+  daemon's `get_digest` / `get_notification_history` (persisted in
+  `~/.companion/notification-history.json`, entries carry `eventType`, `sessionName`, `preview`,
+  `acknowledged`) remain. FEATURES.md still lists "Away Digest" as present. The Inbox is the
+  natural successor and should reuse that history for error reasons + "Recently finished".
+- **Missions have no substrate yet.** Concierge fan-outs keep all state inside the concierge
+  Claude's context (`concierge/CLAUDE.md`, `projects.json`); nothing persists. Work groups persist to
+  `~/.companion/work-groups.json` and have their own worker lifecycle (`WorkGroup`, `WorkerSession`).
+  Daemons never talk to each other directly — only the MCP (`mcp/src/daemon-client.ts`) using
+  `~/.companion/mcp-servers.json` (auto-derived by `concierge_sync_mcp`) does.
+- **AJ's box is a file-copy deploy** (`bin/deploy-aj`) — no git on the host, so drift can only be
+  detected from a build stamp shipped inside `daemon/dist`.
+- Uncommitted WS-reliability work is in `web/src/services/ServerConnection.ts` /
+  `ConnectionManager.ts`. Fleet work should land after that is committed and should avoid editing
+  `ServerConnection.ts` (capability caching goes in a new module instead).
+
+### Capability handshake (prerequisite, part of Phase 1)
+- Extend `CapabilitiesResponse` (additive): `features: string[]`, `hostname: string`,
+  `platform: NodeJS.Platform`, `arch: string`, `buildInfo?: { gitSha?: string; dirty?: boolean;
+  builtAt?: string; branch?: string }`. Bump `protocolVersion` to `2` (field already exists; web
+  treats `>= 2` or presence of `features` as feature-aware).
+- Feature strings (constants in both type files): `fleet_inbox_v1`, `fleet_inbox_push_v1`,
+  `choice_expect_prompt_v1`, `inbox_seen_sync_v1`, later `missions_v1`, `inventory_v1`, `health_v1`, `self_update_v1`.
+- Web: new `web/src/services/capabilities.ts` — per-server cache, fetched once per (re)connect via
+  `connectionManager.onChange`, lazily (only when a Fleet view is mounted, per C4). Result states:
+  `{ kind: 'modern', caps }` | `{ kind: 'legacy-caps', caps }` (has get_capabilities, no
+  `features`) | `{ kind: 'legacy' }` (unknown message type / error) | `{ kind: 'unknown' }`
+  (not connected). `hasFeature(serverId, f)` helper.
+- `useCapabilities.ts` keeps working unchanged (it reads the same message; new fields are ignored).
+
+---
+
+### Phase 1 — Fleet Inbox (DETAILED)
+**Size:** M–L. ~600 LOC daemon + ~400 LOC daemon tests, ~950 LOC web + ~300 LOC web tests
+(includes daemon-synced seen state, decided 2026-09-24).
+Roughly 3–5 focused days; splits cleanly into a daemon workstream and a web workstream (web can
+start against the legacy-derivation path before the daemon lands).
+
+#### Design
+**Buckets** (fixed order), each item in exactly one:
+1. **Needs you** — ranked by reason priority, then oldest-waiting first:
+   `permission` (pending approval tool) > `question` (AUQ, JSONL or live pane) > `plan`
+   (ExitPlanMode pending) > `worker_question` > `error` / `worker_error` (unacknowledged since the
+   session's last user input) > `awaiting_reply` (turn finished, not yet seen by you).
+2. **Working** — actively producing output / running tools / subagents running; shows
+   `currentActivity`.
+3. **Recently finished** — turn ended (or `session_completed`) within `recentWindowMs` (default 2h)
+   and already seen/dismissed.
+4. **Idle** — everything else, including `inactive` persisted sessions; collapsed by default.
+
+**"Seen" state — SYNCED across devices (decided 2026-09-24)** (makes `awaiting_reply` vs Recently
+finished work). Each session's **own daemon** is the source of truth for its sessions' seen
+markers; no daemon-to-daemon traffic, no replication (every session lives on exactly one daemon,
+so there is nothing to merge across daemons).
+- **Marker:** per `tmuxSessionName` a watermark `seenUpTo: number` (ms, **daemon clock**), plus
+  `seenAt` / `seenBy` (client label, for debugging). An item is seen iff `seenUpTo >= turnEndedAt`.
+  Keyed by tmux name (stable within a daemon, survives `/clear` and conversation-file rotation,
+  which a JSONL session id / message uuid would not). A reused tmux name is harmless: the new
+  session's `turnEndedAt` is later than the stale watermark, so it shows as unseen.
+  Timestamp watermark (not a message/turn id) chosen because it is totally ordered, which makes
+  "max wins" trivial, and `turnEndedAt` is already computed for the Inbox item.
+- **Clock skew:** the client never supplies wall-clock time of its own. `mark_seen { upTo? }` sends
+  the `turnEndedAt` value the daemon itself reported for the item the user saw (so seeing an old
+  turn cannot swallow a newer one that arrived meanwhile); omitted → daemon uses its current
+  `turnEndedAt` for that session. Values > daemon `now` are clamped.
+- **Races (multiple devices):** monotonic — `seenUpTo = max(stored, incoming)`; a lower value is a
+  no-op that still returns the effective marker. No un-see/undo in v1 (an "unread" action would need
+  a separate explicit `clear` op; deferred).
+- **What counts as seen:**
+  1. *Opening the session* (SessionView mounted **and** document visible, for ≥ ~1.5s, debounced so
+     swiping through sessions doesn't mark everything) → `mark_seen` with the latest `turnEndedAt`
+     the client has; re-sent when a new turn ends while the view stays open and visible.
+  2. *Answering* — the daemon marks seen **implicitly** inside `send_input` / `send_choice` /
+     `send_worker_input` for the answered session (upTo = now). Server-side, so it also works from
+     old clients and the terminal-less paths; no extra round trip.
+  3. *Explicit "Dismiss"* on an Inbox card → `mark_seen`.
+  NOT seen: appearing in the Inbox list, a push/browser notification being delivered or tapped
+  without the session opening, the app being foregrounded on the Dashboard.
+- **Escalation tie-in:** `mark_seen` also calls `escalation.acknowledgeSession(<that session>)` —
+  if you saw it on the desktop, the phone push is cancelled. (Internal behaviour, only triggered by
+  new clients.)
+- **Live update:** after a marker advances, the daemon sends `session_seen { tmuxSessionName,
+  seenUpTo, seenAt }` to **fleet-subscribed clients only** (C4: nothing new to clients that never
+  opened the Inbox). Non-subscribed / polling clients pick it up from the `seenUpTo` field in the
+  next `get_fleet_inbox`.
+- **Persistence:** `~/.companion/inbox-seen.json` `{ version: 1, sessions: { [tmux]: { seenUpTo,
+  seenAt, seenBy? } } }`, written with the existing `atomicWriteFileSync` (`daemon/src/utils.ts`)
+  with mode `0o600`; loaded lazily on first `mark_seen`/`get_fleet_inbox` (not at boot); writes
+  coalesced (≤ 1 write / `SEEN_WRITE_DEBOUNCE_MS` = 1s, timer only exists while a write is pending,
+  flushed on shutdown). Pruned on write: entries whose tmux session no longer exists and
+  `seenAt` > 30 days old; hard cap 1000 entries. Corrupt/missing file → start empty, log once.
+- **Older daemons (no `inbox_seen_sync_v1` in `features`):** fall back to per-device
+  `localStorage` seen state **for those servers only** (map `serverId:tmuxSessionName → seenUpTo`,
+  using that daemon's `lastActivity`-derived turn end). When a server later advertises the feature,
+  the client does a one-time upload of its local entries for that server via `mark_seen` (max-wins
+  makes this safe from every device) and then deletes them locally.
+- **Offline daemon:** `mark_seen` for a disconnected server is queued in memory (latest per session)
+  and flushed on reconnect; the card is shown seen optimistically meanwhile.
+- The "Count finished turns as Needs you" setting (default **ON**, decided) stays a **per-device UI
+  preference** (localStorage) — only the seen marker is synced. OFF sends finished turns straight to
+  Recently finished.
+
+**Daemon side — `get_fleet_inbox`:** one round trip returning classified items for all tagged
+sessions on that daemon.
+- Base data: reuse `watcher.getServerSummary(tmux.listSessions())` + friendly names + subagent
+  counts (same enrichment as `get_server_summary`; factor into a shared helper
+  `buildSessionSummaries(ctx)` in `handlers/session.ts` so both handlers use it — no behavior change
+  for `get_server_summary`).
+- Classification: pure function `classifyAttention(input)` in `daemon/src/fleet/attention.ts`
+  using the conversation's cached messages: `getPendingApprovalTools` → `permission` (+ tool name
+  and a one-line summary: Bash command / file path), pending `AskUserQuestion` in JSONL →
+  `question` (questions from `extractHighlights` last highlight), pending `ExitPlanMode` → `plan`,
+  worker membership from `workGroupManager` (`status === 'waiting'` + `lastQuestion` →
+  `worker_question`; `status === 'error'` → `worker_error`), notification history
+  (`store.getHistorySince(lastUserInputTs)`, `eventType === 'error_detected'`, not acknowledged) →
+  `error`, `isWaitingForInput` with no blocking reason → `awaiting_reply`.
+- **Live AUQ probe (gated, C5):** only for *candidate* sessions: summary status `working` (or
+  `idle` with a live tmux pane), JSONL unchanged for ≥ `FLEET_AUQ_STALL_MS` (4s), tagged tmux
+  session present in the `listSessions()` result just fetched (liveness check). Implementation in
+  `daemon/src/fleet/live-prompt-probe.ts`:
+  - per-session in-flight promise map (dedup concurrent requests from multiple clients),
+  - per-session result cache keyed by `(tmuxName, conv.lastModified)` with TTL
+    `FLEET_PROBE_TTL_MS` (3s),
+  - global concurrency cap `FLEET_PROBE_MAX_CONCURRENT` (4),
+  - uses `injector.captureTmuxPane` (already `runTmux` with `TMUX_OPERATION_TIMEOUT_MS` +
+    SIGKILL) + `detectActiveChoicePrompt`; any failure → no prompt (never throws),
+  - no timers — runs only inside `get_fleet_inbox`.
+  A live choice → reason `question`, bucket Needs you, `liveSourced: true`.
+- **Prompt identity:** every inline prompt gets a stable `promptId`: live choices reuse
+  `liveChoiceHighlightId(sessionId, question)` (already in `handlers/session.ts`); JSONL prompts use
+  the tool_use id. Used for the staleness guard below.
+- Preview: last assistant text, whitespace-collapsed, truncated to `previewChars` (default 160).
+- Also returns daemon identity (`hostname`, `platform`) so cards can show machine tags even when the
+  user's server name is generic.
+
+**Push (optional, `fleet_inbox_push_v1`):** `fleet_subscribe { enabled }` marks the client;
+subscribed clients receive `fleet_inbox_changed { sessionIds, at }` (a cheap invalidation hint,
+debounced 750ms, triggered from watcher `status-change` / `other-session-activity` /
+`error-detected` / `session-completed` and `work-group-update`). Client then re-fetches
+`get_fleet_inbox`. Keeps payloads small and avoids a second classification codepath. Non-subscribed
+clients (all existing ones) see no new traffic. Polling (5s visible / paused when hidden) remains the
+baseline so the feature works without push.
+
+**Staleness guard for inline answers (`choice_expect_prompt_v1`):** optional
+`expectPromptId?: string` on `send_choice` and `send_input`. If present, the daemon re-derives the
+session's current prompt id (JSONL pending tool id, or fresh pane probe bypassing cache) and replies
+`{ success: false, error: 'prompt_changed' }` on mismatch without sending keys. Old daemons ignore
+the field (so for legacy daemons the web re-fetches immediately before sending and shows a
+"prompt may have changed" confirm if the list changed). Behaviour without the field is unchanged.
+
+**Escalation ack fix:** in `send_input` / `send_choice`, additionally call
+`escalation.acknowledgeSession(<resolved session>)` for the session actually answered (keep the
+existing active-session ack). Internal, non-protocol change.
+
+**Web side:**
+- `useFleetInbox()` merges per-server results:
+  - modern daemon (`fleet_inbox_v1`) → `get_fleet_inbox`;
+  - legacy daemon → derived from `get_server_summary` (`waiting` → Needs you/`awaiting_reply`,
+    `working` → Working, else Idle/Recently finished by `lastActivity`), plus bounded
+    enrichment: for `waiting` sessions only, `get_highlights { sessionId, limit: 3 }` (max 2
+    concurrent per server, cached by `lastActivity`) to surface JSONL-visible permission/AUQ/plan
+    prompts inline. Live-pane AUQ is only available if that daemon's `get_highlights` already
+    scrapes (post-5b4c68c) — otherwise shown as a normal card. Legacy servers get a subtle
+    "limited — update daemon" chip on the machine tag, never an error.
+  - disconnected servers: last-known items kept, dimmed, with "offline since …" and prompts
+    disabled.
+- Pure merge/sort/bucket logic lives in `web/src/utils/fleetInbox.ts` (unit-testable), the hook only
+  does IO.
+- **Cards** (`InboxCard.tsx`): machine tag (server name, tinted per server), project tag
+  (basename of `projectPath`, full path on hover/long-press), friendly/tmux name, reason chip,
+  relative time ("waiting 12m"), preview (2 lines), work-group chip if a worker, subagent count.
+  Needs-you cards render the prompt inline (`InboxPrompt.tsx`):
+  - `question` → existing `QuestionBlock` wired to `send_choice` with `tmuxSessionName` +
+    `expectPromptId`; multi-question AUQs: answer current, card re-fetches and shows the next
+    (same as Chat behaviour after f5165c8).
+  - `permission` / `plan` → option buttons (labels from highlight `options`) → `send_input(label)`
+    exactly as `SessionView.handleSelectOption` does, plus "Open" for context.
+  - `worker_question` → options/text → `send_worker_input`.
+  - `awaiting_reply` → collapsed quick-reply field (`send_input`) + "Dismiss".
+  - After a successful send: optimistic "Sent" state + optimistic seen (the daemon marks it seen
+    server-side; legacy servers → local seen), re-fetch that server.
+  - Failures use the existing error toast pattern; `prompt_changed` → refresh card + inline notice.
+- **Layout:**
+  - Desktop: the Dashboard gains a segmented control at the top of the sidebar: **Sessions |
+    Inbox (N)**. In Inbox mode the main pane shows `FleetInbox` (bucket sections, filter bar:
+    machine, project, reason, text search). Clicking a card opens the session in the main pane with
+    a "Back to Inbox" affordance; sidebar session list keeps working.
+  - Mobile: `MobileDashboard` gets the same toggle in its header; Inbox is a full-screen list; tap a
+    card → existing session view; Android back returns to Inbox (use existing `eventBus` /
+    history pattern).
+  - N badge = Needs-you count, only computed while the Inbox has been opened at least once this app
+    session OR "Inbox as home" is set (C4).
+- **Settings** (`SettingsScreen.tsx`): "Home view: Sessions (default) | Inbox";
+  "Count finished turns as Needs you"; "Recently finished window". Keys in `storageKeys.ts`.
+- Notification deep links / push behaviour: unchanged.
+
+#### Data Model / Types (add to `daemon/src/types.ts` and mirror in `web/src/types/index.ts`)
+```ts
+export const FLEET_FEATURES = {
+  INBOX: 'fleet_inbox_v1',
+  INBOX_PUSH: 'fleet_inbox_push_v1',
+  CHOICE_EXPECT_PROMPT: 'choice_expect_prompt_v1',
+  SEEN_SYNC: 'inbox_seen_sync_v1',
+} as const;
+
+export interface SessionSeenMarker {
+  tmuxSessionName: string;
+  seenUpTo: number;             // daemon clock; monotonic (max wins)
+  seenAt: number;               // daemon clock when last advanced
+  seenBy?: string;              // client label, informational only
+}
+
+export interface MarkSeenRequest {
+  tmuxSessionName: string;
+  upTo?: number;                // a turnEndedAt value the daemon reported; omitted → current
+  clientLabel?: string;
+}
+// Response `session_seen` payload = SessionSeenMarker (effective value after max-merge)
+
+export type AttentionBucket = 'needs_you' | 'working' | 'finished' | 'idle';
+export type AttentionReason =
+  | 'permission' | 'question' | 'plan' | 'worker_question'
+  | 'error' | 'worker_error' | 'awaiting_reply';
+
+export type InboxPrompt =
+  | { kind: 'question'; promptId: string; questions: Question[]; liveSourced: boolean }
+  | { kind: 'permission'; promptId: string; toolName: string; summary: string; options: string[] }
+  | { kind: 'plan'; promptId: string; excerpt: string; options: string[] }
+  | { kind: 'worker_question'; promptId: string; groupId: string; workerId: string;
+      question: WorkerQuestion };
+
+export interface FleetInboxItem {
+  tmuxSessionName: string;      // stable key within a daemon
+  sessionId: string;            // same id get_server_summary uses
+  friendlyName?: string;
+  projectPath: string;
+  bucket: AttentionBucket;
+  reasons: AttentionReason[];   // highest priority first; [] for working/idle
+  lastActivity: number;
+  turnEndedAt?: number;         // when it last became waiting
+  waitingSince?: number;        // when the current blocking reason appeared
+  currentActivity?: string;
+  preview?: string;
+  prompt?: InboxPrompt;         // only for needs_you items with an answerable prompt
+  workGroup?: { groupId: string; groupName: string; workerId: string; taskSlug: string };
+  subagentRunning?: number;
+  inactive?: boolean;
+  lastError?: string;
+  seenUpTo?: number;            // present only on inbox_seen_sync_v1 daemons
+}
+
+export interface FleetInboxResponse {
+  items: FleetInboxItem[];
+  generatedAt: number;
+  host: { hostname: string; platform: string };
+}
+
+// CapabilitiesResponse — additive fields
+//   features?: string[]; hostname?: string; platform?: string; arch?: string;
+//   buildInfo?: { gitSha?: string; dirty?: boolean; builtAt?: string; branch?: string };
+```
+Web-only: `InboxEntry = FleetInboxItem & { serverId; serverName; source: 'modern' | 'legacy';
+stale: boolean; seen: boolean; seenSource: 'daemon' | 'local' }`.
+
+#### New / Changed WS Messages (all additive)
+| Request | Response type | Notes |
+|---|---|---|
+| `get_fleet_inbox` `{ recentWindowMs?, previewChars?, includeIdle? = true }` | `fleet_inbox` `FleetInboxResponse` | new, `fleet_inbox_v1` |
+| `fleet_subscribe` `{ enabled: boolean }` | `fleet_subscribed` | new, `fleet_inbox_push_v1` |
+| (broadcast) | `fleet_inbox_changed` `{ sessionIds: string[]; at: number }` | only to fleet-subscribed clients |
+| `mark_seen` `MarkSeenRequest` | `session_seen` `SessionSeenMarker` | new, `inbox_seen_sync_v1`; max-wins; also acks escalation for that session |
+| (broadcast) | `session_seen` `SessionSeenMarker` | on advance only; only to fleet-subscribed clients (incl. the sender's other devices) |
+| `get_fleet_inbox` | items carry optional `seenUpTo` | additive field |
+| `send_input`, `send_choice`, `send_worker_input` | unchanged shape; daemon now also advances the seen marker for the answered session | internal side effect, no protocol change |
+| `get_capabilities` | `capabilities` + `features`, `hostname`, `platform`, `arch`, `buildInfo` | new optional fields; `protocolVersion: 2` |
+| `send_choice`, `send_input` | unchanged + optional `expectPromptId` → may return `error: 'prompt_changed'` | only when field supplied |
+
+#### Files to Create
+- `daemon/src/fleet/attention.ts` — `classifyAttention()` pure classifier + reason priority.
+- `daemon/src/fleet/live-prompt-probe.ts` — gated, deduped, cached pane probe.
+- `daemon/src/fleet/build-info.ts` — reads `dist/build-info.json` if present (used by capabilities;
+  groundwork for Phase 4).
+- `daemon/src/fleet/seen-store.ts` — lazy-loaded, max-merge, coalesced atomic persistence of
+  `~/.companion/inbox-seen.json`, prune, flush-on-shutdown.
+- `daemon/src/handlers/fleet.ts` — `get_fleet_inbox`, `fleet_subscribe`, `mark_seen`.
+- `daemon/scripts/stamp-build.js` — writes `dist/build-info.json` (git sha, dirty, branch, builtAt;
+  tolerates no-git) — hooked into `npm run build`.
+- `daemon/src/__tests__/fleet-attention.test.ts`, `daemon/src/__tests__/fleet-inbox-handler.test.ts`,
+  `daemon/src/__tests__/live-prompt-probe.test.ts`, `daemon/src/__tests__/seen-store.test.ts`.
+- `web/src/services/capabilities.ts` — per-server capability cache + `hasFeature`.
+- `web/src/utils/fleetInbox.ts` — legacy derivation, merge, bucket/sort, seen logic.
+- `web/src/hooks/useFleetInbox.ts` — polling / push-invalidation IO, visibility pause.
+- `web/src/hooks/useInboxSeen.ts` — seen-state router: daemon markers (`mark_seen`,
+  `session_seen` listener, offline queue) for `inbox_seen_sync_v1` servers; localStorage fallback
+  for legacy servers; one-time local→daemon upload when a server gains the feature.
+- `web/src/components/FleetInbox.tsx` — buckets, filters, empty states (desktop + mobile).
+- `web/src/components/InboxCard.tsx`, `web/src/components/InboxPrompt.tsx`.
+- `web/src/utils/__tests__/fleetInbox.test.ts`, `web/src/services/__tests__/capabilities.test.ts`.
+
+#### Files to Modify
+- `daemon/src/types.ts` — types above; extend `CapabilitiesResponse`.
+- `daemon/src/handlers/index.ts` — register `registerFleetHandlers`.
+- `daemon/src/handlers/remote.ts` — `get_capabilities` adds `features`, host info, `buildInfo`,
+  `protocolVersion: 2`.
+- `daemon/src/handlers/session.ts` — extract `buildSessionSummaries(ctx)` shared by
+  `get_server_summary` and `get_fleet_inbox` (no output change for the old handler); export a helper
+  for current prompt id.
+- `daemon/src/handlers/input.ts` — optional `expectPromptId` check; ack the answered session;
+  advance seen marker for the answered session (`send_input`, `send_choice`, `send_worker_input`).
+- `daemon/src/websocket.ts` — `fleetSubscribed` flag on client; debounced `fleet_inbox_changed`
+  broadcast wired to existing watcher/work-group events (only to flagged clients); helper to send
+  `session_seen` to flagged clients (NOT via the generic `broadcast()`, which targets every
+  subscribed client).
+- `daemon/src/index.ts` — flush `seen-store` on shutdown.
+- `web/src/components/SessionView.tsx` — visible-and-open ≥ 1.5s → mark seen (via `useInboxSeen`).
+- `daemon/src/constants.ts` — `FLEET_AUQ_STALL_MS`, `FLEET_PROBE_TTL_MS`,
+  `FLEET_PROBE_MAX_CONCURRENT`, `FLEET_INBOX_CHANGED_DEBOUNCE_MS`, `DEFAULT_RECENT_WINDOW_MS`,
+  `SEEN_WRITE_DEBOUNCE_MS`, `SEEN_PRUNE_AGE_MS`, `SEEN_MAX_ENTRIES`.
+- `daemon/package.json` — `build` runs `stamp-build.js` after `tsc`.
+- `bin/deploy-aj` — ensure `dist/build-info.json` is rsynced (it is inside `dist/`, verify).
+- `web/src/types/index.ts` — mirrored types; `DaemonCapabilities` gains optional fields.
+- `web/src/components/Dashboard.tsx` — view-mode state, segmented toggle, render `FleetInbox`, open
+  session from inbox + back affordance.
+- `web/src/components/MobileDashboard.tsx` — header toggle + inbox list.
+- `web/src/components/SessionSidebar.tsx` — host the desktop segmented control.
+- `web/src/components/SettingsScreen.tsx` — home view + inbox settings.
+- `web/src/services/storageKeys.ts` — `HOME_VIEW_KEY`, `INBOX_SEEN_KEY` (legacy-server fallback only),
+  `INBOX_FINISHED_AS_NEEDS_KEY`, `INBOX_RECENT_WINDOW_KEY`, `INBOX_FILTERS_KEY`.
+- `web/src/styles/global.css` (+ `variables.css` if a server-tint palette is needed) — inbox styles.
+- `FEATURES.md` — on ship, add "Fleet Inbox"; mark Away Digest UI as superseded.
+
+#### Implementation Steps
+1. **Prereq:** confirm the in-flight WS-reliability changes are committed; branch `feat/fleet-inbox`.
+2. **Types:** add all Phase 1 types/constants to `daemon/src/types.ts` and mirror in
+   `web/src/types/index.ts` (keep field order identical for easy diffing).
+3. **Build stamp:** write `daemon/scripts/stamp-build.js` (spawnSync `git` with timeout; on any
+   failure write `{ builtAt }` only); add to the `build` script; `daemon/src/fleet/build-info.ts`
+   reads it once at startup (sync read at boot only is fine).
+4. **Capabilities:** extend `get_capabilities` with `features` (list driven by a single exported
+   `DAEMON_FEATURES` array), `hostname` (`os.hostname()`), `platform`, `arch`, `buildInfo`,
+   `protocolVersion: 2`. Unit test: payload contains old fields unchanged + new ones.
+5. **Shared summaries:** extract `buildSessionSummaries(ctx)` from `get_server_summary`; verify the
+   existing handler output is byte-identical with a test snapshot of a fixture.
+6. **Classifier:** implement `classifyAttention({ summary, messages, isWaiting, workerInfo,
+   recentErrors, livePrompt, now, recentWindowMs })` → `{ bucket, reasons, prompt?, waitingSince?,
+   turnEndedAt? }`. Reuse `getPendingApprovalTools`, `extractHighlights` (last highlight only), and
+   `detectWaitingForInput` from `parser.ts`. Table-driven tests (step 13).
+7. **Live probe:** implement `live-prompt-probe.ts` (in-flight map, TTL cache, semaphore of 4,
+   liveness = name present in the `listSessions()` snapshot passed in; never throws). Candidate
+   predicate exported separately for testing.
+8. **Handler:** `handlers/fleet.ts` `get_fleet_inbox`: listSessions → summaries → per-session gather
+   (cached messages, worker map from `workGroupManager.getGroups()`, error events from
+   `push.getStore().getHistorySince(since)`) → probe candidates in parallel (bounded) → classify →
+   sort (bucket, priority, waitingSince asc, lastActivity desc) → send `fleet_inbox`. Log duration
+   when > `SLOW_OPERATION_THRESHOLD_MS`.
+9. **Staleness guard + ack fix:** in `handlers/input.ts`, when `expectPromptId` is present compute the
+   current prompt id (JSONL pending tool id, else fresh probe with cache bypass) → `prompt_changed`
+   on mismatch. Add `escalation.acknowledgeSession(resolvedSession)`. Tests for both paths and for
+   "field absent → unchanged behaviour".
+10. **Push invalidation:** `fleet_subscribe` sets `client.fleetSubscribed`; in `websocket.ts` add a
+    debounced collector fed by `status-change`, `other-session-activity`, `error-detected`,
+    `session-completed`, `work-group-update` that sends `fleet_inbox_changed` only to flagged
+    clients. Advertise `fleet_inbox_push_v1`.
+10b. **Synced seen state:** `fleet/seen-store.ts` (lazy load, `markSeen(tmux, upTo, label)` →
+    max-merge, clamp to now, returns effective marker + `advanced` flag; coalesced atomic write
+    `0o600`; prune; `flush()`), `mark_seen` handler (validates tmux name exists or is in the store;
+    resolves `upTo` default from the session's current `turnEndedAt`; acks escalation; on `advanced`
+    sends `session_seen` to fleet-subscribed clients), implicit mark in the answer handlers,
+    `seenUpTo` added to `get_fleet_inbox` items, shutdown flush. Advertise `inbox_seen_sync_v1`.
+11. **Web capabilities service:** `services/capabilities.ts` with lazy fetch per server on connect,
+    classification (`modern` / `legacy-caps` / `legacy` / `unknown`), invalidation on reconnect,
+    `hasFeature()`. Does not touch `ServerConnection.ts`.
+12. **Web data layer:** `utils/fleetInbox.ts` (pure: `deriveLegacyItems`, `mergeServerItems`,
+    `bucketize`, `applySeen` (daemon `seenUpTo` when present, else local map; optimistic pending
+    marks overlay both), `applyFilters`), `hooks/useInboxSeen.ts` (feature-routed; `session_seen`
+    listener patches items in place without a re-fetch; offline queue; one-time local→daemon
+    upload), SessionView open-and-visible mark, `hooks/useFleetInbox.ts`
+    (poll every 5s while mounted & document visible; subscribe to `fleet_inbox_changed` where
+    supported and refetch only that server; bounded legacy enrichment; keep last-known items for
+    disconnected servers marked `stale`).
+13. **Tests (daemon):** `fleet-attention.test.ts` — permission pending (Bash + Edit), AUQ pending in
+    JSONL, live pane AUQ (reuse fixtures from `auq-side-panel.test.ts` /
+    `input-injector-overlay.test.ts`), multi-question AUQ, ExitPlanMode, worker waiting with
+    question, worker error, error_detected after last input (and acknowledged/older → ignored),
+    finished turn inside/outside window, working, idle, inactive, priority ordering when several
+    reasons apply. `live-prompt-probe.test.ts` — 2 concurrent calls → 1 capture; TTL reuse; cache
+    invalidated when `lastModified` changes; >4 candidates → never >4 captures in flight; capture
+    throws/timeout → null; non-candidates (recent JSONL write, missing tmux session) never captured.
+    `fleet-inbox-handler.test.ts` — sort order, previews truncated, host info present, legacy
+    `get_server_summary` unchanged, `expectPromptId` mismatch returns `prompt_changed` and does not
+    call `sendChoice`, items carry `seenUpTo`. `seen-store.test.ts` — max-wins (lower/equal value
+    is a no-op, returns effective marker, `advanced=false`); future `upTo` clamped to now; two
+    interleaved "devices" converge; persistence round-trip via atomic write; corrupt file → empty
+    store; prune (gone + old) and cap; no file I/O and no timer before first use; writes coalesced.
+    Handler tests: `mark_seen` → `session_seen` sent to fleet-subscribed clients only (non-subscribed
+    and other daemons' clients get nothing), not sent when not advanced; escalation acked;
+    `send_input`/`send_choice` advance the marker for the answered session (not the active one).
+14. **Tests (web, vitest):** `fleetInbox.test.ts` — legacy derivation mapping, merge of modern +
+    legacy + disconnected servers, bucket ordering, seen logic (daemon `seenUpTo` before/after turn
+    end, local fallback only for servers without `inbox_seen_sync_v1`, optimistic overlay, incoming
+    `session_seen` patch, setting OFF), filters. `useInboxSeen` logic: offline queue keeps latest
+    per session and flushes on reconnect; one-time local→daemon upload then local entries cleared. `capabilities.test.ts` — `features` present → modern; caps without features →
+    legacy-caps; `Unknown message type` error → legacy; reconnect clears cache.
+15. **UI components:** `InboxPrompt.tsx` (reuse `QuestionBlock`; permission/plan buttons; worker
+    question; quick reply), `InboxCard.tsx`, `FleetInbox.tsx` (sections with counts, Idle collapsed,
+    filter bar, empty state "Nothing needs you", legacy/offline chips). CSS with existing variables
+    only.
+16. **Wire into Dashboard/MobileDashboard:** segmented toggle, view-mode state (persist last mode
+    only if "Inbox as home" is set), open-session-from-inbox with back affordance, Android back
+    handling via existing `eventBus`/history pattern, Needs-you badge (C4 gating).
+17. **Settings:** home view, finished-as-needs toggle, recent window; storage keys.
+18. **Manual verification** (see test plan), then `cd web && npx tsc --noEmit`, `npm test` in daemon
+    and web. Builds/deploys only with user approval; daemon restart only with explicit sign-off.
+19. **Docs:** FEATURES.md entry on ship; update `CLAUDE.md` WebSocket Protocol list with new message
+    types.
+
+#### Test Plan — Manual
+- **Default untouched:** fresh install / existing user → app opens on the existing Dashboard; no
+  `get_fleet_inbox` or `get_capabilities` in daemon logs until the Inbox toggle is clicked (C4).
+- **Mixed fleet:** local daemon on new build + AJ's daemon (or a second local daemon) on the current
+  build. Inbox lists both; old one shows the "limited — update daemon" chip; its waiting sessions
+  still appear under Needs you; existing Dashboard for the old daemon fully functional.
+- **Pre-capabilities daemon:** point at a checkout older than the MCP work (or stub a daemon that
+  rejects `get_capabilities`) → treated as legacy, no errors in console beyond one debug line.
+- **Answer inline:** (a) single AUQ via live pane, (b) multi-question AUQ advances to Q2 on the card,
+  (c) permission prompt (Bash) approve/deny, (d) ExitPlanMode, (e) worker question from a `/work`
+  group, (f) quick reply to a finished turn. Each: session proceeds, card moves bucket within ~5s,
+  push escalation for that session is cancelled (check notification history `acknowledged`).
+- **Staleness:** answer the prompt in the terminal, then press an option on the (stale) card → modern
+  daemon returns `prompt_changed`, card refreshes; nothing is typed into the pane.
+- **Mobile:** Android APK + mobile web: toggle, scroll, inline answer, tap-through and back gesture
+  returns to Inbox, safe-area insets OK.
+- **Load / C5:** 20+ tagged sessions with 5 "stalled working" → `get_fleet_inbox` p95 < 200ms warm;
+  `pgrep -c tmux` does not climb while Inbox is open for 10 min on two clients; kill a tmux session
+  mid-probe → no hung capture.
+- **Offline server:** disconnect a daemon → its cards dim with "offline since", prompts disabled,
+  reconnect restores.
+- **Synced seen:** phone + desktop both on the Inbox. Finish a turn → Needs you on both. Open the
+  session on desktop → within ~2s the phone card moves to Recently finished without a manual
+  refresh; the pending push for that session is cancelled. Dismiss on phone → desktop updates.
+  Restart-free check: `~/.companion/inbox-seen.json` written, `0o600`. Stale mark race: open an
+  old turn on one device while a new turn ends → new turn stays Needs you. Legacy daemon in the
+  mix: its seen state stays per device and nothing errors; after upgrading it, the device's local
+  seen entries appear on the other device.
+
+#### Acceptance Criteria
+- [ ] Dashboard remains the default home; Inbox reachable via a toggle on desktop and mobile; the
+      "Inbox as home" setting works and is off by default.
+- [ ] Every tagged session on every connected daemon appears in exactly one bucket, ordered Needs you
+      → Working → Recently finished → Idle, with machine + project tags and preview.
+- [ ] Pending AUQ (including live, not-yet-flushed AUQ), permission, plan and worker questions on
+      modern daemons render inline and can be answered without opening the session.
+- [ ] Inline answers are guarded against stale prompts on modern daemons (`prompt_changed`) and
+      cancel push escalation for the answered session.
+- [ ] Older daemons: all existing views unchanged; in the Inbox they appear with reduced data and a
+      "needs update" indicator; no error banners.
+- [ ] No existing WS message/field changed; `get_server_summary` output identical (test-enforced).
+- [ ] With the Inbox never opened, no new requests are sent and no new daemon work happens.
+- [ ] Pane probes: deduped, cached, concurrency-capped, timeout+SIGKILL, liveness-checked; no
+      intervals added on the daemon (push path is event-driven + debounced).
+- [ ] Seen state is synced: seeing/answering/dismissing on one device updates every other
+      Inbox-open device live (and others on next fetch); markers survive daemon restart; concurrent
+      marks converge (max wins); a stale mark never hides a newer turn.
+- [ ] Unseen finished turns land in Needs you by default; the per-device setting moves them to
+      Recently finished.
+- [ ] Daemons without `inbox_seen_sync_v1` fall back to per-device seen state for those servers
+      only, with no errors.
+- [ ] Unit tests listed above pass; `tsc --noEmit` clean.
+
+#### Open Questions / Risks (Phase 1)
+- **Q1** ~~Should "turn finished, not yet seen" count as Needs you by default?~~ **Decided
+  2026-09-24: yes**, with the per-device setting to turn it off.
+- **Q2** Desktop placement: plan default = Inbox in the main pane with the sidebar kept. Not
+  blocking.
+- **Q3** ~~Seen state per device or synced?~~ **Decided 2026-09-24: synced via each session's own
+  daemon** (`mark_seen`, feature `inbox_seen_sync_v1`).
+- **R4** Seen markers are keyed by tmux session name. Sessions that are renamed or killed and
+  recreated under the same name are handled by the timestamp watermark, but a rename loses the
+  marker (it shows as unseen once). Acceptable.
+- **R5** The implicit "answered ⇒ seen" in the answer handlers also fires for answers from old
+  clients and the MCP (`remote_send_input`). That is the intended meaning, but it means a
+  concierge-driven answer marks a session seen for the user. Revisit if that is confusing
+  (could skip the implicit mark when the request comes from an MCP/per-origin token).
+- **R1** Live-AUQ detection relies on pane parsing that has been fragile (five `fix(auq)` commits).
+  The Inbox multiplies the surface; keep the probe code path identical to `get_highlights` to avoid
+  divergence.
+- **R2** Permission-prompt option labels depend on Claude Code's current prompt text; reuse whatever
+  `extractHighlights` produces today so Chat and Inbox fail/succeed together.
+- **R3** Tagged-session only: untagged tmux sessions stay invisible (existing gotcha) — surface a
+  hint in the empty state.
+
+---
+
+### Phase 2 — Missions + Mission Notes (design-level)
+**Size:** L. ~2 weeks. Absorbs todo "Server-level / session-persistent working memory".
+
+#### Concept
+A **Mission** is a persisted object above sessions: `goal`, `type`, `status`, `members` (sessions on
+any daemon), per-member status/result, an aggregated `summary`, and **mission notes** — an
+append-only log of what was tried / ruled out / being fixed / decided. Notes are injected into any
+session that picks up the work (on join, on dispatch, and after compaction), so context survives
+daemon restarts, session restarts and compaction.
+
+#### Key Decisions
+- **Where state lives: the daemon where the concierge runs (decided 2026-09-24), no replication.**
+  There is no separate "Fleet home" setting. Every mission is stored on the concierge's daemon at
+  `~/.companion/missions/<id>.json` (atomic tmp+rename via `atomicWriteFileSync`, `0o600`) plus an
+  index. Missions created from the web (`adhoc`) are sent to the concierge daemon too: the web
+  identifies it as the server whose `get_capabilities` reports `features` ∋ `missions_v1` **and**
+  a running/configured concierge (new capabilities field `conciergeHost: boolean`). If several
+  daemons report a concierge, the web uses the one the concierge view is attached to and shows the
+  others' missions read-only-merged; if none is connected, "New mission" is disabled with "concierge
+  daemon offline". Missions carry `homeServer` so a later concierge move is visible, but v1 does not
+  migrate them. Justification: daemons never talk to each other except through the MCP/registry; the web
+  client is not durable or multi-device; replication would need conflict resolution for little gain
+  (one user, low write rate). The web shows missions from all daemons by calling `list_missions` on
+  every `missions_v1` daemon and merging — so "global" view without shared state. Cost: if the home
+  daemon is offline, its missions are read-only-unavailable (shown as offline).
+- **Cross-host member status:** the home daemon tracks remote members through a `MissionTracker`
+  that reuses the MCP daemon client (lift `mcp/src/daemon-client.ts` into a shared module or copy)
+  with the auto-derived `~/.companion/mcp-servers.json` registry; it polls only *active* missions'
+  remote members, event-driven where possible, and follows C5 discipline (in-flight dedup,
+  timeouts, backoff, stop when mission done). Members with no registry entry are status `unknown`;
+  the web overlays live status from Inbox data for display only.
+- **Membership link on the member's daemon (thin, derived):** each member daemon stores
+  `~/.companion/mission-links.json` `{ tmuxSessionName → { missionId, homeServer } }` so it can
+  answer "which mission is this session in?" locally (for compaction re-injection and Inbox chips).
+  It is a cache; the home daemon is the source of truth.
+- **Mission types instead of separate state:** `adhoc` (user-created), `concierge_fanout`,
+  `work_group`. Work groups are *projected* into missions (read-only adapter over
+  `work-groups.json`, additive optional `missionId` on `WorkGroup`) — no migration of
+  `WorkGroupManager` in Phase 2. Concierge fan-outs create a mission only when the user starts one
+  ("Start as mission" in the concierge view, or asks the concierge to) — plain concierge chat
+  unchanged (C1).
+- **Note injection:** (a) *dispatch time* — `remote_dispatch` / spawn from a mission prepends a
+  capped "Mission brief" (goal, current summary, last N notes, ≤ 4 KB) to the prompt; (b) *join* —
+  "Attach session to mission" offers "Send brief" (explicit `send_input`); (c) *after compaction* —
+  Claude Code `SessionStart` hook (matcher `compact|resume`) installed into the project repo
+  (**approved 2026-09-24**), which calls the local daemon (`get_mission_brief { cwd |
+  tmuxSessionName }`, proxied to the concierge/home daemon) and prints the brief as additional
+  context. (d) sessions can append notes themselves via new MCP tools.
+- **SessionStart hook install rules (approved; all required):**
+  - *Opt-in per repo:* installed only by an explicit action ("Install compaction re-injection" on
+    the mission/member, or `bin/companion mission-hook install <repo>`); never automatically on
+    dispatch or mission creation.
+  - *Merge, never clobber:* read `<repo>/.claude/settings.json` (or `settings.local.json` if the
+    user picks "don't commit" — default `settings.local.json`, which is normally gitignored, to
+    avoid dirtying the repo), JSON-parse, append one entry to `hooks.SessionStart` preserving all
+    existing hooks/keys/order, write back atomically. Unparseable file → abort with a message, never
+    overwrite.
+  - *Idempotent:* our entry is identified by a marker (command path
+    `~/.companion/bin/mission-brief-hook` + `"companion-mission-hook": 1` tag in a sibling key or the
+    command string); re-install updates it in place, never duplicates.
+  - *Easy uninstall:* `bin/companion mission-hook uninstall <repo>` + an in-app button remove only
+    our entry (and an empty `SessionStart` array we created); `mission-hook status` lists repos
+    with it installed (tracked in `~/.companion/mission-hooks.json`).
+  - *No-op without an active mission:* the hook script exits 0 with no output in < 200ms when the
+    daemon is unreachable (short timeout), the session/cwd has no mission link, or the mission is not
+    `active`. It must never block or fail session start.
+  - Brief output capped (4 KB) and clearly delimited ("Mission brief (Companion) …").
+- **Summary:** deterministic by default (per-member last result highlight, one line per member); a
+  concierge-owned mission may overwrite with an LLM summary via `mission_update`.
+
+#### Data Model (sketch)
+```ts
+interface Mission {
+  id: string; title: string; goal: string;
+  type: 'adhoc' | 'concierge_fanout' | 'work_group';
+  status: 'active' | 'paused' | 'done' | 'abandoned';
+  homeServer: { hostname: string; label?: string };
+  createdAt: number; updatedAt: number; createdBy: 'user' | 'concierge' | 'foreman';
+  members: MissionMember[]; summary?: string; notes: MissionNote[];
+  workGroupId?: string;
+}
+interface MissionMember {
+  id: string; serverName: string; host?: string; port?: number;
+  tmuxSessionName: string; sessionId?: string; cwd: string; branch?: string;
+  role?: string; status: 'pending' | 'working' | 'needs_you' | 'done' | 'error' | 'unknown';
+  result?: string; joinedAt: number; lastSeenAt?: number;
+}
+interface MissionNote {
+  id: string; ts: number; author: string;   // 'user' | 'concierge' | 'session:<name>@<host>'
+  kind: 'tried' | 'ruled_out' | 'fixing' | 'decision' | 'result' | 'note';
+  text: string; memberId?: string;
+}
+```
+
+#### New WS Messages (feature `missions_v1`)
+`list_missions`, `get_mission`, `create_mission`, `update_mission`, `add_mission_member`,
+`remove_mission_member`, `append_mission_note`, `get_mission_brief`, `get_mission_links`;
+broadcast `mission_update` (global, only to clients that sent `missions_subscribe`). MCP tools:
+`mission_create`, `mission_get`, `mission_add_member`, `mission_note`, `mission_update`,
+`mission_brief`. Writes from per-origin tokens require `dispatch` capability; audit-logged.
+
+#### Files (anticipated)
+- Create: `daemon/src/missions/mission-store.ts`, `daemon/src/missions/mission-tracker.ts`,
+  `daemon/src/missions/brief.ts`, `daemon/src/handlers/missions.ts`,
+  `mcp/src/tools/mission_*.ts`, `web/src/hooks/useMissions.ts`,
+  `web/src/components/MissionsView.tsx`, `web/src/components/MissionDetail.tsx`,
+  `web/src/components/MissionNotes.tsx`, `daemon/src/missions/hook-installer.ts` (merge /
+  idempotent / uninstall logic, unit-tested against fixtures with pre-existing hooks),
+  `daemon/scripts/mission-brief-hook` (installed to `~/.companion/bin/`),
+  `bin/companion mission-hook install|uninstall|status`.
+- Modify: `daemon/src/types.ts`, `web/src/types/index.ts`, `daemon/src/handlers/index.ts`,
+  `daemon/src/handlers/remote.ts` (brief prefix on dispatch), `daemon/src/work-group-manager.ts`
+  (optional `missionId`), `concierge/CLAUDE.md` (mission-aware routing, opt-in),
+  `web/src/components/ConciergeView.tsx` ("Start as mission"), `FleetInbox`/`InboxCard` (mission chip
+  + group-by-mission filter).
+
+#### Acceptance Criteria
+- Missions survive daemon restart and session compaction (brief re-injected after compaction when
+  hook installed); nothing changes for users who never create one.
+- A concierge fan-out started "as mission" shows all members across machines with live status and a
+  summary; the concierge can append notes; a newly dispatched session starts with the brief.
+- Work groups appear as missions (read-only projection) without changing `/work` behaviour.
+- Missions are stored only on the concierge's daemon; web "New mission" targets it.
+- Hook install into a repo with existing `SessionStart`/other hooks preserves them byte-for-byte
+  apart from our appended entry; install twice → one entry; uninstall → file equals the
+  pre-install content (modulo formatting); hook prints nothing and exits 0 when there is no active
+  mission or the daemon is down.
+
+#### Decisions / Plan Defaults
+- **Q4** ~~Fleet home setting?~~ **Decided 2026-09-24: mission home = the concierge's daemon**; no
+  separate setting.
+- **Q5** ~~SessionStart hook into project repos?~~ **Decided 2026-09-24: approved**, under the
+  install rules above (opt-in per repo, merge, idempotent, uninstallable, no-op without mission).
+- **Q6** Notes explicit only in v1 (user, concierge, sessions via MCP); no LLM auto-extraction.
+  Plan default, not blocking.
+- **R** Tracker polling across machines is a new recurring network loop — must stop when missions
+  are idle and honour C5.
+
+---
+
+### Phase 3 — Routing + Fleet Inventory (design-level)
+**Size:** M–L (inventory M, placement S, handoff stretch M).
+
+#### Design
+- **Inventory (`inventory_v1`):** new `get_host_inventory` handler returning host facts (hostname,
+  platform, arch, OS release, CPUs, loadavg, memory, uptime), toolchains (`claude --version`, node,
+  git, xcodebuild, java/gradle, Android SDK, cargo — presence + version), and repos. Repo discovery
+  from a bounded set: configured `inventory.repo_roots` (new optional config), dirs in
+  `tmux-sessions.json`, concierge `projects.json` cwds, and recent working dirs. Per repo: normalized
+  remote URL (to match the same repo across hosts), branch, dirty file count, ahead/behind, last
+  commit. All execs on demand, stale-while-revalidate cache (toolchains 1h, repos 60s), in-flight
+  dedup, timeout + SIGKILL, max 2 concurrent git processes (C5). No background interval.
+- **Reachability:** from the client's perspective (connection state + ping RTT, which the web already
+  has) and, for the concierge, from the MCP registry.
+- **Remote capabilities:** already available via `get_capabilities`.
+- **Placement engine:** pure `web/src/utils/placement.ts` (mirrored as an MCP helper so the concierge
+  can use the same rules): input = task hints (explicit tags or keyword match like
+  `projects.json`: ios → darwin + xcodebuild; android → Android SDK), target repo remote URL,
+  preferences; output = ranked hosts with human-readable reasons ("has repo, clean, Xcode 17,
+  load 0.4") and disqualifiers ("dispatch disabled", "offline"). Surfaced in `NewSessionPanel`, the
+  mission creation flow and concierge; always a suggestion with one-tap override (C1).
+- **Fleet view:** `FleetView.tsx` machines grid (inventory + repos) — later the home for Phase 4.
+- **Stretch — session handoff:** `handoff` wizard: source session → (confirm) commit WIP to a
+  `handoff/<slug>` branch and push → target host fetch + worktree checkout (`create_worktree_session`
+  already exists) → dispatch with mission brief/summary. Each step explicitly confirmed; aborts leave
+  the source untouched.
+
+#### New WS Messages
+`get_host_inventory { refresh?: boolean }` → `host_inventory`; optional `get_repo_status { path }`.
+Feature `inventory_v1`. Config: optional `inventory: { repo_roots?: string[]; scan_depth?: number }`.
+
+#### Plan Defaults (not blocking; revisit at Phase 3 kickoff)
+- **Q7** Scan known session dirs always; configured `inventory.repo_roots` only if set (off by
+  default).
+- **Q8** Handoff pushes WIP to a `handoff/<slug>` branch on the existing remote (each step
+  confirmed); git-bundle-over-`remote_write` is a later alternative.
+
+---
+
+### Phase 4 — Fleet Health (design-level)
+**Size:** 4a read-only S; 4b confirmed rolling update M.
+
+#### Design
+- **Build identity:** `dist/build-info.json` (from Phase 1 stamp) is the only reliable version
+  source, required because AJ's box is a file copy without git. `get_capabilities.buildInfo` +
+  new `get_health` (`health_v1`): uptime, node version, memory/CPU of the daemon process, listener
+  config summary (no secrets), watcher stats (conversations tracked), last errors (existing
+  `get_client_errors`-style ring buffer for daemon errors), tmux session count.
+- **Drift flags (web, `FleetHealth.tsx`):** reference = the web client's own build sha (stamped via
+  Vite define) or the newest sha seen in the fleet; flags: sha differs, dirty build, missing
+  features the web uses, `protocolVersion` behind, pre-capabilities daemon ("unknown build"),
+  deployed-by-copy hosts noted.
+- **Rolling "Update fleet" (4b):** a wizard, one daemon at a time, strictly sequential:
+  1. show current → target build and what will run;
+  2. **explicit per-daemon in-app confirmation** ("Restart <name> now?") — **this counts as the
+     required restart sign-off (decided 2026-09-24)**. Each daemon's restart is individually
+     confirmed at the moment it is about to happen; no "confirm all", no pre-approval of the rest
+     of the queue, no batch or unattended auto-restart, no auto-advance to the next daemon (C6);
+  3. call new `self_update` handler, gated by a new `remote_capabilities.update` flag
+     (disabled by default, audited), which runs the host's configured `update_command`
+     (e.g. local: build + `COMPANION_ALLOW_RESTART=1 bin/companion restart`; AJ: launchd kickstart
+     after rsync is done from the build host via `bin/deploy-aj`) detached (`systemd-run --user` /
+     `launchctl`) so it survives the restart;
+  4. wait for reconnect, verify new `buildInfo.gitSha`, check for orphan-port symptom (known gotcha:
+     restart "succeeds" while an orphaned daemon keeps the port → sha unchanged ⇒ flag, stop);
+  5. only then offer the next daemon. Any failure stops the rollout.
+  The in-app confirmation is recorded in the audit log (who/when/which build) as the sign-off.
+  The `update_command` passes `COMPANION_ALLOW_RESTART=1` only because that confirmation happened;
+  the `confirmToken` is minted by `self_update_prepare` for one daemon, single-use, short TTL
+  (e.g. 60s), so the sign-off cannot be reused for another daemon or replayed later. Restarts
+  initiated by Claude in a terminal still need the user's in-conversation sign-off (unchanged).
+
+#### New WS Messages
+`get_health` → `health`; `self_update { targetSha?, confirmToken }` → `self_update_started`
+(`self_update_v1`, requires `remote_capabilities.update`). `confirmToken` is a one-time value from a
+preceding `self_update_prepare` call so a replayed request cannot restart a daemon.
+
+#### Decisions / Plan Defaults
+- **Q9** ~~Does in-app confirmation count as sign-off?~~ **Decided 2026-09-24: yes**, per daemon,
+  each restart individually confirmed; no batch auto-restart.
+- **Q10** Non-git hosts: build on hexi and push (current `bin/deploy-aj` model) in v1. Plan default,
+  not blocking.
+- **R** A self-update that fails half-way can take a daemon offline with no way to recover from the
+  app; 4b must keep a documented manual fallback per host (`bin/deploy-aj`, `bin/companion`).
+
+---
+
+### Phase Ordering & Dependencies
+- Phase 1 first (also delivers the capability handshake + build stamp used by all later phases).
+- Phase 2 depends on Phase 1 (Inbox chips, capability detection); Phase 3 inventory can run in
+  parallel with Phase 2; placement is most useful once missions exist.
+- Phase 4a can be pulled forward anytime after Phase 1 (build stamp exists); 4b last.
+
+---
+
+## Item: Voice Front Layer (working name) — fleet-wide chief of staff
+**Status:** planned
+
+### Goal & Rationale
+A fast, always-available conversational entity layered **over** Claude Code sessions across the whole
+fleet — the "Iron Man / JARVIS" experience; the bar is "no compromises". Two layers:
+- **Deep layer** = the real Claude sessions: slow, heavy, do the actual work (may run 40+ minutes).
+- **Front layer** = a fast/cheap model (Haiku-class, currently `claude-haiku-4-5`) that knows
+  **about** the work but never does deep work or gives deep answers. A chief of staff. The user talks
+  to it (voice via Wispr Flow or its own STT, or typed), it talks back (TTS or text).
+
+Naming: final name TBD. Must NOT reuse "concierge" — that already names the shipped Global Concierge
+(`daemon/src/handlers/concierge.ts`, `ConciergeView`, `concierge_open`), which is a *deep* Claude
+session that fans work out. The front layer is the opposite: shallow, fast, talks about work.
+
+Builds directly on **Item: Fleet (Inbox → Missions → Routing → Health)** above — the Fleet Inbox
+(`get_fleet_inbox`, attention classification, synced `seenUpTo`) is exactly the prioritized inbox
+this layer narrates and acts on. Together they are the differentiator vs Anthropic Remote Control
+(single-session, no cross-machine awareness, no voice front layer).
+
+### Behaviors
+1. **Announce.** "Companion session finished; deploy session is blocked on a question." Waits for a
+   gap — never talks over the user. Priority: **blocked-on-input > finished > progress**.
+2. **Triage by depth, on request:** one-liner → gist → full read.
+3. **Rewrite for ears.** Never read raw markdown, code, paths, or tables aloud; paraphrase ("changed
+   the input injector"). Full verbatim only when explicitly asked.
+4. **Relay / act.** "Tell it go ahead but skip tests" → `send_input` on the right session, then reads
+   back a confirmation.
+5. **Instant state lookups:** how long it has been running, what it was doing, what is waiting.
+6. **Grounded.** May only paraphrase what sessions actually said. Past that: "I don't know — want me
+   to ask it?". **Hallucinated status ("yeah, it deployed") is the #1 risk** — every status claim must
+   trace to a session turn / inbox item fetched in this conversation.
+
+### Guardrail Tiers for Actions
+The user explicitly wants it to act — with guardrails for both *unclear/unsure* and
+*dangerous-even-if-fairly-sure*.
+
+| Tier | Examples | Behavior |
+|------|----------|----------|
+| **Free** | status, summaries, reads, inbox listing | Just do it. |
+| **Echo** | answering an AUQ, "continue", "option 2" | Read back once with session name ("Telling *deploy* option 2, skip tests"); send unless the user says no/wait. |
+| **Clarify** | ambiguous target (multiple sessions waiting), low STT confidence, utterance matches no option | Ask. Never guess. |
+| **Hard confirm** | deploy, restart (incl. companion daemon), push, delete, force, prod, AJ's box, anything irreversible | Explicit confirm phrase or on-screen tap, even at 99% confidence. |
+
+- **Danger is detected from BOTH sides:** the user's utterance AND the content of the pending
+  question. If the session asks "deploy to prod?", a casual "yeah" gets hard-confirm.
+- **Never silently batch.** "Tell them all to go ahead" → safe ones proceed (echoed), dangerous ones
+  are split out and confirmed individually.
+- Daemon restarts inherit the project hard rule (Fleet C6): per-daemon, explicit sign-off, never
+  batched.
+- Danger classification should be a pure, unit-testable function (keyword/pattern list + pending
+  question text + target host), not left solely to the model's judgment; the model can escalate a
+  tier but never lower one the classifier set.
+- Every action (and its tier + confirmation) goes to the existing audit log
+  (`daemon/src/audit-log.ts`).
+
+### Architecture
+- **One entity across the whole fleet** (all daemons), single prioritized inbox.
+- **Brain runs server-side on a hub**, not on a device, so the conversation persists across devices;
+  devices are just mic + speaker endpoints. Device handoff: conversation follows you desk → phone →
+  iPad.
+- **Inputs already exist:**
+  - daemon session state + waiting-for-input detection — `daemon/src/parser.ts`
+    (`isWaitingForChoice`, `extractHighlights`, `detectActiveChoicePrompt`);
+  - pending AUQ via tmux-pane scraping (not on disk until answered — see `parseTextChoicePrompt`);
+  - last-turn text (`get_highlights` / `get_full` in `daemon/src/websocket.ts`);
+  - input injection — `send_input` in `daemon/src/handlers/input.ts` → `daemon/src/input-injector.ts`;
+  - multi-daemon connections — `web/src/services/ConnectionManager.ts` (client side) and the
+    `companion-remote` MCP (`mcp/src/`, `mcp/README.md`: `remote_list_sessions`,
+    `remote_get_conversation`, `remote_send_input`, ...) for hub-side cross-daemon access;
+  - Fleet Inbox (planned, Fleet Phase 1) for attention-sorted, seen-aware items.
+- **Brain tools** (thin wrappers over the above): `inbox()` / `list_sessions()`,
+  `summarize(session)`, `read_full(session)`, `send_input(session, text)`. Summaries are produced by
+  the front model from fetched text; `read_full` returns verbatim for "read it to me" requests.
+- **Pipeline:** STT → Haiku brain (tool use, Anthropic API) → TTS. Wispr Flow is one input path
+  (great for dictation into text fields) but hands-free needs its own STT.
+- **Hub placement (TBD):** likely a new daemon-side module (or sibling service) on one designated
+  daemon, reaching the rest of the fleet the same way the concierge does (companion-remote /
+  per-origin tokens). Clients connect to the hub over the existing WS protocol with new additive
+  message types (Fleet C2/C3 apply: additive, feature-detected, zero cost when off).
+- **Notification interplay:** announcements should coordinate with `daemon/src/escalation.ts`
+  (browser → push) so the same event is not both spoken and pushed; an event heard/acknowledged via
+  voice should mark it seen (Fleet `mark_seen`).
+
+### Hardware / Hosting
+User wants to use their own hardware; if usage is modest, a Mac mini or DGX Spark is an acceptable
+host. Evaluation items (none decided):
+- Local STT (Whisper-family, e.g. faster-whisper) on a GPU box / Spark for latency + privacy.
+- Local TTS on the same box — candidates to evaluate for latency, quality, and voice identity.
+- Brain via Anthropic API (Haiku) initially; evaluate a local model later.
+- Remote reachability reuses existing tailnet / HAProxy routes.
+
+### Usage Contexts & Devices
+- **Desktop (FIRST voice target).** Gaming headphones with boom mic are primary (no echo problem).
+  Studio mic is a bonus (needs echo cancellation or self-mute while speaking). Killer use case:
+  gaming while sessions work — chime in ear, push-to-talk on a hotkey / mouse button (user is often
+  on Discord voice, so no wake word while gaming), "later" snoozes the queue. Wake word + hard mute
+  as options outside gaming.
+- **Phone + earbuds.** Walking around the house; push-to-talk via earbud tap. iOS background mic is
+  restrictive — needs native audio background-mode work in a Tauri plugin (alongside
+  `desktop/src-tauri/plugins/`).
+- **Park with iPad nearby.** Works whenever the device has connectivity (cellular/hotspot); daemons
+  reachable via existing tailnet/HAProxy routes.
+
+### Phases
+1. **Text-only front layer** in the existing web app (typed or Wispr-dictated): server-side brain,
+   fleet inbox, tools, grounding, guardrail tiers. Tune personality + guardrails before any audio.
+2. **Desktop voice:** headphones, push-to-talk hotkey (+ optional wake word), chimes, TTS, local STT.
+3. **Phone / earbuds push-to-talk** (iOS/Android native audio work).
+4. **Device handoff** (conversation follows you across devices).
+5. **Wake word / always-listening**, studio-mic echo handling.
+
+Dependencies: Phase 1 needs Fleet Phase 1 (Fleet Inbox + capability handshake) or a minimal
+equivalent; later phases are independent of Fleet Phases 2-4, though Missions would give the front
+layer richer "what is this work for" context.
+
+### Tests Needed (Phase 1)
+- Guardrail classifier: tier for each example above; danger from pending-question text alone;
+  "yeah" to a prod-deploy question → hard confirm; batch request splits out dangerous items.
+- Grounding: status answers only cite fetched session content; unknown → "want me to ask it?".
+- Target resolution: ambiguous target with multiple waiting sessions → clarify, never send.
+- Speech rewrite: markdown/code/paths/tables stripped or paraphrased in spoken output.
+
+### Open Questions
+- **Name / voice identity** (JARVIS vibe; must not collide with "concierge").
+- **Host choice:** own GPU box vs Mac mini vs DGX Spark.
+- **Local vs hosted STT/TTS** (latency, privacy, quality, cost).
+- **Hard-confirm UX on voice-only devices** (earbuds, no screen): confirm phrase design, anti-
+  accidental-match, fallback to phone tap.
+- **"What you've already heard" persistence** — reuse Fleet `seenUpTo`, or a separate
+  heard/acknowledged watermark per device vs per user?
+- **Notification interplay with existing escalation** (browser → push): does a spoken announcement
+  suppress/delay push, and what happens when no voice endpoint is connected?
