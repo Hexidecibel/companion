@@ -443,7 +443,16 @@ jobs:
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
       - run: cd web && npm ci
       - run: cd desktop && npm ci
+      # macOS: tauri.conf.json sets bundle.macOS.signingIdentity "-", so the .app is
+      # ad-hoc signed before the dmg is made (unsigned Apple Silicon apps show as
+      # "damaged" after download). Fail loudly if the signature is missing.
       - run: cd desktop && npm run build
+      - name: Verify ad-hoc signature (macOS)
+        if: matrix.os == 'macos-latest'
+        run: |
+          APP=$(ls -d desktop/src-tauri/target/release/bundle/macos/*.app | head -1)
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          codesign -dv "$APP" 2>&1 | grep -E 'Signature=adhoc|Authority='
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact_name }}
