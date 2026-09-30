@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, lazy, Suspense } from 'react';
 import { ConnectionProvider } from './context/ConnectionContext';
 import { ThemeProvider } from './context/ThemeContext';
+import { HeraldProvider } from './context/HeraldContext';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { StatusPage } from './components/StatusPage';
 import { Dashboard } from './components/Dashboard';
@@ -139,6 +140,16 @@ export function App() {
       },
     },
     {
+      id: 'toggle-herald',
+      label: 'Toggle Herald',
+      icon: 'H',
+      shortcut: 'Ctrl+J',
+      execute: () => {
+        navigateTo('dashboard');
+        eventBus.emit('toggle-herald');
+      },
+    },
+    {
       id: 'focus-input',
       label: 'Focus Input',
       icon: '/',
@@ -151,6 +162,7 @@ export function App() {
     <ErrorBoundary>
       <ThemeProvider>
         <ConnectionProvider>
+          <HeraldProvider>
           <div id="app" className={isDashboard ? 'app-dashboard' : ''}>
             {screen.name === 'dashboard' && (
               <Dashboard
@@ -184,6 +196,7 @@ export function App() {
               />
             )}
           </div>
+          </HeraldProvider>
         </ConnectionProvider>
       </ThemeProvider>
     </ErrorBoundary>

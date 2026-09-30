@@ -6,6 +6,7 @@ import { initStorage } from './services/persistentStorage';
 import { applySafeAreaInsets, initKeyboardHeightListener, installExternalLinkHandler } from './utils/platform';
 import './styles/variables.css';
 import './styles/global.css';
+import './styles/herald.css';
 
 applySafeAreaInsets();
 initKeyboardHeightListener();

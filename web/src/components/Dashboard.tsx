@@ -20,6 +20,8 @@ import { useServers } from '../hooks/useServers';
 import { SIDEBAR_WIDTH_KEY, SPLIT_RATIO_KEY } from '../services/storageKeys';
 import { eventBus } from '../utils/eventBus';
 import { connectionManager } from '../services/ConnectionManager';
+import { useHeraldUi } from '../context/HeraldContext';
+import { HeraldPanel } from './herald/HeraldPanel';
 
 interface DashboardProps {
   onSettings?: () => void;
@@ -51,6 +53,8 @@ export function Dashboard({ onSettings }: DashboardProps) {
   const sessionMute = useSessionMute(activeSession?.serverId ?? null);
   const { snapshots } = useConnections();
   const { isParallelWorkersEnabled } = useServers();
+  const herald = useHeraldUi();
+  const heraldScreenOpen = isMobile && herald.screenOpen;
 
   // Use work groups for the active server (only if enabled and git is available)
   const gitEnabled = activeSession
@@ -258,7 +262,10 @@ export function Dashboard({ onSettings }: DashboardProps) {
         return;
       }
 
-      if (showNotifSettings) {
+      if (heraldScreenOpen) {
+        // Back from the full-screen Herald view: its history entry was just popped.
+        herald.close();
+      } else if (showNotifSettings) {
         // Close notification settings modal first
         setShowNotifSettings(false);
         history.pushState({ session: true }, '');
@@ -286,7 +293,48 @@ export function Dashboard({ onSettings }: DashboardProps) {
     };
     window.addEventListener('popstate', handler);
     return () => window.removeEventListener('popstate', handler);
-  }, [isMobile, activeSession, showNotifSettings]);
+  }, [isMobile, activeSession, showNotifSettings, heraldScreenOpen, herald.close]);
+
+  // Mobile Herald is a full screen: give it a history entry so the back
+  // gesture closes it like any other screen.
+  const heraldHistoryPushed = useRef(false);
+  useEffect(() => {
+    if (heraldScreenOpen && !heraldHistoryPushed.current) {
+      history.pushState({ herald: true }, '');
+      heraldHistoryPushed.current = true;
+    } else if (!heraldScreenOpen) {
+      heraldHistoryPushed.current = false;
+    }
+  }, [heraldScreenOpen]);
+
+  const closeHeraldScreen = useCallback(() => {
+    if (history.state?.herald) {
+      suppressPopstate.current = true;
+      history.back();
+    }
+    herald.close();
+  }, [herald.close]);
+
+  // Session chips inside Herald jump straight to that session's view.
+  const handleHeraldOpenSession = useCallback((serverId: string, sessionId: string) => {
+    if (isMobile) {
+      herald.close();
+      setActiveSession({ serverId, sessionId });
+      // Reuse Herald's history entry as the session entry (no extra back press).
+      if (history.state?.herald) history.replaceState({ session: true }, '');
+      else history.pushState({ session: true }, '');
+      return;
+    }
+    setActiveSession({ serverId, sessionId });
+  }, [isMobile, herald.close]);
+
+  const heraldScreen = heraldScreenOpen ? (
+    <ComponentErrorBoundary name="Herald">
+      <div className="herald-screen">
+        <HeraldPanel variant="screen" onOpenSession={handleHeraldOpenSession} onClose={closeHeraldScreen} />
+      </div>
+    </ComponentErrorBoundary>
+  ) : null;
 
   const handleSessionCreated = useCallback((_serverId: string, sessionName: string) => {
     // If sessionName is empty, the JSONL UUID isn't known yet (session was just created).
@@ -576,6 +624,7 @@ export function Dashboard({ onSettings }: DashboardProps) {
               />
             </Suspense>
           )}
+          {heraldScreen}
         </div>
       );
     }
@@ -603,6 +652,7 @@ export function Dashboard({ onSettings }: DashboardProps) {
             />
           </Suspense>
         )}
+        {heraldScreen}
       </>
     );
   }
@@ -703,6 +753,17 @@ export function Dashboard({ onSettings }: DashboardProps) {
           </>
         )}
       </main>
+
+      <aside
+        className={`herald-dock${herald.panelOpen ? ' herald-dock--open' : ''}`}
+        aria-hidden={!herald.panelOpen}
+      >
+        <div className="herald-dock__inner">
+          <ComponentErrorBoundary name="Herald">
+            <HeraldPanel variant="docked" onOpenSession={handleHeraldOpenSession} onClose={herald.close} />
+          </ComponentErrorBoundary>
+        </div>
+      </aside>
 
       {showNotifSettings && activeSession && (
         <Suspense fallback={null}>
