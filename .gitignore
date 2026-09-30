@@ -64,3 +64,6 @@ concierge/.mcp.json
 # Herald voice service (Python)
 __pycache__/
 .pytest_cache/
+
+# Herald trigger scripts: local config holding the trigger token
+triggers/windows/herald-trigger.ini
