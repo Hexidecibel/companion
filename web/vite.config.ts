@@ -26,5 +26,8 @@ export default defineConfig({
     environment: 'jsdom',
     globals: true,
     setupFiles: ['./src/test/setup.ts'],
+    // This machine exports NODE_ENV=production globally, which loads React's
+    // production build (no act()) and breaks hook/component tests.
+    env: { NODE_ENV: 'test' },
   },
 });

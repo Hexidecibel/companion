@@ -33,6 +33,8 @@ interface HeraldComposerProps {
   /** Escape with an empty draft (e.g. cancel the newest echo countdown). */
   onEscape?: () => void;
   autoFocus?: boolean;
+  /** The user typed (or dictated) into the draft: barge-in hook. */
+  onTyping?: () => void;
 }
 
 /**
@@ -40,9 +42,11 @@ interface HeraldComposerProps {
  * programmatically, so everything keys off `input` events and the textarea's
  * live value (read at send time), never keydown bookkeeping.
  */
-export function HeraldComposer({ displayName, onSend, disabled, busy, focusNonce, onEscape, autoFocus }: HeraldComposerProps) {
+export function HeraldComposer({ displayName, onSend, disabled, busy, focusNonce, onEscape, autoFocus, onTyping }: HeraldComposerProps) {
   const [draft, setDraft] = useState(loadDraft);
   const ref = useRef<HTMLTextAreaElement>(null);
+  const onTypingRef = useRef(onTyping);
+  onTypingRef.current = onTyping;
 
   const resize = useCallback(() => {
     const el = ref.current;
@@ -61,6 +65,7 @@ export function HeraldComposer({ displayName, onSend, disabled, busy, focusNonce
     const el = ref.current;
     if (!el) return;
     const sync = () => {
+      if (el.value) onTypingRef.current?.();
       setDraft((prev) => (prev === el.value ? prev : el.value));
     };
     el.addEventListener('input', sync);

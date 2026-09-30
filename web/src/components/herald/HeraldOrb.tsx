@@ -1,15 +1,19 @@
 import { memo } from 'react';
 import type { HeraldPresence } from '../../services/heraldReducer';
 
+/** Presence plus the transient voice state (only the orb cares about it). */
+export type HeraldOrbState = HeraldPresence | 'speaking';
+
 interface HeraldOrbProps {
-  presence: HeraldPresence;
+  presence: HeraldOrbState;
   size?: number;
   /** Mini variant drops the finest detail layers (used in launch buttons). */
   mini?: boolean;
   className?: string;
 }
 
-const LABELS: Record<HeraldPresence, string> = {
+const LABELS: Record<HeraldOrbState, string> = {
+  speaking: 'Speaking',
   idle: 'Standing by',
   busy: 'Thinking',
   attention: 'Something needs you',
@@ -41,6 +45,11 @@ export const HeraldOrb = memo(function HeraldOrb({ presence, size = 44, mini = f
       <svg className="herald-orb__ring herald-orb__ring--arc" viewBox="0 0 100 100" aria-hidden="true">
         <circle cx="50" cy="50" r="33" pathLength="360" strokeDasharray="84 276" />
       </svg>
+      {presence === 'speaking' && (
+        <span className="herald-orb__voice" aria-hidden="true">
+          <span /><span /><span />
+        </span>
+      )}
       <span className="herald-orb__core" />
       <span className="herald-orb__glint" />
     </div>

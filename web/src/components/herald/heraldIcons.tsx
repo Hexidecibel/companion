@@ -40,3 +40,16 @@ export const IconRefresh = (p: IconProps) => (
 export const IconTrash = (p: IconProps) => (
   <Svg {...p}><path d="M3 6h18" /><path d="M8 6V4h8v2" /><path d="M19 6l-1 14H6L5 6" /></Svg>
 );
+export const IconSpeaker = (p: IconProps) => (
+  <Svg {...p}><path d="M11 5L6 9H3v6h3l5 4V5z" /><path d="M15.5 8.5a5 5 0 010 7" /><path d="M18.4 5.6a9 9 0 010 12.8" /></Svg>
+);
+export const IconSpeakerOff = (p: IconProps) => (
+  <Svg {...p}><path d="M11 5L6 9H3v6h3l5 4V5z" /><path d="M22 9l-6 6" /><path d="M16 9l6 6" /></Svg>
+);
+export const IconStop = (p: IconProps) => (
+  <Svg {...p}><rect x="6.5" y="6.5" width="11" height="11" rx="2.2" /></Svg>
+);
+export const IconBell = (p: IconProps) => (
+  <Svg {...p}><path d="M18 8a6 6 0 00-12 0c0 7-3 9-3 9h18s-3-2-3-9" /><path d="M13.7 21a2 2 0 01-3.4 0" /></Svg>
+);
+export const IconPlay = (p: IconProps) => <Svg {...p}><path d="M7 5l12 7-12 7V5z" /></Svg>;

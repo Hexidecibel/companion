@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useReducer, useRef, useMemo } from 'react';
-import type { HeraldAction, HeraldMessage, HeraldState } from '../types/herald';
+import type { HeraldAction, HeraldEvent, HeraldMessage, HeraldState } from '../types/herald';
 import {
   heraldReducer,
   initialHeraldClientState,
@@ -25,6 +25,12 @@ function errorText(err: unknown, fallback: string): string {
   return fallback;
 }
 
+/**
+ * Raw event tap for side channels (voice, chimes). `push` = live socket event,
+ * `fetch` = state snapshot from herald_get_state / reset (history: never voiced).
+ */
+export type HeraldEventListener = (event: HeraldEvent, source: 'push' | 'fetch') => void;
+
 export interface UseHeraldReturn {
   state: HeraldState | null;
   messages: HeraldMessage[];
@@ -41,6 +47,8 @@ export interface UseHeraldReturn {
   reset: () => Promise<boolean>;
   refresh: () => void;
   clearError: () => void;
+  /** Subscribe to every Herald event with its source. Stable identity. */
+  subscribeEvents: (listener: HeraldEventListener) => () => void;
 }
 
 export function useHerald(serverId: string | null): UseHeraldReturn {
@@ -51,6 +59,22 @@ export function useHerald(serverId: string | null): UseHeraldReturn {
   const transportRef = useRef<HeraldTransport | null>(null);
   const fetchSeq = useRef(0);
   const localSeq = useRef(0);
+  const eventListeners = useRef(new Set<HeraldEventListener>());
+
+  const notify = useCallback((event: HeraldEvent, source: 'push' | 'fetch') => {
+    for (const l of [...eventListeners.current]) {
+      try {
+        l(event, source);
+      } catch {
+        // side channels must never break the chat
+      }
+    }
+  }, []);
+
+  const subscribeEvents = useCallback((listener: HeraldEventListener) => {
+    eventListeners.current.add(listener);
+    return () => { eventListeners.current.delete(listener); };
+  }, []);
 
   const fetchState = useCallback(async () => {
     const t = transportRef.current;
@@ -61,7 +85,9 @@ export function useHerald(serverId: string | null): UseHeraldReturn {
       if (seq !== fetchSeq.current || transportRef.current !== t) return;
       if (res.success && res.payload) {
         setSupported(true);
-        dispatch({ type: 'event', event: { kind: 'state', state: res.payload as HeraldState }, receivedAt: Date.now() });
+        const event: HeraldEvent = { kind: 'state', state: res.payload as HeraldState };
+        dispatch({ type: 'event', event, receivedAt: Date.now() });
+        notify(event, 'fetch');
       } else if (isUnsupportedError(res.error)) {
         setSupported(false);
       } else {
@@ -71,7 +97,7 @@ export function useHerald(serverId: string | null): UseHeraldReturn {
       if (seq !== fetchSeq.current) return;
       dispatch({ type: 'error', error: errorText(err, 'Could not load Herald') });
     }
-  }, []);
+  }, [notify]);
 
   useEffect(() => {
     dispatch({ type: 'clear' });
@@ -89,6 +115,7 @@ export function useHerald(serverId: string | null): UseHeraldReturn {
       transportRef.current = t;
       unsubs.push(t.onEvent((event) => {
         dispatch({ type: 'event', event, receivedAt: Date.now() });
+        notify(event, 'push');
       }));
       unsubs.push(t.onConnectivity((isUp) => {
         setConnected(isUp);
@@ -111,7 +138,7 @@ export function useHerald(serverId: string | null): UseHeraldReturn {
       unsubs.forEach((u) => u());
       transportRef.current = null;
     };
-  }, [serverId, fetchState]);
+  }, [serverId, fetchState, notify]);
 
   const send = useCallback(async (raw: string): Promise<boolean> => {
     const text = raw.trim();
@@ -187,7 +214,9 @@ export function useHerald(serverId: string | null): UseHeraldReturn {
       const res = await t.request('herald_reset', {});
       if (res.success && res.payload) {
         dispatch({ type: 'reset_local' });
-        dispatch({ type: 'event', event: { kind: 'state', state: res.payload as HeraldState }, receivedAt: Date.now() });
+        const event: HeraldEvent = { kind: 'state', state: res.payload as HeraldState };
+        dispatch({ type: 'event', event, receivedAt: Date.now() });
+        notify(event, 'fetch');
         return true;
       }
       dispatch({ type: 'error', error: res.error || 'Reset failed' });
@@ -196,7 +225,7 @@ export function useHerald(serverId: string | null): UseHeraldReturn {
       dispatch({ type: 'error', error: errorText(err, 'Reset failed') });
       return false;
     }
-  }, []);
+  }, [notify]);
 
   const clearError = useCallback(() => dispatch({ type: 'clear_error' }), []);
   const refresh = useCallback(() => { void fetchState(); }, [fetchState]);
@@ -217,5 +246,6 @@ export function useHerald(serverId: string | null): UseHeraldReturn {
     reset,
     refresh,
     clearError,
+    subscribeEvents,
   };
 }

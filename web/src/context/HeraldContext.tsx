@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useConnections } from '../hooks/useConnections';
 import { useHerald, type UseHeraldReturn } from '../hooks/useHerald';
+import { useHeraldVoice, type HeraldVoice } from '../hooks/useHeraldVoice';
 import { HERALD_DEMO_SERVER_ID, isHeraldDemo } from '../services/heraldTransport';
 import { DEFAULT_DISPLAY_NAME, derivePresence, type HeraldPresence } from '../services/heraldReducer';
 import { isMobileViewport } from '../utils/platform';
@@ -58,6 +59,7 @@ export interface HeraldDataValue extends UseHeraldReturn {
 
 const HeraldUiContext = createContext<HeraldUiValue | null>(null);
 const HeraldDataContext = createContext<HeraldDataValue | null>(null);
+const HeraldVoiceContext = createContext<HeraldVoice | null>(null);
 
 /**
  * Two contexts on purpose: the UI context changes rarely (open/close, host),
@@ -146,6 +148,7 @@ export function HeraldProvider({ children }: { children: ReactNode }) {
   useEffect(() => eventBus.on('toggle-herald', toggle), [toggle]);
 
   const herald = useHerald(hostId);
+  const voice = useHeraldVoice(herald.subscribeEvents, hostId);
   const available = !!hostId && herald.connected && herald.supported !== false;
   const inbox = herald.state?.inbox;
   const { unheardCount, unheardBlocked } = useMemo(() => {
@@ -182,7 +185,9 @@ export function HeraldProvider({ children }: { children: ReactNode }) {
   return (
     <HeraldUiContext.Provider value={ui}>
       <HeraldDataContext.Provider value={data}>
-        {children}
+        <HeraldVoiceContext.Provider value={voice}>
+          {children}
+        </HeraldVoiceContext.Provider>
       </HeraldDataContext.Provider>
     </HeraldUiContext.Provider>
   );
@@ -197,5 +202,11 @@ export function useHeraldUi(): HeraldUiValue {
 export function useHeraldData(): HeraldDataValue {
   const ctx = useContext(HeraldDataContext);
   if (!ctx) throw new Error('useHeraldData must be used within HeraldProvider');
+  return ctx;
+}
+
+export function useHeraldVoiceCtx(): HeraldVoice {
+  const ctx = useContext(HeraldVoiceContext);
+  if (!ctx) throw new Error('useHeraldVoiceCtx must be used within HeraldProvider');
   return ctx;
 }
