@@ -30,6 +30,7 @@ export const TRIGGER_ACTIONS: readonly HeraldTriggerAction[] = [
   'stop',
   'repeat',
   'toggle',
+  'claim',
 ];
 
 export const TRIGGER_LIMITS = {
@@ -165,7 +166,7 @@ export type TriggerOutcome =
   | { ok: true; status: 200; result: HeraldTriggerResult; target: string }
   | {
       ok: false;
-      status: 400 | 401 | 403 | 405 | 409 | 413 | 429 | 503;
+      status: 400 | 401 | 403 | 404 | 405 | 409 | 413 | 429 | 503;
       code: HeraldTriggerErrorCode;
       error: string;
       retryAfterMs?: number;
@@ -183,6 +184,8 @@ export interface HeraldTriggerServiceOptions {
   available: () => boolean;
   /** The client that should act (the voice announcer), or null. */
   activeClient: () => string | null;
+  /** `claim`: make the device with this label / id active; its client id, or null if unknown. */
+  claimDevice?: (device: string, pin: boolean) => string | null;
   /** Push an event to one client; false if it is gone. */
   deliver: (clientId: string, event: HeraldEvent) => boolean;
   audit: (entry: AuditEntry) => void;
@@ -199,7 +202,20 @@ const MESSAGES: Record<HeraldTriggerErrorCode, string> = {
   no_active_device:
     'No active device: open Companion (Herald) in a browser or the app on the device that should respond',
   unavailable: 'Herald voice is not enabled on this daemon',
+  unknown_device: 'No connected device has that name or id',
 };
+
+/** What a caller asks for: the action, plus the target device for `claim`. */
+export interface TriggerRequest {
+  action?: unknown;
+  device?: unknown;
+  pin?: unknown;
+}
+
+function asRequest(raw: unknown): TriggerRequest {
+  if (typeof raw === 'string') return { action: raw };
+  return raw && typeof raw === 'object' ? (raw as TriggerRequest) : {};
+}
 
 export class HeraldTriggerService {
   readonly tokenFile: TriggerTokenFile;
@@ -227,7 +243,7 @@ export class HeraldTriggerService {
   }
 
   /** An HTTP caller presented a bad / missing token. Audited until it floods. */
-  rejectUnauthorized(source: TriggerSource, rawAction: unknown): TriggerOutcome {
+  rejectUnauthorized(source: TriggerSource, raw: unknown): TriggerOutcome {
     const started = this.now();
     const wait = this.failures.take(source.origin.addr || 'unknown');
     this.failures.prune();
@@ -246,15 +262,19 @@ export class HeraldTriggerService {
       code: 'unauthorized',
       error: MESSAGES.unauthorized,
     };
-    this.record(source, rawAction, out, started);
+    this.record(source, asRequest(raw), out, started);
     return out;
   }
 
-  /** Fire an action from an authorized caller (trigger token, or a full WS client). */
-  fire(rawAction: unknown, source: TriggerSource): TriggerOutcome {
+  /**
+   * Fire an action from an authorized caller (trigger token, or a full WS
+   * client). `raw`: an action name, or `{action, device?, pin?}`.
+   */
+  fire(raw: unknown, source: TriggerSource): TriggerOutcome {
     const started = this.now();
-    const out = this.route(rawAction);
-    this.record(source, rawAction, out, started);
+    const req = asRequest(raw);
+    const out = this.route(req);
+    this.record(source, req, out, started);
     if (out.ok) {
       console.log(`Herald trigger: ${out.result.action} via ${source.via} -> ${out.target}`);
     } else {
@@ -263,8 +283,8 @@ export class HeraldTriggerService {
     return out;
   }
 
-  private route(rawAction: unknown): TriggerOutcome {
-    const action = parseTriggerAction(rawAction);
+  private route(req: TriggerRequest): TriggerOutcome {
+    const action = parseTriggerAction(req.action);
     if (!action) {
       return { ok: false, status: 400, code: 'bad_request', error: MESSAGES.bad_request };
     }
@@ -281,7 +301,24 @@ export class HeraldTriggerService {
     if (!this.opts.available()) {
       return { ok: false, status: 503, code: 'unavailable', error: MESSAGES.unavailable };
     }
-    const target = this.opts.activeClient();
+    let target: string | null;
+    if (action === 'claim') {
+      const device = typeof req.device === 'string' ? req.device.trim() : '';
+      if (!device || device.length > 200) {
+        return {
+          ok: false,
+          status: 400,
+          code: 'bad_request',
+          error: 'claim needs "device": a device label or id',
+        };
+      }
+      target = this.opts.claimDevice?.(device, req.pin !== false) ?? null;
+      if (!target) {
+        return { ok: false, status: 404, code: 'unknown_device', error: MESSAGES.unknown_device };
+      }
+    } else {
+      target = this.opts.activeClient();
+    }
     const id = `trg-${this.now().toString(36)}-${++this.seq}`;
     if (!target || !this.opts.deliver(target, { kind: 'trigger', action, id })) {
       return {
@@ -296,12 +333,16 @@ export class HeraldTriggerService {
 
   private record(
     source: TriggerSource,
-    rawAction: unknown,
+    req: TriggerRequest,
     out: TriggerOutcome,
     started: number
   ): void {
-    const action = parseTriggerAction(rawAction) ?? (rawAction === undefined ? null : 'invalid');
+    const action = parseTriggerAction(req.action) ?? (req.action === undefined ? null : 'invalid');
     const payload: Record<string, unknown> = { via: source.via, action };
+    if (action === 'claim' && typeof req.device === 'string') {
+      payload.device = req.device.slice(0, 80);
+      payload.pin = req.pin !== false;
+    }
     if (source.forwardedFor) payload.forwardedFor = source.forwardedFor.slice(0, 200);
     const result: AuditEntry['result'] = out.ok
       ? { ok: true, target: out.target }
@@ -323,8 +364,9 @@ export class HeraldTriggerService {
   // ---- HTTP -----------------------------------------------------------------
 
   /**
-   * POST /herald/trigger. Body `{"action": "..."}` (or `?action=`); an empty
-   * body means `toggle`. Authorization: Bearer <trigger token>.
+   * POST /herald/trigger. Body `{"action": "...", "device"?: "...", "pin"?: bool}`
+   * (or `?action=&device=`); an empty body means `toggle`.
+   * Authorization: Bearer <trigger token>.
    */
   handleHttp(req: http.IncomingMessage, res: http.ServerResponse, tls: boolean): void {
     const send = (status: number, body: unknown, headers: Record<string, string> = {}) => {
@@ -377,26 +419,31 @@ export class HeraldTriggerService {
     });
     req.on('end', () => {
       if (aborted) return;
-      let action: unknown;
-      const query = new URL(req.url || '/', 'http://x').searchParams.get('action');
+      let request: TriggerRequest;
+      const query = new URL(req.url || '/', 'http://x').searchParams;
       const text = Buffer.concat(chunks).toString('utf8').trim();
       if (text) {
         try {
-          action = (JSON.parse(text) as { action?: unknown } | null)?.action;
+          request = asRequest(JSON.parse(text));
         } catch {
-          action = 'invalid-json';
+          request = { action: 'invalid-json' };
         }
       } else {
-        action = query ?? 'toggle';
+        const pin = query.get('pin');
+        request = {
+          action: query.get('action') ?? 'toggle',
+          device: query.get('device') ?? undefined,
+          pin: pin === null ? undefined : pin !== 'false' && pin !== '0',
+        };
       }
 
       const auth = req.headers['authorization'];
       const m = typeof auth === 'string' ? /^Bearer\s+(\S+)\s*$/i.exec(auth) : null;
       if (!m || !this.tokenMatches(m[1])) {
-        fail(this.rejectUnauthorized(source, action) as Extract<TriggerOutcome, { ok: false }>);
+        fail(this.rejectUnauthorized(source, request) as Extract<TriggerOutcome, { ok: false }>);
         return;
       }
-      const out = this.fire(action, source);
+      const out = this.fire(request, source);
       if (out.ok) send(200, { success: true, ...out.result });
       else fail(out);
     });

@@ -193,8 +193,7 @@ export function registerHeraldHandlers(ctx: HandlerContext): Record<string, Mess
         });
         return;
       }
-      const action = (payload as { action?: unknown } | undefined)?.action;
-      const out = trigger.fire(action, { via: 'ws', origin: auditOrigin(ctx, client) });
+      const out = trigger.fire(payload ?? {}, { via: 'ws', origin: auditOrigin(ctx, client) });
       if (out.ok) {
         ctx.send(client.ws, {
           type: 'herald_trigger',
@@ -214,6 +213,13 @@ export function registerHeraldHandlers(ctx: HandlerContext): Record<string, Mess
           requestId,
         });
       }
+    },
+
+    /** Make this device (or `deviceId`) the active one; `pin` keeps it there. */
+    herald_claim_device(client, payload, requestId) {
+      return voiceReply(client, 'herald_claim_device', requestId, (v) =>
+        v.claimDevice(client.id, payload)
+      );
     },
 
     herald_handsfree(client, payload, requestId) {

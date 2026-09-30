@@ -137,6 +137,7 @@ export class WebSocketHandler {
     this.heraldTrigger = new HeraldTriggerService({
       available: () => !!this.herald && !!this.heraldVoice,
       activeClient: () => this.heraldVoice?.announcerClient ?? null,
+      claimDevice: (device, pin) => this.heraldVoice?.claimByName(device, pin) ?? null,
       deliver: (clientId, event) => this.sendToClient(clientId, 'herald_event', event),
       audit: (entry) => this.auditLog.append(entry),
     });
@@ -314,6 +315,7 @@ export class WebSocketHandler {
         audit: (entry) => this.auditLog.append(entry),
         selfInfo: deriveSelfInfo(this.config.listeners[0]),
         codeHome: this.config.codeHome,
+        devices: () => this.heraldVoice?.devicesSnapshot() ?? null,
       });
     } catch (err) {
       console.error('Herald: failed to initialize:', err);
@@ -333,6 +335,7 @@ export class WebSocketHandler {
       sendEvent: (clientId, event) => this.sendToClient(clientId, 'herald_voice_event', event),
       debugTranscripts: !!process.env.HERALD_DEBUG_TOOLS && process.env.HERALD_DEBUG_TOOLS !== '0',
       sttHints: () => this.herald?.sttHints() ?? null,
+      onDevices: (snap) => this.broadcast('herald_event', { kind: 'devices', ...snap }),
     });
     voice.start();
     console.log(`Herald voice: using voice service at ${url}`);

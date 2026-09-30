@@ -405,17 +405,17 @@ describe('announcer arbitration (which device plays inbox tones)', () => {
     let t = 1000;
     const events: Array<[string, any]> = [];
     const svc = new HeraldVoiceService({ client: fakeClient(), sendEvent: (id, e) => events.push([id, e]), now: () => t });
-    expect(svc.setPresence('phone', { interacted: false })).toEqual({ announcer: true });
+    expect(svc.setPresence('phone', { interacted: false })).toEqual({ announcer: true, clientId: 'phone' });
     t += 10;
     // Neither was used yet: the newest device takes over.
-    expect(svc.setPresence('desk', { interacted: false })).toEqual({ announcer: true });
+    expect(svc.setPresence('desk', { interacted: false })).toMatchObject({ announcer: true });
     expect(events).toContainEqual(['phone', { kind: 'announcer', owner: false }]);
     t += 10;
-    expect(svc.setPresence('phone', { interacted: true })).toEqual({ announcer: true });
+    expect(svc.setPresence('phone', { interacted: true })).toMatchObject({ announcer: true });
     expect(events).toContainEqual(['desk', { kind: 'announcer', owner: false }]);
     t += 10;
     // Seeing the desk again does not beat the phone the user actually touched.
-    expect(svc.setPresence('desk', { interacted: false })).toEqual({ announcer: false });
+    expect(svc.setPresence('desk', { interacted: false })).toMatchObject({ announcer: false });
     expect(svc.announcerClient).toBe('phone');
   });
 
@@ -435,6 +435,169 @@ describe('announcer arbitration (which device plays inbox tones)', () => {
     expect(events).toContainEqual(['laptop', { kind: 'announcer', owner: true }]);
     svc.clientGone('laptop');
     expect(svc.announcerClient).toBeNull();
+  });
+
+});
+
+describe('claiming the active device', () => {
+  function setup() {
+    let t = 1000;
+    const events: Array<[string, any]> = [];
+    const snaps: any[] = [];
+    const svc = new HeraldVoiceService({
+      client: fakeClient(),
+      sendEvent: (id, e) => events.push([id, e]),
+      onDevices: (s) => snaps.push(s),
+      now: () => t,
+    });
+    const tick = (ms = 10) => {
+      t += ms;
+    };
+    return { svc, events, snaps, tick };
+  }
+
+  it('labels devices and exposes the active one (why it is active)', () => {
+    const { svc, snaps, tick } = setup();
+    svc.setPresence('a', {
+      interacted: true,
+      label: '  Chrome\non   Windows ',
+      deviceKey: 'win-pc-000001',
+    });
+    tick();
+    svc.setPresence('b', { interacted: false, label: 'Companion app on Android' });
+    tick();
+    svc.setPresence('c', { interacted: false }); // an older client: no label
+    const snap = svc.devicesSnapshot();
+    expect(snap.devices).toEqual([
+      { id: 'a', label: 'Chrome on Windows', handsFree: false },
+      { id: 'b', label: 'Companion app on Android', handsFree: false },
+      { id: 'c', label: 'Unnamed device', handsFree: false },
+    ]);
+    expect(snap.activeDevice).toEqual({
+      id: 'a',
+      label: 'Chrome on Windows',
+      pinned: false,
+      reason: 'recent',
+    });
+    expect(snaps[snaps.length - 1]).toEqual(snap);
+    // Presence refreshes that change nothing are not re-broadcast.
+    const n = snaps.length;
+    tick();
+    svc.setPresence('b', { interacted: false, label: 'Companion app on Android' });
+    expect(snaps).toHaveLength(n);
+    // A rename is.
+    svc.setPresence('b', { interacted: false, label: 'Pixel' });
+    expect(snaps).toHaveLength(n + 1);
+    svc.setPresence('b', { interacted: false, label: 'x'.repeat(200) });
+    expect(svc.devicesSnapshot().devices.find((d) => d.id === 'b')!.label).toHaveLength(60);
+  });
+
+  it('a claim makes that device active and stands the old one down', () => {
+    const { svc, events, tick } = setup();
+    svc.setPresence('desk', { interacted: true, label: 'Desk' });
+    tick();
+    svc.setPresence('phone', { interacted: false, label: 'Phone' });
+    expect(svc.announcerClient).toBe('desk');
+    const snap = svc.claimDevice('phone', { pin: false });
+    expect(svc.announcerClient).toBe('phone');
+    expect(snap.activeDevice).toEqual({
+      id: 'phone',
+      label: 'Phone',
+      pinned: false,
+      reason: 'claimed',
+    });
+    expect(events).toContainEqual(['desk', { kind: 'announcer', owner: false }]);
+    expect(events).toContainEqual(['phone', { kind: 'announcer', owner: true }]);
+  });
+
+  it('an unpinned claim yields to activity elsewhere; a pinned one does not', () => {
+    const { svc, tick } = setup();
+    svc.setPresence('desk', { interacted: true });
+    tick();
+    svc.setPresence('phone', { interacted: false });
+    svc.claimDevice('phone', { pin: false });
+    tick();
+    svc.setPresence('desk', { interacted: true });
+    expect(svc.announcerClient).toBe('desk');
+
+    svc.claimDevice('phone', { pin: true });
+    for (let i = 0; i < 5; i++) {
+      tick();
+      svc.setPresence('desk', { interacted: true });
+    }
+    expect(svc.announcerClient).toBe('phone');
+    expect(svc.devicesSnapshot().activeDevice).toMatchObject({
+      id: 'phone',
+      pinned: true,
+      reason: 'claimed',
+    });
+  });
+
+  it('a pinned claim beats hands-free, and another claim moves it', () => {
+    const { svc, tick } = setup();
+    svc.setPresence('kitchen', { interacted: false });
+    svc.setPresence('desk', { interacted: false });
+    svc.setHandsFree('kitchen', true);
+    expect(svc.announcerClient).toBe('kitchen');
+    svc.claimDevice('desk', { pin: true });
+    expect(svc.announcerClient).toBe('desk');
+    expect(svc.devicesSnapshot().devices.find((d) => d.id === 'kitchen')!.handsFree).toBe(true);
+    tick();
+    svc.claimDevice('desk', { pin: true, deviceId: 'kitchen' }); // switch from the menu on another device
+    expect(svc.devicesSnapshot().activeDevice).toMatchObject({ id: 'kitchen', pinned: true });
+  });
+
+  it('pinned device disconnects: automatic arbitration; a quick reconnect gets its pin back', () => {
+    const { svc, tick } = setup();
+    svc.setPresence('desk', { interacted: true, deviceKey: 'desk-key-0001' });
+    tick();
+    svc.setPresence('phone', { interacted: true, deviceKey: 'phone-key-001' });
+    svc.claimDevice('desk', { pin: true });
+    svc.clientGone('desk');
+    expect(svc.announcerClient).toBe('phone');
+    expect(svc.devicesSnapshot().activeDevice).toMatchObject({
+      id: 'phone',
+      reason: 'recent',
+      pinned: false,
+    });
+    tick(5000);
+    svc.setPresence('desk-2', { interacted: false, deviceKey: 'desk-key-0001' }); // same browser, new socket
+    expect(svc.announcerClient).toBe('desk-2');
+    expect(svc.devicesSnapshot().activeDevice).toMatchObject({ pinned: true, reason: 'claimed' });
+
+    svc.clientGone('desk-2');
+    tick(61_000); // too late: stays automatic
+    svc.setPresence('desk-3', { interacted: false, deviceKey: 'desk-key-0001' });
+    expect(svc.announcerClient).toBe('phone');
+  });
+
+  it('claims by label (case-insensitive) or id; unknown devices are refused', () => {
+    const { svc, tick } = setup();
+    svc.setPresence('a', { interacted: true, label: 'Windows PC' });
+    tick();
+    svc.setPresence('b', { interacted: false, label: 'Work Mac' });
+    expect(svc.claimByName('work mac', true)).toBe('b');
+    expect(svc.devicesSnapshot().activeDevice).toMatchObject({ id: 'b', pinned: true });
+    expect(svc.claimByName('a', false)).toBe('a');
+    expect(svc.claimByName('Toaster', true)).toBeNull();
+    expect(svc.announcerClient).toBe('a');
+    expect(() => svc.claimDevice('a', { pin: true, deviceId: 'ghost' })).toThrow(VoiceError);
+    expect(() => svc.claimDevice('stranger', { pin: true })).toThrow(/presence/);
+  });
+
+  it('herald_claim_device routes to the service with the client id', async () => {
+    const claimDevice = jest.fn(() => ({ activeDevice: null, devices: [] }));
+    const sent: any[] = [];
+    const ctx: any = {
+      herald: {},
+      heraldVoice: { claimDevice },
+      send: (_ws: unknown, m: unknown) => sent.push(m),
+      config: { listeners: [] },
+    };
+    const h = registerHeraldHandlers(ctx);
+    await h.herald_claim_device({ id: 'c7', ws: {} } as any, { pin: true }, 'q');
+    expect(claimDevice).toHaveBeenCalledWith('c7', { pin: true });
+    expect(sent[0]).toMatchObject({ type: 'herald_claim_device', success: true, requestId: 'q' });
   });
 
   it('herald_presence routes to the service with the client id', async () => {

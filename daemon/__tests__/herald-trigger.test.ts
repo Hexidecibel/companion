@@ -117,8 +117,8 @@ describe('HeraldTriggerService routing', () => {
   });
   afterEach(() => log.mockRestore());
 
-  it('parses exactly the five actions', () => {
-    expect(TRIGGER_ACTIONS).toEqual(['brief', 'listen', 'stop', 'repeat', 'toggle']);
+  it('parses exactly the six actions', () => {
+    expect(TRIGGER_ACTIONS).toEqual(['brief', 'listen', 'stop', 'repeat', 'toggle', 'claim']);
     for (const a of TRIGGER_ACTIONS) expect(parseTriggerAction(a)).toBe(a);
     expect(parseTriggerAction('TOGGLE')).toBeNull();
     expect(parseTriggerAction(undefined)).toBeNull();
@@ -127,7 +127,8 @@ describe('HeraldTriggerService routing', () => {
 
   it('routes each action to the active device as a trigger herald_event', () => {
     const { svc, delivered } = makeService({ active: 'desk-browser' });
-    for (const action of TRIGGER_ACTIONS) {
+    const ROUTED = TRIGGER_ACTIONS.filter((a) => a !== 'claim');
+    for (const action of ROUTED) {
       const out = svc.fire(action, { via: 'http', origin });
       expect(out).toMatchObject({
         ok: true,
@@ -138,11 +139,53 @@ describe('HeraldTriggerService routing', () => {
     }
     expect(delivered.map((d) => d.clientId)).toEqual(Array(5).fill('desk-browser'));
     expect(delivered.map((d) => d.event.kind)).toEqual(Array(5).fill('trigger'));
-    expect(delivered.map((d) => (d.event as { action: string }).action)).toEqual([
-      ...TRIGGER_ACTIONS,
-    ]);
+    expect(delivered.map((d) => (d.event as { action: string }).action)).toEqual(ROUTED);
     const ids = delivered.map((d) => (d.event as { id: string }).id);
     expect(new Set(ids).size).toBe(5);
+  });
+
+  it('claim makes the named device active (pinned by default) and tells it', () => {
+    const claims: Array<[string, boolean]> = [];
+    const delivered: Array<{ clientId: string; event: HeraldEvent }> = [];
+    const svc = new HeraldTriggerService({
+      available: () => true,
+      activeClient: () => 'phone',
+      claimDevice: (device, pin) => {
+        claims.push([device, pin]);
+        return device.toLowerCase() === 'windows pc' ? 'pc-conn' : null;
+      },
+      deliver: (clientId, event) => {
+        delivered.push({ clientId, event });
+        return true;
+      },
+      audit: () => {},
+    });
+    expect(
+      svc.fire({ action: 'claim', device: 'Windows PC' }, { via: 'http', origin })
+    ).toMatchObject({
+      ok: true,
+      target: 'pc-conn',
+      result: { action: 'claim' },
+    });
+    expect(delivered[0]).toMatchObject({
+      clientId: 'pc-conn',
+      event: { kind: 'trigger', action: 'claim' },
+    });
+    svc.fire({ action: 'claim', device: 'windows pc', pin: false }, { via: 'http', origin });
+    expect(claims).toEqual([
+      ['Windows PC', true],
+      ['windows pc', false],
+    ]);
+    expect(svc.fire({ action: 'claim', device: 'Toaster' }, { via: 'http', origin })).toMatchObject(
+      {
+        status: 404,
+        code: 'unknown_device',
+      }
+    );
+    expect(svc.fire({ action: 'claim' }, { via: 'http', origin })).toMatchObject({
+      status: 400,
+      error: expect.stringMatching(/needs "device"/),
+    });
   });
 
   it('409 no_active_device when nobody can act (none elected, or it just left)', () => {
@@ -295,6 +338,12 @@ describe('POST /herald/trigger', () => {
       'toggle',
       'repeat',
     ]);
+  });
+
+  it('claim with ?device= in the query; unknown device -> 404', async () => {
+    const res = await post(undefined, TOKEN, `${base}?action=claim&device=desk`);
+    expect(res.status).toBe(404); // this harness has no claimDevice hook
+    expect(await res.json()).toMatchObject({ code: 'unknown_device' });
   });
 
   it('401 without / with a wrong token (audited), nothing delivered', async () => {

@@ -70,6 +70,10 @@ export interface HeraldState {
   actions: HeraldAction[]; // pending + recently resolved
   /** Reply length setting (persisted server-side, follows the user). Absent on older daemons. */
   verbosity?: HeraldVerbosity;
+  /** The device that acts (tones, triggers, hands-free); absent on older daemons. */
+  activeDevice?: HeraldActiveDevice | null;
+  /** Connected Herald devices (those that reported presence). */
+  devices?: HeraldDeviceInfo[];
 }
 export type HeraldEvent =
   | { kind: 'state'; state: HeraldState }
@@ -82,6 +86,8 @@ export type HeraldEvent =
   | { kind: 'settings'; verbosity: HeraldVerbosity }
   /** Remote trigger, sent ONLY to the active device (see HeraldTriggerAction). */
   | { kind: 'trigger'; action: HeraldTriggerAction; id: string }
+  /** The active device or the device list changed (broadcast). */
+  | { kind: 'devices'; activeDevice: HeraldActiveDevice | null; devices: HeraldDeviceInfo[] }
   | { kind: 'error'; error: string };
 /** herald_set_verbosity payload; answered with { verbosity }. */
 export interface HeraldSetVerbosityRequest {
@@ -99,11 +105,16 @@ export interface HeraldSetVerbosityRequest {
  *   stop   - stop speaking and cancel any capture
  *   repeat - say the last reply again
  *   toggle - Herald speaking: stop; otherwise listen (the one-button default)
+ *   claim  - make `device` (a label or id) the active device; pinned unless pin=false
  */
-export type HeraldTriggerAction = 'brief' | 'listen' | 'stop' | 'repeat' | 'toggle';
+export type HeraldTriggerAction = 'brief' | 'listen' | 'stop' | 'repeat' | 'toggle' | 'claim';
 /** herald_trigger payload and the POST /herald/trigger JSON body. */
 export interface HeraldTriggerRequest {
   action: HeraldTriggerAction;
+  /** claim only: the device to make active, by label (case-insensitive) or id. */
+  device?: string;
+  /** claim only: keep it active against other devices' activity (default true). */
+  pin?: boolean;
 }
 /** A delivered trigger. Failures carry `error` plus `code` instead. */
 export interface HeraldTriggerResult {
@@ -116,6 +127,7 @@ export type HeraldTriggerErrorCode =
   | 'forbidden'
   | 'rate_limited'
   | 'no_active_device'
+  | 'unknown_device'
   | 'unavailable';
 
 // --- voice protocol (mirrored byte-for-byte in web/src/types/herald.ts; a web test enforces it) ---
@@ -128,16 +140,54 @@ export type HeraldTriggerErrorCode =
  *   herald_voice_audio         HeraldVoiceAudioChunk (fire-and-forget; no requestId, no reply)
  *   herald_voice_stream_end    HeraldVoiceStreamEnd -> HeraldSttResult
  *   herald_handsfree           { on: boolean } -> { owner: boolean }
- *   herald_presence            HeraldPresence -> { announcer: boolean }
+ *   herald_presence            HeraldPresence -> HeraldPresenceResult
+ *   herald_claim_device        HeraldClaimDeviceRequest -> HeraldDevicesSnapshot
  * Per-client pushes arrive as `herald_voice_event` with a HeraldVoiceEvent payload.
  *
- * Inbox tones play on ONE device (the announcer): the hands-free device, else
- * the one the user touched last, else the one seen last. Clients report
- * presence on connect / when shown (interacted: false) and on use (true).
+ * ONE device is active (the announcer): it plays inbox tones, runs hands-free
+ * and receives remote triggers. A device claimed by hand wins (pinned: until
+ * another device claims or it disconnects; unpinned: until another device is
+ * used); else the hands-free device; else the one the user touched last; else
+ * the one seen last. Clients report presence on connect / when shown
+ * (interacted: false) and on use (true). The active device and the device list
+ * reach everyone as a `devices` herald_event (and in HeraldState).
  */
 export interface HeraldPresence {
   /** The user just used this device (a key press or tap), not merely opened it. */
   interacted: boolean;
+  /** Friendly name, e.g. "Chrome on Windows" (auto-detected, user-editable). */
+  label?: string;
+  /** Stable random id of this browser / app install: a pin survives a quick reconnect. */
+  deviceKey?: string;
+}
+export interface HeraldPresenceResult {
+  announcer: boolean;
+  /** This connection's device id (compare with HeraldActiveDevice.id). Absent on older daemons. */
+  clientId?: string;
+}
+export interface HeraldDeviceInfo {
+  /** Connection id: changes when the device reconnects. */
+  id: string;
+  label: string;
+  /** Holds hands-free (wake word) mode. */
+  handsFree: boolean;
+}
+export interface HeraldActiveDevice {
+  id: string;
+  label: string;
+  /** Claimed by hand and kept until another device claims or it disconnects. */
+  pinned: boolean;
+  /** Why it is active. */
+  reason: 'claimed' | 'handsfree' | 'recent';
+}
+/** Make a device active. `deviceId` absent = the requesting device. */
+export interface HeraldClaimDeviceRequest {
+  pin: boolean;
+  deviceId?: string;
+}
+export interface HeraldDevicesSnapshot {
+  activeDevice: HeraldActiveDevice | null;
+  devices: HeraldDeviceInfo[];
 }
 export interface HeraldVoiceInfo {
   id: string;

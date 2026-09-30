@@ -227,6 +227,59 @@ describe('herald_trigger over the WebSocket', () => {
     );
   });
 
+  it('a pinned claim wins routing against activity elsewhere; everyone hears about it', async () => {
+    const trig = connect(TRIGGER);
+    const desk = connect(MAIN);
+    const phone = connect(MAIN);
+    sendMsg(desk, 'subscribe');
+    sendMsg(phone, 'subscribe');
+    sendMsg(desk, 'herald_presence', { interacted: false, label: 'Windows PC' });
+    sendMsg(phone, 'herald_presence', { interacted: true, label: 'Pixel' });
+    await flush();
+    sendMsg(desk, 'herald_claim_device', { pin: true }, 'claim1');
+    await flush();
+    expect(sentOf(desk).find((m) => m.requestId === 'claim1')?.payload.activeDevice).toMatchObject({
+      label: 'Windows PC',
+      pinned: true,
+      reason: 'claimed',
+    });
+    const devicesEvent = sentOf(phone)
+      .filter((m) => m.type === 'herald_event' && m.payload?.kind === 'devices')
+      .pop();
+    expect(devicesEvent?.payload.activeDevice).toMatchObject({ label: 'Windows PC', pinned: true });
+    expect(devicesEvent?.payload.devices.map((d: { label: string }) => d.label)).toEqual([
+      'Pixel',
+      'Windows PC',
+    ]);
+
+    sendMsg(phone, 'herald_presence', { interacted: true, label: 'Pixel' }); // phone used again
+    await flush();
+    desk.send.mockClear();
+    phone.send.mockClear();
+    sendMsg(trig, 'herald_trigger', { action: 'toggle' }, 't');
+    await flush();
+    expect(sentOf(desk).filter((m) => m.payload?.kind === 'trigger')).toHaveLength(1);
+    expect(sentOf(phone).filter((m) => m.payload?.kind === 'trigger')).toHaveLength(0);
+
+    // The trigger token can move it: "make THIS machine active".
+    sendMsg(trig, 'herald_trigger', { action: 'claim', device: 'pixel' }, 'c');
+    await flush();
+    expect(sentOf(trig).find((m) => m.requestId === 'c')).toMatchObject({ success: true });
+    expect(sentOf(phone).find((m) => m.payload?.kind === 'trigger')?.payload.action).toBe('claim');
+
+    // Disconnect of the pinned device: falls back to automatic arbitration.
+    phone.emit('close', 1000, Buffer.from(''));
+    await flush();
+    const last = sentOf(desk)
+      .filter((m) => m.type === 'herald_event' && m.payload?.kind === 'devices')
+      .pop();
+    expect(last?.payload.activeDevice).toMatchObject({
+      label: 'Windows PC',
+      reason: 'recent',
+      pinned: false,
+    });
+  });
+
   it('the main token can fire herald_trigger too', async () => {
     const desk = connect(MAIN);
     sendMsg(desk, 'herald_presence', { interacted: true });

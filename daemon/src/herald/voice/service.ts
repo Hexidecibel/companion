@@ -13,6 +13,10 @@
  */
 
 import type {
+  HeraldActiveDevice,
+  HeraldDeviceInfo,
+  HeraldDevicesSnapshot,
+  HeraldPresenceResult,
   HeraldSttResult,
   HeraldTtsRequest,
   HeraldTtsResult,
@@ -56,7 +60,31 @@ export const VOICE_LIMITS = {
   maxWakePendingBytes: 2 * 16000 * 2,
   streamIdleMs: 20_000,
   sweepIntervalMs: 5000,
+  /** A pinned device that drops off keeps its pin this long for a reconnect. */
+  pinGraceMs: 60_000,
+  maxLabelChars: 60,
 };
+
+const DEVICE_KEY = /^[A-Za-z0-9_-]{8,64}$/;
+const DEFAULT_LABEL = 'Unnamed device';
+
+interface Presence {
+  seenAt: number;
+  interactedAt: number;
+  label: string;
+  deviceKey: string | null;
+}
+
+/** Friendly device label: printable, collapsed whitespace, capped. */
+export function cleanDeviceLabel(raw: unknown, max = VOICE_LIMITS.maxLabelChars): string | null {
+  if (typeof raw !== 'string') return null;
+  const text = raw
+    // eslint-disable-next-line no-control-regex
+    .replace(/[\u0000-\u001f\u007f]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return text ? text.slice(0, max) : null;
+}
 
 const STREAM_ID = /^[A-Za-z0-9_-]{1,64}$/;
 
@@ -94,6 +122,8 @@ export interface HeraldVoiceServiceOptions {
   debugTranscripts?: boolean;
   /** Vocabulary hints for each transcription (current session names etc.). */
   sttHints?: () => SttHints | null;
+  /** The active device or the device list changed (broadcast it). */
+  onDevices?: (snapshot: HeraldDevicesSnapshot) => void;
   now?: () => number;
   limits?: Partial<typeof VOICE_LIMITS>;
 }
@@ -105,10 +135,15 @@ export class HeraldVoiceService {
   private tts = new Map<string, ClientTts>();
   private streams = new Map<string, VoiceStream>();
   private handsFreeOwner: string | null = null;
-  /** Clients that registered presence: when they were last seen / last used. */
-  private presence = new Map<string, { seenAt: number; interactedAt: number }>();
-  /** The one client that plays inbox tones (see `presence`). */
+  /** Clients that registered presence: when they were last seen / last used, and their name. */
+  private presence = new Map<string, Presence>();
+  /** The one active client: plays inbox tones, gets triggers (see electAnnouncer). */
   private announcer: string | null = null;
+  /** A device claimed by hand. Unpinned: until another device is used. */
+  private claim: { clientId: string; pinned: boolean } | null = null;
+  /** A pinned device that disconnected: its pin comes back if it reconnects in time. */
+  private orphanPin: { deviceKey: string; until: number } | null = null;
+  private lastDevices = '';
   private sweeper: ReturnType<typeof setInterval> | null = null;
   private readonly limits: typeof VOICE_LIMITS;
   private readonly now: () => number;
@@ -434,7 +469,7 @@ export class HeraldVoiceService {
     return this.streams.size;
   }
 
-  // ---- hands-free arbitration --------------------------------------------
+  // ---- active device arbitration ------------------------------------------
 
   /** Only one client may run hands-free (always listening) at a time. */
   setHandsFree(clientId: string, on: boolean): { owner: boolean } {
@@ -451,29 +486,125 @@ export class HeraldVoiceService {
   }
 
   /**
-   * Which device plays inbox tones. Exactly one: the hands-free device if any,
-   * else the one the user touched most recently, else the one seen most
-   * recently. Every change is pushed to the two clients involved.
+   * A client reports that it is here (and whether the user just used it), with
+   * its friendly label. Using a device takes over from an UNPINNED claim held
+   * elsewhere; a pinned claim is untouched.
    */
-  setPresence(clientId: string, raw: unknown): { announcer: boolean } {
-    const interacted = (raw as { interacted?: unknown } | undefined)?.interacted === true;
+  setPresence(clientId: string, raw: unknown): HeraldPresenceResult {
+    const p0 = (raw || {}) as { interacted?: unknown; label?: unknown; deviceKey?: unknown };
+    const interacted = p0.interacted === true;
     const now = this.now();
-    const p = this.presence.get(clientId) ?? { seenAt: 0, interactedAt: 0 };
+    const prev = this.presence.get(clientId);
+    const p: Presence = prev ?? {
+      seenAt: 0,
+      interactedAt: 0,
+      label: DEFAULT_LABEL,
+      deviceKey: null,
+    };
     p.seenAt = now;
     if (interacted) p.interactedAt = now;
+    const label = cleanDeviceLabel(p0.label, this.limits.maxLabelChars);
+    if (label) p.label = label;
+    if (typeof p0.deviceKey === 'string' && DEVICE_KEY.test(p0.deviceKey))
+      p.deviceKey = p0.deviceKey;
     this.presence.set(clientId, p);
+
+    // The pinned device came back after a dropped connection: restore its pin.
+    const orphan = this.orphanPin;
+    if (orphan && p.deviceKey === orphan.deviceKey) {
+      this.orphanPin = null;
+      if (now < orphan.until && !this.claim) this.claim = { clientId, pinned: true };
+    }
+    if (interacted && this.claim && !this.claim.pinned && this.claim.clientId !== clientId) {
+      this.claim = null;
+    }
     this.electAnnouncer(clientId);
-    return { announcer: this.announcer === clientId };
+    return { announcer: this.announcer === clientId, clientId };
+  }
+
+  /**
+   * Make a device active by hand (`deviceId` absent: the requester). Pinned, it
+   * stays active until another device claims or it disconnects.
+   */
+  claimDevice(requesterId: string, raw: unknown): HeraldDevicesSnapshot {
+    const p = (raw || {}) as { pin?: unknown; deviceId?: unknown };
+    const target = typeof p.deviceId === 'string' && p.deviceId ? p.deviceId : requesterId;
+    if (!this.presence.has(target)) {
+      throw new VoiceError(
+        target === requesterId ? 'Report presence first' : 'No such device',
+        'bad_request'
+      );
+    }
+    this.setClaim(target, p.pin === true);
+    return this.devicesSnapshot();
+  }
+
+  /** Claim by label (case-insensitive) or id, for remote triggers. Null: no such device. */
+  claimByName(nameOrId: string, pin: boolean): string | null {
+    const target = this.findDevice(nameOrId);
+    if (!target) return null;
+    this.setClaim(target, pin);
+    return target;
+  }
+
+  /** A device by exact id, else by label (case-insensitive; the most recently seen wins). */
+  findDevice(nameOrId: string): string | null {
+    if (this.presence.has(nameOrId)) return nameOrId;
+    const want = nameOrId.trim().toLowerCase();
+    if (!want) return null;
+    let best: { id: string; seenAt: number } | null = null;
+    for (const [id, p] of this.presence) {
+      if (p.label.toLowerCase() === want && (!best || p.seenAt > best.seenAt)) {
+        best = { id, seenAt: p.seenAt };
+      }
+    }
+    return best?.id ?? null;
+  }
+
+  private setClaim(clientId: string, pinned: boolean): void {
+    this.claim = { clientId, pinned };
+    this.orphanPin = null;
+    this.electAnnouncer();
+    // A pin flip on the same device changes no announcer, but is news.
+    this.notifyDevices();
   }
 
   get announcerClient(): string | null {
     return this.announcer;
   }
 
-  /** `quiet`: the requester gets its answer in the reply, not as an event. */
+  devicesSnapshot(): HeraldDevicesSnapshot {
+    const devices: HeraldDeviceInfo[] = [...this.presence.entries()]
+      .map(([id, p]) => ({ id, label: p.label, handsFree: this.handsFreeOwner === id }))
+      .sort((a, b) => a.label.localeCompare(b.label) || a.id.localeCompare(b.id));
+    const id = this.announcer;
+    const p = id ? this.presence.get(id) : undefined;
+    let activeDevice: HeraldActiveDevice | null = null;
+    if (id && p) {
+      const claimed = this.claim?.clientId === id;
+      activeDevice = {
+        id,
+        label: p.label,
+        pinned: claimed && !!this.claim?.pinned,
+        reason: claimed ? 'claimed' : this.handsFreeOwner === id ? 'handsfree' : 'recent',
+      };
+    }
+    return { activeDevice, devices };
+  }
+
+  /**
+   * Elect the active device: a claimed one; else the hands-free device; else
+   * the one the user touched most recently; else the one seen most recently.
+   * Announcer changes are pushed to the two clients involved (`quiet`: the
+   * requester gets its answer in the reply instead); structural changes to the
+   * device list are broadcast via onDevices.
+   */
   private electAnnouncer(quiet?: string): void {
     let next: string | null = null;
-    if (this.handsFreeOwner && this.presence.has(this.handsFreeOwner)) {
+    if (this.claim && !this.presence.has(this.claim.clientId)) this.claim = null;
+    if (this.claim) {
+      next = this.claim.clientId;
+    } else if (this.handsFreeOwner && this.presence.has(this.handsFreeOwner)) {
       next = this.handsFreeOwner;
     } else {
       let best: { id: string; interactedAt: number; seenAt: number } | null = null;
@@ -483,27 +614,48 @@ export class HeraldVoiceService {
           p.interactedAt > best.interactedAt ||
           (p.interactedAt === best.interactedAt && p.seenAt > best.seenAt)
         ) {
-          best = { id, ...p };
+          best = { id, interactedAt: p.interactedAt, seenAt: p.seenAt };
         }
       }
       next = best?.id ?? null;
     }
     const prev = this.announcer;
-    if (next === prev) return;
-    this.announcer = next;
-    if (prev && prev !== quiet) this.opts.sendEvent(prev, { kind: 'announcer', owner: false });
-    if (next && next !== quiet) this.opts.sendEvent(next, { kind: 'announcer', owner: true });
+    if (next !== prev) {
+      this.announcer = next;
+      if (prev && prev !== quiet) this.opts.sendEvent(prev, { kind: 'announcer', owner: false });
+      if (next && next !== quiet) this.opts.sendEvent(next, { kind: 'announcer', owner: true });
+    }
+    this.notifyDevices();
+  }
+
+  private notifyDevices(): void {
+    const snap = this.devicesSnapshot();
+    const key = JSON.stringify(snap);
+    if (key === this.lastDevices) return;
+    this.lastDevices = key;
+    try {
+      this.opts.onDevices?.(snap);
+    } catch (err) {
+      console.error('Herald voice: device broadcast failed:', err);
+    }
   }
 
   get handsFreeClient(): string | null {
     return this.handsFreeOwner;
   }
 
-  /** Client disconnected: drop everything it owned. */
+  /** Client disconnected: drop everything it owned. A pin waits briefly for a reconnect. */
   clientGone(clientId: string): void {
     this.cancelTts(clientId);
     for (const s of [...this.streams.values()]) if (s.clientId === clientId) this.closeStream(s);
     if (this.handsFreeOwner === clientId) this.handsFreeOwner = null;
+    if (this.claim?.clientId === clientId) {
+      const key = this.presence.get(clientId)?.deviceKey;
+      if (this.claim.pinned && key) {
+        this.orphanPin = { deviceKey: key, until: this.now() + this.limits.pinGraceMs };
+      }
+      this.claim = null;
+    }
     this.presence.delete(clientId);
     if (this.announcer === clientId) this.announcer = null;
     this.electAnnouncer();

@@ -7,6 +7,7 @@
 import { randomUUID } from 'crypto';
 import type { AuditEntry, AuditOrigin } from '../audit-log';
 import type {
+  HeraldDevicesSnapshot,
   HeraldAction,
   HeraldEvent,
   HeraldInboxItem,
@@ -94,6 +95,8 @@ export interface HeraldServiceDeps {
   codeHome?: string;
   /** Knowledge + cush-tools toolbox. Omitted = built from codeHome; null = disabled. */
   toolbox?: HeraldToolbox | null;
+  /** Active device + connected devices (voice layer), folded into getState(). */
+  devices?: () => HeraldDevicesSnapshot | null;
 }
 
 const SERVER_ORIGIN: AuditOrigin = {
@@ -110,6 +113,7 @@ export class HeraldService {
   private sources: SessionSource[];
   private store: HeraldStore;
   private broadcastFn: (event: HeraldEvent) => void;
+  private devicesFn: (() => HeraldDevicesSnapshot | null) | undefined;
   private auditFn: (entry: AuditEntry) => void;
   private now: () => number;
   private pollIntervalMs: number;
@@ -138,6 +142,7 @@ export class HeraldService {
     this.sources = deps.sources;
     this.store = deps.store;
     this.broadcastFn = deps.broadcast;
+    this.devicesFn = deps.devices;
     this.auditFn = deps.audit;
     this.now = deps.now || Date.now;
     this.pollIntervalMs = deps.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
@@ -229,7 +234,18 @@ export class HeraldService {
       inbox: this.inbox.list(),
       actions: this.actions.list(),
       verbosity: this.verbosity,
+      ...this.deviceFields(),
     };
+  }
+
+  private deviceFields(): Pick<HeraldState, 'activeDevice' | 'devices'> {
+    let snap: HeraldDevicesSnapshot | null = null;
+    try {
+      snap = this.devicesFn?.() ?? null;
+    } catch {
+      snap = null;
+    }
+    return snap ? { activeDevice: snap.activeDevice, devices: snap.devices } : {};
   }
 
   getVerbosity(): HeraldVerbosity {
