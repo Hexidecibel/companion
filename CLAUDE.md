@@ -189,6 +189,19 @@ cd desktop && cargo tauri ios build             # Build for device
 cd desktop && cargo tauri ios build --export-method app-store-connect  # TestFlight
 ```
 
+### Native Herald (voice)
+- Desktop: `src-tauri/src/herald.rs` registers the Herald global shortcuts (the web layer sends the
+  chords via `herald_set_shortcuts`), adds the tray actions, and grants the mic to the app's own
+  origin (WebKitGTK / WebView2). It only emits `herald-native` events `{ action }`.
+- Mobile: `src-tauri/plugins/tauri-plugin-herald-native/` (Kotlin + Swift): earbud play-pause ->
+  plugin event `media` `{ action: 'toggle' }`, `set_media_session`, `set_audio_focus` (ducking).
+- Web: `web/src/services/nativeBridge.ts` + `web/src/hooks/useNativeHerald.ts` route all of it to
+  the existing push-to-talk / remote-trigger handlers; `nativePlatform()` in `utils/platform.ts`
+  gates it. Mic permissions: `setup-android.sh` (RECORD_AUDIO), `setup-ios.sh`
+  (NSMicrophoneUsageDescription), `src-tauri/Info.plist` + `Entitlements.plist` (macOS).
+- CI: pushing a `native/**` branch runs `release.yml` as an artifact-only build (no TestFlight, no
+  release, no tag needed).
+
 ### APK Signing
 ```bash
 apksigner sign --ks desktop/debug.keystore --ks-pass pass:android --key-pass pass:android \

@@ -1809,12 +1809,26 @@ native apps, the browser a lot too.
    daemon token. Ship ready-made triggers: AutoHotkey v2 script (+ how to map a G Hub / Synapse mouse
    side button to it) on Windows, a Raycast script command on the Mac, a `curl` one-liner for Stream
    Deck and iOS Shortcuts. Pick default keys that do not clash with Discord push-to-talk.
-2. **Native desktop Herald (Tauri).** `tauri-plugin-global-shortcut` for system-wide shortcuts with
+2. **Native desktop Herald (Tauri) (built 2026-09-30, branch `native/herald-voice`; needs on-device
+   verification).** Global shortcuts via `tauri-plugin-global-shortcut` (hold Ctrl+Alt+Space to talk,
+   Ctrl+Alt+Shift+H toggle, Ctrl+Alt+Shift+B brief; rebindable in the Herald voice menu, conflicts
+   shown, Wayland note), tray items (Brief me, Toggle listening, Mute tones, Open, Quit), mic granted
+   to the app's own origin on WebKitGTK and WebView2, macOS usage string + audio-input entitlement.
+   Native input only emits `herald-native` events; `web/src/services/nativeBridge.ts` +
+   `useNativeHerald` run the existing push-to-talk and trigger handlers. Still open: Discord mic
+   hiding and ducking (seam: `desktop/src-tauri/src/herald.rs` TODO). Original spec:
+   `tauri-plugin-global-shortcut` for system-wide shortcuts with
    true hold-to-talk (press + release), a tray / menu-bar orb, an always-available mic. Bundle with
    the Phase 2 audio items (hide the mic from Discord, duck other audio): both need native OS audio
    control (PipeWire on Linux, Windows audio session APIs, macOS equivalents). Caveats: macOS mic +
    input-monitoring permissions; limited global shortcuts on Linux Wayland.
-3. **Mobile.** An earbud / headset media-button tap triggers `brief` (Media Session / native media
+3. **Mobile (built 2026-09-30, needs on-device verification).** `tauri-plugin-herald-native`:
+   Android MediaSession / iOS MPRemoteCommandCenter turn earbud play-pause into trigger `toggle`
+   (only while Herald is usable on the device; setting "Earbud button talks to Herald"), transient
+   audio focus / an iOS duckOthers audio session duck other audio while Herald speaks, RECORD_AUDIO
+   and NSMicrophoneUsageDescription for the WebView mic. iOS limit: remote commands only reach the
+   Now Playing app, so with the earbud setting on Herald pauses music instead of ducking it.
+   Original spec: an earbud / headset media-button tap triggers `brief` (Media Session / native media
    button handling in the Tauri Android and iOS apps).
 
 Dependencies: Phase 1 needs Fleet Phase 1 (Fleet Inbox + capability handshake) or a minimal
