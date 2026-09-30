@@ -8,7 +8,7 @@
  * Pure (inject `now`), no React / DOM.
  */
 import type { TtsEngine } from '../tts/types';
-import { isLikelyEcho } from './echoMatch';
+import { isClearBargeIn, isLikelyEcho, stripEcho } from './echoMatch';
 
 /** Sentences queued or played this recently count as "just said". */
 export const ECHO_WINDOW_MS = 10_000;
@@ -17,6 +17,8 @@ export const ECHO_WINDOW_MS = 10_000;
  * (or stopped less than this long ago): "yes" a minute later is an answer.
  */
 export const SHORT_ECHO_WINDOW_MS = 4000;
+/** A pause shorter than this (next sentence still being synthesised) is the same utterance. */
+export const RUN_GAP_MS = 2500;
 
 interface Spoken {
   text: string;
@@ -29,6 +31,7 @@ export class SpokenLog {
   /** When the current (or last) run of speech started. */
   private runStart = 0;
   private stoppedAt = -Infinity;
+  private lastRecord = -Infinity;
 
   constructor(private readonly now: () => number = () => Date.now()) {}
 
@@ -37,6 +40,8 @@ export class SpokenLog {
     const t = text.trim();
     if (!t) return;
     const at = this.now();
+    this.maybeNewRun(at);
+    this.lastRecord = at;
     this.entries.push({ text: t, at });
     this.prune(at);
   }
@@ -45,8 +50,18 @@ export class SpokenLog {
     if (on === this.speaking) return;
     const t = this.now();
     this.speaking = on;
-    if (on) this.runStart = t;
-    else this.stoppedAt = t;
+    if (on) {
+      this.maybeNewRun(t);
+    } else {
+      this.stoppedAt = t;
+      // Everything in this utterance was audible until now.
+      for (const e of this.entries) if (e.at >= this.runStart) e.at = t;
+    }
+  }
+
+  private maybeNewRun(t: number): void {
+    if (this.speaking) return;
+    if (t - this.stoppedAt > RUN_GAP_MS && t - this.lastRecord > RUN_GAP_MS) this.runStart = t;
   }
 
   get isSpeaking(): boolean {
@@ -59,15 +74,15 @@ export class SpokenLog {
   }
 
   /**
-   * Text Herald said recently: everything queued in the last ECHO_WINDOW_MS,
-   * plus the whole current utterance (a long reply may have been queued earlier
-   * than that and still be playing).
+   * Text Herald said recently: everything queued or audible in the last
+   * ECHO_WINDOW_MS, plus the whole current utterance (a long reply may have
+   * been queued earlier than that and still be playing). Short pauses between
+   * sentences do not start a new utterance.
    */
   recent(): string[] {
     const t = this.now();
     this.prune(t);
-    const runLive = this.speaking || t - this.stoppedAt < ECHO_WINDOW_MS;
-    const from = runLive ? Math.min(t - ECHO_WINDOW_MS, this.runStart) : t - ECHO_WINDOW_MS;
+    const from = this.speaking ? Math.min(t - ECHO_WINDOW_MS, this.runStart) : t - ECHO_WINDOW_MS;
     return this.entries.filter((e) => e.at >= from).map((e) => e.text);
   }
 
@@ -84,6 +99,20 @@ export class SpokenLog {
     const words = transcript.trim().split(/\s+/).filter(Boolean).length;
     if (words <= 2 && !this.speakingWithin(SHORT_ECHO_WINDOW_MS)) return false;
     return true;
+  }
+
+  /**
+   * A partial transcript heard while Herald talks: clearly a person (an
+   * interrupt word, or mostly words Herald did not say)? See isClearBargeIn.
+   */
+  isBargeIn(transcript: string): boolean {
+    return isClearBargeIn(transcript, this.recent());
+  }
+
+  /** A transcript known to contain the user (confirmed barge-in): cut Herald's words out of it. */
+  stripEcho(transcript: string): string {
+    const spoken = this.recent();
+    return spoken.length === 0 ? transcript.trim() : stripEcho(transcript, spoken);
   }
 
   reset(): void {

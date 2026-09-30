@@ -9,8 +9,8 @@
  * Echo gating: through speakers the mic hears Herald itself, and echo
  * cancellation does not always remove our own playback (WKWebView never does).
  * So while Herald is speaking, speech only stops it once a quick transcript of
- * what was heard (the latest ~2.5 s, re-checked every ~0.7 s while the speech
- * goes on) is NOT Herald's own words (`isEcho`, see echoGuard.ts). A real
+ * what was heard (the latest ~1.6 s, re-checked every ~0.45 s while the speech
+ * goes on, one check in flight at a time) is NOT Herald's own words (`isEcho`, see echoGuard.ts). A real
  * "stop" / "wait" is not in what Herald said, so it still cuts through, about
  * half a second later. Why not an energy test (mic louder than the playback)?
  * Room, volume, device and partial AEC all move the ratio, and the Web Speech
@@ -67,6 +67,13 @@ export interface AutomationDeps {
   onError?: (message: string) => void;
   /** Is this transcript Herald's own voice (heard through the speakers)? */
   isEcho?: (text: string) => boolean;
+  /**
+   * A partial transcript heard while Herald talks is clearly a person (stricter
+   * than "not echo"). Default: not echo.
+   */
+  isBargeIn?: (text: string) => boolean;
+  /** Cut Herald's own words out of a confirmed interruption (it may be mixed in). */
+  stripEcho?: (text: string) => string;
   /** Quick transcription for echo checks (default: a daemon STT stream). */
   transcribe?: (audio: Float32Array) => Promise<string>;
 }
@@ -86,9 +93,9 @@ export const ECHO_TAIL_MS = 600;
 /** First echo check this many frames (32 ms) after real speech start. */
 export const GATE_FIRST_CHECK_FRAMES = 10;
 /** Then re-check this often while the speech goes on and is still echo. */
-export const GATE_CHECK_EVERY_FRAMES = 22;
-/** Each check transcribes at most this much of the latest audio (~2.5 s). */
-export const GATE_WINDOW_FRAMES = 78;
+export const GATE_CHECK_EVERY_FRAMES = 14;
+/** Each check transcribes at most this much of the latest audio (~1.6 s): less echo mixed in. */
+export const GATE_WINDOW_FRAMES = 50;
 
 interface InterruptGate {
   frames: Float32Array[];
@@ -361,6 +368,11 @@ export class VoiceAutomation implements VadEvents {
     g.checking = false;
     if (this.gate !== g || g.confirmed || this.capturing !== 'interrupt') return;
     if (!text || this.echo(text)) return;
+    if (this.deps.isBargeIn && !this.deps.isBargeIn(text)) {
+      console.debug('Herald voice: not sure it is a person yet:', JSON.stringify(text));
+      return;
+    }
+    console.debug('Herald voice: barge-in confirmed by:', JSON.stringify(text));
     this.confirmInterrupt(g, start);
   }
 
@@ -379,6 +391,30 @@ export class VoiceAutomation implements VadEvents {
     }
   }
 
+  /**
+   * A confirmed interruption ended: transcribe it and cut out Herald's own
+   * words (through speakers they are mixed in), then hand it on.
+   */
+  private async finishConfirmed(audio: Float32Array): Promise<void> {
+    const input = this.deps.input;
+    if (!input.listeningExternally) return;
+    input.externalTranscribing('interrupt');
+    let text = '';
+    try {
+      text = await this.quickTranscribe(audio);
+    } catch (err) {
+      input.deliverExternal(null, 'interrupt', (err as Error)?.message || 'Transcription failed');
+      return;
+    }
+    if (!text) {
+      input.deliverExternal(null, 'interrupt', "Didn't catch that");
+      return;
+    }
+    const cleaned = this.deps.stripEcho ? this.deps.stripEcho(text) : text;
+    if (cleaned !== text) console.debug('Herald voice: cut self-echo out of an interruption:', JSON.stringify(text), '->', JSON.stringify(cleaned));
+    input.deliverExternal(cleaned || null, 'interrupt');
+  }
+
   /** The utterance ended before any check cleared it: one last look at all of it. */
   private async finishUnconfirmed(audio: Float32Array): Promise<void> {
     let text = '';
@@ -390,7 +426,8 @@ export class VoiceAutomation implements VadEvents {
     if (!text || this.echo(text)) return;
     if (this.cfg.speaking) this.deps.stopSpeech();
     if (this.deps.input.state.phase !== 'idle') return;
-    this.deps.input.deliverExternal(text, 'interrupt');
+    const cleaned = this.deps.stripEcho ? this.deps.stripEcho(text) : text;
+    if (cleaned) this.deps.input.deliverExternal(cleaned, 'interrupt');
   }
 
   onMisfire(): void {
@@ -421,7 +458,7 @@ export class VoiceAutomation implements VadEvents {
       if (g?.confirmed) {
         // Trimmed: only what followed the echo (the VAD's audio starts with it).
         const clip = g.trimmed ? concatFrames(g.frames) : audio;
-        void this.deps.input.transcribeUtterance(float32ToInt16Frames(clip), 'interrupt');
+        void this.finishConfirmed(clip);
       } else if (g) {
         void this.finishUnconfirmed(audio);
       }
@@ -440,9 +477,11 @@ export class VoiceAutomation implements VadEvents {
       for (const f of w.framer.push(floatToInt16(frame))) w.uplink.push(f);
     } else if (g) {
       g.frames.push(frame);
-      if (!g.confirmed && !g.checking) {
+      if (!g.confirmed) {
+        // Counted while a check is in flight too: a slow STT means the next
+        // check goes out as soon as the last one returns.
         g.sinceCheck++;
-        if (g.sinceCheck >= (g.checks === 0 ? GATE_FIRST_CHECK_FRAMES : GATE_CHECK_EVERY_FRAMES)) void this.checkGate(g);
+        if (!g.checking && g.sinceCheck >= (g.checks === 0 ? GATE_FIRST_CHECK_FRAMES : GATE_CHECK_EVERY_FRAMES)) void this.checkGate(g);
       }
     } else {
       this.preroll.push(frame);

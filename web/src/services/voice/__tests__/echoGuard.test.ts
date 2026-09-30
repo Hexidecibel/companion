@@ -37,6 +37,26 @@ describe('SpokenLog', () => {
     expect(log.recent()).toEqual([]);
   });
 
+  it('a pause between sentences is the same utterance; a stop keeps it for the window', () => {
+    const c = clock();
+    const log = new SpokenLog(c.now);
+    log.record('Doc Upload Site shipped v2.28.0 to supdox.com, and all the deploy checks passed on the first try.');
+    log.setSpeaking(true);
+    c.advance(9000);
+    log.setSpeaking(false); // next sentence still being synthesised
+    log.record('The billing session is still waiting on you to pick an option.');
+    c.advance(800);
+    log.setSpeaking(true);
+    c.advance(3000);
+    // Straddles both sentences; the first was queued 12.8 s ago.
+    expect(log.isEcho('On the first try, the billing session.')).toBe(true);
+    log.setSpeaking(false);
+    c.advance(ECHO_WINDOW_MS - 1000);
+    expect(log.isEcho('all the deploy checks passed')).toBe(true);
+    c.advance(2000);
+    expect(log.isEcho('all the deploy checks passed')).toBe(false);
+  });
+
   it('one or two words only count as echo while (or right after) Herald talks', () => {
     const c = clock();
     const log = new SpokenLog(c.now);

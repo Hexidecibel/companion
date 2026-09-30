@@ -127,6 +127,9 @@ export function echoWords(text: string): string[] {
   const s = text
     .toLowerCase()
     .replace(/['’]/g, '')
+    // Said aloud but not written: "supdox.com" is "supdox dot com", "2.28" is "2 point 28".
+    .replace(/(\p{L})\.(?=\p{L})/gu, '$1 dot ')
+    .replace(/(\p{N})\.(?=\p{N})/gu, '$1 point ')
     .replace(/(\p{L})(\p{N})/gu, '$1 $2')
     .replace(/(\p{N})(\p{L})/gu, '$1 $2');
   const raw = s.match(/[\p{L}\p{N}]+/gu) ?? [];
@@ -194,9 +197,41 @@ export function soundKey(word: string): string {
   return key;
 }
 
-/** Transcript words that carry meaning; Whisper's stutters ("hey, hey") collapsed. */
+/**
+ * Same word by sound: equal keys, or one key is the other plus an -s / -ed
+ * ending ("deploy"/"deployed", "check"/"checks").
+ */
+export function keysMatch(a: string, b: string): boolean {
+  if (a === b) return true;
+  const [short, long] = a.length <= b.length ? [a, b] : [b, a];
+  return (
+    short.length >= 2 &&
+    long.length === short.length + 1 &&
+    long.startsWith(short) &&
+    (long.endsWith('2') || long.endsWith('3'))
+  );
+}
+
+/** Whisper repeats itself on echo ("hey, hey", "doc upload site doc upload site"): say it once. */
+function collapseRepeats(words: string[]): string[] {
+  const out: string[] = [];
+  for (const w of words) {
+    out.push(w);
+    for (let n = 1; n <= 4 && n * 2 <= out.length; n++) {
+      const a = out.slice(out.length - 2 * n, out.length - n).join(' ');
+      const b = out.slice(out.length - n).join(' ');
+      if (a === b) {
+        out.length -= n;
+        break;
+      }
+    }
+  }
+  return out;
+}
+
+/** Transcript words that carry meaning, repeats collapsed. */
 function contentWords(words: string[]): string[] {
-  const deduped = words.filter((w, i) => i === 0 || w !== words[i - 1]);
+  const deduped = collapseRepeats(words);
   const content = deduped.filter((w) => !STOPWORDS.has(w));
   return content.length > 0 ? content : deduped;
 }
@@ -214,15 +249,16 @@ export function echoScore(transcript: string, spoken: string): EchoScore {
   const dp: number[][] = Array.from({ length: n + 1 }, () => new Array<number>(m + 1).fill(0));
   for (let i = 1; i <= n; i++) {
     for (let j = 1; j <= m; j++) {
-      dp[i][j] =
-        tk[i - 1] === sk[j - 1] ? dp[i - 1][j - 1] + 1 : Math.max(dp[i - 1][j], dp[i][j - 1]);
+      dp[i][j] = keysMatch(tk[i - 1], sk[j - 1])
+        ? dp[i - 1][j - 1] + 1
+        : Math.max(dp[i - 1][j], dp[i][j - 1]);
     }
   }
   const hit = new Array<boolean>(n).fill(false);
   let i = n;
   let j = m;
   while (i > 0 && j > 0) {
-    if (tk[i - 1] === sk[j - 1]) {
+    if (keysMatch(tk[i - 1], sk[j - 1])) {
       hit[i - 1] = true;
       i--;
       j--;
@@ -253,10 +289,114 @@ export function isLikelyEcho(
     .filter(Boolean)
     .join(' . ');
   if (!spoken) return false;
+  // "stop" / "wait" that Herald did not say itself: a person is talking.
+  if (hasUnsaidInterruptWord(transcript, spokenTexts)) return false;
   const score = echoScore(transcript, spoken);
-  if (score.unmatched.some((w) => INTERRUPT_WORDS.has(w))) return false;
   const compactT = echoWords(transcript).join('');
   if (compactT.length >= 8 && echoWords(spoken).join('').includes(compactT)) return true;
   const required = score.total <= 2 ? score.total : Math.ceil(score.total * threshold);
   return score.matched >= required;
+}
+
+/** The transcript has "stop", "wait"... that Herald itself did not say. */
+export function hasUnsaidInterruptWord(transcript: string, spokenTexts: string[]): boolean {
+  const said = new Set(echoWords(spokenTexts.join(' ')));
+  return echoWords(transcript).some((w) => INTERRUPT_WORDS.has(w) && !said.has(w));
+}
+
+/** Fraction of content words at or below which a transcript is "mostly new words". */
+export const BARGE_IN_MAX_MATCHED = 0.3;
+
+/**
+ * A partial transcript of what the mic heard WHILE Herald was talking: is it
+ * clearly a person? Stricter than "not echo", because Whisper fills truncated
+ * echo in with plausible words ("still waiting for a few minutes to get
+ * started") or its vocabulary hints. Yes when it has an interrupt word Herald
+ * did not say, or at least two content words and mostly (70%+) words Herald did
+ * not say.
+ */
+export function isClearBargeIn(transcript: string, spokenTexts: string[]): boolean {
+  const spoken = spokenTexts
+    .map((x) => x.trim())
+    .filter(Boolean)
+    .join(' . ');
+  if (!spoken) return contentWords(echoWords(transcript)).length > 0;
+  if (hasUnsaidInterruptWord(transcript, spokenTexts)) return true;
+  const score = echoScore(transcript, spoken);
+  if (score.total < 2) return false;
+  return score.matched / score.total <= BARGE_IN_MAX_MATCHED;
+}
+
+/**
+ * Remove Herald's own words from a transcript that is known to contain the
+ * user (a confirmed interruption through the speakers mixes both): runs of two
+ * or more consecutive words that match the spoken text in order are cut. Returns
+ * '' when nothing of the user's is left.
+ */
+export function stripEcho(transcript: string, spokenTexts: string[]): string {
+  const spoken = spokenTexts
+    .map((x) => x.trim())
+    .filter(Boolean)
+    .join(' . ');
+  const words = transcript.split(/\s+/).filter(Boolean);
+  if (!spoken || words.length === 0) return transcript.trim();
+  const toks: Array<{ word: number; key: string }> = [];
+  words.forEach((w, i) => {
+    for (const t of echoWords(w)) toks.push({ word: i, key: soundKey(t) });
+  });
+  const sk = echoWords(spoken).map(soundKey);
+  const n = toks.length;
+  const m = sk.length;
+  const dp: number[][] = Array.from({ length: n + 1 }, () => new Array<number>(m + 1).fill(0));
+  for (let i = 1; i <= n; i++) {
+    for (let j = 1; j <= m; j++) {
+      dp[i][j] = keysMatch(toks[i - 1].key, sk[j - 1])
+        ? dp[i - 1][j - 1] + 1
+        : Math.max(dp[i - 1][j], dp[i][j - 1]);
+    }
+  }
+  const hit = new Array<boolean>(n).fill(false);
+  let i = n;
+  let j = m;
+  while (i > 0 && j > 0) {
+    if (keysMatch(toks[i - 1].key, sk[j - 1])) {
+      hit[i - 1] = true;
+      i--;
+      j--;
+    } else if (dp[i - 1][j] >= dp[i][j - 1]) i--;
+    else j--;
+  }
+  // A word is Herald's when all of its tokens matched; punctuation-only words are neutral.
+  const state: Array<'echo' | 'user' | 'none'> = words.map(() => 'none');
+  toks.forEach((t, k) => {
+    if (!hit[k]) state[t.word] = 'user';
+    else if (state[t.word] === 'none') state[t.word] = 'echo';
+  });
+  const drop = new Array<boolean>(words.length).fill(false);
+  let k = 0;
+  while (k < words.length) {
+    if (state[k] !== 'echo') {
+      k++;
+      continue;
+    }
+    let end = k;
+    let count = 0;
+    while (end < words.length && state[end] !== 'user') {
+      if (state[end] === 'echo') count++;
+      end++;
+    }
+    if (count >= 2) for (let x = k; x < end; x++) drop[x] = true;
+    k = end;
+  }
+  const kept = words.filter((_, x) => !drop[x]);
+  const content = contentWords(echoWords(kept.join(' ')));
+  if (content.length === 0) return '';
+  // Echo was cut out and one stray word is left ("...waiting on YouTube"):
+  // a Whisper remnant, not a message, unless it is "stop" / "wait".
+  const cut = kept.length < words.length;
+  if (cut && content.length < 2 && !hasUnsaidInterruptWord(kept.join(' '), spokenTexts)) return '';
+  return kept
+    .join(' ')
+    .replace(/^[\s,.;:!?-]+/, '')
+    .trim();
 }

@@ -322,6 +322,8 @@ export function useHeraldVoiceInput(host: VoiceInputHost): HeraldVoiceInput {
         stopSpeech: () => hostRef.current.stopSpeech(),
         getTransport: () => hostRef.current.getTransport(),
         isEcho: (text) => hostRef.current.spokenLog?.isEcho(text) ?? false,
+        stripEcho: (text) => hostRef.current.spokenLog?.stripEcho(text) ?? text,
+        isBargeIn: (text) => hostRef.current.spokenLog?.isBargeIn(text) ?? true,
         onWake: () => playChime('wake', 0.06),
         onError: (m) => {
           controller.fail(m);

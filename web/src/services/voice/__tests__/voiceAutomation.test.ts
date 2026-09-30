@@ -533,7 +533,7 @@ describe('VoiceAutomation (self-echo gating)', () => {
       now: () => now,
     });
     const debug = vi.spyOn(console, 'debug').mockImplementation(() => {});
-    const auto = new VoiceAutomation({ vad, input, stopSpeech, now: () => now, getTransport: () => tr.t, isEcho: (t) => log.isEcho(t) });
+    const auto = new VoiceAutomation({ vad, input, stopSpeech, now: () => now, getTransport: () => tr.t, isEcho: (t) => log.isEcho(t), stripEcho: (t) => log.stripEcho(t), isBargeIn: (t) => log.isBargeIn(t) });
     return { vad, input, auto, onTranscript, stopSpeech, log, debug, ...tr };
   }
 
@@ -575,6 +575,39 @@ describe('VoiceAutomation (self-echo gating)', () => {
     s.vad.events!.onSpeechEnd(new Float32Array(32000));
     await vi.advanceTimersByTimeAsync(0);
     expect(s.onTranscript).toHaveBeenCalledWith('Stop.', 'interrupt');
+  });
+
+  it("the interruption is sent with Herald's own words cut out (real mixed transcript)", async () => {
+    const s = setup(['Doc Upload Site shipped', 'wait tell Out4 to hold', 'Tailout4 to Halt. 28.0 to Supdocs.com']);
+    await heraldSays(s);
+    s.vad.events!.onSpeechRealStart();
+    await feed(s.vad, GATE_FIRST_CHECK_FRAMES);
+    await feed(s.vad, GATE_CHECK_EVERY_FRAMES);
+    expect(s.stopSpeech).toHaveBeenCalledTimes(1);
+    s.auto.update({ ...base, speaking: false });
+    s.vad.events!.onSpeechEnd(new Float32Array(32000));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(s.onTranscript).toHaveBeenCalledWith('Tailout4 to Halt.', 'interrupt');
+  });
+
+  it('a slow STT does not slow the cadence: the next check goes out as soon as one returns', async () => {
+    const s = setup('Doc Upload Site shipped');
+    let calls = 0;
+    const release: Array<() => void> = [];
+    (s.auto as unknown as { deps: { transcribe: (a: Float32Array) => Promise<string> } }).deps.transcribe = () => {
+      calls++;
+      return new Promise((r) => release.push(() => r('Doc Upload Site shipped')));
+    };
+    await heraldSays(s);
+    s.vad.events!.onSpeechRealStart();
+    await feed(s.vad, GATE_FIRST_CHECK_FRAMES);
+    expect(calls).toBe(1);
+    await feed(s.vad, GATE_CHECK_EVERY_FRAMES + 5); // frames keep coming while the check is slow
+    expect(calls).toBe(1); // one at a time
+    release.shift()!();
+    await vi.advanceTimersByTimeAsync(0);
+    await feed(s.vad, 1);
+    expect(calls).toBe(2);
   });
 
   it('a different sentence ("wait tell Out4 to hold") barges in', async () => {
