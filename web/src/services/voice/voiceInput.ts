@@ -168,6 +168,20 @@ export class VoiceInputController {
     if (this.st.phase === 'listening') this.set({ phase: 'idle', source: null, level: 0 });
   }
 
+  /** External capture handed to transcription elsewhere (wake stream). */
+  externalTranscribing(source: VoiceInputSource): void {
+    this.external = false;
+    this.set({ phase: 'transcribing', source, level: 0 });
+  }
+
+  /** Result of an externally transcribed utterance. */
+  deliverExternal(text: string | null, source: VoiceInputSource, error?: string): void {
+    this.external = false;
+    this.set({ phase: 'idle', source: null, level: 0 });
+    if (text) this.deps.onTranscript(text, source);
+    else if (error) this.fail(error);
+  }
+
   get listeningExternally(): boolean {
     return this.external && this.st.phase === 'listening';
   }

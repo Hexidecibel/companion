@@ -36,12 +36,15 @@ export function unlockChime(): void {
  * Two soft sine notes. Blocked rises a fourth (a gentle "hey"), finished falls
  * a major third (a settled "done"). Quiet on purpose: about -26 dBFS peak.
  */
-const NOTES: Record<ChimeKind, [number, number]> = {
+export type ToneKind = ChimeKind | 'wake';
+
+const NOTES: Record<ToneKind, [number, number]> = {
   blocked: [659.25, 880.0], // E5 -> A5
   finished: [783.99, 622.25], // G5 -> Eb5
+  wake: [1046.5, 1318.51], // C6 -> E6: a quick bright "I'm listening"
 };
 
-export function playChime(kind: ChimeKind, volume = 0.05): void {
+export function playChime(kind: ToneKind, volume = 0.05): void {
   const c = getContext();
   if (!c) return;
   if (c.state === 'suspended') {

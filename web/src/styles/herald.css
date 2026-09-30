@@ -1709,6 +1709,39 @@
 .herald-listening--busy .herald-listening__meter span:nth-child(3n) { animation-delay: -0.55s; }
 
 .herald-voice-set__warn { color: #fcd34d; }
+.herald-menu__item--sub { padding-left: 22px; font-size: 12.5px; color: var(--h-text-2); }
+
+/* Hands-free: always-listening privacy indicator */
+.herald-handsfree {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 9px 0 8px;
+  margin-right: 2px;
+  border: 1px solid rgba(232, 121, 249, 0.4);
+  border-radius: 999px;
+  background: rgba(88, 28, 135, 0.28);
+  color: #f5d0fe;
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color 120ms ease-out, border-color 120ms ease-out;
+}
+.herald-handsfree:hover { background: rgba(88, 28, 135, 0.45); border-color: rgba(232, 121, 249, 0.7); }
+.herald-handsfree__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #e879f9;
+  box-shadow: 0 0 8px #e879f9;
+  animation: herald-blink 1.6s ease-in-out infinite;
+}
+.herald--screen .herald-handsfree__label { display: none; }
+
+.herald-launcher--handsfree { box-shadow: 0 0 0 2px rgba(232, 121, 249, 0.55); }
 .herald-voice-set__select--sm { height: 28px; width: auto; flex: 1; min-width: 0; }
 .herald-voice-set__kbd {
   margin-left: auto;
@@ -1826,4 +1859,5 @@
   .herald-speaking__bars span { transform: scaleY(0.7); }
   .herald-orb__halo { opacity: 0.85; }
   .herald-composer__mic--busy { animation: none; }
+  .herald-handsfree__dot { animation: none; }
 }

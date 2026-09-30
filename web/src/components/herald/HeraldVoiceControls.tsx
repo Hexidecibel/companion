@@ -1,7 +1,7 @@
 import { useEffect, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react';
 import type { HeraldVoiceInput, VoiceInputPrefs } from '../../hooks/useHeraldVoiceInput';
 import { chordFromEvent, formatChord } from '../../services/voice/hotkeys';
-import { IconMic, IconMicOff, IconX } from './heraldIcons';
+import { IconListen, IconMic, IconMicOff, IconX } from './heraldIcons';
 
 /**
  * Hold-to-talk mic button for the composer. Pointer capture keeps the hold
@@ -166,10 +166,50 @@ export function VoiceInputSettings({ input }: { input: HeraldVoiceInput }) {
       {prefs.interrupt && !input.micGranted && available && (
         <div className="herald-voice-set__engine">Allow the mic once (hold to talk) to enable interrupt.</div>
       )}
+      <button
+        type="button"
+        role="menuitemcheckbox"
+        aria-checked={prefs.handsFree}
+        className="herald-menu__item"
+        onClick={() => input.setHandsFree(!prefs.handsFree)}
+        disabled={!input.handsFreeAvailable && !prefs.handsFree}
+        title={input.handsFreeAvailable ? 'Always listening for the wake word on this device' : 'Needs the voice service with the wake word loaded'}
+      >
+        Hands-free: say "Hey Jarvis"
+        <Switch on={prefs.handsFree} />
+      </button>
+      {prefs.handsFree && (
+        <button type="button" role="menuitemcheckbox" aria-checked={prefs.handsFreeInBackground} className="herald-menu__item herald-menu__item--sub" onClick={() => setPref('handsFreeInBackground', !prefs.handsFreeInBackground)}>
+          Keep listening when this tab is hidden
+          <Switch on={prefs.handsFreeInBackground} />
+        </button>
+      )}
+      {input.handsFreeNote && <div className="herald-voice-set__engine">{input.handsFreeNote}</div>}
       <button type="button" role="menuitem" className="herald-menu__item" onClick={() => setCapturing(true)}>
         Talk shortcut
         <kbd className="herald-voice-set__kbd">{capturing ? 'Press keys…' : input.chordLabel}</kbd>
       </button>
     </div>
+  );
+}
+
+/**
+ * Privacy indicator: visible whenever hands-free is listening for the wake
+ * word on this device. Click to turn it off.
+ */
+export function HandsFreeIndicator({ input }: { input: HeraldVoiceInput }) {
+  if (!input.handsFreeActive) return null;
+  return (
+    <button
+      type="button"
+      className="herald-handsfree"
+      onClick={() => input.setHandsFree(false)}
+      title='Hands-free is on: listening for "Hey Jarvis". Audio leaves this device only while someone is talking. Click to turn off.'
+      aria-label="Hands-free listening is on. Turn off"
+    >
+      <span className="herald-handsfree__dot" aria-hidden="true" />
+      <IconListen size={13} />
+      <span className="herald-handsfree__label">Hey Jarvis</span>
+    </button>
   );
 }

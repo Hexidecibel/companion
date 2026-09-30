@@ -59,6 +59,6 @@ export const IconMic = (p: IconProps) => (
 export const IconMicOff = (p: IconProps) => (
   <Svg {...p}><path d="M15 9.5V6a3 3 0 0 0-5.7-1.3" /><path d="M9 9v2a3 3 0 0 0 4.6 2.5" /><path d="M5 11a7 7 0 0 0 11.3 5.5" /><path d="M19 11a7 7 0 0 1-.4 2.3" /><path d="M12 18v3" /><path d="M3 3l18 18" /></Svg>
 );
-export const IconEar = (p: IconProps) => (
-  <Svg {...p}><path d="M6 8.5a6 6 0 1 1 12 0c0 3-2 4.2-3 5.2S13.5 16 13.5 18a3 3 0 0 1-6 0" /><path d="M9.5 8.5a2.5 2.5 0 0 1 5 0" /></Svg>
+export const IconListen = (p: IconProps) => (
+  <Svg {...p}><circle cx="12" cy="12" r="1.6" /><path d="M8.6 8.6a4.8 4.8 0 0 0 0 6.8" /><path d="M15.4 8.6a4.8 4.8 0 0 1 0 6.8" /><path d="M5.8 5.8a8.8 8.8 0 0 0 0 12.4" /><path d="M18.2 5.8a8.8 8.8 0 0 1 0 12.4" /></Svg>
 );

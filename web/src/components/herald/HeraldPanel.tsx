@@ -3,7 +3,7 @@ import type { HeraldAction, HeraldInboxItem, HeraldMessage, HeraldSessionRef, In
 import { sortInbox, sortPendingByUrgency } from '../../services/heraldReducer';
 import { useHeraldData, useHeraldUi, useHeraldVoiceCtx, useHeraldVoiceInputCtx } from '../../context/HeraldContext';
 import type { HeraldVoiceInput } from '../../hooks/useHeraldVoiceInput';
-import { HeraldListeningBar, HeraldMicButton, VoiceInputSettings } from './HeraldVoiceControls';
+import { HandsFreeIndicator, HeraldListeningBar, HeraldMicButton, VoiceInputSettings } from './HeraldVoiceControls';
 import type { HeraldVoice } from '../../hooks/useHeraldVoice';
 import { RATE_MAX, RATE_MIN } from '../../hooks/useHeraldVoice';
 import { pickVoice, voicesForPicker } from '../../services/tts/voices';
@@ -601,6 +601,7 @@ export function HeraldPanel({ variant, onOpenSession, onClose }: HeraldPanelProp
           </span>
         </div>
         <div className="herald-header__actions">
+          <HandsFreeIndicator input={input} />
           {ui.hostOptions.length > 1 && (
             <label className="herald-host">
               <span className="sr-only">Herald host</span>

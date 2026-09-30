@@ -5,6 +5,7 @@ import { getMicCapture, micUnavailableReason } from '../services/voice/micCaptur
 import { VoiceInputController, type VoiceInputSource, type VoiceInputState } from '../services/voice/voiceInput';
 import { VadListener } from '../services/voice/vadListener';
 import { VoiceAutomation } from '../services/voice/voiceAutomation';
+import { playChime } from '../services/tts/chime';
 import { DEFAULT_CHORD, formatChord, isChordRelease, matchesChordDown, parseChord, shouldStartSpacePtt } from '../services/voice/hotkeys';
 
 const PREFS_KEY = 'herald_voice_input_prefs';
@@ -93,6 +94,14 @@ export interface HeraldVoiceInput {
   controller: VoiceInputController;
   /** Microphone permission already granted (interrupt / hands-free need it). */
   micGranted: boolean;
+  /** Wake word can be used (service has it loaded). */
+  handsFreeAvailable: boolean;
+  /** Hands-free is listening for "Hey Jarvis" on this device right now. */
+  handsFreeActive: boolean;
+  /** Why hands-free is on but not listening (tab hidden, another device...). */
+  handsFreeNote: string | null;
+  /** Toggle hands-free (call from a click: it may prompt for the mic). */
+  setHandsFree: (on: boolean) => void;
 }
 
 export interface VoiceInputHost {
@@ -168,18 +177,70 @@ export function useHeraldVoiceInput(host: VoiceInputHost): HeraldVoiceInput {
   }, []);
   const micGranted = permGranted || state.permission === 'granted';
 
-  // Voice interrupt (barge-in) over the VAD.
+  // Voice interrupt (barge-in) and hands-free wake word over the VAD.
   const automation = useMemo(
     () =>
       new VoiceAutomation({
         vad: new VadListener(getMicCapture()),
         input: controller,
         stopSpeech: () => hostRef.current.stopSpeech(),
-        onError: (m) => controller.fail(m),
+        getTransport: () => hostRef.current.getTransport(),
+        onWake: () => playChime('wake', 0.06),
+        onError: (m) => {
+          controller.fail(m);
+          // Never show "listening" when we cannot: drop hands-free on this device.
+          setPrefs((p) => (p.handsFree ? { ...p, handsFree: false } : p));
+        },
       }),
     [controller],
   );
   useEffect(() => () => automation.dispose(), [automation]);
+
+  // Hands-free: per-device pref, paused while the tab is hidden (unless the
+  // user opted in), and only one device at a time (the daemon arbitrates).
+  const [visible, setVisible] = useState(() => typeof document === 'undefined' || document.visibilityState === 'visible');
+  useEffect(() => {
+    const onVis = () => setVisible(document.visibilityState === 'visible');
+    document.addEventListener('visibilitychange', onVis);
+    return () => document.removeEventListener('visibilitychange', onVis);
+  }, []);
+  const handsFreeAvailable = available && !!host.serverStatus?.wake.ready;
+  const wantHandsFree = prefs.handsFree && handsFreeAvailable && (visible || prefs.handsFreeInBackground);
+  const [owner, setOwner] = useState(false);
+  useEffect(() => {
+    const t = hostRef.current.getTransport();
+    if (!t || !host.connected) {
+      setOwner(false);
+      return;
+    }
+    let cancelled = false;
+    if (wantHandsFree) {
+      t.request('herald_handsfree', { on: true }, 5000)
+        .then((res) => { if (!cancelled) setOwner(!!res.success && !!(res.payload as { owner?: boolean })?.owner); })
+        .catch(() => { if (!cancelled) setOwner(false); });
+    } else {
+      setOwner(false);
+      t.request('herald_handsfree', { on: false }, 5000).catch(() => {});
+    }
+    return () => { cancelled = true; };
+  }, [wantHandsFree, host.connected]);
+  const handsFreeActive = wantHandsFree && owner;
+
+  // Per-client daemon events -> automation; revocation turns hands-free off here.
+  useEffect(() => {
+    const t = hostRef.current.getTransport();
+    if (!t?.onVoiceEvent || !host.connected) return;
+    return t.onVoiceEvent((ev) => {
+      if (ev.kind === 'handsfree_revoked') {
+        setOwner(false);
+        setPrefs((p) => ({ ...p, handsFree: false }));
+        controller.fail('Hands-free moved to another device');
+        return;
+      }
+      automation.onVoiceEvent(ev);
+    });
+  }, [host.connected, automation, controller]);
+
   useEffect(() => {
     automation.update({
       available,
@@ -187,8 +248,28 @@ export function useHeraldVoiceInput(host: VoiceInputHost): HeraldVoiceInput {
       interrupt: prefs.interrupt,
       sensitivity: prefs.sensitivity,
       speaking: host.speaking,
+      handsFree: handsFreeActive,
     });
-  }, [automation, available, micGranted, prefs.interrupt, prefs.sensitivity, host.speaking]);
+  }, [automation, available, micGranted, prefs.interrupt, prefs.sensitivity, host.speaking, handsFreeActive]);
+
+  let handsFreeNote: string | null = null;
+  if (prefs.handsFree && !handsFreeActive) {
+    if (!handsFreeAvailable) handsFreeNote = unavailableReason ?? 'Wake word not loaded on the hub';
+    else if (!visible && !prefs.handsFreeInBackground) handsFreeNote = 'Paused while this tab is hidden';
+    else handsFreeNote = 'Starting…';
+  }
+
+  const setHandsFree = useCallback((on: boolean) => {
+    if (!on) {
+      setPrefs((p) => ({ ...p, handsFree: false }));
+      return;
+    }
+    // Inside the click: may show the browser's mic prompt.
+    getMicCapture()
+      .acquire()
+      .then(() => setPrefs((p) => ({ ...p, handsFree: true })))
+      .catch((err: unknown) => controller.fail((err as Error)?.message || 'Could not open the microphone'));
+  }, [controller]);
 
   const chord = useMemo(() => parseChord(prefs.chord) ?? parseChord(DEFAULT_CHORD)!, [prefs.chord]);
 
@@ -283,5 +364,9 @@ export function useHeraldVoiceInput(host: VoiceInputHost): HeraldVoiceInput {
     consumeTranscript,
     controller,
     micGranted,
-  }), [available, unavailableReason, state, prefs, setPref, chord, start, stop, cancel, onComposerKeyDown, onComposerKeyUp, transcript, consumeTranscript, controller, micGranted]);
+    handsFreeAvailable,
+    handsFreeActive,
+    handsFreeNote,
+    setHandsFree,
+  }), [available, unavailableReason, state, prefs, setPref, chord, start, stop, cancel, onComposerKeyDown, onComposerKeyUp, transcript, consumeTranscript, controller, micGranted, handsFreeAvailable, handsFreeActive, handsFreeNote, setHandsFree]);
 }

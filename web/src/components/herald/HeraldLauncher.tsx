@@ -1,4 +1,4 @@
-import { useHeraldData, useHeraldUi, useHeraldVoiceCtx } from '../../context/HeraldContext';
+import { useHeraldData, useHeraldUi, useHeraldVoiceCtx, useHeraldVoiceInputCtx } from '../../context/HeraldContext';
 import { HeraldOrb } from './HeraldOrb';
 
 interface HeraldLauncherProps {
@@ -12,6 +12,7 @@ export function HeraldLauncher({ variant }: HeraldLauncherProps) {
   const ui = useHeraldUi();
   const data = useHeraldData();
   const voice = useHeraldVoiceCtx();
+  const input = useHeraldVoiceInputCtx();
   const open = variant === 'mobile' ? ui.screenOpen : ui.panelOpen;
   const count = data.unheardCount;
   const shortcut = isMac ? 'Cmd+J' : 'Ctrl+J';
@@ -19,11 +20,11 @@ export function HeraldLauncher({ variant }: HeraldLauncherProps) {
   return (
     <button
       type="button"
-      className={`herald-launcher herald-launcher--${variant}${open ? ' herald-launcher--open' : ''}${data.unheardBlocked > 0 ? ' herald-launcher--attention' : ''}`}
+      className={`herald-launcher herald-launcher--${variant}${open ? ' herald-launcher--open' : ''}${data.unheardBlocked > 0 ? ' herald-launcher--attention' : ''}${input.handsFreeActive ? ' herald-launcher--handsfree' : ''}`}
       onClick={ui.toggle}
       aria-pressed={variant === 'sidebar' ? open : undefined}
       aria-label={`${data.displayName}${count ? `, ${count} new` : ''}`}
-      title={`${data.displayName} (${shortcut})`}
+      title={`${data.displayName} (${shortcut})${input.handsFreeActive ? ' · hands-free listening for "Hey Jarvis"' : ''}`}
     >
       <HeraldOrb presence={voice.supported && voice.speaking ? 'speaking' : data.presence} size={variant === 'mobile' ? 22 : 18} mini />
       {variant === 'mobile' && <span className="herald-launcher__name">{data.displayName}</span>}
