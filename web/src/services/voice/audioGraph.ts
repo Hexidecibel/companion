@@ -49,6 +49,11 @@ function audioCtor(): typeof AudioContext | undefined {
   return window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
 }
 
+/**
+ * The AEC3 WASM, fetched here and handed to the worklet: AudioWorkletGlobalScope
+ * has no fetch, and the copy embedded in the glue cannot be decoded there
+ * (its data URI prefix is not the one emscripten recognises).
+ */
 let wasmBytes: Promise<ArrayBuffer> | null = null;
 function loadWasm(): Promise<ArrayBuffer> {
   if (!wasmBytes) {
@@ -180,6 +185,7 @@ export class HeraldAudioGraph {
     this.setAecState('loading');
     this.aecLoading = (async () => {
       try {
+        // Worklet and WASM both come from our own origin (never a CDN).
         const [bytes] = await Promise.all([loadWasm(), ctx.audioWorklet.addModule(aecWorkletUrl)]);
         const node = new AudioWorkletNode(ctx, 'herald-aec', {
           numberOfInputs: 2,

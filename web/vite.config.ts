@@ -49,8 +49,27 @@ function heraldVadAssets(): Plugin {
   };
 }
 
+/**
+ * Herald's echo canceller (@ennuicastr/webrtcaec3.js) embeds its WASM as a
+ * 227 KB base64 data URI that cannot be used inside an AudioWorklet (the page
+ * fetches the .wasm file and hands the bytes over instead). Drop the dead copy
+ * from the worklet bundle.
+ */
+function heraldAecStrip(): Plugin {
+  return {
+    name: 'herald-aec-strip',
+    transform(code, id) {
+      if (!/webrtcaec3-[\d.]+\.js$/.test(id.split('?')[0])) return null;
+      const out = code.replace(/WebRtcAec3Wasm\s*=\s*"data:application\/wasm;base64,[A-Za-z0-9+/=]*"/, 'WebRtcAec3Wasm=""');
+      return out === code ? null : { code: out, map: null };
+    },
+  };
+}
+
 export default defineConfig({
   plugins: [react(), heraldVadAssets()],
+  // Worker / worklet bundles get their own plugin list.
+  worker: { plugins: () => [heraldAecStrip()] },
   resolve: {
     alias: [
       // The "bundle" ORT build references its 14 MB wasm via import.meta.url,

@@ -7,11 +7,13 @@
  *
  * The WebRTC AEC3 WASM is compiled from bytes handed over in processorOptions
  * (AudioWorkletGlobalScope has no fetch); until it is ready, and when bypassed,
- * the mic passes through untouched. Posts energy stats every ~250 ms so the
+ * the mic passes through untouched. The base64 copy the glue embeds is stripped
+ * at build time (vite.config.ts `heraldAecStrip`). Posts energy stats every ~250 ms so the
  * page can measure how much of Herald's voice is left in what it listens to.
  *
  * Bundled by Vite as a standalone module (`?worker&url`).
  */
+import './aecGlobals';
 import WebRtcAec3 from '@ennuicastr/webrtcaec3.js';
 import { AecStream, aecRateFor, type Aec3Like } from './aecCore';
 
@@ -56,10 +58,10 @@ class HeraldAecProcessor extends AudioWorkletProcessor {
     else this.post({ type: 'error', message: 'no AEC module' });
   }
 
-  private async load(wasmBinary: ArrayBuffer): Promise<void> {
+  private async load(wasmBinary: ArrayBuffer | null): Promise<void> {
     try {
       const mod = await (WebRtcAec3 as unknown as (m: Record<string, unknown>) => Promise<Aec3Module>)({
-        wasmBinary,
+        ...(wasmBinary ? { wasmBinary } : {}),
         // Emscripten prints through these; there is no console noise to keep.
         print: () => {},
         printErr: () => {},

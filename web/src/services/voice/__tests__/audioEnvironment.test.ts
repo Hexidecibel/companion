@@ -131,3 +131,15 @@ describe('audio environment at runtime', () => {
     off();
   });
 });
+
+describe('setup key stability', () => {
+  it('the same mic gives the same key before and after it opens (Chrome "Default - " track labels, empty labels)', () => {
+    const devices = [dev('audiooutput', 'Speakers (Desk)'), dev('audioinput', 'Default - Yeti Stereo Microphone', 'default', 'y'), dev('audioinput', 'Yeti Stereo Microphone', 'y')];
+    const base = { devices, route: null, predictedAec: 'in-graph' as const, avoidBluetooth: true, measured: null };
+    const closed = computeEnvironment({ ...base, mic: closedMic });
+    const openDefault = computeEnvironment({ ...base, mic: { open: true, label: 'Default - Yeti Stereo Microphone', deviceId: 'default', mode: 'in-graph', kind: 'external' } });
+    const openNoLabel = computeEnvironment({ ...base, mic: { open: true, label: '', deviceId: null, mode: 'in-graph', kind: 'unknown' } });
+    expect(environmentKey(openDefault)).toBe(environmentKey(closed));
+    expect(environmentKey(openNoLabel)).toBe(environmentKey(closed));
+  });
+});

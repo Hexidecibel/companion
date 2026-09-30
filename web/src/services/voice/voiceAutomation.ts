@@ -40,6 +40,12 @@
  *
  * Interrupt never opens the mic on its own (permission must already be
  * granted); hands-free is turned on by the user, which may prompt.
+ *
+ * Two signals (with in-graph echo cancellation, `raw`): the VAD listens to the
+ * CLEANED mic (Herald removed, so Herald never triggers it), while the words of
+ * a talk-over and the wake stream come from the RAW mic: the canceller clamps
+ * the user's voice while Herald is still talking, exactly when they say
+ * "stop". Herald's words in the raw audio are cut at the text level.
  */
 import type { HeraldVoiceEvent } from '../../types/herald';
 import type { HeraldTransport } from '../heraldTransport';
@@ -47,6 +53,7 @@ import { Framer, float32ToInt16Frames, floatToInt16, meterLevel, rms16 } from '.
 import type { VadEvents, VadLike, VadSensitivity } from './vadListener';
 import type { VoiceInputController } from './voiceInput';
 import { VoiceUplink } from './voiceUplink';
+import type { RawAudio } from './rawTap';
 
 export interface AutomationConfig {
   /** Voice input usable (connected, service up, secure context). */
@@ -91,6 +98,8 @@ export interface AutomationDeps {
   onFalseBargeIn?: () => void;
   /** Time (ms) from the VAD's speech start to Herald being stopped (diagnostics). */
   onBargeInLatency?: (ms: number, mode: 'vad' | 'gated') => void;
+  /** The mic before echo cancellation (16 kHz), when the graph cancels in-app. */
+  raw?: () => RawAudio | null;
 }
 
 /** Keep listening this long after Herald stops, for an immediate reply. */
@@ -111,6 +120,13 @@ export const GATE_FIRST_CHECK_FRAMES = 10;
 export const GATE_CHECK_EVERY_FRAMES = 14;
 /** Each check transcribes at most this much of the latest audio (~1.6 s): less echo mixed in. */
 export const GATE_WINDOW_FRAMES = 50;
+/** VAD frame size (16 kHz samples). */
+const FRAME = 512;
+/**
+ * Raw audio kept ahead of the VAD's speech start: its own pre-pad (400 ms) plus
+ * the cleaned path's extra latency (MediaStream hop, worklet, ONNX) over the tap.
+ */
+const RAW_LEAD_SAMPLES = Math.round(16000 * 0.65);
 
 interface InterruptGate {
   frames: Float32Array[];
@@ -127,6 +143,11 @@ interface InterruptGate {
   echoReported: boolean;
   /** When the VAD first heard it (speech start), for latency. */
   heardAt: number;
+  /** Raw mic (before cancellation) and where this utterance starts in it. */
+  raw: RawAudio | null;
+  rawStart: number;
+  /** Start of the last gate check's window (raw), for trimming at confirmation. */
+  rawWindowFrom: number;
 }
 
 function concatFrames(frames: Float32Array[]): Float32Array {
@@ -148,11 +169,16 @@ interface WakeStream {
   framer: Framer;
   woke: boolean;
   closed: boolean;
+  /** Streaming the raw mic from here (position), instead of the VAD's frames. */
+  raw: RawAudio | null;
+  rawPos: number;
 }
 
 export class VoiceAutomation implements VadEvents {
   protected cfg: AutomationConfig = { available: false, micGranted: false, interrupt: false, sensitivity: 'normal', speaking: false, handsFree: false, bargeIn: 'gated' };
   private speechStartAt = 0;
+  private raw: RawAudio | null = null;
+  private rawStart = 0;
   protected capturing: Capture | null = null;
   private graceUntil = 0;
   private graceTimer: ReturnType<typeof setTimeout> | null = null;
@@ -316,6 +342,8 @@ export class VoiceAutomation implements VadEvents {
 
   onSpeechStart(): void {
     this.speechStartAt = this.now();
+    this.raw = this.deps.raw?.() ?? null;
+    this.rawStart = this.raw ? Math.max(0, this.raw.position() - RAW_LEAD_SAMPLES) : 0;
     if (this.listenWaiting && !this.capturing) {
       this.clearListenWait();
       this.capturing = 'listen';
@@ -355,7 +383,11 @@ export class VoiceAutomation implements VadEvents {
     if (!this.cfg.speaking && this.now() < this.tailUntil) return;
     this.capturing = 'interrupt';
     const instant = this.cfg.speaking && this.cfg.bargeIn === 'vad';
-    this.gate = { frames: this.preroll.slice(), sinceCheck: 0, checks: 0, checking: false, confirmed: false, trimmed: false, instant, echoReported: false, heardAt: this.speechStartAt || this.now() };
+    this.gate = {
+      frames: this.preroll.slice(), sinceCheck: 0, checks: 0, checking: false, confirmed: false, trimmed: false, instant, echoReported: false,
+      heardAt: this.speechStartAt || this.now(),
+      raw: this.raw, rawStart: this.rawStart, rawWindowFrom: this.rawStart,
+    };
     this.preroll = [];
     // Nothing playing (the grace period after a reply): no echo to rule out.
     // Echo-cancelled well enough (measured): the VAD alone is proof of a person.
@@ -391,9 +423,17 @@ export class VoiceAutomation implements VadEvents {
     g.sinceCheck = 0;
     g.checks++;
     const start = Math.max(0, g.frames.length - GATE_WINDOW_FRAMES);
+    let audio: Float32Array;
+    if (g.raw) {
+      const to = g.raw.position();
+      g.rawWindowFrom = Math.max(g.rawStart, to - GATE_WINDOW_FRAMES * FRAME);
+      audio = g.raw.slice(g.rawWindowFrom, to);
+    } else {
+      audio = concatFrames(g.frames.slice(start));
+    }
     let text = '';
     try {
-      text = await this.quickTranscribe(concatFrames(g.frames.slice(start)));
+      text = await this.quickTranscribe(audio);
     } catch {
       text = '';
     }
@@ -419,6 +459,7 @@ export class VoiceAutomation implements VadEvents {
     if (start > 0) {
       g.frames = g.frames.slice(start);
       g.trimmed = true;
+      g.rawStart = g.rawWindowFrom;
     }
     this.deps.stopSpeech();
     if (!this.deps.input.beginExternal('interrupt')) {
@@ -502,12 +543,14 @@ export class VoiceAutomation implements VadEvents {
     } else if (cap === 'interrupt') {
       const g = this.gate;
       this.gate = null;
+      // Raw mic when there is one: the user's words intact (see the top).
+      const rawClip = g?.raw ? g.raw.slice(g.rawStart, g.raw.position()) : null;
       if (g?.confirmed) {
         // Trimmed: only what followed the echo (the VAD's audio starts with it).
-        const clip = g.trimmed ? concatFrames(g.frames) : audio;
+        const clip = rawClip && rawClip.length ? rawClip : g.trimmed ? concatFrames(g.frames) : audio;
         void this.finishConfirmed(clip, g);
       } else if (g) {
-        void this.finishUnconfirmed(audio, g);
+        void this.finishUnconfirmed(rawClip && rawClip.length ? rawClip : audio, g);
       }
     } else if (cap === 'command') {
       void this.deps.input.transcribeUtterance(float32ToInt16Frames(audio), 'wake');
@@ -521,7 +564,13 @@ export class VoiceAutomation implements VadEvents {
     const w = this.wake;
     const g = this.capturing === 'interrupt' ? this.gate : null;
     if (w && !w.closed) {
-      for (const f of w.framer.push(floatToInt16(frame))) w.uplink.push(f);
+      let chunk = frame;
+      if (w.raw) {
+        const to = w.raw.position();
+        chunk = w.raw.slice(w.rawPos, to);
+        w.rawPos = to;
+      }
+      for (const f of w.framer.push(floatToInt16(chunk))) w.uplink.push(f);
     } else if (g) {
       g.frames.push(frame);
       if (!g.confirmed) {
@@ -571,8 +620,13 @@ export class VoiceAutomation implements VadEvents {
     const t = this.deps.getTransport?.();
     if (!t || !t.isConnected()) return;
     const uplink = new VoiceUplink(t, 'wake');
-    const w: WakeStream = { uplink, framer: new Framer(), woke: false, closed: false };
-    for (const f of this.preroll) for (const out of w.framer.push(floatToInt16(f))) uplink.push(out);
+    const raw = this.raw;
+    const w: WakeStream = { uplink, framer: new Framer(), woke: false, closed: false, raw, rawPos: raw ? raw.position() : 0 };
+    if (raw) {
+      for (const out of w.framer.push(floatToInt16(raw.slice(this.rawStart, w.rawPos)))) uplink.push(out);
+    } else {
+      for (const f of this.preroll) for (const out of w.framer.push(floatToInt16(f))) uplink.push(out);
+    }
     this.preroll = [];
     this.wake = w;
     this.capturing = 'wake';

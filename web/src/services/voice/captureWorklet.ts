@@ -1,5 +1,6 @@
 /**
- * AudioWorklet: microphone -> 16 kHz mono PCM16 frames (100 ms) + RMS level.
+ * AudioWorklet: microphone -> 16 kHz mono PCM16 frames (100 ms, or
+ * processorOptions.frameSamples) + RMS level.
  * Bundled by Vite as a standalone module (`?worker&url`) and loaded with
  * audioWorklet.addModule. Runs on the audio rendering thread.
  */
@@ -9,17 +10,18 @@ import { Framer, Resampler16k, floatToInt16, rms16 } from './pcm';
 declare const sampleRate: number;
 declare class AudioWorkletProcessor {
   readonly port: MessagePort;
-  constructor();
+  constructor(options?: unknown);
 }
-declare function registerProcessor(name: string, ctor: new () => AudioWorkletProcessor): void;
+declare function registerProcessor(name: string, ctor: new (options?: { processorOptions?: { frameSamples?: number } }) => AudioWorkletProcessor): void;
 
 class HeraldCaptureProcessor extends AudioWorkletProcessor {
   private resampler = new Resampler16k(sampleRate);
-  private framer = new Framer();
+  private framer: Framer;
   private running = true;
 
-  constructor() {
-    super();
+  constructor(options?: { processorOptions?: { frameSamples?: number } }) {
+    super(options);
+    this.framer = new Framer(options?.processorOptions?.frameSamples);
     this.port.onmessage = (e: MessageEvent) => {
       if (e.data === 'stop') {
         this.running = false;

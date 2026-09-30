@@ -391,6 +391,7 @@ export function useHeraldVoiceInput(host: VoiceInputHost): HeraldVoiceInput {
         stripEcho: (text) => hostRef.current.spokenLog?.stripEcho(text) ?? text,
         isBargeIn: (text) => hostRef.current.spokenLog?.isBargeIn(text) ?? true,
         onWake: () => playChime('wake', 0.06),
+        raw: () => getMicCapture().rawAudio(),
         onEchoHeard: () => reportEchoHeard(),
         onFalseBargeIn: () => reportFalseBargeIn(),
         onBargeInLatency: (ms, mode) => console.info(`Herald voice: talk-over stopped Herald after ${Math.round(ms)} ms (${mode})`),

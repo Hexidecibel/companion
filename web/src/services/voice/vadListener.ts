@@ -79,6 +79,8 @@ export class VadListener implements VadLike {
     vad.setOptions({ ...VAD_PRESETS[sensitivity] });
     await vad.start();
     this._running = true;
+    // Warm the raw (pre-cancellation) tap now, so the first talk-over has it.
+    this.mic.rawAudio();
   }
 
   pause(): void {

@@ -751,3 +751,45 @@ describe("VoiceAutomation: instant talk-over with echo cancellation ('vad' mode)
     expect(stopSpeech).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('VoiceAutomation: words from the raw mic, detection on the cleaned one', () => {
+  let now = 0;
+  beforeEach(() => {
+    vi.useFakeTimers();
+    now = 90_000;
+  });
+  afterEach(() => vi.useRealTimers());
+
+  it('transcribes the RAW audio of a talk-over (the canceller clamps it during double-talk)', async () => {
+    const { RawRing } = await import('../rawTap');
+    const ring = new RawRing(16000 * 20);
+    ring.push(new Float32Array(16000).fill(0.01)); // 1 s before the user spoke
+    const vad = fakeVad();
+    const heard: Float32Array[] = [];
+    const input = new VoiceInputController({
+      mic: { permission: 'granted', start: async () => {}, stop: () => {} },
+      getTransport: () => fakeTransport().t,
+      onTranscript: vi.fn(),
+      onBargeIn: () => {},
+      now: () => now,
+    });
+    const auto = new VoiceAutomation({
+      vad, input, stopSpeech: vi.fn(), now: () => now,
+      transcribe: async (a) => { heard.push(a); return 'stop'; },
+      raw: () => ring,
+    });
+    auto.update({ ...base, speaking: true, bargeIn: 'vad' });
+    await vi.advanceTimersByTimeAsync(0);
+    vad.events!.onSpeechStart();
+    ring.push(new Float32Array(8000).fill(0.5)); // the user's words, intact in the raw mic
+    vad.events!.onSpeechRealStart();
+    auto.update({ ...base, speaking: false, bargeIn: 'vad' });
+    vad.events!.onSpeechEnd(new Float32Array(4000).fill(0.001)); // the cleaned version: clamped
+    await vi.advanceTimersByTimeAsync(0);
+    expect(heard).toHaveLength(1);
+    const clip = heard[0];
+    // Starts ~0.65 s before the VAD's onset (pre-roll + path latency) and holds the raw words.
+    expect(clip.length).toBe(Math.round(16000 * 0.65) + 8000);
+    expect(clip[clip.length - 1]).toBe(0.5);
+  });
+});

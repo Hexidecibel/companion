@@ -29,6 +29,10 @@ import { voiceCopy } from './platformCopy';
 import { getAudioGraph, type GraphAecMode, type HeraldAudioGraph } from './audioGraph';
 import { chooseInput, classifyInputLabel, type DeviceLike, type InputChoice } from './audioDevices';
 import type { InputKind } from './audioEnvironment';
+import { RawRing, type RawAudio } from './rawTap';
+
+/** Raw-tap frames: 32 ms (the VAD's frame), so positions track the VAD closely. */
+const RAW_FRAME_SAMPLES = 512;
 
 export type MicPermission = 'unknown' | 'granted' | 'denied' | 'unavailable';
 
@@ -153,6 +157,9 @@ export class MicCapture {
   private external: ExternalMicSource | null = null;
   private forcedMode: GraphAecMode | null = null;
   private warnedOnlyBluetooth = false;
+  private rawNode: AudioWorkletNode | null = null;
+  private rawRing: RawRing | null = null;
+  private rawStarting: Promise<void> | null = null;
   permission: MicPermission = 'unknown';
 
   constructor(private graph: HeraldAudioGraph = getAudioGraph()) {}
@@ -448,7 +455,52 @@ export class MicCapture {
 
   releaseUser(): void {
     this.users = Math.max(0, this.users - 1);
+    if (this.users === 0) this.stopRawTap();
     this.scheduleIdle();
+  }
+
+  /**
+   * The mic before echo cancellation (16 kHz ring), while the in-graph
+   * canceller is on and someone listens (the VAD). Null otherwise: then the
+   * cleaned signal is the only one (and is the same as the raw one).
+   */
+  rawAudio(): RawAudio | null {
+    if (this.mode !== 'in-graph') return null;
+    if (!this.rawRing && !this.rawStarting) this.rawStarting = this.startRawTap().finally(() => { this.rawStarting = null; });
+    return this.rawRing;
+  }
+
+  private async startRawTap(): Promise<void> {
+    const ctx = this.graph.context();
+    const raw = this.graph.rawBus();
+    if (!ctx || !raw) return;
+    if (this.workletCtx !== ctx) {
+      this.workletCtx = ctx;
+      this.workletReady = ctx.audioWorklet.addModule(captureWorkletUrl);
+    }
+    await this.workletReady;
+    if (this.users === 0 || this.rawNode) return;
+    const ring = new RawRing();
+    const node = new AudioWorkletNode(ctx, 'herald-capture', { numberOfInputs: 1, numberOfOutputs: 0, processorOptions: { frameSamples: RAW_FRAME_SAMPLES } });
+    node.port.onmessage = (e: MessageEvent<MicFrame>) => {
+      if (this.rawNode === node) ring.pushInt16(e.data.pcm);
+    };
+    raw.connect(node);
+    this.rawNode = node;
+    this.rawRing = ring;
+  }
+
+  private stopRawTap(): void {
+    const node = this.rawNode;
+    this.rawNode = null;
+    this.rawRing = null;
+    if (!node) return;
+    try {
+      this.graph.rawBus()?.disconnect(node);
+    } catch {
+      // already
+    }
+    node.port.onmessage = null;
   }
 
   /** Start streaming 16 kHz PCM16 frames (echo-cancelled) to `onFrame` until stop(). */
@@ -487,6 +539,7 @@ export class MicCapture {
   release(): void {
     this.cancelIdle();
     this.stopNode();
+    this.stopRawTap();
     const st = this.opened;
     this.opened = null;
     if (st) {

@@ -21,8 +21,8 @@
  */
 import { getAudioGraph, inGraphAecAllowed, type GraphAecMode } from './audioGraph';
 import { getMicCapture, type MicEvent } from './micCapture';
-import { chooseInput, classifyInputLabel, classifyInputPort, classifyOutput, type DeviceLike, type NativeAudioRoute } from './audioDevices';
-import { echoFigures, emptyStats, mergeStats, type AecStats } from './aec/aecCore';
+import { chooseInput, classifyInputLabel, classifyInputPort, classifyOutput, cleanLabel, type DeviceLike, type NativeAudioRoute } from './audioDevices';
+import { echoFigures, type AecStats } from './aec/aecCore';
 import { noEchoPath, selectBargeInMode, type BargeInDecision, type BargeInEvidence } from './bargeInMode';
 import { synthSpeech } from './aec/probeSignal';
 import { VadListener, VAD_PRESETS, type VadEvents } from './vadListener';
@@ -123,7 +123,8 @@ export type AudioNotice =
 
 interface Evidence {
   measured: EchoMeasurement | null;
-  passive: AecStats;
+  /** Suppression (dB) per stats window (~250 ms) with Herald playing, newest last. */
+  passive: number[];
   echoHeard: number;
   falseBargeIns: number;
 }
@@ -163,7 +164,7 @@ function evidenceFor(key: string): Evidence {
     const saved = loadMeasurements()[key];
     e = {
       measured: saved && Date.now() - saved.at < MEASUREMENT_TTL_MS ? saved : null,
-      passive: emptyStats(),
+      passive: [],
       echoHeard: 0,
       falseBargeIns: 0,
     };
@@ -205,9 +206,10 @@ export function computeEnvironment(i: {
   let input: InputKind;
   let inputLabel: string | undefined;
   let inputDeviceId: string | undefined;
-  if (i.mic.open) {
-    input = i.mic.kind !== 'unknown' ? i.mic.kind : classifyInputLabel(i.mic.label ?? undefined);
-    inputLabel = i.mic.label ?? undefined;
+  if (i.mic.open && i.mic.label) {
+    input = i.mic.kind !== 'unknown' ? i.mic.kind : classifyInputLabel(i.mic.label);
+    // Same setup, same key: Chrome's track label may carry "Default - ".
+    inputLabel = cleanLabel(i.mic.label);
     inputDeviceId = i.mic.deviceId ?? undefined;
   } else if (i.route?.inputs[0]) {
     input = classifyInputPort(i.route.inputs[0]);
@@ -215,8 +217,8 @@ export function computeEnvironment(i: {
   } else {
     const c = chooseInput(i.devices, { avoidBluetooth: i.avoidBluetooth });
     input = c.kind;
-    inputLabel = c.label?.replace(/^(default|communications)\s*-\s*/i, '');
-    inputDeviceId = c.deviceId;
+    inputLabel = c.label ? cleanLabel(c.label) : undefined;
+    inputDeviceId = c.deviceId ?? (i.mic.open ? i.mic.deviceId ?? undefined : undefined);
   }
   // Ground truth: nothing of Herald reaches the mic -> it is on headphones.
   if (output === 'unknown' && noEchoPath(i.measured)) output = 'headphones';
@@ -314,10 +316,18 @@ function onStats(s: AecStats): void {
   const graph = getAudioGraph();
   // Only a cancelled mic and referenced playback say anything about the canceller.
   if (!mic.isOpen || !graph.measuring || graph.unreferencedPlayback || !envKey) return;
+  // Windows mostly filled with Herald's playback only (half of the ~25 blocks).
+  if (s.blocks < 12) return;
+  const fig = echoFigures(s, 12);
+  if (!fig) return;
   const ev = evidenceFor(envKey);
-  ev.passive = mergeStats(ev.passive, s);
-  // Re-decide once in a while (cheap).
-  if (s.blocks > 0) recomputeMode();
+  ev.passive.push(fig.totalDb);
+  if (ev.passive.length > PASSIVE_WINDOWS) ev.passive.shift();
+  if (ev.passive.length % 20 === 0) {
+    const p = passiveSuppression(ev.passive);
+    if (p) console.debug(`Herald audio: echo suppression during replies p20 ${p.totalDb.toFixed(1)} dB over ${p.seconds} s`);
+  }
+  recomputeMode();
 }
 
 function start(): void {
@@ -344,13 +354,28 @@ function notice(n: AudioNotice): void {
 
 // ---- barge-in mode -----------------------------------------------------------------
 
+/** Passive windows kept per setup (~250 ms each: the last 30 s of Herald talking). */
+const PASSIVE_WINDOWS = 120;
+
+/**
+ * A low percentile of per-window suppression: it has to hold in (almost) every
+ * window, not on average. The canceller's first second (converging) and any
+ * window where the user talked read low, which only ever errs towards 'gated'.
+ */
+export function passiveSuppression(windows: number[]): { totalDb: number; seconds: number } | null {
+  if (!windows.length) return null;
+  const sorted = [...windows].sort((a, b) => a - b);
+  const p = sorted[Math.floor(sorted.length * 0.2)];
+  return { totalDb: p, seconds: windows.length * 0.25 };
+}
+
 function currentEvidence(): BargeInEvidence {
   const ev = envKey ? evidenceFor(envKey) : null;
-  const fig = ev ? echoFigures(ev.passive, 100) : null;
   return {
     measured: ev?.measured ?? null,
-    passive: fig && ev ? { totalDb: fig.totalDb, seconds: ev.passive.blocks / 100 } : null,
-    echoHeard: ev?.echoHeard ?? 0,
+    passive: ev ? passiveSuppression(ev.passive) : null,
+    // Echo heard resets the passive windows (reportEchoHeard): nothing left to veto.
+    echoHeard: 0,
     falseBargeIns: ev?.falseBargeIns ?? 0,
   };
 }
@@ -386,10 +411,17 @@ export function onBargeInModeChange(cb: Listener<BargeInDecision>): () => void {
   return () => modeListeners.delete(cb);
 }
 
-/** A gated talk-over check found Herald's own voice: the VAD hears it through the canceller. */
+/**
+ * A gated talk-over check found Herald's own voice: the VAD heard it through
+ * the canceller. Passive evidence starts over (a canceller still converging
+ * after a device change, or a loud passage): promotion needs a clean run of
+ * PASSIVE_MIN_SECONDS after the last such event.
+ */
 export function reportEchoHeard(): void {
   if (!envKey) return;
-  evidenceFor(envKey).echoHeard++;
+  const ev = evidenceFor(envKey);
+  ev.echoHeard++;
+  ev.passive = [];
   recomputeMode();
 }
 

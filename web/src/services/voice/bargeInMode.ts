@@ -23,8 +23,8 @@ export type BargeInMode = 'vad' | 'gated';
 
 /** Measured suppression (dB, Herald's playback -> what we listen to) that counts as good. */
 export const GOOD_SUPPRESSION_DB = 25;
-/** Passive (during replies, possibly with the user talking too) must clear more. */
-export const PASSIVE_GOOD_DB = 30;
+/** Passive: a low percentile of per-window suppression during replies (see audioEnvironment). */
+export const PASSIVE_GOOD_DB = 28;
 export const PASSIVE_MIN_SECONDS = 6;
 /** The raw mic hears this little of Herald: nothing reaches it (headphones). */
 export const NO_ECHO_PATH_DB = 40;
