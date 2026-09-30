@@ -1627,11 +1627,13 @@ preceding `self_update_prepare` call so a replayed request cannot restart a daem
 ---
 
 ## Item: Voice Front Layer (working name) — fleet-wide chief of staff
-**Status:** in-progress — Phase 1 (text-only, named "Herald") is built, reviewed and merged to
-`main` (2026-09-30); not yet live in production (go-live = `bin/companion install-secrets` +
-`bin/companion herald-provider anthropic` + build + a user-approved daemon restart). Phase 2 voice
-(neural TTS, push-to-talk STT, voice interrupt, "Hey Jarvis" wake word) built on `feat/herald`
-(2026-09-30), live on the 9887 sandbox; see "Phase 2 progress" below. Phases 3-5 planned.
+**Status:** in-progress — Phases 1 (text, named "Herald") and 2 (voice: neural TTS, push-to-talk
+STT, voice interrupt, "Hey Jarvis" wake word) are merged to `main` and **deployed to the production
+daemon (9877/9878) on 2026-09-30**: anthropic provider (`claude-haiku-4-5`), key via
+`bin/companion install-secrets`, voice service as the `herald-voice` systemd user unit
+(`bin/herald-voice install-unit`). The 9887 sandbox and its Tailscale :9890 front were retired; its
+conversation was carried over to `~/.companion/herald/state.json`. Native apps still need an `/apk`
+rebuild for the Herald UI (no native mic path yet). See "Phase 2 progress" below. Phases 3-5 planned.
 
 ### Goal & Rationale
 A fast, always-available conversational entity layered **over** Claude Code sessions across the whole

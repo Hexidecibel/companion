@@ -555,6 +555,7 @@ Follow-up fixes layered on the Mobile UX round above: walks back the activity-ro
 - **Autolink URLs inside emphasis** — `MarkdownRenderer.tsx` previously stored bold/italic inner text as a raw string and never re-parsed it, so URLs inside `**…**` / `*…*` never became links. Bold/italic now carry children and recurse, so URLs (plus code/file links and nested emphasis) inside emphasis render as the accent link pill, enabling long-press → Open Link / Copy link
 
 ## Herald — voice, Phase 2 (2026-09-30)
+- Live on the production daemon (2026-09-30): Herald on Haiku over the anthropic provider, voice service runs as the `herald-voice` systemd user unit (`bin/herald-voice install-unit`, survives reboots)
 - Neural voice: Kokoro TTS on a local voice service (`bin/herald-voice`, 127.0.0.1:9889), 27 English voices (default Heart), gapless per-sentence playback, falls back to browser voices per sentence if the service drops
 - Push-to-talk: hold the mic button, Space in an empty composer, or Ctrl+Shift+Space (configurable); faster-whisper transcribes on release and sends (or drops it in the box for review)
 - Interrupt by talking: Silero VAD stops Herald mid-sentence (client and server queues) and sends what you said

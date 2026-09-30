@@ -11,6 +11,12 @@
 #   bin/herald-voice logs [N]    Tail the service log
 #   bin/herald-voice test        Run the service's Python unit tests (fake engines)
 #   bin/herald-voice say "text" [voice] [out.wav]   Synthesize through the running service
+#   bin/herald-voice run         Run in the foreground (what the systemd unit executes)
+#   bin/herald-voice install-unit    Install + enable + start the systemd user unit
+#                                (herald-voice.service, Restart=on-failure, survives reboots)
+#   bin/herald-voice uninstall-unit  Stop, disable and remove the unit
+#
+# When the unit is installed, start/stop/restart go through systemctl --user.
 #
 # The service has NO auth of its own: it binds loopback only and is reached
 # solely through the authenticated Companion daemon (herald.voice_url, default
@@ -52,6 +58,10 @@ running_pid() {
   echo "$pid"
 }
 
+UNIT_NAME="herald-voice.service"
+UNIT_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/$UNIT_NAME"
+unit_installed() { [ -f "$UNIT_FILE" ] && command -v systemctl >/dev/null; }
+
 health() { curl -sS -m 3 "http://127.0.0.1:$PORT/health" 2>/dev/null; }
 
 cmd_install() {
@@ -82,14 +92,120 @@ WhisperModel('${HERALD_STT_MODEL:-base.en}', device='cpu', compute_type='int8', 
   echo "Installed. Start with: bin/herald-voice start"
 }
 
+# Environment + cwd for the service process (shared by start and run).
+service_env() {
+  cd "$SRC"
+  export HERALD_VOICE_HOST=127.0.0.1
+  export HERALD_VOICE_PORT="$PORT"
+  export HERALD_VOICE_MODELS="$MODELS"
+  export HERALD_TTS_THREADS="$TTS_THREADS"
+  export HERALD_STT_THREADS="$STT_THREADS"
+  # Cap every BLAS/OpenMP pool too (numpy/scipy/ctranslate2).
+  export OMP_NUM_THREADS="$STT_THREADS" OPENBLAS_NUM_THREADS=2 MKL_NUM_THREADS=2
+  export PYTHONUNBUFFERED=1
+  # Models are fetched by `install`; never reach the network at runtime.
+  export HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1
+}
+
+preflight() {
+  [ -x "$PY" ] || { echo "ERROR: venv missing. Run: bin/herald-voice install"; exit 1; }
+  [ -s "$MODELS/kokoro-v1.0.onnx" ] || { echo "ERROR: models missing. Run: bin/herald-voice install"; exit 1; }
+  case " $PRODUCTION_PORTS " in *" $PORT "*) echo "ERROR: refusing to use a production port ($PORT)"; exit 1 ;; esac
+}
+
+wait_ready() {
+  local i
+  for i in $(seq 1 90); do
+    health | python3 -c 'import json,sys; d=json.load(sys.stdin); sys.exit(0 if all(d[k]["ready"] or d[k]["error"] for k in ("tts","stt","wake")) else 1)' 2>/dev/null && return 0
+    sleep 1
+  done
+  return 1
+}
+
+# Foreground run (systemd ExecStart). exec keeps the PID, so the pid file stays valid.
+cmd_run() {
+  preflight
+  local owner
+  owner="$(port_owner "$PORT")"
+  [ -z "$owner" ] || { echo "ERROR: port $PORT is already in use (pid $owner)" >&2; exit 1; }
+  mkdir -p "$RUN_DIR"
+  chmod 700 "$RUN_DIR"
+  [ -f "$LOG_FILE" ] && mv -f "$LOG_FILE" "$LOG_FILE.1"
+  : > "$LOG_FILE"
+  chmod 600 "$LOG_FILE"
+  echo "$$" > "$PID_FILE"
+  service_env
+  exec nice -n 10 "$PY" -m herald_voice >> "$LOG_FILE" 2>&1 < /dev/null
+}
+
+cmd_install_unit() {
+  preflight
+  command -v systemctl >/dev/null || { echo "ERROR: systemctl not found"; exit 1; }
+  # A script-launched (non-unit) instance would hold the port: stop it first.
+  if pid="$(running_pid)" && ! unit_installed; then
+    echo "Stopping script-launched voice service (PID $pid) before handing over to systemd..."
+    cmd_stop_direct
+  fi
+  mkdir -p "$(dirname "$UNIT_FILE")"
+  local tmp="$UNIT_FILE.tmp.$$"
+  cat > "$tmp" <<UNIT
+# Managed by 'bin/herald-voice install-unit' ($ROOT). Do not edit by hand.
+[Unit]
+Description=Herald voice service (Kokoro TTS, Whisper STT, openWakeWord) on 127.0.0.1:$PORT
+After=network.target
+StartLimitBurst=5
+StartLimitIntervalSec=120
+
+[Service]
+Type=simple
+WorkingDirectory=$SRC
+ExecStart=$SCRIPT_DIR/herald-voice run
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=10
+Environment=HERALD_VOICE_PORT=$PORT
+Environment=HERALD_TTS_THREADS=$TTS_THREADS
+Environment=HERALD_STT_THREADS=$STT_THREADS
+
+[Install]
+WantedBy=default.target
+UNIT
+  mv "$tmp" "$UNIT_FILE"
+  echo "Wrote $UNIT_FILE"
+  systemctl --user daemon-reload
+  systemctl --user enable "$UNIT_NAME"
+  systemctl --user restart "$UNIT_NAME"
+  local i
+  for i in $(seq 1 40); do health >/dev/null && break; sleep 0.5; done
+  wait_ready || true
+  cmd_status
+}
+
+cmd_uninstall_unit() {
+  if [ -f "$UNIT_FILE" ]; then
+    systemctl --user disable --now "$UNIT_NAME" || true
+    rm -f "$UNIT_FILE"
+    systemctl --user daemon-reload
+    echo "Removed $UNIT_FILE"
+  else
+    echo "Unit not installed."
+  fi
+}
+
 cmd_start() {
+  if unit_installed; then
+    systemctl --user start "$UNIT_NAME"
+    local i
+    for i in $(seq 1 40); do health >/dev/null && break; sleep 0.5; done
+    wait_ready || true
+    cmd_status
+    return $?
+  fi
   if pid="$(running_pid)"; then
     echo "Voice service already running (PID $pid) on 127.0.0.1:$PORT"
     return 0
   fi
-  [ -x "$PY" ] || { echo "ERROR: venv missing. Run: bin/herald-voice install"; exit 1; }
-  [ -s "$MODELS/kokoro-v1.0.onnx" ] || { echo "ERROR: models missing. Run: bin/herald-voice install"; exit 1; }
-  case " $PRODUCTION_PORTS " in *" $PORT "*) echo "ERROR: refusing to use a production port ($PORT)"; exit 1 ;; esac
+  preflight
   local owner
   owner="$(port_owner "$PORT")"
   [ -z "$owner" ] || { echo "ERROR: port $PORT is already in use (pid $owner)"; exit 1; }
@@ -101,17 +217,7 @@ cmd_start() {
   : > "$LOG_FILE"
   chmod 600 "$LOG_FILE"
   (
-    cd "$SRC"
-    export HERALD_VOICE_HOST=127.0.0.1
-    export HERALD_VOICE_PORT="$PORT"
-    export HERALD_VOICE_MODELS="$MODELS"
-    export HERALD_TTS_THREADS="$TTS_THREADS"
-    export HERALD_STT_THREADS="$STT_THREADS"
-    # Cap every BLAS/OpenMP pool too (numpy/scipy/ctranslate2).
-    export OMP_NUM_THREADS="$STT_THREADS" OPENBLAS_NUM_THREADS=2 MKL_NUM_THREADS=2
-    export PYTHONUNBUFFERED=1
-    # Models are fetched by `install`; never reach the network at runtime.
-    export HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1
+    service_env
     exec setsid nice -n 10 "$PY" -m herald_voice >> "$LOG_FILE" 2>&1 < /dev/null
   ) &
   local pid=$!
@@ -133,14 +239,27 @@ cmd_start() {
   echo "Voice service started (PID $pid) on 127.0.0.1:$PORT (nice 10, TTS $TTS_THREADS / STT $STT_THREADS threads)"
   echo "  Log: $LOG_FILE"
   # Wait (bounded) for the engines so callers see a ready service.
-  for i in $(seq 1 90); do
-    health | python3 -c 'import json,sys; d=json.load(sys.stdin); sys.exit(0 if all(d[k]["ready"] or d[k]["error"] for k in ("tts","stt","wake")) else 1)' 2>/dev/null && break
-    sleep 1
-  done
+  wait_ready || true
   cmd_status || true
 }
 
 cmd_stop() {
+  if unit_installed; then
+    systemctl --user stop "$UNIT_NAME" || true
+    rm -f "$PID_FILE"
+    local owner
+    owner="$(port_owner "$PORT")"
+    if [ -n "$owner" ]; then
+      echo "WARNING: port $PORT is still held by pid $owner."
+      return 1
+    fi
+    echo "Voice service stopped ($UNIT_NAME). Port $PORT is free."
+    return 0
+  fi
+  cmd_stop_direct
+}
+
+cmd_stop_direct() {
   local pid
   if ! pid="$(running_pid)"; then
     echo "Voice service is not running."
@@ -212,6 +331,9 @@ with wave.open(os.environ["OUT"], "wb") as w:
 
 case "${1:-}" in
   install) cmd_install ;;
+  run) cmd_run ;;
+  install-unit) cmd_install_unit ;;
+  uninstall-unit) cmd_uninstall_unit ;;
   start) cmd_start ;;
   stop) cmd_stop ;;
   restart) cmd_stop || true; cmd_start ;;
@@ -220,7 +342,7 @@ case "${1:-}" in
   test) cmd_test ;;
   say) shift; cmd_say "$@" ;;
   *)
-    sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '2,31p' "$0" | sed 's/^# \{0,1\}//'
     exit 2
     ;;
 esac

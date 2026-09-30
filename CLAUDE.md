@@ -105,6 +105,10 @@ Herald also has read-only knowledge tools (`daemon/src/herald/knowledge/`): `sea
 
 ```bash
 bin/herald-voice install        # venv (uv), deps, Kokoro + Whisper + openWakeWord models (idempotent)
+bin/herald-voice install-unit   # production: systemd user unit herald-voice.service (runs
+                                # `bin/herald-voice run` from THIS checkout, nice 10, Restart=on-failure,
+                                # WantedBy=default.target). Once installed, start/stop/restart use systemctl.
+bin/herald-voice uninstall-unit # stop, disable and remove the unit
 bin/herald-voice start|stop|restart|status|logs   # status exits 1 unless all engines are ready
 bin/herald-voice test           # Python endpoint tests (fake engines)
 bin/herald-voice say "text" [voice] [out.wav]
@@ -114,6 +118,8 @@ node daemon/scripts/herald-voice-probe.js status|tts|stt|wake "text"   # PROBE i
 ```
 
 Web: `web/src/services/tts/` (`HybridTtsEngine` = neural `ServerTtsEngine` with per-sentence Web Speech fallback) and `web/src/services/voice/` (capture worklet, uplink, push-to-talk controller, Silero VAD via `@ricky0123/vad-web`, `voiceAutomation.ts` for interrupt + wake). VAD assets (worklet, model, ORT wasm) are emitted under `<base>vad/` by the `herald-vad-assets` plugin in `web/vite.config.ts`; never load them from a CDN. Settings live in the Herald panel's overflow menu (Voice / Voice input). Custom wake word later: train an openWakeWord model, set `HERALD_WAKE_MODELS=/path/hey_herald.onnx`, add its spellings to `WAKE_NAMES` in `daemon/src/herald/voice/wake-phrase.ts`.
+
+**Production deploy (done 2026-09-30; repeat for updates):** `bin/herald-voice install-unit` (once), `bin/companion install-secrets`, `bin/companion herald-provider anthropic`, `bin/test` (known failures: daemon `usage-tracker`, `get_highlights` in `websocket.test`/`multi-session.test`; web 2 `ServerConnection` tests), `cd daemon && npm run build` (web `npm run build` runs inside `bin/test`; never `build:desktop` into `web/dist`), then one user-approved `COMPANION_ALLOW_RESTART=1 systemctl --user restart companion`. Verify: journal shows `Herald: started ... anthropic` and `Herald voice: service reachable`, new pid owns 9877/9878 (`ss -ltnp`). Production Herald state: `~/.companion/herald/state.json`. Browsers need a hard refresh for the new bundle.
 
 Ports used by Herald's sandbox and voice work (not yet in `/mnt/hexinas/apps/INFRASTRUCTURE.md`; add them there): **9887** herald sandbox (user's), **9888** herald probe sandbox, **9889** herald voice service (127.0.0.1 only), **9890** Tailscale serve HTTPS front for 9887 (tailnet only).
 
