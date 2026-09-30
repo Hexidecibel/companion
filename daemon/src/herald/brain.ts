@@ -100,7 +100,9 @@ export async function runTurn(provider: LlmProvider, input: TurnInput): Promise<
     ...historyToTurns(input.history),
     {
       role: 'user',
-      text: `${input.snapshot}\n\n${input.userText}${input.turnNote ? `\n\n${input.turnNote}` : ''}`,
+      // The per-turn note sits between the snapshot and the user's words: at the
+      // very end, models tend to parrot it back as a closing "[Reply style: ...]".
+      text: `${input.snapshot}${input.turnNote ? `\n${input.turnNote}` : ''}\n\n${input.userText}`,
     },
   ];
   const usage = { inputTokens: 0, outputTokens: 0 };
@@ -117,8 +119,9 @@ export async function runTurn(provider: LlmProvider, input: TurnInput): Promise<
   // Text from successive iterations joins into one reply.
   let iterationHasText = false;
   const spoken = new SpokenTextFilter();
-  const emit = (raw: string) => {
-    let delta = spoken.push(raw);
+  const emit = (raw: string) => emitFiltered(spoken.push(raw));
+  const emitFiltered = (filtered: string) => {
+    let delta = filtered;
     if (!delta) return;
     if (!iterationHasText) {
       iterationHasText = true;
@@ -182,6 +185,8 @@ export async function runTurn(provider: LlmProvider, input: TurnInput): Promise<
       }
       held = '';
     }
+    // Release anything the filter still holds (a "[" that never closed).
+    emitFiltered(spoken.flush());
 
     if (res.stopReason === 'refusal') {
       outcome = 'refusal';

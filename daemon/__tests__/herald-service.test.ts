@@ -441,7 +441,7 @@ describe('HeraldService', () => {
     return m.role === 'user' ? m.text : '';
   };
 
-  it('voice vs text mode: the per-turn reply style rides at the END of the user turn, system prompt unchanged', async () => {
+  it('voice vs text mode: the per-turn reply style rides in the user turn (after the snapshot), system prompt unchanged', async () => {
     const p = scripted([{ emit: 'Out4 is idle.' }, { emit: 'Out4 is idle.' }]);
     const { svc } = make(p, fakeSource([snap({ sessionId: 'out4' })]));
     await svc.start();
@@ -449,8 +449,8 @@ describe('HeraldService', () => {
     await waitFor(() => !svc.getState().busy);
     svc.send('what is going on with everything?', { mode: 'text' });
     await waitFor(() => p.calls.length === 2 && !svc.getState().busy);
-    expect(lastUser(p, 0)).toMatch(/what is going on with everything\?\n\n\[Reply style: spoken aloud, brief\. One or two short sentences/);
-    expect(lastUser(p, 1)).toMatch(/\[Reply style: short plain sentences, usually one to three/);
+    expect(lastUser(p, 0)).toMatch(/\[End snapshot\]\n\[Reply style: spoken aloud, brief\. One or two short sentences[^\n]*\]\n\nwhat is going on with everything\?$/);
+    expect(lastUser(p, 1)).toMatch(/\[Reply style: short plain sentences, usually one to three[^\n]*\]\n\nwhat is going on/);
     // The cacheable prefix is identical across modes.
     expect(p.calls[0].system).toBe(p.calls[1].system);
     // History carries the words only, never an old style line.
@@ -464,8 +464,23 @@ describe('HeraldService', () => {
     await svc.start();
     svc.send('hello', { mode: 'shouting', intent: 'explode' });
     await waitFor(() => !svc.getState().busy);
-    expect(lastUser(p, 0)).toMatch(/hello\n\n\[Reply style: short plain sentences/);
+    expect(lastUser(p, 0)).toMatch(/\[Reply style: short plain sentences[^\n]*\]\n\nhello$/);
     expect(svc.getState().messages[0].intent).toBeUndefined();
+  });
+
+  it('a parroted "[Reply style: ...]" never reaches the user; other brackets do', async () => {
+    const p = scripted([
+      { emit: 'Out4 is idle.\n\n[Reply style: brief]' },
+      { emit: 'The value is [redacted] in the notes. [Reply style: spoken aloud' },
+    ]);
+    const { svc } = make(p, fakeSource([]));
+    await svc.start();
+    svc.send('status?', { mode: 'voice' });
+    await waitFor(() => !svc.getState().busy);
+    svc.send('what is the key?', { mode: 'voice' });
+    await waitFor(() => p.calls.length === 2 && !svc.getState().busy);
+    const replies = svc.getState().messages.filter((m) => m.role === 'herald').map((m) => m.text);
+    expect(replies).toEqual(['Out4 is idle.', 'The value is [redacted] in the notes.']);
   });
 
   it('shorter / more: the brain gets an instruction, the transcript keeps the words and an intent chip', async () => {

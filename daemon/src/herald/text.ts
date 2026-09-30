@@ -118,28 +118,68 @@ export function plainToolAction(tool: string): string {
  * code markers anywhere, and heading / bullet markers at the start of a line.
  * Stateful, so markers split across stream deltas are still caught.
  */
+/** Bracketed prompt scaffolding a model may parrot back ("[Reply style: brief]"). */
+const SCAFFOLD_TAG =
+  /^\[(?:reply style|the user (?:said|asked)|fleet snapshot|end snapshot|detail for)\b[^\]\n]*\]?$/i;
+const TAG_HOLD_MAX = 200;
+
 export class SpokenTextFilter {
   private atLineStart = true;
   /** Leading whitespace / markers held back at the start of the current line. */
   private lead = '';
+  /** A "[" and what followed it, held until it is known not to be scaffolding. */
+  private tag = '';
 
   push(delta: string): string {
     let out = '';
     for (const ch of delta) {
-      if (ch === '*' || ch === '`') continue;
-      if (this.atLineStart) {
-        if (ch === ' ' || ch === '\t' || ch === '#' || ch === '-' || ch === '\u2022') {
-          this.lead += ch;
-          continue;
-        }
-        this.atLineStart = false;
-        // Keep plain indentation; drop anything that contained a marker.
-        if (/^[ \t]*$/.test(this.lead)) out += this.lead;
-        this.lead = '';
+      if (this.tag) {
+        this.tag += ch;
+        if (ch === ']' || ch === '\n' || this.tag.length > TAG_HOLD_MAX) out += this.releaseTag();
+        continue;
       }
-      out += ch;
-      if (ch === '\n') this.atLineStart = true;
+      if (ch === '[') {
+        this.tag = ch;
+        continue;
+      }
+      out += this.filterChar(ch);
     }
+    return out;
+  }
+
+  /** End of the reply: whatever is still held (an unterminated "[..."). */
+  flush(): string {
+    return this.tag ? this.releaseTag() : '';
+  }
+
+  private releaseTag(): string {
+    const t = this.tag;
+    this.tag = '';
+    if (SCAFFOLD_TAG.test(t.replace(/\n$/, '').trim())) {
+      if (!t.endsWith('\n')) return '';
+      this.atLineStart = true;
+      return '\n';
+    }
+    let out = '';
+    for (const c of t) out += this.filterChar(c);
+    return out;
+  }
+
+  private filterChar(ch: string): string {
+    if (ch === '*' || ch === '`') return '';
+    let out = '';
+    if (this.atLineStart) {
+      if (ch === ' ' || ch === '\t' || ch === '#' || ch === '-' || ch === '\u2022') {
+        this.lead += ch;
+        return '';
+      }
+      this.atLineStart = false;
+      // Keep plain indentation; drop anything that contained a marker.
+      if (/^[ \t]*$/.test(this.lead)) out += this.lead;
+      this.lead = '';
+    }
+    out += ch;
+    if (ch === '\n') this.atLineStart = true;
     return out;
   }
 }
