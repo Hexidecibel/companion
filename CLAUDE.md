@@ -99,6 +99,24 @@ Both key and provider changes take effect only on the next daemon restart (needs
 
 Herald also has read-only knowledge tools (`daemon/src/herald/knowledge/`): `search_infra` (`/mnt/hexinas/apps/INFRASTRUCTURE.md`), `cush_tools_help` (cush-tools docs + the cush-tools section of `~/.claude/CLAUDE.md`), `cush_status`, `search_project_notes` (CLAUDE/plan/todo/FEATURES/README of `~/local/src/*` projects with a CLAUDE.md or plan.md) and `search_memory` (`<code_home>/projects/*/memory/*.md`). All reads go through `knowledge/redact.ts` (path denylist + token redaction). `propose_cush_command` runs only `extend`/`close`/`serve`/`tunnel`/`drop` via execFile (tiers in `danger.ts` `classifyCushCommand`); everything else is refused in code. Paths derive from `code_home`; override with `HERALD_USER_HOME`, `HERALD_INFRA_DOC`, `HERALD_CUSH_TOOLS_DIR`, `HERALD_PROJECTS_ROOT`.
 
+#### Herald voice (local voice service)
+
+`bin/herald-voice` runs a Python/aiohttp service from `voice/herald_voice/` (venv + models in `~/.local/share/herald-voice`, logs in `~/.cache/herald-voice/voice.log`): Kokoro TTS (fp32 ONNX, 6 threads), faster-whisper STT (`base.en` int8, 4 threads) and openWakeWord (`hey_jarvis`), each on a single-worker executor with a bounded queue, launched with `nice -n 10`. It has NO auth and binds 127.0.0.1 only; the daemon is its only client (`herald.voice_url`, env `HERALD_VOICE_URL`, default `http://127.0.0.1:9889`; `herald.voice_enabled=false` turns voice off). Browser traffic goes over the authenticated WS: `herald_voice_status`, `herald_tts`, `herald_tts_cancel`, `herald_voice_stream_start` / `herald_voice_audio` (fire-and-forget PCM16 chunks, never logged) / `herald_voice_stream_end`, `herald_handsfree`, plus per-client `herald_voice_event` pushes. That protocol section lives in `daemon/src/herald/protocol.ts` and must stay byte-identical in `web/src/types/herald.ts` (enforced by `web/src/types/__tests__/heraldProtocolMirror.test.ts`). No audio is written to disk; transcripts are logged only with `HERALD_DEBUG_TOOLS`.
+
+```bash
+bin/herald-voice install        # venv (uv), deps, Kokoro + Whisper + openWakeWord models (idempotent)
+bin/herald-voice start|stop|restart|status|logs   # status exits 1 unless all engines are ready
+bin/herald-voice test           # Python endpoint tests (fake engines)
+bin/herald-voice say "text" [voice] [out.wav]
+bin/herald-sandbox https [on|off|status] [--tunnel]   # mic needs a secure origin: Tailscale serve
+                                # https://<node>.ts.net:9890 -> 127.0.0.1:9887 (tailnet only, sudo -n)
+node daemon/scripts/herald-voice-probe.js status|tts|stt|wake "text"   # PROBE instance only
+```
+
+Web: `web/src/services/tts/` (`HybridTtsEngine` = neural `ServerTtsEngine` with per-sentence Web Speech fallback) and `web/src/services/voice/` (capture worklet, uplink, push-to-talk controller, Silero VAD via `@ricky0123/vad-web`, `voiceAutomation.ts` for interrupt + wake). VAD assets (worklet, model, ORT wasm) are emitted under `<base>vad/` by the `herald-vad-assets` plugin in `web/vite.config.ts`; never load them from a CDN. Settings live in the Herald panel's overflow menu (Voice / Voice input). Custom wake word later: train an openWakeWord model, set `HERALD_WAKE_MODELS=/path/hey_herald.onnx`, add its spellings to `WAKE_NAMES` in `daemon/src/herald/voice/wake-phrase.ts`.
+
+Ports used by Herald's sandbox and voice work (not yet in `/mnt/hexinas/apps/INFRASTRUCTURE.md`; add them there): **9887** herald sandbox (user's), **9888** herald probe sandbox, **9889** herald voice service (127.0.0.1 only), **9890** Tailscale serve HTTPS front for 9887 (tailnet only).
+
 
 ## Web Client
 

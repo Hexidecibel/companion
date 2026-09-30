@@ -554,6 +554,13 @@ Follow-up fixes layered on the Mobile UX round above: walks back the activity-ro
 - **Doubled header inset fixed** — `.dashboard` already applies `var(--safe-top)`, and `.session-header-mobile` was applying it again, creating an excessive top band. Inset now applied once plus a 6px gap (`global.css` mobile media queries)
 - **Autolink URLs inside emphasis** — `MarkdownRenderer.tsx` previously stored bold/italic inner text as a raw string and never re-parsed it, so URLs inside `**…**` / `*…*` never became links. Bold/italic now carry children and recurse, so URLs (plus code/file links and nested emphasis) inside emphasis render as the accent link pill, enabling long-press → Open Link / Copy link
 
+## Herald — voice, Phase 2 (2026-09-30)
+- Neural voice: Kokoro TTS on a local voice service (`bin/herald-voice`, 127.0.0.1:9889), 27 English voices (default Heart), gapless per-sentence playback, falls back to browser voices per sentence if the service drops
+- Push-to-talk: hold the mic button, Space in an empty composer, or Ctrl+Shift+Space (configurable); faster-whisper transcribes on release and sends (or drops it in the box for review)
+- Interrupt by talking: Silero VAD stops Herald mid-sentence (client and server queues) and sends what you said
+- Hands-free "Hey Jarvis": openWakeWord on the hub, audio sent only while someone is talking, chime on wake, one device at a time, always-visible indicator
+- Browser never talks to the voice service; everything rides the authenticated daemon WS. `bin/herald-sandbox https` gives the sandbox a Tailscale HTTPS origin for the mic
+
 ## Herald — conversational front layer, Phase 1 (text) (2026-09-30)
 - Fast, grounded chat over all coding sessions: "anything for me?", "what is X doing?", "tell X to go ahead"; brain is Claude Haiku (`claude-haiku-4-5`) via the Anthropic API, or any OpenAI-compatible local server (`herald.provider`)
 - Deterministic inbox (blocked / finished) derived from session state; headlines are templated, never model-written; "heard" markers persist

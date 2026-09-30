@@ -1629,7 +1629,9 @@ preceding `self_update_prepare` call so a replayed request cannot restart a daem
 ## Item: Voice Front Layer (working name) — fleet-wide chief of staff
 **Status:** in-progress — Phase 1 (text-only, named "Herald") is built, reviewed and merged to
 `main` (2026-09-30); not yet live in production (go-live = `bin/companion install-secrets` +
-`bin/companion herald-provider anthropic` + build + a user-approved daemon restart). Phases 2-5 planned.
+`bin/companion herald-provider anthropic` + build + a user-approved daemon restart). Phase 2 voice
+(neural TTS, push-to-talk STT, voice interrupt, "Hey Jarvis" wake word) built on `feat/herald`
+(2026-09-30), live on the 9887 sandbox; see "Phase 2 progress" below. Phases 3-5 planned.
 
 ### Goal & Rationale
 A fast, always-available conversational entity layered **over** Claude Code sessions across the whole
@@ -1746,6 +1748,30 @@ host. Evaluation items (none decided):
 3. **Phone / earbuds push-to-talk** (iOS/Android native audio work).
 4. **Device handoff** (conversation follows you across devices).
 5. **Wake word / always-listening**, studio-mic echo handling.
+
+### Phase 2 progress (2026-09-30, CPU-only hub)
+Local voice service `bin/herald-voice` (Python/aiohttp, 127.0.0.1:9889, nice 10, capped threads;
+`voice/`). The browser never talks to it: the daemon proxies over the authenticated WS
+(`daemon/src/herald/voice/`, protocol section mirrored in `web/src/types/herald.ts`, test-enforced).
+- [x] **Step 1 Neural TTS** (Kokoro fp32 ONNX, default voice `af_heart`, 27 English voices). Web
+  requests per sentence; `ServerTtsEngine` plays a gapless WebAudio queue; barge-in cancels
+  playback and server synthesis; falls back to Web Speech per sentence if the service drops.
+  Measured: synthesis RTF 0.35-0.45; sentence -> audio 0.5-1.3 s (first long sentence is
+  clause-split); LLM first token ~0.9 s dominates `message_start` -> first audio (~2.1 s).
+- [x] **Step 2 Push-to-talk STT** (faster-whisper base.en int8, 4 threads). AudioWorklet -> 16 kHz
+  PCM16 -> WS chunks. Hold the mic button, Space in an empty composer, or Ctrl+Shift+Space
+  (configurable). 5.2 s clip -> 0.96 s; release -> transcript in composer 0.62 s (3 s utterance).
+  HTTPS for the mic: `bin/herald-sandbox https` (Tailscale serve, tailnet-only, :9890).
+- [x] **Step 3 Voice interrupt** (Silero VAD v5 in-browser, assets served locally). Talking over
+  Herald stops it (client + server queue) and sends what you said. Arms only once mic permission
+  exists; sensitivity low/normal/high.
+- [x] **Step 4 Wake word** (openWakeWord `hey_jarvis`, server-side, VAD-gated streaming). Chime,
+  capture to end-of-speech, send; one hands-free device at a time; visible indicator; paused when
+  the tab is hidden (opt-out). Detection ~90 ms after the wake word; idle hands-free ~7% of one
+  browser core, 0% voice service.
+- [ ] Not done yet: Discord mic hiding (a) and ducking (b) above; native (Tauri/Android/iOS) mic
+  paths; a custom "Hey Herald" model (hook: `HERALD_WAKE_MODELS=/path/hey_herald.onnx` +
+  `daemon/src/herald/voice/wake-phrase.ts` WAKE_NAMES); GPU engines (swap in `voice/herald_voice/engines.py`).
 
 Dependencies: Phase 1 needs Fleet Phase 1 (Fleet Inbox + capability handshake) or a minimal
 equivalent; later phases are independent of Fleet Phases 2-4, though Missions would give the front

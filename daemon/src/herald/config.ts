@@ -55,8 +55,8 @@ export interface ResolvedHeraldConfig {
   brainConfigured: boolean;
   /** Human-readable reason the brain is unavailable (when !brainConfigured or !featureEnabled). */
   disabledReason?: string;
-  /** Voice service base URL, or null when voice is disabled. */
-  voiceUrl: string | null;
+  /** Voice service base URL, or null when voice is disabled (always set by resolveHeraldConfig). */
+  voiceUrl?: string | null;
 }
 
 export const DEFAULT_DISPLAY_NAME = 'Herald';
