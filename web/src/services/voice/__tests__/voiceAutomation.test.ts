@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   COMMAND_WAIT_MS, ECHO_TAIL_MS, GATE_CHECK_EVERY_FRAMES, GATE_FIRST_CHECK_FRAMES, INTERRUPT_GRACE_MS, LISTEN_WAIT_MS,
-  VoiceAutomation, type AutomationConfig,
+  VoiceAutomation, type AutomationConfig, RAW_LEAD_SAMPLES, stripEchoPrefix,
 } from '../voiceAutomation';
 import { SpokenLog } from '../echoGuard';
+import { stripEcho } from '../echoMatch';
 import type { VadEvents, VadLike, VadSensitivity } from '../vadListener';
 import { VoiceInputController } from '../voiceInput';
 import { HybridTtsEngine } from '../../tts/hybridTtsEngine';
@@ -788,8 +789,23 @@ describe('VoiceAutomation: words from the raw mic, detection on the cleaned one'
     await vi.advanceTimersByTimeAsync(0);
     expect(heard).toHaveLength(1);
     const clip = heard[0];
-    // Starts ~0.65 s before the VAD's onset (pre-roll + path latency) and holds the raw words.
-    expect(clip.length).toBe(Math.round(16000 * 0.65) + 8000);
+    // Starts a little before the VAD's onset (its path latency) and holds the raw words.
+    expect(clip.length).toBe(RAW_LEAD_SAMPLES + 8000);
     expect(clip[clip.length - 1]).toBe(0.5);
+  });
+});
+
+describe('stripEchoPrefix', () => {
+  const spoken = ['Hi, I am Herald. Two sessions finished, and one is waiting on you.'];
+  const strip = (t: string) => stripEcho(t, spoken);
+  it("keeps the user's words past the overlap even when Herald said them too", () => {
+    expect(strip('Stop, wait, hold on a second.')).not.toBe('Stop, wait, hold on a second.');
+    expect(stripEchoPrefix('Stop, wait, hold on a second.', 0.3, strip)).toBe('Stop, wait, hold on a second.');
+  });
+  it('still cuts Herald at the start of the clip', () => {
+    expect(stripEchoPrefix('one is waiting on you stop wait hold on a second', 0.4, strip)).toBe('stop wait hold on a second');
+  });
+  it('fraction 1 is the plain strip', () => {
+    expect(stripEchoPrefix('waiting on you stop now', 1, strip)).toBe(strip('waiting on you stop now'));
   });
 });

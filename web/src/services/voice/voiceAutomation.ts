@@ -123,10 +123,26 @@ export const GATE_WINDOW_FRAMES = 50;
 /** VAD frame size (16 kHz samples). */
 const FRAME = 512;
 /**
- * Raw audio kept ahead of the VAD's speech start: its own pre-pad (400 ms) plus
- * the cleaned path's extra latency (MediaStream hop, worklet, ONNX) over the tap.
+ * Raw audio kept ahead of the VAD's speech start: the cleaned path's extra
+ * latency over the tap (MediaStream hop, worklet, ONNX; ~250 ms measured in
+ * Chromium and WebKit) plus a margin. More would only add Herald's voice.
  */
-const RAW_LEAD_SAMPLES = Math.round(16000 * 0.65);
+export const RAW_LEAD_SAMPLES = Math.round(16000 * 0.35);
+
+/**
+ * Strip Herald's words only where they can be: in an instant stop, Herald talks
+ * over the first `echoFraction` of the clip and is silent after. Words past that
+ * part (plus a two-word margin) are the user's, even when they happen to match
+ * something Herald said ("hold ON A second" vs "waiting ON you").
+ */
+export function stripEchoPrefix(text: string, echoFraction: number, strip: (t: string) => string): string {
+  const words = text.trim().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return '';
+  const n = Math.min(words.length, Math.ceil(words.length * Math.max(0, Math.min(1, echoFraction))) + 2);
+  if (n >= words.length) return strip(text);
+  const head = strip(words.slice(0, n).join(' '));
+  return [head, ...words.slice(n)].filter(Boolean).join(' ').trim();
+}
 
 interface InterruptGate {
   frames: Float32Array[];
@@ -148,6 +164,8 @@ interface InterruptGate {
   rawStart: number;
   /** Start of the last gate check's window (raw), for trimming at confirmation. */
   rawWindowFrom: number;
+  /** Raw position when Herald was stopped (-1: not yet). */
+  rawStopAt: number;
 }
 
 function concatFrames(frames: Float32Array[]): Float32Array {
@@ -386,7 +404,7 @@ export class VoiceAutomation implements VadEvents {
     this.gate = {
       frames: this.preroll.slice(), sinceCheck: 0, checks: 0, checking: false, confirmed: false, trimmed: false, instant, echoReported: false,
       heardAt: this.speechStartAt || this.now(),
-      raw: this.raw, rawStart: this.rawStart, rawWindowFrom: this.rawStart,
+      raw: this.raw, rawStart: this.rawStart, rawWindowFrom: this.rawStart, rawStopAt: -1,
     };
     this.preroll = [];
     // Nothing playing (the grace period after a reply): no echo to rule out.
@@ -455,6 +473,7 @@ export class VoiceAutomation implements VadEvents {
   /** The user really is talking over Herald: stop it and show listening. */
   private confirmInterrupt(g: InterruptGate, start: number): void {
     g.confirmed = true;
+    if (g.raw) g.rawStopAt = g.raw.position();
     if (this.cfg.speaking) this.deps.onBargeInLatency?.(Math.max(0, this.now() - g.heardAt), g.instant ? 'vad' : 'gated');
     if (start > 0) {
       g.frames = g.frames.slice(start);
@@ -473,7 +492,7 @@ export class VoiceAutomation implements VadEvents {
    * A confirmed interruption ended: transcribe it and cut out Herald's own
    * words (through speakers they are mixed in), then hand it on.
    */
-  private async finishConfirmed(audio: Float32Array, g?: InterruptGate): Promise<void> {
+  private async finishConfirmed(audio: Float32Array, g?: InterruptGate, echoFraction = 1): Promise<void> {
     const input = this.deps.input;
     if (!input.listeningExternally) return;
     input.externalTranscribing('interrupt');
@@ -494,7 +513,8 @@ export class VoiceAutomation implements VadEvents {
       input.deliverExternal(null, 'interrupt');
       return;
     }
-    const cleaned = this.deps.stripEcho ? this.deps.stripEcho(text) : text;
+    const strip = this.deps.stripEcho;
+    const cleaned = strip ? (echoFraction < 1 ? stripEchoPrefix(text, echoFraction, strip) : strip(text)) : text;
     if (cleaned !== text) console.debug('Herald voice: cut self-echo out of an interruption:', JSON.stringify(text), '->', JSON.stringify(cleaned));
     input.deliverExternal(cleaned || null, 'interrupt');
   }
@@ -547,8 +567,11 @@ export class VoiceAutomation implements VadEvents {
       const rawClip = g?.raw ? g.raw.slice(g.rawStart, g.raw.position()) : null;
       if (g?.confirmed) {
         // Trimmed: only what followed the echo (the VAD's audio starts with it).
-        const clip = rawClip && rawClip.length ? rawClip : g.trimmed ? concatFrames(g.frames) : audio;
-        void this.finishConfirmed(clip, g);
+        const useRaw = !!rawClip && rawClip.length > 0;
+        const clip = useRaw ? rawClip! : g.trimmed ? concatFrames(g.frames) : audio;
+        // Instant stop: Herald can only be in the clip up to the stop (plus its room tail).
+        const fraction = useRaw && g.instant && g.rawStopAt > 0 ? (g.rawStopAt - g.rawStart + 16000 * 0.3) / rawClip!.length : 1;
+        void this.finishConfirmed(clip, g, fraction);
       } else if (g) {
         void this.finishUnconfirmed(rawClip && rawClip.length ? rawClip : audio, g);
       }

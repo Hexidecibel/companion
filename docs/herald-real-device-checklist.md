@@ -75,3 +75,72 @@ install opens it by itself the first time Herald connects).
 - [ ] Tips appear once each (first hands-free, first tone, first red card, first
       remote trigger) and never again after dismissing, across restarts
       (native apps: also after the WebView data is cleared).
+
+## Echo cancellation, Bluetooth and device changes (audio layer)
+
+Diagnostics while testing (browser devtools console, or the desktop app's web
+inspector): `Herald voice: echo check N dB (acoustic A dB, cancelled C dB, mode)`,
+`Herald voice: talk-over detection vad|gated (reason)`, `Herald audio: echo
+suppression during replies p20 N dB`, `Herald voice: talk-over stopped Herald after
+N ms (vad|gated)`. Switches (localStorage): `herald.aec = off` disables the in-app
+canceller (browser AEC only, for comparisons); `herald.androidNativeAec = 1` uses
+Android's platform canceller instead. Stored measurements: `herald.echoMeasurements`.
+
+### Mac, external speakers + external mic (the key case)
+- [ ] Device check > Echo: reads 25 dB or more and "No echo". If the speakers sit
+      in the 3.5 mm jack, the output shows as unknown (macOS calls the jack
+      "External Headphones"), never as headphones.
+- [ ] With the echo check passed, Advanced > Voice input shows "Instant: echo
+      cancelled". Herald reading a long reply at normal volume: it never stops by
+      itself, never sends its own words (console: no "talk-over stopped" lines).
+- [ ] Say "stop" over a reply: Herald goes quiet in well under a second; the
+      transcript is your words (check the composer or the sent message).
+- [ ] Turn the speakers up loud and repeat: if the check then fails (or a
+      talk-over turns out to be Herald), the mode drops to "Checks your words
+      first" and nothing loops.
+- [ ] Hands-free on, speakers: "Hey Jarvis" while Herald talks still wakes it.
+
+### Windows gaming PC, headset + Discord
+- [ ] Output reads as headphones (Advanced / device check "Playing on ...").
+      With Discord in a call on the same headset: Herald's echo check reads very
+      high (no acoustic path) and talk-over is instant.
+- [ ] If the default Windows input is a Bluetooth headset's "Hands-Free AG Audio"
+      endpoint and the PC has another mic: Herald listens on the other mic and
+      the headset stays in "Stereo" (Sound settings > Output shows the Stereo
+      endpoint active while Herald listens).
+- [ ] Discord keeps working with its own input device while Herald listens.
+
+### Android + Bluetooth earbuds (music must stay A2DP quality)
+- [ ] Play music, connect the earbuds, open Herald, start hands-free (or hold to
+      talk): the music does NOT drop to call quality and does not move to the
+      phone speaker. Optional proof: `adb shell dumpsys audio | grep -iE
+      "mode|sco"` shows mode NORMAL and no SCO while Herald listens.
+- [ ] Herald hears you through the phone's own mic (speak towards the phone);
+      replies play in the earbuds.
+- [ ] Settings > "Use built-in mic with Bluetooth headphones" off: capture moves
+      to the earbuds' mic (call quality is then expected).
+- [ ] No earbuds, phone speaker: the echo check passes (in-graph canceller) or
+      reports honestly; talking over Herald works at normal volume.
+- [ ] First use asks for the microphone once (the app's own prompt); denying it
+      shows the mic-denied message, not a silent failure.
+- [ ] Earbuds disconnect mid-reply: Herald continues on the phone speaker, the
+      mic keeps working, the environment switches to speakers.
+
+### iPad (app)
+- [ ] AirPods connected: Herald plays in stereo A2DP quality while listening (no
+      call-quality drop); Control Center shows AirPods as output and the iPad
+      microphone is used. With the setting off, AirPods' mic is used (HFP).
+- [ ] No headphones: echo check passes on the iPad speaker (in-graph canceller
+      in WKWebView); talk-over works.
+
+### Unplugging headphones mid-reply (any platform)
+- [ ] Wired headphones out while Herald talks: playback continues on speakers,
+      the mode drops to "Checks your words first" until the canceller proves
+      itself again (a few seconds of Herald talking, or the echo check), and
+      Herald does not interrupt itself.
+- [ ] Mic unplugged mid-utterance (USB mic): "Microphone disconnected" shows,
+      listening continues on the next mic; the utterance in progress is either
+      sent or clearly reported, never silently dropped.
+- [ ] Plugging a new default mic in (e.g. a USB headset): Herald switches to it
+      ("Listening with ...") unless it is a Bluetooth headset mic with the
+      setting on.

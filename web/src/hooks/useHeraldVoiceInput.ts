@@ -360,9 +360,11 @@ export function useHeraldVoiceInput(host: VoiceInputHost): HeraldVoiceInput {
       const busy = controller.state.phase !== 'idle';
       if (n.kind === 'mic-lost') {
         show(`Microphone disconnected: ${n.label || 'the mic'}`);
-        if (busy) controller.fail('Microphone disconnected: switching to another mic');
+        // The capture carries on with the next microphone (or ends with what it has).
+        if (busy) controller.fail(`Microphone disconnected${n.label ? `: ${n.label}` : ''}`);
       } else if (n.kind === 'mic-switched' && n.reason !== 'mode') {
         show(`Listening with ${n.label || 'another microphone'}`);
+        if (busy && n.reason === 'lost') controller.fail(`Mic disconnected: still listening with ${n.label || 'another microphone'}`);
       } else if (n.kind === 'only-bluetooth-mic') {
         show(`Only your Bluetooth headset has a mic (${n.label}): while Herald listens, its audio drops to call quality.`);
       }
