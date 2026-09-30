@@ -449,7 +449,7 @@ describe('HeraldService', () => {
     await waitFor(() => !svc.getState().busy);
     svc.send('what is going on with everything?', { mode: 'text' });
     await waitFor(() => p.calls.length === 2 && !svc.getState().busy);
-    expect(lastUser(p, 0)).toMatch(/\[End snapshot\]\n\[Reply style: spoken aloud, brief\. One or two short sentences[^\n]*\]\n\nwhat is going on with everything\?$/);
+    expect(lastUser(p, 0)).toMatch(/\[End snapshot\]\n\[Reply style: spoken aloud, brief\. At most two short sentences[^\n]*\]\n\nwhat is going on with everything\?$/);
     expect(lastUser(p, 1)).toMatch(/\[Reply style: short plain sentences, usually one to three[^\n]*\]\n\nwhat is going on/);
     // The cacheable prefix is identical across modes.
     expect(p.calls[0].system).toBe(p.calls[1].system);
@@ -543,6 +543,17 @@ describe('HeraldService', () => {
     expect(other.svc.getState().verbosity).toBe('auto');
     const toolResult = bad.calls[1].messages.find((m) => m.role === 'tool');
     expect(toolResult && toolResult.role === 'tool' ? toolResult.content : '').toMatch(/level must be one of/);
+
+    // Confirmation said before the tool call (dropped as narration), nothing after: a fixed confirmation.
+    const quiet = scripted([
+      { emit: "Okay, I'll keep it short.", toolCalls: [{ id: 'v', name: 'set_verbosity', arguments: '{"level":"brief"}' }], stopReason: 'tool_calls' },
+      { emit: '' },
+    ]);
+    const q = make(quiet, fakeSource([]));
+    await q.svc.start();
+    q.svc.send('keep it short from now on', { mode: 'voice' });
+    await waitFor(() => !q.svc.getState().busy);
+    expect(q.svc.getState().messages.pop()!.text).toBe("Okay, I'll keep it short.");
   });
 
   it('brief: nothing unheard -> "Nothing new." with no brain turn', async () => {

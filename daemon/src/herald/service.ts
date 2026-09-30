@@ -64,6 +64,12 @@ const STT_HINT_TERMS = [
   'AUQ',
 ];
 const STT_HINT_MAX_NAMES = 16;
+const VERBOSITY_CONFIRM: Record<HeraldVerbosity, string> = {
+  brief: "Okay, I'll keep it short.",
+  normal: 'Okay, back to normal.',
+  detailed: "Okay, I'll give you fuller answers.",
+  auto: 'Okay: short when you talk, normal when you type.',
+};
 const STT_HINT_MAX_CHARS = 600;
 
 export class HeraldRequestError extends Error {
@@ -488,8 +494,12 @@ export class HeraldService {
       statusSince: (s, id) => this.statusSince(s, id),
       echoDelayMs: this.cfg.echoDelayMs,
       toolbox: this.toolbox ?? undefined,
-      setVerbosity: (level) => this.setVerbosity(level),
+      setVerbosity: (level) => {
+        this.setVerbosity(level);
+        verbositySet = level;
+      },
     };
+    let verbositySet: HeraldVerbosity | null = null;
     const started = Date.now();
     let errorText: string | null = null;
     let aborted = false;
@@ -598,6 +608,9 @@ export class HeraldService {
         )
         .join(' ');
     }
+    // The model often says "Okay, I'll keep it short." BEFORE calling
+    // set_verbosity (dropped as narration) and then nothing after it.
+    if (!reply.text.trim() && verbositySet) reply.text = VERBOSITY_CONFIRM[verbositySet];
     if (!reply.text.trim()) reply.text = "I don't have an answer for that.";
 
     reply.streaming = false;

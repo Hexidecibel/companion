@@ -88,12 +88,14 @@ export function effectiveVerbosity(v: HeraldVerbosity, mode: HeraldInputMode): E
 const STYLE: Record<HeraldInputMode, Record<EffectiveVerbosity, string>> = {
   voice: {
     brief:
-      'spoken aloud, brief. One or two short sentences, answer first. No lists, no preamble, no recap.',
-    normal: 'spoken aloud. Two or three short sentences, answer first. No lists.',
-    detailed: 'spoken aloud, detailed. Up to five or six short sentences, answer first. No lists.',
+      'spoken aloud, brief. At most two short sentences and about 30 words in total, answer first. Short sentences, not long ones joined with commas and dashes. No lists, no preamble, no recap.',
+    normal:
+      'spoken aloud. Two or three short sentences, under about 50 words, answer first. No lists.',
+    detailed:
+      'spoken aloud, detailed. Up to five or six short sentences, about 100 words at most, answer first. No lists.',
   },
   text: {
-    brief: 'brief. One or two short sentences, answer first.',
+    brief: 'brief. One or two short sentences, under about 30 words, answer first.',
     normal: 'short plain sentences, usually one to three, under about 60 words.',
     detailed:
       'detailed. Up to about 150 words in short plain sentences or paragraphs. Still no markdown or lists.',
