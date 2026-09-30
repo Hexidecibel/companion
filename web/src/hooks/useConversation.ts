@@ -424,17 +424,39 @@ export function useConversation(
       if (!serverId || (!sessionId && !tmuxSessionName)) return false;
       const conn = connectionManager.getConnection(serverId);
       if (!conn) return false;
+      // Generate a unique client message ID for server-side tracking
+      const clientMessageId = `sent-${Date.now()}-${++clientMessageCounter}`;
+
       if (!conn.isConnected()) {
         // Don't silently swallow the send. Kick an immediate reconnect (cancels
         // any pending backoff) so the socket — and this session's subscription
-        // via the onStateChange activate path — recovers right away. The caller
-        // surfaces the failed send; the user can retry once we're back.
+        // via the onStateChange activate path — recovers right away. Queue the
+        // input so it is delivered once we re-authenticate instead of dropped.
         conn.connect();
-        return false;
+        conn.sendQueued({
+          type: 'send_input',
+          payload: {
+            input: text,
+            sessionId,
+            tmuxSessionName: tmuxSessionName || sessionId,
+            clientMessageId,
+          },
+        });
+        const isSlashCmd = text.startsWith('/');
+        if (!opts?.skipOptimistic && !isSlashCmd) {
+          setHighlights((prev) => [
+            ...prev,
+            {
+              id: clientMessageId,
+              type: 'user' as const,
+              content: text,
+              timestamp: Date.now(),
+              isWaitingForChoice: false,
+            },
+          ]);
+        }
+        return true;
       }
-
-      // Generate a unique client message ID for server-side tracking
-      const clientMessageId = `sent-${Date.now()}-${++clientMessageCounter}`;
 
       try {
         const response = await conn.sendRequest('send_input', {

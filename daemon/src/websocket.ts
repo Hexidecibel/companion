@@ -73,6 +73,10 @@ export class WebSocketHandler {
   private deadConnectionInterval: ReturnType<typeof setInterval>;
   private static readonly PONG_TIMEOUT_MS = 90_000;
   private static readonly DEAD_CHECK_INTERVAL_MS = 60_000;
+  // Server-initiated liveness ping. Native ws ping frames are auto-answered by
+  // the browser with a pong frame, so client liveness no longer depends solely
+  // on the client managing to ping into a momentarily busy event loop.
+  private static readonly SERVER_PING_INTERVAL_MS = 30_000;
 
   constructor(
     servers: { server: Server; listener: ListenerConfig }[],
@@ -308,6 +312,24 @@ export class WebSocketHandler {
     this.clients.set(clientId, client);
     console.log(`WebSocket: Client connected (${clientId})`);
 
+    // Server-initiated liveness ping. The browser auto-answers native ping frames
+    // with a pong, keeping lastPongTime fresh without relying on the client's own
+    // app-level ping. Cleared on close/error below.
+    const serverPingInterval = setInterval(() => {
+      if (ws.readyState === WebSocket.OPEN) {
+        try {
+          ws.ping();
+        } catch {
+          // ignore — the close/error handlers will clean up
+        }
+      }
+    }, WebSocketHandler.SERVER_PING_INTERVAL_MS);
+
+    // Native pong (reply to ws.ping()) refreshes liveness, same as app-level ping.
+    ws.on('pong', () => {
+      client.lastPongTime = Date.now();
+    });
+
     ws.on('message', (data) => {
       try {
         const message: WebSocketMessage = JSON.parse(data.toString());
@@ -318,6 +340,7 @@ export class WebSocketHandler {
     });
 
     ws.on('close', (code, reason) => {
+      clearInterval(serverPingInterval);
       this.clients.delete(clientId);
       console.log(
         `WebSocket: Client disconnected (${clientId}) code=${code} reason=${reason?.toString() || 'none'}`
@@ -325,6 +348,7 @@ export class WebSocketHandler {
     });
 
     ws.on('error', (err) => {
+      clearInterval(serverPingInterval);
       console.error(`WebSocket: Client error (${clientId}):`, err);
       this.clients.delete(clientId);
     });

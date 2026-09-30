@@ -1,6 +1,15 @@
-import { spawn } from 'child_process';
+import { spawn, execFile } from 'child_process';
 import { TMUX_OPERATION_TIMEOUT_MS, INPUT_LOG_PREVIEW_LENGTH, POST_TEXT_DELAY_MS, POST_ENTER_DELAY_MS, POST_ENTER_BEFORE_TYPING_DELAY_MS, POST_OTHER_SELECT_DELAY_MS, POST_TEXT_INPUT_DELAY_MS, POST_CHOICE_DELAY_MS, DEFAULT_PANE_CAPTURE_LINES, OVERLAY_DISMISS_DELAY_MS, OVERLAY_DETECTION_LINES } from './constants';
 import { incrementTmuxOperations } from './metrics';
+
+interface TmuxResult {
+  /** 0 on success; non-zero (or null for signal kills) on failure. */
+  status: number | null;
+  stdout: string;
+  stderr: string;
+  /** True if the process was killed by the timeout watchdog. */
+  timedOut: boolean;
+}
 
 export class InputInjector {
   private defaultSession: string;
@@ -10,6 +19,47 @@ export class InputInjector {
   constructor(tmuxSession: string) {
     this.defaultSession = tmuxSession;
     this.activeSession = tmuxSession;
+  }
+
+  /**
+   * Run a `tmux` subprocess WITHOUT blocking the event loop.
+   *
+   * Replaces the former `spawnSync` calls: a synchronous tmux invocation that
+   * stalled (e.g. a wedged server) would freeze the daemon's single thread past
+   * the WebSocket pong window, causing false-positive client disconnects.
+   *
+   * Per the project's subprocess-safety rule this enforces a hard timeout with a
+   * SIGKILL escalation (execFile's `timeout` + `killSignal: 'SIGKILL'`), and it
+   * never rejects — the result mirrors spawnSync's `{ status, stdout, stderr }`
+   * shape so existing call-site checks (`result.status !== 0`,
+   * `result.stdout?.toString()`) keep working unchanged.
+   */
+  private runTmux(args: string[]): Promise<TmuxResult> {
+    return new Promise((resolve) => {
+      execFile(
+        'tmux',
+        args,
+        {
+          timeout: TMUX_OPERATION_TIMEOUT_MS,
+          killSignal: 'SIGKILL',
+          maxBuffer: 16 * 1024 * 1024,
+        },
+        (err, stdout, stderr) => {
+          const out = stdout ?? '';
+          const errOut = stderr ?? '';
+          if (err) {
+            const e = err as NodeJS.ErrnoException & { code?: number | string; killed?: boolean };
+            const timedOut = !!e.killed;
+            // execFile puts the exit code in err.code when it's a number; ENOENT
+            // and other spawn failures surface as a string code -> treat as status 1.
+            const status = typeof e.code === 'number' ? e.code : 1;
+            resolve({ status, stdout: out, stderr: errOut, timedOut });
+            return;
+          }
+          resolve({ status: 0, stdout: out, stderr: errOut, timedOut: false });
+        }
+      );
+    });
   }
 
   /**
@@ -28,10 +78,9 @@ export class InputInjector {
       await previousLock;
 
       const session = targetSession || this.activeSession;
-      const { spawnSync } = require('child_process');
 
       // First, check if the tmux session exists
-      const checkResult = spawnSync('tmux', ['has-session', '-t', session], { timeout: TMUX_OPERATION_TIMEOUT_MS });
+      const checkResult = await this.runTmux(['has-session', '-t', session]);
       if (checkResult.status !== 0) {
         console.error(`Tmux session '${session}' not found`);
         return false;
@@ -62,8 +111,7 @@ export class InputInjector {
       const hasOverlay = overlayPatterns.some((p) => p.test(paneContent));
       if (hasOverlay) {
         console.log(`Overlay detected in session '${session}', sending Escape to dismiss`);
-        const { spawnSync } = require('child_process');
-        spawnSync('tmux', ['send-keys', '-t', session, 'Escape'], { timeout: TMUX_OPERATION_TIMEOUT_MS });
+        await this.runTmux(['send-keys', '-t', session, 'Escape']);
         await new Promise((resolve) => setTimeout(resolve, OVERLAY_DISMISS_DELAY_MS));
       }
     } catch (err) {
@@ -76,14 +124,10 @@ export class InputInjector {
     try {
       console.log(`Sending input to tmux session '${session}': ${input.substring(0, INPUT_LOG_PREVIEW_LENGTH)}...`);
 
-      const { spawnSync } = require('child_process');
-
-      // Send the text using spawnSync (avoids shell interpretation)
-      const textResult = spawnSync('tmux', ['send-keys', '-t', session, '-l', '--', input], {
-        timeout: TMUX_OPERATION_TIMEOUT_MS,
-      });
+      // Send the text (avoids shell interpretation via -l --)
+      const textResult = await this.runTmux(['send-keys', '-t', session, '-l', '--', input]);
       if (textResult.status !== 0) {
-        console.error('Failed to send text:', textResult.stderr?.toString());
+        console.error('Failed to send text:', textResult.stderr);
         return false;
       }
       console.log('Text sent to tmux');
@@ -92,11 +136,9 @@ export class InputInjector {
       await new Promise((resolve) => setTimeout(resolve, POST_TEXT_DELAY_MS));
 
       // Send Enter
-      const enterResult = spawnSync('tmux', ['send-keys', '-t', session, 'Enter'], {
-        timeout: TMUX_OPERATION_TIMEOUT_MS,
-      });
+      const enterResult = await this.runTmux(['send-keys', '-t', session, 'Enter']);
       if (enterResult.status !== 0) {
-        console.error('Failed to send Enter:', enterResult.stderr?.toString());
+        console.error('Failed to send Enter:', enterResult.stderr);
         return false;
       }
       console.log('Enter sent to tmux');
@@ -204,9 +246,8 @@ export class InputInjector {
       await previousLock;
 
       const session = targetSession || this.activeSession;
-      const { spawnSync } = require('child_process');
 
-      const checkResult = spawnSync('tmux', ['has-session', '-t', session], { timeout: TMUX_OPERATION_TIMEOUT_MS });
+      const checkResult = await this.runTmux(['has-session', '-t', session]);
       if (checkResult.status !== 0) {
         console.error(`Tmux session '${session}' not found`);
         return false;
@@ -229,15 +270,14 @@ export class InputInjector {
     session: string
   ): Promise<boolean> {
     try {
-      const { spawnSync } = require('child_process');
       // The picker repaints between keypresses; give the TUI time to settle so a
       // digit toggle / tab switch is fully rendered before the next key arrives.
       const KEY_DELAY = 120; // ms between key presses
 
-      const sendKey = (key: string): boolean => {
-        const result = spawnSync('tmux', ['send-keys', '-t', session, key], { timeout: TMUX_OPERATION_TIMEOUT_MS });
+      const sendKey = async (key: string): Promise<boolean> => {
+        const result = await this.runTmux(['send-keys', '-t', session, key]);
         if (result.status !== 0) {
-          console.error(`Failed to send key '${key}':`, result.stderr?.toString());
+          console.error(`Failed to send key '${key}':`, result.stderr);
           return false;
         }
         return true;
@@ -252,28 +292,26 @@ export class InputInjector {
         console.log(`Sending choice: Other "${otherText.substring(0, 60)}" (option ${otherNumber}) to '${session}'`);
 
         if (otherNumber <= 9) {
-          if (!sendKey(String(otherNumber))) return false;
+          if (!(await sendKey(String(otherNumber)))) return false;
         } else {
           // >9 options: digit can't address the Other row — walk down to it instead.
           for (let i = 0; i < optionCount; i++) {
-            if (!sendKey('Down')) return false;
+            if (!(await sendKey('Down'))) return false;
             await delay(KEY_DELAY);
           }
-          if (!sendKey('Enter')) return false;
+          if (!(await sendKey('Enter'))) return false;
         }
         // Wait for the inline text field to open before typing.
         await delay(POST_OTHER_SELECT_DELAY_MS);
 
         // Type the free-text (replaces the "Type something." label in place).
-        const textResult = spawnSync('tmux', ['send-keys', '-t', session, '-l', '--', otherText], {
-          timeout: TMUX_OPERATION_TIMEOUT_MS,
-        });
+        const textResult = await this.runTmux(['send-keys', '-t', session, '-l', '--', otherText]);
         if (textResult.status !== 0) {
-          console.error('Failed to type Other text:', textResult.stderr?.toString());
+          console.error('Failed to type Other text:', textResult.stderr);
           return false;
         }
         await delay(POST_TEXT_INPUT_DELAY_MS);
-        if (!sendKey('Enter')) return false;
+        if (!(await sendKey('Enter'))) return false;
       } else if (multiSelect) {
         // Multi-select: each option has a [ ] checkbox. Pressing the option's digit
         // toggles that checkbox in place (cursor stays put, nothing submits), so we can
@@ -289,13 +327,13 @@ export class InputInjector {
             console.warn(`Multi-select option ${num} exceeds digit range, skipping`);
             continue;
           }
-          if (!sendKey(String(num))) return false;
+          if (!(await sendKey(String(num)))) return false;
           await delay(KEY_DELAY);
         }
         // Open the review/Submit screen, then confirm with "1. Submit answers".
-        if (!sendKey('Right')) return false;
+        if (!(await sendKey('Right'))) return false;
         await delay(POST_OTHER_SELECT_DELAY_MS);
-        if (!sendKey('1')) return false;
+        if (!(await sendKey('1'))) return false;
       } else {
         // Single-select: pressing the option's digit selects AND submits in one keypress.
         const idx = selectedIndices[0] || 0;
@@ -303,14 +341,14 @@ export class InputInjector {
         console.log(`Sending single-select choice: index ${idx} (option ${num}) of ${optionCount} to '${session}'`);
 
         if (num <= 9) {
-          if (!sendKey(String(num))) return false;
+          if (!(await sendKey(String(num)))) return false;
         } else {
           // >9 options: fall back to arrow navigation + Enter.
           for (let i = 0; i < idx; i++) {
-            if (!sendKey('Down')) return false;
+            if (!(await sendKey('Down'))) return false;
             await delay(KEY_DELAY);
           }
-          if (!sendKey('Enter')) return false;
+          if (!(await sendKey('Enter'))) return false;
         }
       }
 
@@ -329,11 +367,10 @@ export class InputInjector {
    */
   async cancelInput(targetSession?: string): Promise<boolean> {
     const session = targetSession || this.activeSession;
-    const { spawnSync } = require('child_process');
-    const checkResult = spawnSync('tmux', ['has-session', '-t', session], { timeout: TMUX_OPERATION_TIMEOUT_MS });
+    const checkResult = await this.runTmux(['has-session', '-t', session]);
     if (checkResult.status !== 0) return false;
     await this.dismissOverlayIfPresent(session);
-    const result = spawnSync('tmux', ['send-keys', '-t', session, 'C-c'], { timeout: TMUX_OPERATION_TIMEOUT_MS });
+    const result = await this.runTmux(['send-keys', '-t', session, 'C-c']);
     return result.status === 0;
   }
 
@@ -342,12 +379,9 @@ export class InputInjector {
    */
   async capturePaneContent(targetSession?: string, lines = DEFAULT_PANE_CAPTURE_LINES): Promise<string> {
     const session = targetSession || this.activeSession;
-    const { spawnSync } = require('child_process');
-    const result = spawnSync('tmux', ['capture-pane', '-t', session, '-p', '-S', `-${lines}`], {
-      timeout: TMUX_OPERATION_TIMEOUT_MS,
-    });
+    const result = await this.runTmux(['capture-pane', '-t', session, '-p', '-S', `-${lines}`]);
     if (result.status !== 0) return '';
-    return (result.stdout?.toString() || '').trim();
+    return result.stdout.trim();
   }
 
   /**
@@ -357,15 +391,11 @@ export class InputInjector {
   async captureTmuxPane(targetSession?: string, lines = 30): Promise<string> {
     try {
       const session = targetSession || this.activeSession;
-      const { spawnSync } = require('child_process');
-      const args = ['capture-pane', '-t', session, '-p', '-S', `-${lines}`];
-      const result = spawnSync('tmux', args, {
-        timeout: TMUX_OPERATION_TIMEOUT_MS,
-      });
+      const result = await this.runTmux(['capture-pane', '-t', session, '-p', '-S', `-${lines}`]);
       if (result.status !== 0) {
         return '';
       }
-      return (result.stdout?.toString() || '').trim();
+      return result.stdout.trim();
     } catch (err) {
       return '';
     }
@@ -378,10 +408,7 @@ export class InputInjector {
   async sendKeypress(key: string, targetSession?: string): Promise<void> {
     try {
       const session = targetSession || this.activeSession;
-      const { spawnSync } = require('child_process');
-      spawnSync('tmux', ['send-keys', '-t', session, key], {
-        timeout: TMUX_OPERATION_TIMEOUT_MS,
-      });
+      await this.runTmux(['send-keys', '-t', session, key]);
     } catch {
       // Silent fail — don't crash if tmux isn't available
     }

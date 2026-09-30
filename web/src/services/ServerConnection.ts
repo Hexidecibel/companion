@@ -8,8 +8,16 @@ const MAX_RECONNECT_ATTEMPTS = Infinity;
 const INITIAL_RECONNECT_DELAY = 1000;
 const MAX_RECONNECT_DELAY = 30000;
 const PING_INTERVAL = 25000;
-const PONG_TIMEOUT = 15000;
+// Aligned with the daemon's 90s dead-connection tolerance. We tolerate
+// MAX_MISSED_PONGS silent windows before declaring the socket dead, so the
+// effective grace before a forced reconnect is PONG_TIMEOUT * MAX_MISSED_PONGS.
+const PONG_TIMEOUT = 60000;
+const MAX_MISSED_PONGS = 2;
 const CONNECTION_TIMEOUT = 10000;
+// Minimum continuous uptime before the reconnect backoff counter is reset to 0.
+// A link that flaps faster than this keeps its accumulated attempts so the
+// exponential backoff actually widens instead of resetting every reconnect.
+const STABLE_UPTIME = 30000;
 
 export class ServerConnection {
   readonly serverId: string;
@@ -32,8 +40,22 @@ export class ServerConnection {
   private pingTimer: ReturnType<typeof setInterval> | null = null;
   private pongTimer: ReturnType<typeof setTimeout> | null = null;
   private connectionTimer: ReturnType<typeof setTimeout> | null = null;
+  private stableTimer: ReturnType<typeof setTimeout> | null = null;
   private requestCounter = 0;
   private lastSessionId: string | undefined;
+
+  // Liveness / zombie-socket tracking.
+  private lastPongAt = 0;
+  private missedPongs = 0;
+  // Latch so a single drop only runs handleDisconnect() once (the connect-timeout
+  // path closes the socket AND calls handleDisconnect, and the later onclose would
+  // otherwise fire it a second time, double-incrementing reconnectAttempts).
+  private isDisconnecting = false;
+
+  // Outbound send queue for fire-and-forget user payloads composed while the
+  // socket is briefly down (reconnect window). Flushed on re-auth.
+  private outboundQueue: unknown[] = [];
+  private static readonly MAX_OUTBOUND_QUEUE = 100;
 
   constructor(server: Server) {
     this.server = server;
@@ -63,6 +85,8 @@ export class ServerConnection {
 
   private doConnect(): void {
     this.clearTimers();
+    // New connection attempt: re-arm the once-per-drop latch.
+    this.isDisconnecting = false;
 
     this.updateState({
       status: this.connectionState.reconnectAttempts > 0 ? 'reconnecting' : 'connecting',
@@ -126,13 +150,22 @@ export class ServerConnection {
           this.lastSessionId = (subResponse as unknown as { sessionId?: string }).sessionId;
         }
 
+        // Reset liveness trackers before we start pinging.
+        this.missedPongs = 0;
+        this.lastPongAt = Date.now();
+
         this.updateState({
           status: 'connected',
           error: undefined,
           lastConnected: Date.now(),
-          reconnectAttempts: 0,
+          // NOTE: reconnectAttempts is intentionally NOT reset here — that only
+          // happens after STABLE_UPTIME of continuous connection (armStableTimer),
+          // so a flapping link keeps widening its backoff.
         });
         this.startPingInterval();
+        this.armStableTimer();
+        // Deliver anything the user composed while the socket was down.
+        this.flushOutboundQueue();
 
         // Fire reconnect event only on subsequent connections (not the first).
         // Subscribers (e.g. useConversation) use this to refetch state that may
@@ -165,6 +198,8 @@ export class ServerConnection {
 
       if (message.type === 'pong') {
         this.clearPongTimer();
+        this.missedPongs = 0;
+        this.lastPongAt = Date.now();
         return;
       }
 
@@ -193,6 +228,11 @@ export class ServerConnection {
   }
 
   private handleDisconnect(reason: string): void {
+    // Only run once per drop. The connect-timeout path calls close() + this, and
+    // the resulting onclose would otherwise re-enter and double-count attempts.
+    if (this.isDisconnecting) return;
+    this.isDisconnecting = true;
+
     this.ws = null;
     this.clearTimers();
 
@@ -251,6 +291,24 @@ export class ServerConnection {
     this.clearReconnectTimer();
     this.clearPingInterval();
     this.clearPongTimer();
+    this.clearStableTimer();
+  }
+
+  private clearStableTimer(): void {
+    if (this.stableTimer) {
+      clearTimeout(this.stableTimer);
+      this.stableTimer = null;
+    }
+  }
+
+  private armStableTimer(): void {
+    this.clearStableTimer();
+    this.stableTimer = setTimeout(() => {
+      this.stableTimer = null;
+      if (this.connectionState.reconnectAttempts !== 0) {
+        this.updateState({ reconnectAttempts: 0 });
+      }
+    }, STABLE_UPTIME);
   }
 
   private clearConnectionTimer(): void {
@@ -283,16 +341,37 @@ export class ServerConnection {
 
   private startPingInterval(): void {
     this.clearPingInterval();
-    this.pingTimer = setInterval(() => {
-      if (this.isConnected()) {
-        this.send({ type: 'ping' }).catch(() => {});
-        this.clearPongTimer();
-        this.pongTimer = setTimeout(() => {
-          console.warn(`[${this.serverId}] Pong timeout — connection dead, reconnecting`);
-          this.ws?.close();
-        }, PONG_TIMEOUT);
-      }
-    }, PING_INTERVAL);
+    // Arm the liveness baseline so checkAlive() doesn't false-positive before the
+    // first pong lands.
+    this.lastPongAt = Date.now();
+    this.pingTimer = setInterval(() => this.sendPing(), PING_INTERVAL);
+  }
+
+  private sendPing(): void {
+    if (!this.isConnected()) return;
+    this.send({ type: 'ping' }).catch(() => {});
+    // Arm a SINGLE watchdog. Subsequent pings must NOT clear/re-arm it, because
+    // PONG_TIMEOUT (60s) exceeds PING_INTERVAL (25s) — the watchdog is cleared
+    // only when a pong actually arrives (see handleMessage).
+    if (!this.pongTimer) {
+      this.pongTimer = setTimeout(() => this.handlePongTimeout(), PONG_TIMEOUT);
+    }
+  }
+
+  private handlePongTimeout(): void {
+    this.pongTimer = null;
+    this.missedPongs++;
+    if (this.missedPongs >= MAX_MISSED_PONGS) {
+      console.warn(
+        `[${this.serverId}] Pong timeout (${this.missedPongs} consecutive) — connection dead, reconnecting`,
+      );
+      this.ws?.close();
+    } else {
+      console.warn(
+        `[${this.serverId}] Missed pong (${this.missedPongs}/${MAX_MISSED_PONGS}) — tolerating, arming another window`,
+      );
+      this.pongTimer = setTimeout(() => this.handlePongTimeout(), PONG_TIMEOUT);
+    }
   }
 
   private updateState(updates: Partial<ConnectionState>): void {
@@ -339,6 +418,72 @@ export class ServerConnection {
       throw new Error('WebSocket is not connected');
     }
     this.ws.send(JSON.stringify(message));
+  }
+
+  /**
+   * Fire-and-forget send for user-originated payloads (e.g. send_input) that must
+   * survive a brief reconnect window. If the socket is OPEN the message goes out
+   * immediately; otherwise it is queued (capped, oldest dropped) and flushed once
+   * the connection re-authenticates. Unlike send()/sendRequest this never throws.
+   *
+   * Control messages (ping/authenticate/subscribe) must NOT use this path — they
+   * go through send()/sendRequest so their disconnect semantics are preserved and
+   * they are never queued or double-sent.
+   */
+  sendQueued(message: WebSocketMessage): void {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      try {
+        this.ws.send(JSON.stringify(message));
+        return;
+      } catch {
+        // fall through to queue
+      }
+    }
+    if (this.outboundQueue.length >= ServerConnection.MAX_OUTBOUND_QUEUE) {
+      this.outboundQueue.shift();
+      console.warn(`[${this.serverId}] Outbound queue full — dropping oldest queued message`);
+    }
+    this.outboundQueue.push(message);
+  }
+
+  private flushOutboundQueue(): void {
+    if (this.outboundQueue.length === 0) return;
+    const queued = this.outboundQueue;
+    this.outboundQueue = [];
+    for (const message of queued) {
+      try {
+        this.ws?.send(JSON.stringify(message));
+      } catch (error) {
+        console.error(`[${this.serverId}] Failed to flush queued message:`, error);
+      }
+    }
+  }
+
+  /**
+   * Detect and recover a "zombie" socket after mobile suspend/resume: readyState
+   * is OPEN and status is 'connected', but no traffic has flowed and the peer is
+   * effectively gone. Safe to call frequently; no-op unless currently connected.
+   */
+  checkAlive(): void {
+    if (this.connectionState.status !== 'connected') return;
+    const silent = this.lastPongAt > 0 ? Date.now() - this.lastPongAt : 0;
+    if (silent > PING_INTERVAL + PONG_TIMEOUT) {
+      console.warn(
+        `[${this.serverId}] Socket stale on resume (${Math.round(silent / 1000)}s silent) — forcing reconnect`,
+      );
+      try {
+        this.ws?.close();
+      } catch {
+        // ignore
+      }
+      this.handleDisconnect('stale on resume');
+      return;
+    }
+    // Not stale yet — send an immediate ping so a dead-but-OPEN socket surfaces
+    // fast rather than waiting for the next scheduled ping.
+    if (this.ws?.readyState === WebSocket.OPEN) {
+      this.sendPing();
+    }
   }
 
   isConnected(): boolean {

@@ -371,7 +371,7 @@ export class SessionWatcher extends EventEmitter {
       // AskUserQuestion tool_use, which then never re-parses or broadcasts, leaving
       // the choice invisible in the app. This guarantees a conversation-update push
       // (and a refreshed cache) within one refresh interval.
-      this.reconcileTrackedConversations();
+      await this.reconcileTrackedConversations();
 
       // Persist session snapshots so they survive daemon restarts
       this.persistSessions();
@@ -611,7 +611,9 @@ export class SessionWatcher extends EventEmitter {
       convId,
       setTimeout(() => {
         this.debounceTimers.delete(convId);
-        this.processFileChange(filePath, convId);
+        void this.processFileChangeAsync(filePath, convId).catch((err) =>
+          console.error(`Watcher: processFileChangeAsync failed for ${convId}:`, err)
+        );
       }, SessionWatcher.DEBOUNCE_MS)
     );
   }
@@ -625,12 +627,20 @@ export class SessionWatcher extends EventEmitter {
     this.waitingDebounceTimers.set(
       convId,
       setTimeout(() => {
+        void (async () => {
         this.waitingDebounceTimers.delete(convId);
         const tracked = this.conversations.get(convId);
         if (!tracked) return;
 
-        // Re-parse to confirm still waiting
-        const messages = parseConversationFile(filePath);
+        // Re-parse to confirm still waiting. Read off the event loop so a large
+        // conversation file doesn't block pings/pongs.
+        let content: string;
+        try {
+          content = await fs.promises.readFile(filePath, 'utf-8');
+        } catch {
+          return;
+        }
+        const messages = parseConversationFile(filePath, undefined, content);
         if (!detectWaitingForInput(messages)) return;
 
         // Confirmed: tool is genuinely waiting for input (not just running)
@@ -660,6 +670,7 @@ export class SessionWatcher extends EventEmitter {
           currentActivity: detectCurrentActivity(messages),
           lastMessage,
         });
+        })();
       }, SessionWatcher.WAITING_DEBOUNCE_MS)
     );
   }
@@ -669,13 +680,52 @@ export class SessionWatcher extends EventEmitter {
    * (JSONL filename). External events use the tmux session name as sessionId.
    */
   private processFileChange(filePath: string, convId: string): void {
-    const stats = fs.statSync(filePath);
+    // Synchronous entry point (blocking I/O). Retained for one-time / on-demand
+    // loads whose callers verify the result immediately afterwards. Recurring hot
+    // paths should use processFileChangeAsync() so a large-file read never stalls
+    // the event loop long enough to delay WebSocket pongs.
+    let stats: fs.Stats;
+    let content: string;
+    try {
+      stats = fs.statSync(filePath);
+      content = fs.readFileSync(filePath, 'utf-8');
+    } catch (err) {
+      console.log(`Watcher: processFileChange read failed for ${convId}: ${err}`);
+      return;
+    }
+    this.applyFileChange(filePath, convId, content, stats);
+  }
+
+  /**
+   * Non-blocking entry point: performs the JSONL stat + read via fs.promises so
+   * the single-threaded event loop stays free to service pings/pongs while the
+   * (possibly multi-MB) conversation file is read off disk. The parse itself is
+   * still synchronous CPU work but is unchanged for correctness.
+   */
+  private async processFileChangeAsync(filePath: string, convId: string): Promise<void> {
+    let stats: fs.Stats;
+    let content: string;
+    try {
+      [stats, content] = await Promise.all([
+        fs.promises.stat(filePath),
+        fs.promises.readFile(filePath, 'utf-8'),
+      ]);
+    } catch (err) {
+      console.log(`Watcher: processFileChangeAsync read failed for ${convId}: ${err}`);
+      return;
+    }
+    this.applyFileChange(filePath, convId, content, stats);
+  }
+
+  private applyFileChange(
+    filePath: string,
+    convId: string,
+    content: string,
+    stats: fs.Stats
+  ): void {
     const projectPath = this.extractProjectPath(filePath);
 
-    // Read the file ONCE and share the content
-    const content = fs.readFileSync(filePath, 'utf-8');
-
-    // Parse the conversation from content
+    // Parse the conversation from content (already read by the caller)
     const t0 = Date.now();
     const messages = parseConversationFile(filePath, undefined, content);
     const t1 = Date.now();
@@ -1686,12 +1736,12 @@ export class SessionWatcher extends EventEmitter {
    * (so clients with the session open update live). Called from the periodic tmux
    * refresh. Iterates a snapshot so processFileChange's writes don't disturb it.
    */
-  private reconcileTrackedConversations(): void {
+  private async reconcileTrackedConversations(): Promise<void> {
     for (const [convId, tracked] of [...this.conversations]) {
       try {
-        const st = fs.statSync(tracked.path);
+        const st = await fs.promises.stat(tracked.path);
         if (st.mtimeMs > tracked.lastModified) {
-          this.processFileChange(tracked.path, convId);
+          await this.processFileChangeAsync(tracked.path, convId);
         }
       } catch {
         // File missing/unreadable — leave for normal watcher handling.

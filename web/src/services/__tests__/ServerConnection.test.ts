@@ -238,9 +238,13 @@ describe('ServerConnection', () => {
     const firstAttempts = conn.getState().reconnectAttempts;
     expect(firstAttempts).toBeGreaterThanOrEqual(1);
 
-    // Advance past first reconnect delay (1s)
-    await vi.advanceTimersByTimeAsync(1000);
+    // Advance past the first reconnect delay INCLUDING jitter (base 1s + up to 1s
+    // jitter) so the scheduled doConnect actually fires and a genuinely NEW socket
+    // is created. (A second close on the *same* old socket is intentionally a
+    // no-op now — the connection only counts one disconnect per dropped socket.)
+    await vi.advanceTimersByTimeAsync(2100);
     const ws2 = lastCreatedWs!;
+    expect(ws2).not.toBe(ws); // reconnect produced a fresh socket
     await vi.advanceTimersByTimeAsync(0); // let it "open"
     ws2.simulateClose('still down');
 

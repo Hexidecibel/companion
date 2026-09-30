@@ -1,15 +1,36 @@
 import { InputInjector } from '../input-injector';
 
 // ---------------------------------------------------------------------------
-// Mock child_process.spawnSync at the module level
+// Mock child_process.execFile at the module level.
+// InputInjector now runs tmux via async execFile (non-blocking) instead of the
+// former blocking spawnSync. `mockSpawnSync` keeps its name for the assertions
+// below — it records (cmd, args) and returns a spawnSync-style result object,
+// which the execFile shim adapts into the (err, stdout, stderr) callback form.
 // ---------------------------------------------------------------------------
 const mockSpawnSync = jest.fn();
 jest.mock('child_process', () => ({
   spawn: jest.fn(),
-  spawnSync: (...args: unknown[]) => mockSpawnSync(...args),
+  execFile: (
+    file: string,
+    args: string[],
+    _options: unknown,
+    callback: (err: Error | null, stdout: string, stderr: string) => void
+  ) => {
+    const res = mockSpawnSync(file, args) as {
+      status: number;
+      stdout: Buffer;
+      stderr: Buffer;
+    };
+    const stdout = res.stdout?.toString?.() ?? '';
+    const stderr = res.stderr?.toString?.() ?? '';
+    const err =
+      res.status === 0 ? null : Object.assign(new Error('command failed'), { code: res.status });
+    callback(err, stdout, stderr);
+    return { on: () => {} };
+  },
 }));
 
-// Helper to build spawnSync return values
+// Helper to build tmux result values (spawnSync-style shape, adapted above)
 function ok(stdout = '') {
   return { status: 0, stdout: Buffer.from(stdout), stderr: Buffer.from('') };
 }

@@ -78,12 +78,14 @@ export class ConnectionManager {
     this.lastKick = now;
 
     for (const conn of this.connections.values()) {
+      if (conn.getServer().enabled === false) continue;
       const state = conn.getState();
-      if (
-        conn.getServer().enabled !== false &&
-        state.status !== 'connected' &&
-        state.status !== 'connecting'
-      ) {
+      if (state.status === 'connected') {
+        // Live-looking socket: may be a post-resume "zombie" (OPEN but dead).
+        // Probe it — a stale one is torn down and reconnected inside checkAlive().
+        conn.checkAlive();
+      } else if (state.status !== 'connecting') {
+        // 'disconnected' / 'reconnecting' / 'error': retry now, breaking backoff.
         conn.reconnect();
       }
     }

@@ -69,7 +69,20 @@ jest.mock('chokidar', () => ({
   watch: jest.fn(() => mockWatcher),
 }));
 
-jest.mock('fs');
+// Auto-mock fs, but ensure `promises` exists as a STABLE object at mock time.
+// The watcher's `import * as fs` compiles to __importStar, which copies own
+// properties into a per-module namespace object; if `promises` were undefined at
+// import time the watcher would capture that undefined and never see a later
+// reassignment. Defining it in the factory means every module shares the same
+// promises object (and the same jest.fns), so beforeEach can configure them.
+jest.mock('fs', () => {
+  const automock = jest.createMockFromModule<typeof import('fs')>('fs') as any;
+  automock.promises = {
+    readFile: jest.fn(),
+    stat: jest.fn(),
+  };
+  return automock;
+});
 
 import chokidar from 'chokidar';
 import { SessionWatcher } from '../src/watcher';
@@ -129,6 +142,16 @@ describe('SessionWatcher', () => {
     mockFs.existsSync.mockReturnValue(true);
     mockFs.readFileSync.mockReturnValue('');
     mockFs.statSync.mockReturnValue({ mtimeMs: Date.now(), birthtimeMs: Date.now(), isDirectory: () => false } as any);
+    // The watcher now reads JSONL off the event loop via fs.promises in its
+    // recurring hot paths. Delegate those to the synchronous mocks at call time
+    // (do NOT reassign the promises object — modules share the reference captured
+    // at import) so each test's readFileSync/statSync setup still applies.
+    (mockFs.promises.readFile as jest.Mock).mockImplementation((...args: any[]) =>
+      Promise.resolve((mockFs.readFileSync as any)(...args))
+    );
+    (mockFs.promises.stat as jest.Mock).mockImplementation((p: any) =>
+      Promise.resolve((mockFs.statSync as any)(p))
+    );
     watcher = new SessionWatcher(CODE_HOME);
   });
 
@@ -166,7 +189,7 @@ describe('SessionWatcher', () => {
 
       await startWatcher(watcher);
       mockWatcher.emit('add', FILE_A1);
-      jest.advanceTimersByTime(200);
+      await jest.advanceTimersByTimeAsync(200);
 
       const sessions = watcher.getSessions();
       expect(sessions.length).toBe(1);
@@ -184,7 +207,7 @@ describe('SessionWatcher', () => {
 
       // File directly in .claude root (not in projects/)
       mockWatcher.emit('add', '/home/user/.claude/history.jsonl');
-      jest.advanceTimersByTime(200);
+      await jest.advanceTimersByTimeAsync(200);
 
       expect(updateSpy).not.toHaveBeenCalled();
     });
@@ -204,9 +227,9 @@ describe('SessionWatcher', () => {
 
       // Two different JSONL files in the same project directory
       mockWatcher.emit('add', FILE_A1);
-      jest.advanceTimersByTime(200);
+      await jest.advanceTimersByTimeAsync(200);
       mockWatcher.emit('add', FILE_A2);
-      jest.advanceTimersByTime(200);
+      await jest.advanceTimersByTimeAsync(200);
 
       const sessions = watcher.getSessions();
       // Both files map to the same tmux session, so only 1 session entry
@@ -222,9 +245,9 @@ describe('SessionWatcher', () => {
 
       await startWatcher(watcher);
       mockWatcher.emit('add', FILE_A1);
-      jest.advanceTimersByTime(200);
+      await jest.advanceTimersByTimeAsync(200);
       mockWatcher.emit('add', FILE_B1);
-      jest.advanceTimersByTime(200);
+      await jest.advanceTimersByTimeAsync(200);
 
       const sessions = watcher.getSessions();
       expect(sessions.length).toBe(2);
@@ -251,7 +274,7 @@ describe('SessionWatcher', () => {
       watcher.on('conversation-update', updateSpy);
 
       mockWatcher.emit('change', FILE_A1);
-      jest.advanceTimersByTime(200);
+      await jest.advanceTimersByTimeAsync(200);
 
       expect(updateSpy).toHaveBeenCalledWith(
         expect.objectContaining({ path: FILE_A1 })
@@ -269,7 +292,7 @@ describe('SessionWatcher', () => {
       watcher.on('conversation-update', updateSpy);
 
       mockWatcher.emit('add', FILE_A1);
-      jest.advanceTimersByTime(200);
+      await jest.advanceTimersByTimeAsync(200);
 
       expect(updateSpy).toHaveBeenCalledWith(
         expect.objectContaining({ messages: expect.anything() })
@@ -291,11 +314,11 @@ describe('SessionWatcher', () => {
       // Rapid changes - only the last should process
       mockFs.readFileSync.mockReturnValue(content1);
       mockWatcher.emit('change', FILE_A1);
-      jest.advanceTimersByTime(50); // Less than debounce (150ms)
+      await jest.advanceTimersByTimeAsync(50); // Less than debounce (150ms)
 
       mockFs.readFileSync.mockReturnValue(content2);
       mockWatcher.emit('change', FILE_A1);
-      jest.advanceTimersByTime(200); // Past debounce
+      await jest.advanceTimersByTimeAsync(200); // Past debounce
 
       // Should process only once (debounced)
       expect(updateSpy).toHaveBeenCalledTimes(1);
@@ -315,9 +338,9 @@ describe('SessionWatcher', () => {
 
       await startWatcher(watcher);
       mockWatcher.emit('add', FILE_A1);
-      jest.advanceTimersByTime(200);
+      await jest.advanceTimersByTimeAsync(200);
       mockWatcher.emit('add', FILE_B1);
-      jest.advanceTimersByTime(200);
+      await jest.advanceTimersByTimeAsync(200);
     });
 
     it('should switch active session by tmux name', () => {
@@ -361,7 +384,7 @@ describe('SessionWatcher', () => {
 
       await startWatcher(watcher);
       mockWatcher.emit('add', FILE_A1);
-      jest.advanceTimersByTime(200);
+      await jest.advanceTimersByTimeAsync(200);
 
       const status = watcher.getStatus();
       expect(status.isRunning).toBe(true);
@@ -376,7 +399,7 @@ describe('SessionWatcher', () => {
 
       await startWatcher(watcher);
       mockWatcher.emit('add', FILE_A1);
-      jest.advanceTimersByTime(200);
+      await jest.advanceTimersByTimeAsync(200);
 
       expect(watcher.isWaiting()).toBe(true);
     });
@@ -389,7 +412,7 @@ describe('SessionWatcher', () => {
 
       await startWatcher(watcher);
       mockWatcher.emit('add', FILE_A1);
-      jest.advanceTimersByTime(200);
+      await jest.advanceTimersByTimeAsync(200);
 
       expect(watcher.isWaiting()).toBe(false);
     });
@@ -405,7 +428,7 @@ describe('SessionWatcher', () => {
         jsonlLine({ type: 'user', message: { content: 'Do something' }, uuid: 'msg-1' })
       );
       mockWatcher.emit('add', FILE_A1);
-      jest.advanceTimersByTime(200);
+      await jest.advanceTimersByTimeAsync(200);
 
       // Second message - assistant replies, now waiting
       mockFs.readFileSync.mockReturnValue(
@@ -415,7 +438,7 @@ describe('SessionWatcher', () => {
         )
       );
       mockWatcher.emit('change', FILE_A1);
-      jest.advanceTimersByTime(200);
+      await jest.advanceTimersByTimeAsync(200);
 
       expect(statusSpy).toHaveBeenCalledTimes(2);
     });
@@ -433,7 +456,7 @@ describe('SessionWatcher', () => {
 
       await startWatcher(watcher);
       mockWatcher.emit('add', FILE_A1);
-      jest.advanceTimersByTime(200);
+      await jest.advanceTimersByTimeAsync(200);
 
       const chain = watcher.getConversationChain(TMUX_SESSION_A);
       expect(chain).toEqual([FILE_A1]);
@@ -459,9 +482,9 @@ describe('SessionWatcher', () => {
 
       await startWatcher(watcher);
       mockWatcher.emit('add', FILE_A1);
-      jest.advanceTimersByTime(200);
+      await jest.advanceTimersByTimeAsync(200);
       mockWatcher.emit('add', FILE_B1);
-      jest.advanceTimersByTime(200);
+      await jest.advanceTimersByTimeAsync(200);
 
       const summary = await watcher.getServerSummary();
       expect(summary.sessions.length).toBe(2);
@@ -475,7 +498,7 @@ describe('SessionWatcher', () => {
 
       await startWatcher(watcher);
       mockWatcher.emit('add', FILE_A1);
-      jest.advanceTimersByTime(200);
+      await jest.advanceTimersByTimeAsync(200);
 
       const summary = await watcher.getServerSummary();
       expect(summary.sessions[0].projectPath).toBeDefined();
@@ -489,7 +512,7 @@ describe('SessionWatcher', () => {
 
       await startWatcher(watcher);
       mockWatcher.emit('add', FILE_A1);
-      jest.advanceTimersByTime(200);
+      await jest.advanceTimersByTimeAsync(200);
 
       const summary = await watcher.getServerSummary();
       expect(summary.sessions[0].id).toBe(TMUX_SESSION_A);
@@ -503,9 +526,9 @@ describe('SessionWatcher', () => {
 
       await startWatcher(watcher);
       mockWatcher.emit('add', FILE_A1);
-      jest.advanceTimersByTime(200);
+      await jest.advanceTimersByTimeAsync(200);
       mockWatcher.emit('add', FILE_B1);
-      jest.advanceTimersByTime(200);
+      await jest.advanceTimersByTimeAsync(200);
 
       // Only provide tmux session for project A
       const tmuxFilter = [{
@@ -531,14 +554,14 @@ describe('SessionWatcher', () => {
         jsonlLine({ type: 'assistant', message: { content: 'What next?' }, uuid: 'msg-1' })
       );
       mockWatcher.emit('add', FILE_A1);
-      jest.advanceTimersByTime(200);
+      await jest.advanceTimersByTimeAsync(200);
 
       // Session 2: user sent, assistant working
       mockFs.readFileSync.mockReturnValue(
         jsonlLine({ type: 'user', message: { content: 'Do something' }, uuid: 'msg-2' })
       );
       mockWatcher.emit('add', FILE_B1);
-      jest.advanceTimersByTime(200);
+      await jest.advanceTimersByTimeAsync(200);
 
       const summary = await watcher.getServerSummary();
       expect(summary.waitingCount).toBe(1);
@@ -558,7 +581,7 @@ describe('SessionWatcher', () => {
 
       await startWatcher(watcher);
       mockWatcher.emit('add', FILE_A1);
-      jest.advanceTimersByTime(200);
+      await jest.advanceTimersByTimeAsync(200);
 
       const sessions = watcher.getSessions();
       expect(sessions.length).toBe(1);
@@ -571,7 +594,7 @@ describe('SessionWatcher', () => {
 
       await startWatcher(watcher);
       mockWatcher.emit('add', FILE_A1);
-      jest.advanceTimersByTime(200);
+      await jest.advanceTimersByTimeAsync(200);
 
       // Conversations are tracked internally but not exposed without tmux
       const sessions = watcher.getSessions();
@@ -597,7 +620,7 @@ describe('SessionWatcher', () => {
 
       await startWatcher(watcher);
       mockWatcher.emit('add', FILE_A1);
-      jest.advanceTimersByTime(200);
+      await jest.advanceTimersByTimeAsync(200);
 
       expect(watcher.getActiveSessionId()).toBe(TMUX_SESSION_A);
 
@@ -623,7 +646,7 @@ describe('SessionWatcher', () => {
 
       await startWatcher(watcher);
       mockWatcher.emit('add', FILE_A1);
-      jest.advanceTimersByTime(200);
+      await jest.advanceTimersByTimeAsync(200);
 
       const conv = watcher.getActiveConversation();
       expect(conv).not.toBeNull();
@@ -643,7 +666,7 @@ describe('SessionWatcher', () => {
 
       await startWatcher(watcher);
       mockWatcher.emit('add', FILE_A1);
-      jest.advanceTimersByTime(200);
+      await jest.advanceTimersByTimeAsync(200);
 
       // Should not crash, session may or may not be tracked
       const messages = watcher.getMessages();
@@ -657,10 +680,12 @@ describe('SessionWatcher', () => {
       await startWatcher(watcher);
 
       // Should not throw
-      expect(() => {
-        mockWatcher.emit('add', FILE_A1);
-        jest.advanceTimersByTime(200);
-      }).not.toThrow();
+      await expect(
+        (async () => {
+          mockWatcher.emit('add', FILE_A1);
+          await jest.advanceTimersByTimeAsync(200);
+        })()
+      ).resolves.not.toThrow();
     });
 
     it('should auto-set first added session as active', async () => {
@@ -672,7 +697,7 @@ describe('SessionWatcher', () => {
       expect(watcher.getActiveSessionId()).toBeNull();
 
       mockWatcher.emit('add', FILE_A1);
-      jest.advanceTimersByTime(200);
+      await jest.advanceTimersByTimeAsync(200);
 
       // First session should become active automatically
       expect(watcher.getActiveSessionId()).toBe(TMUX_SESSION_A);
@@ -689,7 +714,7 @@ describe('SessionWatcher', () => {
 
       // Subagent files are in a subdirectory
       mockWatcher.emit('add', `${PROJECT_DIR_A}/subagents/${FILE_UUID_1}.jsonl`);
-      jest.advanceTimersByTime(200);
+      await jest.advanceTimersByTimeAsync(200);
 
       // Subagent files should not trigger conversation updates
       expect(updateSpy).not.toHaveBeenCalled();
@@ -742,7 +767,7 @@ describe('SessionWatcher', () => {
 
       await startWatcher(watcher);
       mockWatcher.emit('add', FILE_A1);
-      jest.advanceTimersByTime(200);
+      await jest.advanceTimersByTimeAsync(200);
 
       // Trigger the periodic 5s refreshTmuxPaths which calls refreshConversationMappings
       // which calls persistMappings when the mapping log key changes
@@ -830,7 +855,7 @@ describe('SessionWatcher', () => {
 
       // Load an existing JSONL (belongs to TMUX_EXISTING)
       mockWatcher.emit('add', FILE_A1);
-      jest.advanceTimersByTime(200);
+      await jest.advanceTimersByTimeAsync(200);
 
       // The new session should NOT pick up the old JSONL
       const messages = watcher.getMessages(TMUX_NEW);
@@ -858,7 +883,7 @@ describe('SessionWatcher', () => {
 
       // Load the JSONL for the new session
       mockWatcher.emit('add', FILE_A2);
-      jest.advanceTimersByTime(200);
+      await jest.advanceTimersByTimeAsync(200);
 
       // Now getMessages should work because direct mapping bypasses the guard
       const messages = watcher.getMessages(TMUX_NEW);
@@ -891,9 +916,9 @@ describe('SessionWatcher', () => {
 
       // Load both JSONLs
       mockWatcher.emit('add', FILE_A1);
-      jest.advanceTimersByTime(200);
+      await jest.advanceTimersByTimeAsync(200);
       mockWatcher.emit('add', FILE_A2);
-      jest.advanceTimersByTime(200);
+      await jest.advanceTimersByTimeAsync(200);
 
       // Set up direct mappings
       const mappings = (watcher as any).tmuxConversationIds as Map<string, string>;
@@ -906,7 +931,7 @@ describe('SessionWatcher', () => {
 
       // New JSONL appears (compaction successor)
       mockWatcher.emit('add', FILE_A_NEW);
-      jest.advanceTimersByTime(200);
+      await jest.advanceTimersByTimeAsync(200);
 
       // TMUX_A1 should now be mapped to the new file
       expect(mappings.get(TMUX_A1)).toBe(FILE_UUID_NEW);
@@ -925,9 +950,9 @@ describe('SessionWatcher', () => {
       await startWatcher(watcher);
 
       mockWatcher.emit('add', FILE_A1);
-      jest.advanceTimersByTime(200);
+      await jest.advanceTimersByTimeAsync(200);
       mockWatcher.emit('add', FILE_A2);
-      jest.advanceTimersByTime(200);
+      await jest.advanceTimersByTimeAsync(200);
 
       const mappings = (watcher as any).tmuxConversationIds as Map<string, string>;
       mappings.set(TMUX_A1, FILE_UUID_1);
@@ -935,7 +960,7 @@ describe('SessionWatcher', () => {
 
       // NO compaction flag — new file should NOT trigger re-mapping
       mockWatcher.emit('add', FILE_A_NEW);
-      jest.advanceTimersByTime(200);
+      await jest.advanceTimersByTimeAsync(200);
 
       // Mappings unchanged
       expect(mappings.get(TMUX_A1)).toBe(FILE_UUID_1);
@@ -956,7 +981,7 @@ describe('SessionWatcher', () => {
 
       // First load — prevTracked is null
       mockWatcher.emit('add', FILE_A1);
-      jest.advanceTimersByTime(200);
+      await jest.advanceTimersByTimeAsync(200);
 
       // compactedSessions should NOT contain this session (initial load)
       const compacted = (watcher as any).compactedSessions as Set<string>;
@@ -973,9 +998,9 @@ describe('SessionWatcher', () => {
       await startWatcher(watcher);
 
       mockWatcher.emit('add', FILE_A1);
-      jest.advanceTimersByTime(200);
+      await jest.advanceTimersByTimeAsync(200);
       mockWatcher.emit('add', FILE_A2);
-      jest.advanceTimersByTime(200);
+      await jest.advanceTimersByTimeAsync(200);
 
       const mappings = (watcher as any).tmuxConversationIds as Map<string, string>;
       mappings.set(TMUX_A1, FILE_UUID_1);
@@ -987,7 +1012,7 @@ describe('SessionWatcher', () => {
       compacted.add(TMUX_A2);
 
       mockWatcher.emit('add', FILE_A_NEW);
-      jest.advanceTimersByTime(200);
+      await jest.advanceTimersByTimeAsync(200);
 
       // Neither should be re-mapped (ambiguous — 2 compacted, 1 new file)
       expect(mappings.get(TMUX_A1)).toBe(FILE_UUID_1);
