@@ -5,6 +5,8 @@ import { sortInbox, sortPendingByUrgency } from '../../services/heraldReducer';
 import { useHeraldData, useHeraldUi, useHeraldVoiceCtx, useHeraldVoiceInputCtx } from '../../context/HeraldContext';
 import type { HeraldVoiceInput } from '../../hooks/useHeraldVoiceInput';
 import { HandsFreeIndicator, HeraldListeningBar, HeraldMicButton, VoiceInputSettings } from './HeraldVoiceControls';
+import { HeraldDeviceBar, HeraldDevicesMenu } from './HeraldDevices';
+import type { HeraldDeviceControl } from '../../context/HeraldContext';
 import type { HeraldVoice } from '../../hooks/useHeraldVoice';
 import { RATE_MAX, RATE_MIN } from '../../hooks/useHeraldVoice';
 import { pickVoice, voicesForPicker } from '../../services/tts/voices';
@@ -297,7 +299,7 @@ function VoiceSettings({ voice }: { voice: HeraldVoice }) {
         </button>
       )}
       {voice.chimeSupported && voice.chimeOn && !voice.announcer && (
-        <div className="herald-voice-set__engine">Tones are playing on another device you used more recently.</div>
+        <div className="herald-voice-set__engine">Tones are playing on the active device (see Devices).</div>
       )}
     </div>
   );
@@ -352,7 +354,8 @@ function VoiceCommandsHelp() {
   );
 }
 
-function OverflowMenu({ model, onReset, onRefresh, disabled, voice, input, verbosity, onVerbosity }: {
+function OverflowMenu({ model, onReset, onRefresh, disabled, voice, input, verbosity, onVerbosity, device }: {
+  device: HeraldDeviceControl;
   verbosity: HeraldVerbosity | undefined;
   onVerbosity: (v: HeraldVerbosity) => void;
   model: string;
@@ -414,6 +417,12 @@ function OverflowMenu({ model, onReset, onRefresh, disabled, voice, input, verbo
                 <>
                   <div className="herald-menu__sep" role="separator" />
                   <VoiceSettings voice={voice} />
+                </>
+              )}
+              {device.supported && device.selfId && (
+                <>
+                  <div className="herald-menu__sep" role="separator" />
+                  <HeraldDevicesMenu device={device} onDone={() => setOpen(false)} />
                 </>
               )}
               <div className="herald-menu__sep" role="separator" />
@@ -751,6 +760,7 @@ export function HeraldPanel({ variant, onOpenSession, onClose }: HeraldPanelProp
             input={input}
             verbosity={state?.verbosity}
             onVerbosity={(v) => void h.setVerbosity(v)}
+            device={h.device}
           />
           {variant === 'docked' && (
             <button
@@ -765,6 +775,7 @@ export function HeraldPanel({ variant, onOpenSession, onClose }: HeraldPanelProp
           )}
         </div>
       </header>
+      <HeraldDeviceBar device={h.device} />
 
       {inbox.length > 0 && (
         <InboxStrip

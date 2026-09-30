@@ -68,6 +68,14 @@ describe('useHeraldVoiceInput: remote-trigger speech', () => {
     expect(hook.result.current.isCapturing()).toBe(false);
   });
 
+  it('stands down hands-free while another device holds control', () => {
+    localStorage.setItem('herald_voice_input_prefs', JSON.stringify({ handsFree: true }));
+    const withWake = { ...status, wake: { ready: true, models: ['hey_jarvis'] } };
+    const { hook } = setup({ serverStatus: withWake, pausedBy: 'Work Mac' });
+    expect(hook.result.current.handsFreeActive).toBe(false);
+    expect(hook.result.current.handsFreeNote).toBe('Paused: Work Mac has control');
+  });
+
   it('reports why when voice input is unavailable', async () => {
     const { hook } = setup({ connected: false });
     let reason: string | null = null;

@@ -8,7 +8,7 @@ import { DEFAULT_DISPLAY_NAME, derivePresence, type HeraldPresence } from '../se
 import { isMobileViewport } from '../utils/platform';
 import { eventBus } from '../utils/eventBus';
 import { routeVoiceTranscript } from '../services/voice/voiceCommandRouter';
-import type { HeraldIntent } from '../types/herald';
+import type { HeraldActiveDevice, HeraldDeviceInfo, HeraldIntent } from '../types/herald';
 import { playChime } from '../services/tts/chime';
 import { DeferredNotice, runHeraldTrigger, type TriggerActions } from '../services/voice/heraldTrigger';
 
@@ -16,6 +16,9 @@ const PANEL_OPEN_KEY = 'herald_panel_open';
 /** A voice command waiting for the current turn to finish gives up after this. */
 const INTENT_WAIT_MS = 30_000;
 const HOST_KEY = 'herald_host_server_id';
+const PIN_KEY = 'herald_device_pin';
+/** How long "Now on <other device>" stays up after this device loses control. */
+const HANDOFF_NOTE_MS = 8000;
 
 function readStorage(key: string): string | null {
   try {
@@ -56,7 +59,31 @@ interface HeraldUiValue {
   demo: boolean;
 }
 
+/** Which device is active (tones, triggers, hands-free) and taking control of it. */
+export interface HeraldDeviceControl {
+  /** The hub reports devices (newer daemons). */
+  supported: boolean;
+  selfId: string | null;
+  /** This device's name. */
+  label: string;
+  activeDevice: HeraldActiveDevice | null;
+  devices: HeraldDeviceInfo[];
+  /** This device is the active one (true on hubs without arbitration). */
+  isActive: boolean;
+  /** Another device holds control by hand: this one stands down (no hands-free). */
+  controlledElsewhere: boolean;
+  /** Claims from this device pin ("Keep on this device"). */
+  keepPinned: boolean;
+  setKeepPinned: (on: boolean) => void;
+  takeControl: () => void;
+  switchTo: (deviceId: string) => void;
+  rename: (label: string) => void;
+  /** "Now on <other device>" for a few seconds after losing control. */
+  handoffNote: string | null;
+}
+
 export interface HeraldDataValue extends UseHeraldReturn {
+  device: HeraldDeviceControl;
   /** One-press briefing on what is new (button, hotkey, "what's up"). */
   briefMe: () => void;
   displayName: string;
@@ -229,7 +256,48 @@ export function HeraldProvider({ children }: { children: ReactNode }) {
   }, [sendIntent]);
   const voiceInputRef = useRef<ReturnType<typeof useHeraldVoiceInput> | null>(null);
 
+  // ---- active device ------------------------------------------------------
+  const activeDevice = herald.state?.activeDevice ?? null;
+  const devices = useMemo(() => herald.state?.devices ?? [], [herald.state?.devices]);
+  const selfId = voice.selfId;
+  const isActive = !activeDevice || !selfId || activeDevice.id === selfId;
+  const controlledElsewhere = !isActive && activeDevice?.reason === 'claimed';
+  const [keepPinned, setKeepPinnedState] = useState(() => readStorage(PIN_KEY) === '1');
+  const claimFail = useCallback((err: string | null) => {
+    if (err) voiceInputRef.current?.controller.fail(err);
+  }, []);
+  const takeControl = useCallback(() => {
+    void voiceRef.current.claimDevice(keepPinned).then(claimFail);
+  }, [keepPinned, claimFail]);
+  const switchTo = useCallback((deviceId: string) => {
+    void voiceRef.current.claimDevice(keepPinned, deviceId === selfId ? undefined : deviceId).then(claimFail);
+  }, [keepPinned, selfId, claimFail]);
+  const setKeepPinned = useCallback((on: boolean) => {
+    setKeepPinnedState(on);
+    writeStorage(PIN_KEY, on ? '1' : '0');
+    // Already in control: apply it now (pin, or let other devices take over again).
+    if (isActive && selfId) void voiceRef.current.claimDevice(on).then(claimFail);
+  }, [isActive, selfId, claimFail]);
+  const [handoffNote, setHandoffNote] = useState<string | null>(null);
+  const prevActive = useRef<string | null>(null);
+  useEffect(() => {
+    const prev = prevActive.current;
+    const next = activeDevice?.id ?? null;
+    prevActive.current = next;
+    if (!selfId || !prev || prev === next) return;
+    if (prev === selfId && next && next !== selfId) {
+      // Stand down: a trigger capture here no longer belongs to us. (Tones stop
+      // via the announcer flag; hands-free pauses via controlledElsewhere.)
+      if (voiceInputRef.current?.state.source === 'trigger') voiceInputRef.current.cancel();
+      setHandoffNote(`Now on ${activeDevice?.label ?? 'another device'}`);
+      const t = setTimeout(() => setHandoffNote(null), HANDOFF_NOTE_MS);
+      return () => clearTimeout(t);
+    }
+    if (next === selfId) setHandoffNote(null);
+  }, [activeDevice?.id, activeDevice?.label, selfId]);
+
   const voiceInput = useHeraldVoiceInput({
+    pausedBy: controlledElsewhere ? activeDevice?.label ?? 'another device' : null,
     getTransport: herald.getTransport,
     connected: herald.connected,
     serverStatus: voice.serverStatus,
@@ -302,8 +370,25 @@ export function HeraldProvider({ children }: { children: ReactNode }) {
     return { unheardCount: count, unheardBlocked: blocked };
   }, [inbox]);
 
+  const device: HeraldDeviceControl = useMemo(() => ({
+    supported: herald.state?.devices !== undefined,
+    selfId,
+    label: voice.deviceLabel,
+    activeDevice,
+    devices,
+    isActive,
+    controlledElsewhere,
+    keepPinned,
+    setKeepPinned,
+    takeControl,
+    switchTo,
+    rename: voice.renameDevice,
+    handoffNote,
+  }), [herald.state?.devices, selfId, voice.deviceLabel, activeDevice, devices, isActive, controlledElsewhere, keepPinned, setKeepPinned, takeControl, switchTo, voice.renameDevice, handoffNote]);
+
   const data: HeraldDataValue = useMemo(() => ({
     ...herald,
+    device,
     briefMe,
     displayName: herald.state?.displayName || DEFAULT_DISPLAY_NAME,
     presence: derivePresence({
@@ -315,7 +400,7 @@ export function HeraldProvider({ children }: { children: ReactNode }) {
     unheardCount,
     unheardBlocked,
     available,
-  }), [herald, briefMe, available, inbox, unheardCount, unheardBlocked]);
+  }), [herald, device, briefMe, available, inbox, unheardCount, unheardBlocked]);
 
   const ui: HeraldUiValue = useMemo(() => ({
     panelOpen, screenOpen, open, close, toggle, focusNonce,

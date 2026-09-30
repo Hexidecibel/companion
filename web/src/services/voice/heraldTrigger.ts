@@ -10,6 +10,7 @@
  *   stop   - stop speaking and cancel any capture
  *   repeat - say the last reply again
  *   toggle - speaking: stop; listening: cancel; otherwise listen
+ *   claim  - this device was just made the active one (the daemon did it): acknowledge
  */
 import type { HeraldTriggerAction } from '../../types/herald';
 
@@ -45,6 +46,7 @@ export type TriggerOutcome =
   | 'repeating'
   | 'nothing_to_repeat'
   | 'already_listening'
+  | 'claimed'
   | 'failed';
 
 export async function runHeraldTrigger(action: HeraldTriggerAction, a: TriggerActions): Promise<TriggerOutcome> {
@@ -78,6 +80,9 @@ export async function runHeraldTrigger(action: HeraldTriggerAction, a: TriggerAc
         return 'cancelled';
       }
       return listen(a);
+    case 'claim':
+      a.tone('ok');
+      return 'claimed';
     case 'listen':
       if (a.capturing()) return 'already_listening';
       if (a.speaking()) a.stopSpeech(); // barge-in: the user wants to talk

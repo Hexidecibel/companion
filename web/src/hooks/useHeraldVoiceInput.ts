@@ -142,6 +142,11 @@ export interface VoiceInputHost {
    * it, trigger transcripts go through the composer like any other.
    */
   sendVoice?: (text: string) => void;
+  /**
+   * Another device holds control by hand (its label): hands-free pauses here
+   * and resumes when control comes back. Null / absent: not paused.
+   */
+  pausedBy?: string | null;
 }
 
 export function useHeraldVoiceInput(host: VoiceInputHost): HeraldVoiceInput {
@@ -244,7 +249,8 @@ export function useHeraldVoiceInput(host: VoiceInputHost): HeraldVoiceInput {
     return () => document.removeEventListener('visibilitychange', onVis);
   }, []);
   const handsFreeAvailable = available && !!host.serverStatus?.wake.ready;
-  const wantHandsFree = prefs.handsFree && handsFreeAvailable && (visible || prefs.handsFreeInBackground);
+  const pausedBy = host.pausedBy ?? null;
+  const wantHandsFree = prefs.handsFree && handsFreeAvailable && (visible || prefs.handsFreeInBackground) && !pausedBy;
   const [owner, setOwner] = useState(false);
   useEffect(() => {
     const t = hostRef.current.getTransport();
@@ -293,7 +299,8 @@ export function useHeraldVoiceInput(host: VoiceInputHost): HeraldVoiceInput {
 
   let handsFreeNote: string | null = null;
   if (prefs.handsFree && !handsFreeActive) {
-    if (!handsFreeAvailable) handsFreeNote = unavailableReason ?? 'Wake word not loaded on the hub';
+    if (pausedBy) handsFreeNote = `Paused: ${pausedBy} has control`;
+    else if (!handsFreeAvailable) handsFreeNote = unavailableReason ?? 'Wake word not loaded on the hub';
     else if (!visible && !prefs.handsFreeInBackground) handsFreeNote = 'Paused while this tab is hidden';
     else handsFreeNote = 'Starting…';
   }

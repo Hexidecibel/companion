@@ -177,6 +177,8 @@ function applyEvent(state: HeraldClientState, event: HeraldEvent, receivedAt: nu
     }
     case 'settings':
       return { ...state, server: { ...server, verbosity: event.verbosity } };
+    case 'devices':
+      return { ...state, server: { ...server, activeDevice: event.activeDevice, devices: event.devices } };
     case 'error':
       return { ...state, error: event.error };
     default:

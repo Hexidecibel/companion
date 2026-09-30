@@ -1929,3 +1929,94 @@
   .herald-composer__mic--busy { animation: none; }
   .herald-handsfree__dot { animation: none; }
 }
+
+/* --------------------------------------------------------------------------
+   Active device: which device plays tones / runs hands-free / gets triggers
+   -------------------------------------------------------------------------- */
+
+.herald-device {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 12px 6px;
+  padding: 5px 6px 5px 10px;
+  min-height: 34px;
+  border: 1px solid var(--h-border-soft);
+  border-radius: 10px;
+  background: rgba(31, 41, 55, 0.55);
+  font-size: 12px;
+  color: var(--h-text-2);
+  flex: none;
+  animation: herald-pop 160ms var(--h-ease) both;
+}
+.herald-device__dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--h-text-3);
+}
+.herald-device--here .herald-device__dot { background: var(--h-green); box-shadow: 0 0 6px rgba(16, 185, 129, 0.6); }
+.herald-device__text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.herald-device__text strong { color: var(--h-text); font-weight: 600; }
+.herald-device__pin { color: var(--h-text-3); }
+.herald-device__note { color: var(--h-amber); }
+.herald-device__keep {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  height: 24px;
+  padding: 0 4px 0 6px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--h-text-2);
+  font: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+}
+.herald-device__keep:hover { background: rgba(55, 65, 81, 0.6); color: var(--h-text); }
+.herald-btn--xs { height: 24px; padding: 0 10px; font-size: 11.5px; border-radius: 7px; flex: none; }
+.herald--screen .herald-device__keep { font-size: 0; gap: 0; }
+.herald--screen .herald-device__keep .herald-switch { margin-left: 0; }
+
+.herald-devices__item { gap: 8px; }
+.herald-devices__radio {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  border: 1.5px solid #6b7280;
+  border-radius: 50%;
+}
+.herald-devices__radio--on { border-color: var(--h-green); box-shadow: inset 0 0 0 2.5px var(--h-card), inset 0 0 0 6px var(--h-green); }
+.herald-devices__name { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.herald-devices__tag {
+  flex: none;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: rgba(55, 65, 81, 0.8);
+  font-size: 10.5px;
+  color: var(--h-text-2);
+}
+.herald-devices__tag--hf { background: rgba(88, 28, 135, 0.35); color: #f5d0fe; }
+.herald-devices__rename { display: flex; gap: 6px; padding: 4px 6px 6px; }
+.herald-devices__input {
+  flex: 1;
+  min-width: 0;
+  height: 26px;
+  padding: 0 8px;
+  border: 1px solid var(--h-border);
+  border-radius: 7px;
+  background: var(--h-bg);
+  color: var(--h-text);
+  font: inherit;
+  font-size: 12.5px;
+}
+.herald-devices__input:focus { outline: none; border-color: var(--h-blue); }

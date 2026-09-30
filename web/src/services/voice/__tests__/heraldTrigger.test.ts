@@ -78,6 +78,14 @@ describe('runHeraldTrigger', () => {
   });
 });
 
+describe('runHeraldTrigger claim', () => {
+  it('claim: the daemon already moved control here; just acknowledge', async () => {
+    const { a, log } = actions();
+    expect(await runHeraldTrigger('claim', a)).toBe('claimed');
+    expect(log).toEqual(['tone:ok']);
+  });
+});
+
 describe('DeferredNotice', () => {
   it('shows at once when visible, else on the next flush while visible', () => {
     let visible = false;

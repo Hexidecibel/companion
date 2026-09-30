@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { HeraldEventListener } from './useHerald';
 import type { TtsEngine, TtsVoice } from '../services/tts/types';
-import type { HeraldTtsResult, HeraldVoiceEvent, HeraldVoiceStatus } from '../types/herald';
+import type { HeraldPresenceResult, HeraldTtsResult, HeraldVoiceEvent, HeraldVoiceStatus } from '../types/herald';
 import type { HeraldTransport } from '../services/heraldTransport';
 import { getWebSpeechEngine } from '../services/tts/webSpeechEngine';
 import { HybridTtsEngine } from '../services/tts/hybridTtsEngine';
@@ -9,6 +9,7 @@ import { TtsRequestError, WebAudioSink, type TtsRequester } from '../services/tt
 import { BRIEFING_SPOKEN_LIMIT, HeraldSpeechController, InboxChimeTracker, type SpokenLength } from '../services/tts/heraldSpeech';
 import { chimeSupported, playChime, unlockChime } from '../services/tts/chime';
 import { pickVoice } from '../services/tts/voices';
+import { deviceKey, deviceLabel, saveCustomLabel } from '../services/heraldDevice';
 
 const PREFS_KEY = 'herald_voice_prefs';
 export const RATE_MIN = 0.9;
@@ -155,6 +156,14 @@ export interface HeraldVoice {
    * for a while (normally a background tab stays quiet).
    */
   allowBackground: (ms?: number) => void;
+  /** This connection's device id on the hub (null until known / older hub). */
+  selfId: string | null;
+  /** This device's friendly name (auto-detected or renamed). */
+  deviceLabel: string;
+  /** Rename this device (empty: back to the detected name). */
+  renameDevice: (label: string) => void;
+  /** Make this device (or `deviceId`) the active one; `pin` keeps it there. Resolves an error or null. */
+  claimDevice: (pin: boolean, deviceId?: string) => Promise<string | null>;
 }
 
 const TEST_LINE = "Hi, I'm Herald. Two sessions finished, and one is waiting on you.";
@@ -209,6 +218,11 @@ export function useHeraldVoice(
   useEffect(() => () => { if (flashTimer.current) clearTimeout(flashTimer.current); }, []);
   // One device plays inbox tones; older hubs (no arbitration) leave every device on.
   const [announcer, setAnnouncer] = useState(true);
+  const [selfId, setSelfId] = useState<string | null>(null);
+  const [label, setLabel] = useState(deviceLabel);
+  const labelRef = useRef(label);
+  labelRef.current = label;
+  const reportRef = useRef<((interacted: boolean) => void) | null>(null);
   const announcerRef = useRef(announcer);
   announcerRef.current = announcer;
   const chimes = useMemo(() => new InboxChimeTracker(), []);
@@ -318,20 +332,25 @@ export function useHeraldVoice(
   // in use (key or tap, throttled), so exactly one device plays the tones.
   useEffect(() => {
     setAnnouncer(true);
+    setSelfId(null);
     if (!connected || !hostRef.current) return;
     let cancelled = false;
     let lastInteract = 0;
+    const key = deviceKey();
     const report = (interacted: boolean) => {
       const t = hostRef.current?.getTransport();
       if (!t || !t.isConnected() || cancelled) return;
-      t.request('herald_presence', { interacted }, 5000)
+      t.request('herald_presence', { interacted, label: labelRef.current, deviceKey: key }, 5000)
         .then((res) => {
           if (cancelled) return;
           // Older hub / voice off: no arbitration, keep toning here.
-          setAnnouncer(res.success ? !!(res.payload as { announcer?: boolean })?.announcer : true);
+          const p = res.payload as HeraldPresenceResult | undefined;
+          setAnnouncer(res.success ? !!p?.announcer : true);
+          if (res.success && typeof p?.clientId === 'string') setSelfId(p.clientId);
         })
         .catch(() => {});
     };
+    reportRef.current = report;
     report(false);
     const onUse = () => {
       const now = Date.now();
@@ -349,6 +368,7 @@ export function useHeraldVoice(
     });
     return () => {
       cancelled = true;
+      reportRef.current = null;
       window.removeEventListener('pointerdown', onUse, true);
       window.removeEventListener('keydown', onUse, true);
       document.removeEventListener('visibilitychange', onVis);
@@ -357,6 +377,23 @@ export function useHeraldVoice(
   }, [connected, hostId]);
 
   const refreshStatus = useCallback(() => setStatusNonce((n) => n + 1), []);
+  const renameDevice = useCallback((raw: string) => {
+    const next = saveCustomLabel(raw);
+    labelRef.current = next;
+    setLabel(next);
+    reportRef.current?.(false);
+  }, []);
+  const claimDevice = useCallback(async (pin: boolean, deviceId?: string): Promise<string | null> => {
+    const t = hostRef.current?.getTransport();
+    if (!t || !t.isConnected()) return 'Not connected to the Herald host';
+    try {
+      const res = await t.request('herald_claim_device', deviceId ? { pin, deviceId } : { pin }, 5000);
+      if (res.success) return null;
+      return /unknown message type/i.test(res.error ?? '') ? 'This hub is too old to switch devices' : res.error || 'Could not switch devices';
+    } catch {
+      return 'Could not switch devices';
+    }
+  }, []);
   const allowBackground = useCallback((ms: number = BACKGROUND_SPEECH_MS) => {
     backgroundUntil.current = Date.now() + ms;
   }, []);
@@ -443,5 +480,9 @@ export function useHeraldVoice(
     neural: !!hybrid && hybrid.server.available && voice?.engine === 'neural',
     refreshStatus,
     allowBackground,
-  }), [engine, hybrid, prefs, speaking, voices, voice, setVoiceOn, setChimeOn, setVoiceId, setRate, stop, stopCommand, repeat, goOn, stepRateCb, expectBriefing, setSpokenLength, setRemind, flash, announcer, testVoice, serverStatus, refreshStatus, allowBackground]);
+    selfId,
+    deviceLabel: label,
+    renameDevice,
+    claimDevice,
+  }), [engine, hybrid, prefs, speaking, voices, voice, setVoiceOn, setChimeOn, setVoiceId, setRate, stop, stopCommand, repeat, goOn, stepRateCb, expectBriefing, setSpokenLength, setRemind, flash, announcer, testVoice, serverStatus, refreshStatus, allowBackground, selfId, label, renameDevice, claimDevice]);
 }
