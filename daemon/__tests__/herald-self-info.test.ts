@@ -83,7 +83,7 @@ describe('herald system prompt self-knowledge', () => {
     expect(prompt).toMatch(/Ctrl\+J/);
     expect(prompt).toMatch(/Herald button on mobile/);
     expect(prompt).toMatch(/stored on the server/);
-    expect(prompt).toMatch(/native phone app needs an update/);
+    expect(prompt).toMatch(/Companion desktop and phone apps/);
     expect(prompt).toMatch(/hands-free by saying "Hey Jarvis"/);
     expect(prompt).not.toMatch(/Voice is not available yet/);
   });
@@ -102,5 +102,14 @@ describe('herald system prompt self-knowledge', () => {
     const bare = buildSystemPrompt('Herald');
     expect(bare).toMatch(/same address they opened you on/);
     expect(bare).not.toMatch(/https?:\/\//);
+  });
+
+  it('carries the feature guide (profiles, device check, hands-free, triggers, overlay) in the stable prefix', () => {
+    for (const phrase of ['Profiles:', 'Device check:', 'Hands-free:', 'Triggers:', 'Take control:', 'Floating orb', 'Wispr Flow', 'Gaming:']) {
+      expect(prompt).toContain(phrase);
+    }
+    // Before the per-conversation rules, and identical for every conversation.
+    expect(prompt.indexOf('Using you')).toBeLessThan(prompt.indexOf('How you speak:'));
+    expect(buildSystemPrompt('Herald')).toContain('Using you');
   });
 });
