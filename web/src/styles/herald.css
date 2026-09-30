@@ -1936,8 +1936,9 @@
 
 .herald-device {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
+  gap: 4px 8px;
   margin: 0 12px 6px;
   padding: 5px 6px 5px 10px;
   min-height: 34px;
@@ -1958,7 +1959,7 @@
 }
 .herald-device--here .herald-device__dot { background: var(--h-green); box-shadow: 0 0 6px rgba(16, 185, 129, 0.6); }
 .herald-device__text {
-  flex: 1;
+  flex: 1 1 190px;
   min-width: 0;
   overflow: hidden;
   white-space: nowrap;
@@ -1973,6 +1974,7 @@
   gap: 6px;
   flex: none;
   height: 24px;
+  margin-left: auto;
   padding: 0 4px 0 6px;
   border: 0;
   border-radius: 7px;
