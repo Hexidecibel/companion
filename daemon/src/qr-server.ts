@@ -90,7 +90,19 @@ function findWebDir(): string | null {
 /**
  * Create an HTTP request handler that serves QR code at /qr and web client at /web
  */
-export function createQRRequestHandler(config: DaemonConfig): http.RequestListener {
+/**
+ * Routes owned by services that exist only after the HTTP servers are created
+ * (the WebSocket handler). Filled in by index.ts once they are up.
+ */
+export interface HttpRoutes {
+  /** POST /herald/trigger (scoped trigger token; see herald/trigger.ts). */
+  heraldTrigger?: http.RequestListener;
+}
+
+export function createQRRequestHandler(
+  config: DaemonConfig,
+  routes: HttpRoutes = {}
+): http.RequestListener {
   const webDir = findWebDir();
   if (webDir) {
     console.log(`Web client: Serving from ${webDir}`);
@@ -112,6 +124,17 @@ export function createQRRequestHandler(config: DaemonConfig): http.RequestListen
 
     const fullUrl = req.url || '/';
     const [urlPath] = fullUrl.split('?');
+
+    // Herald remote trigger (hotkeys on other machines). Own credential and limits.
+    if (urlPath === '/herald/trigger') {
+      if (routes.heraldTrigger) {
+        routes.heraldTrigger(req, res);
+      } else {
+        res.writeHead(503, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: 'Not ready', code: 'unavailable' }));
+      }
+      return;
+    }
 
     // HTTP image upload endpoint - more reliable than WebSocket for large payloads
     if (urlPath === '/upload' && req.method === 'POST') {

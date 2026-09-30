@@ -183,6 +183,7 @@ export interface WebSocketResponse {
   sessionId?: string; // Session context for validation
   isLocal?: boolean; // Whether connection is from localhost (sent in auth response)
   gitEnabled?: boolean; // Whether git integration is enabled (sent in auth response)
+  scope?: 'full' | 'trigger'; // Auth response: 'trigger' = the Herald trigger token (triggers only)
 }
 
 export interface RegisteredDevice {

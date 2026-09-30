@@ -9,6 +9,9 @@
 #   bin/herald-sandbox status    PID, port owner, and whether Herald's brain is configured
 #   bin/herald-sandbox logs [N]  Tail the sandbox daemon log (key-shaped strings redacted)
 #   bin/herald-sandbox env       Print the sandbox URL/port and config path (token not printed)
+#   bin/herald-sandbox trigger-token create|rotate|show-path
+#                                Herald remote-trigger token for THIS instance (in its own HOME;
+#                                never printed). POST /herald/trigger on its port with it.
 #   bin/herald-sandbox https [on|off|status] [--tunnel]
 #                                HTTPS front door for the sandbox (browsers only expose the
 #                                microphone in secure contexts). Default: Tailscale serve on
@@ -189,6 +192,8 @@ cmd_start() {
     export COMPANION_SANDBOX=1
     export COMPANION_READONLY_SHARED_STATE=1
     export NODE_ENV=production
+    # Own trigger token under the sandbox HOME, never production's.
+    unset COMPANION_HERALD_TRIGGER_TOKEN_FILE
     # Trace Herald tool calls/results into the sandbox log (HERALD_DEBUG_TOOLS=0 to silence).
     export HERALD_DEBUG_TOOLS="${HERALD_DEBUG_TOOLS:-1}"
     exec setsid node "$ENTRY" >> "$LOG_FILE" 2>&1 < /dev/null
@@ -348,8 +353,13 @@ case "${1:-}" in
   logs) tail -n "${2:-80}" "$LOG_FILE" | redact ;;
   env) cmd_env ;;
   https) shift; cmd_https "$@" ;;
+  trigger-token)
+    shift
+    mkdir -p "$SANDBOX_HOME/.companion"
+    HOME="$SANDBOX_HOME" COMPANION_HERALD_TRIGGER_TOKEN_FILE="$SANDBOX_HOME/.companion/herald-trigger.token" \
+      exec "$ROOT/bin/companion" trigger-token "$@" ;;
   *)
-    sed -n '2,28p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '2,31p' "$0" | sed 's/^# \{0,1\}//'
     exit 2
     ;;
 esac

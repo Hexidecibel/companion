@@ -12,6 +12,7 @@ import { AuditLog } from './audit-log';
 import { RateLimiter } from './rate-limiter';
 import type { HeraldService } from './herald/service';
 import type { HeraldVoiceService } from './herald/voice/service';
+import type { HeraldTriggerService } from './herald/trigger';
 import { DaemonConfig, OriginCredential, TmuxSessionConfig, WebSocketResponse } from './types';
 
 export interface AuthenticatedClient {
@@ -25,6 +26,11 @@ export interface AuthenticatedClient {
   isLocal: boolean;
   lastPongTime: number;
   origin: string | null;
+  /**
+   * 'trigger': authenticated with the Herald trigger token; may only send
+   * herald_trigger (and ping). Absent / 'full': the normal daemon token.
+   */
+  scope?: 'full' | 'trigger';
   // Set when the client authenticated against a per-origin credential
   // (remoteCapabilities.origins[]). Used to narrow capabilities per origin.
   originCredential?: OriginCredential;
@@ -60,6 +66,7 @@ export interface HandlerContext {
   config: DaemonConfig;
   herald: HeraldService | null;
   heraldVoice: HeraldVoiceService | null;
+  heraldTrigger: HeraldTriggerService | null;
 
   // Helper methods from WebSocketServer
   send: (ws: WebSocket, response: WebSocketResponse) => void;

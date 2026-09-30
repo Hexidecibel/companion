@@ -1,5 +1,5 @@
 import { WebSocket, WebSocketServer } from 'ws';
-import { IncomingMessage, Server } from 'http';
+import { IncomingMessage, Server, ServerResponse } from 'http';
 import { v4 as uuidv4 } from 'uuid';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -45,7 +45,7 @@ import { createProvider } from './herald/llm';
 import { deriveSelfInfo } from './herald/self-info';
 import { HeraldVoiceService } from './herald/voice/service';
 import { VoiceServiceClient } from './herald/voice/client';
-import type { HeraldVoiceEvent } from './herald/protocol';
+import { HeraldTriggerService } from './herald/trigger';
 
 // File for persisting tmux session configs
 const TMUX_CONFIGS_FILE = path.join(os.homedir(), '.companion', 'tmux-sessions.json');
@@ -86,6 +86,7 @@ export class WebSocketHandler {
   private handlers: Map<string, MessageHandler>;
   private herald: HeraldService | null = null;
   private heraldVoice: HeraldVoiceService | null = null;
+  private heraldTrigger: HeraldTriggerService;
   private deadConnectionInterval: ReturnType<typeof setInterval>;
   private static readonly PONG_TIMEOUT_MS = 90_000;
   private static readonly DEAD_CHECK_INTERVAL_MS = 60_000;
@@ -133,6 +134,12 @@ export class WebSocketHandler {
 
     this.herald = this.createHerald();
     this.heraldVoice = this.createHeraldVoice();
+    this.heraldTrigger = new HeraldTriggerService({
+      available: () => !!this.herald && !!this.heraldVoice,
+      activeClient: () => this.heraldVoice?.announcerClient ?? null,
+      deliver: (clientId, event) => this.sendToClient(clientId, 'herald_event', event),
+      audit: (entry) => this.auditLog.append(entry),
+    });
 
     // Register all handler modules
     this.handlers = registerAllHandlers(this.createHandlerContext());
@@ -255,6 +262,7 @@ export class WebSocketHandler {
       config: this.config,
       herald: this.herald,
       heraldVoice: this.heraldVoice,
+      heraldTrigger: this.heraldTrigger,
 
       send: (ws, response) => this.send(ws, response),
       broadcast: (type, payload, sessionId) => this.broadcast(type, payload, sessionId),
@@ -331,10 +339,20 @@ export class WebSocketHandler {
     return voice;
   }
 
-  private sendToClient(clientId: string, type: string, payload: HeraldVoiceEvent): void {
+  /** Push to one full-scope client; false when it is gone or not allowed to receive. */
+  private sendToClient(clientId: string, type: string, payload: unknown): boolean {
     const client = this.clients.get(clientId);
-    if (!client || !client.authenticated || client.ws.readyState !== WebSocket.OPEN) return;
+    if (!client || !client.authenticated || client.scope === 'trigger') return false;
+    if (client.ws.readyState !== WebSocket.OPEN) return false;
     this.send(client.ws, { type, success: true, payload });
+    return true;
+  }
+
+  /** POST /herald/trigger on the daemon's HTTP server(s). */
+  handleHeraldTriggerHttp(req: IncomingMessage, res: ServerResponse): void {
+    const port = req.socket.localPort;
+    const tls = Boolean(this.config.listeners.find((l) => l.port === port)?.tls);
+    this.heraldTrigger.handleHttp(req, res, tls);
   }
 
   // --- Tmux session config persistence ---
@@ -486,6 +504,7 @@ export class WebSocketHandler {
         );
         if (matched) {
           client.authenticated = true;
+          client.scope = 'full';
           client.deviceId = authPayload.deviceId;
           client.origin = providedOrigin;
           client.originCredential = matched;
@@ -506,6 +525,26 @@ export class WebSocketHandler {
         // path below (so a valid listener token still works alongside origins[]).
       }
 
+      // Scoped trigger credential: may ONLY fire Herald triggers (see handleMessage).
+      if (
+        token !== undefined &&
+        !(expectedToken && token === expectedToken) &&
+        this.heraldTrigger.tokenMatches(token)
+      ) {
+        client.authenticated = true;
+        client.scope = 'trigger';
+        client.origin = providedOrigin;
+        this.send(client.ws, {
+          type: 'authenticated',
+          success: true,
+          isLocal: client.isLocal,
+          scope: 'trigger',
+          requestId,
+        });
+        console.log(`WebSocket: Client authenticated (${client.id}) with the trigger token`);
+        return;
+      }
+
       if (expectedToken && token === expectedToken) {
         const allowedOrigins = listener?.remoteCapabilities?.allowedOrigins;
         if (Array.isArray(allowedOrigins) && allowedOrigins.length > 0) {
@@ -524,6 +563,7 @@ export class WebSocketHandler {
         }
 
         client.authenticated = true;
+        client.scope = 'full';
         client.deviceId = authPayload.deviceId;
         client.origin = providedOrigin;
 
@@ -554,6 +594,18 @@ export class WebSocketHandler {
         type: 'error',
         success: false,
         error: 'Not authenticated',
+        requestId,
+      });
+      return;
+    }
+
+    // The trigger token can fire triggers (and keep its socket alive), nothing else.
+    if (client.scope === 'trigger' && type !== 'herald_trigger' && type !== 'ping') {
+      this.send(client.ws, {
+        type,
+        success: false,
+        error: 'Forbidden: this credential can only fire Herald triggers',
+        payload: { code: 'forbidden' },
         requestId,
       });
       return;

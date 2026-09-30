@@ -80,11 +80,43 @@ export type HeraldEvent =
   | { kind: 'action'; action: HeraldAction }
   | { kind: 'busy'; busy: boolean }
   | { kind: 'settings'; verbosity: HeraldVerbosity }
+  /** Remote trigger, sent ONLY to the active device (see HeraldTriggerAction). */
+  | { kind: 'trigger'; action: HeraldTriggerAction; id: string }
   | { kind: 'error'; error: string };
 /** herald_set_verbosity payload; answered with { verbosity }. */
 export interface HeraldSetVerbosityRequest {
   verbosity: HeraldVerbosity;
 }
+
+/**
+ * Remote triggers: a hotkey on another machine (AutoHotkey, Raycast), a Stream
+ * Deck, a phone shortcut. `POST /herald/trigger` with the scoped trigger token
+ * (Authorization: Bearer), or the `herald_trigger` WS request. The daemon routes
+ * the action to the ACTIVE device (the announcer: hands-free device, else the
+ * one used last) as a `trigger` herald_event sent to that client only.
+ *   brief  - spoken rundown of what is new
+ *   listen - open the mic, capture one utterance (ends on VAD), send it as a voice turn
+ *   stop   - stop speaking and cancel any capture
+ *   repeat - say the last reply again
+ *   toggle - Herald speaking: stop; otherwise listen (the one-button default)
+ */
+export type HeraldTriggerAction = 'brief' | 'listen' | 'stop' | 'repeat' | 'toggle';
+/** herald_trigger payload and the POST /herald/trigger JSON body. */
+export interface HeraldTriggerRequest {
+  action: HeraldTriggerAction;
+}
+/** A delivered trigger. Failures carry `error` plus `code` instead. */
+export interface HeraldTriggerResult {
+  action: HeraldTriggerAction;
+  delivered: true;
+}
+export type HeraldTriggerErrorCode =
+  | 'bad_request'
+  | 'unauthorized'
+  | 'forbidden'
+  | 'rate_limited'
+  | 'no_active_device'
+  | 'unavailable';
 
 // --- voice protocol (mirrored byte-for-byte in web/src/types/herald.ts; a web test enforces it) ---
 /**

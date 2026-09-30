@@ -12,6 +12,7 @@
 #   bin/companion status       Show daemon status
 #   bin/companion install-secrets   Materialize daemon secrets (Herald key) + systemd drop-in
 #   bin/companion herald-provider   Set herald.provider in the live config (idempotent)
+#   bin/companion trigger-token     Herald remote-trigger token: create | rotate | show-path
 #   bin/companion help         Show all commands
 #
 # See README.md for full documentation.
@@ -31,6 +32,9 @@ SECRETS_MANIFEST="$ROOT/.cush-secrets"
 CUSH_INJECT="${CUSH_INJECT:-$HOME/local/src/cush-tools/bin/inject}"
 SYSTEMD_DROPIN_DIR="$HOME/.config/systemd/user/companion.service.d"
 SYSTEMD_DROPIN="$SYSTEMD_DROPIN_DIR/secrets.conf"
+# Herald remote-trigger token (triggers only; chmod 600, never in git or config.json).
+# The daemon reads the same default path (override: COMPANION_HERALD_TRIGGER_TOKEN_FILE).
+TRIGGER_TOKEN_FILE="${COMPANION_HERALD_TRIGGER_TOKEN_FILE:-$CONFIG_DIR/herald-trigger.token}"
 
 # Platform-aware log location
 if [[ "$OSTYPE" == darwin* ]]; then
@@ -279,9 +283,77 @@ cmd_herald_provider() {
   '
 }
 
+# --- Herald: trigger-token ---
+# A credential that can ONLY fire Herald triggers (POST /herald/trigger, or the
+# herald_trigger WS request); it cannot read sessions or send input. Written to a
+# 0600 file outside the repo. Never printed: only the path and a masked preview.
+# The daemon re-reads the file when it changes, so create/rotate need no restart.
+trigger_token_preview() {
+  local tok
+  tok="$(cat "$TRIGGER_TOKEN_FILE")"
+  echo "${tok:0:4}…(${#tok} chars)"
+}
+
+cmd_trigger_token() {
+  local sub="${1:-}"
+  case "$sub" in
+    create|rotate)
+      if [ "$sub" = "create" ] && [ -s "$TRIGGER_TOKEN_FILE" ]; then
+        echo "A trigger token already exists: $TRIGGER_TOKEN_FILE ($(trigger_token_preview))"
+        echo "Use 'companion trigger-token rotate' to replace it (old triggers stop working)."
+        return 0
+      fi
+      local dir tmp tok
+      dir="$(dirname "$TRIGGER_TOKEN_FILE")"
+      mkdir -p "$dir"
+      chmod 700 "$dir" 2>/dev/null || true
+      tok="$(od -An -tx1 -N32 /dev/urandom | tr -d ' \n')"
+      if [ "${#tok}" -ne 64 ]; then
+        echo "ERROR: could not read /dev/urandom" >&2
+        return 1
+      fi
+      tmp="$dir/.herald-trigger.token.$$"
+      ( umask 077; printf '%s\n' "$tok" > "$tmp" )
+      chmod 600 "$tmp"
+      mv -f "$tmp" "$TRIGGER_TOKEN_FILE"
+      unset tok
+      if [ "$sub" = "rotate" ]; then echo "Rotated the Herald trigger token."; else echo "Created a Herald trigger token."; fi
+      echo "  File:    $TRIGGER_TOKEN_FILE (mode 600)"
+      echo "  Preview: $(trigger_token_preview)"
+      echo ""
+      echo "The running daemon picks it up on the next trigger (no restart)."
+      echo "Copy it to your trigger machines without pasting it in chat, e.g.:"
+      echo "  cat \"$TRIGGER_TOKEN_FILE\" | ~/local/src/cush-tools/bin/exchange herald-trigger --bg"
+      echo "  (then: ~/local/src/cush-tools/bin/status close herald-trigger)"
+      echo "Setup per machine: triggers/README.md"
+      ;;
+    show-path)
+      echo "$TRIGGER_TOKEN_FILE"
+      if [ -f "$TRIGGER_TOKEN_FILE" ]; then
+        local mode
+        mode="$(stat -c '%a' "$TRIGGER_TOKEN_FILE" 2>/dev/null || stat -f '%Lp' "$TRIGGER_TOKEN_FILE")"
+        echo "  exists, mode $mode, preview $(trigger_token_preview)" >&2
+        [ "$mode" = "600" ] || echo "  WARNING: the daemon ignores this file unless it is mode 600 (chmod 600 it)" >&2
+      else
+        echo "  not created yet (companion trigger-token create)" >&2
+      fi
+      ;;
+    -h|--help|help|"")
+      echo "Usage: companion trigger-token <create|rotate|show-path>"
+      echo "  create     make a Herald trigger token if none exists ($TRIGGER_TOKEN_FILE)"
+      echo "  rotate     replace it (every trigger script needs the new one)"
+      echo "  show-path  print the file path (and, on stderr, a masked preview)"
+      echo "  The token can only fire Herald triggers. Override the path with"
+      echo "  COMPANION_HERALD_TRIGGER_TOKEN_FILE (the daemon must see the same value)."
+      [ -n "$sub" ] && return 0 || return 2 ;;
+    *) echo "Unknown subcommand: $sub (see: companion trigger-token --help)"; return 2 ;;
+  esac
+}
+
 case "${1:-}" in
   install-secrets) shift; cmd_install_secrets "$@"; exit $? ;;
   herald-provider) shift; cmd_herald_provider "$@"; exit $? ;;
+  trigger-token) shift; cmd_trigger_token "$@"; exit $? ;;
 esac
 
 # Every other launch path (foreground, background, CLI-driven restart) loads the

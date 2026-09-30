@@ -176,6 +176,46 @@ export function registerHeraldHandlers(ctx: HandlerContext): Record<string, Mess
       );
     },
 
+    /**
+     * Remote trigger from an authenticated socket: the full daemon token, or the
+     * scoped trigger token (which can send nothing else). Routed to the active
+     * device, exactly like POST /herald/trigger.
+     */
+    herald_trigger(client, payload, requestId) {
+      const trigger = ctx.heraldTrigger;
+      if (!trigger) {
+        ctx.send(client.ws, {
+          type: 'herald_trigger',
+          success: false,
+          error: VOICE_OFF,
+          payload: { code: 'unavailable' },
+          requestId,
+        });
+        return;
+      }
+      const action = (payload as { action?: unknown } | undefined)?.action;
+      const out = trigger.fire(action, { via: 'ws', origin: auditOrigin(ctx, client) });
+      if (out.ok) {
+        ctx.send(client.ws, {
+          type: 'herald_trigger',
+          success: true,
+          payload: out.result,
+          requestId,
+        });
+      } else {
+        ctx.send(client.ws, {
+          type: 'herald_trigger',
+          success: false,
+          error: out.error,
+          payload: {
+            code: out.code,
+            ...(out.retryAfterMs ? { retryAfterMs: out.retryAfterMs } : {}),
+          },
+          requestId,
+        });
+      }
+    },
+
     herald_handsfree(client, payload, requestId) {
       const on = (payload as { on?: unknown } | undefined)?.on === true;
       return voiceReply(client, 'herald_handsfree', requestId, (v) =>

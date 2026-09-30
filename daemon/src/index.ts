@@ -12,7 +12,7 @@ import { TmuxManager } from './tmux-manager';
 import { WorkGroupManager } from './work-group-manager';
 import { createServer, validateTlsConfig } from './tls';
 import { certsExist, generateAndSaveCerts, getDefaultCertPaths } from './cert-generator';
-import { createQRRequestHandler } from './qr-server';
+import { createQRRequestHandler, type HttpRoutes } from './qr-server';
 import { dispatchCli, writePidFile, removePidFile } from './cli';
 import { SHUTDOWN_TIMEOUT_MS, STATUS_LOG_INTERVAL_MS } from './constants';
 import { AutoApprovalService } from './auto-approval';
@@ -116,7 +116,8 @@ async function main(): Promise<void> {
   );
 
   // Create HTTP/HTTPS servers for each listener
-  const qrHandler = createQRRequestHandler(config);
+  const httpRoutes: HttpRoutes = {};
+  const qrHandler = createQRRequestHandler(config, httpRoutes);
   const servers: {
     server: ReturnType<typeof createServer>;
     listener: (typeof config.listeners)[0];
@@ -179,6 +180,7 @@ async function main(): Promise<void> {
     subAgentWatcher,
     workGroupManager
   );
+  httpRoutes.heraldTrigger = (req, res) => wsHandler.handleHeraldTriggerHttp(req, res);
 
   // Start mDNS advertisement (advertise first listener)
   let mdns: MdnsAdvertiser | null = null;
