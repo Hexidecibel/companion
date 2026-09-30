@@ -7,7 +7,12 @@
  * user's live history.
  *
  *   node scripts/herald-probe.js [--config <config.json>] [--url ws://localhost:9888] \
- *     [--reset] [--json out.json] "Anything for me?" "What's everyone working on?" ...
+ *     [--reset] [--json out.json] [--mode voice|text] "Anything for me?" "What's everyone working on?" ...
+ *
+ * A question may start with tags that override the defaults for that turn:
+ *   "[voice] what's going on?"   sent as a spoken message (mode voice)
+ *   "[text] what's going on?"    typed (mode text)
+ *   "[shorter] Shorter."         a voice command intent (shorter | more | brief)
  *
  * For each question: sends herald_send, streams herald_event pushes, and reports
  * client-observed time-to-first-token, total latency, the verbatim reply, tool
@@ -24,7 +29,7 @@ const fs = require('fs');
 const WebSocket = require('ws');
 
 function parseArgs(argv) {
-  const out = { url: null, config: null, reset: false, json: null, questions: [], timeoutMs: 60_000 };
+  const out = { url: null, config: null, reset: false, json: null, questions: [], timeoutMs: 60_000, mode: null };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--url') out.url = argv[++i];
@@ -32,6 +37,7 @@ function parseArgs(argv) {
     else if (a === '--reset') out.reset = true;
     else if (a === '--json') out.json = argv[++i];
     else if (a === '--timeout') out.timeoutMs = Number(argv[++i]) * 1000;
+    else if (a === '--mode') out.mode = argv[++i];
     else out.questions.push(a);
   }
   return out;
@@ -119,6 +125,7 @@ function ask(question) {
     let finalMsg = null;
     let errorEv = null;
     let busyOff = false;
+    let sawBusy = false;
 
     const done = () => {
       eventListeners.delete(onEvent);
@@ -142,20 +149,43 @@ function ask(question) {
       if (ev.kind === 'action') actions.push({ tier: ev.action.tier, status: ev.action.status, readback: ev.action.readback, reasons: ev.action.reasons });
       if (ev.kind === 'error') errorEv = ev.error;
       if (ev.kind === 'busy' && ev.busy === false) busyOff = true;
-      if (busyOff && finalMsg) setTimeout(done, 300); // let trailing action events land
+      if (ev.kind === 'busy' && ev.busy === true) sawBusy = true;
+      // A "Nothing new." briefing is answered without a turn (no busy events).
+      if (finalMsg && (busyOff || !sawBusy)) setTimeout(done, 300); // let trailing action events land
     };
     eventListeners.add(onEvent);
     const timer = setTimeout(() => {
       eventListeners.delete(onEvent);
       reject(new Error(`no reply within ${args.timeoutMs / 1000}s`));
     }, args.timeoutMs);
-    request('herald_send', { text: question }).catch((e) => {
+    const { text, mode, intent } = parseTags(question);
+    const payload = { text, ...(mode ? { mode } : {}), ...(intent ? { intent } : {}) };
+    request('herald_send', payload).catch((e) => {
       eventListeners.delete(onEvent);
       clearTimeout(timer);
       reject(e);
     });
   });
 }
+
+function parseTags(question) {
+  let text = question;
+  let mode = args.mode;
+  let intent = null;
+  for (;;) {
+    const m = /^\[(voice|text|shorter|more|brief)\]\s*/.exec(text);
+    if (!m) break;
+    if (m[1] === 'voice' || m[1] === 'text') mode = m[1];
+    else {
+      intent = m[1];
+      mode = mode || 'voice';
+    }
+    text = text.slice(m[0].length);
+  }
+  return { text, mode, intent };
+}
+
+const words = (t) => (t || '').split(/\s+/).filter(Boolean).length;
 
 ws.on('error', (e) => {
   console.error(`WebSocket error: ${e.message}`);
@@ -173,7 +203,7 @@ ws.on('open', async () => {
     }
     const st = await request('herald_get_state', {});
     report.state = { enabled: st.enabled, disabledReason: st.disabledReason, model: st.model, inbox: st.inbox, pendingActions: st.actions.filter((a) => a.status === 'pending').length };
-    console.log(`Herald "${st.displayName}" enabled=${st.enabled} model=${st.model}${st.disabledReason ? ` reason=${st.disabledReason}` : ''}`);
+    console.log(`Herald "${st.displayName}" enabled=${st.enabled} model=${st.model} verbosity=${st.verbosity ?? 'n/a'}${st.disabledReason ? ` reason=${st.disabledReason}` : ''}`);
     console.log(`Inbox (${st.inbox.length}):`);
     for (const i of st.inbox) console.log(`  [${i.priority}${i.heard ? '' : ', unheard'}] ${i.sessionName}: ${i.headline}`);
     for (const a of st.actions) await cancelIfPending(a);
@@ -186,7 +216,7 @@ ws.on('open', async () => {
       if (r.error) console.log(`  ERROR: ${r.error}`);
       console.log(`  refs: ${r.sessionRefs.join(', ') || 'none'}`);
       if (r.actions.length) console.log(`  actions: ${JSON.stringify(r.actions)}`);
-      console.log(`  reply: ${r.reply}`);
+      console.log(`  reply (${words(r.reply)} words): ${r.reply}`);
     }
   } catch (e) {
     console.error(`probe failed: ${e.message}`);
