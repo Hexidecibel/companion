@@ -91,6 +91,10 @@ jobs:
           targets: aarch64-linux-android
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          # The default list includes the retired 'tools' package, which
+          # sdkmanager no longer finds (the step fails).
+          packages: 'platform-tools'
       - name: Install Android NDK
         run: sdkmanager "ndk;27.0.12077973"
       - run: cd web && npm ci
