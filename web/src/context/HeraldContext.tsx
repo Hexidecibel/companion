@@ -162,6 +162,7 @@ export function HeraldProvider({ children }: { children: ReactNode }) {
     connected: herald.connected,
     serverStatus: voice.serverStatus,
     stopSpeech: voice.stop,
+    speaking: voice.supported && voice.speaking,
     openPanel: () => {
       const mobile = isMobileViewport();
       if (!(mobile ? screenOpenRef.current : panelOpenRef.current)) openRef.current();

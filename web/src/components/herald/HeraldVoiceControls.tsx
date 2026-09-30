@@ -1,5 +1,5 @@
 import { useEffect, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react';
-import type { HeraldVoiceInput } from '../../hooks/useHeraldVoiceInput';
+import type { HeraldVoiceInput, VoiceInputPrefs } from '../../hooks/useHeraldVoiceInput';
 import { chordFromEvent, formatChord } from '../../services/voice/hotkeys';
 import { IconMic, IconMicOff, IconX } from './heraldIcons';
 
@@ -145,6 +145,27 @@ export function VoiceInputSettings({ input }: { input: HeraldVoiceInput }) {
         Hold Space to talk (empty box)
         <Switch on={prefs.spaceToTalk} />
       </button>
+      <button type="button" role="menuitemcheckbox" aria-checked={prefs.interrupt} className="herald-menu__item" onClick={() => setPref('interrupt', !prefs.interrupt)}>
+        Interrupt by talking
+        <Switch on={prefs.interrupt} />
+      </button>
+      {prefs.interrupt && (
+        <label className="herald-voice-set__rate">
+          <span className="herald-voice-set__rate-label">Sensitivity</span>
+          <select
+            className="herald-voice-set__select herald-voice-set__select--sm"
+            value={prefs.sensitivity}
+            onChange={(e) => setPref('sensitivity', e.target.value as VoiceInputPrefs['sensitivity'])}
+          >
+            <option value="low">Low (noisy room)</option>
+            <option value="normal">Normal</option>
+            <option value="high">High (quiet room)</option>
+          </select>
+        </label>
+      )}
+      {prefs.interrupt && !input.micGranted && available && (
+        <div className="herald-voice-set__engine">Allow the mic once (hold to talk) to enable interrupt.</div>
+      )}
       <button type="button" role="menuitem" className="herald-menu__item" onClick={() => setCapturing(true)}>
         Talk shortcut
         <kbd className="herald-voice-set__kbd">{capturing ? 'Press keys…' : input.chordLabel}</kbd>

@@ -102,6 +102,8 @@
   color: var(--h-text);
   isolation: isolate;
   overflow: hidden;
+  /* clip (not just hidden): focus / scrollIntoView can never shift the panel sideways. */
+  overflow: clip;
   -webkit-font-smoothing: antialiased;
 }
 
@@ -1707,6 +1709,7 @@
 .herald-listening--busy .herald-listening__meter span:nth-child(3n) { animation-delay: -0.55s; }
 
 .herald-voice-set__warn { color: #fcd34d; }
+.herald-voice-set__select--sm { height: 28px; width: auto; flex: 1; min-width: 0; }
 .herald-voice-set__kbd {
   margin-left: auto;
   padding: 1px 6px;

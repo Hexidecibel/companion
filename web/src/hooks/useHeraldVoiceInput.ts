@@ -3,6 +3,8 @@ import type { HeraldTransport } from '../services/heraldTransport';
 import type { HeraldVoiceStatus } from '../types/herald';
 import { getMicCapture, micUnavailableReason } from '../services/voice/micCapture';
 import { VoiceInputController, type VoiceInputSource, type VoiceInputState } from '../services/voice/voiceInput';
+import { VadListener } from '../services/voice/vadListener';
+import { VoiceAutomation } from '../services/voice/voiceAutomation';
 import { DEFAULT_CHORD, formatChord, isChordRelease, matchesChordDown, parseChord, shouldStartSpacePtt } from '../services/voice/hotkeys';
 
 const PREFS_KEY = 'herald_voice_input_prefs';
@@ -89,6 +91,8 @@ export interface HeraldVoiceInput {
   consumeTranscript: (id: number) => void;
   /** Controller, for the VAD / wake layers. */
   controller: VoiceInputController;
+  /** Microphone permission already granted (interrupt / hands-free need it). */
+  micGranted: boolean;
 }
 
 export interface VoiceInputHost {
@@ -99,6 +103,8 @@ export interface VoiceInputHost {
   stopSpeech: () => void;
   /** Bring the Herald panel up (global chord from anywhere). */
   openPanel: () => void;
+  /** Herald is speaking (arms voice interrupt). */
+  speaking: boolean;
 }
 
 export function useHeraldVoiceInput(host: VoiceInputHost): HeraldVoiceInput {
@@ -141,6 +147,48 @@ export function useHeraldVoiceInput(host: VoiceInputHost): HeraldVoiceInput {
   const available = unavailableReason === null;
   const availableRef = useRef(available);
   availableRef.current = available;
+
+  // Mic permission, without prompting: Permissions API where available, else
+  // learned from the first push-to-talk.
+  const [permGranted, setPermGranted] = useState(false);
+  useEffect(() => {
+    let status: PermissionStatus | null = null;
+    let cancelled = false;
+    const q = navigator.permissions?.query?.({ name: 'microphone' as PermissionName });
+    q?.then((st) => {
+      if (cancelled) return;
+      status = st;
+      setPermGranted(st.state === 'granted');
+      st.onchange = () => setPermGranted(st.state === 'granted');
+    }).catch(() => {});
+    return () => {
+      cancelled = true;
+      if (status) status.onchange = null;
+    };
+  }, []);
+  const micGranted = permGranted || state.permission === 'granted';
+
+  // Voice interrupt (barge-in) over the VAD.
+  const automation = useMemo(
+    () =>
+      new VoiceAutomation({
+        vad: new VadListener(getMicCapture()),
+        input: controller,
+        stopSpeech: () => hostRef.current.stopSpeech(),
+        onError: (m) => controller.fail(m),
+      }),
+    [controller],
+  );
+  useEffect(() => () => automation.dispose(), [automation]);
+  useEffect(() => {
+    automation.update({
+      available,
+      micGranted,
+      interrupt: prefs.interrupt,
+      sensitivity: prefs.sensitivity,
+      speaking: host.speaking,
+    });
+  }, [automation, available, micGranted, prefs.interrupt, prefs.sensitivity, host.speaking]);
 
   const chord = useMemo(() => parseChord(prefs.chord) ?? parseChord(DEFAULT_CHORD)!, [prefs.chord]);
 
@@ -234,5 +282,6 @@ export function useHeraldVoiceInput(host: VoiceInputHost): HeraldVoiceInput {
     transcript,
     consumeTranscript,
     controller,
-  }), [available, unavailableReason, state, prefs, setPref, chord, start, stop, cancel, onComposerKeyDown, onComposerKeyUp, transcript, consumeTranscript, controller]);
+    micGranted,
+  }), [available, unavailableReason, state, prefs, setPref, chord, start, stop, cancel, onComposerKeyDown, onComposerKeyUp, transcript, consumeTranscript, controller, micGranted]);
 }

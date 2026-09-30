@@ -52,6 +52,8 @@ export class VoiceInputController {
   private maxTimer: ReturnType<typeof setTimeout> | null = null;
   private errorTimer: ReturnType<typeof setTimeout> | null = null;
   private gen = 0;
+  /** Listening driven by the VAD (no mic/uplink owned here). */
+  private external = false;
   private readonly now: () => number;
 
   constructor(private deps: VoiceInputDeps) {
@@ -138,6 +140,7 @@ export class VoiceInputController {
     }
     if (this.st.phase === 'idle') return;
     this.gen++;
+    this.external = false;
     this.clearMax();
     this.deps.mic.stop();
     this.uplink?.discard();
@@ -145,12 +148,38 @@ export class VoiceInputController {
     this.set({ phase: 'idle', source: null, level: 0 });
   }
 
+  /** The VAD heard real speech: show "listening" without owning the mic. */
+  beginExternal(source: VoiceInputSource): boolean {
+    if (this.st.phase !== 'idle') return false;
+    this.external = true;
+    this.set({ phase: 'listening', source, level: 0, error: null });
+    return true;
+  }
+
+  /** VAD-driven level updates while listening externally. */
+  setLevel(level: number): void {
+    if (this.external && this.st.phase === 'listening') this.set({ level });
+  }
+
+  /** The VAD utterance was dropped (misfire / no wake word). */
+  endExternal(): void {
+    if (!this.external) return;
+    this.external = false;
+    if (this.st.phase === 'listening') this.set({ phase: 'idle', source: null, level: 0 });
+  }
+
+  get listeningExternally(): boolean {
+    return this.external && this.st.phase === 'listening';
+  }
+
   /**
    * Transcribe a complete utterance captured elsewhere (VAD). Frames are
-   * 16 kHz PCM16. Ignored unless idle.
+   * 16 kHz PCM16. Allowed when idle or listening externally.
    */
   async transcribeUtterance(frames: Int16Array[], source: VoiceInputSource): Promise<void> {
-    if (this.st.phase !== 'idle') return;
+    const externalListening = this.external && this.st.phase === 'listening';
+    this.external = false;
+    if (this.st.phase !== 'idle' && !externalListening) return;
     const t = this.deps.getTransport();
     if (!t || !t.isConnected()) return;
     const gen = ++this.gen;
