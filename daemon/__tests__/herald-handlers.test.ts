@@ -27,9 +27,24 @@ describe('herald WS handlers', () => {
     const { h, sent, client } = setup({ send });
     await h.herald_send(client, { text: 'hi' }, 'a');
     await h.herald_send(client, { text: '' }, 'b');
-    expect(send).toHaveBeenCalledWith('hi');
+    expect(send).toHaveBeenCalledWith('hi', { mode: undefined, intent: undefined });
     expect(sent[0]).toEqual({ type: 'herald_send', success: true, payload: { messageId: 'm1' }, requestId: 'a' });
     expect(sent[1]).toEqual({ type: 'herald_send', success: false, error: 'Message is empty.', requestId: 'b' });
+  });
+
+  it('herald_send passes mode / intent through; herald_set_verbosity routes to the service', async () => {
+    const send = jest.fn(() => ({ messageId: 'm2' }));
+    const setVerbosity = jest.fn((v: unknown) => {
+      if (v !== 'brief') throw new HeraldRequestError('verbosity must be one of auto, brief, normal, detailed');
+      return { verbosity: v };
+    });
+    const { h, sent, client } = setup({ send, setVerbosity });
+    await h.herald_send(client, { text: 'Shorter.', mode: 'voice', intent: 'shorter' }, 'a');
+    expect(send).toHaveBeenCalledWith('Shorter.', { mode: 'voice', intent: 'shorter' });
+    await h.herald_set_verbosity(client, { verbosity: 'brief' }, 'b');
+    await h.herald_set_verbosity(client, { verbosity: 'loud' }, 'c');
+    expect(sent[1]).toEqual({ type: 'herald_set_verbosity', success: true, payload: { verbosity: 'brief' }, requestId: 'b' });
+    expect(sent[2]).toMatchObject({ type: 'herald_set_verbosity', success: false, error: expect.stringMatching(/verbosity must be/) });
   });
 
   it('herald_confirm passes an audit origin; unexpected errors are masked', async () => {

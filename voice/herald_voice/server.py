@@ -5,6 +5,7 @@ Endpoints (all bodies bounded; audio is never written to disk):
   POST   /tts                 JSON {text, voice?, speed?} -> raw PCM16LE mono
                               (headers X-Sample-Rate, X-Synth-Ms, X-Audio-Ms)
   POST   /stt                 raw PCM16LE mono 16 kHz -> JSON {text, audioMs, sttMs, model}
+                               optional ?prompt=&hotwords= vocabulary hints (session names)
   POST   /wake/{stream_id}    raw PCM16LE mono 16 kHz chunk -> JSON {detected, score, model}
   DELETE /wake/{stream_id}    drop that stream's detector state
 
@@ -32,6 +33,7 @@ log = logging.getLogger("herald_voice")
 
 STREAM_ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 MAX_BODY = 4 * 1024 * 1024  # 4 MB covers 60 s of 16 kHz PCM16 with headroom
+STT_HINT_MAX_CHARS = 800  # Whisper's prompt window is ~220 tokens; the daemon sends < 600 chars
 
 
 class Busy(Exception):
@@ -247,9 +249,10 @@ def create_app(
         audio_ms = len(pcm) / 16
         if len(pcm) < 1600:  # < 100 ms: nothing to hear
             return web.json_response({"text": "", "audioMs": audio_ms, "sttMs": 0, "model": settings.stt_model})
+        hints = {k: req.query[k][:STT_HINT_MAX_CHARS] for k in ("prompt", "hotwords") if req.query.get(k, "").strip()}
         t0 = time.monotonic()
         try:
-            text = await stt.run(lambda e: e.transcribe(pcm))
+            text = await stt.run(lambda e: e.transcribe(pcm, **hints) if hints else e.transcribe(pcm))
         except Busy:
             raise web.HTTPServiceUnavailable(text="stt busy")
         stt_ms = (time.monotonic() - t0) * 1000

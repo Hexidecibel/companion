@@ -46,6 +46,11 @@ export interface SttText {
   sttMs: number;
 }
 
+export interface SttHints {
+  prompt?: string;
+  hotwords?: string;
+}
+
 export interface WakeScore {
   detected: boolean;
   score: number;
@@ -131,9 +136,14 @@ export class VoiceServiceClient {
     };
   }
 
-  async stt(pcm: Buffer, signal?: AbortSignal): Promise<SttText> {
+  /** `hints`: vocabulary (session names, jargon) passed to Whisper as its prompt / hotwords. */
+  async stt(pcm: Buffer, signal?: AbortSignal, hints?: SttHints | null): Promise<SttText> {
+    const q = new URLSearchParams();
+    if (hints?.prompt) q.set('prompt', hints.prompt);
+    if (hints?.hotwords) q.set('hotwords', hints.hotwords);
+    const qs = q.toString();
     const res = await this.request(
-      '/stt',
+      qs ? `/stt?${qs}` : '/stt',
       { method: 'POST', headers: { 'content-type': 'application/octet-stream' }, body: pcm },
       this.timeouts.stt,
       signal

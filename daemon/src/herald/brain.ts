@@ -28,6 +28,8 @@ export interface TurnInput {
   history: HeraldMessage[];
   userText: string;
   snapshot: string;
+  /** Volatile per-turn instructions (reply style), appended after the user's words. */
+  turnNote?: string;
   systemPrompt: string;
   maxTokens: number;
   signal: AbortSignal;
@@ -96,7 +98,10 @@ const GIVE_UP_TEXT = 'Sorry, I got tangled up on that one. Could you say it anot
 export async function runTurn(provider: LlmProvider, input: TurnInput): Promise<TurnResult> {
   const turns: LlmTurn[] = [
     ...historyToTurns(input.history),
-    { role: 'user', text: `${input.snapshot}\n\n${input.userText}` },
+    {
+      role: 'user',
+      text: `${input.snapshot}\n\n${input.userText}${input.turnNote ? `\n\n${input.turnNote}` : ''}`,
+    },
   ];
   const usage = { inputTokens: 0, outputTokens: 0 };
   const toolCallsMade: string[] = [];

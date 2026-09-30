@@ -29,8 +29,10 @@ class FakeTts:
 
 class FakeStt:
     model_name = "fake"
+    last_hints: dict = {}
 
-    def transcribe(self, pcm16):
+    def transcribe(self, pcm16, prompt=None, hotwords=None):
+        FakeStt.last_hints = {"prompt": prompt, "hotwords": hotwords}
         return f"heard {len(pcm16)} samples"
 
 
@@ -145,3 +147,29 @@ async def test_not_ready_is_503(aiohttp_client):
 @pytest.fixture
 def anyio_backend():
     return "asyncio"
+
+
+async def test_stt_passes_vocabulary_hints(aiohttp_client):
+    client = await aiohttp_client(make_app())
+    await ready(client)
+    pcm = np.zeros(8000, dtype="<i2").tobytes()
+    FakeStt.last_hints = {}
+    r = await client.post("/stt?prompt=Herald%2C%20Jarvis.%20Sessions%3A%20Out4.&hotwords=Herald%20Out4", data=pcm)
+    assert (await r.json())["text"] == "heard 8000 samples"
+    assert FakeStt.last_hints == {"prompt": "Herald, Jarvis. Sessions: Out4.", "hotwords": "Herald Out4"}
+    # Oversized hints are clipped, never rejected.
+    r = await client.post("/stt?prompt=" + "a" * 5000, data=pcm)
+    assert r.status == 200
+    assert len(FakeStt.last_hints["prompt"]) == 800
+    assert FakeStt.last_hints["hotwords"] is None
+
+
+def test_prompt_echo_guard():
+    from herald_voice.engines import echoes_prompt
+
+    prompt = "Herald, Jarvis. Sessions: Out4, Doc Upload Site, Companion. tmux, deploy, Haiku."
+    assert echoes_prompt("Sessions: Out4, Doc Upload Site.", prompt)
+    assert echoes_prompt("tmux, deploy, Haiku", prompt) is False  # three words: could be real
+    assert not echoes_prompt("Companion.", prompt)
+    assert not echoes_prompt("Tell Out4 to hold the refunds.", prompt)
+    assert not echoes_prompt("Doc Upload Site deploy", None)

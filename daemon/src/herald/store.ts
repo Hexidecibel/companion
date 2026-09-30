@@ -10,7 +10,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import type { HeraldAction, HeraldMessage } from './protocol';
+import type { HeraldAction, HeraldMessage, HeraldVerbosity } from './protocol';
 
 export const MAX_PERSISTED_MESSAGES = 100;
 export const MAX_PERSISTED_ACTIONS = 50;
@@ -25,6 +25,13 @@ export interface PersistedHeraldState {
   actions: HeraldAction[];
   /** Names of cush-tools tools Herald itself launched (closing those needs no confirm). */
   cushOpened?: string[];
+  /** Reply length setting; absent = 'auto'. */
+  verbosity?: HeraldVerbosity;
+}
+
+export const VERBOSITY_LEVELS: readonly HeraldVerbosity[] = ['auto', 'brief', 'normal', 'detailed'];
+export function isVerbosity(v: unknown): v is HeraldVerbosity {
+  return typeof v === 'string' && (VERBOSITY_LEVELS as readonly string[]).includes(v);
 }
 
 export const MAX_PERSISTED_CUSH_OPENED = 100;
@@ -64,6 +71,8 @@ function sanitizeMessage(raw: unknown): HeraldMessage | null {
       .slice(0, 20);
   }
   if (Array.isArray(m.actionIds)) out.actionIds = m.actionIds.filter(isStr).slice(0, 20);
+  if (m.role === 'user' && (m.intent === 'shorter' || m.intent === 'more' || m.intent === 'brief'))
+    out.intent = m.intent;
   // A message persisted mid-stream is finalized on load.
   return out;
 }
@@ -140,6 +149,7 @@ export function sanitizeState(raw: unknown, now: number): PersistedHeraldState {
     heard,
     actions,
     ...(cushOpened.length ? { cushOpened } : {}),
+    ...(isVerbosity(r.verbosity) && r.verbosity !== 'auto' ? { verbosity: r.verbosity } : {}),
   };
 }
 

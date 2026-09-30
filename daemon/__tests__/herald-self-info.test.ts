@@ -79,12 +79,13 @@ describe('herald system prompt self-knowledge', () => {
     expect(prompt.toLowerCase()).not.toContain('token');
   });
 
-  it('describes itself: access points, cross-device state, native app and voice limits', () => {
+  it('describes itself: access points, cross-device state, native app and voice', () => {
     expect(prompt).toMatch(/Ctrl\+J/);
     expect(prompt).toMatch(/Herald button on mobile/);
     expect(prompt).toMatch(/stored on the server/);
     expect(prompt).toMatch(/native phone app needs an update/);
-    expect(prompt).toMatch(/Voice is not available yet/);
+    expect(prompt).toMatch(/hands-free by saying "Hey Jarvis"/);
+    expect(prompt).not.toMatch(/Voice is not available yet/);
   });
 
   it('allows practical answers, keeps deep technical work routed, and bans option menus', () => {

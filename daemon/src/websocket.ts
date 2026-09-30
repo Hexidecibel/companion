@@ -324,6 +324,7 @@ export class WebSocketHandler {
       client: new VoiceServiceClient(url),
       sendEvent: (clientId, event) => this.sendToClient(clientId, 'herald_voice_event', event),
       debugTranscripts: !!process.env.HERALD_DEBUG_TOOLS && process.env.HERALD_DEBUG_TOOLS !== '0',
+      sttHints: () => this.herald?.sttHints() ?? null,
     });
     voice.start();
     console.log(`Herald voice: using voice service at ${url}`);

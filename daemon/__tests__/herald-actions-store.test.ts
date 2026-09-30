@@ -334,6 +334,24 @@ describe('HeraldStore', () => {
     expect(fs.existsSync(path.join(dir, 'state.json.corrupt-42'))).toBe(true);
   });
 
+  it('sanitizeState keeps a valid verbosity and user intents, drops junk', () => {
+    const s = sanitizeState(
+      {
+        verbosity: 'brief',
+        messages: [
+          { id: 'u', role: 'user', text: 'Shorter.', createdAt: 1, intent: 'shorter' },
+          { id: 'v', role: 'user', text: 'x', createdAt: 2, intent: 'explode' },
+          { id: 'h', role: 'herald', text: 'y', createdAt: 3, intent: 'more' },
+        ],
+      },
+      1
+    );
+    expect(s.verbosity).toBe('brief');
+    expect(s.messages.map((m) => m.intent)).toEqual(['shorter', undefined, undefined]);
+    expect(sanitizeState({ verbosity: 'loud' }, 1).verbosity).toBeUndefined();
+    expect(sanitizeState({ verbosity: 'auto' }, 1).verbosity).toBeUndefined();
+  });
+
   it('sanitizeState drops malformed entries and bounds sizes', () => {
     const s = sanitizeState(
       {

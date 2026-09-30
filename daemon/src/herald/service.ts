@@ -6,12 +6,22 @@
 
 import { randomUUID } from 'crypto';
 import type { AuditEntry, AuditOrigin } from '../audit-log';
-import type { HeraldAction, HeraldEvent, HeraldMessage, HeraldState } from './protocol';
+import type {
+  HeraldAction,
+  HeraldEvent,
+  HeraldInboxItem,
+  HeraldInputMode,
+  HeraldIntent,
+  HeraldMessage,
+  HeraldState,
+  HeraldVerbosity,
+} from './protocol';
 import { ResolvedHeraldConfig } from './config';
 import { ActionManager } from './actions';
 import { InboxTracker } from './inbox';
 import {
   HeraldStore,
+  isVerbosity,
   MAX_PERSISTED_ACTIONS,
   MAX_PERSISTED_MESSAGES,
   PersistedHeraldState,
@@ -19,7 +29,7 @@ import {
 import type { SessionSnapshot, SessionSource } from './session-source';
 import { LlmError, LlmProvider } from './llm/provider';
 import { raceAbort, runTurn, TURN_TIMEOUT_MS } from './brain';
-import { buildSystemPrompt } from './prompt';
+import { buildSystemPrompt, intentInstruction, replyStyleLine } from './prompt';
 import type { HeraldSelfInfo } from './self-info';
 import { executeTool, TurnToolState, ToolEnv } from './tools';
 import { HeraldToolbox } from './knowledge/toolbox';
@@ -37,6 +47,24 @@ const SNAPSHOT_MAX_SESSIONS = 20;
 const MAX_PREFETCH_SESSIONS = 2;
 const SNAPSHOT_MAX_UNHEARD = 6;
 const INBOX_RANK = { blocked: 0, finished: 1, progress: 2 } as const;
+/** Words the user says that Whisper tends to get wrong (tmux -> "T-MUX", daemon -> "demon"). */
+const STT_HINT_TERMS = [
+  'tmux',
+  'deploy',
+  'Haiku',
+  'Kokoro',
+  'Tailscale',
+  'cush',
+  'HAProxy',
+  'APK',
+  'PR',
+  'commit',
+  'prod',
+  'daemon',
+  'AUQ',
+];
+const STT_HINT_MAX_NAMES = 16;
+const STT_HINT_MAX_CHARS = 600;
 
 export class HeraldRequestError extends Error {
   constructor(message: string) {
@@ -87,6 +115,7 @@ export class HeraldService {
   private actions: ActionManager;
   private toolbox: HeraldToolbox | null;
   private busy = false;
+  private verbosity: HeraldVerbosity = 'auto';
   private turnAbort: AbortController | null = null;
   private started = false;
   private disposed = false;
@@ -145,6 +174,7 @@ export class HeraldService {
     this.inbox = new InboxTracker(persisted.heard);
     this.actions.loadPersisted(persisted.actions);
     this.toolbox?.loadOpened(persisted.cushOpened);
+    this.verbosity = persisted.verbosity ?? 'auto';
     if (persisted.actions.some((a) => a.status === 'expired' && a.error?.includes('restarted')))
       this.persist();
     const brain = this.enabled
@@ -192,7 +222,25 @@ export class HeraldService {
       messages: this.messages.map((m) => ({ ...m })),
       inbox: this.inbox.list(),
       actions: this.actions.list(),
+      verbosity: this.verbosity,
     };
+  }
+
+  getVerbosity(): HeraldVerbosity {
+    return this.verbosity;
+  }
+
+  /** Reply-length setting (menu, or the brain's set_verbosity tool). Persisted. */
+  setVerbosity(raw: unknown): { verbosity: HeraldVerbosity } {
+    if (!isVerbosity(raw))
+      throw new HeraldRequestError('verbosity must be one of auto, brief, normal, detailed');
+    if (raw !== this.verbosity) {
+      this.verbosity = raw;
+      this.emit({ kind: 'settings', verbosity: raw });
+      this.persist();
+      console.log(`Herald: reply length set to ${raw}`);
+    }
+    return { verbosity: this.verbosity };
   }
 
   private emit(event: HeraldEvent): void {
@@ -214,6 +262,7 @@ export class HeraldService {
       heard: this.inbox.heardIds(),
       actions: this.actions.list().slice(0, MAX_PERSISTED_ACTIONS),
       cushOpened: this.toolbox?.openedNames() ?? [],
+      ...(this.verbosity !== 'auto' ? { verbosity: this.verbosity } : {}),
     };
   }
 
@@ -333,8 +382,11 @@ export class HeraldService {
     this.emit({ kind: 'busy', busy });
   }
 
-  /** Accept a user message and start a turn in the background. */
-  send(textRaw: unknown): { messageId: string } {
+  /**
+   * Accept a user message and start a turn in the background. `opts` comes
+   * straight from the client: unknown mode / intent values are ignored.
+   */
+  send(textRaw: unknown, opts: { mode?: unknown; intent?: unknown } = {}): { messageId: string } {
     if (!this.cfg.featureEnabled)
       throw new HeraldRequestError(this.cfg.disabledReason || 'Herald is disabled.');
     if (!this.provider)
@@ -349,10 +401,30 @@ export class HeraldService {
         `${this.cfg.displayName} is still answering the previous message.`
       );
 
+    const mode: HeraldInputMode = opts.mode === 'voice' ? 'voice' : 'text';
+    const intent: HeraldIntent | undefined =
+      opts.intent === 'shorter' || opts.intent === 'more' || opts.intent === 'brief'
+        ? opts.intent
+        : undefined;
+
+    // "Brief me": only what the user has not been told yet. Nothing new is
+    // answered deterministically, without a brain turn.
+    let briefing: HeraldInboxItem[] | undefined;
+    if (intent === 'brief') {
+      briefing = this.unheardForBriefing();
+      if (briefing.length === 0) {
+        const userMsg = this.postMessage('user', text, { intent });
+        this.postMessage('herald', 'Nothing new.');
+        return { messageId: userMsg.id };
+      }
+      // They are about to be told: heard from now on (the chips dim at once).
+      this.markHeard(briefing.map((i) => i.id));
+    }
+
     this.setBusy(true);
     const history = this.messages.slice();
-    const userMsg = this.postMessage('user', text);
-    void this.runConversationTurn(text, history).catch((err) => {
+    const userMsg = this.postMessage('user', text, intent ? { intent } : {});
+    void this.runConversationTurn(text, history, { mode, intent, briefing }).catch((err) => {
       console.error('Herald: turn crashed:', err);
       // Never leave the turn lock held: the user could not send again until restart.
       this.setBusy(false);
@@ -360,7 +432,13 @@ export class HeraldService {
     return { messageId: userMsg.id };
   }
 
-  private async runConversationTurn(userText: string, history: HeraldMessage[]): Promise<void> {
+  private async runConversationTurn(
+    userText: string,
+    history: HeraldMessage[],
+    turn: { mode: HeraldInputMode; intent?: HeraldIntent; briefing?: HeraldInboxItem[] } = {
+      mode: 'text',
+    }
+  ): Promise<void> {
     const provider = this.provider!;
     const abort = new AbortController();
     this.turnAbort = abort;
@@ -410,6 +488,7 @@ export class HeraldService {
       statusSince: (s, id) => this.statusSince(s, id),
       echoDelayMs: this.cfg.echoDelayMs,
       toolbox: this.toolbox ?? undefined,
+      setVerbosity: (level) => this.setVerbosity(level),
     };
     const started = Date.now();
     let errorText: string | null = null;
@@ -424,13 +503,16 @@ export class HeraldService {
       // snapshot: a "finished" note for a session that is working again must not
       // survive until the next poll tick and be read out as news.
       this.applyInbox(snaps);
-      const prefetched = await raceAbort(
-        this.prefetchMentioned(userText, snaps, env, toolState),
-        abort.signal
-      );
+      const prefetched = turn.intent
+        ? ''
+        : await raceAbort(this.prefetchMentioned(userText, snaps, env, toolState), abort.signal);
       const result = await runTurn(provider, {
         history,
-        userText,
+        userText: turn.intent
+          ? intentInstruction(turn.intent, userText, this.briefingLines(turn.briefing ?? []))
+          : userText,
+        // A briefing sets its own shape (one sentence per item).
+        turnNote: turn.intent === 'brief' ? undefined : replyStyleLine(turn.mode, this.verbosity),
         snapshot: this.buildSnapshot(snaps) + prefetched,
         systemPrompt: this.systemPrompt,
         maxTokens: this.cfg.maxTokens,
@@ -451,6 +533,7 @@ export class HeraldService {
       reply.text = result.text;
       console.log(
         `Herald: turn done provider=${provider.name} model=${provider.model} outcome=${result.outcome} ` +
+          `mode=${turn.mode}${turn.intent ? ` intent=${turn.intent}` : ''} verbosity=${this.verbosity} ` +
           `ttft=${result.firstTokenMs !== undefined ? `${result.firstTokenMs}ms` : 'n/a'} total=${Date.now() - started}ms ` +
           `iterations=${result.iterations} tools=[${result.toolCalls.join(',')}] ` +
           `tokens in=${result.usage.inputTokens} out=${result.usage.outputTokens}` +
@@ -527,6 +610,62 @@ export class HeraldService {
       this.persist();
     }
     this.setBusy(false);
+  }
+
+  /** Unheard inbox items for "brief me", most urgent first, newest first within a rank. */
+  private unheardForBriefing(): HeraldInboxItem[] {
+    const live = new Map(
+      this.lastSnapshots.map((s) => [`${s.serverId}:${s.sessionId}`, s.status] as const)
+    );
+    return this.inbox
+      .list()
+      .filter((i) => !i.heard)
+      .filter(
+        (i) =>
+          !(i.priority === 'finished' && live.get(`${i.serverId}:${i.sessionId}`) === 'working')
+      )
+      .sort((a, b) => INBOX_RANK[a.priority] - INBOX_RANK[b.priority] || b.createdAt - a.createdAt);
+  }
+
+  private briefingLines(items: HeraldInboxItem[]): string[] {
+    const now = this.now();
+    return items.map(
+      (i) =>
+        `[${i.priority}] ${clip(oneLine(i.headline), 200)} (${i.sessionName}, ${formatAgo(now - i.createdAt)} ago)`
+    );
+  }
+
+  /**
+   * Vocabulary hints for speech recognition: the names Whisper would otherwise
+   * mangle ("Out4" -> "out for", "Doc Upload Site" -> "dock upload site").
+   * Built from the latest session listing, so it follows sessions as they come
+   * and go. Short on purpose (Whisper's prompt window is ~220 tokens).
+   */
+  sttHints(): { prompt: string; hotwords: string } {
+    const names: string[] = [];
+    const seen = new Set<string>();
+    const add = (n: string | undefined) => {
+      const v = oneLine(n || '').slice(0, 40);
+      const k = v.toLowerCase();
+      if (!v || seen.has(k)) return;
+      seen.add(k);
+      names.push(v);
+    };
+    const live = this.lastSnapshots
+      .filter((s) => !s.inactive)
+      .sort((a, b) => b.lastActivity - a.lastActivity);
+    for (const s of live) {
+      add(s.sessionName);
+      if (s.projectName) add(s.projectName);
+      if (names.length >= STT_HINT_MAX_NAMES) break;
+    }
+    const self = [this.cfg.displayName, 'Jarvis'];
+    const prompt = clip(
+      `${self.join(', ')}.${names.length ? ` Sessions: ${names.join(', ')}.` : ''} ${STT_HINT_TERMS.join(', ')}.`,
+      STT_HINT_MAX_CHARS
+    );
+    const hotwords = clip([...self, ...names, ...STT_HINT_TERMS].join(' '), STT_HINT_MAX_CHARS);
+    return { prompt, hotwords };
   }
 
   /**

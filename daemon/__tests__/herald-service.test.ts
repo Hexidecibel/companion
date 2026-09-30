@@ -436,6 +436,156 @@ describe('HeraldService', () => {
     expect(b.svc.getState().inbox[0].heard).toBe(true);
   });
 
+  const lastUser = (p: { calls: LlmChatRequest[] }, i: number) => {
+    const m = p.calls[i].messages.filter((x) => x.role === 'user').pop()!;
+    return m.role === 'user' ? m.text : '';
+  };
+
+  it('voice vs text mode: the per-turn reply style rides at the END of the user turn, system prompt unchanged', async () => {
+    const p = scripted([{ emit: 'Out4 is idle.' }, { emit: 'Out4 is idle.' }]);
+    const { svc } = make(p, fakeSource([snap({ sessionId: 'out4' })]));
+    await svc.start();
+    svc.send('what is going on with everything?', { mode: 'voice' });
+    await waitFor(() => !svc.getState().busy);
+    svc.send('what is going on with everything?', { mode: 'text' });
+    await waitFor(() => p.calls.length === 2 && !svc.getState().busy);
+    expect(lastUser(p, 0)).toMatch(/what is going on with everything\?\n\n\[Reply style: spoken aloud, brief\. One or two short sentences/);
+    expect(lastUser(p, 1)).toMatch(/\[Reply style: short plain sentences, usually one to three/);
+    // The cacheable prefix is identical across modes.
+    expect(p.calls[0].system).toBe(p.calls[1].system);
+    // History carries the words only, never an old style line.
+    const hist = p.calls[1].messages.filter((m) => m.role === 'user').slice(0, -1);
+    expect(hist.map((m) => (m.role === 'user' ? m.text : ''))).toEqual(['what is going on with everything?']);
+  });
+
+  it('unknown mode / intent values are ignored (old or buggy clients)', async () => {
+    const p = scripted([{ emit: 'ok' }]);
+    const { svc } = make(p, fakeSource([]));
+    await svc.start();
+    svc.send('hello', { mode: 'shouting', intent: 'explode' });
+    await waitFor(() => !svc.getState().busy);
+    expect(lastUser(p, 0)).toMatch(/hello\n\n\[Reply style: short plain sentences/);
+    expect(svc.getState().messages[0].intent).toBeUndefined();
+  });
+
+  it('shorter / more: the brain gets an instruction, the transcript keeps the words and an intent chip', async () => {
+    const p = scripted([{ emit: 'Long answer. With detail.' }, { emit: 'Out4 is waiting.' }, { emit: 'More detail.' }]);
+    const { svc } = make(p, fakeSource([snap({ sessionId: 'out4' })]));
+    await svc.start();
+    svc.send('tell me about out4', { mode: 'voice' });
+    await waitFor(() => !svc.getState().busy);
+    svc.send('Shorter.', { mode: 'voice', intent: 'shorter' });
+    await waitFor(() => p.calls.length === 2 && !svc.getState().busy);
+    expect(lastUser(p, 1)).toMatch(/restate your previous reply in ONE short sentence/);
+    expect(lastUser(p, 1)).not.toMatch(/Detail for out4/); // no prefetch for a command
+    svc.send('Go on.', { mode: 'voice', intent: 'more' });
+    await waitFor(() => p.calls.length === 3 && !svc.getState().busy);
+    expect(lastUser(p, 2)).toMatch(/more detail on the last topic/);
+    const users = svc.getState().messages.filter((m) => m.role === 'user');
+    expect(users.map((m) => [m.text, m.intent])).toEqual([
+      ['tell me about out4', undefined],
+      ['Shorter.', 'shorter'],
+      ['Go on.', 'more'],
+    ]);
+  });
+
+  it('verbosity: validated, persisted, broadcast, and it shapes the style line', async () => {
+    const p = scripted([{ emit: 'ok' }, { emit: 'ok' }]);
+    const a = make(p, fakeSource([]));
+    await a.svc.start();
+    expect(a.svc.getState().verbosity).toBe('auto');
+    expect(() => a.svc.setVerbosity('chatty')).toThrow(/verbosity/);
+    expect(a.svc.setVerbosity('detailed')).toEqual({ verbosity: 'detailed' });
+    expect(a.events).toContainEqual({ kind: 'settings', verbosity: 'detailed' });
+    a.svc.send('status?', { mode: 'voice' });
+    await waitFor(() => !a.svc.getState().busy);
+    expect(lastUser(p, 0)).toMatch(/\[Reply style: spoken aloud, detailed/);
+    a.svc.shutdown();
+    const b = make(scripted([]), fakeSource([]));
+    await b.svc.start();
+    expect(b.svc.getState().verbosity).toBe('detailed');
+  });
+
+  it('set_verbosity tool: the brain can change the setting ("keep it short from now on")', async () => {
+    const p = scripted([
+      { toolCalls: [{ id: 'v', name: 'set_verbosity', arguments: '{"level":"brief"}' }], stopReason: 'tool_calls' },
+      { emit: "Okay, I'll keep it short." },
+    ]);
+    const { svc, events } = make(p, fakeSource([]));
+    await svc.start();
+    svc.send('keep it short from now on');
+    await waitFor(() => !svc.getState().busy);
+    expect(svc.getState().verbosity).toBe('brief');
+    expect(events).toContainEqual({ kind: 'settings', verbosity: 'brief' });
+    const bad = scripted([
+      { toolCalls: [{ id: 'v', name: 'set_verbosity', arguments: '{"level":"loud"}' }], stopReason: 'tool_calls' },
+      { emit: 'Sorry.' },
+    ]);
+    const other = make(bad, fakeSource([]));
+    await other.svc.start();
+    other.svc.send('be loud');
+    await waitFor(() => !other.svc.getState().busy);
+    expect(other.svc.getState().verbosity).toBe('auto');
+    const toolResult = bad.calls[1].messages.find((m) => m.role === 'tool');
+    expect(toolResult && toolResult.role === 'tool' ? toolResult.content : '').toMatch(/level must be one of/);
+  });
+
+  it('brief: nothing unheard -> "Nothing new." with no brain turn', async () => {
+    const p = scripted([]);
+    const { svc } = make(p, fakeSource([snap({ sessionId: 'out4', status: 'idle' })]));
+    await svc.start();
+    await svc.poll();
+    svc.send('Brief me', { mode: 'voice', intent: 'brief' });
+    expect(p.calls).toHaveLength(0);
+    expect(svc.getState().busy).toBe(false);
+    expect(svc.getState().messages.map((m) => [m.role, m.text, m.intent])).toEqual([
+      ['user', 'Brief me', 'brief'],
+      ['herald', 'Nothing new.', undefined],
+    ]);
+  });
+
+  it('brief: only unheard items, most urgent first, capped at three, and they become heard', async () => {
+    const sessions = ['a', 'b', 'c', 'd', 'e'].map((id) =>
+      snap({ sessionId: id, status: 'waiting', pendingChoice: { ...choice, signature: `sig-${id}` } })
+    );
+    const src = fakeSource(sessions);
+    const p = scripted([{ emit: 'B needs you. C asks to ship. D needs you. And 1 more.' }]);
+    const { svc } = make(p, src);
+    await svc.start();
+    await svc.poll();
+    const before = svc.getState().inbox.filter((i) => !i.heard);
+    expect(before).toHaveLength(5);
+    svc.send('Brief me', { mode: 'voice', intent: 'brief' });
+    await waitFor(() => !svc.getState().busy);
+    const text = lastUser(p, 0);
+    expect(text).toMatch(/Tell them ONLY about these new items/);
+    const items = text.split('New items:')[1].trim().split('\n');
+    expect(items).toHaveLength(3);
+    expect(items[0]).toMatch(/^- \[blocked\]/);
+    expect(text).toMatch(/"and 2 more"/);
+    expect(text).not.toMatch(/\[Reply style:/);
+    expect(svc.getState().inbox.filter((i) => !i.heard)).toHaveLength(0);
+  });
+
+  it('sttHints: session names (newest first), the names Herald / Jarvis, jargon; bounded', async () => {
+    const src = fakeSource([
+      snap({ sessionId: 'x1', sessionName: 'Doc Upload Site', projectName: 'doc-upload-site', lastActivity: 5 }),
+      snap({ sessionId: 'x2', sessionName: 'Out4', projectName: 'out4', lastActivity: 9 }),
+      snap({ sessionId: 'x3', sessionName: 'gone', inactive: true }),
+    ]);
+    const { svc } = make(scripted([]), src);
+    await svc.start();
+    await svc.poll();
+    const h = svc.sttHints();
+    expect(h.prompt).toMatch(/^Herald, Jarvis\. Sessions: Out4, Doc Upload Site, doc-upload-site\. tmux, deploy/);
+    expect(h.prompt).not.toMatch(/gone/);
+    expect(h.hotwords).toMatch(/Out4/);
+    expect(h.prompt.length).toBeLessThanOrEqual(600);
+    src.sessions.push(snap({ sessionId: 'x4', sessionName: 'Fresh One', lastActivity: 20 }));
+    await svc.poll();
+    expect(svc.sttHints().prompt).toMatch(/Sessions: Fresh One,/);
+  });
+
   it('markHeard rejects non-arrays', () => {
     const { svc } = make(null, fakeSource([]));
     expect(() => svc.markHeard('x' as unknown as string[])).toThrow();

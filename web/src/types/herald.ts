@@ -7,11 +7,24 @@ export interface HeraldInboxItem {
   headline: string;
   createdAt: number; heard: boolean;
 }
+/** voice = push-to-talk / talk-over / hands-free; text = typed. Voice replies are kept shorter. */
+export type HeraldInputMode = 'voice' | 'text';
+/** A spoken command turned into a structured brain request. */
+export type HeraldIntent = 'shorter' | 'more' | 'brief';
+/** Reply length. `auto` = brief for voice, normal for text. */
+export type HeraldVerbosity = 'auto' | 'brief' | 'normal' | 'detailed';
+/** herald_send payload. Unknown mode / intent values are ignored by the daemon. */
+export interface HeraldSendRequest {
+  text: string;
+  mode?: HeraldInputMode;
+  intent?: HeraldIntent;
+}
 export interface HeraldMessage {
   id: string; role: 'user' | 'herald'; text: string; createdAt: number;
   sessionRefs?: HeraldSessionRef[];
   actionIds?: string[];
   streaming?: boolean;
+  intent?: HeraldIntent;  // user lines sent as a voice command (rendered as a chip)
 }
 export interface HeraldAction {
   id: string; tier: HeraldActionTier;
@@ -32,6 +45,7 @@ export interface HeraldState {
   messages: HeraldMessage[];
   inbox: HeraldInboxItem[];
   actions: HeraldAction[];
+  verbosity?: HeraldVerbosity;  // persisted on the hub; absent on older daemons
 }
 export type HeraldEvent =
   | { kind: 'state'; state: HeraldState }
@@ -41,7 +55,12 @@ export type HeraldEvent =
   | { kind: 'inbox'; inbox: HeraldInboxItem[] }
   | { kind: 'action'; action: HeraldAction }
   | { kind: 'busy'; busy: boolean }
+  | { kind: 'settings'; verbosity: HeraldVerbosity }
   | { kind: 'error'; error: string };
+/** herald_set_verbosity payload; answered with { verbosity }. */
+export interface HeraldSetVerbosityRequest {
+  verbosity: HeraldVerbosity;
+}
 
 // --- voice protocol (mirrored byte-for-byte in web/src/types/herald.ts; a web test enforces it) ---
 /**
@@ -53,8 +72,17 @@ export type HeraldEvent =
  *   herald_voice_audio         HeraldVoiceAudioChunk (fire-and-forget; no requestId, no reply)
  *   herald_voice_stream_end    HeraldVoiceStreamEnd -> HeraldSttResult
  *   herald_handsfree           { on: boolean } -> { owner: boolean }
+ *   herald_presence            HeraldPresence -> { announcer: boolean }
  * Per-client pushes arrive as `herald_voice_event` with a HeraldVoiceEvent payload.
+ *
+ * Inbox tones play on ONE device (the announcer): the hands-free device, else
+ * the one the user touched last, else the one seen last. Clients report
+ * presence on connect / when shown (interacted: false) and on use (true).
  */
+export interface HeraldPresence {
+  /** The user just used this device (a key press or tap), not merely opened it. */
+  interacted: boolean;
+}
 export interface HeraldVoiceInfo {
   id: string;
   name: string;
@@ -116,5 +144,7 @@ export interface HeraldSttResult {
 export type HeraldVoiceEvent =
   | { kind: 'wake'; streamId: string; score: number; model: string }
   | { kind: 'stream_error'; streamId: string; error: string }
-  | { kind: 'handsfree_revoked' };
+  | { kind: 'handsfree_revoked' }
+  /** This client became (true) or stopped being (false) the device that plays inbox tones. */
+  | { kind: 'announcer'; owner: boolean };
 // --- end voice protocol ---

@@ -24,6 +24,7 @@ import {
   VoiceRequestError,
   VoiceServiceClient,
   VoiceUnavailableError,
+  type SttHints,
   type VoiceHealth,
 } from './client';
 import { stripWakePhrase } from './wake-phrase';
@@ -91,6 +92,8 @@ export interface HeraldVoiceServiceOptions {
   sendEvent: (clientId: string, event: HeraldVoiceEvent) => void;
   /** Log transcripts (user data) only when set. */
   debugTranscripts?: boolean;
+  /** Vocabulary hints for each transcription (current session names etc.). */
+  sttHints?: () => SttHints | null;
   now?: () => number;
   limits?: Partial<typeof VOICE_LIMITS>;
 }
@@ -102,6 +105,10 @@ export class HeraldVoiceService {
   private tts = new Map<string, ClientTts>();
   private streams = new Map<string, VoiceStream>();
   private handsFreeOwner: string | null = null;
+  /** Clients that registered presence: when they were last seen / last used. */
+  private presence = new Map<string, { seenAt: number; interactedAt: number }>();
+  /** The one client that plays inbox tones (see `presence`). */
+  private announcer: string | null = null;
   private sweeper: ReturnType<typeof setInterval> | null = null;
   private readonly limits: typeof VOICE_LIMITS;
   private readonly now: () => number;
@@ -381,7 +388,13 @@ export class HeraldVoiceService {
       return { text: '', audioMs, sttMs: 0, woke };
     }
     try {
-      const r = await this.opts.client.stt(audio);
+      let hints: SttHints | null = null;
+      try {
+        hints = this.opts.sttHints?.() ?? null;
+      } catch {
+        hints = null; // hints are an accuracy aid, never a reason to fail
+      }
+      const r = await this.opts.client.stt(audio, undefined, hints);
       const text = purpose === 'wake' ? stripWakePhrase(r.text) : r.text.trim();
       if (this.opts.debugTranscripts) {
         console.log(
@@ -429,10 +442,57 @@ export class HeraldVoiceService {
       const prev = this.handsFreeOwner;
       this.handsFreeOwner = clientId;
       if (prev && prev !== clientId) this.opts.sendEvent(prev, { kind: 'handsfree_revoked' });
+      this.electAnnouncer();
       return { owner: true };
     }
     if (this.handsFreeOwner === clientId) this.handsFreeOwner = null;
+    this.electAnnouncer();
     return { owner: false };
+  }
+
+  /**
+   * Which device plays inbox tones. Exactly one: the hands-free device if any,
+   * else the one the user touched most recently, else the one seen most
+   * recently. Every change is pushed to the two clients involved.
+   */
+  setPresence(clientId: string, raw: unknown): { announcer: boolean } {
+    const interacted = (raw as { interacted?: unknown } | undefined)?.interacted === true;
+    const now = this.now();
+    const p = this.presence.get(clientId) ?? { seenAt: 0, interactedAt: 0 };
+    p.seenAt = now;
+    if (interacted) p.interactedAt = now;
+    this.presence.set(clientId, p);
+    this.electAnnouncer(clientId);
+    return { announcer: this.announcer === clientId };
+  }
+
+  get announcerClient(): string | null {
+    return this.announcer;
+  }
+
+  /** `quiet`: the requester gets its answer in the reply, not as an event. */
+  private electAnnouncer(quiet?: string): void {
+    let next: string | null = null;
+    if (this.handsFreeOwner && this.presence.has(this.handsFreeOwner)) {
+      next = this.handsFreeOwner;
+    } else {
+      let best: { id: string; interactedAt: number; seenAt: number } | null = null;
+      for (const [id, p] of this.presence) {
+        if (
+          !best ||
+          p.interactedAt > best.interactedAt ||
+          (p.interactedAt === best.interactedAt && p.seenAt > best.seenAt)
+        ) {
+          best = { id, ...p };
+        }
+      }
+      next = best?.id ?? null;
+    }
+    const prev = this.announcer;
+    if (next === prev) return;
+    this.announcer = next;
+    if (prev && prev !== quiet) this.opts.sendEvent(prev, { kind: 'announcer', owner: false });
+    if (next && next !== quiet) this.opts.sendEvent(next, { kind: 'announcer', owner: true });
   }
 
   get handsFreeClient(): string | null {
@@ -444,6 +504,9 @@ export class HeraldVoiceService {
     this.cancelTts(clientId);
     for (const s of [...this.streams.values()]) if (s.clientId === clientId) this.closeStream(s);
     if (this.handsFreeOwner === clientId) this.handsFreeOwner = null;
+    this.presence.delete(clientId);
+    if (this.announcer === clientId) this.announcer = null;
+    this.electAnnouncer();
   }
 }
 

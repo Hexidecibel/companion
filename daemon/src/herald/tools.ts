@@ -194,6 +194,23 @@ export const KNOWLEDGE_TOOL_SPECS: LlmToolSpec[] = [
 
 TOOL_SPECS.push(...KNOWLEDGE_TOOL_SPECS);
 
+export const VERBOSITY_TOOL_LEVELS = ['brief', 'normal', 'detailed', 'auto'] as const;
+
+TOOL_SPECS.push({
+  name: 'set_verbosity',
+  description:
+    'Change how long your replies are FROM NOW ON, only when the user asks for a lasting change ("keep it short from now on", "you can be more detailed", "back to normal"). ' +
+    'Not for a one-off request about a single answer. brief = one or two sentences; normal = a few sentences; detailed = fuller answers; auto = brief when spoken, normal when typed (the default).',
+  parameters: {
+    type: 'object',
+    properties: {
+      level: { type: 'string', enum: [...VERBOSITY_TOOL_LEVELS], maxLength: 10 },
+    },
+    required: ['level'],
+    additionalProperties: false,
+  },
+});
+
 /** Tools that create an action: never executed in an iteration with malformed calls. */
 export const ACTION_TOOLS = new Set(['propose_input', 'propose_cush_command']);
 
@@ -304,6 +321,8 @@ function example(name: string): string {
       return '{"query": "jellyfin port"}';
     case 'propose_cush_command':
       return '{"operation": "serve", "name": "phone-share", "dir": "~/local/src/<project>/dist"}';
+    case 'set_verbosity':
+      return '{"level": "brief"}';
     default:
       return '{"session": "companion"}';
   }
@@ -334,6 +353,8 @@ export interface ToolEnv {
   echoDelayMs: number;
   /** Knowledge lookups + cush-tools. Absent = those tools report unavailable. */
   toolbox?: HeraldToolbox;
+  /** Persist the reply-length setting. Absent = set_verbosity reports unavailable. */
+  setVerbosity?: (level: (typeof VERBOSITY_TOOL_LEVELS)[number]) => void;
 }
 
 export interface ToolOutcome {
@@ -574,6 +595,19 @@ export async function executeTool(
 
       case 'propose_cush_command':
         return await proposeCush(args, env, state);
+
+      case 'set_verbosity': {
+        const level = String(args.level || '').toLowerCase();
+        const valid = (VERBOSITY_TOOL_LEVELS as readonly string[]).includes(level);
+        if (!valid) return err(`level must be one of: ${VERBOSITY_TOOL_LEVELS.join(', ')}.`);
+        if (!env.setVerbosity) return err('Changing reply length is not available here.');
+        env.setVerbosity(level as (typeof VERBOSITY_TOOL_LEVELS)[number]);
+        return ok({
+          ok: true,
+          level,
+          instruction: 'Saved. Confirm in a few words, e.g. "Okay, I\'ll keep it short."',
+        });
+      }
 
       default:
         return err(`Unknown tool "${name}".`);

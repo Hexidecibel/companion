@@ -92,8 +92,15 @@ export function registerHeraldHandlers(ctx: HandlerContext): Record<string, Mess
     },
 
     herald_send(client, payload, requestId) {
+      const p = (payload || {}) as { text?: unknown; mode?: unknown; intent?: unknown };
       return reply(client, 'herald_send', requestId, () =>
-        ctx.herald!.send((payload as { text?: unknown } | undefined)?.text)
+        ctx.herald!.send(p.text, { mode: p.mode, intent: p.intent })
+      );
+    },
+
+    herald_set_verbosity(client, payload, requestId) {
+      return reply(client, 'herald_set_verbosity', requestId, () =>
+        ctx.herald!.setVerbosity((payload as { verbosity?: unknown } | undefined)?.verbosity)
       );
     },
 
@@ -160,6 +167,12 @@ export function registerHeraldHandlers(ctx: HandlerContext): Record<string, Mess
     herald_voice_stream_end(client, payload, requestId) {
       return voiceReply(client, 'herald_voice_stream_end', requestId, (v) =>
         v.endStream(client.id, payload)
+      );
+    },
+
+    herald_presence(client, payload, requestId) {
+      return voiceReply(client, 'herald_presence', requestId, (v) =>
+        v.setPresence(client.id, payload)
       );
     },
 

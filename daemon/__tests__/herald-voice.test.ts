@@ -355,3 +355,95 @@ describe('voice config + handlers', () => {
     expect(sent[1].payload).toEqual({ cancelled: 3 });
   });
 });
+
+describe('STT vocabulary hints', () => {
+  it('each transcription carries the current hints; a failing hint source never fails STT', async () => {
+    const client = fakeClient({ stt: jest.fn(async () => ({ text: 'Tell Out4 to hold', audioMs: 0, sttMs: 20 })) });
+    let hints: any = { prompt: 'Herald, Jarvis. Sessions: Out4.', hotwords: 'Herald Jarvis Out4' };
+    const svc = new HeraldVoiceService({ client, sendEvent: () => {}, sttHints: () => hints });
+    svc.startStream('c1', { streamId: 's1', purpose: 'stt', sampleRate: 16000 });
+    svc.pushAudio('c1', { streamId: 's1', seq: 0, pcm: pcm(1600) });
+    await svc.endStream('c1', { streamId: 's1', action: 'transcribe' });
+    expect(client.stt.mock.calls[0][2]).toEqual(hints);
+
+    hints = { prompt: 'Herald, Jarvis. Sessions: Doc Upload Site.', hotwords: 'Doc Upload Site' };
+    svc.startStream('c1', { streamId: 's2', purpose: 'stt', sampleRate: 16000 });
+    svc.pushAudio('c1', { streamId: 's2', seq: 0, pcm: pcm(1600) });
+    await svc.endStream('c1', { streamId: 's2', action: 'transcribe' });
+    expect(client.stt.mock.calls[1][2].prompt).toContain('Doc Upload Site'); // follows the sessions
+
+    const broken = new HeraldVoiceService({
+      client,
+      sendEvent: () => {},
+      sttHints: () => {
+        throw new Error('boom');
+      },
+    });
+    broken.startStream('c1', { streamId: 's3', purpose: 'stt', sampleRate: 16000 });
+    broken.pushAudio('c1', { streamId: 's3', seq: 0, pcm: pcm(1600) });
+    await expect(broken.endStream('c1', { streamId: 's3', action: 'transcribe' })).resolves.toMatchObject({ text: 'Tell Out4 to hold' });
+    expect(client.stt.mock.calls[2][2]).toBeNull();
+  });
+
+  it('the HTTP client sends hints as query parameters, and nothing when there are none', async () => {
+    const urls: string[] = [];
+    const c = new VoiceServiceClient('http://v', (async (u: string) => {
+      urls.push(u);
+      return new Response(JSON.stringify({ text: 'x', audioMs: 1, sttMs: 1 }), { status: 200 });
+    }) as any);
+    await c.stt(Buffer.alloc(4), undefined, { prompt: 'Herald, Out4.', hotwords: 'Out4 tmux' });
+    await c.stt(Buffer.alloc(4));
+    const q = new URL(urls[0]).searchParams;
+    expect(q.get('prompt')).toBe('Herald, Out4.');
+    expect(q.get('hotwords')).toBe('Out4 tmux');
+    expect(urls[1]).toBe('http://v/stt');
+  });
+});
+
+describe('announcer arbitration (which device plays inbox tones)', () => {
+  it('the most recently used device wins; the others are told to stand down', () => {
+    let t = 1000;
+    const events: Array<[string, any]> = [];
+    const svc = new HeraldVoiceService({ client: fakeClient(), sendEvent: (id, e) => events.push([id, e]), now: () => t });
+    expect(svc.setPresence('phone', { interacted: false })).toEqual({ announcer: true });
+    t += 10;
+    // Neither was used yet: the newest device takes over.
+    expect(svc.setPresence('desk', { interacted: false })).toEqual({ announcer: true });
+    expect(events).toContainEqual(['phone', { kind: 'announcer', owner: false }]);
+    t += 10;
+    expect(svc.setPresence('phone', { interacted: true })).toEqual({ announcer: true });
+    expect(events).toContainEqual(['desk', { kind: 'announcer', owner: false }]);
+    t += 10;
+    // Seeing the desk again does not beat the phone the user actually touched.
+    expect(svc.setPresence('desk', { interacted: false })).toEqual({ announcer: false });
+    expect(svc.announcerClient).toBe('phone');
+  });
+
+  it('hands-free wins; when that device leaves, the next most recent takes over', () => {
+    let t = 1000;
+    const events: Array<[string, any]> = [];
+    const svc = new HeraldVoiceService({ client: fakeClient(), sendEvent: (id, e) => events.push([id, e]), now: () => t });
+    svc.setPresence('laptop', { interacted: true });
+    t += 10;
+    svc.setPresence('kitchen', { interacted: false });
+    expect(svc.announcerClient).toBe('laptop');
+    svc.setHandsFree('kitchen', true);
+    expect(svc.announcerClient).toBe('kitchen');
+    expect(events).toContainEqual(['kitchen', { kind: 'announcer', owner: true }]);
+    svc.clientGone('kitchen');
+    expect(svc.announcerClient).toBe('laptop');
+    expect(events).toContainEqual(['laptop', { kind: 'announcer', owner: true }]);
+    svc.clientGone('laptop');
+    expect(svc.announcerClient).toBeNull();
+  });
+
+  it('herald_presence routes to the service with the client id', async () => {
+    const setPresence = jest.fn(() => ({ announcer: true }));
+    const sent: any[] = [];
+    const ctx: any = { herald: {}, heraldVoice: { setPresence }, send: (_ws: unknown, m: unknown) => sent.push(m), config: { listeners: [] } };
+    const h = registerHeraldHandlers(ctx);
+    await h.herald_presence({ id: 'c9', ws: {} } as any, { interacted: true }, 'p');
+    expect(setPresence).toHaveBeenCalledWith('c9', { interacted: true });
+    expect(sent[0]).toMatchObject({ type: 'herald_presence', success: true, payload: { announcer: true } });
+  });
+});
