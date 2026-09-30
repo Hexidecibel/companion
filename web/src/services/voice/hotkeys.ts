@@ -18,6 +18,8 @@ export interface Chord {
 }
 
 export const DEFAULT_CHORD = 'Ctrl+Shift+Space';
+/** "Brief me": one press, anywhere. Needs a modifier, so it never eats typing. */
+export const DEFAULT_BRIEF_CHORD = 'Ctrl+Shift+B';
 
 const MOD_CODES = new Set([
   'ControlLeft', 'ControlRight', 'ShiftLeft', 'ShiftRight', 'AltLeft', 'AltRight', 'MetaLeft', 'MetaRight',

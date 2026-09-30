@@ -1,5 +1,6 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
-import type { HeraldAction, HeraldInboxItem, HeraldMessage, HeraldSessionRef, InboxPriority } from '../../types/herald';
+import type { HeraldAction, HeraldInboxItem, HeraldMessage, HeraldSessionRef, HeraldVerbosity, InboxPriority } from '../../types/herald';
+import { INTENT_LABELS, VOICE_COMMAND_HELP } from '../../services/voice/voiceCommands';
 import { sortInbox, sortPendingByUrgency } from '../../services/heraldReducer';
 import { useHeraldData, useHeraldUi, useHeraldVoiceCtx, useHeraldVoiceInputCtx } from '../../context/HeraldContext';
 import type { HeraldVoiceInput } from '../../hooks/useHeraldVoiceInput';
@@ -10,7 +11,7 @@ import { pickVoice, voicesForPicker } from '../../services/tts/voices';
 import { HeraldOrb } from './HeraldOrb';
 import { HeraldActionCard, HeraldPendingMarker, HeraldResolvedLine } from './HeraldActionCard';
 import { HeraldComposer } from './HeraldComposer';
-import { IconBack, IconBell, IconClose, IconDown, IconMore, IconPlay, IconRefresh, IconSpeaker, IconSpeakerOff, IconStop, IconTrash, IconX } from './heraldIcons';
+import { IconBack, IconBell, IconBrief, IconClose, IconDown, IconMore, IconPlay, IconRefresh, IconSpeaker, IconSpeakerOff, IconStop, IconTrash, IconX } from './heraldIcons';
 
 type OpenSession = (serverId: string, sessionId: string) => void;
 
@@ -83,6 +84,14 @@ const HeraldLine = memo(function HeraldLine({ message, actionById, priorityBySes
   onOpenSession: OpenSession;
 }) {
   if (message.role === 'user') {
+    if (message.intent) {
+      // A spoken command ("shorter", "go on", "what's up"): a small chip, not the raw words.
+      return (
+        <div className="herald-msg herald-msg--user herald-msg--intent" title={`${formatTime(message.createdAt)} · you said "${message.text}"`}>
+          <span className="herald-intent-chip">{INTENT_LABELS[message.intent]}</span>
+        </div>
+      );
+    }
     return (
       <div className="herald-msg herald-msg--user" title={formatTime(message.createdAt)}>
         <time className="herald-msg__time" dateTime={new Date(message.createdAt).toISOString()}>{formatTime(message.createdAt)}</time>
@@ -245,6 +254,18 @@ function VoiceSettings({ voice }: { voice: HeraldVoice }) {
             />
             <span className="herald-voice-set__rate-val">{voice.rate.toFixed(2)}×</span>
           </label>
+          <label className="herald-voice-set__rate">
+            <span className="herald-voice-set__rate-label">Spoken</span>
+            <select
+              className="herald-voice-set__select herald-voice-set__select--sm"
+              value={voice.spokenLength}
+              onChange={(e) => voice.setSpokenLength(e.target.value === 'full' ? 'full' : 'short')}
+              title="Short: the first sentence or two are read out, the rest stays on screen (say &quot;go on&quot;)"
+            >
+              <option value="short">Short (first sentence or two)</option>
+              <option value="full">Full reply</option>
+            </select>
+          </label>
           <button type="button" role="menuitem" className="herald-menu__item" onClick={voice.testVoice}>
             <IconPlay size={14} /> Test voice
           </button>
@@ -258,15 +279,82 @@ function VoiceSettings({ voice }: { voice: HeraldVoice }) {
           className="herald-menu__item"
           onClick={() => voice.setChimeOn(!voice.chimeOn)}
         >
-          <IconBell size={15} /> Chime on new items
+          <IconBell size={15} /> Tone when something is new
           <span className={`herald-switch${voice.chimeOn ? ' herald-switch--on' : ''}`} aria-hidden="true" />
         </button>
+      )}
+      {voice.chimeSupported && voice.chimeOn && (
+        <button
+          type="button"
+          role="menuitemcheckbox"
+          aria-checked={voice.remind}
+          className="herald-menu__item herald-menu__item--sub"
+          onClick={() => voice.setRemind(!voice.remind)}
+          title="Replay the tone once or twice if something blocked on you goes unheard for 5 minutes"
+        >
+          Remind me if a block goes unheard
+          <span className={`herald-switch${voice.remind ? ' herald-switch--on' : ''}`} aria-hidden="true" />
+        </button>
+      )}
+      {voice.chimeSupported && voice.chimeOn && !voice.announcer && (
+        <div className="herald-voice-set__engine">Tones are playing on another device you used more recently.</div>
       )}
     </div>
   );
 }
 
-function OverflowMenu({ model, onReset, onRefresh, disabled, voice, input }: {
+const VERBOSITY_OPTIONS: Array<{ value: HeraldVerbosity; label: string }> = [
+  { value: 'auto', label: 'Auto (brief spoken, normal typed)' },
+  { value: 'brief', label: 'Brief' },
+  { value: 'normal', label: 'Normal' },
+  { value: 'detailed', label: 'Detailed' },
+];
+
+function ReplyLength({ value, onChange, disabled }: { value: HeraldVerbosity; onChange: (v: HeraldVerbosity) => void; disabled: boolean }) {
+  return (
+    <div className="herald-voice-set" role="group" aria-label="Reply length">
+      <label className="herald-voice-set__rate">
+        <span className="herald-voice-set__rate-label">Replies</span>
+        <select
+          className="herald-voice-set__select herald-voice-set__select--sm"
+          value={value}
+          disabled={disabled}
+          onChange={(e) => onChange(e.target.value as HeraldVerbosity)}
+          title='How much Herald says. Also: "keep it short from now on", "you can be more detailed"'
+        >
+          {VERBOSITY_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+        </select>
+      </label>
+    </div>
+  );
+}
+
+function VoiceCommandsHelp() {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="herald-voice-set" role="group" aria-label="Voice commands">
+      <button type="button" className="herald-menu__item" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+        Voice commands
+        <span className={`herald-pending-more__chev${open ? ' herald-pending-more__chev--up' : ''}`} aria-hidden="true"><IconDown size={13} /></span>
+      </button>
+      {open && (
+        <dl className="herald-cmds">
+          {VOICE_COMMAND_HELP.map((c) => (
+            <div key={c.does} className="herald-cmds__row">
+              <dt>{c.say}</dt>
+              <dd>{c.does}</dd>
+            </div>
+          ))}
+          <p className="herald-cmds__note">Say one on its own (after "Hey Jarvis" when hands-free). "Stop the build" is still a message.</p>
+        </dl>
+      )}
+    </div>
+  );
+}
+
+function OverflowMenu({ model, onReset, onRefresh, disabled, voice, input, verbosity, onVerbosity }: {
+  verbosity: HeraldVerbosity | undefined;
+  onVerbosity: (v: HeraldVerbosity) => void;
   model: string;
   onReset: () => Promise<boolean>;
   onRefresh: () => void;
@@ -316,6 +404,12 @@ function OverflowMenu({ model, onReset, onRefresh, disabled, voice, input }: {
               <button type="button" role="menuitem" className="herald-menu__item herald-menu__item--danger" onClick={() => setConfirming(true)} disabled={disabled}>
                 <IconTrash size={15} /> Reset conversation
               </button>
+              {verbosity !== undefined && (
+                <>
+                  <div className="herald-menu__sep" role="separator" />
+                  <ReplyLength value={verbosity} onChange={onVerbosity} disabled={disabled} />
+                </>
+              )}
               {(voice.supported || voice.chimeSupported) && (
                 <>
                   <div className="herald-menu__sep" role="separator" />
@@ -324,6 +418,8 @@ function OverflowMenu({ model, onReset, onRefresh, disabled, voice, input }: {
               )}
               <div className="herald-menu__sep" role="separator" />
               <VoiceInputSettings input={input} />
+              <div className="herald-menu__sep" role="separator" />
+              <VoiceCommandsHelp />
             </>
           ) : (
             <div className="herald-menu__confirm">
@@ -491,11 +587,12 @@ export function HeraldPanel({ variant, onOpenSession, onClose }: HeraldPanelProp
 
   // ---- actions -----------------------------------------------------------
   const stopVoice = voice.stop;
-  const send = useCallback(async (text: string) => {
+  const send = useCallback(async (text: string, mode: 'voice' | 'text' = 'text') => {
     stickRef.current = true;
     stopVoice();
-    return h.send(text);
+    return h.send(text, { mode });
   }, [h, stopVoice]);
+  const briefMe = h.briefMe;
 
   const onChip = useCallback((item: HeraldInboxItem) => {
     if (!item.heard) h.markHeard([item.id]);
@@ -521,6 +618,7 @@ export function HeraldPanel({ variant, onOpenSession, onClose }: HeraldPanelProp
   // Escape while speaking is a barge-in: it only stops the voice (runs in the
   // capture phase so it beats echo-cancel and panel-close).
   const cancelInput = input.cancel;
+  const stopCommand = voice.stopCommand;
   const onKeyDownCapture = useCallback((e: ReactKeyboardEvent) => {
     if (e.key === 'Escape' && listening) {
       e.preventDefault();
@@ -531,9 +629,9 @@ export function HeraldPanel({ variant, onOpenSession, onClose }: HeraldPanelProp
     if (e.key === 'Escape' && speaking) {
       e.preventDefault();
       e.stopPropagation();
-      stopVoice();
+      stopCommand();
     }
-  }, [speaking, stopVoice, listening, cancelInput]);
+  }, [speaking, stopCommand, listening, cancelInput]);
 
   // Escape closes the docked panel when focus is inside it.
   const onKeyDown = useCallback((e: ReactKeyboardEvent) => {
@@ -551,6 +649,7 @@ export function HeraldPanel({ variant, onOpenSession, onClose }: HeraldPanelProp
   else if (supported === false) statusText = 'Unavailable';
   else if (!enabled) statusText = 'Paused';
   else if (listening) statusText = 'Listening';
+  else if (voice.flash) statusText = voice.flash;
   else if (speaking) statusText = 'Speaking';
   else if (busy) statusText = 'Thinking';
   else if (h.unheardBlocked > 0) statusText = `${h.unheardBlocked} waiting on you`;
@@ -596,12 +695,25 @@ export function HeraldPanel({ variant, onOpenSession, onClose }: HeraldPanelProp
         </div>
         <div className="herald-header__title">
           <span className="herald-header__name">{displayName}</span>
-          <span className={`herald-header__status herald-header__status--${listening ? 'listening' : speaking ? 'speaking' : presence}`}>
+          <span className={`herald-header__status herald-header__status--${listening ? 'listening' : voice.flash ? 'flash' : speaking ? 'speaking' : presence}`} aria-live="polite">
             {statusText}
           </span>
         </div>
         <div className="herald-header__actions">
           <HandsFreeIndicator input={input} />
+          {canTalk && (
+            <button
+              type="button"
+              className={`herald-icon-btn herald-brief${h.unheardCount > 0 ? ' herald-brief--new' : ''}`}
+              onClick={briefMe}
+              disabled={busy}
+              aria-label={h.unheardCount > 0 ? `Brief me: ${h.unheardCount} new` : 'Brief me'}
+              title={`Brief me on what is new (${input.briefChordLabel}, or say "what's up")`}
+            >
+              <IconBrief size={17} />
+              {h.unheardCount > 0 && <span className="herald-brief__badge" aria-hidden="true">{h.unheardCount}</span>}
+            </button>
+          )}
           {ui.hostOptions.length > 1 && (
             <label className="herald-host">
               <span className="sr-only">Herald host</span>
@@ -630,7 +742,16 @@ export function HeraldPanel({ variant, onOpenSession, onClose }: HeraldPanelProp
               {voice.voiceOn ? <IconSpeaker size={18} /> : <IconSpeakerOff size={18} />}
             </button>
           )}
-          <OverflowMenu model={state?.model ?? ''} onReset={h.reset} onRefresh={h.refresh} disabled={!available} voice={voice} input={input} />
+          <OverflowMenu
+            model={state?.model ?? ''}
+            onReset={h.reset}
+            onRefresh={h.refresh}
+            disabled={!available}
+            voice={voice}
+            input={input}
+            verbosity={state?.verbosity}
+            onVerbosity={(v) => void h.setVerbosity(v)}
+          />
           {variant === 'docked' && (
             <button
               type="button"
@@ -650,7 +771,7 @@ export function HeraldPanel({ variant, onOpenSession, onClose }: HeraldPanelProp
           items={inbox}
           unheardCount={h.unheardCount}
           canAsk={canTalk && !busy}
-          onAsk={() => void send('Anything for me?')}
+          onAsk={briefMe}
           onChip={onChip}
         />
       )}
@@ -734,11 +855,16 @@ export function HeraldPanel({ variant, onOpenSession, onClose }: HeraldPanelProp
         <HeraldListeningBar input={input} />
 
         {speaking && !listening && (
-          <div className="herald-speaking" role="status">
+          <div className={`herald-speaking${input.handsFreeActive ? ' herald-speaking--handsfree' : ''}`} role="status">
             <span className="herald-speaking__bars" aria-hidden="true"><span /><span /><span /><span /></span>
-            <span className="herald-speaking__label">Speaking…</span>
-            <button type="button" className="herald-speaking__stop" onClick={stopVoice} title="Stop speaking (Esc)">
-              <IconStop size={13} /> Stop
+            <span className="herald-speaking__label">
+              Speaking…
+              <span className="herald-speaking__hint">
+                {input.prefs.interrupt || input.handsFreeActive ? ' say "stop", or press Esc' : ' press Esc to stop'}
+              </span>
+            </span>
+            <button type="button" className="herald-speaking__stop" onClick={voice.stopCommand} title="Stop speaking (Esc, or say &quot;stop&quot;)">
+              <IconStop size={13} /> Stop <kbd className="herald-speaking__kbd">Esc</kbd>
             </button>
           </div>
         )}

@@ -62,3 +62,7 @@ export const IconMicOff = (p: IconProps) => (
 export const IconListen = (p: IconProps) => (
   <Svg {...p}><circle cx="12" cy="12" r="1.6" /><path d="M8.6 8.6a4.8 4.8 0 0 0 0 6.8" /><path d="M15.4 8.6a4.8 4.8 0 0 1 0 6.8" /><path d="M5.8 5.8a8.8 8.8 0 0 0 0 12.4" /><path d="M18.2 5.8a8.8 8.8 0 0 1 0 12.4" /></Svg>
 );
+/** "Brief me": what's new, read out. */
+export const IconBrief = (p: IconProps) => (
+  <Svg {...p}><path d="M4 6h10" /><path d="M4 12h7" /><path d="M4 18h10" /><path d="M16 10l5 3-5 3v-6z" /></Svg>
+);

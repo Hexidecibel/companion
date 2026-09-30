@@ -24,8 +24,8 @@ function saveDraft(text: string): void {
 
 interface HeraldComposerProps {
   displayName: string;
-  /** Returns true if the server accepted the line. */
-  onSend: (text: string) => Promise<boolean>;
+  /** Returns true if the server accepted the line. `mode` 'voice': an auto-sent transcript. */
+  onSend: (text: string, mode?: 'voice' | 'text') => Promise<boolean>;
   /** Hub unreachable / Herald disabled: no typing at all. */
   disabled: boolean;
   /** A turn is in flight: typing (and dictation) allowed, sending is not. */
@@ -102,11 +102,11 @@ export function HeraldComposer({
 
   const canSend = !disabled && !busy;
 
-  const sendText = useCallback(async (text: string) => {
+  const sendText = useCallback(async (text: string, mode: 'voice' | 'text' = 'text') => {
     const el = ref.current;
     setDraft('');
     if (el) el.value = '';
-    const ok = await onSend(text);
+    const ok = await onSend(text, mode);
     if (!ok) {
       // Never lose what the user said: put it back unless they've started a new line.
       setDraft((cur) => (cur.trim() ? cur : text));
@@ -128,7 +128,7 @@ export function HeraldComposer({
     onInjected?.(inject.id);
     const current = ref.current?.value ?? '';
     if (inject.autoSend && canSend && !current.trim()) {
-      void sendText(inject.text);
+      void sendText(inject.text, inject.mode);
       return;
     }
     const merged = current.trim() ? `${current.replace(/\s+$/, '')} ${inject.text}` : inject.text;

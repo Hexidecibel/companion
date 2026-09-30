@@ -7,8 +7,13 @@ import { HERALD_DEMO_SERVER_ID, isHeraldDemo } from '../services/heraldTransport
 import { DEFAULT_DISPLAY_NAME, derivePresence, type HeraldPresence } from '../services/heraldReducer';
 import { isMobileViewport } from '../utils/platform';
 import { eventBus } from '../utils/eventBus';
+import { routeVoiceTranscript } from '../services/voice/voiceCommandRouter';
+import type { HeraldIntent } from '../types/herald';
+import { playChime } from '../services/tts/chime';
 
 const PANEL_OPEN_KEY = 'herald_panel_open';
+/** A voice command waiting for the current turn to finish gives up after this. */
+const INTENT_WAIT_MS = 30_000;
 const HOST_KEY = 'herald_host_server_id';
 
 function readStorage(key: string): string | null {
@@ -51,6 +56,8 @@ interface HeraldUiValue {
 }
 
 export interface HeraldDataValue extends UseHeraldReturn {
+  /** One-press briefing on what is new (button, hotkey, "what's up"). */
+  briefMe: () => void;
   displayName: string;
   presence: HeraldPresence;
   unheardCount: number;
@@ -157,6 +164,66 @@ export function HeraldProvider({ children }: { children: ReactNode }) {
   const voice = useHeraldVoice(herald.subscribeEvents, hostId, undefined, voiceHost);
   const openRef = useRef(open);
   openRef.current = open;
+
+  // Structured brain requests from voice commands. A turn may still be running
+  // (the user talked over the reply): the request waits for it, briefly.
+  const heraldRef = useRef(herald);
+  heraldRef.current = herald;
+  const voiceRef = useRef(voice);
+  voiceRef.current = voice;
+  const pendingIntent = useRef<{ text: string; intent: HeraldIntent; at: number } | null>(null);
+  const sendIntent = useCallback((text: string, intent: HeraldIntent) => {
+    const h = heraldRef.current;
+    if ((h.state?.busy ?? false) || h.sending) {
+      pendingIntent.current = { text, intent, at: Date.now() };
+      return;
+    }
+    void h.send(text, { mode: 'voice', intent });
+  }, []);
+  const busyNow = (herald.state?.busy ?? false) || herald.sending;
+  useEffect(() => {
+    const p = pendingIntent.current;
+    if (busyNow || !p) return;
+    pendingIntent.current = null;
+    if (Date.now() - p.at < INTENT_WAIT_MS) void heraldRef.current.send(p.text, { mode: 'voice', intent: p.intent });
+  }, [busyNow]);
+
+  // Esc stops Herald talking from anywhere on the page (hands-free: focus is
+  // rarely in the panel). Bubble phase, so dialogs that handle Esc first win.
+  const speakingNow = voice.supported && voice.speaking;
+  useEffect(() => {
+    if (!speakingNow) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape' || e.defaultPrevented) return;
+      voiceRef.current.stopCommand();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [speakingNow]);
+
+  const briefMe = useCallback(() => {
+    voiceRef.current.stop();
+    voiceRef.current.expectBriefing();
+    sendIntent('Brief me', 'brief');
+  }, [sendIntent]);
+
+  const onVoiceTranscript = useCallback((text: string): string | null => {
+    const v = voiceRef.current;
+    const r = routeVoiceTranscript(text, {
+      stop: v.stopCommand,
+      repeat: v.repeat,
+      goOn: v.goOn,
+      stepRate: v.stepRate,
+      expectBriefing: v.expectBriefing,
+      sendIntent,
+      notice: (m) => voiceInputRef.current?.controller.fail(m),
+    });
+    // Taken: a soft acknowledgement for commands that are otherwise silent.
+    if (r.command === 'stop' && v.chimeOn) playChime('ok', 0.035);
+    return r.send;
+  }, [sendIntent]);
+  const voiceInputRef = useRef<ReturnType<typeof useHeraldVoiceInput> | null>(null);
+
   const voiceInput = useHeraldVoiceInput({
     getTransport: herald.getTransport,
     connected: herald.connected,
@@ -167,7 +234,10 @@ export function HeraldProvider({ children }: { children: ReactNode }) {
       const mobile = isMobileViewport();
       if (!(mobile ? screenOpenRef.current : panelOpenRef.current)) openRef.current();
     },
+    onVoiceTranscript,
+    briefMe,
   });
+  voiceInputRef.current = voiceInput;
   const panelOpenRef = useRef(panelOpen);
   panelOpenRef.current = panelOpen;
   const screenOpenRef = useRef(screenOpen);
@@ -188,6 +258,7 @@ export function HeraldProvider({ children }: { children: ReactNode }) {
 
   const data: HeraldDataValue = useMemo(() => ({
     ...herald,
+    briefMe,
     displayName: herald.state?.displayName || DEFAULT_DISPLAY_NAME,
     presence: derivePresence({
       available,
@@ -198,7 +269,7 @@ export function HeraldProvider({ children }: { children: ReactNode }) {
     unheardCount,
     unheardBlocked,
     available,
-  }), [herald, available, inbox, unheardCount, unheardBlocked]);
+  }), [herald, briefMe, available, inbox, unheardCount, unheardBlocked]);
 
   const ui: HeraldUiValue = useMemo(() => ({
     panelOpen, screenOpen, open, close, toggle, focusNonce,

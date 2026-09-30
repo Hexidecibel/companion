@@ -260,3 +260,20 @@ describe('sortPendingByUrgency', () => {
     expect(sortPendingByUrgency(items).map((a) => a.id)).toEqual(['a', 'b']);
   });
 });
+
+describe('heraldReducer: reply-length setting', () => {
+  it('a settings event updates verbosity without touching the conversation', () => {
+    let s = apply(initialHeraldClientState, { kind: 'state', state: baseState({ verbosity: 'auto', messages: [msg('a', 'user', 'hi')] }) });
+    s = apply(s, { kind: 'settings', verbosity: 'brief' });
+    expect(s.server?.verbosity).toBe('brief');
+    expect(s.server?.messages.map((m) => m.id)).toEqual(['a']);
+  });
+
+  it('an optimistic intent line keeps its intent until the server echo replaces it', () => {
+    let s = apply(initialHeraldClientState, { kind: 'state', state: baseState() });
+    s = heraldReducer(s, { type: 'optimistic_add', message: { ...msg('local-1', 'user', 'Shorter.'), intent: 'shorter' } });
+    expect(selectMessages(s).map((m) => m.intent)).toEqual(['shorter']);
+    s = apply(s, { kind: 'message_end', message: { ...msg('srv-1', 'user', 'Shorter.'), intent: 'shorter' } });
+    expect(selectMessages(s).map((m) => [m.id, m.intent])).toEqual([['srv-1', 'shorter']]);
+  });
+});

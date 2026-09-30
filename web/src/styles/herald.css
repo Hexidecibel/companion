@@ -1615,6 +1615,74 @@
 }
 .herald-speaking__stop:hover { background: rgba(15, 118, 110, 0.35); border-color: rgba(94, 234, 212, 0.6); }
 
+.herald-speaking__hint { color: rgba(204, 251, 241, 0.62); font-weight: 400; }
+.herald-speaking__kbd {
+  padding: 0 4px;
+  border: 1px solid rgba(94, 234, 212, 0.3);
+  border-radius: 4px;
+  font: 600 10px/16px ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: rgba(204, 251, 241, 0.75);
+}
+/* Hands-free: nobody may be looking at the keyboard, so Stop is the loudest thing on screen. */
+.herald-speaking--handsfree { border-color: rgba(94, 234, 212, 0.5); }
+.herald-speaking--handsfree .herald-speaking__stop {
+  height: 32px;
+  padding: 0 14px;
+  border-color: rgba(94, 234, 212, 0.65);
+  background: rgba(15, 118, 110, 0.45);
+  color: #f0fdfa;
+  font-size: 13px;
+}
+
+/* Transient voice-command feedback ("Stopped", "Slower · 1.00x") in the header. */
+.herald-header__status--flash { color: #e5e7eb; }
+.herald-header__status--flash::before { background: var(--h-text-2); box-shadow: none; }
+
+/* A spoken command sent to the brain ("Shorter", "Tell me more", "Brief me"). */
+.herald-msg--intent { margin-top: 18px; }
+.herald-intent-chip {
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 10px;
+  border-radius: 11px;
+  border: 1px solid rgba(59, 130, 246, 0.35);
+  background: rgba(59, 130, 246, 0.08);
+  color: var(--h-blue-light);
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+/* Brief me: header button with the count of unheard items. */
+.herald-brief { position: relative; }
+.herald-brief--new { color: var(--h-blue-light); }
+.herald-brief__badge {
+  position: absolute;
+  top: 1px;
+  right: 0;
+  display: inline-grid;
+  place-items: center;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: var(--h-blue);
+  color: #fff;
+  font-size: 9.5px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+.herald--attention .herald-brief__badge { background: var(--h-amber); color: #111827; }
+
+/* Voice commands help (overflow menu). */
+.herald-cmds { margin: 0; padding: 2px 10px 8px; font-size: 11.5px; }
+.herald-cmds__row { display: grid; grid-template-columns: 1fr auto; gap: 8px; padding: 3px 0; }
+.herald-cmds__row dt { color: var(--h-text); }
+.herald-cmds__row dd { margin: 0; color: var(--h-text-2); text-align: right; }
+.herald-cmds__note { margin: 6px 0 0; color: var(--h-text-3); font-size: 11px; line-height: 1.4; }
+
 /* --------------------------------------------------------------------------
    Voice input: listening orb, mic button, listening bar
    -------------------------------------------------------------------------- */

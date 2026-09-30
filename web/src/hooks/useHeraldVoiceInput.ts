@@ -6,7 +6,7 @@ import { VoiceInputController, type VoiceInputSource, type VoiceInputState } fro
 import { VadListener } from '../services/voice/vadListener';
 import { VoiceAutomation } from '../services/voice/voiceAutomation';
 import { playChime } from '../services/tts/chime';
-import { DEFAULT_CHORD, formatChord, isChordRelease, matchesChordDown, parseChord, shouldStartSpacePtt } from '../services/voice/hotkeys';
+import { DEFAULT_BRIEF_CHORD, DEFAULT_CHORD, formatChord, isChordRelease, matchesChordDown, parseChord, shouldStartSpacePtt } from '../services/voice/hotkeys';
 
 const PREFS_KEY = 'herald_voice_input_prefs';
 
@@ -19,6 +19,8 @@ export interface VoiceInputPrefs {
   spaceToTalk: boolean;
   /** Global hold-to-talk chord, e.g. "Ctrl+Shift+Space". */
   chord: string;
+  /** Global one-press "brief me" chord, e.g. "Ctrl+Shift+B". */
+  briefChord: string;
   /** Talking over Herald stops it and sends what you said (needs mic permission). */
   interrupt: boolean;
   sensitivity: InterruptSensitivity;
@@ -32,6 +34,7 @@ export const DEFAULT_INPUT_PREFS: VoiceInputPrefs = {
   reviewBeforeSend: false,
   spaceToTalk: true,
   chord: DEFAULT_CHORD,
+  briefChord: DEFAULT_BRIEF_CHORD,
   interrupt: true,
   sensitivity: 'normal',
   handsFree: false,
@@ -48,6 +51,7 @@ export function loadInputPrefs(): VoiceInputPrefs {
       reviewBeforeSend: bool(p.reviewBeforeSend, DEFAULT_INPUT_PREFS.reviewBeforeSend),
       spaceToTalk: bool(p.spaceToTalk, DEFAULT_INPUT_PREFS.spaceToTalk),
       chord: typeof p.chord === 'string' && parseChord(p.chord) ? p.chord : DEFAULT_INPUT_PREFS.chord,
+      briefChord: typeof p.briefChord === 'string' && parseChord(p.briefChord) ? p.briefChord : DEFAULT_INPUT_PREFS.briefChord,
       interrupt: bool(p.interrupt, DEFAULT_INPUT_PREFS.interrupt),
       sensitivity: p.sensitivity === 'low' || p.sensitivity === 'high' ? p.sensitivity : 'normal',
       handsFree: bool(p.handsFree, false),
@@ -70,6 +74,8 @@ export interface InjectedTranscript {
   id: number;
   text: string;
   autoSend: boolean;
+  /** Always 'voice': an auto-sent transcript is a spoken message (shorter replies). */
+  mode: 'voice';
 }
 
 export interface HeraldVoiceInput {
@@ -81,6 +87,7 @@ export interface HeraldVoiceInput {
   prefs: VoiceInputPrefs;
   setPref: <K extends keyof VoiceInputPrefs>(key: K, value: VoiceInputPrefs[K]) => void;
   chordLabel: string;
+  briefChordLabel: string;
   start: (source: VoiceInputSource) => void;
   stop: () => void;
   cancel: () => void;
@@ -114,6 +121,14 @@ export interface VoiceInputHost {
   openPanel: () => void;
   /** Herald is speaking (arms voice interrupt). */
   speaking: boolean;
+  /**
+   * Every transcript passes through here first (push-to-talk, talking over
+   * Herald, hands-free). Returns null when it was a voice command that has been
+   * handled, else the text to send on as a message (e.g. with "Hey Jarvis" cut).
+   */
+  onVoiceTranscript?: (text: string, source: VoiceInputSource) => string | null;
+  /** The "brief me" chord was pressed. */
+  briefMe?: () => void;
 }
 
 export function useHeraldVoiceInput(host: VoiceInputHost): HeraldVoiceInput {
@@ -131,9 +146,12 @@ export function useHeraldVoiceInput(host: VoiceInputHost): HeraldVoiceInput {
         mic: getMicCapture(),
         getTransport: () => hostRef.current.getTransport(),
         onBargeIn: () => hostRef.current.stopSpeech(),
-        onTranscript: (text) => {
+        onTranscript: (text, source) => {
+          const hook = hostRef.current.onVoiceTranscript;
+          const rest = hook ? hook(text, source) : text;
+          if (!rest) return;
           seq.current += 1;
-          setTranscript({ id: seq.current, text, autoSend: !prefsRef.current.reviewBeforeSend });
+          setTranscript({ id: seq.current, text: rest, autoSend: !prefsRef.current.reviewBeforeSend, mode: 'voice' });
         },
       }),
     [],
@@ -272,6 +290,20 @@ export function useHeraldVoiceInput(host: VoiceInputHost): HeraldVoiceInput {
   }, [controller]);
 
   const chord = useMemo(() => parseChord(prefs.chord) ?? parseChord(DEFAULT_CHORD)!, [prefs.chord]);
+  const briefChord = useMemo(() => parseChord(prefs.briefChord) ?? parseChord(DEFAULT_BRIEF_CHORD)!, [prefs.briefChord]);
+
+  // Global one-press "brief me". Exact match only, so typing is never affected.
+  useEffect(() => {
+    const down = (e: KeyboardEvent) => {
+      if (!matchesChordDown(e, briefChord)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.repeat) return;
+      hostRef.current.briefMe?.();
+    };
+    window.addEventListener('keydown', down, true);
+    return () => window.removeEventListener('keydown', down, true);
+  }, [briefChord]);
 
   const unavailableRef = useRef(unavailableReason);
   unavailableRef.current = unavailableReason;
@@ -355,6 +387,7 @@ export function useHeraldVoiceInput(host: VoiceInputHost): HeraldVoiceInput {
     prefs,
     setPref,
     chordLabel: formatChord(chord),
+    briefChordLabel: formatChord(briefChord),
     start,
     stop,
     cancel,
@@ -368,5 +401,5 @@ export function useHeraldVoiceInput(host: VoiceInputHost): HeraldVoiceInput {
     handsFreeActive,
     handsFreeNote,
     setHandsFree,
-  }), [available, unavailableReason, state, prefs, setPref, chord, start, stop, cancel, onComposerKeyDown, onComposerKeyUp, transcript, consumeTranscript, controller, micGranted, handsFreeAvailable, handsFreeActive, handsFreeNote, setHandsFree]);
+  }), [available, unavailableReason, state, prefs, setPref, chord, briefChord, start, stop, cancel, onComposerKeyDown, onComposerKeyUp, transcript, consumeTranscript, controller, micGranted, handsFreeAvailable, handsFreeActive, handsFreeNote, setHandsFree]);
 }

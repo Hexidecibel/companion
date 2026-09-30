@@ -175,6 +175,8 @@ function applyEvent(state: HeraldClientState, event: HeraldEvent, receivedAt: nu
         : server.messages.map((m) => (m.streaming ? { ...m, streaming: false } : m));
       return { ...state, server: { ...server, busy: event.busy, messages } };
     }
+    case 'settings':
+      return { ...state, server: { ...server, verbosity: event.verbosity } };
     case 'error':
       return { ...state, error: event.error };
     default:

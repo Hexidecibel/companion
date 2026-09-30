@@ -54,6 +54,8 @@ interface Item {
 
 /** Tiny lead so the first buffer never starts in the past. */
 const START_LEAD_S = 0.03;
+/** Recently synthesised sentences kept for "repeat that" (about a minute of speech). */
+export const AUDIO_CACHE_ENTRIES = 24;
 
 /**
  * Split a long opening sentence at its first clause boundary so the first
@@ -110,6 +112,8 @@ export class ServerTtsEngine implements TtsEngine {
   private isSpeaking = false;
   private listeners = new Set<(e: TtsEvent) => void>();
   private fallbackTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Synthesis results by voice/speed/text, least recently used first. */
+  private cache = new Map<string, HeraldTtsResult>();
   /** Time of the first speak() after idle, for time-to-first-audio. */
   private idleSpeakAt: number | null = null;
   lastFirstAudioMs: number | null = null;
@@ -208,9 +212,24 @@ export class ServerTtsEngine implements TtsEngine {
     const item: Item = { text, state: 'pending', opts };
     this.items.push(item);
     const voiceId = opts.voiceId?.startsWith(NEURAL_PREFIX) ? opts.voiceId.slice(NEURAL_PREFIX.length) : null;
+    const speed = opts.rate ?? 1;
+    const key = `${voiceId ?? ''}|${speed}|${text}`;
+    const cached = this.cache.get(key);
+    if (cached) {
+      // Replay ("repeat that"): no round trip. Refresh its LRU position.
+      this.cache.delete(key);
+      this.cache.set(key, cached);
+      item.state = 'ready';
+      item.result = cached;
+      queueMicrotask(() => {
+        if (gen === this.gen) void this.pump(gen);
+      });
+      return;
+    }
     this.requester
-      .synth({ text, voice: voiceId, speed: opts.rate ?? 1 })
+      .synth({ text, voice: voiceId, speed })
       .then((result) => {
+        this.remember(key, result);
         if (gen !== this.gen) return;
         item.state = 'ready';
         item.result = result;
@@ -223,6 +242,21 @@ export class ServerTtsEngine implements TtsEngine {
       .finally(() => {
         if (gen === this.gen) void this.pump(gen);
       });
+  }
+
+  private remember(key: string, result: HeraldTtsResult): void {
+    this.cache.delete(key);
+    this.cache.set(key, result);
+    while (this.cache.size > AUDIO_CACHE_ENTRIES) {
+      const oldest = this.cache.keys().next().value;
+      if (oldest === undefined) break;
+      this.cache.delete(oldest);
+    }
+  }
+
+  /** Cached sentences (tests / diagnostics). */
+  get cachedCount(): number {
+    return this.cache.size;
   }
 
   private async pump(gen: number): Promise<void> {

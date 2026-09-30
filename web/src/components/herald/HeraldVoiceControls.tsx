@@ -113,7 +113,7 @@ function Switch({ on }: { on: boolean }) {
 /** Voice input section of the overflow menu. */
 export function VoiceInputSettings({ input }: { input: HeraldVoiceInput }) {
   const { prefs, setPref, available, unavailableReason } = input;
-  const [capturing, setCapturing] = useState(false);
+  const [capturing, setCapturing] = useState<null | 'chord' | 'briefChord'>(null);
 
   useEffect(() => {
     if (!capturing) return;
@@ -121,13 +121,13 @@ export function VoiceInputSettings({ input }: { input: HeraldVoiceInput }) {
       e.preventDefault();
       e.stopPropagation();
       if (e.key === 'Escape') {
-        setCapturing(false);
+        setCapturing(null);
         return;
       }
       const c = chordFromEvent(e);
       if (!c) return; // modifiers alone, or no Ctrl/Alt/Meta: keep waiting
-      setPref('chord', formatChord(c));
-      setCapturing(false);
+      setPref(capturing, formatChord(c));
+      setCapturing(null);
     };
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
@@ -185,9 +185,13 @@ export function VoiceInputSettings({ input }: { input: HeraldVoiceInput }) {
         </button>
       )}
       {input.handsFreeNote && <div className="herald-voice-set__engine">{input.handsFreeNote}</div>}
-      <button type="button" role="menuitem" className="herald-menu__item" onClick={() => setCapturing(true)}>
+      <button type="button" role="menuitem" className="herald-menu__item" onClick={() => setCapturing('chord')}>
         Talk shortcut
-        <kbd className="herald-voice-set__kbd">{capturing ? 'Press keys…' : input.chordLabel}</kbd>
+        <kbd className="herald-voice-set__kbd">{capturing === 'chord' ? 'Press keys…' : input.chordLabel}</kbd>
+      </button>
+      <button type="button" role="menuitem" className="herald-menu__item" onClick={() => setCapturing('briefChord')}>
+        Brief me shortcut
+        <kbd className="herald-voice-set__kbd">{capturing === 'briefChord' ? 'Press keys…' : input.briefChordLabel}</kbd>
       </button>
     </div>
   );

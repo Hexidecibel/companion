@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useReducer, useRef, useMemo } from 'react';
-import type { HeraldAction, HeraldEvent, HeraldMessage, HeraldState } from '../types/herald';
+import type { HeraldAction, HeraldEvent, HeraldInputMode, HeraldIntent, HeraldMessage, HeraldState, HeraldVerbosity } from '../types/herald';
 import {
   heraldReducer,
   initialHeraldClientState,
@@ -41,7 +41,10 @@ export interface UseHeraldReturn {
   sending: boolean;
   error: string | null;
   skewMs: number | null;
-  send: (text: string) => Promise<boolean>;
+  /** `mode`: how the words arrived (voice replies are shorter); `intent`: a spoken command. */
+  send: (text: string, opts?: SendOptions) => Promise<boolean>;
+  /** Reply length setting on the hub (no-op on daemons without it). */
+  setVerbosity: (v: HeraldVerbosity) => Promise<boolean>;
   confirm: (actionId: string, decision: 'confirm' | 'cancel') => Promise<HeraldAction | null>;
   markHeard: (itemIds: string[]) => void;
   reset: () => Promise<boolean>;
@@ -51,6 +54,11 @@ export interface UseHeraldReturn {
   subscribeEvents: (listener: HeraldEventListener) => () => void;
   /** Current host transport (voice side channel). Stable identity. */
   getTransport: () => HeraldTransport | null;
+}
+
+export interface SendOptions {
+  mode?: HeraldInputMode;
+  intent?: HeraldIntent;
 }
 
 export function useHerald(serverId: string | null): UseHeraldReturn {
@@ -142,7 +150,7 @@ export function useHerald(serverId: string | null): UseHeraldReturn {
     };
   }, [serverId, fetchState, notify]);
 
-  const send = useCallback(async (raw: string): Promise<boolean> => {
+  const send = useCallback(async (raw: string, opts: SendOptions = {}): Promise<boolean> => {
     const text = raw.trim();
     const t = transportRef.current;
     if (!text) return false;
@@ -155,11 +163,14 @@ export function useHerald(serverId: string | null): UseHeraldReturn {
       role: 'user',
       text,
       createdAt: Date.now(),
+      ...(opts.intent ? { intent: opts.intent } : {}),
     };
     dispatch({ type: 'optimistic_add', message: optimistic });
     setSending(true);
     try {
-      const res = await t.request('herald_send', { text }, SEND_TIMEOUT);
+      // Older daemons ignore mode / intent (the words still go through).
+      const payload = { text, ...(opts.mode ? { mode: opts.mode } : {}), ...(opts.intent ? { intent: opts.intent } : {}) };
+      const res = await t.request('herald_send', payload, SEND_TIMEOUT);
       if (!res.success) {
         dispatch({ type: 'optimistic_remove', id: optimistic.id });
         dispatch({ type: 'error', error: res.error || 'Herald could not take that' });
@@ -229,6 +240,23 @@ export function useHerald(serverId: string | null): UseHeraldReturn {
     }
   }, [notify]);
 
+  const setVerbosity = useCallback(async (v: HeraldVerbosity): Promise<boolean> => {
+    const t = transportRef.current;
+    if (!t || !t.isConnected()) return false;
+    dispatch({ type: 'event', event: { kind: 'settings', verbosity: v }, receivedAt: Date.now() });
+    try {
+      const res = await t.request('herald_set_verbosity', { verbosity: v });
+      if (!res.success) {
+        dispatch({ type: 'error', error: res.error || 'Could not change reply length' });
+        void fetchState();
+      }
+      return res.success;
+    } catch (err) {
+      dispatch({ type: 'error', error: errorText(err, 'Could not change reply length') });
+      return false;
+    }
+  }, [fetchState]);
+
   const getTransport = useCallback(() => transportRef.current, []);
   const clearError = useCallback(() => dispatch({ type: 'clear_error' }), []);
   const refresh = useCallback(() => { void fetchState(); }, [fetchState]);
@@ -244,6 +272,7 @@ export function useHerald(serverId: string | null): UseHeraldReturn {
     error: client.error,
     skewMs: client.skewMs,
     send,
+    setVerbosity,
     confirm,
     markHeard,
     reset,

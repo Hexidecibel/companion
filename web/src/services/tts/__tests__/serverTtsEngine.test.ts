@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { HeraldTtsRequest, HeraldTtsResult } from '../../../types/herald';
 import {
+  AUDIO_CACHE_ENTRIES,
   ServerTtsEngine,
   TtsRequestError,
   decodePcm16,
@@ -213,5 +214,39 @@ describe('HybridTtsEngine', () => {
     const groups = voicesForPicker(voices);
     expect(groups.neural).toHaveLength(2);
     expect(groups.recommended.map((v) => v.id)).toEqual(['Samantha']);
+  });
+});
+
+describe('ServerTtsEngine audio cache ("repeat that")', () => {
+  it('replaying a sentence reuses its audio: no second synthesis request', async () => {
+    const { engine, pending, reply, scheduled } = setup();
+    engine.speak('Out4 is waiting on you.', { rate: 1, voiceId: 'neural:af_heart' });
+    reply(0);
+    await flush();
+    expect(scheduled).toHaveLength(1);
+    engine.cancel();
+    engine.speak('Out4 is waiting on you.', { rate: 1, voiceId: 'neural:af_heart' });
+    await flush();
+    expect(pending).toHaveLength(1);
+    expect(scheduled).toHaveLength(2);
+    expect(engine.cachedCount).toBe(1);
+  });
+
+  it('a different speed or voice is synthesised again', async () => {
+    const { engine, pending, reply } = setup();
+    engine.speak('Same words.', { rate: 1, voiceId: 'neural:af_heart' });
+    reply(0);
+    await flush();
+    engine.cancel();
+    engine.speak('Same words.', { rate: 1.1, voiceId: 'neural:af_heart' });
+    expect(pending).toHaveLength(2);
+  });
+
+  it('keeps only the most recent sentences', async () => {
+    const { engine, pending } = setup();
+    for (let i = 0; i < AUDIO_CACHE_ENTRIES + 5; i++) engine.speak(`Sentence number ${i}.`);
+    pending.forEach((p) => p.resolve({ audio: audio(10), sampleRate: 24000, audioMs: 1, synthMs: 1 }));
+    await flush();
+    expect(engine.cachedCount).toBe(AUDIO_CACHE_ENTRIES);
   });
 });
