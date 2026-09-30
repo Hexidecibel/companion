@@ -7,18 +7,31 @@ import { applySafeAreaInsets, initKeyboardHeightListener, installExternalLinkHan
 import './styles/variables.css';
 import './styles/global.css';
 import './styles/herald.css';
+import './styles/herald-setup.css';
+import { isOverlayWindow } from './services/overlayBridge';
+import { HeraldOverlayApp } from './components/herald/HeraldOverlayApp';
 
-applySafeAreaInsets();
-initKeyboardHeightListener();
-installExternalLinkHandler();
+if (isOverlayWindow()) {
+  // The desktop app's floating orb window: just the orb, no app.
+  document.documentElement.classList.add('herald-overlay-root');
+  ReactDOM.createRoot(document.getElementById('root')!).render(<HeraldOverlayApp />);
+} else {
+  startApp();
+}
 
-// Initialize persistent storage (restores Tauri store to localStorage),
-// then apply settings and render.
-initStorage().then(() => {
-  applyFontScale();
-  ReactDOM.createRoot(document.getElementById('root')!).render(
-    <React.StrictMode>
-      <App />
-    </React.StrictMode>,
-  );
-});
+function startApp(): void {
+  applySafeAreaInsets();
+  initKeyboardHeightListener();
+  installExternalLinkHandler();
+
+  // Initialize persistent storage (restores Tauri store to localStorage),
+  // then apply settings and render.
+  initStorage().then(() => {
+    applyFontScale();
+    ReactDOM.createRoot(document.getElementById('root')!).render(
+      <React.StrictMode>
+        <App />
+      </React.StrictMode>,
+    );
+  });
+}

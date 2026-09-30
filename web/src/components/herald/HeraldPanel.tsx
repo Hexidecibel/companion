@@ -2,7 +2,11 @@ import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useStat
 import type { HeraldAction, HeraldInboxItem, HeraldMessage, HeraldSessionRef, HeraldVerbosity, InboxPriority } from '../../types/herald';
 import { INTENT_LABELS, VOICE_COMMAND_HELP } from '../../services/voice/voiceCommands';
 import { sortInbox, sortPendingByUrgency } from '../../services/heraldReducer';
-import { useHeraldData, useHeraldUi, useHeraldVoiceCtx, useHeraldVoiceInputCtx } from '../../context/HeraldContext';
+import { useHeraldData, useHeraldSetupCtx, useHeraldUi, useHeraldVoiceCtx, useHeraldVoiceInputCtx } from '../../context/HeraldContext';
+import { HeraldMenuMain, SetupAdvancedSettings } from './setup/HeraldMenuMain';
+import { HeraldNotices } from './setup/HeraldNotices';
+import { HeraldSetup } from './setup/HeraldSetup';
+import { HeraldHelp } from './setup/HeraldHelp';
 import type { HeraldVoiceInput } from '../../hooks/useHeraldVoiceInput';
 import { HandsFreeIndicator, HeraldListeningBar, HeraldMicButton, VoiceInputSettings } from './HeraldVoiceControls';
 import { HeraldDeviceBar, HeraldDevicesMenu } from './HeraldDevices';
@@ -367,15 +371,22 @@ function OverflowMenu({ model, onReset, onRefresh, disabled, voice, input, verbo
 }) {
   const [open, setOpen] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  // The main view holds the few everyday controls; every other knob is in Advanced.
+  const [advanced, setAdvanced] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
+  const close = useCallback(() => { setOpen(false); setConfirming(false); setAdvanced(false); }, []);
 
   useEffect(() => {
     if (!open) return;
     const onDoc = (e: MouseEvent) => {
-      if (!rootRef.current?.contains(e.target as Node)) { setOpen(false); setConfirming(false); }
+      if (!rootRef.current?.contains(e.target as Node)) close();
     };
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') { e.stopPropagation(); setOpen(false); setConfirming(false); }
+      if (e.key !== 'Escape') return;
+      e.stopPropagation();
+      // Esc steps back out of Advanced first.
+      if (advanced && !confirming) setAdvanced(false);
+      else close();
     };
     document.addEventListener('mousedown', onDoc);
     document.addEventListener('keydown', onKey, true);
@@ -383,7 +394,7 @@ function OverflowMenu({ model, onReset, onRefresh, disabled, voice, input, verbo
       document.removeEventListener('mousedown', onDoc);
       document.removeEventListener('keydown', onKey, true);
     };
-  }, [open]);
+  }, [open, advanced, confirming, close]);
 
   return (
     <div className="herald-menu" ref={rootRef}>
@@ -393,15 +404,21 @@ function OverflowMenu({ model, onReset, onRefresh, disabled, voice, input, verbo
         aria-haspopup="menu"
         aria-expanded={open}
         aria-label="More"
-        onClick={() => { setOpen((o) => !o); setConfirming(false); }}
+        onClick={() => { if (open) close(); else setOpen(true); }}
       >
         <IconMore size={18} />
       </button>
       {open && (
-        <div className="herald-menu__pop" role="menu">
-          {!confirming ? (
+        <div className={`herald-menu__pop${advanced ? ' herald-menu__pop--advanced' : ' herald-menu__pop--main'}`} role="menu">
+          {!advanced && !confirming ? (
+            <HeraldMenuMain onClose={close} onAdvanced={() => setAdvanced(true)} />
+          ) : !confirming ? (
             <>
-              <button type="button" role="menuitem" className="herald-menu__item" onClick={() => { onRefresh(); setOpen(false); }} disabled={disabled}>
+              <button type="button" className="herald-menu__item hm-back" onClick={() => setAdvanced(false)}>
+                <IconBack size={15} /> Advanced
+              </button>
+              <div className="herald-menu__sep" role="separator" />
+              <button type="button" role="menuitem" className="herald-menu__item" onClick={() => { onRefresh(); close(); }} disabled={disabled}>
                 <IconRefresh size={15} /> Refresh
               </button>
               <button type="button" role="menuitem" className="herald-menu__item herald-menu__item--danger" onClick={() => setConfirming(true)} disabled={disabled}>
@@ -422,11 +439,13 @@ function OverflowMenu({ model, onReset, onRefresh, disabled, voice, input, verbo
               {device.supported && device.selfId && (
                 <>
                   <div className="herald-menu__sep" role="separator" />
-                  <HeraldDevicesMenu device={device} onDone={() => setOpen(false)} />
+                  <HeraldDevicesMenu device={device} onDone={close} />
                 </>
               )}
               <div className="herald-menu__sep" role="separator" />
               <VoiceInputSettings input={input} />
+              <div className="herald-menu__sep" role="separator" />
+              <SetupAdvancedSettings />
               <div className="herald-menu__sep" role="separator" />
               <VoiceCommandsHelp />
             </>
@@ -438,7 +457,7 @@ function OverflowMenu({ model, onReset, onRefresh, disabled, voice, input, verbo
                 <button
                   type="button"
                   className="herald-btn herald-btn--danger herald-btn--sm"
-                  onClick={async () => { await onReset(); setOpen(false); setConfirming(false); }}
+                  onClick={async () => { await onReset(); close(); }}
                 >
                   Reset
                 </button>
@@ -534,6 +553,7 @@ export function HeraldPanel({ variant, onOpenSession, onClose }: HeraldPanelProp
   const h = useHeraldData();
   const voice = useHeraldVoiceCtx();
   const input = useHeraldVoiceInputCtx();
+  const setup = useHeraldSetupCtx();
   const { state, messages, connected, supported, loaded, skewMs, presence, displayName, available } = h;
   const speaking = voice.supported && voice.speaking;
   const listening = input.state.phase === 'starting' || input.state.phase === 'listening';
@@ -880,6 +900,8 @@ export function HeraldPanel({ variant, onOpenSession, onClose }: HeraldPanelProp
           </div>
         )}
 
+        <HeraldNotices />
+
         <HeraldListeningBar input={input} />
 
         {speaking && !listening && (
@@ -923,6 +945,9 @@ export function HeraldPanel({ variant, onOpenSession, onClose }: HeraldPanelProp
             : pending.some((a) => a.tier === 'echo') && <><span className="herald-hint__sep" /><kbd>Esc</kbd> stop send</>}
         </div>
       </div>
+      {setup.helpOpen && <HeraldHelp onClose={() => setup.setHelpOpen(false)} />}
+      {/* One device check at a time: the docked and full-screen panels can both be mounted. */}
+      {(variant === 'screen' ? ui.screenOpen : ui.panelOpen && !ui.screenOpen) && <HeraldSetup />}
     </section>
   );
 }

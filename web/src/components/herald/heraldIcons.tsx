@@ -66,3 +66,31 @@ export const IconListen = (p: IconProps) => (
 export const IconBrief = (p: IconProps) => (
   <Svg {...p}><path d="M4 6h10" /><path d="M4 12h7" /><path d="M4 18h10" /><path d="M16 10l5 3-5 3v-6z" /></Svg>
 );
+export const IconHeadphones = (p: IconProps) => (
+  <Svg {...p}><path d="M4 15v-3a8 8 0 0 1 16 0v3" /><rect x="3" y="14" width="4" height="6" rx="1.5" /><rect x="17" y="14" width="4" height="6" rx="1.5" /></Svg>
+);
+export const IconDeskSpeaker = (p: IconProps) => (
+  <Svg {...p}><rect x="6" y="3" width="12" height="18" rx="2.5" /><circle cx="12" cy="14" r="3" /><circle cx="12" cy="7" r="0.9" /></Svg>
+);
+export const IconGamepad = (p: IconProps) => (
+  <Svg {...p}><path d="M7 8h10a4 4 0 0 1 3.9 4.9l-.8 3.4a2.4 2.4 0 0 1-4.1 1l-1.6-1.8H9.6L8 17.3a2.4 2.4 0 0 1-4.1-1l-.8-3.4A4 4 0 0 1 7 8z" /><path d="M8 11v3M6.5 12.5h3" /><path d="M16 11.5h.01M17.5 13h.01" /></Svg>
+);
+export const IconPhone = (p: IconProps) => (
+  <Svg {...p}><rect x="7" y="2.5" width="10" height="19" rx="2.5" /><path d="M11 18.5h2" /></Svg>
+);
+export const IconHelp = (p: IconProps) => (
+  <Svg {...p}><circle cx="12" cy="12" r="9" /><path d="M9.5 9.2a2.6 2.6 0 0 1 5 .9c0 1.8-2.5 2.2-2.5 3.9" /><path d="M12 17h.01" /></Svg>
+);
+export const IconSliders = (p: IconProps) => (
+  <Svg {...p}><path d="M4 7h10M18 7h2M4 17h4M12 17h8" /><circle cx="16" cy="7" r="2" /><circle cx="10" cy="17" r="2" /></Svg>
+);
+export const IconChevron = (p: IconProps) => <Svg {...p}><path d="M9 6l6 6-6 6" /></Svg>;
+export const IconCheckup = (p: IconProps) => (
+  <Svg {...p}><path d="M3 12h4l2-5 4 10 2-5h6" /></Svg>
+);
+export const IconDevice = (p: IconProps) => (
+  <Svg {...p}><rect x="3" y="4" width="18" height="12" rx="2" /><path d="M8 20h8M12 16v4" /></Svg>
+);
+export const IconKey = (p: IconProps) => (
+  <Svg {...p}><rect x="2.5" y="6" width="19" height="12" rx="2" /><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10" /></Svg>
+);

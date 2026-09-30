@@ -12,8 +12,17 @@ import type { HeraldActiveDevice, HeraldDeviceInfo, HeraldIntent } from '../type
 import { playChime } from '../services/tts/chime';
 import { DeferredNotice, runHeraldTrigger, type TriggerActions } from '../services/voice/heraldTrigger';
 import { useNativeHerald } from '../hooks/useNativeHerald';
+import { useHeraldSetup, type HeraldSetupControl } from '../hooks/useHeraldSetup';
+import { useHeraldOverlay } from '../hooks/useHeraldOverlay';
+import { heraldSetupStore, overlayEnabled } from '../services/heraldSetup/setupStore';
+import { shouldBringToFront, type FrontSource } from '../services/heraldSetup/overlay';
+import { probeTrigger } from '../services/heraldSetup/triggerProbe';
+import { tipsStore } from '../services/heraldSetup/tips';
+import { bringToFront } from '../services/overlayBridge';
+import { nativePlatform } from '../utils/platform';
 
 const PANEL_OPEN_KEY = 'herald_panel_open';
+const EMPTY: never[] = [];
 /** A voice command waiting for the current turn to finish gives up after this. */
 const INTENT_WAIT_MS = 30_000;
 const HOST_KEY = 'herald_host_server_id';
@@ -98,6 +107,13 @@ const HeraldUiContext = createContext<HeraldUiValue | null>(null);
 const HeraldDataContext = createContext<HeraldDataValue | null>(null);
 const HeraldVoiceContext = createContext<HeraldVoice | null>(null);
 const HeraldVoiceInputContext = createContext<HeraldVoiceInput | null>(null);
+const HeraldSetupContext = createContext<HeraldSetupControl | null>(null);
+
+/** "Hey Jarvis" / a trigger may bring the Companion window forward (setting; never in Gaming). */
+function maybeBringToFront(source: FrontSource): void {
+  const s = heraldSetupStore.get();
+  if (shouldBringToFront({ enabled: s.bringToFront, profile: s.profile, platform: nativePlatform(), source })) void bringToFront();
+}
 
 /**
  * Two contexts on purpose: the UI context changes rarely (open/close, host),
@@ -352,6 +368,10 @@ export function HeraldProvider({ children }: { children: ReactNode }) {
     if (event.kind !== 'trigger' || source !== 'push') return;
     if (seenTriggers.current.includes(event.id)) return;
     seenTriggers.current = [...seenTriggers.current.slice(-19), event.id];
+    // The device check is waiting for a test press: it takes this one.
+    if (probeTrigger(event.action)) return;
+    tipsStore.trigger('remote_trigger');
+    if (event.action !== 'stop' && event.action !== 'claim') maybeBringToFront('trigger');
     void runHeraldTrigger(event.action, triggerActions);
   }), [subscribeEvents, triggerActions]);
   const panelOpenRef = useRef(panelOpen);
@@ -372,6 +392,32 @@ export function HeraldProvider({ children }: { children: ReactNode }) {
     tone: (kind) => playChime(kind, 0.06),
     notice: (m) => triggerNotice.post(m),
   });
+  // "Hey Jarvis" heard: the capture that follows is a wake one.
+  const wakeListening = voiceInput.state.source === 'wake' && voiceInput.state.phase !== 'idle';
+  useEffect(() => {
+    if (wakeListening) maybeBringToFront('wake');
+  }, [wakeListening]);
+
+  const setup = useHeraldSetup({
+    voice,
+    input: voiceInput,
+    available,
+    actions: herald.state?.actions ?? EMPTY,
+    inbox: herald.state?.inbox ?? EMPTY,
+  });
+
+  // Desktop app: the floating orb.
+  useHeraldOverlay({
+    enabled: overlayEnabled(setup.state, setup.platform),
+    listening: voiceInput.state.phase === 'starting' || voiceInput.state.phase === 'listening',
+    transcribing: voiceInput.state.phase === 'transcribing',
+    thinking: (herald.state?.busy ?? false) || herald.sending,
+    speaking: voice.supported && voice.speaking,
+    messages: herald.messages,
+    inbox: herald.state?.inbox ?? EMPTY,
+    tonesHere: voice.chimeOn && voice.announcer,
+  });
+
   const inbox = herald.state?.inbox;
   const { unheardCount, unheardBlocked } = useMemo(() => {
     let count = 0;
@@ -427,7 +473,9 @@ export function HeraldProvider({ children }: { children: ReactNode }) {
       <HeraldDataContext.Provider value={data}>
         <HeraldVoiceContext.Provider value={voice}>
           <HeraldVoiceInputContext.Provider value={voiceInput}>
-            {children}
+            <HeraldSetupContext.Provider value={setup}>
+              {children}
+            </HeraldSetupContext.Provider>
           </HeraldVoiceInputContext.Provider>
         </HeraldVoiceContext.Provider>
       </HeraldDataContext.Provider>
@@ -456,5 +504,11 @@ export function useHeraldVoiceCtx(): HeraldVoice {
 export function useHeraldVoiceInputCtx(): HeraldVoiceInput {
   const ctx = useContext(HeraldVoiceInputContext);
   if (!ctx) throw new Error('useHeraldVoiceInputCtx must be used within HeraldProvider');
+  return ctx;
+}
+
+export function useHeraldSetupCtx(): HeraldSetupControl {
+  const ctx = useContext(HeraldSetupContext);
+  if (!ctx) throw new Error('useHeraldSetupCtx must be used within HeraldProvider');
   return ctx;
 }
