@@ -13,6 +13,7 @@ import { ContextMenu, ContextMenuEntry } from './ContextMenu';
 import { getFontScale, saveFontScale } from '../services/storage';
 import { Sparkline } from './Sparkline';
 import { SkeletonSessionCard } from './Skeleton';
+import { HeraldLauncher } from './herald/HeraldLauncher';
 import { useConnectionHealth, ServerHealth } from '../hooks/useConnectionHealth';
 
 interface SessionSidebarProps {
@@ -468,6 +469,7 @@ export function SessionSidebar({
       <div className="sidebar-header">
         <span className="sidebar-title">Companion</span>
         <div className="sidebar-header-actions">
+          <HeraldLauncher variant="sidebar" />
           {onNotificationSettings && (
             <button
               className="sidebar-bell-btn"

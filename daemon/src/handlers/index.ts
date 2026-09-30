@@ -9,6 +9,7 @@ import { registerSessionHandlers } from './session';
 import { registerMetricsHandlers } from './metrics';
 import { registerRemoteHandlers } from './remote';
 import { registerConciergeHandlers } from './concierge';
+import { registerHeraldHandlers } from './herald';
 
 export function registerAllHandlers(ctx: HandlerContext): Map<string, MessageHandler> {
   const handlers = new Map<string, MessageHandler>();
@@ -23,6 +24,7 @@ export function registerAllHandlers(ctx: HandlerContext): Map<string, MessageHan
     registerMetricsHandlers(ctx),
     registerRemoteHandlers(ctx),
     registerConciergeHandlers(ctx),
+    registerHeraldHandlers(ctx),
   ];
   for (const mod of modules) {
     for (const [type, handler] of Object.entries(mod)) {

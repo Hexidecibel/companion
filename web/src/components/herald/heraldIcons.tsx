@@ -1,0 +1,42 @@
+/* Minimal stroke icons for Herald (inline SVG, inherit currentColor). */
+import type { ReactNode } from 'react';
+interface IconProps { size?: number }
+
+function Svg({ size = 16, children }: IconProps & { children: ReactNode }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      focusable="false"
+    >
+      {children}
+    </svg>
+  );
+}
+
+export const IconSend = (p: IconProps) => <Svg {...p}><path d="M12 19V5" /><path d="M5 12l7-7 7 7" /></Svg>;
+export const IconClose = (p: IconProps) => <Svg {...p}><path d="M18 6L6 18" /><path d="M6 6l12 12" /></Svg>;
+export const IconX = (p: IconProps) => <Svg {...p}><path d="M17 7L7 17" /><path d="M7 7l10 10" /></Svg>;
+export const IconBack = (p: IconProps) => <Svg {...p}><path d="M15 18l-6-6 6-6" /></Svg>;
+export const IconMore = (p: IconProps) => (
+  <Svg {...p}><circle cx="5" cy="12" r="1" /><circle cx="12" cy="12" r="1" /><circle cx="19" cy="12" r="1" /></Svg>
+);
+export const IconCheck = (p: IconProps) => <Svg {...p}><path d="M20 6L9 17l-5-5" /></Svg>;
+export const IconAlert = (p: IconProps) => (
+  <Svg {...p}><path d="M12 9v4" /><path d="M12 17h.01" /><path d="M10.3 3.9L1.8 18a2 2 0 001.7 3h17a2 2 0 001.7-3L13.7 3.9a2 2 0 00-3.4 0z" /></Svg>
+);
+export const IconClock = (p: IconProps) => <Svg {...p}><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></Svg>;
+export const IconDown = (p: IconProps) => <Svg {...p}><path d="M12 5v14" /><path d="M19 12l-7 7-7-7" /></Svg>;
+export const IconRefresh = (p: IconProps) => (
+  <Svg {...p}><path d="M21 12a9 9 0 11-3-6.7L21 8" /><path d="M21 3v5h-5" /></Svg>
+);
+export const IconTrash = (p: IconProps) => (
+  <Svg {...p}><path d="M3 6h18" /><path d="M8 6V4h8v2" /><path d="M19 6l-1 14H6L5 6" /></Svg>
+);

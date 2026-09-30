@@ -32,6 +32,11 @@ import { RateLimiter } from './rate-limiter';
 import { AuthenticatedClient, ClientError, HandlerContext, MessageHandler } from './handler-context';
 import { registerAllHandlers } from './handlers';
 import { updateLastActivity } from './metrics';
+import { HeraldService } from './herald/service';
+import { HeraldStore } from './herald/store';
+import { LocalSessionSource } from './herald/session-source';
+import { resolveHeraldConfig } from './herald/config';
+import { createProvider } from './herald/llm';
 
 // File for persisting tmux session configs
 const TMUX_CONFIGS_FILE = path.join(os.homedir(), '.companion', 'tmux-sessions.json');
@@ -70,6 +75,7 @@ export class WebSocketHandler {
   private auditLog: AuditLog;
   private rateLimiter: RateLimiter;
   private handlers: Map<string, MessageHandler>;
+  private herald: HeraldService | null = null;
   private deadConnectionInterval: ReturnType<typeof setInterval>;
   private static readonly PONG_TIMEOUT_MS = 90_000;
   private static readonly DEAD_CHECK_INTERVAL_MS = 60_000;
@@ -114,6 +120,8 @@ export class WebSocketHandler {
       }
     );
     this.usageMonitor.start();
+
+    this.herald = this.createHerald();
 
     // Register all handler modules
     this.handlers = registerAllHandlers(this.createHandlerContext());
@@ -189,6 +197,13 @@ export class WebSocketHandler {
 
     this.loadTmuxSessionConfigs();
 
+    if (this.herald) {
+      const herald = this.herald;
+      this.watcher.on('status-change', () => herald.notifyActivity());
+      this.watcher.on('conversation-update', () => herald.notifyActivity());
+      herald.start().catch((err) => console.error('Herald: failed to start:', err));
+    }
+
     // Periodically close dead connections that haven't sent a ping recently
     this.deadConnectionInterval = setInterval(() => {
       const now = Date.now();
@@ -225,6 +240,7 @@ export class WebSocketHandler {
       auditLog: this.auditLog,
       rateLimiter: this.rateLimiter,
       config: this.config,
+      herald: this.herald,
 
       send: (ws, response) => this.send(ws, response),
       broadcast: (type, payload, sessionId) => this.broadcast(type, payload, sessionId),
@@ -246,6 +262,39 @@ export class WebSocketHandler {
       MAX_CLIENT_ERRORS: this.MAX_CLIENT_ERRORS,
       MAX_SCROLL_LOGS: this.MAX_SCROLL_LOGS,
     };
+  }
+
+  // --- Herald ---
+
+  private createHerald(): HeraldService | null {
+    try {
+      const cfg = resolveHeraldConfig(this.config.herald);
+      const source = new LocalSessionSource({
+        watcher: this.watcher,
+        injector: this.injector,
+        sessionNames: this.sessionNameStore,
+        onSent: (tmuxName, text, tag) => {
+          // Same bookkeeping as send_input: optimistic chat echo + escalation ack.
+          if (text) {
+            const pending = this.pendingSentMessages.get(tmuxName) || [];
+            pending.push({ clientMessageId: tag, content: text, sentAt: Date.now() });
+            this.pendingSentMessages.set(tmuxName, pending);
+          }
+          this.escalation.acknowledgeSession(tmuxName);
+        },
+      });
+      return new HeraldService({
+        config: cfg,
+        provider: createProvider(cfg),
+        sources: [source],
+        store: new HeraldStore(cfg.stateDir),
+        broadcast: (event) => this.broadcast('herald_event', event),
+        audit: (entry) => this.auditLog.append(entry),
+      });
+    } catch (err) {
+      console.error('Herald: failed to initialize:', err);
+      return null;
+    }
   }
 
   // --- Tmux session config persistence ---
@@ -699,5 +748,6 @@ export class WebSocketHandler {
     clearInterval(this.deadConnectionInterval);
     this.escalation.destroy();
     this.usageMonitor.stop();
+    this.herald?.shutdown();
   }
 }

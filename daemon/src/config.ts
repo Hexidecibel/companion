@@ -5,6 +5,7 @@ import * as crypto from 'crypto';
 import QRCode from 'qrcode';
 import { DaemonConfig, ListenerConfig, RemoteCapabilitiesConfig } from './types';
 import { atomicWriteFileSync } from './utils';
+import { parseHeraldConfigBlock } from './herald/config';
 
 const HOME_DIR = process.env.HOME || '/root';
 const CONFIG_DIR = path.join(HOME_DIR, '.companion');
@@ -211,6 +212,7 @@ export function loadConfig(): DaemonConfig {
         git: parsed.git,
         anthropicAdminApiKey: parsed.anthropic_admin_api_key,
         concierge_dir: parsed.concierge_dir,
+        herald: parseHeraldConfigBlock(parsed.herald),
       };
     } catch (err) {
       console.error(`Error loading config from ${configPath}:`, err);
@@ -303,6 +305,10 @@ export function saveConfig(config: DaemonConfig): void {
   };
   if (config.concierge_dir) {
     fileConfig.concierge_dir = config.concierge_dir;
+  }
+  // Preserve the herald block across rewrites (e.g. token rotation).
+  if (config.herald) {
+    fileConfig.herald = config.herald;
   }
 
   if (config.listeners.length === 1) {

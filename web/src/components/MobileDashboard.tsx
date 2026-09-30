@@ -13,6 +13,7 @@ import { ContextMenu, ContextMenuEntry } from './ContextMenu';
 import { ConnectionSnapshot } from '../services/ConnectionManager';
 import { Sparkline } from './Sparkline';
 import { connectionManager } from '../services/ConnectionManager';
+import { HeraldLauncher } from './herald/HeraldLauncher';
 import { SkeletonSessionCard } from './Skeleton';
 
 const STATUS_DOT_CLASS: Record<SessionSummary['status'], string> = {
@@ -120,6 +121,7 @@ export function MobileDashboard({
       <header className="mobile-dashboard-header">
         <h1 className="mobile-dashboard-title">Companion</h1>
         <div className="mobile-dashboard-header-actions">
+          <HeraldLauncher variant="mobile" />
           {hasWaiting && (
             <span className="mobile-attention-dot" title="Sessions need attention" />
           )}
