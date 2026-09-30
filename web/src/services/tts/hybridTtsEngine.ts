@@ -7,6 +7,7 @@
 import type { HeraldVoiceInfo } from '../../types/herald';
 import { NEURAL_PREFIX, ServerTtsEngine, type AudioSink, type TtsRequester } from './serverTtsEngine';
 import type { TtsEngine, TtsEvent, TtsSpeakOptions, TtsVoice } from './types';
+import { getAudioGraph } from '../voice/audioGraph';
 
 export class HybridTtsEngine implements TtsEngine {
   readonly id = 'hybrid';
@@ -14,6 +15,7 @@ export class HybridTtsEngine implements TtsEngine {
   private listeners = new Set<(e: TtsEvent) => void>();
   private unsubs: Array<() => void> = [];
   private lastSpeaking = false;
+  private webSpeaking = false;
 
   constructor(private web: TtsEngine, requester: TtsRequester, sink: AudioSink) {
     this.server = new ServerTtsEngine(requester, sink, (text, opts) => {
@@ -23,6 +25,17 @@ export class HybridTtsEngine implements TtsEngine {
     for (const eng of [this.server, this.web]) {
       this.unsubs.push(eng.on((e) => this.relay(e)));
     }
+    // Web Speech plays outside Herald's audio graph: the echo canceller has no
+    // reference for it, so barge-in falls back to transcript checks meanwhile.
+    this.unsubs.push(this.web.on((e) => {
+      if (e.type === 'speaking') this.setWebSpeaking(e.speaking);
+    }));
+  }
+
+  private setWebSpeaking(on: boolean): void {
+    if (on === this.webSpeaking) return;
+    this.webSpeaking = on;
+    getAudioGraph().setUnreferencedPlayback(on);
   }
 
   get available(): boolean {
@@ -72,6 +85,7 @@ export class HybridTtsEngine implements TtsEngine {
   }
 
   dispose(): void {
+    this.setWebSpeaking(false);
     this.server.dispose();
     this.unsubs.forEach((u) => u());
     this.listeners.clear();

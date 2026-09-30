@@ -75,6 +75,15 @@ describe('profileSettings', () => {
     expect(s.voice.spokenLength).toBe('short');
     expect(s.input.interrupt).toBe(true);
   });
+
+  it("phone turns the built-in-mic-with-Bluetooth setting back on; 'auto' leaves it alone", () => {
+    const off = targets({ builtInMicWithBluetooth: false }, 'android');
+    applyProfileSettings(profileSettings('phone', { echo: null }), off);
+    expect(off.input.setPref).toHaveBeenCalledWith('builtInMicWithBluetooth', true);
+    const desk = targets({ builtInMicWithBluetooth: false });
+    applyProfileSettings(profileSettings('desk', { echo: null }), desk);
+    expect(desk.input.setPref).not.toHaveBeenCalledWith('builtInMicWithBluetooth', expect.anything());
+  });
 });
 
 function targets(over: Partial<ProfileTargets['current']> = {}, platform: ProfileTargets['platform'] = 'desktop') {

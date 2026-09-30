@@ -6,6 +6,13 @@
  * stops Herald on both the client and the server queue; the utterance is
  * transcribed and sent when the speaker pauses.
  *
+ * Two talk-over modes (`bargeIn`, chosen by audioEnvironment / bargeInMode.ts):
+ * - 'vad': the mic is echo-cancelled well enough (measured) that the VAD never
+ *   hears Herald: real speech stops Herald at once (minSpeechMs, ~0.3 s). If one
+ *   such stop turns out to be Herald's own voice anyway, `onFalseBargeIn` drops
+ *   this setup back to 'gated'.
+ * - 'gated' (below): no or weak echo cancellation.
+ *
  * Echo gating: through speakers the mic hears Herald itself, and echo
  * cancellation does not always remove our own playback (WKWebView never does).
  * So while Herald is speaking, speech only stops it once a quick transcript of
@@ -52,6 +59,8 @@ export interface AutomationConfig {
   speaking: boolean;
   /** Hands-free is on, owned by this device, and allowed right now (tab visible etc.). */
   handsFree?: boolean;
+  /** Talk-over detection: instant on the VAD ('vad') or transcript-checked ('gated', default). */
+  bargeIn?: 'vad' | 'gated';
 }
 
 export interface AutomationDeps {
@@ -76,6 +85,12 @@ export interface AutomationDeps {
   stripEcho?: (text: string) => string;
   /** Quick transcription for echo checks (default: a daemon STT stream). */
   transcribe?: (audio: Float32Array) => Promise<string>;
+  /** A gated check found Herald's own voice: the VAD hears it through the canceller. */
+  onEchoHeard?: () => void;
+  /** An instant ('vad') talk-over turned out to be Herald's own voice. */
+  onFalseBargeIn?: () => void;
+  /** Time (ms) from the VAD's speech start to Herald being stopped (diagnostics). */
+  onBargeInLatency?: (ms: number, mode: 'vad' | 'gated') => void;
 }
 
 /** Keep listening this long after Herald stops, for an immediate reply. */
@@ -106,6 +121,12 @@ interface InterruptGate {
   confirmed: boolean;
   /** Frames dropped from the front at confirmation (the echo before the user spoke). */
   trimmed: boolean;
+  /** Confirmed instantly on the VAD alone ('vad' mode) while Herald was talking. */
+  instant: boolean;
+  /** Echo already reported for this utterance. */
+  echoReported: boolean;
+  /** When the VAD first heard it (speech start), for latency. */
+  heardAt: number;
 }
 
 function concatFrames(frames: Float32Array[]): Float32Array {
@@ -130,7 +151,8 @@ interface WakeStream {
 }
 
 export class VoiceAutomation implements VadEvents {
-  protected cfg: AutomationConfig = { available: false, micGranted: false, interrupt: false, sensitivity: 'normal', speaking: false, handsFree: false };
+  protected cfg: AutomationConfig = { available: false, micGranted: false, interrupt: false, sensitivity: 'normal', speaking: false, handsFree: false, bargeIn: 'gated' };
+  private speechStartAt = 0;
   protected capturing: Capture | null = null;
   private graceUntil = 0;
   private graceTimer: ReturnType<typeof setTimeout> | null = null;
@@ -155,7 +177,7 @@ export class VoiceAutomation implements VadEvents {
 
   update(next: AutomationConfig): void {
     const prev = this.cfg;
-    this.cfg = { ...next, handsFree: !!next.handsFree };
+    this.cfg = { ...next, handsFree: !!next.handsFree, bargeIn: next.bargeIn ?? 'gated' };
     if (prev.speaking && !next.speaking) {
       this.tailUntil = this.now() + ECHO_TAIL_MS;
       this.graceUntil = this.now() + INTERRUPT_GRACE_MS;
@@ -293,6 +315,7 @@ export class VoiceAutomation implements VadEvents {
   // ---- VAD events -----------------------------------------------------------
 
   onSpeechStart(): void {
+    this.speechStartAt = this.now();
     if (this.listenWaiting && !this.capturing) {
       this.clearListenWait();
       this.capturing = 'listen';
@@ -331,10 +354,19 @@ export class VoiceAutomation implements VadEvents {
     // Herald just stopped: what the VAD hears now is its last word in the room.
     if (!this.cfg.speaking && this.now() < this.tailUntil) return;
     this.capturing = 'interrupt';
-    this.gate = { frames: this.preroll.slice(), sinceCheck: 0, checks: 0, checking: false, confirmed: false, trimmed: false };
+    const instant = this.cfg.speaking && this.cfg.bargeIn === 'vad';
+    this.gate = { frames: this.preroll.slice(), sinceCheck: 0, checks: 0, checking: false, confirmed: false, trimmed: false, instant, echoReported: false, heardAt: this.speechStartAt || this.now() };
     this.preroll = [];
     // Nothing playing (the grace period after a reply): no echo to rule out.
-    if (!this.cfg.speaking) this.confirmInterrupt(this.gate, 0);
+    // Echo-cancelled well enough (measured): the VAD alone is proof of a person.
+    if (!this.cfg.speaking || instant) this.confirmInterrupt(this.gate, 0);
+  }
+
+  private noteEcho(g: InterruptGate): void {
+    if (g.echoReported) return;
+    g.echoReported = true;
+    if (g.instant) this.deps.onFalseBargeIn?.();
+    else this.deps.onEchoHeard?.();
   }
 
   /** Is `text` Herald's own voice? Logged (debug) and dropped by the caller when so. */
@@ -367,7 +399,11 @@ export class VoiceAutomation implements VadEvents {
     }
     g.checking = false;
     if (this.gate !== g || g.confirmed || this.capturing !== 'interrupt') return;
-    if (!text || this.echo(text)) return;
+    if (!text) return;
+    if (this.echo(text)) {
+      this.noteEcho(g);
+      return;
+    }
     if (this.deps.isBargeIn && !this.deps.isBargeIn(text)) {
       console.debug('Herald voice: not sure it is a person yet:', JSON.stringify(text));
       return;
@@ -379,6 +415,7 @@ export class VoiceAutomation implements VadEvents {
   /** The user really is talking over Herald: stop it and show listening. */
   private confirmInterrupt(g: InterruptGate, start: number): void {
     g.confirmed = true;
+    if (this.cfg.speaking) this.deps.onBargeInLatency?.(Math.max(0, this.now() - g.heardAt), g.instant ? 'vad' : 'gated');
     if (start > 0) {
       g.frames = g.frames.slice(start);
       g.trimmed = true;
@@ -395,7 +432,7 @@ export class VoiceAutomation implements VadEvents {
    * A confirmed interruption ended: transcribe it and cut out Herald's own
    * words (through speakers they are mixed in), then hand it on.
    */
-  private async finishConfirmed(audio: Float32Array): Promise<void> {
+  private async finishConfirmed(audio: Float32Array, g?: InterruptGate): Promise<void> {
     const input = this.deps.input;
     if (!input.listeningExternally) return;
     input.externalTranscribing('interrupt');
@@ -410,20 +447,30 @@ export class VoiceAutomation implements VadEvents {
       input.deliverExternal(null, 'interrupt', "Didn't catch that");
       return;
     }
+    if (g?.instant && this.echo(text)) {
+      // The VAD fired on Herald itself: the canceller is not good enough here.
+      this.noteEcho(g);
+      input.deliverExternal(null, 'interrupt');
+      return;
+    }
     const cleaned = this.deps.stripEcho ? this.deps.stripEcho(text) : text;
     if (cleaned !== text) console.debug('Herald voice: cut self-echo out of an interruption:', JSON.stringify(text), '->', JSON.stringify(cleaned));
     input.deliverExternal(cleaned || null, 'interrupt');
   }
 
   /** The utterance ended before any check cleared it: one last look at all of it. */
-  private async finishUnconfirmed(audio: Float32Array): Promise<void> {
+  private async finishUnconfirmed(audio: Float32Array, g?: InterruptGate): Promise<void> {
     let text = '';
     try {
       text = await this.quickTranscribe(audio);
     } catch {
       return;
     }
-    if (!text || this.echo(text)) return;
+    if (!text) return;
+    if (this.echo(text)) {
+      if (g) this.noteEcho(g);
+      return;
+    }
     if (this.cfg.speaking) this.deps.stopSpeech();
     if (this.deps.input.state.phase !== 'idle') return;
     const cleaned = this.deps.stripEcho ? this.deps.stripEcho(text) : text;
@@ -458,9 +505,9 @@ export class VoiceAutomation implements VadEvents {
       if (g?.confirmed) {
         // Trimmed: only what followed the echo (the VAD's audio starts with it).
         const clip = g.trimmed ? concatFrames(g.frames) : audio;
-        void this.finishConfirmed(clip);
+        void this.finishConfirmed(clip, g);
       } else if (g) {
-        void this.finishUnconfirmed(audio);
+        void this.finishUnconfirmed(audio, g);
       }
     } else if (cap === 'command') {
       void this.deps.input.transcribeUtterance(float32ToInt16Frames(audio), 'wake');

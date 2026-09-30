@@ -167,11 +167,15 @@ export function VoiceInputSettings({ input }: { input: HeraldVoiceInput }) {
       )}
       {!prefs.interrupt && prefs.interruptOrigin === 'auto' && (
         <div className="herald-voice-set__engine">
-          Off without headphones: through speakers Herald can hear itself. Turns on by itself with headphones.
+          Off until Herald knows it cannot hear itself: turns on by itself with headphones or once the echo check passes.
         </div>
       )}
-      {prefs.interrupt && input.headphones === false && (
-        <div className="herald-voice-set__engine">Best with headphones: through speakers Herald may hear itself.</div>
+      {prefs.interrupt && (
+        <div className="herald-voice-set__engine">
+          {input.bargeIn.mode === 'vad'
+            ? `Instant: echo cancelled (${input.bargeIn.reason}).`
+            : `Checks your words first, about 2 s (${input.bargeIn.reason}).`}
+        </div>
       )}
       {prefs.interrupt && !input.micGranted && available && (
         <div className="herald-voice-set__engine">Allow the mic once (hold to talk) to enable interrupt.</div>
@@ -195,6 +199,18 @@ export function VoiceInputSettings({ input }: { input: HeraldVoiceInput }) {
         </button>
       )}
       {input.handsFreeNote && <div className="herald-voice-set__engine">{input.handsFreeNote}</div>}
+      <button
+        type="button"
+        role="menuitemcheckbox"
+        aria-checked={prefs.builtInMicWithBluetooth}
+        className="herald-menu__item"
+        onClick={() => setPref('builtInMicWithBluetooth', !prefs.builtInMicWithBluetooth)}
+        title="A Bluetooth headset's own mic switches it to call quality while Herald listens"
+      >
+        Use built-in mic with Bluetooth headphones
+        <Switch on={prefs.builtInMicWithBluetooth} />
+      </button>
+      {input.audioNotice && <div className="herald-voice-set__engine" role="status">{input.audioNotice}</div>}
       <button type="button" role="menuitem" className="herald-menu__item" onClick={() => setCapturing('chord')}>
         Talk shortcut
         <kbd className="herald-voice-set__kbd">{capturing === 'chord' ? 'Press keys…' : input.chordLabel}</kbd>

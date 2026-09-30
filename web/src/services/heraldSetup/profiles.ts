@@ -122,7 +122,12 @@ export interface ProfileSettings {
   };
   /** Other features read this: no proactive speech, no bring-to-front, no overlay unless opted in. */
   gamingMode: boolean;
-  /** Mic hint for the audio layer: the phone's own mic avoids the Bluetooth call-quality profile. */
+  /**
+   * Mic hint for the audio layer: the phone's own mic avoids the Bluetooth
+   * call-quality profile. 'builtin' turns on the voice-input setting "Use
+   * built-in mic with Bluetooth headphones" (`builtInMicWithBluetooth`, on by
+   * default); 'auto' leaves the user's choice alone.
+   */
   micPreference: 'auto' | 'builtin';
   /** Plain-language notes about choices the profile made (shown after applying). */
   notes: string[];
@@ -196,7 +201,7 @@ export interface ProfileTargets {
     setSpokenLength: (v: 'short' | 'full') => void;
   };
   input: {
-    setPref: (key: 'interrupt' | 'sensitivity' | 'reviewBeforeSend' | 'spaceToTalk', value: boolean | 'low' | 'normal' | 'high') => void;
+    setPref: (key: 'interrupt' | 'sensitivity' | 'reviewBeforeSend' | 'spaceToTalk' | 'builtInMicWithBluetooth', value: boolean | 'low' | 'normal' | 'high') => void;
     setHandsFree: (on: boolean) => void;
   };
   native: {
@@ -217,6 +222,8 @@ export interface ProfileTargets {
     globalShortcuts: boolean;
     earbudButton: boolean;
     duckOthers: boolean;
+    /** Voice-input setting behind `micPreference` (absent: treated as on, its default). */
+    builtInMicWithBluetooth?: boolean;
   };
   platform: NativePlatform;
 }
@@ -234,6 +241,7 @@ export function applyProfileSettings(s: ProfileSettings, t: ProfileTargets): voi
   if (c.reviewBeforeSend !== s.input.reviewBeforeSend) t.input.setPref('reviewBeforeSend', s.input.reviewBeforeSend);
   if (c.spaceToTalk !== s.input.spaceToTalk) t.input.setPref('spaceToTalk', s.input.spaceToTalk);
   if (s.input.handsFree === 'off' && c.handsFree) t.input.setHandsFree(false);
+  if (s.micPreference === 'builtin' && c.builtInMicWithBluetooth === false) t.input.setPref('builtInMicWithBluetooth', true);
   if (t.platform === 'desktop' && c.globalShortcuts !== s.native.globalShortcuts) {
     t.native.setPref('globalShortcuts', s.native.globalShortcuts);
   }

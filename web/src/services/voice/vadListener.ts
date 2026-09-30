@@ -4,8 +4,10 @@
  * only fetched once interrupt or hands-free mode actually needs them. Assets
  * come from our own origin (<base>vad/, see vite.config.ts), never a CDN.
  *
- * It shares MicCapture's stream (echo cancellation on), so Herald's own voice,
- * played through the page, is cancelled out before the VAD hears it.
+ * It listens to the CLEANED mic (MicCapture / audioGraph: echo-cancelled in the
+ * graph when possible) in Herald's shared AudioContext, so Herald's own voice is
+ * removed before the VAD hears it, and a microphone switch mid-session is
+ * invisible to it (the cleaned stream never changes).
  */
 import type { MicCapture } from './micCapture';
 
@@ -116,10 +118,11 @@ export class VadListener implements VadLike {
         preSpeechPadMs: 400,
         submitUserSpeechOnPause: false,
         ...VAD_PRESETS[sensitivity],
-        // Share the page's echo-cancelled mic stream; never stop it from here.
-        getStream: () => this.mic.acquire(),
+        // The graph's cleaned mic, in the graph's own context; never stopped from here.
+        ...(this.mic.context() ? { audioContext: this.mic.context()! } : {}),
+        getStream: () => this.mic.acquireCleaned(),
         pauseStream: async () => {},
-        resumeStream: () => this.mic.acquire(),
+        resumeStream: () => this.mic.acquireCleaned(),
         onSpeechStart: () => this.events?.onSpeechStart(),
         onSpeechRealStart: () => this.events?.onSpeechRealStart(),
         onVADMisfire: () => this.events?.onMisfire(),

@@ -15,6 +15,7 @@
  */
 import type { HeraldTtsRequest, HeraldTtsResult, HeraldVoiceInfo } from '../../types/herald';
 import type { TtsEngine, TtsEvent, TtsSpeakOptions, TtsVoice } from './types';
+import { getAudioGraph, type HeraldAudioGraph } from '../voice/audioGraph';
 
 export const NEURAL_PREFIX = 'neural:';
 
@@ -335,52 +336,34 @@ export class ServerTtsEngine implements TtsEngine {
   }
 }
 
-/** WebAudio output. The context is created lazily inside a user gesture. */
+/**
+ * WebAudio output through Herald's shared audio graph: every sentence plays
+ * via the graph's playback bus, which is also the echo canceller's reference.
+ * The context is created lazily (and resumed inside a user gesture).
+ */
 export class WebAudioSink implements AudioSink {
-  private ctx: AudioContext | null = null;
-
-  private context(): AudioContext | null {
-    if (this.ctx) return this.ctx;
-    const Ctor = typeof window !== 'undefined'
-      ? (window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext)
-      : undefined;
-    if (!Ctor) return null;
-    try {
-      this.ctx = new Ctor({ latencyHint: 'interactive' });
-    } catch {
-      return null;
-    }
-    return this.ctx;
-  }
+  constructor(private graph: HeraldAudioGraph = getAudioGraph()) {}
 
   isRunning(): boolean {
-    return this.ctx?.state === 'running';
+    return this.graph.running;
   }
 
-  async resume(): Promise<boolean> {
-    const ctx = this.context();
-    if (!ctx) return false;
-    if (ctx.state === 'running') return true;
-    try {
-      await Promise.race([ctx.resume(), new Promise((r) => setTimeout(r, 400))]);
-    } catch {
-      // fall through
-    }
-    return (ctx.state as string) === 'running';
+  resume(): Promise<boolean> {
+    return this.graph.resume();
   }
 
   currentTime(): number {
-    return this.ctx?.currentTime ?? 0;
+    return this.graph.context()?.currentTime ?? 0;
   }
 
   play(pcm: Int16Array, sampleRate: number, when: number, onEnded: () => void): PlayingHandle {
-    const ctx = this.context()!;
+    const ctx = this.graph.context()!;
     const buf = ctx.createBuffer(1, pcm.length, sampleRate);
     const ch = buf.getChannelData(0);
     for (let i = 0; i < pcm.length; i++) ch[i] = pcm[i] / 32768;
     const src = ctx.createBufferSource();
     src.buffer = buf;
-    src.connect(ctx.destination);
+    src.connect(this.graph.playbackBus() ?? ctx.destination);
     let done = false;
     src.onended = () => {
       if (done) return;

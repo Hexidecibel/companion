@@ -4,34 +4,27 @@
  * do not cancel our WebAudio playback), so the default is OFF unless headphones
  * are confirmed. An explicit choice by the user always wins.
  *
- * Pure helpers; the hook feeds them `navigator.mediaDevices.enumerateDevices()`.
+ * Pure helpers; the hook feeds them `navigator.mediaDevices.enumerateDevices()`
+ * (and native route info). Measured echo (audioEnvironment.ts) beats both.
  */
 
-export interface DeviceLike {
-  kind: string;
-  label: string;
-  deviceId: string;
-}
+import { classifyInputLabel, classifyOutput, resolveDefault, type DeviceLike, type NativeAudioRoute } from './audioDevices';
 
-const HEADPHONE_RE = /head\s?phone|headset|ear\s?phone|ear\s?bud|airpods|\bbuds\b|galaxy buds|pixel buds|hands-?free|bose qc|wh-1000|wf-1000|jabra/i;
-
-export function looksLikeHeadphones(label: string): boolean {
-  return HEADPHONE_RE.test(label);
-}
+export { looksLikeHeadphones, type DeviceLike } from './audioDevices';
 
 /**
  * True: the output in use (or the default mic, which follows a headset) is a
  * headphone / headset. False: the output in use is known and is not.
- * Null: cannot tell (no labels before mic permission, Safari lists no outputs).
+ * Null: cannot tell (no labels before mic permission, Safari lists no outputs,
+ * a macOS "External Headphones" jack that may well be desk speakers).
+ * Native route info (iOS / Android / macOS), when present, beats labels.
  */
-export function detectHeadphones(devices: DeviceLike[]): boolean | null {
-  const outputs = devices.filter((d) => d.kind === 'audiooutput' && d.label);
-  const inputs = devices.filter((d) => d.kind === 'audioinput' && d.label);
-  const defaultOut = outputs.find((d) => d.deviceId === 'default') ?? outputs[0];
-  const defaultIn = inputs.find((d) => d.deviceId === 'default') ?? inputs[0];
-  if (defaultOut && looksLikeHeadphones(defaultOut.label)) return true;
-  if (defaultIn && looksLikeHeadphones(defaultIn.label)) return true;
-  if (defaultOut) return false;
+export function detectHeadphones(devices: DeviceLike[], route: NativeAudioRoute | null = null): boolean | null {
+  const out = classifyOutput(devices, route);
+  if (out.kind === 'headphones' || out.kind === 'bluetooth-headphones') return true;
+  const input = classifyInputLabel(resolveDefault(devices, 'audioinput')?.label);
+  if (input === 'headset' || input === 'bluetooth-headset') return true;
+  if (out.kind === 'speakers') return false;
   return null;
 }
 

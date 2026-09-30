@@ -658,3 +658,96 @@ describe('VoiceAutomation (self-echo gating)', () => {
     expect(s.onTranscript).toHaveBeenCalledWith('and what about billing', 'interrupt');
   });
 });
+
+describe("VoiceAutomation: instant talk-over with echo cancellation ('vad' mode)", () => {
+  let now = 0;
+  beforeEach(() => {
+    vi.useFakeTimers();
+    now = 50_000;
+  });
+  afterEach(() => vi.useRealTimers());
+
+  const HERALD_SAYS = 'three sessions need you and the deploy is waiting';
+
+  function setup(sttText: string | string[]) {
+    const vad = fakeVad();
+    const tr = fakeTransport(sttText);
+    const onTranscript = vi.fn();
+    const input = new VoiceInputController({
+      mic: { permission: 'granted', start: async () => {}, stop: () => {} },
+      getTransport: () => tr.t,
+      onTranscript,
+      onBargeIn: () => {},
+      now: () => now,
+    });
+    const stopSpeech = vi.fn();
+    const onEchoHeard = vi.fn();
+    const onFalseBargeIn = vi.fn();
+    const onBargeInLatency = vi.fn();
+    const auto = new VoiceAutomation({
+      vad, input, stopSpeech, now: () => now, getTransport: () => tr.t,
+      isEcho: (t) => HERALD_SAYS.includes(t.toLowerCase().replace(/[.,!?]/g, '').trim()) && t.trim().length > 0,
+      onEchoHeard, onFalseBargeIn, onBargeInLatency,
+    });
+    return { vad, input, auto, onTranscript, stopSpeech, onEchoHeard, onFalseBargeIn, onBargeInLatency, ...tr };
+  }
+
+  it('stops Herald the moment the VAD confirms speech: no transcript round trip', async () => {
+    const { vad, auto, stopSpeech, input, requests, onTranscript, onBargeInLatency } = setup('stop');
+    auto.update({ ...base, speaking: true, bargeIn: 'vad' });
+    await vi.advanceTimersByTimeAsync(0);
+    vad.events!.onSpeechStart();
+    now += 300; // the VAD's minimum speech time
+    vad.events!.onSpeechRealStart();
+    expect(stopSpeech).toHaveBeenCalledTimes(1);
+    expect(input.state).toMatchObject({ phase: 'listening', source: 'interrupt' });
+    expect(requests.filter((r) => r.type === 'herald_voice_stream_start')).toHaveLength(0); // no STT to decide
+    expect(onBargeInLatency).toHaveBeenCalledWith(300, 'vad');
+    // No gate checks while the user keeps talking either.
+    await feed(vad, GATE_FIRST_CHECK_FRAMES + GATE_CHECK_EVERY_FRAMES * 3);
+    expect(requests.filter((r) => r.type === 'herald_voice_stream_start')).toHaveLength(0);
+    auto.update({ ...base, speaking: false, bargeIn: 'vad' });
+    vad.events!.onSpeechEnd(new Float32Array(16000));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(onTranscript).toHaveBeenCalledWith('stop', 'interrupt');
+  });
+
+  it("if the instant stop was Herald's own voice after all: nothing is sent and the setup is flagged", async () => {
+    const { vad, auto, onTranscript, onFalseBargeIn, stopSpeech } = setup('the deploy is waiting');
+    auto.update({ ...base, speaking: true, bargeIn: 'vad' });
+    await vi.advanceTimersByTimeAsync(0);
+    vad.events!.onSpeechStart();
+    vad.events!.onSpeechRealStart();
+    expect(stopSpeech).toHaveBeenCalledTimes(1);
+    auto.update({ ...base, speaking: false, bargeIn: 'vad' });
+    vad.events!.onSpeechEnd(new Float32Array(16000));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(onTranscript).not.toHaveBeenCalled();
+    expect(onFalseBargeIn).toHaveBeenCalledTimes(1);
+  });
+
+  it("gated mode reports the VAD hearing Herald through the canceller (evidence against 'vad')", async () => {
+    const { vad, auto, stopSpeech, onEchoHeard, onFalseBargeIn } = setup('the deploy is waiting');
+    auto.update({ ...base, speaking: true, bargeIn: 'gated' });
+    await vi.advanceTimersByTimeAsync(0);
+    vad.events!.onSpeechStart();
+    vad.events!.onSpeechRealStart();
+    await feed(vad, GATE_FIRST_CHECK_FRAMES);
+    await feed(vad, GATE_CHECK_EVERY_FRAMES);
+    expect(stopSpeech).not.toHaveBeenCalled();
+    expect(onEchoHeard).toHaveBeenCalledTimes(1); // once per utterance
+    expect(onFalseBargeIn).not.toHaveBeenCalled();
+  });
+
+  it('with Herald silent the mode makes no difference (grace period answers are instant anyway)', async () => {
+    const { vad, auto, stopSpeech, input } = setup('yes');
+    auto.update({ ...base, speaking: true, bargeIn: 'gated' });
+    await vi.advanceTimersByTimeAsync(0);
+    auto.update({ ...base, speaking: false, bargeIn: 'gated' });
+    now += ECHO_TAIL_MS + 10;
+    vad.events!.onSpeechStart();
+    vad.events!.onSpeechRealStart();
+    expect(input.state).toMatchObject({ phase: 'listening', source: 'interrupt' });
+    expect(stopSpeech).toHaveBeenCalledTimes(1);
+  });
+});

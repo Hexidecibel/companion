@@ -1,8 +1,7 @@
 import type { ChimeKind } from './heraldSpeech';
+import { getAudioGraph } from '../voice/audioGraph';
 
 type AudioCtor = typeof AudioContext;
-
-let ctx: AudioContext | null = null;
 
 function getCtor(): AudioCtor | null {
   if (typeof window === 'undefined') return null;
@@ -10,16 +9,9 @@ function getCtor(): AudioCtor | null {
   return w.AudioContext ?? w.webkitAudioContext ?? null;
 }
 
+/** Tones play through Herald's shared graph, so the echo canceller hears them as Herald's own. */
 function getContext(): AudioContext | null {
-  if (ctx) return ctx;
-  const Ctor = getCtor();
-  if (!Ctor) return null;
-  try {
-    ctx = new Ctor();
-  } catch {
-    ctx = null;
-  }
-  return ctx;
+  return getAudioGraph().context();
 }
 
 export function chimeSupported(): boolean {
@@ -98,7 +90,7 @@ export function playChime(kind: ToneKind, volume = 0.05): void {
     const t0 = c.currentTime + 0.02;
     const master = c.createGain();
     master.gain.value = kind === 'blocked' ? volume * 1.15 : volume;
-    master.connect(c.destination);
+    master.connect(getAudioGraph().playbackBus() ?? c.destination);
     for (const note of TONES[kind]) {
       const start = t0 + note.at;
       const osc = c.createOscillator();

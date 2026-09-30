@@ -5,7 +5,8 @@ import type { HeraldPresenceResult, HeraldTtsResult, HeraldVoiceEvent, HeraldVoi
 import type { HeraldTransport } from '../services/heraldTransport';
 import { getWebSpeechEngine } from '../services/tts/webSpeechEngine';
 import { HybridTtsEngine } from '../services/tts/hybridTtsEngine';
-import { TtsRequestError, WebAudioSink, type TtsRequester } from '../services/tts/serverTtsEngine';
+import { NEURAL_PREFIX, TtsRequestError, WebAudioSink, decodePcm16, type TtsRequester } from '../services/tts/serverTtsEngine';
+import { ECHO_PROBE_LINE, setBrowserVoice, setEchoProbeSource } from '../services/voice/audioEnvironment';
 import { BRIEFING_SPOKEN_LIMIT, HeraldSpeechController, InboxChimeTracker, type SpokenLength } from '../services/tts/heraldSpeech';
 import { chimeSupported, playChime, unlockChime } from '../services/tts/chime';
 import { pickVoice } from '../services/tts/voices';
@@ -197,6 +198,30 @@ export function useHeraldVoice(
   const [speaking, setSpeaking] = useState(engine.speaking);
 
   const voice = useMemo(() => pickVoice(voices, prefs.voiceId), [voices, prefs.voiceId]);
+
+  // Echo cancellation needs Herald's playback as its reference: the neural voice
+  // plays through the shared audio graph, a browser voice (Web Speech) does not.
+  const neuralVoice = !!hybrid && !!serverStatus?.available && !!serverStatus?.tts.ready && voice?.engine === 'neural';
+  useEffect(() => {
+    if (!hybrid) return;
+    setBrowserVoice(!neuralVoice);
+  }, [hybrid, neuralVoice]);
+  // The echo check plays a line in Herald's own voice (synthesised on the hub).
+  const voiceIdRef = useRef<string | null>(null);
+  voiceIdRef.current = voice?.id ?? null;
+  useEffect(() => {
+    if (!hybrid) return;
+    const requester = makeRequester(() => hostRef.current?.getTransport() ?? null);
+    setEchoProbeSource(async () => {
+      const id = voiceIdRef.current;
+      const r = await requester.synth({ text: ECHO_PROBE_LINE, voice: id?.startsWith(NEURAL_PREFIX) ? id.slice(NEURAL_PREFIX.length) : null, speed: 1 });
+      const pcm16 = decodePcm16(r.audio);
+      const pcm = new Float32Array(pcm16.length);
+      for (let i = 0; i < pcm16.length; i++) pcm[i] = pcm16[i] / 32768;
+      return { pcm, sampleRate: r.sampleRate };
+    });
+    return () => setEchoProbeSource(null);
+  }, [hybrid]);
 
   const prefsRef = useRef(prefs);
   prefsRef.current = prefs;

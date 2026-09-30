@@ -9,7 +9,19 @@ import { playChime } from '../services/tts/chime';
 import { voiceCopy } from '../services/voice/platformCopy';
 import type { SpokenLog } from '../services/voice/echoGuard';
 import { VoiceLoopBreaker } from '../services/voice/voiceLoopBreaker';
-import { detectHeadphones, interruptDefault } from '../services/voice/headphones';
+import { interruptDefault } from '../services/voice/headphones';
+import {
+  getAudioEnvironment,
+  getBargeInDecision,
+  onAudioEnvironmentChange,
+  onAudioNotice,
+  onBargeInModeChange,
+  reportEchoHeard,
+  reportFalseBargeIn,
+  type AudioEnvironment,
+  type AudioNotice,
+} from '../services/voice/audioEnvironment';
+import type { BargeInDecision } from '../services/voice/bargeInMode';
 import { nativePlatform } from '../utils/platform';
 import { DEFAULT_BRIEF_CHORD, DEFAULT_CHORD, formatChord, isChordRelease, matchesChordDown, parseChord, shouldStartSpacePtt } from '../services/voice/hotkeys';
 
@@ -43,6 +55,12 @@ export interface VoiceInputPrefs {
   handsFree: boolean;
   /** Keep hands-free on while the tab is hidden. */
   handsFreeInBackground: boolean;
+  /**
+   * With a Bluetooth headset as the default mic, listen with the built-in (or
+   * another non-Bluetooth) mic instead, so the headphones stay in music quality
+   * (A2DP) rather than dropping to a phone call (HFP).
+   */
+  builtInMicWithBluetooth: boolean;
 }
 
 export const DEFAULT_INPUT_PREFS: VoiceInputPrefs = {
@@ -55,6 +73,7 @@ export const DEFAULT_INPUT_PREFS: VoiceInputPrefs = {
   sensitivity: 'normal',
   handsFree: false,
   handsFreeInBackground: false,
+  builtInMicWithBluetooth: true,
 };
 
 export function loadInputPrefs(): VoiceInputPrefs {
@@ -74,6 +93,7 @@ export function loadInputPrefs(): VoiceInputPrefs {
       sensitivity: p.sensitivity === 'low' || p.sensitivity === 'high' ? p.sensitivity : 'normal',
       handsFree: bool(p.handsFree, false),
       handsFreeInBackground: bool(p.handsFreeInBackground, false),
+      builtInMicWithBluetooth: bool(p.builtInMicWithBluetooth, true),
     };
   } catch {
     return DEFAULT_INPUT_PREFS;
@@ -147,6 +167,12 @@ export interface HeraldVoiceInput {
   resumeAutoSend: () => void;
   /** Headphones detected (true), speakers (false), unknown (null). */
   headphones: boolean | null;
+  /** Where Herald plays / listens and how echo is cancelled. */
+  audioEnv: AudioEnvironment | null;
+  /** How talking over Herald is detected right now, and why. */
+  bargeIn: BargeInDecision;
+  /** A short-lived note about the microphone (switched, disconnected, Bluetooth-only). */
+  audioNotice: string | null;
 }
 
 /** Voice sources nobody pressed anything for: these can loop on Herald's own voice. */
@@ -287,30 +313,70 @@ export function useHeraldVoiceInput(host: VoiceInputHost): HeraldVoiceInput {
   }, []);
   const micGranted = permGranted || state.permission === 'granted';
 
-  // Headphones? Device labels need mic permission; re-check on device changes.
-  const [headphones, setHeadphones] = useState<boolean | null>(null);
+  // Where Herald plays and listens (labels need mic permission; native route
+  // info and measured echo beat labels). Re-detected on device changes.
+  const [audioEnv, setAudioEnv] = useState<AudioEnvironment | null>(null);
   useEffect(() => {
-    const md = typeof navigator !== 'undefined' ? navigator.mediaDevices : undefined;
-    if (!md?.enumerateDevices) return;
     let cancelled = false;
-    const check = () => {
-      md.enumerateDevices()
-        .then((list) => { if (!cancelled) setHeadphones(detectHeadphones(list)); })
-        .catch(() => {});
-    };
-    check();
-    md.addEventListener?.('devicechange', check);
+    void getAudioEnvironment().then((e) => { if (!cancelled) setAudioEnv(e); }).catch(() => {});
+    const off = onAudioEnvironmentChange((e) => setAudioEnv(e));
     return () => {
       cancelled = true;
-      md.removeEventListener?.('devicechange', check);
+      off();
     };
   }, [micGranted]);
+  const headphones: boolean | null = !audioEnv
+    ? null
+    : audioEnv.output === 'headphones' || audioEnv.output === 'bluetooth-headphones'
+      ? true
+      : audioEnv.output === 'speakers'
+        ? false
+        : audioEnv.input === 'headset' || audioEnv.input === 'bluetooth-headset'
+          ? true
+          : null;
+  const [bargeIn, setBargeIn] = useState<BargeInDecision>(getBargeInDecision);
+  useEffect(() => onBargeInModeChange(setBargeIn), []);
+
+  // "Use built-in mic with Bluetooth headphones" -> the shared mic.
+  useEffect(() => {
+    getMicCapture().setMicPrefs({ avoidBluetoothMic: prefs.builtInMicWithBluetooth });
+  }, [prefs.builtInMicWithBluetooth]);
+
+  // Microphone notices: tell the user when the mic changed under them,
+  // especially mid-utterance (the capture carries on with the new mic).
+  const [audioNotice, setAudioNotice] = useState<string | null>(null);
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const show = (text: string) => {
+      setAudioNotice(text);
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => setAudioNotice(null), 8000);
+    };
+    const off = onAudioNotice((n: AudioNotice) => {
+      const busy = controller.state.phase !== 'idle';
+      if (n.kind === 'mic-lost') {
+        show(`Microphone disconnected: ${n.label || 'the mic'}`);
+        if (busy) controller.fail('Microphone disconnected: switching to another mic');
+      } else if (n.kind === 'mic-switched' && n.reason !== 'mode') {
+        show(`Listening with ${n.label || 'another microphone'}`);
+      } else if (n.kind === 'only-bluetooth-mic') {
+        show(`Only your Bluetooth headset has a mic (${n.label}): while Herald listens, its audio drops to call quality.`);
+      }
+    });
+    return () => {
+      off();
+      if (timer) clearTimeout(timer);
+    };
+  }, [controller]);
+
   const nativeDesktop = useMemo(() => nativePlatform() === 'desktop', []);
+  // Talk-over is safe by default with headphones, or once the echo check (or
+  // Herald's own replies) proved the canceller removes Herald from the mic.
   const interrupt = interruptDefault({
     explicit: prefs.interruptOrigin === 'explicit' ? prefs.interrupt : undefined,
     legacy: prefs.interruptOrigin === 'saved' ? prefs.interrupt : undefined,
     nativeDesktop,
-    headphones,
+    headphones: headphones === true || bargeIn.mode === 'vad' ? true : headphones,
   });
 
   // Voice interrupt (barge-in) and hands-free wake word over the VAD.
@@ -325,6 +391,9 @@ export function useHeraldVoiceInput(host: VoiceInputHost): HeraldVoiceInput {
         stripEcho: (text) => hostRef.current.spokenLog?.stripEcho(text) ?? text,
         isBargeIn: (text) => hostRef.current.spokenLog?.isBargeIn(text) ?? true,
         onWake: () => playChime('wake', 0.06),
+        onEchoHeard: () => reportEchoHeard(),
+        onFalseBargeIn: () => reportFalseBargeIn(),
+        onBargeInLatency: (ms, mode) => console.info(`Herald voice: talk-over stopped Herald after ${Math.round(ms)} ms (${mode})`),
         onError: (m) => {
           controller.fail(m);
           // Never show "listening" when we cannot: drop hands-free on this device.
@@ -389,8 +458,9 @@ export function useHeraldVoiceInput(host: VoiceInputHost): HeraldVoiceInput {
       sensitivity: prefs.sensitivity,
       speaking: host.speaking,
       handsFree: handsFreeActive,
+      bargeIn: bargeIn.mode,
     });
-  }, [automation, available, micGranted, interrupt, prefs.sensitivity, host.speaking, handsFreeActive]);
+  }, [automation, available, micGranted, interrupt, prefs.sensitivity, host.speaking, handsFreeActive, bargeIn.mode]);
 
   let handsFreeNote: string | null = null;
   if (prefs.handsFree && !handsFreeActive) {
@@ -555,5 +625,8 @@ export function useHeraldVoiceInput(host: VoiceInputHost): HeraldVoiceInput {
     echoPaused,
     resumeAutoSend,
     headphones,
-  }), [echoPaused, resumeAutoSend, headphones, available, unavailableReason, state, effectivePrefs, setPref, chord, briefChord, start, stop, cancel, onComposerKeyDown, onComposerKeyUp, transcript, consumeTranscript, controller, micGranted, handsFreeAvailable, handsFreeActive, handsFreeNote, setHandsFree, listen, isCapturing]);
+    audioEnv,
+    bargeIn,
+    audioNotice,
+  }), [echoPaused, resumeAutoSend, headphones, audioEnv, bargeIn, audioNotice, available, unavailableReason, state, effectivePrefs, setPref, chord, briefChord, start, stop, cancel, onComposerKeyDown, onComposerKeyUp, transcript, consumeTranscript, controller, micGranted, handsFreeAvailable, handsFreeActive, handsFreeNote, setHandsFree, listen, isCapturing]);
 }
