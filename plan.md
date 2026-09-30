@@ -1799,7 +1799,11 @@ Local voice service `bin/herald-voice` (Python/aiohttp, 127.0.0.1:9889, nice 10,
 #### Planned: global triggers & native desktop Herald
 **Status:** planned. Machines: Windows gaming PC, this Linux box, a work Mac (Raycast). Mostly the
 native apps, the browser a lot too.
-1. **Remote trigger API (next up).** Authenticated daemon endpoint (HTTP POST + a WS message) with
+1. **Remote trigger API (done 2026-09-30).** `POST /herald/trigger` + `herald_trigger`, scoped
+   trigger token (`bin/companion trigger-token`), actions brief/listen/stop/repeat/toggle/claim,
+   explicit device claiming with pin ("Take control"), scripts in `triggers/` (AutoHotkey v2 with an
+   MX Master 3 gesture button via Logi Options+, Raycast, curl). Original spec:
+   Authenticated daemon endpoint (HTTP POST + a WS message) with
    actions `brief`, `listen` (start capture, ends by VAD), `stop`, `repeat`, routed by the daemon to
    the ACTIVE device (same arbitration as tones and hands-free). Scoped trigger token, not the main
    daemon token. Ship ready-made triggers: AutoHotkey v2 script (+ how to map a G Hub / Synapse mouse
