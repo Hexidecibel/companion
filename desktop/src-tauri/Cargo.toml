@@ -19,6 +19,7 @@ tauri-plugin-notification = "2"
 tauri-plugin-shell = "2"
 tauri-plugin-opener = "2"
 tauri-plugin-fcm = { path = "plugins/tauri-plugin-fcm" }
+tauri-plugin-herald-native = { path = "plugins/tauri-plugin-herald-native" }
 tauri-plugin-store = "2"
 log = "0.4"
 
@@ -26,3 +27,15 @@ log = "0.4"
 [target.'cfg(not(target_os = "android"))'.dependencies]
 tauri-plugin-window-state = "2"
 tauri-plugin-autostart = "2"
+# Herald: system-wide hold-to-talk / toggle / brief shortcuts
+tauri-plugin-global-shortcut = "~2.3.2"
+
+# Herald: grant the WebView microphone for our own page (WebKitGTK denies
+# getUserMedia unless the app handles permission-request).
+[target.'cfg(target_os = "linux")'.dependencies]
+webkit2gtk = { version = "2.0", features = ["v2_40"] }
+
+# Herald: allow the microphone for our own origin in WebView2 without a prompt.
+[target.'cfg(target_os = "windows")'.dependencies]
+webview2-com = "0.38"
+windows = { version = "0.61", features = ["Win32_Foundation"] }

@@ -1,5 +1,6 @@
+use crate::herald;
 use tauri::{
-    menu::{Menu, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder},
+    menu::{CheckMenuItemBuilder, Menu, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     Emitter, Manager, WebviewWindow, WindowEvent,
 };
@@ -129,17 +130,30 @@ pub fn setup_desktop(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Err
         }
     });
 
-    // -- System tray --
-    let show_item = MenuItemBuilder::with_id("show", "Show Companion").build(app)?;
+    // -- System tray / menu-bar icon --
+    // Herald actions only deliver input to the web layer (see herald.rs).
+    let brief_item = MenuItemBuilder::with_id("herald-brief", "Brief me").build(app)?;
+    let listen_item = MenuItemBuilder::with_id("herald-toggle", "Toggle listening").build(app)?;
+    let tones_item = CheckMenuItemBuilder::with_id("herald-mute-tones", "Mute tones")
+        .checked(false)
+        .build(app)?;
+    let show_item = MenuItemBuilder::with_id("show", "Open Companion").build(app)?;
     let quit_item = MenuItemBuilder::with_id("quit-app", "Quit").build(app)?;
     let tray_menu = Menu::with_items(
         app,
         &[
+            &brief_item,
+            &listen_item,
+            &tones_item,
+            &PredefinedMenuItem::separator(app)?,
             &show_item,
             &PredefinedMenuItem::separator(app)?,
             &quit_item,
         ],
     )?;
+    app.manage(herald::TrayState(std::sync::Mutex::new(Some(tones_item))));
+    app.manage(herald::Registered::default());
+    herald::setup_mic_permission(app);
 
     let _tray = TrayIconBuilder::with_id("main-tray")
         .icon(app.default_window_icon().unwrap().clone())
@@ -159,19 +173,21 @@ pub fn setup_desktop(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Err
                 }
             }
         })
-        .on_menu_event(|app: &tauri::AppHandle, event| {
-            match event.id().0.as_str() {
-                "show" => {
-                    if let Some(window) = app.get_webview_window("main") {
-                        let _ = window.show();
-                        let _ = window.set_focus();
-                    }
+        .on_menu_event(|app: &tauri::AppHandle, event| match event.id().0.as_str() {
+            "herald-brief" => herald::emit(app, "brief"),
+            "herald-toggle" => herald::emit(app, "toggle"),
+            "herald-mute-tones" => herald::emit(app, "mute_tones"),
+            "show" => {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.show();
+                    let _ = window.unminimize();
+                    let _ = window.set_focus();
                 }
-                "quit-app" => {
-                    app.exit(0);
-                }
-                _ => {}
             }
+            "quit-app" => {
+                app.exit(0);
+            }
+            _ => {}
         })
         .build(app)?;
 
@@ -181,6 +197,7 @@ pub fn setup_desktop(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Err
 pub fn setup_desktop_plugins(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
     builder
         .plugin(tauri_plugin_window_state::Builder::new().build())
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_autostart::init(
             MacosLauncher::LaunchAgent,
             None,

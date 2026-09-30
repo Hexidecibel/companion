@@ -1,5 +1,7 @@
 #[cfg(desktop)]
 mod desktop;
+#[cfg(desktop)]
+mod herald;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -9,6 +11,8 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         // FCM push notifications (no-op on desktop, active on mobile)
         .plugin(tauri_plugin_fcm::init())
+        // Herald native voice glue (earbud button, audio focus; no-op on desktop)
+        .plugin(tauri_plugin_herald_native::init())
         .plugin(tauri_plugin_store::Builder::default().build());
 
     // On mobile, intercept external link navigation and open in system browser
@@ -61,6 +65,9 @@ pub fn run() {
             desktop::set_tray_tooltip,
             desktop::get_autostart_enabled,
             desktop::set_autostart_enabled,
+            herald::herald_set_shortcuts,
+            herald::herald_native_info,
+            herald::herald_set_tray_state,
         ]);
     }
 
