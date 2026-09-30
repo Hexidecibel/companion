@@ -7,6 +7,7 @@
 #    doesn't auto-link missing Swift compatibility shims
 #    (swiftCompatibility56, swiftCompatibilityConcurrency,
 #    swiftCompatibilityPacks) when linking libapp.a.
+# 3. Add NSMicrophoneUsageDescription (Herald voice input)
 #
 # Usage: cd desktop && bash scripts/setup-ios.sh
 
@@ -90,6 +91,25 @@ if [ ${#PBXPROJS[@]} -gt 0 ]; then
   done
 else
   echo "WARNING: No .xcodeproj/project.pbxproj found under $GEN_APPLE — skipping deployment target bump"
+fi
+
+# 3. Herald voice: microphone usage string. WKWebView getUserMedia (iOS 14.3+)
+#    is granted by wry's WKUIDelegate; iOS then shows its own one-time prompt,
+#    which needs this key (without it the app is killed on first mic use).
+MIC_TEXT="Companion uses the microphone when you talk to Herald, your voice assistant."
+shopt -s nullglob
+IOS_PLISTS=( "$GEN_APPLE"/*_iOS/Info.plist )
+shopt -u nullglob
+if [ ${#IOS_PLISTS[@]} -eq 0 ]; then
+  echo "WARNING: no *_iOS/Info.plist under $GEN_APPLE - skipping NSMicrophoneUsageDescription"
+elif [ ! -x /usr/libexec/PlistBuddy ]; then
+  echo "WARNING: PlistBuddy not available (not macOS) - skipping NSMicrophoneUsageDescription"
+else
+  for PLIST in "${IOS_PLISTS[@]}"; do
+    echo "Setting NSMicrophoneUsageDescription in $PLIST"
+    /usr/libexec/PlistBuddy -c "Add :NSMicrophoneUsageDescription string $MIC_TEXT" "$PLIST" 2>/dev/null || \
+      /usr/libexec/PlistBuddy -c "Set :NSMicrophoneUsageDescription $MIC_TEXT" "$PLIST"
+  done
 fi
 
 echo ""

@@ -5,6 +5,7 @@
 # 1. Add Firebase/Google Services plugin
 # 2. Copy google-services.json
 # 3. Add usesCleartextTraffic for dev builds
+# 4. Declare the microphone permissions Herald voice needs
 #
 # Usage: cd desktop && bash scripts/setup-android.sh
 
@@ -137,6 +138,20 @@ if [ -f "$VECTOR_ICON" ]; then
 else
   echo "Tauri vector icon already removed"
 fi
+
+# 11. Herald voice: microphone for the WebView's getUserMedia. wry's
+#     RustWebChromeClient requests these at runtime when the page asks for
+#     RESOURCE_AUDIO_CAPTURE, then grants it; undeclared, the request is denied.
+#     (tauri-plugin-herald-native's manifest declares them too; this keeps the
+#     app manifest explicit.)
+for PERM in RECORD_AUDIO MODIFY_AUDIO_SETTINGS; do
+  if ! grep -q "android.permission.$PERM" "$MANIFEST"; then
+    echo "Adding $PERM permission to AndroidManifest.xml..."
+    sed -i "/<uses-permission android:name=\"android.permission.INTERNET\"/a\\    <uses-permission android:name=\"android.permission.$PERM\" />" "$MANIFEST"
+  else
+    echo "$PERM permission already in manifest"
+  fi
+done
 
 echo ""
 echo "=== Android FCM setup complete ==="
