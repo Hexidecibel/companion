@@ -299,3 +299,95 @@ describe('VoiceAutomation (hands-free wake word)', () => {
     expect(input.state.source).toBe('interrupt');
   });
 });
+
+describe('VoiceAutomation (barge-in while hands-free)', () => {
+  let now = 0;
+  beforeEach(() => {
+    vi.useFakeTimers();
+    now = 90_000;
+  });
+  afterEach(() => vi.useRealTimers());
+
+  function setup(sttText: string | string[] = 'stop') {
+    const vad = fakeVad();
+    const tr = fakeTransport(sttText);
+    const onTranscript = vi.fn();
+    const stopSpeech = vi.fn();
+    const input = new VoiceInputController({
+      mic: { permission: 'granted', start: async () => {}, stop: () => {} },
+      getTransport: () => tr.t,
+      onTranscript,
+      onBargeIn: () => {},
+      now: () => now,
+    });
+    const auto = new VoiceAutomation({ vad, input, stopSpeech, now: () => now, getTransport: () => tr.t, onWake: vi.fn() });
+    return { vad, input, auto, onTranscript, stopSpeech, ...tr };
+  }
+  const streamId = (requests: Array<{ type: string; payload: any }>) =>
+    requests.find((r) => r.type === 'herald_voice_stream_start')!.payload.streamId as string;
+
+  // Regression: hands-free opens the mic itself, but micGranted only came from
+  // the Permissions API or a push-to-talk. Where that API is missing (Firefox)
+  // interrupt was never armed in hands-free mode, so talking over Herald did nothing.
+  it('hands-free counts as mic permission: talking over Herald stops it', async () => {
+    const { vad, auto, input, stopSpeech } = setup();
+    auto.update({ ...base, micGranted: false, handsFree: true, speaking: true });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(auto.interruptArmed).toBe(true);
+    vad.events!.onSpeechStart();
+    vad.events!.onSpeechRealStart();
+    expect(stopSpeech).toHaveBeenCalledTimes(1);
+    expect(input.state.source).toBe('interrupt');
+  });
+
+  it('without hands-free, no mic permission still means no interrupt (never prompts)', async () => {
+    const { vad, auto } = setup();
+    auto.update({ ...base, micGranted: false, speaking: true });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(auto.interruptArmed).toBe(false);
+    expect(vad.starts).toBe(0);
+  });
+
+  // Regression: an utterance that began just before Herald started talking had
+  // already opened a wake stream; its real start was then ignored, and the
+  // echo of Herald's own voice could keep that segment open for the whole reply.
+  it('a wake stream opened just before Herald spoke turns into an interrupt', async () => {
+    const { vad, auto, input, stopSpeech, requests, onTranscript } = setup('shorter');
+    auto.update({ ...base, handsFree: true, speaking: false });
+    await vi.advanceTimersByTimeAsync(0);
+    vad.events!.onSpeechStart(); // not armed yet: opens a wake stream
+    expect(requests.some((r) => r.type === 'herald_voice_stream_start')).toBe(true);
+    auto.update({ ...base, handsFree: true, speaking: true });
+    vad.events!.onSpeechRealStart();
+    expect(stopSpeech).toHaveBeenCalledTimes(1);
+    expect(input.state.source).toBe('interrupt');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(requests.find((r) => r.type === 'herald_voice_stream_end')!.payload.action).toBe('discard');
+    auto.update({ ...base, handsFree: true, speaking: false });
+    vad.events!.onSpeechEnd(new Float32Array(8000));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(onTranscript).toHaveBeenCalledWith('shorter', 'interrupt');
+  });
+
+  it('"Hey Jarvis" silences Herald even with talk-over interrupt switched off', async () => {
+    const { vad, auto, stopSpeech, requests } = setup();
+    auto.update({ ...base, interrupt: false, handsFree: true, speaking: true });
+    await vi.advanceTimersByTimeAsync(0);
+    vad.events!.onSpeechStart();
+    expect(stopSpeech).not.toHaveBeenCalled();
+    auto.onVoiceEvent({ kind: 'wake', streamId: streamId(requests), score: 0.97, model: 'hey_jarvis' });
+    expect(stopSpeech).toHaveBeenCalledTimes(1);
+  });
+
+  it('a woken wake stream keeps its wake flow when talk-over starts (and Herald stops)', async () => {
+    const { vad, auto, input, stopSpeech, requests } = setup('what is blocked');
+    auto.update({ ...base, handsFree: true, speaking: false });
+    await vi.advanceTimersByTimeAsync(0);
+    vad.events!.onSpeechStart();
+    auto.onVoiceEvent({ kind: 'wake', streamId: streamId(requests), score: 0.97, model: 'hey_jarvis' });
+    auto.update({ ...base, handsFree: true, speaking: true });
+    vad.events!.onSpeechRealStart();
+    expect(stopSpeech).toHaveBeenCalled();
+    expect(input.state.source).toBe('wake');
+  });
+});

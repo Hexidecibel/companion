@@ -99,10 +99,15 @@ export class VoiceAutomation implements VadEvents {
     this.reconcile();
   }
 
-  /** Interrupt is armed: Herald speaking (or just finished) and the feature on. */
+  /**
+   * Interrupt is armed: Herald speaking (or just finished) and the feature on.
+   * Hands-free counts as mic permission: it only runs with the mic open, and
+   * browsers without the Permissions API (Firefox) never report "granted"
+   * otherwise, which left talking over Herald dead in hands-free mode.
+   */
   get interruptArmed(): boolean {
     const c = this.cfg;
-    return c.available && c.micGranted && c.interrupt && (c.speaking || this.now() < this.graceUntil);
+    return c.available && (c.micGranted || !!c.handsFree) && c.interrupt && (c.speaking || this.now() < this.graceUntil);
   }
 
   get handsFreeActive(): boolean {
@@ -160,6 +165,18 @@ export class VoiceAutomation implements VadEvents {
   }
 
   onSpeechRealStart(): void {
+    if (this.capturing === 'wake' && this.interruptArmed) {
+      // Hands-free opened a wake stream for this utterance just before Herald
+      // started talking (or while its first words were still being fetched).
+      // Talking over Herald must still stop it: woken, the wake flow carries
+      // on (and has already silenced Herald); otherwise it becomes an interrupt.
+      if (this.wake?.woke) {
+        this.deps.stopSpeech();
+        return;
+      }
+      this.dropWakeStream();
+      this.capturing = null;
+    }
     if (this.capturing === 'wake' || this.capturing === 'command') return;
     if (this.capturing || !this.interruptArmed) return;
     if (this.deps.input.state.phase !== 'idle') return; // push-to-talk owns the mic
@@ -209,6 +226,8 @@ export class VoiceAutomation implements VadEvents {
     const w = this.wake;
     if (ev.kind === 'wake' && w && ev.streamId === w.uplink.streamId && !w.woke) {
       w.woke = true;
+      // "Hey Jarvis" always silences Herald, even with talk-over interrupt off.
+      if (this.cfg.speaking) this.deps.stopSpeech();
       this.deps.onWake?.();
       this.deps.input.beginExternal('wake');
     } else if (ev.kind === 'stream_error' && w && ev.streamId === w.uplink.streamId) {
