@@ -67,6 +67,29 @@ bin/companion enable-remote
 
 Config path is resolved from `COMPANION_CONFIG` (preferred), falling back to `CONFIG_PATH` (legacy alias), then `~/.companion/config.json`. `remote_capabilities` may be set at the root of a legacy flat config, or per-listener in the `listeners: [...]` array form.
 
+### Herald (conversational front layer) and daemon secrets
+
+Herald's brain runs in the daemon (`daemon/src/herald/`). Config block `herald: {enabled, display_name, provider: 'openai_compatible'|'anthropic', base_url, model, echo_delay_ms, timeout_ms, max_tokens, state_dir}`. State lives in `~/.companion/herald/state.json` (override: `herald.state_dir` or env `COMPANION_HERALD_STATE_DIR`). Secrets never go in config.json or git: the anthropic provider reads `ANTHROPIC_API_KEY` from the daemon's environment only.
+
+```bash
+# Materialize secrets from .cush-secrets (Infisical) into ~/.companion/herald.env (chmod 600,
+# outside the repo) and install a systemd drop-in (companion.service.d/secrets.conf) with
+# EnvironmentFile=-~/.companion/herald.env. Runs daemon-reload; never restarts the daemon.
+bin/companion install-secrets                    # --no-unit: env file only; --refresh-on-start: also
+                                                 # re-run inject in ExecStartPre (failures never block start)
+
+# Point Herald at Haiku in the live config (idempotent; preserves everything else):
+bin/companion herald-provider anthropic          # [--model NAME] [--config PATH]
+
+# Isolated test daemon from THIS checkout: port 9887, own HOME/config/state, mDNS off,
+# no remote capabilities, key injected into that process's env only. Reads real sessions.
+bin/herald-sandbox start|stop|status|logs|env
+node daemon/scripts/herald-probe.js --config ~/.cache/companion-herald-sandbox/config.json \
+  [--reset] "Anything for me?"                   # measures TTFT/latency; auto-CANCELS any proposed action
+```
+
+Both key and provider changes take effect only on the next daemon restart (needs explicit user sign-off). `bin/companion start` / `start -f` also source `~/.companion/herald.env` when it exists. The sandbox must use its own HOME: the daemon writes its PID file, audit log and push state under `$HOME/.companion`, so a second daemon sharing HOME would overwrite (and on exit delete) production's `daemon.pid`. It does still share `code_home`, so both daemons write `~/.claude/companion-session-mappings.json` / `companion-sessions-snapshot.json`; keep sandbox runs short. `HERALD_DEBUG_TOOLS=1` (on by default in the sandbox) logs tool calls and results, which include session text.
+
 
 ## Web Client
 

@@ -1,0 +1,224 @@
+#!/bin/bash
+# herald-sandbox — run THIS checkout's daemon as an isolated test instance with
+# the Herald brain on the anthropic provider, without touching production.
+#
+# Usage:
+#   bin/herald-sandbox start     Build-check, write sandbox config, launch in background
+#   bin/herald-sandbox stop      Stop the sandbox daemon (SIGTERM, then SIGKILL) and verify the port is free
+#   bin/herald-sandbox status    PID, port owner, and whether Herald's brain is configured
+#   bin/herald-sandbox logs [N]  Tail the sandbox daemon log (key-shaped strings redacted)
+#   bin/herald-sandbox env       Print the sandbox URL/port and config path (token not printed)
+#
+# Isolation guarantees:
+#   - Own port (HERALD_SANDBOX_PORT, default 9887) and a single listener, so it
+#     never collides with production's 9877/9878. mDNS off. No remote
+#     capabilities (exec / dispatch / write) on the sandbox listener.
+#   - Own HOME ($SANDBOX_DIR/home): the daemon writes its PID file, audit log,
+#     notification/push state, session names etc. under $HOME/.companion. Without
+#     this, the sandbox would overwrite (and on exit delete) production's
+#     ~/.companion/daemon.pid and share its push-token store.
+#   - Own Herald state dir via COMPANION_HERALD_STATE_DIR (never
+#     ~/.companion/herald/state.json).
+#   - ANTHROPIC_API_KEY is resolved from Infisical with cush-tools inject --env
+#     into THIS process's environment only: never written to disk, config, or logs.
+#
+# It still READS the real Claude sessions (code_home from the live config and the
+# shared tmux server), which is the point. Never confirm a Herald action against
+# the sandbox unless you mean to type into a real session.
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+ROOT="$(dirname "$SCRIPT_DIR")"
+ENTRY="$ROOT/daemon/dist/index.js"
+LIVE_CONFIG="${COMPANION_CONFIG:-$HOME/.companion/config.json}"
+SANDBOX_DIR="${HERALD_SANDBOX_DIR:-$HOME/.cache/companion-herald-sandbox}"
+SANDBOX_HOME="$SANDBOX_DIR/home"
+SANDBOX_CONFIG="$SANDBOX_DIR/config.json"
+STATE_DIR="$SANDBOX_DIR/herald"
+LOG_FILE="$SANDBOX_DIR/daemon.log"
+PID_FILE="$SANDBOX_DIR/sandbox.pid"
+PORT="${HERALD_SANDBOX_PORT:-9887}"
+CUSH_INJECT="${CUSH_INJECT:-$HOME/local/src/cush-tools/bin/inject}"
+MANIFEST="$ROOT/.cush-secrets"
+PRODUCTION_PORTS="9877 9878"
+
+redact() { sed -E 's/sk-ant-[A-Za-z0-9_-]+/[REDACTED]/g'; }
+
+ensure_node() {
+  if ! command -v node &>/dev/null && [ -s "$HOME/.nvm/nvm.sh" ]; then
+    # shellcheck disable=SC1091
+    . "$HOME/.nvm/nvm.sh" >/dev/null
+  fi
+  command -v node &>/dev/null || { echo "ERROR: node not found"; exit 1; }
+}
+
+running_pid() {
+  [ -f "$PID_FILE" ] || return 1
+  local pid
+  pid="$(cat "$PID_FILE" 2>/dev/null || true)"
+  [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null || return 1
+  # Guard against PID reuse: it must be our entry point.
+  tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null | grep -q "$ENTRY" || return 1
+  echo "$pid"
+}
+
+port_owner() { ss -ltnpH "sport = :$1" 2>/dev/null | grep -oE 'pid=[0-9]+' | head -1 | cut -d= -f2 || true; }
+
+write_config() {
+  [ -f "$LIVE_CONFIG" ] || { echo "ERROR: live config not found: $LIVE_CONFIG"; exit 1; }
+  mkdir -p "$SANDBOX_HOME/.companion" "$STATE_DIR"
+  chmod 700 "$SANDBOX_DIR" "$SANDBOX_HOME"
+  # Read-only copies of naming metadata so Herald shows the same session names.
+  local f
+  for f in session-names.json tmux-sessions.json work-groups.json; do
+    [ -f "$HOME/.companion/$f" ] && cp "$HOME/.companion/$f" "$SANDBOX_HOME/.companion/$f"
+  done
+  LIVE="$LIVE_CONFIG" OUT="$SANDBOX_CONFIG" PORT="$PORT" STATE="$STATE_DIR" node -e '
+    const fs = require("fs"), crypto = require("crypto");
+    const live = JSON.parse(fs.readFileSync(process.env.LIVE, "utf-8"));
+    let token;
+    try { token = JSON.parse(fs.readFileSync(process.env.OUT, "utf-8")).listeners[0].token; } catch {}
+    const cfg = { ...live };
+    delete cfg.port; delete cfg.token; delete cfg.tls; delete cfg.remote_capabilities;
+    cfg.listeners = [{ port: Number(process.env.PORT), token: token || crypto.randomBytes(24).toString("hex"), tls: false }];
+    cfg.mdns_enabled = false;
+    cfg.herald = { ...(live.herald || {}), provider: "anthropic", state_dir: process.env.STATE };
+    fs.writeFileSync(process.env.OUT, JSON.stringify(cfg, null, 2) + "\n", { mode: 0o600 });
+    fs.chmodSync(process.env.OUT, 0o600);
+  '
+}
+
+cmd_start() {
+  ensure_node
+  if pid="$(running_pid)"; then
+    echo "Sandbox already running (PID $pid) on port $PORT"
+    return 0
+  fi
+  local owner
+  owner="$(port_owner "$PORT")"
+  if [ -n "$owner" ]; then
+    echo "ERROR: port $PORT is already in use (pid $owner). Set HERALD_SANDBOX_PORT to another free 9400-9900 port."
+    exit 1
+  fi
+  case " $PRODUCTION_PORTS " in *" $PORT "*) echo "ERROR: refusing to use a production port ($PORT)"; exit 1 ;; esac
+  [ -f "$ENTRY" ] || { echo "ERROR: $ENTRY missing. Build first: (cd $ROOT/daemon && npm run build)"; exit 1; }
+  if find "$ROOT/daemon/src" -name '*.ts' -newer "$ENTRY" -print -quit | grep -q .; then
+    echo "WARNING: daemon sources are newer than dist/; rebuild for current code: (cd $ROOT/daemon && npm run build)"
+  fi
+  [ -x "$CUSH_INJECT" ] || { echo "ERROR: cush-tools inject not found at $CUSH_INJECT"; exit 1; }
+
+  write_config
+
+  # Resolve the key into this shell only (eval'd exports; nothing on disk).
+  local exports
+  if ! exports="$("$CUSH_INJECT" --manifest "$MANIFEST" --env --no-prompt 2>/dev/null)"; then
+    echo "ERROR: could not resolve secrets from $MANIFEST (run: $CUSH_INJECT --manifest $MANIFEST --check)"
+    exit 1
+  fi
+  eval "$exports"
+  unset exports
+  [ -n "${ANTHROPIC_API_KEY:-}" ] || { echo "ERROR: ANTHROPIC_API_KEY did not resolve"; exit 1; }
+
+  : > "$LOG_FILE"
+  chmod 600 "$LOG_FILE"
+  (
+    cd "$ROOT/daemon"
+    export HOME="$SANDBOX_HOME"
+    export COMPANION_CONFIG="$SANDBOX_CONFIG"
+    export COMPANION_HERALD_STATE_DIR="$STATE_DIR"
+    export NODE_ENV=production
+    # Trace Herald tool calls/results into the sandbox log (HERALD_DEBUG_TOOLS=0 to silence).
+    export HERALD_DEBUG_TOOLS="${HERALD_DEBUG_TOOLS:-1}"
+    exec setsid node "$ENTRY" >> "$LOG_FILE" 2>&1 < /dev/null
+  ) &
+  local pid=$!
+  unset ANTHROPIC_API_KEY
+  echo "$pid" > "$PID_FILE"
+
+  # Wait for the listener (up to ~15s).
+  local i
+  for i in $(seq 1 30); do
+    if ! kill -0 "$pid" 2>/dev/null; then
+      echo "ERROR: sandbox daemon exited during startup. Last log lines:"
+      tail -20 "$LOG_FILE" | redact
+      rm -f "$PID_FILE"
+      exit 1
+    fi
+    [ "$(port_owner "$PORT")" = "$pid" ] && break
+    sleep 0.5
+  done
+  if [ "$(port_owner "$PORT")" != "$pid" ]; then
+    echo "ERROR: sandbox did not bind port $PORT in time; stopping it."
+    cmd_stop
+    exit 1
+  fi
+  echo "Sandbox daemon started (PID $pid) on port $PORT"
+  echo "  Config: $SANDBOX_CONFIG"
+  echo "  HOME:   $SANDBOX_HOME"
+  echo "  State:  $STATE_DIR"
+  echo "  Log:    $LOG_FILE"
+  echo "  Web:    http://localhost:$PORT/web"
+  grep -E "Herald" "$LOG_FILE" | redact | head -5 || true
+}
+
+cmd_stop() {
+  local pid
+  if ! pid="$(running_pid)"; then
+    echo "Sandbox is not running."
+    rm -f "$PID_FILE"
+  else
+    kill -TERM "$pid" 2>/dev/null || true
+    local i
+    for i in $(seq 1 20); do
+      kill -0 "$pid" 2>/dev/null || break
+      sleep 0.5
+    done
+    if kill -0 "$pid" 2>/dev/null; then
+      echo "Sandbox did not exit after SIGTERM; sending SIGKILL."
+      kill -KILL "$pid" 2>/dev/null || true
+      sleep 0.5
+    fi
+    rm -f "$PID_FILE"
+    echo "Sandbox daemon stopped (PID $pid)."
+  fi
+  local owner
+  owner="$(port_owner "$PORT")"
+  if [ -n "$owner" ]; then
+    echo "WARNING: port $PORT is still held by pid $owner."
+    return 1
+  fi
+  echo "Port $PORT is free."
+  for p in $PRODUCTION_PORTS; do
+    echo "Production port $p: owner pid $(port_owner "$p" || true)"
+  done
+}
+
+cmd_status() {
+  local pid
+  if pid="$(running_pid)"; then
+    echo "Sandbox running (PID $pid) on port $PORT; port owner: $(port_owner "$PORT" || echo none)"
+  else
+    echo "Sandbox not running. Port $PORT owner: $(port_owner "$PORT" || echo none)"
+  fi
+  [ -f "$LOG_FILE" ] && grep -E "Herald" "$LOG_FILE" | redact | tail -3 || true
+}
+
+cmd_env() {
+  echo "HERALD_SANDBOX_URL=ws://localhost:$PORT"
+  echo "HERALD_SANDBOX_PORT=$PORT"
+  echo "HERALD_SANDBOX_CONFIG=$SANDBOX_CONFIG"
+  echo "HERALD_SANDBOX_LOG=$LOG_FILE"
+}
+
+case "${1:-}" in
+  start) cmd_start ;;
+  stop) cmd_stop ;;
+  status) cmd_status ;;
+  logs) tail -n "${2:-80}" "$LOG_FILE" | redact ;;
+  env) cmd_env ;;
+  *)
+    sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'
+    exit 2
+    ;;
+esac
