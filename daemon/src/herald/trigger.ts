@@ -301,20 +301,27 @@ export class HeraldTriggerService {
     if (!this.opts.available()) {
       return { ok: false, status: 503, code: 'unavailable', error: MESSAGES.unavailable };
     }
+    // `device` names the machine the hotkey was pressed on: make it active
+    // (pinned unless pin=false), then act there. Required for `claim`.
+    const device = typeof req.device === 'string' ? req.device.trim() : '';
+    if (device.length > 200 || (action === 'claim' && !device)) {
+      return {
+        ok: false,
+        status: 400,
+        code: 'bad_request',
+        error: 'claim needs "device": a device label or id',
+      };
+    }
     let target: string | null;
-    if (action === 'claim') {
-      const device = typeof req.device === 'string' ? req.device.trim() : '';
-      if (!device || device.length > 200) {
-        return {
-          ok: false,
-          status: 400,
-          code: 'bad_request',
-          error: 'claim needs "device": a device label or id',
-        };
-      }
+    if (device) {
       target = this.opts.claimDevice?.(device, req.pin !== false) ?? null;
       if (!target) {
-        return { ok: false, status: 404, code: 'unknown_device', error: MESSAGES.unknown_device };
+        return {
+          ok: false,
+          status: 404,
+          code: 'unknown_device',
+          error: `${MESSAGES.unknown_device} ("${device.slice(0, 60)}")`,
+        };
       }
     } else {
       target = this.opts.activeClient();
@@ -339,7 +346,7 @@ export class HeraldTriggerService {
   ): void {
     const action = parseTriggerAction(req.action) ?? (req.action === undefined ? null : 'invalid');
     const payload: Record<string, unknown> = { via: source.via, action };
-    if (action === 'claim' && typeof req.device === 'string') {
+    if (typeof req.device === 'string' && req.device) {
       payload.device = req.device.slice(0, 80);
       payload.pin = req.pin !== false;
     }

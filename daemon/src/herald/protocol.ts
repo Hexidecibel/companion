@@ -105,15 +105,19 @@ export interface HeraldSetVerbosityRequest {
  *   stop   - stop speaking and cancel any capture
  *   repeat - say the last reply again
  *   toggle - Herald speaking: stop; otherwise listen (the one-button default)
- *   claim  - make `device` (a label or id) the active device; pinned unless pin=false
+ *   claim  - make `device` (a label or id) the active device; pinned unless pin=false.
+ *            Any action may name a `device`: it is made active first, then acts.
  */
 export type HeraldTriggerAction = 'brief' | 'listen' | 'stop' | 'repeat' | 'toggle' | 'claim';
 /** herald_trigger payload and the POST /herald/trigger JSON body. */
 export interface HeraldTriggerRequest {
   action: HeraldTriggerAction;
-  /** claim only: the device to make active, by label (case-insensitive) or id. */
+  /**
+   * The device to make active first, by label (case-insensitive) or id: required
+   * for `claim`, optional for the rest ("act on THIS machine's device").
+   */
   device?: string;
-  /** claim only: keep it active against other devices' activity (default true). */
+  /** With `device`: keep it active against other devices' activity (default true). */
   pin?: boolean;
 }
 /** A delivered trigger. Failures carry `error` plus `code` instead. */

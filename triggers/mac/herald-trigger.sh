@@ -3,20 +3,25 @@
 # Unix shell). Used by the Raycast script commands next to it; also fine from
 # a terminal, Keyboard Maestro, BetterTouchTool or a Shortcuts "Run Shell Script".
 #
-#   ACTION: toggle | brief | listen | stop | repeat
+#   ACTION: toggle | brief | listen | stop | repeat | claim
 #
 # Daemon URL (not secret): $HERALD_TRIGGER_URL, else the first line of
 #   ~/.config/herald-trigger/url   (e.g. https://dev.cush.rocks)
 # Token (secret): $HERALD_TRIGGER_TOKEN, else the macOS Keychain item
 #   service "herald-trigger", account $USER
 #   (security add-generic-password -s herald-trigger -a "$USER" -w   # prompts)
+# This machine's device name in Herald (optional): $HERALD_TRIGGER_DEVICE, else
+#   ~/.config/herald-trigger/device   (e.g. Work Mac; Herald menu > Devices > Rename)
+#   When set, every trigger first makes that device active (pinned; set
+#   HERALD_TRIGGER_PIN=false to not pin), so the hotkey acts on THIS Mac.
+#   `claim` needs it.
 # The token is passed to curl on stdin (a config file), never on its command
 # line, so it does not show up in `ps`.
 set -euo pipefail
 
 action="${1:-toggle}"
 case "$action" in
-  toggle|brief|listen|stop|repeat) ;;
+  toggle|brief|listen|stop|repeat|claim) ;;
   *) echo "Herald: unknown action '$action'"; exit 2 ;;
 esac
 
@@ -39,13 +44,30 @@ if [ -z "$token" ]; then
   exit 1
 fi
 
+device="${HERALD_TRIGGER_DEVICE:-}"
+if [ -z "$device" ] && [ -r "$HOME/.config/herald-trigger/device" ]; then
+  device="$(head -n1 "$HOME/.config/herald-trigger/device" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+fi
+if [ "$action" = "claim" ] && [ -z "$device" ]; then
+  echo "Herald: set this Mac's device name in ~/.config/herald-trigger/device"
+  exit 1
+fi
+json="{\"action\":\"$action\""
+if [ -n "$device" ]; then
+  esc="$(printf '%s' "$device" | sed 's/\\/\\\\/g; s/"/\\"/g')"
+  pin=true
+  [ "${HERALD_TRIGGER_PIN:-true}" = "false" ] && pin=false
+  json="$json,\"device\":\"$esc\",\"pin\":$pin"
+fi
+json="$json}"
+
 body="$(mktemp)"
 trap 'rm -f "$body"' EXIT
 code="$(
   printf 'header = "Authorization: Bearer %s"\n' "$token" |
     curl -sS --max-time 5 -o "$body" -w '%{http_code}' -K - \
       -X POST -H 'Content-Type: application/json' \
-      --data "{\"action\":\"$action\"}" "$url/herald/trigger" 2>/dev/null
+      --data "$json" "$url/herald/trigger" 2>/dev/null
 )" || code="000"
 unset token
 
@@ -56,6 +78,7 @@ if [ "$code" = "200" ]; then
     listen) echo "Herald: listening" ;;
     stop) echo "Herald: stopped" ;;
     repeat) echo "Herald: repeating" ;;
+    claim) echo "Herald: now on ${device}" ;;
   esac
   exit 0
 fi

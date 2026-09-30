@@ -182,6 +182,18 @@ describe('HeraldTriggerService routing', () => {
         code: 'unknown_device',
       }
     );
+    // Any action can name its device: claimed first, then it acts there.
+    expect(
+      svc.fire({ action: 'toggle', device: 'Windows PC' }, { via: 'http', origin })
+    ).toMatchObject({
+      ok: true,
+      target: 'pc-conn',
+    });
+    expect(delivered.pop()).toMatchObject({ clientId: 'pc-conn', event: { action: 'toggle' } });
+    expect(svc.fire({ action: 'brief', device: 'Nope' }, { via: 'http', origin })).toMatchObject({
+      status: 404,
+      error: expect.stringContaining('"Nope"'),
+    });
     expect(svc.fire({ action: 'claim' }, { via: 'http', origin })).toMatchObject({
       status: 400,
       error: expect.stringMatching(/needs "device"/),
