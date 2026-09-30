@@ -265,15 +265,19 @@ export class HeraldService {
 
   // ---------------------------------------------------------------- inbox
 
+  private applyInbox(snaps: SessionSnapshot[]): void {
+    if (this.disposed) return;
+    if (this.inbox.update(snaps, this.now())) {
+      this.emit({ kind: 'inbox', inbox: this.inbox.list() });
+    }
+  }
+
   poll(): Promise<void> {
     if (this.pollInFlight) return this.pollInFlight;
     this.pollInFlight = (async () => {
       try {
         const snaps = await this.listAll();
-        if (this.disposed) return;
-        if (this.inbox.update(snaps, this.now())) {
-          this.emit({ kind: 'inbox', inbox: this.inbox.list() });
-        }
+        this.applyInbox(snaps);
       } catch (err) {
         console.error('Herald: inbox poll failed:', err);
       } finally {
@@ -416,6 +420,10 @@ export class HeraldService {
         this.listAll().catch(() => this.lastSnapshots),
         abort.signal
       );
+      // Reconcile the inbox with this exact listing before it goes into the
+      // snapshot: a "finished" note for a session that is working again must not
+      // survive until the next poll tick and be read out as news.
+      this.applyInbox(snaps);
       const prefetched = await raceAbort(
         this.prefetchMentioned(userText, snaps, env, toolState),
         abort.signal
@@ -582,7 +590,15 @@ export class HeraldService {
         s.projectName && s.projectName !== s.sessionName ? ` (project ${s.projectName})` : '';
       lines.push(`- ${s.sessionName}${project}: ${s.status}${age}${detail}`);
     }
-    const inbox = this.inbox.list();
+    // Inbox items are events ("finished 5m ago"), not states. Each is shown with
+    // the session's CURRENT status from this same listing, and a finished note for
+    // a session that is running again is dropped (it is history, not news).
+    const current = new Map(live.map((s) => [`${s.serverId}:${s.sessionId}`, s]));
+    const statusOf = (i: { serverId: string; sessionId: string }) =>
+      current.get(`${i.serverId}:${i.sessionId}`)?.status ?? 'closed';
+    const inbox = this.inbox
+      .list()
+      .filter((i) => !(i.priority === 'finished' && statusOf(i) === 'working'));
     const blocked = inbox.filter((i) => i.priority === 'blocked').length;
     const finished = inbox.filter((i) => i.priority === 'finished').length;
     const pending = this.actions.list().filter((a) => a.status === 'pending');
@@ -592,7 +608,9 @@ export class HeraldService {
     ];
     if (live.length > SNAPSHOT_MAX_SESSIONS)
       parts.push(`(${live.length - SNAPSHOT_MAX_SESSIONS} more sessions not shown)`);
-    parts.push(`Inbox: ${blocked} blocked, ${finished} finished.`);
+    parts.push(
+      `Inbox: ${blocked} blocked, ${finished} finished earlier. Each session's status line above is its state NOW; describe a session by that, never as finished if it is working.`
+    );
     // What the user has not been told yet, most urgent first: this is what
     // "anything for me?" should cover. Headlines are deterministic, not model-written.
     const unheardItems = inbox
@@ -602,7 +620,7 @@ export class HeraldService {
       parts.push('Not yet told to the user:');
       for (const i of unheardItems.slice(0, SNAPSHOT_MAX_UNHEARD)) {
         parts.push(
-          `- [${i.priority}] ${clip(oneLine(i.headline), 200)} (${formatAgo(now - i.createdAt)} ago)`
+          `- [${i.priority}] ${clip(oneLine(i.headline), 200)} (${formatAgo(now - i.createdAt)} ago; ${i.sessionName} is ${statusOf(i)} now)`
         );
       }
       if (unheardItems.length > SNAPSHOT_MAX_UNHEARD)
