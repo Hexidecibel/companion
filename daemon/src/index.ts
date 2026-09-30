@@ -5,6 +5,7 @@ import { SubAgentWatcher } from './subagent-watcher';
 import { InputInjector } from './input-injector';
 import { MdnsAdvertiser } from './mdns';
 import { PushNotificationService } from './push';
+import { isSandbox } from './sandbox';
 import { NotificationStore } from './notification-store';
 import { WebSocketHandler } from './websocket';
 import { TmuxManager } from './tmux-manager';
@@ -103,10 +104,15 @@ async function main(): Promise<void> {
   const watcher = new SessionWatcher(config.codeHome, injector);
   const subAgentWatcher = new SubAgentWatcher(config.codeHome);
   const notificationStore = new NotificationStore();
+  const sandbox = isSandbox();
+  if (sandbox) {
+    console.log('Sandbox mode: push notifications and tool auto-approval are disabled; shared state is read-only');
+  }
   const push = new PushNotificationService(
     config.fcmCredentialsPath,
     config.pushDelayMs,
-    notificationStore
+    notificationStore,
+    { disabled: sandbox }
   );
 
   // Create HTTP/HTTPS servers for each listener
@@ -193,10 +199,14 @@ async function main(): Promise<void> {
     injector,
   });
 
-  watcher.on('pending-approval', async ({ sessionId, projectPath, tools }) => {
-    const toolList = tools as Array<{ name: string; id: string }>;
-    await autoApproval.handlePendingApproval(sessionId, projectPath, toolList);
-  });
+  // A sandbox daemon must never approve tools: production already does, and a
+  // second approval keystroke would land in whatever the pane shows next.
+  if (!sandbox) {
+    watcher.on('pending-approval', async ({ sessionId, projectPath, tools }) => {
+      const toolList = tools as Array<{ name: string; id: string }>;
+      await autoApproval.handlePendingApproval(sessionId, projectPath, toolList);
+    });
+  }
 
   // Write PID file for CLI management
   writePidFile();

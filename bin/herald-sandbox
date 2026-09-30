@@ -19,6 +19,13 @@
 #     ~/.companion/daemon.pid and share its push-token store.
 #   - Own Herald state dir via COMPANION_HERALD_STATE_DIR (never
 #     ~/.companion/herald/state.json).
+#   - COMPANION_SANDBOX=1 (implies COMPANION_READONLY_SHARED_STATE=1): the daemon
+#     never writes the shared ~/.claude/companion-session-mappings.json /
+#     companion-sessions-snapshot.json, never registers push devices or sends
+#     pushes (no duplicate notifications on the phone), and never auto-approves
+#     tools (production already does).
+#   - Same auth token as production's first listener, so an already-paired
+#     browser/app can connect to the sandbox without a new token. Never printed.
 #   - ANTHROPIC_API_KEY is resolved from Infisical with cush-tools inject --env
 #     into THIS process's environment only: never written to disk, config, or logs.
 #
@@ -70,15 +77,20 @@ write_config() {
   mkdir -p "$SANDBOX_HOME/.companion" "$STATE_DIR"
   chmod 700 "$SANDBOX_DIR" "$SANDBOX_HOME"
   # Read-only copies of naming metadata so Herald shows the same session names.
+  # (Not work-groups.json: the sandbox must not monitor production's workers.)
   local f
-  for f in session-names.json tmux-sessions.json work-groups.json; do
+  for f in session-names.json tmux-sessions.json; do
     [ -f "$HOME/.companion/$f" ] && cp "$HOME/.companion/$f" "$SANDBOX_HOME/.companion/$f"
   done
   LIVE="$LIVE_CONFIG" OUT="$SANDBOX_CONFIG" PORT="$PORT" STATE="$STATE_DIR" node -e '
     const fs = require("fs"), crypto = require("crypto");
     const live = JSON.parse(fs.readFileSync(process.env.LIVE, "utf-8"));
-    let token;
-    try { token = JSON.parse(fs.readFileSync(process.env.OUT, "utf-8")).listeners[0].token; } catch {}
+    // Reuse production auth token (first listener, else legacy root token) so the
+    // same paired clients work; fall back to the previous sandbox token / random.
+    let token = (Array.isArray(live.listeners) && live.listeners[0] && live.listeners[0].token) || live.token;
+    if (!token) {
+      try { token = JSON.parse(fs.readFileSync(process.env.OUT, "utf-8")).listeners[0].token; } catch {}
+    }
     const cfg = { ...live };
     delete cfg.port; delete cfg.token; delete cfg.tls; delete cfg.remote_capabilities;
     cfg.listeners = [{ port: Number(process.env.PORT), token: token || crypto.randomBytes(24).toString("hex"), tls: false }];
@@ -127,6 +139,8 @@ cmd_start() {
     export HOME="$SANDBOX_HOME"
     export COMPANION_CONFIG="$SANDBOX_CONFIG"
     export COMPANION_HERALD_STATE_DIR="$STATE_DIR"
+    export COMPANION_SANDBOX=1
+    export COMPANION_READONLY_SHARED_STATE=1
     export NODE_ENV=production
     # Trace Herald tool calls/results into the sandbox log (HERALD_DEBUG_TOOLS=0 to silence).
     export HERALD_DEBUG_TOOLS="${HERALD_DEBUG_TOOLS:-1}"
@@ -195,13 +209,24 @@ cmd_stop() {
 }
 
 cmd_status() {
-  local pid
+  local pid rc=0
   if pid="$(running_pid)"; then
-    echo "Sandbox running (PID $pid) on port $PORT; port owner: $(port_owner "$PORT" || echo none)"
+    local owner code
+    owner="$(port_owner "$PORT")"
+    code="$(curl -sS -o /dev/null -m 5 -w '%{http_code}' "http://127.0.0.1:$PORT/web/" 2>/dev/null || echo 000)"
+    if [ "$owner" = "$pid" ] && [ "$code" = "200" ]; then
+      echo "Sandbox HEALTHY: PID $pid owns port $PORT; GET /web/ -> $code"
+    else
+      echo "Sandbox UNHEALTHY: PID $pid, port $PORT owner: ${owner:-none}, GET /web/ -> $code"
+      rc=1
+    fi
+    grep -q "read-only shared state\|Sandbox mode" "$LOG_FILE" 2>/dev/null && echo "  Sandbox mode confirmed in log (no push, no auto-approve, shared state read-only)"
   else
     echo "Sandbox not running. Port $PORT owner: $(port_owner "$PORT" || echo none)"
+    rc=1
   fi
   [ -f "$LOG_FILE" ] && grep -E "Herald" "$LOG_FILE" | redact | tail -3 || true
+  return $rc
 }
 
 cmd_env() {

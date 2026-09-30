@@ -725,6 +725,86 @@ describe('SessionWatcher', () => {
   // Session-conversation mapping persistence
   // ========================================
 
+  describe('quiet on-demand loads (Herald)', () => {
+    const waitingContent = jsonlLine({
+      type: 'assistant',
+      message: { content: 'Which approach should I take?' },
+      uuid: 'msg-1',
+    });
+
+    function spyAll(w: SessionWatcher) {
+      const seen: string[] = [];
+      for (const ev of ['status-change', 'conversation-update', 'other-session-activity', 'pending-approval', 'compaction', 'session-completed', 'error-detected']) {
+        w.on(ev, () => seen.push(ev));
+      }
+      return seen;
+    }
+
+    it('ensureConversationLoaded({ quiet }) caches the transcript but emits nothing', async () => {
+      addTmuxSession(TMUX_SESSION_A, '/home/user/project-a');
+      await startWatcher(watcher);
+      const seen = spyAll(watcher);
+      mockFs.readdirSync.mockReturnValue([`${FILE_UUID_1}.jsonl`] as any);
+      mockFs.readFileSync.mockReturnValue(waitingContent);
+
+      expect(watcher.ensureConversationLoaded(TMUX_SESSION_A, { quiet: true })).toBe(true);
+      await jest.advanceTimersByTimeAsync(5000);
+
+      expect(watcher.getMessages(TMUX_SESSION_A).length).toBeGreaterThan(0);
+      expect(seen).toEqual([]);
+    });
+
+    it('a non-quiet load of the same transcript still emits (unchanged default)', async () => {
+      addTmuxSession(TMUX_SESSION_A, '/home/user/project-a');
+      await startWatcher(watcher);
+      const seen = spyAll(watcher);
+      mockFs.readdirSync.mockReturnValue([`${FILE_UUID_1}.jsonl`] as any);
+      mockFs.readFileSync.mockReturnValue(waitingContent);
+
+      expect(watcher.ensureConversationLoaded(TMUX_SESSION_A)).toBe(true);
+      expect(seen).toContain('status-change');
+    });
+  });
+
+  describe('read-only shared state (sandbox)', () => {
+    const MAPPINGS_PATH = `${CODE_HOME}/companion-session-mappings.json`;
+    const SNAPSHOT_PATH = `${CODE_HOME}/companion-sessions-snapshot.json`;
+    afterEach(() => {
+      delete process.env.COMPANION_READONLY_SHARED_STATE;
+      delete process.env.COMPANION_SANDBOX;
+    });
+
+    it.each([['COMPANION_READONLY_SHARED_STATE'], ['COMPANION_SANDBOX']])(
+      '%s=1 never writes the shared mappings / snapshot files',
+      async (envVar) => {
+        process.env[envVar] = '1';
+        addTmuxSession(TMUX_SESSION_A, '/home/user/project-a');
+        mockFs.readFileSync.mockReturnValue(
+          jsonlLine({ type: 'user', message: { content: 'Hello' }, uuid: 'msg-1' })
+        );
+        await startWatcher(watcher);
+        mockWatcher.emit('add', FILE_A1);
+        await jest.advanceTimersByTimeAsync(200);
+        jest.useRealTimers();
+        await (watcher as any).refreshTmuxPaths();
+        jest.useFakeTimers();
+        watcher.persistSessions();
+
+        const written = [...mockFs.renameSync.mock.calls.map((c) => c[1]), ...mockFs.writeFileSync.mock.calls.map((c) => c[0])];
+        expect(written).not.toContain(MAPPINGS_PATH);
+        expect(written).not.toContain(SNAPSHOT_PATH);
+      }
+    );
+
+    it('writes them normally when the switch is off', async () => {
+      addTmuxSession(TMUX_SESSION_A, '/home/user/project-a');
+      mockFs.readFileSync.mockReturnValue('[]');
+      await startWatcher(watcher);
+      watcher.persistSessions();
+      expect(mockFs.renameSync.mock.calls.map((c) => c[1])).toContain(SNAPSHOT_PATH);
+    });
+  });
+
   describe('mapping persistence', () => {
     const MAPPINGS_PATH = `${CODE_HOME}/companion-session-mappings.json`;
     const TMUX_A1 = 'companion-project-a-1';

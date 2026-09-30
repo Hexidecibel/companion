@@ -36,6 +36,7 @@ import {
   RECENT_ACTIVITY_LIMIT,
 } from './constants';
 import { atomicWriteFileSync, registerShutdownCallback } from './utils';
+import { isReadonlySharedState } from './sandbox';
 
 const execAsync = promisify(exec);
 
@@ -103,9 +104,19 @@ interface TrackedConversation {
   lastErrorCount: number; // Track error count for dedup
 }
 
+export interface FileChangeOptions {
+  /**
+   * Cache-only load (e.g. Herald reading an idle session's transcript on demand):
+   * parse and track the conversation but emit no events, so a stale transcript
+   * never triggers notifications, escalation, feedback polling or auto-approval.
+   */
+  quiet?: boolean;
+}
+
 export class SessionWatcher extends EventEmitter {
   private codeHome: string;
   private watcher: chokidar.FSWatcher | null = null;
+  private loggedReadonlySharedState = false;
   // Internal conversation tracking — keyed by JSONL UUID for parse efficiency
   private conversations: Map<string, TrackedConversation> = new Map();
   // Tmux session maps — the public session model
@@ -198,7 +209,20 @@ export class SessionWatcher extends EventEmitter {
     }
   }
 
+  /** True (and logs once) when shared code_home state must not be written. */
+  private sharedStateReadonly(): boolean {
+    if (!isReadonlySharedState()) return false;
+    if (!this.loggedReadonlySharedState) {
+      this.loggedReadonlySharedState = true;
+      console.log(
+        'Watcher: read-only shared state (sandbox): not writing companion-session-mappings.json / companion-sessions-snapshot.json'
+      );
+    }
+    return true;
+  }
+
   private persistMappings(): void {
+    if (this.sharedStateReadonly()) return;
     try {
       const mappings: Record<string, string> = {};
       for (const [session, convId] of this.tmuxConversationIds) {
@@ -246,6 +270,7 @@ export class SessionWatcher extends EventEmitter {
 
   /** Save current session list to disk. Called on session changes and shutdown. */
   persistSessions(): void {
+    if (this.sharedStateReadonly()) return;
     try {
       const sessions = this.getSessionsInternal(true);
       const snapshots: PersistedSessionSnapshot[] = sessions.map((s) => ({
@@ -679,7 +704,7 @@ export class SessionWatcher extends EventEmitter {
    * Process a JSONL file change. convId is the internal conversation UUID
    * (JSONL filename). External events use the tmux session name as sessionId.
    */
-  private processFileChange(filePath: string, convId: string): void {
+  private processFileChange(filePath: string, convId: string, opts: FileChangeOptions = {}): void {
     // Synchronous entry point (blocking I/O). Retained for one-time / on-demand
     // loads whose callers verify the result immediately afterwards. Recurring hot
     // paths should use processFileChangeAsync() so a large-file read never stalls
@@ -693,7 +718,7 @@ export class SessionWatcher extends EventEmitter {
       console.log(`Watcher: processFileChange read failed for ${convId}: ${err}`);
       return;
     }
-    this.applyFileChange(filePath, convId, content, stats);
+    this.applyFileChange(filePath, convId, content, stats, opts);
   }
 
   /**
@@ -721,8 +746,10 @@ export class SessionWatcher extends EventEmitter {
     filePath: string,
     convId: string,
     content: string,
-    stats: fs.Stats
+    stats: fs.Stats,
+    opts: FileChangeOptions = {}
   ): void {
+    const quiet = opts.quiet === true;
     const projectPath = this.extractProjectPath(filePath);
 
     // Parse the conversation from content (already read by the caller)
@@ -779,7 +806,11 @@ export class SessionWatcher extends EventEmitter {
         lastMsg.toolCalls?.some(
           (tc) => tc.status === 'pending' && APPROVAL_TOOLS.includes(tc.name) && tc.name !== 'Task'
         );
-      if (hasPendingApprovalTools) {
+      if (hasPendingApprovalTools && quiet) {
+        // Quiet (on-demand) load of an untouched file: nothing is still running,
+        // and the delayed confirmation would emit a status-change.
+        conversationWaiting = true;
+      } else if (hasPendingApprovalTools) {
         // Delay: auto-approved tool might still be running
         conversationWaiting = false;
         this.scheduleWaitingConfirmation(convId, filePath);
@@ -849,7 +880,7 @@ export class SessionWatcher extends EventEmitter {
       content
     );
 
-    if (compactionEvent) {
+    if (compactionEvent && !quiet) {
       console.log(`Watcher: Detected compaction in session ${tmuxName || convId}`);
       this.emit('compaction', compactionEvent);
       // Mark this session as expecting a new JSONL (compaction creates a continuation file)
@@ -909,6 +940,15 @@ export class SessionWatcher extends EventEmitter {
       lastErrorCount: errorCount,
     };
     this.conversations.set(convId, tracked);
+
+    if (quiet) {
+      // Cache-only load: record the pending-tool set as already seen so a later
+      // real change does not replay a stale approval, and emit nothing (no
+      // status-change -> escalation/push, no pending-approval -> auto-approve).
+      const quietPending = getPendingApprovalTools(messages);
+      tracked.lastEmittedPendingTools = quietPending.map((t) => t.id).sort().join(',');
+      return;
+    }
 
     // Only emit external events if we identified the owning tmux session
     if (!tmuxName) return;
@@ -1654,7 +1694,7 @@ export class SessionWatcher extends EventEmitter {
    * initial age filter), this searches on disk and force-loads the most
    * recent JSONL file. Returns true if a conversation is available afterward.
    */
-  ensureConversationLoaded(sessionId: string): boolean {
+  ensureConversationLoaded(sessionId: string, opts: FileChangeOptions = {}): boolean {
     // Already tracked?
     if (this.resolveConversationForSession(sessionId)) {
       return true;
@@ -1699,7 +1739,7 @@ export class SessionWatcher extends EventEmitter {
       const best = jsonlFiles[0];
       const convId = path.basename(best.path, '.jsonl');
       console.log(`Watcher: On-demand loading conversation ${convId} for session ${sessionId}`);
-      this.processFileChange(best.path, convId);
+      this.processFileChange(best.path, convId, opts);
 
       // Verify it loaded
       return this.resolveConversationForSession(sessionId) !== null;

@@ -164,7 +164,7 @@ export interface LocalSourceDeps {
      * tracks recently modified files, so idle sessions have no messages until
      * something asks for them.
      */
-    ensureConversationLoaded?(sessionId: string): boolean;
+    ensureConversationLoaded?(sessionId: string, opts?: { quiet?: boolean }): boolean;
   };
   injector: {
     sendInput(input: string, targetSession?: string): Promise<boolean>;
@@ -289,7 +289,9 @@ export class LocalSessionSource implements SessionSource {
     if (last !== undefined && now - last < TRANSCRIPT_LOAD_RETRY_MS) return messages;
     this.loadAttempts.set(sessionId, now);
     try {
-      if (!this.deps.watcher.ensureConversationLoaded(sessionId)) return messages;
+      // Quiet: loading an old transcript must not look like new activity (no
+      // notifications / escalation / auto-approval for a stale prompt).
+      if (!this.deps.watcher.ensureConversationLoaded(sessionId, { quiet: true })) return messages;
     } catch (err) {
       console.error(`Herald: loading transcript for "${sessionId}" failed:`, err);
       return messages;

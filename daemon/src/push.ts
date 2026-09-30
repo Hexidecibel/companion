@@ -26,9 +26,21 @@ interface ExpoPushResponse {
 export class PushNotificationService {
   private store: NotificationStore;
   private firebaseInitialized: boolean = false;
+  /** Sandbox daemons never register devices or send pushes (no duplicates on the phone). */
+  private readonly disabled: boolean;
 
-  constructor(credentialsPath: string | undefined, _pushDelayMs: number, store: NotificationStore) {
+  constructor(
+    credentialsPath: string | undefined,
+    _pushDelayMs: number,
+    store: NotificationStore,
+    opts: { disabled?: boolean } = {}
+  ) {
     this.store = store;
+    this.disabled = opts.disabled === true;
+    if (this.disabled) {
+      console.log('Push notifications: disabled (sandbox mode)');
+      return;
+    }
 
     // Initialize Firebase if credentials provided
     if (credentialsPath && fs.existsSync(credentialsPath)) {
@@ -52,7 +64,15 @@ export class PushNotificationService {
     return this.store;
   }
 
+  get isDisabled(): boolean {
+    return this.disabled;
+  }
+
   registerDevice(deviceId: string, pushToken: string): void {
+    if (this.disabled) {
+      console.log(`Push notifications: ignoring device registration from ${deviceId} (sandbox mode)`);
+      return;
+    }
     this.store.setDevice({
       token: pushToken,
       deviceId,
@@ -81,6 +101,7 @@ export class PushNotificationService {
     sessionId?: string,
     sessionName?: string
   ): void {
+    if (this.disabled) return;
     const allDevices = this.store.getDevices();
     if (allDevices.length === 0) {
       console.log('Push notifications: No devices registered, skipping');
@@ -268,6 +289,7 @@ export class PushNotificationService {
    * Used by escalation service to batch multiple events into one push.
    */
   sendConsolidatedNotification(title: string, body: string): void {
+    if (this.disabled) return;
     const allDevices = this.store.getDevices();
     if (allDevices.length === 0) {
       console.log('Push notifications: No devices registered, skipping consolidated');
@@ -285,6 +307,7 @@ export class PushNotificationService {
    * Send a test push notification to all registered devices.
    */
   async sendTestNotification(): Promise<{ sent: number; failed: number }> {
+    if (this.disabled) return { sent: 0, failed: 0 };
     const devices = this.store.getDevices();
     if (devices.length === 0) return { sent: 0, failed: 0 };
 

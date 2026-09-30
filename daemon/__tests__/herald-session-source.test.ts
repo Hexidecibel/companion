@@ -121,7 +121,7 @@ describe('LocalSessionSource', () => {
     });
     const src = new LocalSessionSource(d);
     const build = (await src.listSessions()).find((x) => x.sessionId === 'build')!;
-    expect(d.watcher.ensureConversationLoaded).toHaveBeenCalledWith('build');
+    expect(d.watcher.ensureConversationLoaded).toHaveBeenCalledWith('build', { quiet: true });
     expect(build.pendingApproval?.tool).toBe('Bash');
     expect(build.lastTurnKey).toBe('a1:2');
     const t = await src.getRecentTranscript('build', 1);
