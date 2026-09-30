@@ -4,6 +4,10 @@ on:
   push:
     tags:
       - 'v*'
+    # Branch builds of the native apps (artifacts only): no daemon package,
+    # no TestFlight upload, no GitHub release. See the job conditions below.
+    branches:
+      - 'native/**'
   workflow_dispatch:
     inputs:
       skip_testflight:
@@ -19,6 +23,7 @@ jobs:
   build-daemon:
     name: Build Daemon (npm package)
     needs: [build-web]
+    if: github.event_name != 'push' || startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -106,7 +111,7 @@ jobs:
           $ANDROID_HOME/build-tools/$(ls $ANDROID_HOME/build-tools | tail -1)/apksigner sign \
             --ks /tmp/companion.keystore \
             --ks-pass pass:android --key-pass pass:android \
-            --out companion-${{ github.ref_name }}-android.apk "$APK"
+            --out "companion-${GITHUB_REF_NAME//\//-}-android.apk" "$APK"
       - uses: actions/upload-artifact@v4
         with:
           name: android-apk
@@ -371,7 +376,8 @@ jobs:
           fi
           rm -rf "$TMPDIR"
       - name: Upload IPA to TestFlight
-        if: ${{ github.event_name == 'push' || inputs.skip_testflight != true }}
+        # Tags upload; manual runs upload unless skipped; branch pushes never do.
+        if: ${{ startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && inputs.skip_testflight != true) }}
         env:
           APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
@@ -442,7 +448,7 @@ jobs:
   create-release:
     name: Create GitHub Release
     needs: [build-daemon, build-web, build-android, build-ios, build-desktop]
-    if: always() && needs.build-daemon.result == 'success'
+    if: always() && needs.build-daemon.result == 'success' && (github.event_name != 'push' || startsWith(github.ref, 'refs/tags/'))
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
