@@ -17,9 +17,9 @@
 import { parseChord } from './voice/hotkeys';
 import { nativePlatform, type NativePlatform } from '../utils/platform';
 
-export type NativeHeraldAction = 'talk_down' | 'talk_up' | 'toggle' | 'brief' | 'mute_tones';
+export type NativeHeraldAction = 'talk_down' | 'talk_up' | 'toggle' | 'brief' | 'mute_tones' | 'stop';
 
-const ACTIONS: ReadonlySet<string> = new Set<NativeHeraldAction>(['talk_down', 'talk_up', 'toggle', 'brief', 'mute_tones']);
+const ACTIONS: ReadonlySet<string> = new Set<NativeHeraldAction>(['talk_down', 'talk_up', 'toggle', 'brief', 'mute_tones', 'stop']);
 
 export interface NativeHeraldHandlers {
   /** Hold-to-talk pressed (desktop global shortcut). */
@@ -32,6 +32,8 @@ export interface NativeHeraldHandlers {
   brief: () => void;
   /** Tray "Mute tones". */
   muteTones: () => void;
+  /** The floating orb's stop button: stop speaking and cancel any capture. */
+  stop: () => void;
 }
 
 /** Validate a native payload and run its handler. False when it was not ours. */
@@ -44,6 +46,7 @@ export function dispatchNativeEvent(payload: unknown, h: NativeHeraldHandlers): 
     case 'toggle': h.toggle(); break;
     case 'brief': h.brief(); break;
     case 'mute_tones': h.muteTones(); break;
+    case 'stop': h.stop(); break;
   }
   return true;
 }

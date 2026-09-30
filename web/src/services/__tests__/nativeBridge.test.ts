@@ -23,7 +23,7 @@ import {
 import { setNativeEnv } from '../../test/nativeEnv';
 
 function handlers(): NativeHeraldHandlers & Record<string, ReturnType<typeof vi.fn>> {
-  return { talkDown: vi.fn(), talkUp: vi.fn(), toggle: vi.fn(), brief: vi.fn(), muteTones: vi.fn() };
+  return { talkDown: vi.fn(), talkUp: vi.fn(), toggle: vi.fn(), brief: vi.fn(), muteTones: vi.fn(), stop: vi.fn() };
 }
 
 beforeEach(() => {
@@ -44,6 +44,7 @@ describe('dispatchNativeEvent', () => {
     ['toggle', 'toggle'],
     ['brief', 'brief'],
     ['mute_tones', 'muteTones'],
+    ['stop', 'stop'],
   ])('%s runs %s only', (action, handler) => {
     const h = handlers();
     expect(dispatchNativeEvent({ action }, h)).toBe(true);

@@ -31,6 +31,8 @@ export interface NativeHeraldPrefs {
   briefChord: string;
   /** Mobile: the earbud / headset play-pause toggles Herald. */
   earbudButton: boolean;
+  /** Mobile: other audio ducks while Herald speaks. */
+  duckOthers: boolean;
 }
 
 export const DEFAULT_NATIVE_PREFS: NativeHeraldPrefs = {
@@ -39,6 +41,7 @@ export const DEFAULT_NATIVE_PREFS: NativeHeraldPrefs = {
   toggleChord: 'Ctrl+Alt+Shift+H',
   briefChord: 'Ctrl+Alt+Shift+B',
   earbudButton: true,
+  duckOthers: true,
 };
 
 const PREFS_KEY = 'herald_native_prefs';
@@ -55,6 +58,7 @@ export function loadNativePrefs(): NativeHeraldPrefs {
       toggleChord: chord(p.toggleChord, DEFAULT_NATIVE_PREFS.toggleChord),
       briefChord: chord(p.briefChord, DEFAULT_NATIVE_PREFS.briefChord),
       earbudButton: typeof p.earbudButton === 'boolean' ? p.earbudButton : DEFAULT_NATIVE_PREFS.earbudButton,
+      duckOthers: typeof p.duckOthers === 'boolean' ? p.duckOthers : DEFAULT_NATIVE_PREFS.duckOthers,
     };
   } catch {
     return DEFAULT_NATIVE_PREFS;
@@ -67,6 +71,10 @@ interface NativeState {
   shortcuts: ShortcutResult[];
   info: NativeInfo | null;
 }
+
+/** A native input the device check is waiting for (it takes the press instead of Herald). */
+export type NativeProbe = (action: 'talk_down' | 'talk_up' | 'toggle' | 'brief' | 'stop') => void;
+let probe: NativeProbe | null = null;
 
 // A tiny store shared by the provider hook (which applies the prefs) and the
 // settings UI (which edits them), so neither needs a new React context.
@@ -95,8 +103,13 @@ export const nativeHeraldStore = {
   },
   setShortcuts: (shortcuts: ShortcutResult[]) => setState({ shortcuts }),
   setInfo: (info: NativeInfo | null) => setState({ info }),
+  /** Device check: route the next native presses here instead of to Herald (null restores). */
+  setProbe(p: NativeProbe | null): void {
+    probe = p;
+  },
   /** Tests only. */
   reset(): void {
+    probe = null;
     state = { prefs: loadNativePrefs(), shortcuts: [], info: null };
     listeners.forEach((l) => l());
   },
@@ -109,7 +122,7 @@ export function useNativeHeraldState(): NativeState {
 /** What the provider hands the native layer. Read through a ref: always current. */
 export interface NativeHeraldHost {
   /** Run a remote-trigger action locally (same logic as a daemon trigger). */
-  runTrigger: (action: 'toggle' | 'brief') => void;
+  runTrigger: (action: 'toggle' | 'brief' | 'stop') => void;
   input: {
     state: VoiceInputState;
     available: boolean;
@@ -129,8 +142,14 @@ export interface NativeHeraldHost {
 
 /** The handlers native input runs. Pure over the host, so it is unit tested. */
 export function nativeHandlers(host: () => NativeHeraldHost): NativeHeraldHandlers {
+  const probed = (action: Parameters<NativeProbe>[0]): boolean => {
+    if (!probe) return false;
+    probe(action);
+    return true;
+  };
   return {
     talkDown: () => {
+      if (probed('talk_down')) return;
       const h = host();
       if (h.input.state.phase !== 'idle') return; // key auto-repeat, or already capturing
       if (!h.input.available) {
@@ -141,11 +160,13 @@ export function nativeHandlers(host: () => NativeHeraldHost): NativeHeraldHandle
       h.input.start('global');
     },
     talkUp: () => {
+      if (probed('talk_up')) return;
       const h = host();
       if (h.input.state.source === 'global') h.input.stop();
     },
-    toggle: () => host().runTrigger('toggle'),
-    brief: () => host().runTrigger('brief'),
+    toggle: () => { if (!probed('toggle')) host().runTrigger('toggle'); },
+    brief: () => { if (!probed('brief')) host().runTrigger('brief'); },
+    stop: () => { if (!probed('stop')) host().runTrigger('stop'); },
     muteTones: () => {
       const h = host();
       h.setTonesOn(!h.tonesOn);
@@ -218,10 +239,10 @@ export function useNativeHerald(host: NativeHeraldHost, platform: NativePlatform
     void setMediaSession(earbud);
   }, [mobile, earbud]);
 
-  // Mobile: other audio ducks while Herald speaks.
-  const speaking = host.speaking;
+  // Mobile: other audio ducks while Herald speaks (unless turned off).
+  const duck = host.speaking && prefs.duckOthers;
   useEffect(() => {
     if (!mobile) return;
-    void setAudioFocus(speaking);
-  }, [mobile, speaking]);
+    void setAudioFocus(duck);
+  }, [mobile, duck]);
 }

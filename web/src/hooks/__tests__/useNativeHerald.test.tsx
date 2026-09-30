@@ -103,6 +103,29 @@ describe('nativeHandlers', () => {
     nativeHandlers(() => host).muteTones();
     expect(host.setTonesOn).toHaveBeenCalledWith(false);
   });
+
+  it('the overlay stop button runs the stop trigger', () => {
+    const host = makeHost();
+    nativeHandlers(() => host).stop();
+    expect(host.runTrigger).toHaveBeenCalledWith('stop');
+  });
+
+  it('while the device check waits for a press, presses go to it instead of Herald', () => {
+    const host = makeHost();
+    const probe = vi.fn();
+    nativeHeraldStore.setProbe(probe);
+    const h = nativeHandlers(() => host);
+    h.talkDown();
+    h.talkUp();
+    h.toggle();
+    h.brief();
+    expect(probe.mock.calls.map((c) => c[0])).toEqual(['talk_down', 'talk_up', 'toggle', 'brief']);
+    expect(host.input.start).not.toHaveBeenCalled();
+    expect(host.runTrigger).not.toHaveBeenCalled();
+    nativeHeraldStore.setProbe(null);
+    h.toggle();
+    expect(host.runTrigger).toHaveBeenCalledWith('toggle');
+  });
 });
 
 describe('native prefs', () => {
@@ -195,6 +218,15 @@ describe('useNativeHerald', () => {
     expect(bridge.setAudioFocus).toHaveBeenLastCalledWith(true);
     rerender({ ...host, speaking: false });
     expect(bridge.setAudioFocus).toHaveBeenLastCalledWith(false);
+  });
+
+  it('mobile: ducking can be turned off', async () => {
+    nativeHeraldStore.setPref('duckOthers', false);
+    const host = makeHost();
+    const { rerender } = renderHook((h: NativeHeraldHost) => useNativeHerald(h, 'android'), { initialProps: host });
+    await act(async () => {});
+    rerender({ ...host, speaking: true });
+    expect(bridge.setAudioFocus).not.toHaveBeenCalledWith(true);
   });
 });
 
