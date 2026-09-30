@@ -1,0 +1,226 @@
+#!/bin/bash
+# herald-voice — Herald's local voice service (Kokoro TTS, faster-whisper STT,
+# openWakeWord "hey jarvis"), Python/aiohttp on 127.0.0.1:9889 by default.
+#
+# Usage:
+#   bin/herald-voice install     Create the venv, install deps, download models (idempotent)
+#   bin/herald-voice start       Launch daemonized (nice'd, capped threads); waits for /health
+#   bin/herald-voice stop        SIGTERM, then SIGKILL; verifies the port is free
+#   bin/herald-voice restart     stop + start
+#   bin/herald-voice status      PID, port owner, engine readiness (exit 1 if unhealthy)
+#   bin/herald-voice logs [N]    Tail the service log
+#   bin/herald-voice test        Run the service's Python unit tests (fake engines)
+#   bin/herald-voice say "text" [voice] [out.wav]   Synthesize through the running service
+#
+# The service has NO auth of its own: it binds loopback only and is reached
+# solely through the authenticated Companion daemon (herald.voice_url, default
+# http://127.0.0.1:9889). The browser never talks to it directly.
+# Audio is never written to disk; transcripts are logged only with HERALD_DEBUG_TOOLS=1.
+#
+# Env overrides: HERALD_VOICE_PORT, HERALD_VOICE_HOME (venv+models, default
+# ~/.local/share/herald-voice), HERALD_TTS_VOICE, HERALD_TTS_THREADS (6),
+# HERALD_STT_MODEL (base.en), HERALD_STT_THREADS (4), HERALD_WAKE_MODELS
+# (hey_jarvis, or comma list incl. paths to custom .onnx), HERALD_WAKE_THRESHOLD (0.5).
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+ROOT="$(dirname "$SCRIPT_DIR")"
+SRC="$ROOT/voice"
+VOICE_HOME="${HERALD_VOICE_HOME:-$HOME/.local/share/herald-voice}"
+VENV="$VOICE_HOME/venv"
+PY="$VENV/bin/python"
+MODELS="$VOICE_HOME/models"
+RUN_DIR="${HERALD_VOICE_RUN_DIR:-$HOME/.cache/herald-voice}"
+PID_FILE="$RUN_DIR/voice.pid"
+LOG_FILE="$RUN_DIR/voice.log"
+PORT="${HERALD_VOICE_PORT:-9889}"
+KOKORO_BASE="https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0"
+PRODUCTION_PORTS="9877 9878"
+# Threads: keep the box responsive (12 cores; llama-server etc. share it).
+TTS_THREADS="${HERALD_TTS_THREADS:-6}"
+STT_THREADS="${HERALD_STT_THREADS:-4}"
+
+port_owner() { ss -ltnpH "sport = :$1" 2>/dev/null | grep -oE 'pid=[0-9]+' | head -1 | cut -d= -f2 || true; }
+
+running_pid() {
+  [ -f "$PID_FILE" ] || return 1
+  local pid
+  pid="$(cat "$PID_FILE" 2>/dev/null || true)"
+  [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null || return 1
+  tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null | grep -q "herald_voice" || return 1
+  echo "$pid"
+}
+
+health() { curl -sS -m 3 "http://127.0.0.1:$PORT/health" 2>/dev/null; }
+
+cmd_install() {
+  command -v uv >/dev/null || { echo "ERROR: uv not found (https://docs.astral.sh/uv/)"; exit 1; }
+  mkdir -p "$MODELS"
+  if [ ! -x "$PY" ]; then
+    echo "Creating venv at $VENV"
+    uv venv --python 3.12 "$VENV"
+  fi
+  echo "Installing Python dependencies..."
+  VIRTUAL_ENV="$VENV" uv pip install -q -r "$SRC/requirements.txt" -r "$SRC/requirements-dev.txt"
+  VIRTUAL_ENV="$VENV" uv pip install -q --no-deps "openwakeword>=0.6"
+  local f
+  for f in kokoro-v1.0.onnx voices-v1.0.bin; do
+    if [ ! -s "$MODELS/$f" ]; then
+      echo "Downloading $f..."
+      curl -fsSL --retry 3 -o "$MODELS/$f.part" "$KOKORO_BASE/$f"
+      mv "$MODELS/$f.part" "$MODELS/$f"
+    fi
+  done
+  echo "Fetching openWakeWord models (hey_jarvis + feature models)..."
+  "$PY" -c "import openwakeword.utils as u; u.download_models(model_names=['hey_jarvis'])" >/dev/null 2>&1
+  echo "Fetching Whisper ${HERALD_STT_MODEL:-base.en} (first run only)..."
+  OMP_NUM_THREADS=2 "$PY" -c "
+from faster_whisper import WhisperModel
+WhisperModel('${HERALD_STT_MODEL:-base.en}', device='cpu', compute_type='int8', cpu_threads=2, download_root='$MODELS/whisper')
+" >/dev/null 2>&1
+  echo "Installed. Start with: bin/herald-voice start"
+}
+
+cmd_start() {
+  if pid="$(running_pid)"; then
+    echo "Voice service already running (PID $pid) on 127.0.0.1:$PORT"
+    return 0
+  fi
+  [ -x "$PY" ] || { echo "ERROR: venv missing. Run: bin/herald-voice install"; exit 1; }
+  [ -s "$MODELS/kokoro-v1.0.onnx" ] || { echo "ERROR: models missing. Run: bin/herald-voice install"; exit 1; }
+  case " $PRODUCTION_PORTS " in *" $PORT "*) echo "ERROR: refusing to use a production port ($PORT)"; exit 1 ;; esac
+  local owner
+  owner="$(port_owner "$PORT")"
+  [ -z "$owner" ] || { echo "ERROR: port $PORT is already in use (pid $owner)"; exit 1; }
+
+  mkdir -p "$RUN_DIR"
+  chmod 700 "$RUN_DIR"
+  # Keep one previous log; never grow without bound.
+  [ -f "$LOG_FILE" ] && mv -f "$LOG_FILE" "$LOG_FILE.1"
+  : > "$LOG_FILE"
+  chmod 600 "$LOG_FILE"
+  (
+    cd "$SRC"
+    export HERALD_VOICE_HOST=127.0.0.1
+    export HERALD_VOICE_PORT="$PORT"
+    export HERALD_VOICE_MODELS="$MODELS"
+    export HERALD_TTS_THREADS="$TTS_THREADS"
+    export HERALD_STT_THREADS="$STT_THREADS"
+    # Cap every BLAS/OpenMP pool too (numpy/scipy/ctranslate2).
+    export OMP_NUM_THREADS="$STT_THREADS" OPENBLAS_NUM_THREADS=2 MKL_NUM_THREADS=2
+    export PYTHONUNBUFFERED=1
+    # Models are fetched by `install`; never reach the network at runtime.
+    export HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1
+    exec setsid nice -n 10 "$PY" -m herald_voice >> "$LOG_FILE" 2>&1 < /dev/null
+  ) &
+  local pid=$!
+  echo "$pid" > "$PID_FILE"
+
+  # /health answers as soon as the socket is up; engines keep loading after.
+  local i
+  for i in $(seq 1 40); do
+    if ! kill -0 "$pid" 2>/dev/null; then
+      echo "ERROR: voice service exited during startup. Last log lines:"
+      tail -20 "$LOG_FILE"
+      rm -f "$PID_FILE"
+      exit 1
+    fi
+    health >/dev/null && break
+    sleep 0.5
+  done
+  health >/dev/null || { echo "ERROR: no /health after 20s; stopping."; cmd_stop; exit 1; }
+  echo "Voice service started (PID $pid) on 127.0.0.1:$PORT (nice 10, TTS $TTS_THREADS / STT $STT_THREADS threads)"
+  echo "  Log: $LOG_FILE"
+  # Wait (bounded) for the engines so callers see a ready service.
+  for i in $(seq 1 90); do
+    health | python3 -c 'import json,sys; d=json.load(sys.stdin); sys.exit(0 if all(d[k]["ready"] or d[k]["error"] for k in ("tts","stt","wake")) else 1)' 2>/dev/null && break
+    sleep 1
+  done
+  cmd_status || true
+}
+
+cmd_stop() {
+  local pid
+  if ! pid="$(running_pid)"; then
+    echo "Voice service is not running."
+    rm -f "$PID_FILE"
+  else
+    kill -TERM "$pid" 2>/dev/null || true
+    local i
+    for i in $(seq 1 20); do
+      kill -0 "$pid" 2>/dev/null || break
+      sleep 0.25
+    done
+    if kill -0 "$pid" 2>/dev/null; then
+      echo "Voice service did not exit after SIGTERM; sending SIGKILL."
+      kill -KILL "$pid" 2>/dev/null || true
+      sleep 0.3
+    fi
+    rm -f "$PID_FILE"
+    echo "Voice service stopped (PID $pid)."
+  fi
+  local owner
+  owner="$(port_owner "$PORT")"
+  if [ -n "$owner" ]; then
+    echo "WARNING: port $PORT is still held by pid $owner."
+    return 1
+  fi
+  echo "Port $PORT is free."
+}
+
+cmd_status() {
+  local pid body
+  if ! pid="$(running_pid)"; then
+    echo "Voice service not running. Port $PORT owner: $(port_owner "$PORT" || true)"
+    return 1
+  fi
+  local owner cpu rss
+  owner="$(port_owner "$PORT")"
+  cpu="$(ps -o %cpu= -p "$pid" | tr -d ' ')"
+  rss="$(ps -o rss= -p "$pid" | awk '{printf "%.0f MB", $1/1024}')"
+  if ! body="$(health)"; then
+    echo "Voice service UNHEALTHY: PID $pid, port owner ${owner:-none}, /health unreachable"
+    return 1
+  fi
+  echo "$body" | PID="$pid" OWNER="$owner" CPU="$cpu" RSS="$rss" PORT="$PORT" python3 "$SRC/herald_voice/status.py"
+}
+
+cmd_test() {
+  [ -x "$PY" ] || { echo "ERROR: venv missing. Run: bin/herald-voice install"; exit 1; }
+  (cd "$SRC" && "$PY" -m pytest -q)
+}
+
+cmd_say() {
+  local text="${1:-}" voice="${2:-}" out="${3:-}"
+  [ -n "$text" ] || { echo "Usage: bin/herald-voice say \"text\" [voice] [out.wav]"; exit 2; }
+  [ -n "$out" ] || out="$(mktemp --suffix=.wav)"
+  local raw hdr
+  raw="$(mktemp)"; hdr="$(mktemp)"
+  TEXT="$text" VOICE="$voice" python3 -c 'import json,os; print(json.dumps({"text": os.environ["TEXT"], "voice": os.environ["VOICE"]}))' \
+    | curl -fsS -m 60 -D "$hdr" -H 'content-type: application/json' --data-binary @- -o "$raw" "http://127.0.0.1:$PORT/tts"
+  RAW="$raw" OUT="$out" python3 -c '
+import os, wave
+data = open(os.environ["RAW"], "rb").read()
+with wave.open(os.environ["OUT"], "wb") as w:
+    w.setnchannels(1); w.setsampwidth(2); w.setframerate(24000); w.writeframes(data)
+'
+  grep -iE '^x-(synth|audio)-ms' "$hdr" | tr -d '\r' | tr '\n' ' '; echo
+  rm -f "$raw" "$hdr"
+  echo "Wrote $out"
+}
+
+case "${1:-}" in
+  install) cmd_install ;;
+  start) cmd_start ;;
+  stop) cmd_stop ;;
+  restart) cmd_stop || true; cmd_start ;;
+  status) cmd_status ;;
+  logs) tail -n "${2:-80}" "$LOG_FILE" ;;
+  test) cmd_test ;;
+  say) shift; cmd_say "$@" ;;
+  *)
+    sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//'
+    exit 2
+    ;;
+esac

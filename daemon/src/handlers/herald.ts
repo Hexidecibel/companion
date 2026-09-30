@@ -1,5 +1,6 @@
 import { AuthenticatedClient, HandlerContext, MessageHandler } from '../handler-context';
 import { HeraldRequestError } from '../herald/service';
+import { VoiceError } from '../herald/voice/service';
 import type { AuditOrigin } from '../audit-log';
 
 /**
@@ -19,6 +20,8 @@ function auditOrigin(ctx: HandlerContext, client: AuthenticatedClient): AuditOri
     origin: client.origin,
   };
 }
+
+const VOICE_OFF = 'Herald voice is not enabled on this daemon';
 
 export function registerHeraldHandlers(ctx: HandlerContext): Record<string, MessageHandler> {
   const reply = (
@@ -54,6 +57,35 @@ export function registerHeraldHandlers(ctx: HandlerContext): Record<string, Mess
       }
     })();
 
+  const voiceReply = (
+    client: AuthenticatedClient,
+    type: string,
+    requestId: string | undefined,
+    run: (voice: NonNullable<HandlerContext['heraldVoice']>) => unknown | Promise<unknown>
+  ) =>
+    (async () => {
+      const voice = ctx.heraldVoice;
+      if (!voice) {
+        ctx.send(client.ws, { type, success: false, error: VOICE_OFF, requestId });
+        return;
+      }
+      try {
+        const payload = await run(voice);
+        ctx.send(client.ws, { type, success: true, payload, requestId });
+      } catch (err) {
+        const known = err instanceof VoiceError;
+        if (!known) console.error(`Herald voice: ${type} failed:`, err);
+        ctx.send(client.ws, {
+          type,
+          success: false,
+          // `code` lets the client tell "service down" (fall back) from "cancelled".
+          error: known ? (err as VoiceError).message : `Internal error handling ${type}`,
+          payload: known ? { code: (err as VoiceError).code } : undefined,
+          requestId,
+        });
+      }
+    })();
+
   return {
     herald_get_state(client, _payload, requestId) {
       return reply(client, 'herald_get_state', requestId, () => ctx.herald!.getState());
@@ -84,6 +116,58 @@ export function registerHeraldHandlers(ctx: HandlerContext): Record<string, Mess
 
     herald_reset(client, _payload, requestId) {
       return reply(client, 'herald_reset', requestId, () => ctx.herald!.reset());
+    },
+
+    // ---- voice (see the voice protocol section of herald/protocol.ts) ----
+
+    herald_voice_status(client, _payload, requestId) {
+      return voiceReply(client, 'herald_voice_status', requestId, (v) => v.status(client.id));
+    },
+
+    herald_tts(client, payload, requestId) {
+      return voiceReply(client, 'herald_tts', requestId, (v) => v.synthesize(client.id, payload));
+    },
+
+    herald_tts_cancel(client, _payload, requestId) {
+      return voiceReply(client, 'herald_tts_cancel', requestId, (v) => ({
+        cancelled: v.cancelTts(client.id),
+      }));
+    },
+
+    herald_voice_stream_start(client, payload, requestId) {
+      return voiceReply(client, 'herald_voice_stream_start', requestId, (v) =>
+        v.startStream(client.id, payload)
+      );
+    },
+
+    herald_voice_audio(client, payload, requestId) {
+      // Hot path (~10/s while talking): no reply unless the sender asked for one.
+      if (!ctx.heraldVoice) {
+        if (requestId) {
+          ctx.send(client.ws, {
+            type: 'herald_voice_audio',
+            success: false,
+            error: VOICE_OFF,
+            requestId,
+          });
+        }
+        return;
+      }
+      ctx.heraldVoice.pushAudio(client.id, payload);
+      if (requestId) ctx.send(client.ws, { type: 'herald_voice_audio', success: true, requestId });
+    },
+
+    herald_voice_stream_end(client, payload, requestId) {
+      return voiceReply(client, 'herald_voice_stream_end', requestId, (v) =>
+        v.endStream(client.id, payload)
+      );
+    },
+
+    herald_handsfree(client, payload, requestId) {
+      const on = (payload as { on?: unknown } | undefined)?.on === true;
+      return voiceReply(client, 'herald_handsfree', requestId, (v) =>
+        v.setHandsFree(client.id, on)
+      );
     },
   };
 }

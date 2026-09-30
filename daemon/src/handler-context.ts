@@ -11,6 +11,7 @@ import { SubAgentWatcher } from './subagent-watcher';
 import { AuditLog } from './audit-log';
 import { RateLimiter } from './rate-limiter';
 import type { HeraldService } from './herald/service';
+import type { HeraldVoiceService } from './herald/voice/service';
 import { DaemonConfig, OriginCredential, TmuxSessionConfig, WebSocketResponse } from './types';
 
 export interface AuthenticatedClient {
@@ -58,6 +59,7 @@ export interface HandlerContext {
   rateLimiter: RateLimiter;
   config: DaemonConfig;
   herald: HeraldService | null;
+  heraldVoice: HeraldVoiceService | null;
 
   // Helper methods from WebSocketServer
   send: (ws: WebSocket, response: WebSocketResponse) => void;

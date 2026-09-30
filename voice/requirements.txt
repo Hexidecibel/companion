@@ -1,0 +1,12 @@
+# Herald voice service (CPU). Installed by bin/herald-voice install into its own venv.
+# openwakeword is installed separately with --no-deps: its Linux metadata pins
+# tflite-runtime, which has no Python 3.12 wheel; we use its ONNX backend instead.
+aiohttp>=3.9
+numpy>=1.26
+scipy>=1.11
+scikit-learn>=1.3
+requests>=2.31
+tqdm>=4.66
+onnxruntime>=1.17
+kokoro-onnx>=0.4
+faster-whisper>=1.0

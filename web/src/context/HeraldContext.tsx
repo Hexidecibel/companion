@@ -148,7 +148,11 @@ export function HeraldProvider({ children }: { children: ReactNode }) {
   useEffect(() => eventBus.on('toggle-herald', toggle), [toggle]);
 
   const herald = useHerald(hostId);
-  const voice = useHeraldVoice(herald.subscribeEvents, hostId);
+  const voiceHost = useMemo(
+    () => ({ getTransport: herald.getTransport, connected: herald.connected }),
+    [herald.getTransport, herald.connected],
+  );
+  const voice = useHeraldVoice(herald.subscribeEvents, hostId, undefined, voiceHost);
   const available = !!hostId && herald.connected && herald.supported !== false;
   const inbox = herald.state?.inbox;
   const { unheardCount, unheardBlocked } = useMemo(() => {

@@ -1,5 +1,5 @@
 import type { WebSocketResponse } from '../types';
-import type { HeraldEvent } from '../types/herald';
+import type { HeraldEvent, HeraldVoiceEvent } from '../types/herald';
 import { connectionManager } from './ConnectionManager';
 
 /**
@@ -16,9 +16,17 @@ export interface HeraldTransport {
    * A false -> true transition is a (re)connect: callers refetch state there.
    */
   onConnectivity(handler: (connected: boolean) => void): () => void;
+  /**
+   * Fire-and-forget (no requestId, never queued across reconnects): used for
+   * streamed audio chunks. Returns false when the socket is not open.
+   */
+  fire?(type: string, payload: unknown): boolean;
+  /** Per-client `herald_voice_event` pushes (wake word, stream errors, hands-free). */
+  onVoiceEvent?(handler: (event: HeraldVoiceEvent) => void): () => void;
 }
 
 export const HERALD_EVENT_TYPE = 'herald_event';
+export const HERALD_VOICE_EVENT_TYPE = 'herald_voice_event';
 export const HERALD_DEMO_SERVER_ID = '__herald_demo__';
 
 export function createConnectionTransport(serverId: string): HeraldTransport | null {
@@ -31,6 +39,17 @@ export function createConnectionTransport(serverId: string): HeraldTransport | n
       conn.onMessage((msg) => {
         if (msg.type === HERALD_EVENT_TYPE && msg.payload && typeof msg.payload === 'object') {
           handler(msg.payload as HeraldEvent);
+        }
+      }),
+    fire: (type, payload) => {
+      if (!conn.isConnected()) return false;
+      conn.send({ type, payload }).catch(() => {});
+      return true;
+    },
+    onVoiceEvent: (handler) =>
+      conn.onMessage((msg) => {
+        if (msg.type === HERALD_VOICE_EVENT_TYPE && msg.payload && typeof msg.payload === 'object') {
+          handler(msg.payload as HeraldVoiceEvent);
         }
       }),
     onConnectivity: (handler) => {

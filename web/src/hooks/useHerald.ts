@@ -49,6 +49,8 @@ export interface UseHeraldReturn {
   clearError: () => void;
   /** Subscribe to every Herald event with its source. Stable identity. */
   subscribeEvents: (listener: HeraldEventListener) => () => void;
+  /** Current host transport (voice side channel). Stable identity. */
+  getTransport: () => HeraldTransport | null;
 }
 
 export function useHerald(serverId: string | null): UseHeraldReturn {
@@ -227,6 +229,7 @@ export function useHerald(serverId: string | null): UseHeraldReturn {
     }
   }, [notify]);
 
+  const getTransport = useCallback(() => transportRef.current, []);
   const clearError = useCallback(() => dispatch({ type: 'clear_error' }), []);
   const refresh = useCallback(() => { void fetchState(); }, [fetchState]);
   const messages = useMemo(() => selectMessages(client), [client]);
@@ -247,5 +250,6 @@ export function useHerald(serverId: string | null): UseHeraldReturn {
     refresh,
     clearError,
     subscribeEvents,
+    getTransport,
   };
 }

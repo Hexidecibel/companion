@@ -43,6 +43,9 @@ import { LocalSessionSource } from './herald/session-source';
 import { resolveHeraldConfig } from './herald/config';
 import { createProvider } from './herald/llm';
 import { deriveSelfInfo } from './herald/self-info';
+import { HeraldVoiceService } from './herald/voice/service';
+import { VoiceServiceClient } from './herald/voice/client';
+import type { HeraldVoiceEvent } from './herald/protocol';
 
 // File for persisting tmux session configs
 const TMUX_CONFIGS_FILE = path.join(os.homedir(), '.companion', 'tmux-sessions.json');
@@ -82,6 +85,7 @@ export class WebSocketHandler {
   private rateLimiter: RateLimiter;
   private handlers: Map<string, MessageHandler>;
   private herald: HeraldService | null = null;
+  private heraldVoice: HeraldVoiceService | null = null;
   private deadConnectionInterval: ReturnType<typeof setInterval>;
   private static readonly PONG_TIMEOUT_MS = 90_000;
   private static readonly DEAD_CHECK_INTERVAL_MS = 60_000;
@@ -128,6 +132,7 @@ export class WebSocketHandler {
     this.usageMonitor.start();
 
     this.herald = this.createHerald();
+    this.heraldVoice = this.createHeraldVoice();
 
     // Register all handler modules
     this.handlers = registerAllHandlers(this.createHandlerContext());
@@ -249,6 +254,7 @@ export class WebSocketHandler {
       rateLimiter: this.rateLimiter,
       config: this.config,
       herald: this.herald,
+      heraldVoice: this.heraldVoice,
 
       send: (ws, response) => this.send(ws, response),
       broadcast: (type, payload, sessionId) => this.broadcast(type, payload, sessionId),
@@ -305,6 +311,29 @@ export class WebSocketHandler {
       console.error('Herald: failed to initialize:', err);
       return null;
     }
+  }
+
+  private createHeraldVoice(): HeraldVoiceService | null {
+    if (!this.herald) return null;
+    const url = resolveHeraldConfig(this.config.herald).voiceUrl;
+    if (!url) {
+      console.log('Herald voice: disabled (herald.voice_enabled=false or invalid voice_url)');
+      return null;
+    }
+    const voice = new HeraldVoiceService({
+      client: new VoiceServiceClient(url),
+      sendEvent: (clientId, event) => this.sendToClient(clientId, 'herald_voice_event', event),
+      debugTranscripts: !!process.env.HERALD_DEBUG_TOOLS && process.env.HERALD_DEBUG_TOOLS !== '0',
+    });
+    voice.start();
+    console.log(`Herald voice: using voice service at ${url}`);
+    return voice;
+  }
+
+  private sendToClient(clientId: string, type: string, payload: HeraldVoiceEvent): void {
+    const client = this.clients.get(clientId);
+    if (!client || !client.authenticated || client.ws.readyState !== WebSocket.OPEN) return;
+    this.send(client.ws, { type, success: true, payload });
   }
 
   // --- Tmux session config persistence ---
@@ -401,6 +430,7 @@ export class WebSocketHandler {
     ws.on('close', (code, reason) => {
       clearInterval(serverPingInterval);
       this.clients.delete(clientId);
+      this.heraldVoice?.clientGone(clientId);
       console.log(
         `WebSocket: Client disconnected (${clientId}) code=${code} reason=${reason?.toString() || 'none'}`
       );
@@ -410,6 +440,7 @@ export class WebSocketHandler {
       clearInterval(serverPingInterval);
       console.error(`WebSocket: Client error (${clientId}):`, err);
       this.clients.delete(clientId);
+      this.heraldVoice?.clientGone(clientId);
     });
 
     this.send(ws, {
@@ -423,7 +454,8 @@ export class WebSocketHandler {
 
   private handleMessage(client: AuthenticatedClient, message: WebSocketMessage): void {
     const { type, token, payload, requestId } = message;
-    if (type !== 'ping') {
+    // Audio chunks arrive ~10/s while someone talks: never log them.
+    if (type !== 'ping' && type !== 'herald_voice_audio') {
       console.log(`WebSocket: >> recv ${type} (${requestId || 'no-id'}) from ${client.id}`);
       updateLastActivity();
     }
@@ -757,5 +789,6 @@ export class WebSocketHandler {
     this.escalation.destroy();
     this.usageMonitor.stop();
     this.herald?.shutdown();
+    this.heraldVoice?.shutdown();
   }
 }

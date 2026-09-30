@@ -42,6 +42,9 @@ function getContentType(filePath: string): string {
     '.html': 'text/html',
     '.css': 'text/css',
     '.js': 'application/javascript',
+    '.mjs': 'application/javascript',
+    '.wasm': 'application/wasm',
+    '.onnx': 'application/octet-stream',
     '.json': 'application/json',
     '.png': 'image/png',
     '.jpg': 'image/jpeg',
@@ -190,6 +193,15 @@ export function createQRRequestHandler(config: DaemonConfig): http.RequestListen
           }
         }
 
+        // Validator so large assets (e.g. the 14 MB VAD wasm) revalidate with a
+        // 304 instead of being re-sent on every load under no-cache.
+        const st = fs.statSync(servePath);
+        const etag = `W/"${st.size.toString(16)}-${Math.floor(st.mtimeMs).toString(16)}"`;
+        if (req.headers['if-none-match'] === etag) {
+          res.writeHead(304, { ETag: etag, 'Cache-Control': 'no-cache' });
+          res.end();
+          return;
+        }
         const content = fs.readFileSync(servePath);
         const contentType = getContentType(servePath);
 
@@ -197,6 +209,7 @@ export function createQRRequestHandler(config: DaemonConfig): http.RequestListen
           'Content-Type': contentType,
           'Content-Length': content.length,
           'Cache-Control': 'no-cache',
+          ETag: etag,
         });
         res.end(content);
       } catch (err) {

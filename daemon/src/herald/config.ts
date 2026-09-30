@@ -28,6 +28,13 @@ export interface HeraldConfigBlock {
    * isolated bin/herald-sandbox daemon so it never touches production state).
    */
   state_dir?: string;
+  /**
+   * Local voice service (bin/herald-voice). Default http://127.0.0.1:9889;
+   * env HERALD_VOICE_URL takes precedence. The browser never talks to it.
+   */
+  voice_url?: string;
+  /** Set false to disable neural voice / voice input entirely. */
+  voice_enabled?: boolean;
 }
 
 export interface ResolvedHeraldConfig {
@@ -48,6 +55,8 @@ export interface ResolvedHeraldConfig {
   brainConfigured: boolean;
   /** Human-readable reason the brain is unavailable (when !brainConfigured or !featureEnabled). */
   disabledReason?: string;
+  /** Voice service base URL, or null when voice is disabled. */
+  voiceUrl: string | null;
 }
 
 export const DEFAULT_DISPLAY_NAME = 'Herald';
@@ -57,6 +66,7 @@ export const MIN_ECHO_DELAY_MS = 1500;
 export const MAX_ECHO_DELAY_MS = 60_000;
 export const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
 export const DEFAULT_MAX_TOKENS = 700;
+export const DEFAULT_VOICE_URL = 'http://127.0.0.1:9889';
 
 const PROVIDERS: HeraldProviderName[] = ['openai_compatible', 'anthropic'];
 
@@ -83,6 +93,8 @@ export function parseHeraldConfigBlock(raw: unknown): HeraldConfigBlock | undefi
   if (typeof r.timeout_ms === 'number') out.timeout_ms = r.timeout_ms;
   if (typeof r.max_tokens === 'number') out.max_tokens = r.max_tokens;
   if (typeof r.state_dir === 'string' && r.state_dir.trim()) out.state_dir = r.state_dir.trim();
+  if (typeof r.voice_url === 'string' && r.voice_url.trim()) out.voice_url = r.voice_url.trim();
+  if (typeof r.voice_enabled === 'boolean') out.voice_enabled = r.voice_enabled;
   return out;
 }
 
@@ -111,6 +123,17 @@ function validBaseUrl(u: string): boolean {
   }
 }
 
+/** Voice service URL: env HERALD_VOICE_URL > herald.voice_url > default; null when disabled or invalid. */
+export function resolveVoiceUrl(
+  block: HeraldConfigBlock | undefined,
+  env: NodeJS.ProcessEnv = process.env
+): string | null {
+  if (block?.voice_enabled === false) return null;
+  const raw = (env.HERALD_VOICE_URL || '').trim() || block?.voice_url || DEFAULT_VOICE_URL;
+  const url = raw.replace(/\/+$/, '');
+  return validBaseUrl(url) ? url : null;
+}
+
 export function resolveHeraldConfig(
   block: HeraldConfigBlock | undefined,
   env: NodeJS.ProcessEnv = process.env
@@ -134,6 +157,7 @@ export function resolveHeraldConfig(
     requestTimeoutMs: clampInt(b.timeout_ms, DEFAULT_REQUEST_TIMEOUT_MS, 5_000, 120_000),
     maxTokens: clampInt(b.max_tokens, DEFAULT_MAX_TOKENS, 128, 4096),
     stateDir: resolveHeraldStateDir(b, env),
+    voiceUrl: resolveVoiceUrl(b, env),
   };
 
   if (!featureEnabled) {

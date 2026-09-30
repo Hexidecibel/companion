@@ -18,6 +18,8 @@ export interface TtsVoice {
   local: boolean;
   /** True when the engine would pick it with no preference. */
   isDefault: boolean;
+  /** Which backend speaks it: `neural` = Herald's server voices, else the browser. */
+  engine?: 'neural' | 'browser';
 }
 
 export interface TtsSpeakOptions {

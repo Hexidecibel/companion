@@ -33,20 +33,29 @@ export function rankVoices(voices: TtsVoice[], preferredLang = 'en-US'): TtsVoic
   return [...voices].sort((a, b) => scoreVoice(b, preferredLang) - scoreVoice(a, preferredLang) || a.name.localeCompare(b.name));
 }
 
-/** The voice to use: the saved one if still present, otherwise the best ranked. */
+/**
+ * The voice to use: the saved one if still present; otherwise Herald's default
+ * neural voice when the voice service is up; otherwise the best browser voice.
+ */
 export function pickVoice(voices: TtsVoice[], savedId: string | null, preferredLang = 'en-US'): TtsVoice | null {
   if (voices.length === 0) return null;
   if (savedId) {
     const saved = voices.find((v) => v.id === savedId);
     if (saved) return saved;
   }
+  const neural = voices.filter((v) => v.engine === 'neural');
+  if (neural.length > 0) return neural.find((v) => v.isDefault) ?? neural[0];
   return rankVoices(voices, preferredLang)[0] ?? null;
 }
 
-/** Voices worth listing in the picker: English first (ranked), then the rest. */
-export function voicesForPicker(voices: TtsVoice[], preferredLang = 'en-US'): { recommended: TtsVoice[]; other: TtsVoice[] } {
-  const ranked = rankVoices(voices, preferredLang);
+/**
+ * Picker groups: Herald's neural voices (server order), then browser voices
+ * worth listing (English first, ranked), then the rest.
+ */
+export function voicesForPicker(voices: TtsVoice[], preferredLang = 'en-US'): { neural: TtsVoice[]; recommended: TtsVoice[]; other: TtsVoice[] } {
+  const neural = voices.filter((v) => v.engine === 'neural');
+  const ranked = rankVoices(voices.filter((v) => v.engine !== 'neural'), preferredLang);
   const recommended = ranked.filter((v) => v.lang.toLowerCase().startsWith('en') && !NOVELTY.test(v.name));
   const other = ranked.filter((v) => !recommended.includes(v));
-  return { recommended, other };
+  return { neural, recommended, other };
 }

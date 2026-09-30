@@ -4,7 +4,7 @@ import { sortInbox, sortPendingByUrgency } from '../../services/heraldReducer';
 import { useHeraldData, useHeraldUi, useHeraldVoiceCtx } from '../../context/HeraldContext';
 import type { HeraldVoice } from '../../hooks/useHeraldVoice';
 import { RATE_MAX, RATE_MIN } from '../../hooks/useHeraldVoice';
-import { voicesForPicker } from '../../services/tts/voices';
+import { pickVoice, voicesForPicker } from '../../services/tts/voices';
 import { HeraldOrb } from './HeraldOrb';
 import { HeraldActionCard, HeraldPendingMarker, HeraldResolvedLine } from './HeraldActionCard';
 import { HeraldComposer } from './HeraldComposer';
@@ -181,8 +181,9 @@ function InboxStrip({ items, unheardCount, canAsk, onAsk, onChip }: {
 // ---------------------------------------------------------------------------
 
 function VoiceSettings({ voice }: { voice: HeraldVoice }) {
-  const { recommended, other } = useMemo(() => voicesForPicker(voice.voices), [voice.voices]);
-  const auto = recommended[0] ?? other[0] ?? null;
+  const { neural, recommended, other } = useMemo(() => voicesForPicker(voice.voices), [voice.voices]);
+  const auto = useMemo(() => pickVoice(voice.voices, null), [voice.voices]);
+  const neuralDown = voice.serverStatus !== null && !voice.serverStatus.available;
   return (
     <div className="herald-voice-set" role="group" aria-label="Voice settings">
       {voice.supported && (
@@ -199,8 +200,15 @@ function VoiceSettings({ voice }: { voice: HeraldVoice }) {
               <option value="">
                 {voice.voices.length === 0 ? 'System default voice' : `Automatic${auto ? ` (${auto.name})` : ''}`}
               </option>
+              {neural.length > 0 && (
+                <optgroup label="Herald voices (neural)">
+                  {neural.map((v) => (
+                    <option key={v.id} value={v.id}>{v.name}</option>
+                  ))}
+                </optgroup>
+              )}
               {recommended.length > 0 && (
-                <optgroup label="English">
+                <optgroup label={neural.length > 0 ? 'Browser voices' : 'English'}>
                   {recommended.map((v) => (
                     <option key={v.id} value={v.id}>{v.name}{v.local ? '' : ' · online'}</option>
                   ))}
@@ -215,6 +223,13 @@ function VoiceSettings({ voice }: { voice: HeraldVoice }) {
               )}
             </select>
           </label>
+          <div className="herald-voice-set__engine" aria-live="polite">
+            {voice.neural
+              ? 'Neural voice (Kokoro, on your hub)'
+              : neuralDown
+                ? 'Voice service offline: using browser voice'
+                : neural.length > 0 ? 'Browser voice' : 'Browser voice (hub has no neural voices)'}
+          </div>
           <label className="herald-voice-set__rate">
             <span className="herald-voice-set__rate-label">Speed</span>
             <input

@@ -60,3 +60,7 @@ desktop/src-tauri/gen/
 
 # Concierge orchestrator (rendered per-machine from .mcp.json.template)
 concierge/.mcp.json
+
+# Herald voice service (Python)
+__pycache__/
+.pytest_cache/
