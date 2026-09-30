@@ -12,7 +12,8 @@ Quick capture for ideas and tasks. Run `/plan` to process into detailed plans.
 - TestFlight beta -- submit iOS build for beta testing before public release
 
 ## Upcoming
-- Herald (voice front layer) -- Phase 1 text-only in progress on branch feat/herald (worktree ../companion-herald). See plan.md 'Voice Front Layer' [in-progress]
+- Herald go-live (Phase 1 text-only is merged to main, not live) -- needs sign-off for: `bin/companion install-secrets`, `bin/companion herald-provider anthropic`, build daemon + web in the main repo, daemon restart; then `/apk` for the native app UI. Sandbox demo: `bin/herald-sandbox` (port 9887) [in-progress]
+- Herald Phase 2 (desktop voice) -- push-to-talk + TTS; hide mic from Discord while PTT held (PipeWire, on by default); duck other audio while Herald speaks (lower/mute/off + level; phones via OS audio focus). See plan.md 'Voice Front Layer' [planned]
 - Cmd+Alt+Tab session switcher -- keyboard shortcut to cycle between session windows (MRU order like Alt+Tab, hold modifiers + tap Tab to step, release to switch). Confirm target: desktop Tauri app vs browser; check OS doesn't swallow the combo
 - Fleet initiative (Inbox -> Missions -> Routing -> Health) -- opt-in fleet/orchestration layer to differentiate from Anthropic Remote Control; Phase 1 Fleet Inbox is next. See plan.md 'Fleet (Inbox → Missions → Routing → Health)' [planned]
 - BUG: App doesn't reconnect after daemon restart -- WS closes on daemon restart, client never re-establishes a working connection; `send` silently no-ops; only fix is remove server + re-add. Need auto-reconnect (backoff) that re-runs authenticate + subscribe, not just reopens the socket. (High pain -- this is what made every debug restart miserable.)

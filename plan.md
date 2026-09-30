@@ -1627,7 +1627,9 @@ preceding `self_update_prepare` call so a replayed request cannot restart a daem
 ---
 
 ## Item: Voice Front Layer (working name) — fleet-wide chief of staff
-**Status:** planned
+**Status:** in-progress — Phase 1 (text-only, named "Herald") is built, reviewed and merged to
+`main` (2026-09-30); not yet live in production (go-live = `bin/companion install-secrets` +
+`bin/companion herald-provider anthropic` + build + a user-approved daemon restart). Phases 2-5 planned.
 
 ### Goal & Rationale
 A fast, always-available conversational entity layered **over** Claude Code sessions across the whole
@@ -1734,6 +1736,13 @@ host. Evaluation items (none decided):
 1. **Text-only front layer** in the existing web app (typed or Wispr-dictated): server-side brain,
    fleet inbox, tools, grounding, guardrail tiers. Tune personality + guardrails before any audio.
 2. **Desktop voice:** headphones, push-to-talk hotkey (+ optional wake word), chimes, TTS, local STT.
+   Confirmed audio requirements:
+   - **(a) Hide the mic from voice chat while talking to Herald.** While the user holds Herald's
+     push-to-talk, their mic must not reach voice chat. Linux: PipeWire-mute ONLY Discord's input
+     stream (Herald still hears them); restore on release. **On by default.**
+   - **(b) Duck other audio while Herald speaks.** Setting: lower (default) / mute / leave alone,
+     with an adjustable duck level. Restore when Herald finishes. Phones use OS audio focus
+     (transient-may-duck on Android, `.duckOthers` on iOS) instead of per-app volume.
 3. **Phone / earbuds push-to-talk** (iOS/Android native audio work).
 4. **Device handoff** (conversation follows you across devices).
 5. **Wake word / always-listening**, studio-mic echo handling.
