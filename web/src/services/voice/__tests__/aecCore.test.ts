@@ -177,3 +177,19 @@ describe('AecStream with WebRTC AEC3 (synthetic room)', () => {
     expect(cpuMs / (secs * 1000)).toBeLessThan(0.1);
   });
 });
+
+describe('echoFigures', () => {
+  it('caps at the room noise floor instead of reporting impossible suppression', () => {
+    // Playback at -20 dBFS; the cleaned mic during playback is at the noise floor (-65 dBFS).
+    const ref = 1e-2;
+    const floor = Math.pow(10, -6.5);
+    const s = { blocks: 200, idleBlocks: 100, refPow: ref * 200, micPow: 1e-4 * 200, outPow: floor * 200, idleMicPow: floor * 100, idleOutPow: floor * 100 };
+    const f = echoFigures(s)!;
+    expect(f.totalDb).toBeGreaterThan(45);
+    expect(f.totalDb).toBeLessThan(55); // ~ref/floor + 6 dB, not 90+
+  });
+
+  it('needs enough playback to say anything', () => {
+    expect(echoFigures({ ...emptyStats(), blocks: 10, refPow: 1 })).toBeNull();
+  });
+});

@@ -256,11 +256,14 @@ export class AecStream {
 export function echoFigures(s: AecStats, minBlocks = 50): { erlDb: number; erleDb: number; totalDb: number } | null {
   if (s.blocks < minBlocks) return null;
   const ref = s.refPow / s.blocks;
-  // Subtract the room noise floor so a noisy room does not read as echo.
+  // Subtract the room noise floor so a noisy room does not read as echo, but
+  // never below a quarter of it: echo under the noise floor cannot be measured,
+  // so the figure is capped there (~6 dB below the floor) instead of running
+  // off to 90 dB.
   const floorMic = s.idleBlocks ? s.idleMicPow / s.idleBlocks : 0;
   const floorOut = s.idleBlocks ? s.idleOutPow / s.idleBlocks : 0;
-  const mic = Math.max(s.micPow / s.blocks - floorMic, 1e-12);
-  const out = Math.max(s.outPow / s.blocks - floorOut, 1e-12);
+  const mic = Math.max(s.micPow / s.blocks - floorMic, floorMic * 0.25, 1e-12);
+  const out = Math.max(s.outPow / s.blocks - floorOut, floorOut * 0.25, 1e-12);
   return {
     erlDb: powDb(ref) - powDb(mic),
     erleDb: powDb(mic) - powDb(out),
