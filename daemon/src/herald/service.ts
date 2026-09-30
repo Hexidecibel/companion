@@ -20,6 +20,7 @@ import type { SessionSnapshot, SessionSource } from './session-source';
 import { LlmError, LlmProvider } from './llm/provider';
 import { raceAbort, runTurn, TURN_TIMEOUT_MS } from './brain';
 import { buildSystemPrompt } from './prompt';
+import type { HeraldSelfInfo } from './self-info';
 import { executeTool, TurnToolState, ToolEnv } from './tools';
 import { sessionsMentioned } from './resolve';
 import { clip, firstSentence, formatAgo, oneLine, plainToolAction } from './text';
@@ -50,6 +51,8 @@ export interface HeraldServiceDeps {
   audit: (entry: AuditEntry) => void;
   pollIntervalMs?: number;
   now?: () => number;
+  /** Where this daemon's web UI is reachable (for Herald's self-knowledge). */
+  selfInfo?: HeraldSelfInfo;
 }
 
 const SERVER_ORIGIN: AuditOrigin = {
@@ -69,6 +72,8 @@ export class HeraldService {
   private auditFn: (entry: AuditEntry) => void;
   private now: () => number;
   private pollIntervalMs: number;
+  /** Built once: stable across turns so it caches well. */
+  private systemPrompt: string;
 
   private messages: HeraldMessage[] = [];
   private inbox = new InboxTracker();
@@ -93,6 +98,7 @@ export class HeraldService {
     this.auditFn = deps.audit;
     this.now = deps.now || Date.now;
     this.pollIntervalMs = deps.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
+    this.systemPrompt = buildSystemPrompt(this.cfg.displayName, deps.selfInfo);
     this.actions = new ActionManager({
       getSource: (serverId) => this.getSource(serverId),
       echoDelayMs: this.cfg.echoDelayMs,
@@ -401,7 +407,7 @@ export class HeraldService {
         history,
         userText,
         snapshot: this.buildSnapshot(snaps) + prefetched,
-        systemPrompt: buildSystemPrompt(this.cfg.displayName),
+        systemPrompt: this.systemPrompt,
         maxTokens: this.cfg.maxTokens,
         signal: abort.signal,
         onText,

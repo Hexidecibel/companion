@@ -29,7 +29,12 @@ import { SessionNameStore } from './session-names';
 import { AuditLog } from './audit-log';
 import { RateLimiter } from './rate-limiter';
 
-import { AuthenticatedClient, ClientError, HandlerContext, MessageHandler } from './handler-context';
+import {
+  AuthenticatedClient,
+  ClientError,
+  HandlerContext,
+  MessageHandler,
+} from './handler-context';
 import { registerAllHandlers } from './handlers';
 import { updateLastActivity } from './metrics';
 import { HeraldService } from './herald/service';
@@ -37,6 +42,7 @@ import { HeraldStore } from './herald/store';
 import { LocalSessionSource } from './herald/session-source';
 import { resolveHeraldConfig } from './herald/config';
 import { createProvider } from './herald/llm';
+import { deriveSelfInfo } from './herald/self-info';
 
 // File for persisting tmux session configs
 const TMUX_CONFIGS_FILE = path.join(os.homedir(), '.companion', 'tmux-sessions.json');
@@ -209,7 +215,9 @@ export class WebSocketHandler {
       const now = Date.now();
       for (const [id, client] of this.clients) {
         if (now - client.lastPongTime > WebSocketHandler.PONG_TIMEOUT_MS) {
-          console.log(`WebSocket: Closing dead connection (${id}) — no ping for ${Math.round((now - client.lastPongTime) / 1000)}s`);
+          console.log(
+            `WebSocket: Closing dead connection (${id}) — no ping for ${Math.round((now - client.lastPongTime) / 1000)}s`
+          );
           try {
             client.ws.close(1000, 'Ping timeout');
           } catch {
@@ -290,6 +298,7 @@ export class WebSocketHandler {
         store: new HeraldStore(cfg.stateDir),
         broadcast: (event) => this.broadcast('herald_event', event),
         audit: (entry) => this.auditLog.append(entry),
+        selfInfo: deriveSelfInfo(this.config.listeners[0]),
       });
     } catch (err) {
       console.error('Herald: failed to initialize:', err);
@@ -700,9 +709,7 @@ export class WebSocketHandler {
   }
 
   private broadcast(type: string, payload: unknown, sessionId?: string): void {
-    const SESSION_SCOPED_TYPES = new Set([
-      'conversation_update', 'status_change', 'compaction'
-    ]);
+    const SESSION_SCOPED_TYPES = new Set(['conversation_update', 'status_change', 'compaction']);
 
     // Session-scoped events without a sessionId are dropped — never broadcast to everyone
     if (SESSION_SCOPED_TYPES.has(type) && !sessionId) {
