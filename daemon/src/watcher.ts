@@ -653,48 +653,48 @@ export class SessionWatcher extends EventEmitter {
       convId,
       setTimeout(() => {
         void (async () => {
-        this.waitingDebounceTimers.delete(convId);
-        const tracked = this.conversations.get(convId);
-        if (!tracked) return;
+          this.waitingDebounceTimers.delete(convId);
+          const tracked = this.conversations.get(convId);
+          if (!tracked) return;
 
-        // Re-parse to confirm still waiting. Read off the event loop so a large
-        // conversation file doesn't block pings/pongs.
-        let content: string;
-        try {
-          content = await fs.promises.readFile(filePath, 'utf-8');
-        } catch {
-          return;
-        }
-        const messages = parseConversationFile(filePath, undefined, content);
-        if (!detectWaitingForInput(messages)) return;
-
-        // Confirmed: tool is genuinely waiting for input (not just running)
-        tracked.isWaitingForInput = true;
-        tracked.cachedMessages = messages;
-        const currentIsRunning = messages.length > 0 && !tracked.isWaitingForInput;
-        tracked.isRunning = currentIsRunning;
-
-        if (this.activeConversationId === convId) {
-          this.isWaitingForInput = true;
-        }
-
-        // Find tmux session name for this conversation
-        let sessionId: string | undefined;
-        for (const [name, mappedId] of this.tmuxConversationIds) {
-          if (mappedId === convId) {
-            sessionId = name;
-            break;
+          // Re-parse to confirm still waiting. Read off the event loop so a large
+          // conversation file doesn't block pings/pongs.
+          let content: string;
+          try {
+            content = await fs.promises.readFile(filePath, 'utf-8');
+          } catch {
+            return;
           }
-        }
-        if (!sessionId) return;
+          const messages = parseConversationFile(filePath, undefined, content);
+          if (!detectWaitingForInput(messages)) return;
 
-        const lastMessage = messages[messages.length - 1];
-        this.emit('status-change', {
-          sessionId,
-          isWaitingForInput: true,
-          currentActivity: detectCurrentActivity(messages),
-          lastMessage,
-        });
+          // Confirmed: tool is genuinely waiting for input (not just running)
+          tracked.isWaitingForInput = true;
+          tracked.cachedMessages = messages;
+          const currentIsRunning = messages.length > 0 && !tracked.isWaitingForInput;
+          tracked.isRunning = currentIsRunning;
+
+          if (this.activeConversationId === convId) {
+            this.isWaitingForInput = true;
+          }
+
+          // Find tmux session name for this conversation
+          let sessionId: string | undefined;
+          for (const [name, mappedId] of this.tmuxConversationIds) {
+            if (mappedId === convId) {
+              sessionId = name;
+              break;
+            }
+          }
+          if (!sessionId) return;
+
+          const lastMessage = messages[messages.length - 1];
+          this.emit('status-change', {
+            sessionId,
+            isWaitingForInput: true,
+            currentActivity: detectCurrentActivity(messages),
+            lastMessage,
+          });
         })();
       }, SessionWatcher.WAITING_DEBOUNCE_MS)
     );
