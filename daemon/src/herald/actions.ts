@@ -14,10 +14,13 @@ import { randomUUID } from 'crypto';
 import type { HeraldAction, HeraldActionTier } from './protocol';
 import type { SessionSource } from './session-source';
 import type { AuditOrigin } from '../audit-log';
+import type { CushCommand } from './knowledge/cush';
 
 export const HARD_CONFIRM_TTL_MS = 10 * 60 * 1000;
 const REVALIDATE_TIMEOUT_MS = 8000;
 const SEND_TIMEOUT_MS = 20_000;
+/** Command (20s) + launch verification (12s) + local checks, with headroom. */
+const CUSH_TIMEOUT_MS = 45_000;
 const MAX_RESOLVED_KEPT = 30;
 
 export interface ChoiceMeta {
@@ -29,6 +32,15 @@ export interface ChoiceMeta {
 
 export interface ActionMeta {
   choice?: ChoiceMeta;
+  /** cush_command: the validated command (never a shell string). */
+  cush?: CushCommand;
+}
+
+/** Outcome of running a cush_command; `message` is posted to the user verbatim. */
+export interface CushExecOutcome {
+  ok: boolean;
+  message: string;
+  error?: string;
 }
 
 export type ActionTrigger = 'auto' | 'confirm' | 'cancel' | 'expire' | 'propose' | 'escalate';
@@ -48,8 +60,11 @@ export interface ActionManagerDeps {
   hardConfirmTtlMs?: number;
   now?: () => number;
   onChange(action: HeraldAction): void;
-  onSent(action: HeraldAction): void;
+  /** `note`: the result line for a cush_command (URL + verification). */
+  onSent(action: HeraldAction, note?: string): void;
   audit: ActionAuditHook;
+  /** Runs a cush_command (re-validates, executes, verifies). Absent = unsupported. */
+  runCush?: (cmd: CushCommand, action: HeraldAction) => Promise<CushExecOutcome>;
 }
 
 interface ActionRecord {
@@ -226,6 +241,24 @@ export class ActionManager {
     };
 
     try {
+      if (a.kind === 'cush_command') {
+        const cmd = rec.meta.cush;
+        if (!cmd || !this.deps.runCush) {
+          fail('failed', 'cush-tools commands are not available here; nothing was run.');
+          return { ...rec.action };
+        }
+        sendStarted = true;
+        const out = await withTimeout(this.deps.runCush(cmd, { ...a }), CUSH_TIMEOUT_MS, 'command');
+        if (!out.ok) {
+          fail('failed', out.error || out.message);
+          return { ...rec.action };
+        }
+        this.resolve(rec, 'sent');
+        this.deps.audit('sent', rec.action, trigger, origin);
+        this.deps.onChange({ ...rec.action });
+        this.deps.onSent({ ...rec.action }, out.message);
+        return { ...rec.action };
+      }
       const source = this.deps.getSource(a.serverId);
       if (!source) {
         fail('failed', `Server "${a.serverId}" is not reachable.`);
@@ -304,7 +337,9 @@ export class ActionManager {
         // believe nothing was sent (a blind retry could double-send).
         fail(
           'failed',
-          `Delivery to ${a.sessionName} timed out; it may still have been typed. Check the session before retrying.`
+          a.kind === 'cush_command'
+            ? 'The command timed out; it may still have started. Check the cush-tools status before retrying.'
+            : `Delivery to ${a.sessionName} timed out; it may still have been typed. Check the session before retrying.`
         );
       } else {
         fail('failed', `Send failed: ${err instanceof Error ? err.message : String(err)}`);

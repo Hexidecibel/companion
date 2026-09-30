@@ -15,7 +15,7 @@ export interface HeraldMessage {
 }
 export interface HeraldAction {
   id: string; tier: HeraldActionTier;
-  kind: 'send_input' | 'answer_choice';
+  kind: 'send_input' | 'answer_choice' | 'cush_command';  // cush_command: payload is the command line, no session
   serverId: string; sessionId: string; sessionName: string;
   payload: string;
   readback: string;

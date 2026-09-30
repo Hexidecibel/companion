@@ -225,3 +225,65 @@ export function classifyAction(input: ClassifyInput): ClassifyResult {
 export function stricterTier(a: HeraldActionTier, b: HeraldActionTier): HeraldActionTier {
   return a === 'hard_confirm' || b === 'hard_confirm' ? 'hard_confirm' : 'echo';
 }
+
+// ---------------------------------------------------------------------------
+// cush-tools commands
+
+export interface CushClassifyInput {
+  op: 'extend' | 'close' | 'serve' | 'tunnel' | 'drop';
+  name: string;
+  /** close: the tool was opened by Herald itself. */
+  openedByHerald?: boolean;
+  /** serve: exactly what gets exposed (stated in the reasons). */
+  exposure?: string;
+  /** tunnel: local port. */
+  port?: number;
+  /** Extra facts to surface on the card (registry hits, .git, partial scan). */
+  warnings?: string[];
+  requestedConfirm?: boolean;
+}
+
+/**
+ * Tier for a cush-tools command. PURE and table-driven:
+ *
+ *   extend <name>                          echo
+ *   close <name>  (opened by Herald)       echo
+ *   close <name>  (anything else)          hard_confirm
+ *   serve <dir> <name>                     hard_confirm (publishes files)
+ *   tunnel <port> <name>                   hard_confirm
+ *   drop <name>                            hard_confirm
+ *
+ * Anything else never reaches here (validateCushCommand refuses it), and an
+ * unknown op is hard_confirm as a last line of defense. Warnings and the model's
+ * confirm flag can only raise the tier.
+ */
+export function classifyCushCommand(input: CushClassifyInput): ClassifyResult {
+  const reasons: string[] = [];
+  const url = `https://${input.name}.tunnel.cush.rocks`;
+  switch (input.op) {
+    case 'extend':
+      break;
+    case 'close':
+      if (!input.openedByHerald)
+        reasons.push(
+          `${input.name} was not opened by Herald; closing it cuts off anyone using ${url}`
+        );
+      break;
+    case 'serve':
+      reasons.push(`publishes files: ${input.exposure || `a folder at ${url}`}`);
+      break;
+    case 'tunnel':
+      reasons.push(
+        `exposes whatever is listening on local port ${input.port ?? '?'} to anyone with ${url}`
+      );
+      break;
+    case 'drop':
+      reasons.push(`anyone with ${url} can upload files to this machine`);
+      break;
+    default:
+      reasons.push('unrecognized cush-tools operation');
+  }
+  reasons.push(...(input.warnings || []));
+  if (input.requestedConfirm) reasons.push('flagged for confirmation by the assistant');
+  return { tier: reasons.length > 0 ? 'hard_confirm' : 'echo', reasons };
+}

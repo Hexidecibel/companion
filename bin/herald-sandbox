@@ -3,11 +3,21 @@
 # the Herald brain on the anthropic provider, without touching production.
 #
 # Usage:
+#   bin/herald-sandbox [--instance NAME] start|stop|status|logs|env
 #   bin/herald-sandbox start     Build-check, write sandbox config, launch in background
 #   bin/herald-sandbox stop      Stop the sandbox daemon (SIGTERM, then SIGKILL) and verify the port is free
 #   bin/herald-sandbox status    PID, port owner, and whether Herald's brain is configured
 #   bin/herald-sandbox logs [N]  Tail the sandbox daemon log (key-shaped strings redacted)
 #   bin/herald-sandbox env       Print the sandbox URL/port and config path (token not printed)
+#
+# Instances: the default instance (port 9887) is the one the user talks to; its
+# conversation is live history. Automated probing uses a SEPARATE instance:
+#   bin/herald-sandbox --instance probe start   # port 9888, own HOME/config/state
+#   node daemon/scripts/herald-probe.js "question" ...   # defaults to the probe instance
+#   bin/herald-sandbox --instance probe stop    # verifies the port is free
+# A non-default instance gets its own dir ($SANDBOX_DIR-<name>) and starts with a
+# fresh Herald conversation every time (its state.json is cleared on start).
+# Port: HERALD_SANDBOX_PORT, else 9888 for "probe"; other instances must set it.
 #
 # Isolation guarantees:
 #   - Own port (HERALD_SANDBOX_PORT, default 9887) and a single listener, so it
@@ -39,13 +49,39 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(dirname "$SCRIPT_DIR")"
 ENTRY="$ROOT/daemon/dist/index.js"
 LIVE_CONFIG="${COMPANION_CONFIG:-$HOME/.companion/config.json}"
-SANDBOX_DIR="${HERALD_SANDBOX_DIR:-$HOME/.cache/companion-herald-sandbox}"
+
+INSTANCE="default"
+ARGS=()
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --instance) INSTANCE="${2:-}"; shift 2 ;;
+    --instance=*) INSTANCE="${1#--instance=}"; shift ;;
+    *) ARGS+=("$1"); shift ;;
+  esac
+done
+set -- "${ARGS[@]+"${ARGS[@]}"}"
+case "$INSTANCE" in
+  ""|*[!a-z0-9-]*) echo "ERROR: --instance must be lowercase letters, digits or hyphens"; exit 2 ;;
+esac
+
+BASE_SANDBOX_DIR="${HERALD_SANDBOX_DIR:-$HOME/.cache/companion-herald-sandbox}"
+if [ "$INSTANCE" = "default" ]; then
+  SANDBOX_DIR="$BASE_SANDBOX_DIR"
+  DEFAULT_PORT=9887
+else
+  SANDBOX_DIR="$BASE_SANDBOX_DIR-$INSTANCE"
+  if [ "$INSTANCE" = "probe" ]; then DEFAULT_PORT=9888; else DEFAULT_PORT=""; fi
+fi
 SANDBOX_HOME="$SANDBOX_DIR/home"
 SANDBOX_CONFIG="$SANDBOX_DIR/config.json"
 STATE_DIR="$SANDBOX_DIR/herald"
 LOG_FILE="$SANDBOX_DIR/daemon.log"
 PID_FILE="$SANDBOX_DIR/sandbox.pid"
-PORT="${HERALD_SANDBOX_PORT:-9887}"
+PORT="${HERALD_SANDBOX_PORT:-$DEFAULT_PORT}"
+[ -n "$PORT" ] || { echo "ERROR: instance '$INSTANCE' needs HERALD_SANDBOX_PORT (a free 9400-9900 port)"; exit 2; }
+if [ "$INSTANCE" != "default" ] && [ "$PORT" = "9887" ]; then
+  echo "ERROR: port 9887 belongs to the default sandbox (the user's live Herald conversation)"; exit 2
+fi
 CUSH_INJECT="${CUSH_INJECT:-$HOME/local/src/cush-tools/bin/inject}"
 MANIFEST="$ROOT/.cush-secrets"
 PRODUCTION_PORTS="9877 9878"
@@ -104,7 +140,7 @@ write_config() {
 cmd_start() {
   ensure_node
   if pid="$(running_pid)"; then
-    echo "Sandbox already running (PID $pid) on port $PORT"
+    echo "Sandbox ($INSTANCE) already running (PID $pid) on port $PORT"
     return 0
   fi
   local owner
@@ -121,6 +157,10 @@ cmd_start() {
   [ -x "$CUSH_INJECT" ] || { echo "ERROR: cush-tools inject not found at $CUSH_INJECT"; exit 1; }
 
   write_config
+  if [ "$INSTANCE" != "default" ]; then
+    # Throwaway instances start every run with an empty conversation.
+    rm -f "$STATE_DIR/state.json"
+  fi
 
   # Resolve the key into this shell only (eval'd exports; nothing on disk).
   local exports
@@ -167,7 +207,7 @@ cmd_start() {
     cmd_stop
     exit 1
   fi
-  echo "Sandbox daemon started (PID $pid) on port $PORT"
+  echo "Sandbox ($INSTANCE) daemon started (PID $pid) on port $PORT"
   echo "  Config: $SANDBOX_CONFIG"
   echo "  HOME:   $SANDBOX_HOME"
   echo "  State:  $STATE_DIR"
@@ -194,7 +234,7 @@ cmd_stop() {
       sleep 0.5
     fi
     rm -f "$PID_FILE"
-    echo "Sandbox daemon stopped (PID $pid)."
+    echo "Sandbox ($INSTANCE) daemon stopped (PID $pid)."
   fi
   local owner
   owner="$(port_owner "$PORT")"
@@ -215,14 +255,14 @@ cmd_status() {
     owner="$(port_owner "$PORT")"
     code="$(curl -sS -o /dev/null -m 5 -w '%{http_code}' "http://127.0.0.1:$PORT/web/" 2>/dev/null || echo 000)"
     if [ "$owner" = "$pid" ] && [ "$code" = "200" ]; then
-      echo "Sandbox HEALTHY: PID $pid owns port $PORT; GET /web/ -> $code"
+      echo "Sandbox ($INSTANCE) HEALTHY: PID $pid owns port $PORT; GET /web/ -> $code"
     else
       echo "Sandbox UNHEALTHY: PID $pid, port $PORT owner: ${owner:-none}, GET /web/ -> $code"
       rc=1
     fi
     grep -q "read-only shared state\|Sandbox mode" "$LOG_FILE" 2>/dev/null && echo "  Sandbox mode confirmed in log (no push, no auto-approve, shared state read-only)"
   else
-    echo "Sandbox not running. Port $PORT owner: $(port_owner "$PORT" || echo none)"
+    echo "Sandbox ($INSTANCE) not running. Port $PORT owner: $(port_owner "$PORT" || echo none)"
     rc=1
   fi
   [ -f "$LOG_FILE" ] && grep -E "Herald" "$LOG_FILE" | redact | tail -3 || true
@@ -243,7 +283,7 @@ case "${1:-}" in
   logs) tail -n "${2:-80}" "$LOG_FILE" | redact ;;
   env) cmd_env ;;
   *)
-    sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//'
     exit 2
     ;;
 esac

@@ -83,12 +83,21 @@ bin/companion herald-provider anthropic          # [--model NAME] [--config PATH
 
 # Isolated test daemon from THIS checkout: port 9887, own HOME/config/state, mDNS off,
 # no remote capabilities, key injected into that process's env only. Reads real sessions.
+# The user talks to this one: its conversation is live history. Never probe it.
 bin/herald-sandbox start|stop|status|logs|env
-node daemon/scripts/herald-probe.js --config ~/.cache/companion-herald-sandbox/config.json \
-  [--reset] "Anything for me?"                   # measures TTFT/latency; auto-CANCELS any proposed action
+
+# Throwaway PROBE instance for automated checks: port 9888 (HERALD_SANDBOX_PORT overrides),
+# own HOME/config/state under ~/.cache/companion-herald-sandbox-probe, same isolation, and a
+# fresh conversation on every start. herald-probe.js targets it by default.
+bin/herald-sandbox --instance probe start|stop|status|logs|env
+node daemon/scripts/herald-probe.js [--reset] "Anything for me?"   # measures TTFT/latency;
+                                                 # auto-CANCELS any proposed action
+bin/herald-sandbox --instance probe stop         # always stop it afterwards (verifies the port is free)
 ```
 
 Both key and provider changes take effect only on the next daemon restart (needs explicit user sign-off). `bin/companion start` / `start -f` also source `~/.companion/herald.env` when it exists. The sandbox must use its own HOME: the daemon writes its PID file, audit log and push state under `$HOME/.companion`, so a second daemon sharing HOME would overwrite (and on exit delete) production's `daemon.pid`. It does still read the shared `code_home`; the script sets `COMPANION_SANDBOX=1` (implies `COMPANION_READONLY_SHARED_STATE=1`), so the sandbox never writes `~/.claude/companion-session-mappings.json` / `companion-sessions-snapshot.json`, never registers push devices or sends pushes, and never auto-approves tools. It reuses production's auth token (never printed). `HERALD_DEBUG_TOOLS=1` (on by default in the sandbox) logs tool calls and results, which include session text.
+
+Herald also has read-only knowledge tools (`daemon/src/herald/knowledge/`): `search_infra` (`/mnt/hexinas/apps/INFRASTRUCTURE.md`), `cush_tools_help` (cush-tools docs + the cush-tools section of `~/.claude/CLAUDE.md`), `cush_status`, `search_project_notes` (CLAUDE/plan/todo/FEATURES/README of `~/local/src/*` projects with a CLAUDE.md or plan.md) and `search_memory` (`<code_home>/projects/*/memory/*.md`). All reads go through `knowledge/redact.ts` (path denylist + token redaction). `propose_cush_command` runs only `extend`/`close`/`serve`/`tunnel`/`drop` via execFile (tiers in `danger.ts` `classifyCushCommand`); everything else is refused in code. Paths derive from `code_home`; override with `HERALD_USER_HOME`, `HERALD_INFRA_DOC`, `HERALD_CUSH_TOOLS_DIR`, `HERALD_PROJECTS_ROOT`.
 
 
 ## Web Client

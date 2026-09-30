@@ -42,6 +42,15 @@ function useDecision(action: HeraldAction, onDecide: Decide) {
 }
 
 function SessionChip({ action, onOpenSession }: { action: HeraldAction; onOpenSession: CardProps['onOpenSession'] }) {
+  // A cush-tools command targets this machine, not a session: nothing to open.
+  if (action.kind === 'cush_command') {
+    return (
+      <span className="herald-ref" title="cush-tools command">
+        <span className="herald-ref__dot" />
+        {action.sessionName}
+      </span>
+    );
+  }
   return (
     <button
       type="button"
@@ -52,6 +61,19 @@ function SessionChip({ action, onOpenSession }: { action: HeraldAction; onOpenSe
       <span className="herald-ref__dot" />
       {action.sessionName}
     </button>
+  );
+}
+
+/** The exact command a cush-tools action runs, under its readback. */
+function CommandLine({ action }: { action: HeraldAction }) {
+  if (action.kind !== 'cush_command') return null;
+  return (
+    <code
+      className="herald-action__command"
+      style={{ display: 'block', marginTop: 6, fontFamily: 'var(--h-mono)', fontSize: 12, color: 'var(--h-text-2)', overflowWrap: 'anywhere' }}
+    >
+      {action.payload}
+    </code>
   );
 }
 
@@ -95,6 +117,7 @@ function EchoCard({ action, skewMs, onDecide, onOpenSession, disabled }: CardPro
             <SessionChip action={action} onOpenSession={onOpenSession} />
           </div>
           <div className="herald-action__readback">{action.readback}</div>
+          <CommandLine action={action} />
         </div>
       </div>
       <div className="herald-action__buttons">
@@ -200,6 +223,7 @@ function HardConfirmCard({ action, onDecide, onOpenSession, disabled }: CardProp
         <SessionChip action={action} onOpenSession={onOpenSession} />
       </div>
       <div className="herald-action__readback">{action.readback}</div>
+      <CommandLine action={action} />
       {action.reasons.length > 0 && (
         <ul className="herald-action__reasons">
           {action.reasons.map((r, i) => <li key={i}>{r}</li>)}
@@ -238,9 +262,13 @@ export const HeraldResolvedLine = memo(function HeraldResolvedLine({ action, onO
     <div className={`herald-resolved herald-resolved--${action.status}`}>
       <Icon />
       <span className="herald-resolved__status">{RESOLVED_COPY[action.status]}</span>
-      <button type="button" className="herald-resolved__session" onClick={() => onOpenSession(action.serverId, action.sessionId)}>
-        {action.sessionName}
-      </button>
+      {action.kind === 'cush_command' ? (
+        <span className="herald-resolved__session">{action.sessionName}</span>
+      ) : (
+        <button type="button" className="herald-resolved__session" onClick={() => onOpenSession(action.serverId, action.sessionId)}>
+          {action.sessionName}
+        </button>
+      )}
       <span className="herald-resolved__text" title={action.readback}>
         {action.status === 'failed' && action.error ? action.error : action.readback}
       </span>

@@ -7,12 +7,12 @@
  *  - Hard caps: tool iterations, tool calls per iteration, wall-clock per turn.
  *  - Strict tool-argument validation: a malformed call gets one corrective error;
  *    a second malformed call ends the turn gracefully. Unvalidated input never
- *    reaches propose_input.
+ *    reaches an action tool (propose_input / propose_cush_command).
  */
 
 import type { HeraldMessage } from './protocol';
 import { LlmError, LlmProvider, LlmToolCall, LlmTurn, LlmUsage } from './llm/provider';
-import { TOOL_SPECS, validateToolCall, ToolOutcome } from './tools';
+import { ACTION_TOOLS, TOOL_SPECS, validateToolCall, ToolOutcome } from './tools';
 import { clip, SpokenTextFilter } from './text';
 
 export const MAX_TOOL_ITERATIONS = 6;
@@ -235,7 +235,7 @@ export async function runTurn(provider: LlmProvider, input: TurnInput): Promise<
           content: JSON.stringify({ error: `${v.error} Correct the call and try again.` }),
           isError: true,
         };
-      } else if (anyMalformed && c.name === 'propose_input') {
+      } else if (anyMalformed && ACTION_TOOLS.has(c.name)) {
         // Never act in an iteration where the model produced malformed calls.
         result = {
           content: JSON.stringify({

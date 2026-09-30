@@ -22,6 +22,9 @@ import { raceAbort, runTurn, TURN_TIMEOUT_MS } from './brain';
 import { buildSystemPrompt } from './prompt';
 import type { HeraldSelfInfo } from './self-info';
 import { executeTool, TurnToolState, ToolEnv } from './tools';
+import { HeraldToolbox } from './knowledge/toolbox';
+import { resolveKnowledgePaths } from './knowledge/sources';
+import type { CushCommand } from './knowledge/cush';
 import { sessionsMentioned } from './resolve';
 import { clip, firstSentence, formatAgo, oneLine, plainToolAction } from './text';
 
@@ -53,6 +56,10 @@ export interface HeraldServiceDeps {
   now?: () => number;
   /** Where this daemon's web UI is reachable (for Herald's self-knowledge). */
   selfInfo?: HeraldSelfInfo;
+  /** The daemon's code_home (~/.claude of the real user): locates knowledge sources. */
+  codeHome?: string;
+  /** Knowledge + cush-tools toolbox. Omitted = built from codeHome; null = disabled. */
+  toolbox?: HeraldToolbox | null;
 }
 
 const SERVER_ORIGIN: AuditOrigin = {
@@ -78,6 +85,7 @@ export class HeraldService {
   private messages: HeraldMessage[] = [];
   private inbox = new InboxTracker();
   private actions: ActionManager;
+  private toolbox: HeraldToolbox | null;
   private busy = false;
   private turnAbort: AbortController | null = null;
   private started = false;
@@ -99,6 +107,11 @@ export class HeraldService {
     this.now = deps.now || Date.now;
     this.pollIntervalMs = deps.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
     this.systemPrompt = buildSystemPrompt(this.cfg.displayName, deps.selfInfo);
+    this.toolbox =
+      deps.toolbox === null
+        ? null
+        : deps.toolbox || new HeraldToolbox({ paths: resolveKnowledgePaths(deps.codeHome) });
+    this.toolbox?.setOnOpenedChange(() => this.persist());
     this.actions = new ActionManager({
       getSource: (serverId) => this.getSource(serverId),
       echoDelayMs: this.cfg.echoDelayMs,
@@ -107,8 +120,9 @@ export class HeraldService {
         this.emit({ kind: 'action', action: a });
         this.persist();
       },
-      onSent: (a) => this.onActionSent(a),
+      onSent: (a, note) => this.onActionSent(a, note),
       audit: (event, action, trigger, origin) => this.auditAction(event, action, trigger, origin),
+      runCush: this.toolbox ? (cmd, action) => this.runCush(cmd, action) : undefined,
     });
   }
 
@@ -130,6 +144,7 @@ export class HeraldService {
     this.messages = persisted.messages.slice(-MAX_PERSISTED_MESSAGES);
     this.inbox = new InboxTracker(persisted.heard);
     this.actions.loadPersisted(persisted.actions);
+    this.toolbox?.loadOpened(persisted.cushOpened);
     if (persisted.actions.some((a) => a.status === 'expired' && a.error?.includes('restarted')))
       this.persist();
     const brain = this.enabled
@@ -198,6 +213,7 @@ export class HeraldService {
       messages: this.messages.filter((m) => !m.streaming).slice(-MAX_PERSISTED_MESSAGES),
       heard: this.inbox.heardIds(),
       actions: this.actions.list().slice(0, MAX_PERSISTED_ACTIONS),
+      cushOpened: this.toolbox?.openedNames() ?? [],
     };
   }
 
@@ -389,6 +405,7 @@ export class HeraldService {
       now: this.now,
       statusSince: (s, id) => this.statusSince(s, id),
       echoDelayMs: this.cfg.echoDelayMs,
+      toolbox: this.toolbox ?? undefined,
     };
     const started = Date.now();
     let errorText: string | null = null;
@@ -480,9 +497,13 @@ export class HeraldService {
         .map((id) => this.actions.get(id))
         .filter((a): a is HeraldAction => !!a)
         .map((a) =>
-          a.tier === 'echo'
-            ? `Sending to ${a.readback} unless you cancel.`
-            : `Needs your confirmation: ${a.readback}.`
+          a.kind === 'cush_command'
+            ? a.tier === 'echo'
+              ? `${a.readback} in a few seconds unless you cancel.`
+              : `Needs your confirmation: ${a.readback}.`
+            : a.tier === 'echo'
+              ? `Sending to ${a.readback} unless you cancel.`
+              : `Needs your confirmation: ${a.readback}.`
         )
         .join(' ');
     }
@@ -620,7 +641,36 @@ export class HeraldService {
       : this.actions.cancel(actionId, origin);
   }
 
-  private onActionSent(a: HeraldAction): void {
+  private async runCush(cmd: CushCommand, a: HeraldAction) {
+    const started = this.now();
+    const out = await this.toolbox!.runCush(cmd);
+    try {
+      this.auditFn({
+        ts: this.now(),
+        origin: SERVER_ORIGIN,
+        action: 'herald_cush_result',
+        payload: { actionId: a.id, op: cmd.op, name: cmd.name, command: clip(a.payload, 500) },
+        result: {
+          ok: out.ok,
+          ...(out.result?.url ? { url: out.result.url } : {}),
+          ...(out.result?.verified !== undefined ? { verified: out.result.verified } : {}),
+          ...(out.result?.localPort ? { localPort: out.result.localPort } : {}),
+          ...(out.result?.checks ? { checks: out.result.checks } : {}),
+          ...(out.error ? { error: out.error } : {}),
+        },
+        durationMs: Math.max(0, this.now() - started),
+      });
+    } catch (err) {
+      console.error('Herald: audit append failed:', err);
+    }
+    return out;
+  }
+
+  private onActionSent(a: HeraldAction, note?: string): void {
+    if (a.kind === 'cush_command') {
+      this.postMessage('herald', note || `Done: ${a.readback}.`, { actionIds: [a.id] });
+      return;
+    }
     this.postMessage('herald', `Sent to ${a.sessionName}.`, {
       sessionRefs: [{ serverId: a.serverId, sessionId: a.sessionId, sessionName: a.sessionName }],
       actionIds: [a.id],

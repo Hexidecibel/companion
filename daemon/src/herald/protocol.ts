@@ -27,7 +27,8 @@ export interface HeraldMessage {
 export interface HeraldAction {
   id: string;
   tier: HeraldActionTier;
-  kind: 'send_input' | 'answer_choice';
+  /** cush_command: a validated cush-tools command (payload = the command line; no session). */
+  kind: 'send_input' | 'answer_choice' | 'cush_command';
   serverId: string;
   sessionId: string;
   sessionName: string;

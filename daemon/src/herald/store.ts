@@ -23,7 +23,12 @@ export interface PersistedHeraldState {
   messages: HeraldMessage[];
   heard: string[];
   actions: HeraldAction[];
+  /** Names of cush-tools tools Herald itself launched (closing those needs no confirm). */
+  cushOpened?: string[];
 }
+
+export const MAX_PERSISTED_CUSH_OPENED = 100;
+const CUSH_NAME = /^[a-z0-9-]{2,32}$/;
 
 export function emptyState(): PersistedHeraldState {
   return { version: STATE_VERSION, messages: [], heard: [], actions: [] };
@@ -71,7 +76,7 @@ function sanitizeAction(raw: unknown): HeraldAction | null {
   if (
     !isStr(a.id) ||
     (a.tier !== 'echo' && a.tier !== 'hard_confirm') ||
-    (a.kind !== 'send_input' && a.kind !== 'answer_choice') ||
+    (a.kind !== 'send_input' && a.kind !== 'answer_choice' && a.kind !== 'cush_command') ||
     !isStr(a.serverId) ||
     !isStr(a.sessionId) ||
     !isStr(a.sessionName) ||
@@ -126,7 +131,16 @@ export function sanitizeState(raw: unknown, now: number): PersistedHeraldState {
           }
         : a
     );
-  return { version: STATE_VERSION, messages, heard, actions };
+  const cushOpened = (Array.isArray(r.cushOpened) ? r.cushOpened : [])
+    .filter((n): n is string => isStr(n) && CUSH_NAME.test(n))
+    .slice(-MAX_PERSISTED_CUSH_OPENED);
+  return {
+    version: STATE_VERSION,
+    messages,
+    heard,
+    actions,
+    ...(cushOpened.length ? { cushOpened } : {}),
+  };
 }
 
 export class HeraldStore {

@@ -10,7 +10,11 @@ import type { LlmToolSpec } from './llm/provider';
 import type { PendingChoice, SessionSnapshot, SessionSource } from './session-source';
 import type { HeraldAction, HeraldSessionRef } from './protocol';
 import type { ActionManager } from './actions';
-import { classifyAction, findSelectedOption } from './danger';
+import { classifyAction, classifyCushCommand, findSelectedOption } from './danger';
+import type { HeraldToolbox } from './knowledge/toolbox';
+import { cushCommandLine, cushReadback, CUSH_OPS, publicUrl } from './knowledge/cush';
+import { MAX_QUERY_CHARS } from './knowledge/sources';
+import { redactSecrets } from './knowledge/redact';
 import { resolveSession, normalizeRef } from './resolve';
 import { clip, clipTail, firstSentence, formatAgo, oneLine, plainToolAction } from './text';
 
@@ -94,6 +98,105 @@ export const TOOL_SPECS: LlmToolSpec[] = [
   },
 ];
 
+const QUERY_PROP = {
+  type: 'string',
+  description: 'What to look up, in a few keywords (e.g. "jellyfin port", "share file phone").',
+  maxLength: MAX_QUERY_CHARS,
+};
+
+/** Read-only lookups over the user's own docs and tools. */
+export const KNOWLEDGE_TOOL_SPECS: LlmToolSpec[] = [
+  {
+    name: 'search_infra',
+    description:
+      "Search the home server's infrastructure doc: ports and the port registry, which service runs where, HAProxy routing and subdomains, SSL certs, docker patterns, firewall, deployed apps. Returns the best matching sections.",
+    parameters: {
+      type: 'object',
+      properties: { query: QUERY_PROP },
+      required: ['query'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'cush_tools_help',
+    description:
+      'Search the docs for cush-tools, the user\'s own sharing toolkit: tunnels, serving a folder, file drops, pastes, receiving secrets, .env injection, status/extend/close. Use for any "how do I share / send / expose / receive" question.',
+    parameters: {
+      type: 'object',
+      properties: { query: QUERY_PROP },
+      required: ['query'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'cush_status',
+    description:
+      'List the cush-tools tunnels and shares running right now: name, type, public link, uptime, time left, and whether you opened it.',
+    parameters: { type: 'object', properties: {}, additionalProperties: false },
+  },
+  {
+    name: 'search_project_notes',
+    description:
+      "Search the user's project notes (each project's CLAUDE.md, plan.md, todo.md, FEATURES.md, README.md): how a project is built, deployed or configured, what is planned or done.",
+    parameters: {
+      type: 'object',
+      properties: {
+        query: QUERY_PROP,
+        project: {
+          type: 'string',
+          description: 'Optional project (folder) name to search first, e.g. "companion".',
+          maxLength: 80,
+        },
+      },
+      required: ['query'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'search_memory',
+    description:
+      "Search the persistent memory notes the user's coding sessions keep: setup facts, gotchas, deploy mechanics, how things were fixed, where machines live.",
+    parameters: {
+      type: 'object',
+      properties: { query: QUERY_PROP },
+      required: ['query'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'propose_cush_command',
+    description:
+      'Propose a cush-tools command. It does NOT run immediately: extending or closing a share you opened runs after a short delay; everything that makes something public waits for on-screen confirmation. ' +
+      'Operations: "extend" (name) keeps a share open another hour; "close" (name) shuts one; "serve" (name, dir) shares a folder; "tunnel" (name, port) exposes a local port; "drop" (name) opens an upload page. ' +
+      'Nothing else is possible (no secrets, deploys, certificates or permanent exposure). The name becomes the link: 2 to 32 lowercase letters, digits or hyphens.',
+    parameters: {
+      type: 'object',
+      properties: {
+        operation: { type: 'string', enum: [...CUSH_OPS], maxLength: 20 },
+        name: { type: 'string', description: 'Share name, e.g. "phone-share".', maxLength: 40 },
+        dir: {
+          type: 'string',
+          description:
+            'serve only: full path of the folder to share. Projects live in ~/local/src/<project> (e.g. ~/local/src/companion/web/dist). Never guess: take it from the project notes or ask.',
+          maxLength: 500,
+        },
+        port: { type: 'integer', description: 'tunnel only: local port number.' },
+        confirm: {
+          type: 'boolean',
+          description: 'Set true if you are at all unsure; forces an explicit confirmation.',
+        },
+      },
+      required: ['operation', 'name'],
+      additionalProperties: false,
+    },
+  },
+];
+
+TOOL_SPECS.push(...KNOWLEDGE_TOOL_SPECS);
+
+/** Tools that create an action: never executed in an iteration with malformed calls. */
+export const ACTION_TOOLS = new Set(['propose_input', 'propose_cush_command']);
+
 const SPEC_BY_NAME = new Map(TOOL_SPECS.map((t) => [t.name, t]));
 
 // ---------------------------------------------------------------------------
@@ -153,6 +256,10 @@ export function validateToolCall(name: string, rawArgs: string): ValidationResul
           error: `Argument "${key}" for ${name} is too long (max ${prop.maxLength} characters).`,
         };
       }
+    } else if (prop.type === 'integer') {
+      if (typeof v === 'string' && /^\s*\d{1,6}\s*$/.test(v)) v = Number(v);
+      if (typeof v !== 'number' || !Number.isInteger(v))
+        return { ok: false, error: `Argument "${key}" for ${name} must be a whole number.` };
     } else if (prop.type === 'boolean') {
       if (v === 'true' || v === 'false') v = v === 'true';
       if (typeof v !== 'boolean')
@@ -187,6 +294,16 @@ function example(name: string): string {
       return '{}';
     case 'propose_input':
       return '{"session": "companion", "option": "2"}';
+    case 'cush_status':
+      return '{}';
+    case 'search_project_notes':
+      return '{"query": "deploy", "project": "companion"}';
+    case 'search_infra':
+    case 'cush_tools_help':
+    case 'search_memory':
+      return '{"query": "jellyfin port"}';
+    case 'propose_cush_command':
+      return '{"operation": "serve", "name": "phone-share", "dir": "~/local/src/<project>/dist"}';
     default:
       return '{"session": "companion"}';
   }
@@ -215,6 +332,8 @@ export interface ToolEnv {
   /** Observed start of the current status per session (from the poll loop). */
   statusSince(serverId: string, sessionId: string): number | null;
   echoDelayMs: number;
+  /** Knowledge lookups + cush-tools. Absent = those tools report unavailable. */
+  toolbox?: HeraldToolbox;
 }
 
 export interface ToolOutcome {
@@ -223,6 +342,11 @@ export interface ToolOutcome {
 }
 
 const ok = (data: unknown): ToolOutcome => ({ content: JSON.stringify(data), isError: false });
+/** For results built from files or subprocess output: redacted once more on the way out. */
+const safeOk = (data: unknown): ToolOutcome => ({
+  content: redactSecrets(JSON.stringify(data)),
+  isError: false,
+});
 const err = (message: string): ToolOutcome => ({
   content: JSON.stringify({ error: message }),
   isError: true,
@@ -401,6 +525,56 @@ export async function executeTool(
       case 'propose_input':
         return await proposeInput(args, env, state);
 
+      case 'search_infra':
+      case 'cush_tools_help':
+      case 'search_project_notes':
+      case 'search_memory': {
+        if (!env.toolbox) return err('Knowledge lookups are not available on this server.');
+        const kb = env.toolbox.knowledge;
+        const q = oneLine(String(args.query || ''));
+        const r =
+          name === 'search_infra'
+            ? await kb.searchInfra(q)
+            : name === 'cush_tools_help'
+              ? await kb.cushToolsHelp(q)
+              : name === 'search_memory'
+                ? await kb.searchMemory(q)
+                : await kb.searchProjectNotes(
+                    q,
+                    typeof args.project === 'string' ? args.project : undefined
+                  );
+        return safeOk({
+          ...r,
+          instruction: r.found
+            ? 'Answer only from these sections, in plain spoken words. If they do not actually answer the question, say you could not find it.'
+            : undefined,
+        });
+      }
+
+      case 'cush_status': {
+        if (!env.toolbox) return err('cush-tools status is not available on this server.');
+        const st = await env.toolbox.cushStatus();
+        if (!st.ok) return err(`Could not read the cush-tools status: ${st.error}`);
+        const mine = env.toolbox.openedByHerald();
+        return safeOk({
+          tunnel_server: st.server,
+          active: st.tools.map((t) => ({
+            name: t.name,
+            type: t.type,
+            link: t.url,
+            up_for: t.uptime,
+            time_left: t.expires ?? (t.managed ? undefined : 'unmanaged, no timer'),
+            opened_by_you: mine.has(t.name) || undefined,
+          })),
+          note: st.tools.length
+            ? 'Say names and what they share; the links are visible to the user already, do not read them out.'
+            : 'Nothing is running.',
+        });
+      }
+
+      case 'propose_cush_command':
+        return await proposeCush(args, env, state);
+
       default:
         return err(`Unknown tool "${name}".`);
     }
@@ -562,4 +736,73 @@ function batchSplit(state: TurnToolState): {
       .filter((p) => p.tier === 'hard_confirm')
       .map((p) => p.sessionName),
   };
+}
+
+async function proposeCush(
+  args: Record<string, unknown>,
+  env: ToolEnv,
+  state: TurnToolState
+): Promise<ToolOutcome> {
+  if (!env.toolbox) return err('cush-tools commands are not available on this server.');
+  if (state.proposals.length >= MAX_PROPOSALS_PER_TURN) {
+    return err(
+      `At most ${MAX_PROPOSALS_PER_TURN} actions per request. Ask the user to handle the rest one at a time.`
+    );
+  }
+  const v = await env.toolbox.validateCush({
+    operation: args.operation,
+    name: args.name,
+    dir: args.dir,
+    port: args.port,
+  });
+  if (!v.ok) return err(v.error);
+  const { cmd, facts } = v;
+  const key = `cush:${cmd.name}`;
+  if (state.proposals.some((p) => p.sessionKey === key)) {
+    return err(`You already proposed a command for ${cmd.name} in this request.`);
+  }
+  const verdict = classifyCushCommand({
+    op: cmd.op,
+    name: cmd.name,
+    openedByHerald: facts.openedByHerald,
+    exposure: facts.exposure,
+    port: cmd.port,
+    warnings: facts.warnings,
+    requestedConfirm: args.confirm === true,
+  });
+  // Supersede an older pending command for the same share name.
+  for (const a of env.actions.list()) {
+    if (a.status === 'pending' && a.kind === 'cush_command' && a.sessionId === key) {
+      env.actions.cancel(a.id);
+    }
+  }
+  const action = env.actions.create({
+    tier: verdict.tier,
+    reasons: verdict.reasons,
+    kind: 'cush_command',
+    serverId: 'local',
+    sessionId: key,
+    sessionName: 'cush-tools',
+    payload: cushCommandLine(cmd),
+    readback: cushReadback(cmd, facts),
+    meta: { cush: cmd },
+  });
+  state.proposals.push({
+    actionId: action.id,
+    sessionKey: key,
+    sessionName: cmd.name,
+    tier: action.tier,
+  });
+  const seconds = Math.round(env.echoDelayMs / 1000);
+  return ok({
+    action_id: action.id,
+    tier: action.tier,
+    readback: action.readback,
+    link: cmd.op === 'extend' || cmd.op === 'close' ? undefined : publicUrl(cmd.name),
+    reasons: action.reasons.length ? action.reasons : undefined,
+    instruction:
+      action.tier === 'echo'
+        ? `Say in one short sentence what will happen; it runs automatically in about ${seconds} seconds unless the user cancels.`
+        : 'Nothing has run. It needs the user to confirm on screen. In one or two short sentences say what it would make public and ask them to confirm on the card. Do not read the link out.',
+  });
 }

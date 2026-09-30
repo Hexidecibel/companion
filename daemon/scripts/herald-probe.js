@@ -1,9 +1,12 @@
 #!/usr/bin/env node
 /**
  * herald-probe: drive a Herald-enabled daemon over the WebSocket protocol and
- * measure it. Intended for the isolated bin/herald-sandbox daemon.
+ * measure it. Intended for the throwaway probe instance
+ * (bin/herald-sandbox --instance probe start, port 9888), which it targets by
+ * default. Never point it at the default 9887 sandbox: that conversation is the
+ * user's live history.
  *
- *   node scripts/herald-probe.js --config <sandbox config.json> [--url ws://localhost:9887] \
+ *   node scripts/herald-probe.js [--config <config.json>] [--url ws://localhost:9888] \
  *     [--reset] [--json out.json] "Anything for me?" "What's everyone working on?" ...
  *
  * For each question: sends herald_send, streams herald_event pushes, and reports
@@ -35,8 +38,16 @@ function parseArgs(argv) {
 }
 
 const args = parseArgs(process.argv.slice(2));
-if (!args.config) {
-  console.error('usage: herald-probe.js --config <config.json> [--url ws://host:port] [--reset] [--json out] "question" ...');
+// Default: the throwaway probe instance (bin/herald-sandbox --instance probe start),
+// never the default sandbox, whose conversation is the user's live history.
+const PROBE_CONFIG = require('path').join(
+  process.env.HERALD_SANDBOX_DIR || require('path').join(require('os').homedir(), '.cache', 'companion-herald-sandbox'),
+) + '-probe/config.json';
+if (!args.config) args.config = PROBE_CONFIG;
+if (!fs.existsSync(args.config)) {
+  console.error(`config not found: ${args.config}`);
+  console.error('Start the probe instance first: bin/herald-sandbox --instance probe start');
+  console.error('usage: herald-probe.js [--config <config.json>] [--url ws://host:port] [--reset] [--json out] "question" ...');
   process.exit(2);
 }
 const cfg = JSON.parse(fs.readFileSync(args.config, 'utf-8'));

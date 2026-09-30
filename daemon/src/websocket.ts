@@ -299,6 +299,7 @@ export class WebSocketHandler {
         broadcast: (event) => this.broadcast('herald_event', event),
         audit: (entry) => this.auditLog.append(entry),
         selfInfo: deriveSelfInfo(this.config.listeners[0]),
+        codeHome: this.config.codeHome,
       });
     } catch (err) {
       console.error('Herald: failed to initialize:', err);
