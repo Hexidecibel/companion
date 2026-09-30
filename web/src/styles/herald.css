@@ -924,6 +924,34 @@
 
 .herald-error .herald-icon-btn { color: #fca5a5; flex: none; }
 
+.herald-echo-paused {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+  padding: 8px 10px 8px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(245, 158, 11, 0.4);
+  background: rgba(245, 158, 11, 0.1);
+  color: #fde68a;
+  font-size: 12.5px;
+  line-height: 1.4;
+}
+.herald-echo-paused strong { color: #fcd34d; }
+.herald-echo-paused__actions { display: flex; gap: 6px; flex: none; margin-left: auto; }
+.herald-echo-paused__btn {
+  padding: 4px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(245, 158, 11, 0.45);
+  background: transparent;
+  color: #fcd34d;
+  font-size: 12px;
+  cursor: pointer;
+}
+.herald-echo-paused__btn:hover { background: rgba(245, 158, 11, 0.15); }
+
 .herald-pinned {
   display: flex;
   flex-direction: column;

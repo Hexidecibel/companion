@@ -1,5 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { COMMAND_WAIT_MS, INTERRUPT_GRACE_MS, LISTEN_WAIT_MS, VoiceAutomation, type AutomationConfig } from '../voiceAutomation';
+import {
+  COMMAND_WAIT_MS, ECHO_TAIL_MS, GATE_CHECK_EVERY_FRAMES, GATE_FIRST_CHECK_FRAMES, INTERRUPT_GRACE_MS, LISTEN_WAIT_MS,
+  VoiceAutomation, type AutomationConfig,
+} from '../voiceAutomation';
+import { SpokenLog } from '../echoGuard';
 import type { VadEvents, VadLike, VadSensitivity } from '../vadListener';
 import { VoiceInputController } from '../voiceInput';
 import { HybridTtsEngine } from '../../tts/hybridTtsEngine';
@@ -55,6 +59,12 @@ function fakeTransport(sttText: string | string[] = 'actually, stop that') {
 
 const base: AutomationConfig = { available: true, micGranted: true, interrupt: true, sensitivity: 'normal', speaking: false };
 
+/** Feed `n` VAD frames (32 ms each) and let any echo check settle. */
+async function feed(vad: ReturnType<typeof fakeVad>, n: number, level = 0.2) {
+  for (let i = 0; i < n; i++) vad.events!.onFrame(new Float32Array(512).fill(level), 0.9);
+  await vi.advanceTimersByTimeAsync(0);
+}
+
 describe('VoiceAutomation (voice interrupt)', () => {
   let now = 0;
   beforeEach(() => {
@@ -95,21 +105,26 @@ describe('VoiceAutomation (voice interrupt)', () => {
     expect(vad.pauses).toBe(1);
   });
 
-  it('real speech stops Herald, shows listening, and sends the utterance on pause', async () => {
-    const { vad, auto, input, stopSpeech, onTranscript, fired } = setup();
+  it('real speech stops Herald once a quick transcript shows it is not echo, then sends on pause', async () => {
+    const { vad, auto, input, stopSpeech, onTranscript, requests } = setup();
     auto.update({ ...base, speaking: true });
     await vi.advanceTimersByTimeAsync(0);
     vad.events!.onSpeechStart();
     expect(stopSpeech).not.toHaveBeenCalled(); // a single loud frame is not enough
     vad.events!.onSpeechRealStart();
+    expect(stopSpeech).not.toHaveBeenCalled(); // could be Herald's own voice: check first
+    expect(input.state.phase).toBe('idle');
+    await feed(vad, GATE_FIRST_CHECK_FRAMES);
     expect(stopSpeech).toHaveBeenCalledTimes(1);
     expect(input.state).toMatchObject({ phase: 'listening', source: 'interrupt' });
-    vad.events!.onFrame(new Float32Array(512).fill(0.2), 0.9);
+    await feed(vad, 1);
     expect(input.state.level).toBeGreaterThan(0);
     auto.update({ ...base, speaking: false }); // TTS stopped as a result
     vad.events!.onSpeechEnd(new Float32Array(16000));
     await vi.advanceTimersByTimeAsync(0);
-    expect(fired.length).toBe(10); // 1 s = ten 100 ms frames
+    const ends = requests.filter((r) => r.type === 'herald_voice_stream_end');
+    expect(ends).toHaveLength(2); // the quick check + the whole utterance
+    expect(onTranscript).toHaveBeenCalledTimes(1);
     expect(onTranscript).toHaveBeenCalledWith('actually, stop that', 'interrupt');
   });
 
@@ -163,6 +178,7 @@ describe('VoiceAutomation (voice interrupt)', () => {
     auto.update({ ...base, speaking: true });
     await vi.advanceTimersByTimeAsync(0);
     vad.events!.onSpeechRealStart();
+    await feed(vad, GATE_FIRST_CHECK_FRAMES);
     expect(cancelServer).toHaveBeenCalledTimes(1);
     expect(web.cancel).toHaveBeenCalled();
     expect(hybrid.speaking).toBe(false);
@@ -296,6 +312,7 @@ describe('VoiceAutomation (hands-free wake word)', () => {
     vad.events!.onSpeechStart();
     expect(requests).toHaveLength(0); // no wake stream
     vad.events!.onSpeechRealStart();
+    await feed(vad, GATE_FIRST_CHECK_FRAMES);
     expect(input.state.source).toBe('interrupt');
   });
 });
@@ -336,6 +353,7 @@ describe('VoiceAutomation (barge-in while hands-free)', () => {
     expect(auto.interruptArmed).toBe(true);
     vad.events!.onSpeechStart();
     vad.events!.onSpeechRealStart();
+    await feed(vad, GATE_FIRST_CHECK_FRAMES);
     expect(stopSpeech).toHaveBeenCalledTimes(1);
     expect(input.state.source).toBe('interrupt');
   });
@@ -359,10 +377,11 @@ describe('VoiceAutomation (barge-in while hands-free)', () => {
     expect(requests.some((r) => r.type === 'herald_voice_stream_start')).toBe(true);
     auto.update({ ...base, handsFree: true, speaking: true });
     vad.events!.onSpeechRealStart();
-    expect(stopSpeech).toHaveBeenCalledTimes(1);
-    expect(input.state.source).toBe('interrupt');
     await vi.advanceTimersByTimeAsync(0);
     expect(requests.find((r) => r.type === 'herald_voice_stream_end')!.payload.action).toBe('discard');
+    await feed(vad, GATE_FIRST_CHECK_FRAMES);
+    expect(stopSpeech).toHaveBeenCalledTimes(1);
+    expect(input.state.source).toBe('interrupt');
     auto.update({ ...base, handsFree: true, speaking: false });
     vad.events!.onSpeechEnd(new Float32Array(8000));
     await vi.advanceTimersByTimeAsync(0);
@@ -487,5 +506,122 @@ describe('VoiceAutomation (remote-trigger listen)', () => {
     vad.events!.onSpeechEnd(new Float32Array(16000));
     await vi.advanceTimersByTimeAsync(0);
     expect(onTranscript).toHaveBeenCalledWith('what finished?', 'trigger');
+  });
+});
+
+describe('VoiceAutomation (self-echo gating)', () => {
+  let now = 0;
+  beforeEach(() => {
+    vi.useFakeTimers();
+    now = 200_000;
+  });
+  afterEach(() => vi.useRealTimers());
+
+  const SAID = 'Doc Upload Site shipped v2.28.0 to supdox.com.';
+
+  function setup(sttText: string | string[]) {
+    const vad = fakeVad();
+    const tr = fakeTransport(sttText);
+    const onTranscript = vi.fn();
+    const stopSpeech = vi.fn();
+    const log = new SpokenLog(() => now);
+    const input = new VoiceInputController({
+      mic: { permission: 'granted', start: async () => {}, stop: () => {} },
+      getTransport: () => tr.t,
+      onTranscript,
+      onBargeIn: () => {},
+      now: () => now,
+    });
+    const debug = vi.spyOn(console, 'debug').mockImplementation(() => {});
+    const auto = new VoiceAutomation({ vad, input, stopSpeech, now: () => now, getTransport: () => tr.t, isEcho: (t) => log.isEcho(t) });
+    return { vad, input, auto, onTranscript, stopSpeech, log, debug, ...tr };
+  }
+
+  async function heraldSays(s: ReturnType<typeof setup>, text = SAID) {
+    s.log.setSpeaking(true);
+    s.log.record(text);
+    s.auto.update({ ...base, speaking: true });
+    await vi.advanceTimersByTimeAsync(0);
+  }
+
+  it("Herald's own voice through the speakers never barges in and is never sent", async () => {
+    const s = setup(['Doc Upload Site, shift V2.', 'Doc Upload Site, shift V2.', 'Doc Upload Site, shift V2 to sup docs.']);
+    await heraldSays(s);
+    s.vad.events!.onSpeechStart();
+    s.vad.events!.onSpeechRealStart();
+    await feed(s.vad, GATE_FIRST_CHECK_FRAMES);
+    await feed(s.vad, GATE_CHECK_EVERY_FRAMES);
+    expect(s.stopSpeech).not.toHaveBeenCalled();
+    expect(s.input.state.phase).toBe('idle'); // never showed "listening"
+    s.vad.events!.onSpeechEnd(new Float32Array(16000));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(s.stopSpeech).not.toHaveBeenCalled();
+    expect(s.onTranscript).not.toHaveBeenCalled();
+    expect(s.debug).toHaveBeenCalled(); // logged at debug
+    // Still listening for a real interruption.
+    expect(s.vad.running).toBe(true);
+  });
+
+  it('"stop" said over the echo still cuts Herald off (re-checked while the speech goes on)', async () => {
+    const s = setup(['Doc Upload Site shipped', 'Stop.', 'Stop.']);
+    await heraldSays(s);
+    s.vad.events!.onSpeechRealStart();
+    await feed(s.vad, GATE_FIRST_CHECK_FRAMES);
+    expect(s.stopSpeech).not.toHaveBeenCalled();
+    await feed(s.vad, GATE_CHECK_EVERY_FRAMES);
+    expect(s.stopSpeech).toHaveBeenCalledTimes(1);
+    expect(s.input.state).toMatchObject({ phase: 'listening', source: 'interrupt' });
+    s.auto.update({ ...base, speaking: false });
+    s.vad.events!.onSpeechEnd(new Float32Array(32000));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(s.onTranscript).toHaveBeenCalledWith('Stop.', 'interrupt');
+  });
+
+  it('a different sentence ("wait tell Out4 to hold") barges in', async () => {
+    const s = setup('wait tell Out4 to hold');
+    await heraldSays(s);
+    s.vad.events!.onSpeechRealStart();
+    await feed(s.vad, GATE_FIRST_CHECK_FRAMES);
+    expect(s.stopSpeech).toHaveBeenCalledTimes(1);
+  });
+
+  it('a short utterance that ends before the first check is judged whole', async () => {
+    const real = setup('wait');
+    await heraldSays(real);
+    real.vad.events!.onSpeechRealStart();
+    await feed(real.vad, 3);
+    real.vad.events!.onSpeechEnd(new Float32Array(8000));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(real.stopSpeech).toHaveBeenCalledTimes(1);
+    expect(real.onTranscript).toHaveBeenCalledWith('wait', 'interrupt');
+
+    const echo = setup('Doc Upload');
+    await heraldSays(echo);
+    echo.vad.events!.onSpeechRealStart();
+    echo.vad.events!.onSpeechEnd(new Float32Array(8000));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(echo.stopSpeech).not.toHaveBeenCalled();
+    expect(echo.onTranscript).not.toHaveBeenCalled();
+  });
+
+  it(`ignores speech for ${ECHO_TAIL_MS} ms after Herald stops (its last word still in the room)`, async () => {
+    const s = setup('and what about billing');
+    await heraldSays(s);
+    s.log.setSpeaking(false);
+    s.auto.update({ ...base, speaking: false });
+    now += ECHO_TAIL_MS - 100;
+    s.vad.events!.onSpeechRealStart();
+    await feed(s.vad, GATE_FIRST_CHECK_FRAMES);
+    expect(s.input.state.phase).toBe('idle');
+    s.vad.events!.onSpeechEnd(new Float32Array(8000));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(s.onTranscript).not.toHaveBeenCalled();
+    // After the tail, still inside the reply grace: an answer is taken at once.
+    now += 200;
+    s.vad.events!.onSpeechRealStart();
+    expect(s.input.state).toMatchObject({ phase: 'listening', source: 'interrupt' });
+    s.vad.events!.onSpeechEnd(new Float32Array(8000));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(s.onTranscript).toHaveBeenCalledWith('and what about billing', 'interrupt');
   });
 });

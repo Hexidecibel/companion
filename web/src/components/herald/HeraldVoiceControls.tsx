@@ -165,6 +165,14 @@ export function VoiceInputSettings({ input }: { input: HeraldVoiceInput }) {
           </select>
         </label>
       )}
+      {!prefs.interrupt && prefs.interruptOrigin === 'auto' && (
+        <div className="herald-voice-set__engine">
+          Off without headphones: through speakers Herald can hear itself. Turns on by itself with headphones.
+        </div>
+      )}
+      {prefs.interrupt && input.headphones === false && (
+        <div className="herald-voice-set__engine">Best with headphones: through speakers Herald may hear itself.</div>
+      )}
       {prefs.interrupt && !input.micGranted && available && (
         <div className="herald-voice-set__engine">Allow the mic once (hold to talk) to enable interrupt.</div>
       )}

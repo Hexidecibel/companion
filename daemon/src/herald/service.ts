@@ -38,8 +38,13 @@ import { resolveKnowledgePaths } from './knowledge/sources';
 import type { CushCommand } from './knowledge/cush';
 import { sessionsMentioned } from './resolve';
 import { clip, firstSentence, formatAgo, oneLine, plainToolAction } from './text';
+import { isLikelyEcho } from './voice/echo-match';
 
 export const MAX_USER_TEXT = 4000;
+/** A voice message is checked against Herald's replies started this recently. */
+export const ECHO_GUARD_WINDOW_MS = 90_000;
+/** ...the last this many of them. */
+const ECHO_GUARD_REPLIES = 2;
 export const DEFAULT_POLL_INTERVAL_MS = 4000;
 const ACTIVITY_DEBOUNCE_MS = 800;
 const DELTA_FLUSH_MS = 60;
@@ -408,7 +413,24 @@ export class HeraldService {
    * Accept a user message and start a turn in the background. `opts` comes
    * straight from the client: unknown mode / intent values are ignored.
    */
-  send(textRaw: unknown, opts: { mode?: unknown; intent?: unknown } = {}): { messageId: string } {
+  /**
+   * Backstop for the client's self-echo filter: is this voice message just
+   * Herald's own last reply (or the one before), heard through the speakers
+   * and transcribed? Two or more words only: a lone "yes" is an answer.
+   */
+  isVoiceEcho(text: string): boolean {
+    const since = this.now() - ECHO_GUARD_WINDOW_MS;
+    const replies = this.messages
+      .filter((m) => m.role === 'herald' && m.createdAt >= since && m.text.trim())
+      .slice(-ECHO_GUARD_REPLIES)
+      .map((m) => m.text);
+    return replies.length > 0 && isLikelyEcho(text, replies, { minTokens: 2 });
+  }
+
+  send(
+    textRaw: unknown,
+    opts: { mode?: unknown; intent?: unknown } = {}
+  ): { messageId: string; ignored?: 'echo' } {
     if (!this.cfg.featureEnabled)
       throw new HeraldRequestError(this.cfg.disabledReason || 'Herald is disabled.');
     if (!this.provider)
@@ -418,6 +440,13 @@ export class HeraldService {
     if (!text) throw new HeraldRequestError('Message is empty.');
     if (text.length > MAX_USER_TEXT)
       throw new HeraldRequestError(`Message is too long (max ${MAX_USER_TEXT} characters).`);
+    // Herald's own voice coming back as a "user" message: benign ack, no turn.
+    if (opts.mode === 'voice' && !opts.intent && this.isVoiceEcho(text)) {
+      console.log(
+        `Herald: ignored a voice message that matches its own last reply (${text.length} chars, likely self-echo)`
+      );
+      return { messageId: '', ignored: 'echo' };
+    }
     if (this.busy)
       throw new HeraldRequestError(
         `${this.cfg.displayName} is still answering the previous message.`

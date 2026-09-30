@@ -3,8 +3,20 @@
  *
  * Interrupt (barge-in): while Herald is speaking, and for a short grace period
  * after, real speech (past minSpeechMs, so a cough or click does not count)
- * immediately stops Herald on both the client and the server queue; the
- * utterance is transcribed and sent when the speaker pauses.
+ * stops Herald on both the client and the server queue; the utterance is
+ * transcribed and sent when the speaker pauses.
+ *
+ * Echo gating: through speakers the mic hears Herald itself, and echo
+ * cancellation does not always remove our own playback (WKWebView never does).
+ * So while Herald is speaking, speech only stops it once a quick transcript of
+ * what was heard (the latest ~2.5 s, re-checked every ~0.7 s while the speech
+ * goes on) is NOT Herald's own words (`isEcho`, see echoGuard.ts). A real
+ * "stop" / "wait" is not in what Herald said, so it still cuts through, about
+ * half a second later. Why not an energy test (mic louder than the playback)?
+ * Room, volume, device and partial AEC all move the ratio, and the Web Speech
+ * fallback has no playback signal to compare with; the words themselves do not
+ * lie. For ECHO_TAIL_MS after Herald stops, new speech is ignored for barge-in
+ * (the room is still ringing with its last word).
  *
  * Hands-free ("Hey Jarvis"): the VAD runs continuously. Audio is sent ONLY
  * while someone is talking: each utterance opens a wake stream (with ~0.6 s of
@@ -53,6 +65,10 @@ export interface AutomationDeps {
   now?: () => number;
   /** Report a VAD load failure (e.g. WASM blocked). */
   onError?: (message: string) => void;
+  /** Is this transcript Herald's own voice (heard through the speakers)? */
+  isEcho?: (text: string) => boolean;
+  /** Quick transcription for echo checks (default: a daemon STT stream). */
+  transcribe?: (audio: Float32Array) => Promise<string>;
 }
 
 /** Keep listening this long after Herald stops, for an immediate reply. */
@@ -65,6 +81,37 @@ export const WAKE_SETTLE_MS = 600;
 export const LISTEN_WAIT_MS = 8000;
 /** Pre-roll kept ahead of speech start (VAD frames are 32 ms). */
 const PREROLL_FRAMES = 20;
+/** After Herald stops, speech this soon is its own tail, not a barge-in. */
+export const ECHO_TAIL_MS = 600;
+/** First echo check this many frames (32 ms) after real speech start. */
+export const GATE_FIRST_CHECK_FRAMES = 10;
+/** Then re-check this often while the speech goes on and is still echo. */
+export const GATE_CHECK_EVERY_FRAMES = 22;
+/** Each check transcribes at most this much of the latest audio (~2.5 s). */
+export const GATE_WINDOW_FRAMES = 78;
+
+interface InterruptGate {
+  frames: Float32Array[];
+  sinceCheck: number;
+  checks: number;
+  checking: boolean;
+  /** Not echo: Herald stopped, this is the user. */
+  confirmed: boolean;
+  /** Frames dropped from the front at confirmation (the echo before the user spoke). */
+  trimmed: boolean;
+}
+
+function concatFrames(frames: Float32Array[]): Float32Array {
+  let n = 0;
+  for (const f of frames) n += f.length;
+  const out = new Float32Array(n);
+  let o = 0;
+  for (const f of frames) {
+    out.set(f, o);
+    o += f.length;
+  }
+  return out;
+}
 
 type Capture = 'interrupt' | 'wake' | 'command' | 'listen';
 
@@ -91,6 +138,8 @@ export class VoiceAutomation implements VadEvents {
   private listenWaiting = false;
   private listenTimer: ReturnType<typeof setTimeout> | null = null;
   private lastStartError: string | null = null;
+  private tailUntil = 0;
+  private gate: InterruptGate | null = null;
   protected readonly now: () => number;
 
   constructor(protected deps: AutomationDeps) {
@@ -101,6 +150,7 @@ export class VoiceAutomation implements VadEvents {
     const prev = this.cfg;
     this.cfg = { ...next, handsFree: !!next.handsFree };
     if (prev.speaking && !next.speaking) {
+      this.tailUntil = this.now() + ECHO_TAIL_MS;
       this.graceUntil = this.now() + INTERRUPT_GRACE_MS;
       if (this.graceTimer) clearTimeout(this.graceTimer);
       this.graceTimer = setTimeout(() => this.reconcile(), INTERRUPT_GRACE_MS + 20);
@@ -271,15 +321,85 @@ export class VoiceAutomation implements VadEvents {
     if (this.capturing === 'wake' || this.capturing === 'command') return;
     if (this.capturing || !this.interruptArmed) return;
     if (this.deps.input.state.phase !== 'idle') return; // push-to-talk owns the mic
+    // Herald just stopped: what the VAD hears now is its last word in the room.
+    if (!this.cfg.speaking && this.now() < this.tailUntil) return;
     this.capturing = 'interrupt';
+    this.gate = { frames: this.preroll.slice(), sinceCheck: 0, checks: 0, checking: false, confirmed: false, trimmed: false };
+    this.preroll = [];
+    // Nothing playing (the grace period after a reply): no echo to rule out.
+    if (!this.cfg.speaking) this.confirmInterrupt(this.gate, 0);
+  }
+
+  /** Is `text` Herald's own voice? Logged (debug) and dropped by the caller when so. */
+  private echo(text: string): boolean {
+    if (!this.deps.isEcho?.(text)) return false;
+    console.debug('Herald voice: ignored likely self-echo:', JSON.stringify(text));
+    return true;
+  }
+
+  private async quickTranscribe(audio: Float32Array): Promise<string> {
+    if (this.deps.transcribe) return (await this.deps.transcribe(audio)).trim();
+    const t = this.deps.getTransport?.();
+    if (!t || !t.isConnected()) return '';
+    const up = new VoiceUplink(t, 'stt');
+    for (const f of float32ToInt16Frames(audio)) up.push(f);
+    return (await up.finish('transcribe')).text.trim();
+  }
+
+  /** Transcribe the latest window of a gated interrupt; not echo -> barge in. */
+  private async checkGate(g: InterruptGate): Promise<void> {
+    g.checking = true;
+    g.sinceCheck = 0;
+    g.checks++;
+    const start = Math.max(0, g.frames.length - GATE_WINDOW_FRAMES);
+    let text = '';
+    try {
+      text = await this.quickTranscribe(concatFrames(g.frames.slice(start)));
+    } catch {
+      text = '';
+    }
+    g.checking = false;
+    if (this.gate !== g || g.confirmed || this.capturing !== 'interrupt') return;
+    if (!text || this.echo(text)) return;
+    this.confirmInterrupt(g, start);
+  }
+
+  /** The user really is talking over Herald: stop it and show listening. */
+  private confirmInterrupt(g: InterruptGate, start: number): void {
+    g.confirmed = true;
+    if (start > 0) {
+      g.frames = g.frames.slice(start);
+      g.trimmed = true;
+    }
     this.deps.stopSpeech();
-    this.deps.input.beginExternal('interrupt');
+    if (!this.deps.input.beginExternal('interrupt')) {
+      // Push-to-talk took the mic meanwhile: it owns this one.
+      this.gate = null;
+      this.capturing = null;
+    }
+  }
+
+  /** The utterance ended before any check cleared it: one last look at all of it. */
+  private async finishUnconfirmed(audio: Float32Array): Promise<void> {
+    let text = '';
+    try {
+      text = await this.quickTranscribe(audio);
+    } catch {
+      return;
+    }
+    if (!text || this.echo(text)) return;
+    if (this.cfg.speaking) this.deps.stopSpeech();
+    if (this.deps.input.state.phase !== 'idle') return;
+    this.deps.input.deliverExternal(text, 'interrupt');
   }
 
   onMisfire(): void {
     const cap = this.capturing;
     this.capturing = null;
-    if (cap === 'interrupt') this.deps.input.endExternal();
+    if (cap === 'interrupt') {
+      if (this.gate?.confirmed) this.deps.input.endExternal();
+      this.gate = null;
+    }
     else if (cap === 'wake') this.dropWakeStream();
     else if (cap === 'command') {
       this.deps.input.endExternal();
@@ -295,8 +415,18 @@ export class VoiceAutomation implements VadEvents {
     this.capturing = null;
     if (cap === 'listen') {
       void this.deps.input.transcribeUtterance(float32ToInt16Frames(audio), 'trigger');
-    } else if (cap === 'interrupt' || cap === 'command') {
-      void this.deps.input.transcribeUtterance(float32ToInt16Frames(audio), cap === 'command' ? 'wake' : 'interrupt');
+    } else if (cap === 'interrupt') {
+      const g = this.gate;
+      this.gate = null;
+      if (g?.confirmed) {
+        // Trimmed: only what followed the echo (the VAD's audio starts with it).
+        const clip = g.trimmed ? concatFrames(g.frames) : audio;
+        void this.deps.input.transcribeUtterance(float32ToInt16Frames(clip), 'interrupt');
+      } else if (g) {
+        void this.finishUnconfirmed(audio);
+      }
+    } else if (cap === 'command') {
+      void this.deps.input.transcribeUtterance(float32ToInt16Frames(audio), 'wake');
     } else if (cap === 'wake') {
       void this.finishWakeStream();
     }
@@ -305,13 +435,20 @@ export class VoiceAutomation implements VadEvents {
 
   onFrame(frame: Float32Array, _probability: number): void {
     const w = this.wake;
+    const g = this.capturing === 'interrupt' ? this.gate : null;
     if (w && !w.closed) {
       for (const f of w.framer.push(floatToInt16(frame))) w.uplink.push(f);
-    } else if (this.handsFreeActive) {
+    } else if (g) {
+      g.frames.push(frame);
+      if (!g.confirmed && !g.checking) {
+        g.sinceCheck++;
+        if (g.sinceCheck >= (g.checks === 0 ? GATE_FIRST_CHECK_FRAMES : GATE_CHECK_EVERY_FRAMES)) void this.checkGate(g);
+      }
+    } else {
       this.preroll.push(frame);
       if (this.preroll.length > PREROLL_FRAMES) this.preroll.shift();
     }
-    if (this.capturing === 'interrupt' || this.capturing === 'command' || this.capturing === 'listen' || (this.capturing === 'wake' && w?.woke)) {
+    if ((this.capturing === 'interrupt' && g?.confirmed) || this.capturing === 'command' || this.capturing === 'listen' || (this.capturing === 'wake' && w?.woke)) {
       this.deps.input.setLevel(meterLevel(rms16(floatToInt16(frame))));
     }
   }

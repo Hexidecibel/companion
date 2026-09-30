@@ -176,6 +176,10 @@ export function useHerald(serverId: string | null): UseHeraldReturn {
         dispatch({ type: 'error', error: res.error || 'Herald could not take that' });
         return false;
       }
+      // The hub recognised Herald's own voice (self-echo) and dropped it.
+      if ((res.payload as { ignored?: string } | undefined)?.ignored) {
+        dispatch({ type: 'optimistic_remove', id: optimistic.id });
+      }
       return true;
     } catch (err) {
       dispatch({ type: 'optimistic_remove', id: optimistic.id });

@@ -863,6 +863,23 @@ export function HeraldPanel({ variant, onOpenSession, onClose }: HeraldPanelProp
           />
         )}
 
+        {input.echoPaused && (
+          <div className="herald-echo-paused" role="alert">
+            <span>
+              <strong>Paused — possible echo.</strong> {displayName} may be hearing itself through the speakers, so voice
+              messages now wait for you to send them. Use headphones, or turn off Interrupt.
+            </span>
+            <span className="herald-echo-paused__actions">
+              {input.prefs.interrupt && (
+                <button type="button" className="herald-echo-paused__btn" onClick={() => { input.setPref('interrupt', false); input.resumeAutoSend(); }}>
+                  Turn off Interrupt
+                </button>
+              )}
+              <button type="button" className="herald-echo-paused__btn" onClick={input.resumeAutoSend}>Resume</button>
+            </span>
+          </div>
+        )}
+
         <HeraldListeningBar input={input} />
 
         {speaking && !listening && (

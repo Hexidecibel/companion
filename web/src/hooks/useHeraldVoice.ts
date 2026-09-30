@@ -10,6 +10,7 @@ import { BRIEFING_SPOKEN_LIMIT, HeraldSpeechController, InboxChimeTracker, type 
 import { chimeSupported, playChime, unlockChime } from '../services/tts/chime';
 import { pickVoice } from '../services/tts/voices';
 import { deviceKey, deviceLabel, saveCustomLabel } from '../services/heraldDevice';
+import { SpokenLog, recordingEngine } from '../services/voice/echoGuard';
 
 const PREFS_KEY = 'herald_voice_prefs';
 export const RATE_MIN = 0.9;
@@ -164,6 +165,8 @@ export interface HeraldVoice {
   renameDevice: (label: string) => void;
   /** Make this device (or `deviceId`) the active one; `pin` keeps it there. Resolves an error or null. */
   claimDevice: (pin: boolean, deviceId?: string) => Promise<string | null>;
+  /** Everything Herald said lately (voice input drops transcripts of it: self-echo). */
+  spokenLog: SpokenLog;
 }
 
 const TEST_LINE = "Hi, I'm Herald. Two sessions finished, and one is waiting on you.";
@@ -184,7 +187,9 @@ export function useHeraldVoice(
     () => (engineOverride ? null : new HybridTtsEngine(getWebSpeechEngine(), makeRequester(() => hostRef.current?.getTransport() ?? null), new WebAudioSink())),
     [engineOverride],
   );
-  const engine: TtsEngine = useMemo(() => engineOverride ?? hybrid!, [engineOverride, hybrid]);
+  const spokenLog = useMemo(() => new SpokenLog(), []);
+  // Every sentence handed to the engine is remembered for the self-echo filter.
+  const engine: TtsEngine = useMemo(() => recordingEngine(engineOverride ?? hybrid!, spokenLog), [engineOverride, hybrid, spokenLog]);
   const [serverStatus, setServerStatus] = useState<HeraldVoiceStatus | null>(null);
   const [statusNonce, setStatusNonce] = useState(0);
   const [prefs, setPrefs] = useState<VoicePrefs>(loadPrefs);
@@ -484,5 +489,6 @@ export function useHeraldVoice(
     deviceLabel: label,
     renameDevice,
     claimDevice,
-  }), [engine, hybrid, prefs, speaking, voices, voice, setVoiceOn, setChimeOn, setVoiceId, setRate, stop, stopCommand, repeat, goOn, stepRateCb, expectBriefing, setSpokenLength, setRemind, flash, announcer, testVoice, serverStatus, refreshStatus, allowBackground, selfId, label, renameDevice, claimDevice]);
+    spokenLog,
+  }), [spokenLog, engine, hybrid, prefs, speaking, voices, voice, setVoiceOn, setChimeOn, setVoiceId, setRate, stop, stopCommand, repeat, goOn, stepRateCb, expectBriefing, setSpokenLength, setRemind, flash, announcer, testVoice, serverStatus, refreshStatus, allowBackground, selfId, label, renameDevice, claimDevice]);
 }

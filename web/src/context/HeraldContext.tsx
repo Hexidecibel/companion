@@ -311,6 +311,7 @@ export function HeraldProvider({ children }: { children: ReactNode }) {
     onVoiceTranscript,
     briefMe,
     sendVoice: sendVoiceTurn,
+    spokenLog: voice.spokenLog,
   });
   voiceInputRef.current = voiceInput;
 

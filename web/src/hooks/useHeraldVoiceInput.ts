@@ -7,6 +7,10 @@ import { VadListener } from '../services/voice/vadListener';
 import { VoiceAutomation } from '../services/voice/voiceAutomation';
 import { playChime } from '../services/tts/chime';
 import { voiceCopy } from '../services/voice/platformCopy';
+import type { SpokenLog } from '../services/voice/echoGuard';
+import { VoiceLoopBreaker } from '../services/voice/voiceLoopBreaker';
+import { detectHeadphones, interruptDefault } from '../services/voice/headphones';
+import { nativePlatform } from '../utils/platform';
 import { DEFAULT_BRIEF_CHORD, DEFAULT_CHORD, formatChord, isChordRelease, matchesChordDown, parseChord, shouldStartSpacePtt } from '../services/voice/hotkeys';
 
 const PREFS_KEY = 'herald_voice_input_prefs';
@@ -22,8 +26,18 @@ export interface VoiceInputPrefs {
   chord: string;
   /** Global one-press "brief me" chord, e.g. "Ctrl+Shift+B". */
   briefChord: string;
-  /** Talking over Herald stops it and sends what you said (needs mic permission). */
+  /**
+   * Talking over Herald stops it and sends what you said (needs mic permission).
+   * In `prefs` returned by the hook this is the EFFECTIVE value (see
+   * `interruptOrigin`): off by default unless headphones are detected.
+   */
   interrupt: boolean;
+  /**
+   * Where `interrupt` comes from: the user's own choice, a value saved by an
+   * older build (honoured in browsers, ignored in the desktop app), or `auto`
+   * (on only with headphones detected).
+   */
+  interruptOrigin: 'explicit' | 'saved' | 'auto';
   sensitivity: InterruptSensitivity;
   /** "Hey Jarvis" wake word (always listening while on). Per device. */
   handsFree: boolean;
@@ -36,7 +50,8 @@ export const DEFAULT_INPUT_PREFS: VoiceInputPrefs = {
   spaceToTalk: true,
   chord: DEFAULT_CHORD,
   briefChord: DEFAULT_BRIEF_CHORD,
-  interrupt: true,
+  interrupt: false,
+  interruptOrigin: 'auto',
   sensitivity: 'normal',
   handsFree: false,
   handsFreeInBackground: false,
@@ -46,14 +61,16 @@ export function loadInputPrefs(): VoiceInputPrefs {
   try {
     const raw = localStorage.getItem(PREFS_KEY);
     if (!raw) return DEFAULT_INPUT_PREFS;
-    const p = JSON.parse(raw) as Partial<VoiceInputPrefs>;
+    const p = JSON.parse(raw) as Partial<VoiceInputPrefs> & { interruptExplicit?: unknown };
     const bool = (v: unknown, d: boolean) => (typeof v === 'boolean' ? v : d);
+    const hasInterrupt = typeof p.interrupt === 'boolean';
     return {
       reviewBeforeSend: bool(p.reviewBeforeSend, DEFAULT_INPUT_PREFS.reviewBeforeSend),
       spaceToTalk: bool(p.spaceToTalk, DEFAULT_INPUT_PREFS.spaceToTalk),
       chord: typeof p.chord === 'string' && parseChord(p.chord) ? p.chord : DEFAULT_INPUT_PREFS.chord,
       briefChord: typeof p.briefChord === 'string' && parseChord(p.briefChord) ? p.briefChord : DEFAULT_INPUT_PREFS.briefChord,
       interrupt: bool(p.interrupt, DEFAULT_INPUT_PREFS.interrupt),
+      interruptOrigin: hasInterrupt ? (p.interruptExplicit === true ? 'explicit' : 'saved') : 'auto',
       sensitivity: p.sensitivity === 'low' || p.sensitivity === 'high' ? p.sensitivity : 'normal',
       handsFree: bool(p.handsFree, false),
       handsFreeInBackground: bool(p.handsFreeInBackground, false),
@@ -65,7 +82,10 @@ export function loadInputPrefs(): VoiceInputPrefs {
 
 function saveInputPrefs(p: VoiceInputPrefs): void {
   try {
-    localStorage.setItem(PREFS_KEY, JSON.stringify(p));
+    const { interruptOrigin, interrupt, ...rest } = p;
+    // `auto` is not saved: the default can still follow the headphones later.
+    const stored = interruptOrigin === 'auto' ? rest : { ...rest, interrupt, interruptExplicit: interruptOrigin === 'explicit' };
+    localStorage.setItem(PREFS_KEY, JSON.stringify(stored));
   } catch {
     // storage unavailable
   }
@@ -118,7 +138,21 @@ export interface HeraldVoiceInput {
   listen: () => Promise<string | null>;
   /** Anything capturing right now (push-to-talk, VAD utterance, trigger listen). */
   isCapturing: () => boolean;
+  /**
+   * Speech kept sending on its own with nobody touching anything: probably
+   * Herald hearing itself. Auto-send is paused (transcripts wait in the composer).
+   */
+  echoPaused: boolean;
+  /** Resume auto-send after an echo pause. */
+  resumeAutoSend: () => void;
+  /** Headphones detected (true), speakers (false), unknown (null). */
+  headphones: boolean | null;
 }
+
+/** Voice sources nobody pressed anything for: these can loop on Herald's own voice. */
+const HANDS_OFF_SOURCES: ReadonlySet<VoiceInputSource> = new Set(['interrupt', 'wake']);
+/** Push-to-talk / hotkeys: deliberate, so only a long echo is dropped. */
+const DELIBERATE_SOURCES: ReadonlySet<VoiceInputSource> = new Set(['button', 'space', 'chord', 'global']);
 
 export interface VoiceInputHost {
   getTransport: () => HeraldTransport | null;
@@ -148,6 +182,8 @@ export interface VoiceInputHost {
    * and resumes when control comes back. Null / absent: not paused.
    */
   pausedBy?: string | null;
+  /** What Herald said recently: transcripts of its own voice are dropped. */
+  spokenLog?: SpokenLog;
 }
 
 export function useHeraldVoiceInput(host: VoiceInputHost): HeraldVoiceInput {
@@ -158,6 +194,21 @@ export function useHeraldVoiceInput(host: VoiceInputHost): HeraldVoiceInput {
   prefsRef.current = prefs;
   const [transcript, setTranscript] = useState<InjectedTranscript | null>(null);
   const seq = useRef(0);
+  const breaker = useMemo(() => new VoiceLoopBreaker(), []);
+  const [echoPaused, setEchoPaused] = useState(false);
+  useEffect(() => breaker.subscribe(setEchoPaused), [breaker]);
+  // Any keyboard, mouse or touch use means a person is here (resumes auto-send).
+  useEffect(() => {
+    const onUse = () => breaker.noteInteraction();
+    window.addEventListener('keydown', onUse, true);
+    window.addEventListener('pointerdown', onUse, true);
+    window.addEventListener('touchstart', onUse, true);
+    return () => {
+      window.removeEventListener('keydown', onUse, true);
+      window.removeEventListener('pointerdown', onUse, true);
+      window.removeEventListener('touchstart', onUse, true);
+    };
+  }, [breaker]);
 
   const controller = useMemo(
     () =>
@@ -166,6 +217,14 @@ export function useHeraldVoiceInput(host: VoiceInputHost): HeraldVoiceInput {
         getTransport: () => hostRef.current.getTransport(),
         onBargeIn: () => hostRef.current.stopSpeech(),
         onTranscript: (text, source) => {
+          // Herald's own voice through the speakers: drop it, keep listening.
+          const log = hostRef.current.spokenLog;
+          if (log?.isEcho(text, { minTokens: DELIBERATE_SOURCES.has(source) ? 3 : 1 })) {
+            console.debug(`Herald voice: dropped likely self-echo (${source}):`, JSON.stringify(text));
+            return;
+          }
+          // Hotkeys, push-to-talk, remote triggers: someone deliberately asked.
+          if (!HANDS_OFF_SOURCES.has(source)) breaker.noteInteraction();
           const hook = hostRef.current.onVoiceTranscript;
           const rest = hook ? hook(text, source) : text;
           if (!rest) return;
@@ -178,7 +237,13 @@ export function useHeraldVoiceInput(host: VoiceInputHost): HeraldVoiceInput {
             return;
           }
           seq.current += 1;
-          setTranscript({ id: seq.current, text: rest, autoSend: !prefsRef.current.reviewBeforeSend, mode: 'voice' });
+          let autoSend = !prefsRef.current.reviewBeforeSend;
+          // Loop breaker: hands-off sends in a burst wait for the user instead.
+          if (autoSend && HANDS_OFF_SOURCES.has(source) && !breaker.allowSend()) {
+            autoSend = false;
+            console.debug('Herald voice: auto-send paused (possible echo loop)');
+          }
+          setTranscript({ id: seq.current, text: rest, autoSend, mode: 'voice' });
         },
       }),
     [],
@@ -222,6 +287,32 @@ export function useHeraldVoiceInput(host: VoiceInputHost): HeraldVoiceInput {
   }, []);
   const micGranted = permGranted || state.permission === 'granted';
 
+  // Headphones? Device labels need mic permission; re-check on device changes.
+  const [headphones, setHeadphones] = useState<boolean | null>(null);
+  useEffect(() => {
+    const md = typeof navigator !== 'undefined' ? navigator.mediaDevices : undefined;
+    if (!md?.enumerateDevices) return;
+    let cancelled = false;
+    const check = () => {
+      md.enumerateDevices()
+        .then((list) => { if (!cancelled) setHeadphones(detectHeadphones(list)); })
+        .catch(() => {});
+    };
+    check();
+    md.addEventListener?.('devicechange', check);
+    return () => {
+      cancelled = true;
+      md.removeEventListener?.('devicechange', check);
+    };
+  }, [micGranted]);
+  const nativeDesktop = useMemo(() => nativePlatform() === 'desktop', []);
+  const interrupt = interruptDefault({
+    explicit: prefs.interruptOrigin === 'explicit' ? prefs.interrupt : undefined,
+    legacy: prefs.interruptOrigin === 'saved' ? prefs.interrupt : undefined,
+    nativeDesktop,
+    headphones,
+  });
+
   // Voice interrupt (barge-in) and hands-free wake word over the VAD.
   const automation = useMemo(
     () =>
@@ -230,6 +321,7 @@ export function useHeraldVoiceInput(host: VoiceInputHost): HeraldVoiceInput {
         input: controller,
         stopSpeech: () => hostRef.current.stopSpeech(),
         getTransport: () => hostRef.current.getTransport(),
+        isEcho: (text) => hostRef.current.spokenLog?.isEcho(text) ?? false,
         onWake: () => playChime('wake', 0.06),
         onError: (m) => {
           controller.fail(m);
@@ -291,12 +383,12 @@ export function useHeraldVoiceInput(host: VoiceInputHost): HeraldVoiceInput {
     automation.update({
       available,
       micGranted,
-      interrupt: prefs.interrupt,
+      interrupt,
       sensitivity: prefs.sensitivity,
       speaking: host.speaking,
       handsFree: handsFreeActive,
     });
-  }, [automation, available, micGranted, prefs.interrupt, prefs.sensitivity, host.speaking, handsFreeActive]);
+  }, [automation, available, micGranted, interrupt, prefs.sensitivity, host.speaking, handsFreeActive]);
 
   let handsFreeNote: string | null = null;
   if (prefs.handsFree && !handsFreeActive) {
@@ -426,8 +518,10 @@ export function useHeraldVoiceInput(host: VoiceInputHost): HeraldVoiceInput {
   }, [controller]);
 
   const setPref = useCallback(<K extends keyof VoiceInputPrefs>(key: K, value: VoiceInputPrefs[K]) => {
-    setPrefs((p) => ({ ...p, [key]: value }));
+    setPrefs((p) => (key === 'interrupt' ? { ...p, interrupt: value as boolean, interruptOrigin: 'explicit' } : { ...p, [key]: value }));
   }, []);
+  const resumeAutoSend = useCallback(() => breaker.resume(), [breaker]);
+  const effectivePrefs = useMemo(() => ({ ...prefs, interrupt }), [prefs, interrupt]);
 
   const consumeTranscript = useCallback((id: number) => {
     setTranscript((t) => (t && t.id === id ? null : t));
@@ -437,7 +531,7 @@ export function useHeraldVoiceInput(host: VoiceInputHost): HeraldVoiceInput {
     available,
     unavailableReason,
     state,
-    prefs,
+    prefs: effectivePrefs,
     setPref,
     chordLabel: formatChord(chord),
     briefChordLabel: formatChord(briefChord),
@@ -456,5 +550,8 @@ export function useHeraldVoiceInput(host: VoiceInputHost): HeraldVoiceInput {
     setHandsFree,
     listen,
     isCapturing,
-  }), [available, unavailableReason, state, prefs, setPref, chord, briefChord, start, stop, cancel, onComposerKeyDown, onComposerKeyUp, transcript, consumeTranscript, controller, micGranted, handsFreeAvailable, handsFreeActive, handsFreeNote, setHandsFree, listen, isCapturing]);
+    echoPaused,
+    resumeAutoSend,
+    headphones,
+  }), [echoPaused, resumeAutoSend, headphones, available, unavailableReason, state, effectivePrefs, setPref, chord, briefChord, start, stop, cancel, onComposerKeyDown, onComposerKeyUp, transcript, consumeTranscript, controller, micGranted, handsFreeAvailable, handsFreeActive, handsFreeNote, setHandsFree, listen, isCapturing]);
 }
