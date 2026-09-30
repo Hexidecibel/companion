@@ -6,6 +6,7 @@ import { VoiceInputController, type VoiceInputSource, type VoiceInputState } fro
 import { VadListener } from '../services/voice/vadListener';
 import { VoiceAutomation } from '../services/voice/voiceAutomation';
 import { playChime } from '../services/tts/chime';
+import { voiceCopy } from '../services/voice/platformCopy';
 import { DEFAULT_BRIEF_CHORD, DEFAULT_CHORD, formatChord, isChordRelease, matchesChordDown, parseChord, shouldStartSpacePtt } from '../services/voice/hotkeys';
 
 const PREFS_KEY = 'herald_voice_input_prefs';
@@ -168,11 +169,11 @@ export function useHeraldVoiceInput(host: VoiceInputHost): HeraldVoiceInput {
           const hook = hostRef.current.onVoiceTranscript;
           const rest = hook ? hook(text, source) : text;
           if (!rest) return;
-          // Remote trigger: the user is somewhere else (mid-game), so it goes
+          // Remote trigger / desktop global hold-to-talk: the user is somewhere else (mid-game), so it goes
           // straight out as a voice turn. The composer (and any draft in it) is
           // never touched.
           const direct = hostRef.current.sendVoice;
-          if (source === 'trigger' && direct) {
+          if ((source === 'trigger' || source === 'global') && direct) {
             direct(rest);
             return;
           }
@@ -195,7 +196,7 @@ export function useHeraldVoiceInput(host: VoiceInputHost): HeraldVoiceInput {
   else if (!host.serverStatus.available || !host.serverStatus.stt.ready) {
     unavailableReason = 'Voice service offline on the hub (bin/herald-voice start)';
   } else if (state.permission === 'denied') {
-    unavailableReason = "Microphone blocked. Allow it in the browser's site settings.";
+    unavailableReason = voiceCopy().micDenied;
   }
   const available = unavailableReason === null;
   const availableRef = useRef(available);
@@ -301,7 +302,7 @@ export function useHeraldVoiceInput(host: VoiceInputHost): HeraldVoiceInput {
   if (prefs.handsFree && !handsFreeActive) {
     if (pausedBy) handsFreeNote = `Paused: ${pausedBy} has control`;
     else if (!handsFreeAvailable) handsFreeNote = unavailableReason ?? 'Wake word not loaded on the hub';
-    else if (!visible && !prefs.handsFreeInBackground) handsFreeNote = 'Paused while this tab is hidden';
+    else if (!visible && !prefs.handsFreeInBackground) handsFreeNote = voiceCopy().pausedHidden;
     else handsFreeNote = 'Starting…';
   }
 
@@ -356,7 +357,7 @@ export function useHeraldVoiceInput(host: VoiceInputHost): HeraldVoiceInput {
     // would see it). Permission granted earlier works in the background.
     const hidden = typeof document !== 'undefined' && document.visibilityState !== 'visible';
     if (hidden && !micGrantedRef.current) {
-      return 'Microphone not allowed yet: use the mic once in this tab, then triggers can open it from anywhere';
+      return voiceCopy().micNotYetAllowed;
     }
     try {
       return (await automation.listen()) ? null : 'Already listening';

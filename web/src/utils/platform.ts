@@ -29,6 +29,28 @@ export function isTauriDesktop(): boolean {
   return isTauri() && !isTauriMobile();
 }
 
+export type NativePlatform = 'browser' | 'desktop' | 'android' | 'ios';
+
+/**
+ * Which build is running, for gating native-only features (Herald global
+ * shortcuts, earbud button, mic hints). Unlike isTauriMobile() this never uses
+ * the viewport: an iPad reports a Mac user agent, so a touch-capable "Mac"
+ * inside Tauri is iPadOS.
+ */
+export function nativePlatform(): NativePlatform {
+  if (!isTauri()) return 'browser';
+  const ua = navigator.userAgent.toLowerCase();
+  if (ua.includes('android')) return 'android';
+  if (/iphone|ipad|ipod/.test(ua)) return 'ios';
+  if (ua.includes('macintosh') && navigator.maxTouchPoints > 1) return 'ios';
+  return 'desktop';
+}
+
+/** Any Tauri build (desktop or mobile app) rather than a browser tab. */
+export function isNativeApp(): boolean {
+  return nativePlatform() !== 'browser';
+}
+
 /**
  * Apply safe area insets for Tauri mobile.
  * On Android, env(safe-area-inset-top) often returns 0 even with edge-to-edge,

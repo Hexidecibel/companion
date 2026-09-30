@@ -5,6 +5,7 @@
  * "mic in use" indicator does not stay lit when nothing is listening.
  */
 import captureWorkletUrl from './captureWorklet?worker&url';
+import { voiceCopy } from './platformCopy';
 
 export type MicPermission = 'unknown' | 'granted' | 'denied' | 'unavailable';
 
@@ -28,8 +29,8 @@ export const MIC_CONSTRAINTS: MediaStreamConstraints = {
 /** Why voice input can't work on this page, or null if it can. */
 export function micUnavailableReason(): string | null {
   if (typeof window === 'undefined') return 'No browser';
-  if (!window.isSecureContext) return 'The microphone needs HTTPS. Open Herald over https (bin/herald-sandbox https).';
-  if (!navigator.mediaDevices?.getUserMedia) return 'This browser has no microphone access.';
+  if (!window.isSecureContext) return voiceCopy().micInsecure;
+  if (!navigator.mediaDevices?.getUserMedia) return voiceCopy().micMissing;
   if (typeof AudioWorkletNode === 'undefined') return 'This browser lacks AudioWorklet.';
   return null;
 }
@@ -73,7 +74,7 @@ export class MicCapture {
         const name = (err as { name?: string })?.name;
         if (name === 'NotAllowedError' || name === 'SecurityError') {
           this.permission = 'denied';
-          throw new MicError('Microphone permission denied. Allow it in the browser\'s site settings.', 'denied');
+          throw new MicError(voiceCopy().micDenied, 'denied');
         }
         if (name === 'NotFoundError' || name === 'OverconstrainedError') {
           this.permission = 'unavailable';

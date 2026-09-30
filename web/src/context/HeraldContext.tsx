@@ -11,6 +11,7 @@ import { routeVoiceTranscript } from '../services/voice/voiceCommandRouter';
 import type { HeraldActiveDevice, HeraldDeviceInfo, HeraldIntent } from '../types/herald';
 import { playChime } from '../services/tts/chime';
 import { DeferredNotice, runHeraldTrigger, type TriggerActions } from '../services/voice/heraldTrigger';
+import { useNativeHerald } from '../hooks/useNativeHerald';
 
 const PANEL_OPEN_KEY = 'herald_panel_open';
 /** A voice command waiting for the current turn to finish gives up after this. */
@@ -357,6 +358,19 @@ export function HeraldProvider({ children }: { children: ReactNode }) {
   const screenOpenRef = useRef(screenOpen);
   screenOpenRef.current = screenOpen;
   const available = !!hostId && herald.connected && herald.supported !== false;
+
+  // Native apps: desktop global shortcuts + tray, mobile earbud button + ducking.
+  // They run the same handlers as the browser (push-to-talk, trigger actions).
+  useNativeHerald({
+    runTrigger: (action) => void runHeraldTrigger(action, triggerActions),
+    input: voiceInput,
+    tonesOn: voice.chimeOn,
+    setTonesOn: voice.setChimeOn,
+    speaking: voice.supported && voice.speaking,
+    enabled: available,
+    tone: (kind) => playChime(kind, 0.06),
+    notice: (m) => triggerNotice.post(m),
+  });
   const inbox = herald.state?.inbox;
   const { unheardCount, unheardBlocked } = useMemo(() => {
     let count = 0;

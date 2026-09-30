@@ -2,6 +2,8 @@ import { useEffect, useState, type KeyboardEvent as ReactKeyboardEvent, type Poi
 import type { HeraldVoiceInput, VoiceInputPrefs } from '../../hooks/useHeraldVoiceInput';
 import { chordFromEvent, formatChord } from '../../services/voice/hotkeys';
 import { IconListen, IconMic, IconMicOff, IconX } from './heraldIcons';
+import { voiceCopy } from '../../services/voice/platformCopy';
+import { NativeHeraldSettings } from './NativeHeraldSettings';
 
 /**
  * Hold-to-talk mic button for the composer. Pointer capture keeps the hold
@@ -180,7 +182,7 @@ export function VoiceInputSettings({ input }: { input: HeraldVoiceInput }) {
       </button>
       {prefs.handsFree && (
         <button type="button" role="menuitemcheckbox" aria-checked={prefs.handsFreeInBackground} className="herald-menu__item herald-menu__item--sub" onClick={() => setPref('handsFreeInBackground', !prefs.handsFreeInBackground)}>
-          Keep listening when this tab is hidden
+          {voiceCopy().keepListeningHidden}
           <Switch on={prefs.handsFreeInBackground} />
         </button>
       )}
@@ -193,6 +195,7 @@ export function VoiceInputSettings({ input }: { input: HeraldVoiceInput }) {
         Brief me shortcut
         <kbd className="herald-voice-set__kbd">{capturing === 'briefChord' ? 'Press keys…' : input.briefChordLabel}</kbd>
       </button>
+      <NativeHeraldSettings />
     </div>
   );
 }
