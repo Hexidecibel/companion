@@ -1,0 +1,127 @@
+#!/usr/bin/env bash
+# Desktop signing material: Developer ID certificate + Tauri updater key.
+#
+# Everything private lives in ~/.companion/signing (chmod 700, outside the repo)
+# and is stored as GitHub Actions secrets + Infisical (inf://prod/companion/*).
+# Values are never printed.
+#
+#   bin/desktop-signing csr                  Create the Developer ID private key + CSR
+#                                            (idempotent; backs the key up to Infisical)
+#   bin/desktop-signing import-devid <.cer>  Build a .p12 from the downloaded Developer ID
+#                                            Application cert and store it as
+#                                            APPLE_DEVID_CERT_P12_B64 / APPLE_DEVID_CERT_PASSWORD
+#   bin/desktop-signing updater-keygen       Create the Tauri updater keypair (once), store
+#                                            TAURI_SIGNING_PRIVATE_KEY(_PASSWORD), print pubkey
+#   bin/desktop-signing status               Show which pieces exist (no values)
+#
+# Why the CSR route: the App Store Connect API refuses to create Developer ID
+# certificates unless the key belongs to the Account Holder (403 FORBIDDEN_ERROR),
+# so the certificate itself is created in the developer portal from this CSR.
+set -euo pipefail
+umask 077
+
+REPO="$(cd "$(dirname "$0")/.." && pwd)"
+DIR="${COMPANION_SIGNING_DIR:-$HOME/.companion/signing}"
+CUSH="${CUSH_TOOLS:-$HOME/local/src/cush-tools}"
+INF_PREFIX="inf://prod/companion"
+mkdir -p "$DIR" && chmod 700 "$DIR"
+
+die() { echo "error: $*" >&2; exit 1; }
+
+# store_secret NAME FILE: GitHub secret + Infisical, value read from FILE.
+store_secret() {
+  local name="$1" file="$2"
+  (cd "$REPO" && gh secret set "$name" < "$file") >/dev/null || die "gh secret set $name failed"
+  echo "  github secret: $name"
+  if [ -f "$CUSH/lib/infisical.py" ] && [ -f "$HOME/.config/cush-tools/infisical.env" ]; then
+    # stderr is discarded: Infisical errors can echo the value.
+    if CUSH_LIB="$CUSH/lib" VALUE_FILE="$file" REF="$INF_PREFIX/$name" python3 - 2>/dev/null <<'PY'
+import os, sys
+sys.path.insert(0, os.environ["CUSH_LIB"])
+import infisical
+infisical._load_env_file()
+with open(os.environ["VALUE_FILE"]) as f:
+    v = f.read().rstrip("\n")
+if "\n" in v:
+    sys.exit("multi-line values are not supported")
+infisical.inf_item_upsert(os.environ["REF"], v)
+PY
+    then echo "  infisical:     $INF_PREFIX/$name"
+    else echo "  infisical:     FAILED for $name (GitHub secret is set)" >&2
+    fi
+  fi
+}
+
+shred_file() { [ -e "$1" ] && { shred -u "$1" 2>/dev/null || rm -f "$1"; }; return 0; }
+
+cmd_csr() {
+  if [ ! -f "$DIR/devid.key" ] || [ "${1:-}" = "--rotate" ]; then
+    openssl genrsa -out "$DIR/devid.key" 2048 2>/dev/null
+    echo "created $DIR/devid.key"
+  fi
+  openssl req -new -key "$DIR/devid.key" -out "$DIR/devid.csr" \
+    -subj "/emailAddress=${DEVID_EMAIL:-ludacris2k4@gmail.com}/CN=Companion Developer ID/C=US"
+  chmod 600 "$DIR/devid.key" "$DIR/devid.csr"
+  # Backup only (Infisical values must be one line, hence base64).
+  base64 -w0 "$DIR/devid.key" > "$DIR/devid.key.b64"
+  store_secret APPLE_DEVID_PRIVATE_KEY_B64 "$DIR/devid.key.b64"
+  shred_file "$DIR/devid.key.b64"
+  echo "CSR: $DIR/devid.csr  (upload this in the developer portal)"
+}
+
+cmd_import_devid() {
+  local cer="${1:-}"
+  [ -n "$cer" ] && [ -f "$cer" ] || die "usage: bin/desktop-signing import-devid <developerID_application.cer>"
+  [ -f "$DIR/devid.key" ] || die "no $DIR/devid.key; the cert must come from this machine's CSR"
+  local pem="$DIR/devid.cert.pem" p12="$DIR/devid.p12" pass="$DIR/devid.p12.pass" b64="$DIR/devid.p12.b64"
+  if ! openssl x509 -inform DER -in "$cer" -out "$pem" 2>/dev/null; then
+    openssl x509 -in "$cer" -out "$pem" || die "not a certificate: $cer"
+  fi
+  # The certificate must match our private key.
+  [ "$(openssl x509 -in "$pem" -noout -pubkey | sha256sum)" = "$(openssl pkey -in "$DIR/devid.key" -pubout | sha256sum)" ] \
+    || die "certificate does not match $DIR/devid.key (was it made from $DIR/devid.csr?)"
+  local subject; subject="$(openssl x509 -in "$pem" -noout -subject -nameopt multiline | sed -n 's/^ *commonName *= //p')"
+  case "$subject" in "Developer ID Application:"*) ;; *) die "not a Developer ID Application cert: $subject" ;; esac
+  openssl rand -base64 24 | tr -d '\n' > "$pass"
+  # 3DES/SHA1 PKCS#12: macOS `security import` rejects OpenSSL 3's AES default.
+  openssl pkcs12 -export -inkey "$DIR/devid.key" -in "$pem" -name "$subject" \
+    -keypbe PBE-SHA1-3DES -certpbe PBE-SHA1-3DES -macalg sha1 \
+    -passout "file:$pass" -out "$p12"
+  base64 -w0 "$p12" > "$b64"
+  chmod 600 "$pem" "$p12" "$pass" "$b64"
+  store_secret APPLE_DEVID_CERT_P12_B64 "$b64"
+  store_secret APPLE_DEVID_CERT_PASSWORD "$pass"
+  shred_file "$b64"
+  echo "identity: $subject"
+  echo "expires:  $(openssl x509 -in "$pem" -noout -enddate | cut -d= -f2)"
+}
+
+cmd_updater_keygen() {
+  local key="$DIR/updater.key" pass="$DIR/updater.key.pass"
+  if [ -f "$key" ] && [ "${1:-}" != "--force" ]; then
+    echo "updater key exists ($key); use --force to rotate (old installs then reject updates)"
+  else
+    openssl rand -base64 24 | tr -d '\n' > "$pass"
+    (cd "$REPO/desktop" && npx --no-install tauri signer generate --ci -f -w "$key" -p "$(cat "$pass")") >/dev/null
+    chmod 600 "$key" "$key.pub" "$pass"
+    store_secret TAURI_SIGNING_PRIVATE_KEY "$key"
+    store_secret TAURI_SIGNING_PRIVATE_KEY_PASSWORD "$pass"
+  fi
+  echo "public key (goes in tauri.conf.json plugins.updater.pubkey):"
+  cat "$key.pub"; echo
+}
+
+cmd_status() {
+  for f in devid.key devid.csr devid.p12 updater.key updater.key.pub; do
+    printf '  %-16s %s\n' "$f" "$([ -f "$DIR/$f" ] && echo present || echo missing)"
+  done
+  (cd "$REPO" && gh secret list) | awk '{print "  secret: "$1}' | grep -E 'DEVID|TAURI_SIGNING' || true
+}
+
+case "${1:-}" in
+  csr) shift; cmd_csr "$@" ;;
+  import-devid) shift; cmd_import_devid "$@" ;;
+  updater-keygen) shift; cmd_updater_keygen "$@" ;;
+  status) cmd_status ;;
+  *) sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+esac
