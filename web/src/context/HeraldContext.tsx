@@ -615,13 +615,16 @@ export function HeraldProvider({ children }: { children: ReactNode }) {
     tone: (kind) => playChime(kind, 0.06),
     notice: (m) => triggerNotice.post(m),
   });
-  // Esc anywhere in the app stops Herald talking (the panel handles its own
-  // Esc first; this covers focus elsewhere in the app). Never swallows the key.
+  // Esc anywhere in the app stops Herald talking (the panel and its menu
+  // handle their own Esc; this covers focus elsewhere in the app, where other
+  // Esc handlers may run too). Never swallows the key.
   const speakingHere = voice.supported && voice.speaking;
   useEffect(() => {
     if (!speakingHere) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape' || e.defaultPrevented || e.repeat) return;
+      if (e.key !== 'Escape' || e.repeat) return;
+      const t = e.target as Element | null;
+      if (t && typeof t.closest === 'function' && t.closest('.herald, .herald-menu, .hh')) return;
       voiceRef.current.stopCommand();
     };
     window.addEventListener('keydown', onKey);
