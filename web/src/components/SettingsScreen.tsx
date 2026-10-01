@@ -7,6 +7,7 @@ import { clearStore } from '../services/persistentStorage';
 import { NotificationSettingsModal } from './NotificationSettingsModal';
 import { SkillBrowser } from './SkillBrowser';
 import { isTauriDesktop } from '../utils/platform';
+import { useAppUpdater, AppUpdateStatus } from '../hooks/useAppUpdater';
 import { useTheme } from '../context/ThemeContext';
 
 interface SettingsScreenProps {
@@ -29,6 +30,7 @@ export function SettingsScreen({ onBack }: SettingsScreenProps) {
   const [rotatingServer, setRotatingServer] = useState<string | null>(null);
   const [rotateResult, setRotateResult] = useState<{ serverId: string; token?: string; error?: string } | null>(null);
   const [autostart, setAutostart] = useState<boolean | null>(null);
+  const updater = useAppUpdater();
   const [skillBrowserServerId, setSkillBrowserServerId] = useState<string | null>(null);
 
   // Load autostart state in Tauri desktop only
@@ -198,6 +200,49 @@ export function SettingsScreen({ onBack }: SettingsScreenProps) {
                 {autostart ? 'On' : 'Off'}
               </button>
             </div>
+            {updater.status && (
+              <>
+                <div className="settings-card settings-card-row">
+                  <div className="settings-card-row-info">
+                    <span className="settings-card-label">Updates</span>
+                    <span className="settings-card-detail">{describeUpdate(updater.status)}</span>
+                  </div>
+                  {updater.status.state === 'ready' ? (
+                    <button className="settings-toggle-btn active" onClick={() => updater.installNow().catch(() => {})}>
+                      Restart
+                    </button>
+                  ) : (
+                    <button
+                      className="settings-toggle-btn"
+                      onClick={updater.checkNow}
+                      disabled={
+                        updater.status.state === 'disabled' ||
+                        updater.status.state === 'checking' ||
+                        updater.status.state === 'downloading'
+                      }
+                    >
+                      Check now
+                    </button>
+                  )}
+                </div>
+                {updater.status.state !== 'disabled' && (
+                  <div className="settings-card settings-card-row">
+                    <div className="settings-card-row-info">
+                      <span className="settings-card-label">Install Updates on Quit</span>
+                      <span className="settings-card-detail">
+                        A downloaded update is applied when you quit Companion.
+                      </span>
+                    </div>
+                    <button
+                      className={`settings-toggle-btn ${updater.status.autoInstallOnQuit ? 'active' : ''}`}
+                      onClick={() => updater.setAutoInstall(!updater.status?.autoInstallOnQuit)}
+                    >
+                      {updater.status.autoInstallOnQuit ? 'On' : 'Off'}
+                    </button>
+                  </div>
+                )}
+              </>
+            )}
           </section>
         )}
 
@@ -344,4 +389,26 @@ export function SettingsScreen({ onBack }: SettingsScreenProps) {
       )}
     </div>
   );
+}
+
+function describeUpdate(s: AppUpdateStatus): string {
+  const v = `Version ${s.currentVersion}`;
+  switch (s.state) {
+    case 'disabled':
+      return `${v}. Automatic updates are not available for this build.`;
+    case 'checking':
+      return `${v}. Checking for updates...`;
+    case 'downloading':
+      return `${v}. Downloading ${s.version ?? 'update'}...`;
+    case 'ready':
+      return `${v}. Update ${s.version} is ready: restart to install.`;
+    case 'installing':
+      return `${v}. Installing ${s.version}...`;
+    case 'up-to-date':
+      return `${v}. Up to date.`;
+    case 'error':
+      return `${v}. ${s.error ?? 'Last check failed'}.`;
+    default:
+      return `${v}. Checks every 6 hours.`;
+  }
 }

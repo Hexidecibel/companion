@@ -5,6 +5,7 @@ import { HeraldProvider } from './context/HeraldContext';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { StatusPage } from './components/StatusPage';
 import { Dashboard } from './components/Dashboard';
+import { UpdateBanner } from './components/UpdateBanner';
 import { CommandPalette, CommandAction } from './components/CommandPalette';
 import { eventBus } from './utils/eventBus';
 
@@ -188,6 +189,8 @@ export function App() {
                 />
               </Suspense>
             )}
+
+            <UpdateBanner />
 
             {showCommandPalette && (
               <CommandPalette

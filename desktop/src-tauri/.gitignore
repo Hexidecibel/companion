@@ -2,3 +2,4 @@
 /gen/
 # Generated per-build by scripts/android-version.cjs (auto-incrementing versionCode overlay)
 /android-version.conf.json
+/desktop-version.conf.json

@@ -9,6 +9,8 @@ High-level features of the Companion daemon, web client, and desktop/mobile apps
 - **Web** — served directly by the daemon at `http://<host>:9877/web`
 - Mobile-optimized layout with full-screen session list, bottom toolbar, safe area insets
 - Desktop layout with sidebar + session view side-by-side
+- **Desktop auto-update** (Tauri updater): checks the daemon's own feed (`/updates/stable/latest.json`, no GitHub Releases) at startup and every 6 hours, downloads + verifies (minisign) in the background, then offers "Restart to update" in the app and tray; optional install-on-quit (Settings > Desktop). Versions are `1.0.<git commit count>`. Publish with `bin/companion publish-update --run <id|latest>`
+- macOS builds signed with Developer ID, notarized and stapled in CI when the `APPLE_DEVID_CERT_*` secrets exist (ad-hoc fallback otherwise); `bin/desktop-signing` manages the certificate and updater keys
 
 ## Real-Time Monitoring
 - Live WebSocket updates from CLI coding sessions

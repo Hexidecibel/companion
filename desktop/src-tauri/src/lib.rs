@@ -6,6 +6,8 @@ mod herald;
 mod overlay;
 #[cfg(desktop)]
 mod passthrough;
+#[cfg(desktop)]
+mod updater;
 
 /// WebView2 (Windows) browser arguments for every Companion webview: wry's
 /// defaults plus no occlusion / background throttling, so Herald hands-free
@@ -104,6 +106,10 @@ pub fn run() {
             overlay::herald_overlay_drag,
             overlay::herald_overlay_action,
             overlay::herald_bring_to_front,
+            updater::updater_status,
+            updater::updater_check,
+            updater::updater_install,
+            updater::updater_set_auto_install,
         ]);
     }
 
@@ -125,6 +131,13 @@ pub fn run() {
     }
 
     builder
-        .run(tauri::generate_context!())
-        .expect("error while running Companion");
+        .build(tauri::generate_context!())
+        .expect("error while building Companion")
+        .run(|_app, _event| {
+            // Apply a downloaded update on quit ("install on quit" setting).
+            #[cfg(desktop)]
+            if let tauri::RunEvent::ExitRequested { .. } = _event {
+                updater::on_exit(_app);
+            }
+        });
 }

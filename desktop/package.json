@@ -5,10 +5,11 @@
   "scripts": {
     "tauri": "tauri",
     "dev": "tauri dev",
-    "build": "tauri build",
+    "build": "node scripts/desktop-version.cjs && tauri build --config src-tauri/desktop-version.conf.json",
     "android:version": "node scripts/android-version.cjs",
     "android:build": "node scripts/android-version.cjs && tauri android build --target aarch64 --config src-tauri/android-version.conf.json",
-    "typecheck": "echo 'No TypeScript in desktop — run cd ../web && npm run typecheck'"
+    "typecheck": "echo 'No TypeScript in desktop \u2014 run cd ../web && npm run typecheck'",
+    "version:print": "node scripts/desktop-version.cjs --print"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.0.0"

@@ -1,4 +1,5 @@
 use crate::herald;
+use crate::updater;
 use tauri::{
     menu::{CheckMenuItemBuilder, Menu, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
@@ -153,6 +154,8 @@ pub fn setup_desktop(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Err
     }
     let volume_menu = volume_menu.build()?;
     let show_item = MenuItemBuilder::with_id("show", "Open Companion").build(app)?;
+    let update_check_item =
+        MenuItemBuilder::with_id(updater::TRAY_CHECK_ID, "Check for updates").build(app)?;
     let quit_item = MenuItemBuilder::with_id("quit-app", "Quit").build(app)?;
     let tray_menu = Menu::with_items(
         app,
@@ -164,10 +167,13 @@ pub fn setup_desktop(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Err
             &tones_item,
             &PredefinedMenuItem::separator(app)?,
             &show_item,
+            &update_check_item,
             &PredefinedMenuItem::separator(app)?,
             &quit_item,
         ],
     )?;
+    updater::init(app.handle());
+    updater::attach_tray(app.handle(), tray_menu.clone(), update_check_item);
     app.manage(herald::TrayState {
         tones: std::sync::Mutex::new(Some(tones_item)),
         volumes: std::sync::Mutex::new(volume_items),
@@ -212,6 +218,12 @@ pub fn setup_desktop(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Err
                     let _ = window.set_focus();
                 }
             }
+            updater::TRAY_INSTALL_ID => {
+                if let Err(e) = updater::install_and_restart(app) {
+                    log::warn!("updater: {e}");
+                }
+            }
+            updater::TRAY_CHECK_ID => updater::spawn_check(app),
             "quit-app" => {
                 app.exit(0);
             }
@@ -226,6 +238,7 @@ pub fn setup_desktop_plugins(builder: tauri::Builder<tauri::Wry>) -> tauri::Buil
     builder
         .plugin(tauri_plugin_window_state::Builder::new().build())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_autostart::init(
             MacosLauncher::LaunchAgent,
             None,
