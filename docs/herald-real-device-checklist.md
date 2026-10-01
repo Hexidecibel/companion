@@ -364,3 +364,66 @@ not headphones.
       the hotkey instead); the phone keeps talking.
 - [ ] Close the phone's tab mid-reply: the Mac's bar clears within ~3 s and the
       Mac listens normally again.
+
+## Volume, quick stop, passthrough shortcuts (Discord on the same keys)
+
+Native desktop app from the `native/herald-voice` CI build (Windows .exe, macOS .dmg).
+
+### Discord Push to Mute on Ctrl+Alt+Space (Windows gaming PC, headset, in a call)
+- [ ] Herald menu > Advanced > System-wide shortcuts: Hold to talk shows "Let
+      other apps see this key too (recommended for push-to-talk)" ON; the other
+      shortcuts OFF.
+- [ ] Discord > Keybinds: Push to Mute = Ctrl+Alt+Space. In a call (voice
+      activity), hold Ctrl+Alt+Space and ask Herald something: Discord shows
+      you muted for the whole hold (teammates hear nothing) AND Herald hears and
+      answers. Release: Discord unmutes.
+- [ ] Hold it for 10+ seconds (key auto-repeat): one capture, no restarts; it
+      ends the moment you let go of Space OR of Ctrl / Alt.
+- [ ] Turn the switch OFF: Ctrl+Alt+Space is Companion's alone again (Discord no
+      longer mutes). Turn it back on.
+- [ ] Game focused (borderless, raw-input game): the same still works.
+- [ ] **Elevated game** (a game or tool started with "Run as administrator"):
+      while it has focus, hold-to-talk does nothing and the shortcut settings
+      say the app in front runs as administrator. Run Companion as
+      administrator: it works again. (Discord needs the same for its keybinds.)
+- [ ] Fallback `triggers/windows/herald-discord-ptt.ahk`: bind mode records F13
+      as Discord Push to Mute; holding the thumb button mutes Discord and Herald
+      listens; release ends both.
+
+### macOS passthrough
+- [ ] First launch: hold-to-talk falls back to exclusive and the settings explain
+      Input Monitoring; "Allow Input Monitoring…" shows the system prompt /
+      opens System Settings. Allow Companion, quit and reopen: the note is gone
+      and another app bound to the same chord still receives it.
+
+### Quick stop
+- [ ] Herald speaking: Ctrl+Alt+Shift+S from a game stops her at once (no other
+      app reacts to the chord). Discord's own defaults are untouched.
+- [ ] Herald speaking on the PHONE: Ctrl+Alt+Shift+S on the PC stops the phone.
+- [ ] Herald speaking: press and hold Ctrl+Alt+Space: she stops on the key-down,
+      the listening tone follows, and what you say is sent on release.
+- [ ] Tray > Stop speaking, the floating orb's stop button, Esc in the app (focus
+      anywhere in the window), "stop": each one stops her.
+- [ ] AutoHotkey `herald-trigger.ahk` with `stop_key=^!+s` (Companion app closed):
+      stops Herald on the active device.
+- [ ] Help page lists the stop shortcut and the volume options.
+
+### Volume
+- [ ] Main menu Volume slider: 50 % and 150 % are clearly quieter / louder than
+      100 %, independent of the Windows volume; 150 % may clip a little on
+      loud words, never crackles.
+- [ ] Say "louder", "quieter", "volume 50": each answers "Volume N." at the new
+      level; the slider and the tray check follow; it survives a restart.
+      "Turn up the logging" goes to Herald as a normal question.
+- [ ] Tray > Herald volume: Louder / Quieter / 80 % change it; the checked level
+      follows the slider.
+- [ ] Advanced > Tones at 50 % with "Tones follow the voice volume" on and off:
+      the news tone follows the voice level only when on.
+- [ ] Pick the Gaming profile: volume goes to 80 %. Running the device check
+      again does not reset a volume you changed.
+- [ ] Echo cancellation at 150 %: with speakers and talk-over allowed, Herald
+      at 150 % still does not hear itself (no self-echo sends).
+- [ ] **Windows volume mixer** (Settings > System > Sound > Volume mixer, or the
+      classic mixer): while Herald speaks, its audio appears as "Microsoft Edge
+      WebView2" (the WebView2 process plays it); lowering that entry lowers
+      Herald and its tones, nothing else. Note what it is actually called.
