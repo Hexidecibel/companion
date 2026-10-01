@@ -125,6 +125,22 @@ async def test_wake_is_stateful_per_stream(aiohttp_client):
     assert (await client.post("/wake/bad id!", data=half)).status in (400, 404)
 
 
+async def test_wake_logs_detection_and_best_score_per_stream(aiohttp_client, caplog):
+    client = await aiohttp_client(make_app())
+    await ready(client)
+    half = np.zeros(8000, dtype="<i2").tobytes()
+    caplog.set_level("INFO", logger="herald_voice")
+    await client.post("/wake/quiet", data=half)
+    await client.delete("/wake/quiet")
+    await client.post("/wake/hit", data=half)
+    await client.post("/wake/hit", data=half)
+    await client.delete("/wake/hit")
+    text = "\n".join(r.getMessage() for r in caplog.records)
+    assert "wake: stream quiet ended, best score 0.100 (threshold" in text
+    assert "wake: hey_jarvis detected (score 0.900)" in text
+    assert "wake: stream hit ended, best score 0.900" in text and ", detected" in text
+
+
 async def test_wake_streams_are_bounded(aiohttp_client):
     app = make_app(wake_max_streams=2)
     client = await aiohttp_client(app)

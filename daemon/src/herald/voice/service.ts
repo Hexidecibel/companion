@@ -38,6 +38,7 @@ import { stripWakePhrase } from './wake-phrase';
 import { normalizeSpokenVersions } from './versions';
 import type { SpokenEvidence, VoiceTranscriptEvidence } from '../voice-confirm';
 import { SpeakingError, SpeakingTracker, type SPEAKING_LIMITS } from './speaking';
+import { RateLimitedLog, shortId } from './rate-log';
 
 /** Voice-confirm evidence is kept this long, at most this many transcripts per client. */
 const EVIDENCE_TTL_MS = 60_000;
@@ -123,6 +124,8 @@ interface VoiceStream {
   wakePending: Buffer[];
   wakePendingBytes: number;
   closed: boolean;
+  /** Highest wake score seen on this stream (diagnostics). */
+  bestScore: number;
 }
 
 export interface HeraldVoiceServiceOptions {
@@ -142,6 +145,12 @@ export interface HeraldVoiceServiceOptions {
   now?: () => number;
   limits?: Partial<typeof VOICE_LIMITS>;
   speakingLimits?: Partial<typeof SPEAKING_LIMITS>;
+  /**
+   * Info lines (rate limited): wake streams starting / ending, wake detections
+   * with their score, hands-free decisions. No audio, no transcripts. Default
+   * console.log (the journal).
+   */
+  log?: (line: string) => void;
 }
 
 export class HeraldVoiceService {
@@ -167,10 +176,12 @@ export class HeraldVoiceService {
   private readonly now: () => number;
   /** Which device is playing Herald's voice right now (fleet-wide echo guard). */
   readonly speaking: SpeakingTracker;
+  private readonly info: RateLimitedLog;
 
   constructor(private opts: HeraldVoiceServiceOptions) {
     this.limits = { ...VOICE_LIMITS, ...(opts.limits || {}) };
     this.now = opts.now || Date.now;
+    this.info = new RateLimitedLog(opts.log, this.now);
     this.speaking = new SpeakingTracker({
       broadcast: (signal) => this.opts.onSpeaking?.(signal),
       labelOf: (id) => this.presence.get(id)?.label ?? DEFAULT_LABEL,
@@ -366,7 +377,14 @@ export class HeraldVoiceService {
       wakePending: [],
       wakePendingBytes: 0,
       closed: false,
+      bestScore: 0,
     });
+    if (p.purpose === 'wake') {
+      this.info.log(
+        'wake_stream',
+        `Herald voice: wake stream start client=${this.who(clientId)} stream=${id}`
+      );
+    }
     return { ok: true };
   }
 
@@ -415,8 +433,13 @@ export class HeraldVoiceService {
     this.opts.client
       .wake(s.id, buf)
       .then((r) => {
+        if (typeof r.score === 'number' && r.score > s.bestScore) s.bestScore = r.score;
         if (s.closed || s.woke) return;
         if (r.detected) {
+          this.info.log(
+            'wake_detected',
+            `Herald voice: wake detected client=${this.who(s.clientId)} stream=${s.id} score=${r.score.toFixed(3)} model=${r.model}`
+          );
           s.woke = true;
           s.wakePending = [];
           s.wakePendingBytes = 0;
@@ -449,7 +472,7 @@ export class HeraldVoiceService {
     const audio = Buffer.concat(s.chunks);
     const woke = s.woke;
     const purpose = s.purpose;
-    this.closeStream(s);
+    this.closeStream(s, p.action === 'transcribe' ? 'transcribe' : 'discard');
     const audioMs = Math.round(audio.length / 32);
     if (p.action !== 'transcribe' || (purpose === 'wake' && !woke)) {
       return { text: '', audioMs, sttMs: 0, woke };
@@ -487,12 +510,18 @@ export class HeraldVoiceService {
   }
 
   private failStream(s: VoiceStream, error: string): void {
-    this.closeStream(s);
+    this.closeStream(s, `error: ${error}`);
     this.opts.sendEvent(s.clientId, { kind: 'stream_error', streamId: s.id, error });
   }
 
-  private closeStream(s: VoiceStream): void {
+  private closeStream(s: VoiceStream, reason = 'closed'): void {
     if (s.closed) return;
+    if (s.purpose === 'wake') {
+      this.info.log(
+        'wake_stream',
+        `Herald voice: wake stream end client=${this.who(s.clientId)} stream=${s.id} ${reason} woke=${s.woke} audioMs=${Math.round(s.bytes / 32)} bestScore=${s.bestScore.toFixed(3)}`
+      );
+    }
     s.closed = true;
     s.chunks = [];
     s.wakePending = [];
@@ -628,13 +657,30 @@ export class HeraldVoiceService {
     if (on) {
       const prev = this.handsFreeOwner;
       this.handsFreeOwner = clientId;
-      if (prev && prev !== clientId) this.opts.sendEvent(prev, { kind: 'handsfree_revoked' });
+      if (prev && prev !== clientId) {
+        this.opts.sendEvent(prev, { kind: 'handsfree_revoked' });
+        this.info.log(
+          'handsfree',
+          `Herald voice: hands-free on client=${this.who(clientId)}; stood down client=${this.who(prev)} (only one device listens)`
+        );
+      } else if (prev !== clientId) {
+        this.info.log('handsfree', `Herald voice: hands-free on client=${this.who(clientId)}`);
+      }
       this.electAnnouncer();
       return { owner: true };
     }
-    if (this.handsFreeOwner === clientId) this.handsFreeOwner = null;
+    if (this.handsFreeOwner === clientId) {
+      this.handsFreeOwner = null;
+      this.info.log('handsfree', `Herald voice: hands-free off client=${this.who(clientId)}`);
+    }
     this.electAnnouncer();
     return { owner: false };
+  }
+
+  /** "abcd1234 (Mac desktop)" for logs. */
+  private who(clientId: string): string {
+    const label = this.presence.get(clientId)?.label;
+    return label ? `${shortId(clientId)} (${label})` : shortId(clientId);
   }
 
   /**
@@ -803,7 +849,13 @@ export class HeraldVoiceService {
     this.transcripts.delete(clientId);
     this.speech.delete(clientId);
     for (const s of [...this.streams.values()]) if (s.clientId === clientId) this.closeStream(s);
-    if (this.handsFreeOwner === clientId) this.handsFreeOwner = null;
+    if (this.handsFreeOwner === clientId) {
+      this.info.log(
+        'handsfree',
+        `Herald voice: hands-free off client=${this.who(clientId)} (disconnected)`
+      );
+      this.handsFreeOwner = null;
+    }
     if (this.claim?.clientId === clientId) {
       const key = this.presence.get(clientId)?.deviceKey;
       if (this.claim.pinned && key) {

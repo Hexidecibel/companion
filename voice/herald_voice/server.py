@@ -31,6 +31,9 @@ from .config import Settings
 
 log = logging.getLogger("herald_voice")
 
+#: Wake streams whose best score is remembered for the end-of-stream log line.
+WAKE_BEST_MAX = 256
+
 STREAM_ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 MAX_BODY = 4 * 1024 * 1024  # 4 MB covers 60 s of 16 kHz PCM16 with headroom
 STT_HINT_MAX_CHARS = 800  # Whisper's prompt window is ~220 tokens; the daemon sends < 600 chars
@@ -262,6 +265,9 @@ def create_app(
             log.info("stt: %.0f ms audio in %.0f ms (%d chars)", audio_ms, stt_ms, len(text))
         return web.json_response({"text": text, "audioMs": round(audio_ms), "sttMs": round(stt_ms), "model": settings.stt_model})
 
+    # Best score per open wake stream (logged when the daemon drops the stream).
+    wake_best: "OrderedDict[str, tuple[float, bool]]" = OrderedDict()
+
     async def post_wake(req: web.Request) -> web.Response:
         sid = req.match_info["sid"]
         if not STREAM_ID.match(sid):
@@ -273,6 +279,10 @@ def create_app(
         except Busy:
             raise web.HTTPServiceUnavailable(text="wake busy")
         detected = score >= settings.wake_threshold
+        best = wake_best.pop(sid, (0.0, False))
+        wake_best[sid] = (max(best[0], score), best[1] or detected)
+        while len(wake_best) > WAKE_BEST_MAX:
+            wake_best.popitem(last=False)
         if detected:
             log.info("wake: %s detected (score %.3f) in %.0f ms", name, score, (time.monotonic() - t0) * 1000)
         return web.json_response({"detected": detected, "score": round(score, 4), "model": name})
@@ -284,6 +294,13 @@ def create_app(
         dropped = False
         if wake.ready:
             dropped = await wake.run(lambda streams: streams.drop(sid))
+        best = wake_best.pop(sid, None)
+        if best is not None:
+            # One line per utterance the client checked: how close it came (no audio, no text).
+            log.info(
+                "wake: stream %s ended, best score %.3f (threshold %.2f)%s",
+                sid, best[0], settings.wake_threshold, ", detected" if best[1] else "",
+            )
         return web.json_response({"dropped": dropped})
 
     app.router.add_get("/health", health)
