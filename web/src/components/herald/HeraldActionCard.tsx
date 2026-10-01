@@ -41,11 +41,16 @@ function useDecision(action: HeraldAction, onDecide: Decide) {
   return { inflight, decide };
 }
 
+/** Actions with no existing session to open: a cush-tools command, a session not started yet. */
+function hasNoSession(action: HeraldAction): boolean {
+  return action.kind === 'cush_command' || action.kind === 'spawn_session';
+}
+
 function SessionChip({ action, onOpenSession }: { action: HeraldAction; onOpenSession: CardProps['onOpenSession'] }) {
-  // A cush-tools command targets this machine, not a session: nothing to open.
-  if (action.kind === 'cush_command') {
+  // A cush-tools command targets this machine; a new session does not exist yet.
+  if (hasNoSession(action)) {
     return (
-      <span className="herald-ref" title="cush-tools command">
+      <span className="herald-ref" title={action.kind === 'spawn_session' ? 'New session' : 'cush-tools command'}>
         <span className="herald-ref__dot" />
         {action.sessionName}
       </span>
@@ -144,6 +149,32 @@ function EchoCard({ action, skewMs, onDecide, onOpenSession, disabled }: CardPro
   );
 }
 
+const PHRASE_STYLE = { marginTop: 10, fontSize: 13, lineHeight: 1.45, color: 'var(--h-text-2)' } as const;
+const PHRASE_WORDS_STYLE = { color: 'var(--h-text)', fontWeight: 600, quotes: '"\\201C" "\\201D"' } as const;
+
+/**
+ * The spoken alternative to holding: "Or say “confirm deploy”". Hands busy
+ * (mid-game) is exactly when this matters. After the voice tries are used up
+ * the card says so: only the hold confirms it then.
+ */
+function VoicePhrase({ action }: { action: HeraldAction }) {
+  if (!action.confirmPhrase) return null;
+  const left = action.voiceAttemptsLeft ?? 1;
+  if (left <= 0) {
+    return (
+      <div className="herald-action__phrase herald-action__phrase--off" style={PHRASE_STYLE}>
+        Voice tries used up: hold to confirm.
+      </div>
+    );
+  }
+  return (
+    <div className="herald-action__phrase" style={PHRASE_STYLE} aria-label={`Or say: ${action.confirmPhrase}`}>
+      Or say <q style={PHRASE_WORDS_STYLE}>{action.confirmPhrase}</q>
+      {left < 3 && <span> ({left} {left === 1 ? 'try' : 'tries'} left)</span>}
+    </div>
+  );
+}
+
 const HOLD_MS = 1200;
 
 /**
@@ -229,6 +260,7 @@ function HardConfirmCard({ action, onDecide, onOpenSession, disabled }: CardProp
           {action.reasons.map((r, i) => <li key={i}>{r}</li>)}
         </ul>
       )}
+      <VoicePhrase action={action} />
       <div className="herald-action__buttons">
         <HoldToConfirm
           onConfirm={() => decide('confirm')}
@@ -262,7 +294,7 @@ export const HeraldResolvedLine = memo(function HeraldResolvedLine({ action, onO
     <div className={`herald-resolved herald-resolved--${action.status}`}>
       <Icon />
       <span className="herald-resolved__status">{RESOLVED_COPY[action.status]}</span>
-      {action.kind === 'cush_command' ? (
+      {hasNoSession(action) ? (
         <span className="herald-resolved__session">{action.sessionName}</span>
       ) : (
         <button type="button" className="herald-resolved__session" onClick={() => onOpenSession(action.serverId, action.sessionId)}>

@@ -8,6 +8,7 @@ import { DEFAULT_DISPLAY_NAME, derivePresence, type HeraldPresence } from '../se
 import { isMobileViewport } from '../utils/platform';
 import { eventBus } from '../utils/eventBus';
 import { routeVoiceTranscript } from '../services/voice/voiceCommandRouter';
+import { detectVoiceConfirm, runVoiceConfirm } from '../services/voice/confirmPhrase';
 import { runUndo } from '../services/voice/voiceUndo';
 import type { HeraldActiveDevice, HeraldDeviceInfo, HeraldIntent } from '../types/herald';
 import { TICK_VOLUME, playChime, startShimmer } from '../services/tts/chime';
@@ -303,6 +304,18 @@ export function HeraldProvider({ children }: { children: ReactNode }) {
 
   const onVoiceTranscript = useCallback((text: string): string | null => {
     const v = voiceRef.current;
+    // Red card by voice ("confirm deploy"; the hub verifies) or a bare "yes" at
+    // one (answered with the phrase, never a confirm). See confirmPhrase.ts.
+    const vc = detectVoiceConfirm(text, heraldRef.current.state?.actions);
+    if (vc) {
+      void runVoiceConfirm(vc, {
+        confirmByVoice: heraldRef.current.confirmByVoice,
+        say: (line) => voiceRef.current.say(line),
+        tone: (kind) => playChime(kind),
+      });
+      cues.turnDone();
+      return null;
+    }
     const r = routeVoiceTranscript(text, {
       stop: v.stopCommand,
       repeat: v.repeat,

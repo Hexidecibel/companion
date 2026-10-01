@@ -367,3 +367,20 @@ describe('InboxChimeTracker reminders', () => {
     expect(t.dueReminder(REMINDER_AFTER_MS * 2)).toBeNull();
   });
 });
+
+describe('quiet announcements', () => {
+  it('a quiet Herald message (a session answer posted on its own) is never spoken', () => {
+    const engine = new MockEngine();
+    const ctl = new HeraldSpeechController(engine, { isEnabled: () => true, isVisible: () => true, speakOptions: () => ({ rate: 1 }) });
+    const m: HeraldMessage = { id: 'q1', role: 'herald', text: 'Out4 answered your question: two tests fail.', createdAt: 1, quiet: true };
+    ctl.handleEvent({ kind: 'message_start', message: m }, 'push');
+    ctl.handleEvent({ kind: 'message_end', message: m }, 'push');
+    expect(engine.spoken).toEqual([]);
+    expect(ctl.canRepeat).toBe(false);
+    // The same text without the flag (the user is mid voice exchange) is spoken.
+    const loud: HeraldMessage = { ...m, id: 'q2', quiet: undefined };
+    ctl.handleEvent({ kind: 'message_end', message: loud }, 'push');
+    expect(engine.spoken).toHaveLength(1);
+    expect(engine.spoken[0]).toMatch(/answered your question: two tests fail/);
+  });
+});

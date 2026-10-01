@@ -51,8 +51,22 @@ describe('herald WS handlers', () => {
     const confirm = jest.fn(async () => ({ id: 'x', status: 'sent' }));
     const { h, sent, client } = setup({ confirm });
     await h.herald_confirm(client, { actionId: 'x', decision: 'confirm' }, 'q');
-    expect(confirm).toHaveBeenCalledWith('x', 'confirm', { addr: '', clientId: 'c1', isLocal: true, tls: false, origin: null });
+    expect(confirm).toHaveBeenCalledWith(
+      'x',
+      'confirm',
+      { addr: '', clientId: 'c1', isLocal: true, tls: false, origin: null },
+      { method: undefined, phrase: undefined, streamId: undefined, clientId: 'c1' }
+    );
+    // Voice confirmation: method, phrase and stream pass through with the connection id.
+    await h.herald_confirm(client, { actionId: 'x', decision: 'confirm', method: 'voice', phrase: 'confirm deploy', streamId: 's1' }, 'q2');
+    expect(confirm).toHaveBeenLastCalledWith('x', 'confirm', expect.any(Object), {
+      method: 'voice',
+      phrase: 'confirm deploy',
+      streamId: 's1',
+      clientId: 'c1',
+    });
     expect(sent[0].payload).toEqual({ id: 'x', status: 'sent' });
+    expect(sent[1].payload).toEqual({ id: 'x', status: 'sent' });
 
     const boom = setup({ confirm: jest.fn(async () => Promise.reject(new Error('kaboom'))) });
     const errSpy = jest.spyOn(console, 'error').mockImplementation(() => {});

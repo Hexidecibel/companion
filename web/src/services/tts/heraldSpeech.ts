@@ -259,7 +259,9 @@ export class HeraldSpeechController {
   }
 
   private onStart(message: HeraldMessage): void {
-    if (message.role !== 'herald') {
+    // An announcement Herald posted on its own (a session's answer while the
+    // user is not talking to it): toned and shown, never spoken unasked.
+    if (message.role !== 'herald' || message.quiet) {
       this.known.add(message.id);
       return;
     }
@@ -282,7 +284,7 @@ export class HeraldSpeechController {
   }
 
   private onEnd(message: HeraldMessage): void {
-    if (message.role !== 'herald') {
+    if (message.role !== 'herald' || message.quiet) {
       this.known.add(message.id);
       return;
     }

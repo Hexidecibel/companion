@@ -180,9 +180,20 @@ export function registerHeraldHandlers(ctx: HandlerContext): Record<string, Mess
     },
 
     herald_confirm(client, payload, requestId) {
-      const p = (payload || {}) as { actionId?: unknown; decision?: unknown };
+      const p = (payload || {}) as {
+        actionId?: unknown;
+        decision?: unknown;
+        method?: unknown;
+        phrase?: unknown;
+        streamId?: unknown;
+      };
       return reply(client, 'herald_confirm', requestId, () =>
-        ctx.herald!.confirm(p.actionId, p.decision, auditOrigin(ctx, client))
+        ctx.herald!.confirm(p.actionId, p.decision, auditOrigin(ctx, client), {
+          method: p.method,
+          phrase: p.phrase,
+          streamId: p.streamId,
+          clientId: client.id,
+        })
       );
     },
 

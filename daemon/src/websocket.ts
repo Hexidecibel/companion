@@ -39,7 +39,8 @@ import { registerAllHandlers } from './handlers';
 import { updateLastActivity } from './metrics';
 import { HeraldService } from './herald/service';
 import { HeraldStore } from './herald/store';
-import { LocalSessionSource } from './herald/session-source';
+import { defaultCapturePane, LocalSessionSource } from './herald/session-source';
+import { createClaudeSession } from './session-spawn';
 import { resolveHeraldConfig } from './herald/config';
 import { createProvider } from './herald/llm';
 import { deriveSelfInfo } from './herald/self-info';
@@ -317,6 +318,32 @@ export class WebSocketHandler {
         selfInfo: deriveSelfInfo(this.config.listeners[0]),
         codeHome: this.config.codeHome,
         devices: () => this.heraldVoice?.devicesSnapshot() ?? null,
+        // propose_spawn_session: the app's own session-creation path. It does not
+        // become the active session (Herald never switches the user's view).
+        spawner: {
+          spawn: async ({ dir }) => {
+            const r = await createClaudeSession(
+              {
+                tmux: this.tmux,
+                storeTmuxSessionConfig: (n, d, c) => this.storeTmuxSessionConfig(n, d, c),
+                sessionNameStore: this.sessionNameStore,
+                watcher: this.watcher,
+                broadcast: (type, payload) => this.broadcast(type, payload),
+              },
+              { workingDir: dir }
+            );
+            return r.success
+              ? { ok: true, sessionId: r.sessionName, sessionName: r.friendlyName }
+              : { ok: false, error: r.error };
+          },
+          capturePane: (id) => defaultCapturePane(id),
+          exists: (id) => this.injector.checkSessionExists(id),
+        },
+        voiceEvidence: (clientId, streamId) =>
+          this.heraldVoice?.voiceEvidence(clientId, streamId) ?? null,
+        consumeTranscript: (clientId, streamId) =>
+          this.heraldVoice?.consumeTranscript(clientId, streamId),
+        activeClientId: () => this.heraldVoice?.announcerClient ?? null,
       });
     } catch (err) {
       console.error('Herald: failed to initialize:', err);
