@@ -181,6 +181,10 @@ function applyEvent(state: HeraldClientState, event: HeraldEvent, receivedAt: nu
       return { ...state, server: { ...server, pronunciations: event.pronunciations } };
     case 'devices':
       return { ...state, server: { ...server, activeDevice: event.activeDevice, devices: event.devices } };
+    case 'usage':
+      return { ...state, server: { ...server, usage: event.usage } };
+    case 'brain':
+      return { ...state, server: { ...server, brain: event.brain } };
     case 'error':
       return { ...state, error: event.error };
     default:

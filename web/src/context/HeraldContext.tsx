@@ -468,8 +468,22 @@ export function HeraldProvider({ children }: { children: ReactNode }) {
     if (probeTrigger(event.action)) return;
     tipsStore.trigger('remote_trigger');
     if (event.action !== 'stop' && event.action !== 'claim') maybeBringToFront('trigger');
-    void runHeraldTrigger(event.action, triggerActions);
+    // A remote trigger that opens the mic plays its own tone ("remote"), and a
+    // trigger from outside the home network / tailnet may never open it.
+    const remote: TriggerActions = {
+      ...triggerActions,
+      tone: (kind) => (kind === 'wake' ? playChime('remote', 0.06) : triggerActions.tone(kind)),
+      ...(event.allowListen === false
+        ? { listen: async () => 'Remote listening is only allowed from your home network or tailnet' }
+        : {}),
+    };
+    void runHeraldTrigger(event.action, remote);
   }), [subscribeEvents, triggerActions]);
+  // Budget notices (80% / used up): a tone on the active device; the message itself is spoken as a reply.
+  useEffect(() => subscribeEvents((event, source) => {
+    if (event.kind !== 'usage' || !event.notice || source !== 'push') return;
+    if (isActiveRef.current) playChime(event.notice === 'budget_exceeded' ? 'error' : 'blocked', 0.06);
+  }), [subscribeEvents]);
   const panelOpenRef = useRef(panelOpen);
   panelOpenRef.current = panelOpen;
   const screenOpenRef = useRef(screenOpen);

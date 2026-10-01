@@ -35,11 +35,13 @@ export function unlockChime(): void {
  *   ok       - one soft note (a voice command was taken)
  *   error    - a low falling pair, off the motif (could not do that: e.g. the
  *              mic is not available to a remote trigger in a background tab)
+ *   remote   - a double tap then a high note: a REMOTE trigger (another
+ *              machine's hotkey) just opened this device's mic
  *   tick     - a tiny G-C grace note (under 80 ms): "heard you, working on it",
  *              the moment a voice turn ends, so the wait is not dead air
  * Quiet on purpose: about -26 dBFS peak at the default volume.
  */
-export type ToneKind = ChimeKind | 'wake' | 'ok' | 'error' | 'tick';
+export type ToneKind = ChimeKind | 'wake' | 'ok' | 'error' | 'remote' | 'tick';
 
 interface Note {
   freq: number;
@@ -70,6 +72,11 @@ export const TONES: Record<ToneKind, Note[]> = {
     { freq: E6, at: 0.1, dur: 0.4, gain: 1 },
   ],
   ok: [{ freq: C6, at: 0, dur: 0.35, gain: 0.7 }],
+  remote: [
+    { freq: G5, at: 0, dur: 0.1, gain: 0.8 },
+    { freq: G5, at: 0.13, dur: 0.1, gain: 0.8 },
+    { freq: E6, at: 0.26, dur: 0.4, gain: 1 },
+  ],
   error: [
     { freq: 392.0, at: 0, dur: 0.22, gain: 0.8 },
     { freq: 311.13, at: 0.14, dur: 0.4, gain: 0.8 },

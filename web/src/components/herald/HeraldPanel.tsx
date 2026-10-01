@@ -15,6 +15,8 @@ import type { HeraldVoice } from '../../hooks/useHeraldVoice';
 import { RATE_MAX, RATE_MIN } from '../../hooks/useHeraldVoice';
 import { pickVoice, voicesForPicker } from '../../services/tts/voices';
 import { HeraldOrb } from './HeraldOrb';
+import { HeraldBrainBadge, HeraldUsageMeter } from './HeraldUsage';
+import type { HeraldUsageSummary } from '../../types/herald';
 import { HeraldVoiceExtras } from './HeraldVoiceExtras';
 import { HeraldActionCard, HeraldPendingMarker, HeraldResolvedLine } from './HeraldActionCard';
 import { HeraldComposer } from './HeraldComposer';
@@ -359,8 +361,10 @@ function VoiceCommandsHelp() {
   );
 }
 
-function OverflowMenu({ model, onReset, onRefresh, disabled, voice, input, verbosity, onVerbosity, device }: {
+function OverflowMenu({ model, onReset, onRefresh, disabled, voice, input, verbosity, onVerbosity, device, usage, onBudget }: {
   device: HeraldDeviceControl;
+  usage: HeraldUsageSummary | undefined;
+  onBudget: (monthlyUsd: number | null | undefined) => Promise<string | null>;
   verbosity: HeraldVerbosity | undefined;
   onVerbosity: (v: HeraldVerbosity) => void;
   model: string;
@@ -467,6 +471,7 @@ function OverflowMenu({ model, onReset, onRefresh, disabled, voice, input, verbo
               </div>
             </div>
           )}
+          {!confirming && <HeraldUsageMeter usage={usage} onBudget={onBudget} />}
           {model && <div className="herald-menu__foot">{model}</div>}
         </div>
       )}
@@ -712,7 +717,7 @@ export function HeraldPanel({ variant, onOpenSession, onClose }: HeraldPanelProp
 
   return (
     <section
-      className={`herald herald--${variant} herald--${presence}${speaking ? ' herald--speaking' : ''}${listening ? ' herald--listening' : ''}`}
+      className={`herald herald--${variant} herald--${presence}${speaking ? ' herald--speaking' : ''}${listening ? ' herald--listening' : ''}${state?.brain?.state === 'degraded' ? ' herald--degraded' : ''}`}
       aria-label={displayName}
       onKeyDown={onKeyDown}
       onKeyDownCapture={onKeyDownCapture}
@@ -729,7 +734,7 @@ export function HeraldPanel({ variant, onOpenSession, onClose }: HeraldPanelProp
           <HeraldOrb presence={orbState} size={34} mini countdown={followUp} />
         </div>
         <div className="herald-header__title">
-          <span className="herald-header__name">{displayName}</span>
+          <span className="herald-header__name">{displayName}<HeraldBrainBadge brain={state?.brain} /></span>
           <span className={`herald-header__status herald-header__status--${listening ? 'listening' : voice.flash ? 'flash' : speaking ? 'speaking' : followUp ? 'followup' : presence}`} aria-live="polite">
             {statusText}
           </span>
@@ -787,6 +792,8 @@ export function HeraldPanel({ variant, onOpenSession, onClose }: HeraldPanelProp
             verbosity={state?.verbosity}
             onVerbosity={(v) => void h.setVerbosity(v)}
             device={h.device}
+            usage={state?.usage}
+            onBudget={h.setBudget}
           />
           {variant === 'docked' && (
             <button

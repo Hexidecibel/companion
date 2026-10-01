@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useReducer, useRef, useMemo } from 'react';
-import type { HeraldAction, HeraldEvent, HeraldInputMode, HeraldIntent, HeraldMessage, HeraldPronunciation, HeraldState, HeraldVerbosity } from '../types/herald';
+import type { HeraldAction, HeraldEvent, HeraldInputMode, HeraldIntent, HeraldMessage, HeraldPronunciation, HeraldState, HeraldUsageSummary, HeraldVerbosity } from '../types/herald';
 import {
   heraldReducer,
   initialHeraldClientState,
@@ -45,6 +45,8 @@ export interface UseHeraldReturn {
   send: (text: string, opts?: SendOptions) => Promise<boolean>;
   /** Reply length setting on the hub (no-op on daemons without it). */
   setVerbosity: (v: HeraldVerbosity) => Promise<boolean>;
+  /** Monthly API budget: USD, null = none, undefined = back to the server config. Error text or null. */
+  setBudget: (monthlyUsd: number | null | undefined) => Promise<string | null>;
   /** Replace the voice's pronunciation list on the hub. Resolves an error, or null. */
   setPronunciations: (list: HeraldPronunciation[]) => Promise<string | null>;
   confirm: (actionId: string, decision: 'confirm' | 'cancel') => Promise<HeraldAction | null>;
@@ -299,6 +301,22 @@ export function useHerald(serverId: string | null): UseHeraldReturn {
     }
   }, []);
 
+  const setBudget = useCallback(async (monthlyUsd: number | null | undefined): Promise<string | null> => {
+    const t = transportRef.current;
+    if (!t || !t.isConnected()) return 'Not connected to the Herald host';
+    try {
+      const res = await t.request('herald_set_budget', monthlyUsd === undefined ? {} : { monthlyUsd });
+      if (!res.success) {
+        return isUnsupportedError(res.error) ? 'This hub is too old to set a budget' : res.error || 'Could not set the budget';
+      }
+      const usage = res.payload as HeraldUsageSummary | undefined;
+      if (usage) dispatch({ type: 'event', event: { kind: 'usage', usage }, receivedAt: Date.now() });
+      return null;
+    } catch (err) {
+      return errorText(err, 'Could not set the budget');
+    }
+  }, []);
+
   const getTransport = useCallback(() => transportRef.current, []);
   const clearError = useCallback(() => dispatch({ type: 'clear_error' }), []);
   const refresh = useCallback(() => { void fetchState(); }, [fetchState]);
@@ -315,6 +333,7 @@ export function useHerald(serverId: string | null): UseHeraldReturn {
     skewMs: client.skewMs,
     send,
     setVerbosity,
+    setBudget,
     setPronunciations,
     confirm,
     confirmByVoice,
