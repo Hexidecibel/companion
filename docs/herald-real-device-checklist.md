@@ -331,3 +331,36 @@ two sessions with recent news, ideally one parked on a question or choice.
 - [ ] Signed mode on (`signed=true` / `HERALD_TRIGGER_SIGNED=true`) with a
       session: works; an unknown session gives the tray tip / HUD "No session
       has that name".
+
+## One voice across devices (fleet speaking)
+
+Needs the daemon restarted with this build and both apps/tabs on the new web
+bundle. Hands-free and "Interrupt by talking" on for both devices; speakers,
+not headphones.
+
+### Phone speaking next to the Mac
+- [ ] Ask on the phone (push-to-talk or typed with voice on). Only the phone
+      speaks the reply; the Mac shows the text silently and a grey bar
+      "Speaking on <phone>" with a Stop button.
+- [ ] While the phone talks, the Mac never shows listening, never chimes a
+      wake, never sends a message (Herald's chat has no line from the Mac),
+      even when the reply says "Jarvis".
+- [ ] Mid-reply, hold the Mac's talk hotkey / mic button and ask something:
+      it is sent, the phone goes quiet, and the Mac speaks its own answer.
+- [ ] Typed on a device with voice off: nobody speaks the reply.
+
+### Mac speaking next to the phone
+- [ ] Same as above with the roles swapped (ask on the Mac, phone stays
+      silent, shows "Speaking on <Mac>", sends nothing, no follow-up window).
+- [ ] A remote trigger (AutoHotkey / Raycast `listen`) to the phone while the
+      Mac talks still listens and sends.
+
+### Stop from the other device
+- [ ] Phone talking: press Stop on the Mac's "Speaking on" bar. The phone stops
+      within a moment and flashes "Stopped from <Mac>".
+- [ ] Phone talking: say "Hey Jarvis, stop" near the Mac. The phone stops
+      (a couple of seconds); nothing is sent to Herald.
+- [ ] "Hey Jarvis, what's up" near the Mac while the phone talks: ignored (use
+      the hotkey instead); the phone keeps talking.
+- [ ] Close the phone's tab mid-reply: the Mac's bar clears within ~3 s and the
+      Mac listens normally again.
