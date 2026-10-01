@@ -100,7 +100,10 @@ export function unheardItems(inbox: HeraldInboxItem[]): HeraldInboxItem[] {
 }
 
 function sentence(s: string): string {
-  const t = oneLine(s).replace(/\s+$/, '');
+  // A gist cut at a list ("...in parallel: 1.") drops the dangling number.
+  const t = oneLine(s)
+    .replace(/\s+$/, '')
+    .replace(/:\s*\d+[.)]$/, '');
   if (!t) return '';
   return /[.!?]$/.test(t) ? t : `${t}.`;
 }

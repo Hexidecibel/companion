@@ -554,6 +554,12 @@ Follow-up fixes layered on the Mobile UX round above: walks back the activity-ro
 - **Doubled header inset fixed** — `.dashboard` already applies `var(--safe-top)`, and `.session-header-mobile` was applying it again, creating an excessive top band. Inset now applied once plus a 6px gap (`global.css` mobile media queries)
 - **Autolink URLs inside emphasis** — `MarkdownRenderer.tsx` previously stored bold/italic inner text as a raw string and never re-parsed it, so URLs inside `**…**` / `*…*` never became links. Bold/italic now carry children and recurse, so URLs (plus code/file links and nested emphasis) inside emphasis render as the accent link pill, enabling long-press → Open Link / Copy link
 
+## Herald — cost control, offline fallback, hardened triggers (2026-09-30)
+- Prompt caching of tools + system (~5.9K tokens) on Haiku 4.5: a warm turn costs roughly a quarter of an uncached one
+- Usage meter in the Herald menu ("Today $0.04 · Month $1.10", turns, average per turn, cache hit rate) and an optional monthly budget (80% warning, fallback at 100%); "how much have you cost me" answered from the meter
+- Fallback brain: when the API is down, out of credit, rate limited or over budget, Herald answers briefings, status and "what's waiting" from session data, says why once per outage, shows an offline badge and recovers on its own
+- Per-device trigger tokens (create / list / rotate / revoke), mic-opening triggers only from the home network / tailnet (hairpin through the public domain counts as home), optional signed triggers (HMAC, 60 s, replay-guarded), distinct tone for remote listening
+
 ## Herald — quiet by default: voice commands, brevity, tones (2026-09-30)
 - Local voice commands, whole-utterance only (1-5 words after fillers and "Herald"/"Hey Jarvis"): "stop", "repeat that" (replays cached audio), "shorter", "go on", "slower"/"faster", "what's up"; "stop the build" is still a message. Works for push-to-talk, talking over Herald and hands-free
 - Spoken cap: at most two sentences / 40 words are read out, then "There's more on screen — say go on."; full text on screen. Setting: Spoken length Short / Full

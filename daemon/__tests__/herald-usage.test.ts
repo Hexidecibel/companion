@@ -242,6 +242,13 @@ describe('fallback brain', () => {
     expect(later).toBe("Still offline — here's what's waiting: companion wants your OK to run a shell command.");
   });
 
+  it('a gist cut at a numbered list drops the dangling number', () => {
+    const item = { ...items[0], headline: 'companion finished: Three builds are running in parallel: 1.' };
+    expect(fallbackReply({ kind: 'brief', reason: 'unreachable', announce: false, snapshots: [], briefing: [item] })).toBe(
+      'companion finished: Three builds are running in parallel.'
+    );
+  });
+
   it('brief: headlines, most urgent first; status: one line per session', () => {
     const sorted = [items[1], items[0]];
     expect(fallbackReply({ kind: 'brief', reason: 'unreachable', announce: false, snapshots: sessions, briefing: sorted })).toBe(

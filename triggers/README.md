@@ -154,6 +154,16 @@ the next time you look at it.
 
 ## Windows: AutoHotkey + MX Master 3
 
+**At home, in short:** `url=https://dev.cush.rocks`, `token=` the PC's own
+trigger token, `device=` this PC's Herald device name. Every key works from
+the home network (the server lists `dev.cush.rocks` in
+`herald.trigger_home_hosts`, so your PC's trips through the router count as
+home). If listen ever answers 403 at home, the server is missing that setting
+or your public IP just changed; as a stopgap point `url=` at the server's LAN
+address (`http://<server LAN IP>:9878`, plain HTTP on your own network) or its
+tailnet name. Away from home only brief / stop / repeat / claim work, and
+toggle only stops, by design.
+
 Files: `windows/herald-trigger.ahk`, `windows/herald-trigger.example.ini`.
 Default keys: **Ctrl+Alt+Shift+H** = `toggle`, **Ctrl+Alt+Shift+B** = `brief`.
 
