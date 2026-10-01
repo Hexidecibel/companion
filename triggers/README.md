@@ -170,7 +170,8 @@ tailnet name. Away from home only brief / stop / repeat / claim work, and
 toggle only stops, by design.
 
 Files: `windows/herald-trigger.ahk`, `windows/herald-trigger.example.ini`.
-Default keys: **Ctrl+Alt+Shift+H** = `toggle`, **Ctrl+Alt+Shift+B** = `brief`.
+Default keys: **Ctrl+Alt+Shift+H** = `toggle`, **Ctrl+Alt+Shift+B** = `brief`,
+**Ctrl+Alt+Shift+S** = `stop` (stop Herald talking on whichever device speaks).
 
 1. **Install AutoHotkey v2** from <https://www.autohotkey.com> (v2, not v1.1).
 2. **Configure.** Copy `herald-trigger.ahk` and `herald-trigger.example.ini` into a
@@ -200,11 +201,66 @@ Default keys: **Ctrl+Alt+Shift+H** = `toggle`, **Ctrl+Alt+Shift+B** = `brief`.
    if you like.
 5. **Keep Discord out of the way.** In Discord > Settings > Keybinds, make sure
    push-to-talk (and toggle-mute / deafen, which default to Ctrl+Shift+M /
-   Ctrl+Shift+D) is not on Ctrl+Alt+Shift+H / B or on the gesture button. Herald
+   Ctrl+Shift+D) is not on Ctrl+Alt+Shift+H / B / S or on the gesture button. Herald
    hears you through the browser, and Discord hears the same mic: with Discord on
    voice activity your question goes to the channel too, so use push-to-talk there
    (and don't hold it while you talk to Herald). Some anti-cheat systems dislike
    AutoHotkey; if a game complains, close the script for that game.
+
+## Windows: Herald and Discord on the same push-to-talk
+
+**The Companion app does this by itself now.** Its system-wide hold-to-talk
+(default **Ctrl+Alt+Space**) is a *passthrough* shortcut on Windows and macOS
+(Herald menu > Advanced > System-wide shortcuts > "Let other apps see this key
+too", on by default for hold-to-talk): Companion watches the keys without
+taking them, so Discord bound to the same keys still gets them. Bind Discord's
+**Push to Mute** to Ctrl+Alt+Space and holding it mutes you in Discord while
+Herald listens. (Exclusive shortcuts, the old behaviour and still the default for
+the tap shortcuts, take the keys away from every other app.)
+
+Exceptions, and what to do:
+
+- **Your game runs as administrator.** Windows does not show an elevated
+  window's keys to a normal app, so neither Companion nor Discord see the keys
+  while that game has focus (Companion's shortcut settings say so when it
+  happens). Run Companion as administrator too (and Discord, for Discord's
+  keybinds), or use the script below run elevated.
+- **You want ONE mouse button for both** (e.g. the MX Master thumb button) or
+  you use an older Companion app: use the fallback script below.
+
+### Fallback: `windows/herald-discord-ptt.ahk`
+
+Hold one physical key or mouse button (default **XButton1**, the mouse "back"
+thumb button) and the script holds BOTH Herald's hold-to-talk combo
+(Ctrl+Alt+Space) and a Discord **Push to Mute** key (**F13**, which no
+keyboard has, so it never collides with anything). Release it and both end.
+Settings (optional) go in `herald-discord-ptt.ini` next to the script:
+
+```ini
+[ptt]
+ptt_key=XButton1
+herald_mods=^!
+herald_key=Space
+discord_key=F13
+pass_button=false
+```
+
+1. Install AutoHotkey v2, put the script in a folder of your own and
+   double-click it.
+2. **Bind F13 in Discord with bind mode** (you cannot type F13): tray icon >
+   **Bind mode** (or run the script with the argument `bind`). In Discord >
+   User Settings > Keybinds > **Add a Keybind** > Action **Push to Mute** >
+   **Record Keybind**, then press your talk button once: in bind mode the
+   script sends only F13, so Discord records F13. Click Stop Recording.
+3. In Companion, keep hold-to-talk on Ctrl+Alt+Space (or set `herald_mods` /
+   `herald_key` to match yours). The app's passthrough setting does not
+   matter here; the script's key presses reach it either way.
+4. Logi Options+: leave the thumb button as "Back" (or set it to send the key
+   you put in `ptt_key`). Options+ only sends taps for keyboard shortcuts, so
+   map the hold to a mouse button the script can see.
+5. Start with Windows like the trigger script (`shell:startup`, or a Task
+   Scheduler task with **Run with highest privileges** if the game runs as
+   administrator).
 
 ## Mac: Raycast
 

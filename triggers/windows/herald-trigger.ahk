@@ -16,7 +16,8 @@
 ; Default keys (change them in the ini):
 ;   Ctrl+Alt+Shift+H  toggle  (Herald talking: stop; listening: cancel; else listen)
 ;   Ctrl+Alt+Shift+B  brief   (spoken rundown of what is new)
-; Optional: listen_key, stop_key, repeat_key, claim_key (needs device=),
+;   Ctrl+Alt+Shift+S  stop    (stop Herald talking, on whichever device speaks)
+; Optional: listen_key, repeat_key, claim_key (needs device=),
 ;   show_key (open the session Herald last talked about on the active device;
 ;   show_session= names a fixed session instead, e.g. Out4).
 ;
@@ -43,7 +44,7 @@ global LastFire := Map()
 BindKey("toggle_key", "toggle", "^!+h")
 BindKey("brief_key", "brief", "^!+b")
 BindKey("listen_key", "listen", "")
-BindKey("stop_key", "stop", "")
+BindKey("stop_key", "stop", "^!+s")
 BindKey("repeat_key", "repeat", "")
 BindKey("claim_key", "claim", "")
 BindKey("show_key", "show", "")
