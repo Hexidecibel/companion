@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { detectVoiceConfirm, hintText, runVoiceConfirm, voiceConfirmable } from '../confirmPhrase';
+import { detectVoiceConfirm, hintText, isPendingConfirmPhrase, runVoiceConfirm, voiceConfirmable } from '../confirmPhrase';
 import type { HeraldAction } from '../../../types/herald';
 
 const NOW = 1_000_000;
@@ -78,5 +78,24 @@ describe('runVoiceConfirm', () => {
     expect(await runVoiceConfirm({ kind: 'confirm', action: card(), phrase: 'confirm deplore' }, no)).toBe(false);
     expect(no.tone).toHaveBeenCalledWith('error');
     expect(no.say).toHaveBeenCalledWith(expect.stringMatching(/didn't match/));
+  });
+});
+
+describe('isPendingConfirmPhrase', () => {
+  it('true only for the exact phrase of a pending red card', () => {
+    expect(isPendingConfirmPhrase('confirm deploy', [card()], NOW)).toBe(true);
+    expect(isPendingConfirmPhrase('Hey Jarvis, confirm deploy, please.', [card()], NOW)).toBe(true);
+    expect(isPendingConfirmPhrase('Confirm deploy out four', [card(), card({ id: 'a2', confirmPhrase: 'confirm deploy out four' })], NOW)).toBe(true);
+  });
+
+  it('false with no pending card, a partial / misheard phrase, or a bare yes', () => {
+    expect(isPendingConfirmPhrase('confirm deploy', [], NOW)).toBe(false);
+    expect(isPendingConfirmPhrase('confirm deploy', null, NOW)).toBe(false);
+    expect(isPendingConfirmPhrase('confirm deploy', [card({ status: 'sent' })], NOW)).toBe(false);
+    expect(isPendingConfirmPhrase('confirm deploy', [card({ voiceAttemptsLeft: 0 })], NOW)).toBe(false);
+    expect(isPendingConfirmPhrase('confirm deplore', [card()], NOW)).toBe(false);
+    expect(isPendingConfirmPhrase('confirm deploy now and restart', [card()], NOW)).toBe(false);
+    expect(isPendingConfirmPhrase('yes', [card()], NOW)).toBe(false);
+    expect(isPendingConfirmPhrase('go ahead', [card()], NOW)).toBe(false);
   });
 });

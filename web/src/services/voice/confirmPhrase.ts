@@ -91,6 +91,25 @@ export function detectVoiceConfirm(
   return { kind: 'confirm', action: best, phrase: transcript.trim() };
 }
 
+/**
+ * Is `transcript` exactly the confirm phrase of a red card pending right now?
+ * Such a transcript skips the client self-echo guard: Herald's prompt says the
+ * phrase ("say 'confirm deploy' to go ahead"), so the user's real answer in the
+ * follow-up window would otherwise look like an echo of it. Safe because the
+ * daemon checks the active device, the timing (after Herald's playback end) and
+ * echo on its OWN transcript before anything is confirmed. Narrow on purpose:
+ * exact phrase words only (wake words / fillers trimmed), never a partial match.
+ */
+export function isPendingConfirmPhrase(
+  transcript: string,
+  actions: HeraldAction[] | null | undefined,
+  now: number = Date.now(),
+): boolean {
+  const m = detectVoiceConfirm(transcript, actions, now);
+  if (!m || m.kind !== 'confirm') return false;
+  return confirmWords(transcript).join(' ') === words(m.action.confirmPhrase!).join(' ');
+}
+
 /** What Herald says / shows for a bare "yes" at a red card. */
 export function hintText(phrase: string): string {
   return `That one needs your confirmation: say "${phrase}" to go ahead, or hold the card.`;

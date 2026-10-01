@@ -8,7 +8,7 @@ import { DEFAULT_DISPLAY_NAME, derivePresence, type HeraldPresence } from '../se
 import { isMobileViewport } from '../utils/platform';
 import { eventBus } from '../utils/eventBus';
 import { routeVoiceTranscript } from '../services/voice/voiceCommandRouter';
-import { detectVoiceConfirm, runVoiceConfirm } from '../services/voice/confirmPhrase';
+import { detectVoiceConfirm, isPendingConfirmPhrase, runVoiceConfirm } from '../services/voice/confirmPhrase';
 import { runUndo } from '../services/voice/voiceUndo';
 import type { HeraldActiveDevice, HeraldDeviceInfo, HeraldIntent } from '../types/herald';
 import { TICK_VOLUME, playChime, startShimmer } from '../services/tts/chime';
@@ -347,6 +347,10 @@ export function HeraldProvider({ children }: { children: ReactNode }) {
     return r.send;
   }, [sendIntent, followUp, cues, noteVoiceTurn]);
   const voiceInputRef = useRef<ReturnType<typeof useHeraldVoiceInput> | null>(null);
+  const isPendingConfirmText = useCallback(
+    (text: string) => isPendingConfirmPhrase(text, heraldRef.current.state?.actions),
+    [],
+  );
 
   // ---- active device ------------------------------------------------------
   const activeDevice = herald.state?.activeDevice ?? null;
@@ -404,6 +408,7 @@ export function HeraldProvider({ children }: { children: ReactNode }) {
     briefMe,
     sendVoice: sendVoiceDirect,
     spokenLog: voice.spokenLog,
+    isPendingConfirm: isPendingConfirmText,
   });
   voiceInputRef.current = voiceInput;
 

@@ -242,6 +242,12 @@ export interface VoiceInputHost {
   pausedBy?: string | null;
   /** What Herald said recently: transcripts of its own voice are dropped. */
   spokenLog?: SpokenLog;
+  /**
+   * The exact confirm phrase of a pending red card ("confirm deploy"): skips
+   * the self-echo guard (Herald's prompt says the phrase; the daemon does its
+   * own device / timing / echo checks). See confirmPhrase.isPendingConfirmPhrase.
+   */
+  isPendingConfirm?: (text: string) => boolean;
 }
 
 export function useHeraldVoiceInput(host: VoiceInputHost): HeraldVoiceInput {
@@ -277,7 +283,7 @@ export function useHeraldVoiceInput(host: VoiceInputHost): HeraldVoiceInput {
         onTranscript: (text, source) => {
           // Herald's own voice through the speakers: drop it, keep listening.
           const log = hostRef.current.spokenLog;
-          if (log?.isEcho(text, { minTokens: DELIBERATE_SOURCES.has(source) ? 3 : 1 })) {
+          if (!hostRef.current.isPendingConfirm?.(text) && log?.isEcho(text, { minTokens: DELIBERATE_SOURCES.has(source) ? 3 : 1 })) {
             console.debug(`Herald voice: dropped likely self-echo (${source}):`, JSON.stringify(text));
             return;
           }
