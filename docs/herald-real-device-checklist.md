@@ -202,3 +202,72 @@ and spoken-version fixes, the daemon restarted on the new build.
       it, then check it is there on another device (saved on the hub).
 - [ ] With 2.0.7 mentioned in a session, ask "is two oh seven on the phone?":
       the sent message reads "2.0.7"; "two or three tests" stays words.
+
+## Asking sessions, interrupting, new sessions, voice confirm (actions)
+
+Use a disposable session for anything that types into a session (e.g. a scratch
+project under `~/local/src`), never a session with real work in flight.
+
+### Ask a session and hear the answer back
+- [ ] Type "ask <session> what it is working on". After "Sent to <session>.",
+      wait for the session to finish: one tone (finished variant), a line
+      "<session> answered your question: ..." with a chip that opens the
+      session, and NO separate "<session> finished: ..." chip.
+- [ ] The answer was not spoken (typed turn = quiet). "Brief me" / "what's up"
+      says it first: "<session> answered your question: ...".
+- [ ] Same by voice (hold to talk): the answer is spoken when it lands within
+      about 2 minutes of your last voice turn, and brief me does not repeat it.
+- [ ] If Herald is mid-reply when the answer lands, the answer waits for the
+      reply to finish instead of cutting it off.
+- [ ] Ask something that makes the session ask YOU (a choice / permission box):
+      "<session> needs your input on ..." once; after you answer it, the real
+      answer still comes back later.
+- [ ] Ask two different sessions back to back: each answer comes back on its own.
+- [ ] Restart the daemon (with sign-off) while an ask is open: the answer still
+      arrives after the restart. With no reply in 30 minutes, nothing is said.
+- [ ] A session in bypass mode running a long command is NOT reported as
+      "needs your input".
+
+### Interrupt
+- [ ] While a session is working: "interrupt <session>" / "stop <session>" ->
+      "Interrupting <session>", a 5 s countdown card, then Ctrl+C: the session
+      shows "Interrupted" and stays open. Cancel on the card stops it.
+- [ ] "interrupt <session>" while it is idle: Herald says there is nothing to
+      interrupt (no card).
+- [ ] Spoken right after Herald mentioned that session, "interrupt <session>"
+      still goes through (not dropped as Herald's own echo).
+
+### New session
+- [ ] "Start a new session in <project> and have it run the tests": a red card
+      "New session in <project>" with "permissions bypassed" in the reasons and
+      "Or say "confirm launch"". Nothing starts until confirmed.
+- [ ] A folder outside `~/local/src` or a made-up project is refused.
+- [ ] In a folder Claude has never opened: Herald reports the trust prompt /
+      bypass-permissions warning and does NOT answer it. Answer it in the app:
+      Herald then sends the first prompt ("... is ready; sent your first
+      prompt") and later reports the answer.
+- [ ] The new session shows up in the session list with the folder's name and
+      did not become the app's active session.
+
+### Voice confirm (red cards), mid-game
+Windows gaming PC, Gaming profile, headset + Discord in a call, game full screen,
+MX Master trigger, Companion is the ACTIVE device.
+- [ ] Ask Herald (trigger) to send something dangerous to a scratch session
+      ("tell scratch to deploy to prod"). Herald: "That's a deploy to prod — say
+      'confirm deploy' to go ahead." The card shows the phrase.
+- [ ] Press the trigger again and say "confirm deploy": an OK tone, then "Sent to
+      scratch." Without touching the mouse or alt-tabbing.
+- [ ] Say "yes" / "do it" instead: nothing is sent; Herald says the phrase.
+- [ ] Say the wrong words ("confirm push"): "That didn't match", tries left on
+      the card go 2, 1; after three misses the card says "Voice tries used up"
+      and only hold-to-confirm works (holding still works).
+- [ ] Talk over Herald while it is still saying the phrase: refused ("I was
+      still talking"), then saying it after Herald finishes works.
+- [ ] Desk speakers (no headset): Herald's own "say 'confirm deploy' to go
+      ahead" coming out of the speakers never confirms the card, even with
+      hands-free on.
+- [ ] Say "confirm deploy" on a device that is NOT the active one: refused
+      ("only works on the active device"), no try used up on the card.
+- [ ] Let the card expire (10 minutes): the phrase no longer works.
+- [ ] Teammates on Discord saying "confirm" do nothing (hands-free is off in
+      Gaming; only your trigger opens the mic).
