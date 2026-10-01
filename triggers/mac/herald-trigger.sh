@@ -17,6 +17,12 @@
 #   `claim` needs it.
 # The token is passed to curl on stdin (a config file), never on its command
 # line, so it does not show up in `ps`.
+#
+# Signed mode (optional, off by default): HERALD_TRIGGER_SIGNED=true, or a line
+# "true" in ~/.config/herald-trigger/signed. The token is then never sent:
+# each request carries X-Herald-Ts + X-Herald-Sig (HMAC-SHA256 keyed with the
+# token's SHA-256, over "<ts>.<action>.<device>"), which the daemon refuses
+# after 60 s or on reuse. Needs perl (built in on macOS) and a correct clock.
 set -euo pipefail
 
 action="${1:-toggle}"
@@ -61,15 +67,30 @@ if [ -n "$device" ]; then
 fi
 json="$json}"
 
+signed="${HERALD_TRIGGER_SIGNED:-}"
+if [ -z "$signed" ] && [ -r "$HOME/.config/herald-trigger/signed" ]; then
+  signed="$(head -n1 "$HOME/.config/herald-trigger/signed" | tr -d '[:space:]')"
+fi
+if [ "$signed" = "true" ] || [ "$signed" = "1" ]; then
+  ts="$(date +%s)"
+  # The token goes to perl on stdin, never on a command line.
+  sig="$(printf '%s' "$token" | perl -MDigest::SHA=hmac_sha256_hex,sha256_hex -e \
+    'my $t = <STDIN>; $t =~ s/\s+$//; print hmac_sha256_hex($ARGV[0], sha256_hex($t));' \
+    "$ts.$action.$device")"
+  auth_headers="$(printf 'header = "X-Herald-Ts: %s"\nheader = "X-Herald-Sig: %s"\n' "$ts" "$sig")"
+else
+  auth_headers="$(printf 'header = "Authorization: Bearer %s"\n' "$token")"
+fi
+
 body="$(mktemp)"
 trap 'rm -f "$body"' EXIT
 code="$(
-  printf 'header = "Authorization: Bearer %s"\n' "$token" |
+  printf '%s\n' "$auth_headers" |
     curl -sS --max-time 5 -o "$body" -w '%{http_code}' -K - \
       -X POST -H 'Content-Type: application/json' \
       --data "$json" "$url/herald/trigger" 2>/dev/null
 )" || code="000"
-unset token
+unset token auth_headers
 
 if [ "$code" = "200" ]; then
   case "$action" in

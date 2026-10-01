@@ -11,7 +11,7 @@ its tab or window in the background if need be.
 |----------|------------------------------------------------------------------------|
 | `toggle` | Herald talking: stop. Listening: cancel. Otherwise: listen (the best one-button default) |
 | `brief`  | Spoken rundown of what is new                                          |
-| `listen` | Earcon, mic opens, you ask one question; it ends when you pause (VAD) and is sent as a voice turn. "Stop", "repeat", "shorter" and the other voice commands still work |
+| `listen` | A distinct "remote" tone (three rising notes), mic opens, you ask one question; it ends when you pause (VAD) and is sent as a voice turn. "Stop", "repeat", "shorter" and the other voice commands still work |
 | `stop`   | Stop talking and cancel any capture                                    |
 | `repeat` | Say the last reply again                                               |
 | `claim`  | Make `device` the active device (pinned unless `"pin": false`), nothing else |
@@ -19,6 +19,45 @@ its tab or window in the background if need be.
 Any action can carry `"device": "<name>"`: that device is made active first
 (pinned unless `"pin": false`), then acts. Set it in each machine's script so
 its keys always act on **that** machine's browser or app.
+
+Every remote trigger that opens a mic plays the remote tone on that device
+before it listens, so a mic never opens silently (an error tone plays instead
+when it cannot open).
+
+## Who may open the mic
+
+`listen`, and `toggle` when it would start listening, are honoured only from a
+trusted network: this machine, the LAN (192.168.x, 10.x, 172.16-31.x), the
+tailnet (100.64.0.0/10) or the home's own public IP (see below). From anywhere
+else `listen` answers **403** (`untrusted_origin`) and `toggle` can only stop or
+cancel (it plays the error tone instead of listening). `brief`, `stop`,
+`repeat` and `claim` work from anywhere with a valid token. Set
+`herald.trigger_public_listen` to `true` to allow listening from anywhere.
+
+How the daemon knows where a request came from:
+
+- Direct (LAN URL, tailnet URL, localhost): the TCP peer address.
+- Through HAProxy (`https://dev.cush.rocks`): HAProxy runs on the same host,
+  connects from 127.0.0.1 and **sets** `X-Forwarded-For` to the real client
+  (it overwrites anything the client sent). The daemon believes
+  `X-Forwarded-For` only from a trusted proxy (`herald.trigger_trusted_proxies`,
+  default `["127.0.0.1", "::1"]`); a forwarded request from anyone else counts
+  as the internet.
+- **From home through the public domain:** a PC on the LAN that opens
+  `https://dev.cush.rocks` goes out to the router and back in (hairpin NAT),
+  so HAProxy sees the home's own public IP, not 192.168.x. List the public
+  domain in `herald.trigger_home_hosts` and the daemon resolves it (cached 5
+  minutes, follows dynamic-DNS changes) and treats requests from that address
+  as home:
+
+  ```bash
+  bin/companion herald-set trigger_home_hosts '["dev.cush.rocks"]'   # next restart
+  ```
+
+  Only machines behind the home router can appear with that address.
+
+Every trigger is audit-logged with its `network` (`local`, `lan`, `tailnet`,
+`home`, `public`), the client address behind the proxy, and the token name.
 
 ## The endpoint
 
@@ -36,7 +75,8 @@ An empty body means `toggle`; `?action=brief&device=Windows%20PC` works too. Ans
 |--------|---------|
 | 200 | Delivered: `{"success":true,"action":"toggle","delivered":true}` |
 | 400 | Unknown action, or `claim` without `device` |
-| 401 | Missing or wrong trigger token |
+| 401 | Missing, wrong or revoked trigger token; or a signed request that is stale (over 60 s), replayed or badly signed |
+| 403 | `listen` from outside the home network / tailnet (`untrusted_origin`) |
 | 404 | `device` names no connected device (`unknown_device`) |
 | 409 | No active device: open Companion (Herald) somewhere first |
 | 429 | More than 10 triggers in 10 s (`Retry-After` header) |
@@ -45,29 +85,53 @@ An empty body means `toggle`; `?action=brief&device=Windows%20PC` works too. Ans
 The daemon URL used below is `https://dev.cush.rocks` (the production listener on
 9878 behind HAProxy, see `/mnt/hexinas/apps/INFRASTRUCTURE.md`). Swap in yours.
 
-## The trigger token
+## Trigger tokens (one per device)
 
-A separate credential that can **only** fire triggers: it cannot read sessions,
-send input or run anything, and over the WebSocket it is refused every other
-message. On the server:
+A trigger token is a separate credential that can **only** fire triggers: it
+cannot read sessions, send input or run anything, and over the WebSocket it is
+refused every other message. Give each machine its own, so one can be revoked
+without touching the others. On the server:
 
 ```bash
-bin/companion trigger-token create      # once; prints only the path + a masked preview
-bin/companion trigger-token rotate      # replace it (update every trigger machine)
-bin/companion trigger-token show-path   # where it lives (~/.companion/herald-trigger.token, mode 600)
+bin/companion trigger-token create gaming-pc   # prints only the secret file's path + a masked preview
+bin/companion trigger-token list               # names, status, secret files
+bin/companion trigger-token rotate gaming-pc   # new secret for that device
+bin/companion trigger-token revoke gaming-pc   # refused from now on; its secret file is deleted
+bin/companion trigger-token migrate            # register the original single token as "default"
+bin/companion trigger-token show-path gaming-pc
 ```
 
-The daemon re-reads the file when it changes, so create and rotate need no
-restart. Every trigger (and every bad-token attempt) is written to the audit log
-(`~/.companion/audit.log`, action `herald_trigger`), never with the token.
+The daemon only stores each token's name and SHA-256 (in
+`~/.companion/herald-trigger-tokens.json`, mode 600); the secret itself is in
+`~/.companion/herald-triggers/<name>.token` (mode 600) for copying to the
+device. The original single token (`~/.companion/herald-trigger.token`) keeps
+working as the token named **default** (deprecated: `migrate` registers it so
+it shows in `list` and can be revoked by name). Both files are re-read when
+they change, so create, rotate and revoke need no restart; a WebSocket session
+opened with a token that is later revoked is refused on its next trigger.
+Every trigger (and every bad-token attempt) is written to the audit log
+(`~/.companion/audit.log`, action `herald_trigger`) with the token's name,
+never the token.
 
-Move the token to another machine without pasting it into chat, for example
-with cush-tools (then close it straight away):
+Move a token to its machine without pasting it into chat, for example with
+cush-tools (then close it straight away):
 
 ```bash
-cat "$(bin/companion trigger-token show-path 2>/dev/null)" | ~/local/src/cush-tools/bin/exchange herald-trigger --bg
+cat "$(bin/companion trigger-token show-path gaming-pc 2>/dev/null)" | ~/local/src/cush-tools/bin/exchange herald-trigger --bg
 ~/local/src/cush-tools/bin/status close herald-trigger
 ```
+
+### Signed mode (optional)
+
+By default a script sends the token as `Authorization: Bearer` over HTTPS. In
+signed mode it never sends the token: each request carries
+`X-Herald-Ts` (unix seconds) and `X-Herald-Sig` = hex HMAC-SHA256, keyed with
+the token's SHA-256 (as lowercase hex text), over `<ts>.<action>.<device>`
+(`device` empty when not set). The daemon refuses it when the clock differs by
+more than 60 s, when that signature was already used, or when the device or
+action was changed. Turn it on with `signed=true` in the AutoHotkey ini, or
+`HERALD_TRIGGER_SIGNED=true` / `~/.config/herald-trigger/signed` for the shell
+script. Both machines need a correct clock.
 
 ## Devices: names, taking control, pinning
 
@@ -96,8 +160,9 @@ Default keys: **Ctrl+Alt+Shift+H** = `toggle`, **Ctrl+Alt+Shift+B** = `brief`.
 1. **Install AutoHotkey v2** from <https://www.autohotkey.com> (v2, not v1.1).
 2. **Configure.** Copy `herald-trigger.ahk` and `herald-trigger.example.ini` into a
    folder of your own (e.g. `%USERPROFILE%\herald`), rename the ini to
-   `herald-trigger.ini`, set `url=https://dev.cush.rocks` and `token=` (the
-   trigger token). Set `device=` to this PC's Herald device name (e.g. `Windows
+   `herald-trigger.ini`, set `url=https://dev.cush.rocks` and `token=` (this
+   PC's trigger token: `bin/companion trigger-token create gaming-pc` on the
+   server; the original single token also works). Set `device=` to this PC's Herald device name (e.g. `Windows
    PC`, see Devices above) so the keys always act on this PC; leave it empty to
    act on whichever device is active. Optionally bind `listen_key`, `stop_key`,
    `repeat_key`, `claim_key` (just take control).

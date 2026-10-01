@@ -18,6 +18,12 @@
 ;   Ctrl+Alt+Shift+B  brief   (spoken rundown of what is new)
 ; Optional: listen_key, stop_key, repeat_key, claim_key (needs device=).
 ;
+; signed=true (optional, off by default): the token is never sent. Each
+; request carries X-Herald-Ts + X-Herald-Sig instead (HMAC-SHA256 keyed with
+; the token's SHA-256, over "<ts>.<action>.<device>", via Windows CNG), which
+; the daemon refuses after 60 s or on reuse. Needs a correct clock (Windows
+; time sync is on by default).
+;
 ; Errors show as a tray tip only; nothing ever steals focus from the game.
 ; The token is never shown.
 
@@ -64,6 +70,7 @@ LoadConfig() {
     token: token,
     device: device,
     pin: StrLower(read("pin", "true")) != "false",
+    signed: StrLower(read("signed", "false")) = "true",
     timeoutMs: IsInteger(timeout) ? Integer(timeout) : 4000,
     ini: ini,
     readKey: read,
@@ -104,7 +111,13 @@ Fire(action) {
     ; resolve, connect, send, receive
     req.SetTimeouts(Cfg.timeoutMs, Cfg.timeoutMs, Cfg.timeoutMs, Cfg.timeoutMs)
     req.Open("POST", Cfg.url "/herald/trigger", true)
-    req.SetRequestHeader("Authorization", "Bearer " Cfg.token)
+    if (Cfg.signed) {
+      ts := DateDiff(A_NowUTC, "19700101000000", "Seconds")
+      req.SetRequestHeader("X-Herald-Ts", ts)
+      req.SetRequestHeader("X-Herald-Sig", HmacSha256Hex(Sha256Hex(Cfg.token), ts "." action "." Cfg.device))
+    } else {
+      req.SetRequestHeader("Authorization", "Bearer " Cfg.token)
+    }
     req.SetRequestHeader("Content-Type", "application/json")
     req.Send(body)
     if !req.WaitForResponse(Ceil(Cfg.timeoutMs / 1000) + 1) {
@@ -120,6 +133,47 @@ Fire(action) {
   }
 }
 
+; --- signed mode: SHA-256 / HMAC-SHA256 through Windows CNG (bcrypt.dll) ---
+Sha256Hex(str) => CngSha256(str, "")
+HmacSha256Hex(key, msg) => CngSha256(msg, key)
+
+CngSha256(data, key) {
+  d := Utf8(data)
+  k := key = "" ? 0 : Utf8(key)
+  hAlg := 0, hHash := 0
+  ; BCRYPT_ALG_HANDLE_HMAC_FLAG = 0x8
+  if DllCall("bcrypt\BCryptOpenAlgorithmProvider", "Ptr*", &hAlg, "WStr", "SHA256", "Ptr", 0, "UInt", k ? 0x8 : 0, "UInt") != 0
+    throw Error("BCryptOpenAlgorithmProvider failed")
+  out := Buffer(32, 0)
+  try {
+    if DllCall("bcrypt\BCryptCreateHash", "Ptr", hAlg, "Ptr*", &hHash, "Ptr", 0, "UInt", 0
+        , "Ptr", k ? k.buf.Ptr : 0, "UInt", k ? k.len : 0, "UInt", 0, "UInt") != 0
+      throw Error("BCryptCreateHash failed")
+    try {
+      if DllCall("bcrypt\BCryptHashData", "Ptr", hHash, "Ptr", d.buf.Ptr, "UInt", d.len, "UInt", 0, "UInt") != 0
+        throw Error("BCryptHashData failed")
+      if DllCall("bcrypt\BCryptFinishHash", "Ptr", hHash, "Ptr", out.Ptr, "UInt", 32, "UInt", 0, "UInt") != 0
+        throw Error("BCryptFinishHash failed")
+    } finally {
+      DllCall("bcrypt\BCryptDestroyHash", "Ptr", hHash)
+    }
+  } finally {
+    DllCall("bcrypt\BCryptCloseAlgorithmProvider", "Ptr", hAlg, "UInt", 0)
+  }
+  hex := ""
+  Loop 32
+    hex .= Format("{:02x}", NumGet(out, A_Index - 1, "UChar"))
+  return hex
+}
+
+; UTF-8 bytes of a string: {buf, len} (len excludes the terminating NUL).
+Utf8(str) {
+  n := StrPut(str, "UTF-8")
+  buf := Buffer(n, 0)
+  StrPut(str, buf, "UTF-8")
+  return {buf: buf, len: n - 1}
+}
+
 JsonEscape(s) {
   s := StrReplace(s, "\", "\\")
   return StrReplace(s, '"', '\"')
@@ -130,7 +184,8 @@ Explain(status, body) {
   if RegExMatch(body, '"error"\s*:\s*"((?:[^"\\]|\\.)*)"', &m)
     return m[1] " (" status ")"
   switch status {
-    case 401: return "bad trigger token (401)"
+    case 401: return "bad or revoked trigger token, or signed=true with a wrong clock (401)"
+    case 403: return "listening is only allowed from your home network or tailnet (403)"
     case 404: return "not found (404): old daemon, or no device named as in device="
     case 409: return "no active device: open Companion somewhere (409)"
     case 429: return "too many triggers, slow down (429)"

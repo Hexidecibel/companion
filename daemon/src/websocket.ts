@@ -140,6 +140,7 @@ export class WebSocketHandler {
       claimDevice: (device, pin) => this.heraldVoice?.claimByName(device, pin) ?? null,
       deliver: (clientId, event) => this.sendToClient(clientId, 'herald_event', event),
       audit: (entry) => this.auditLog.append(entry),
+      trust: resolveHeraldConfig(this.config.herald).trigger,
     });
 
     // Register all handler modules
@@ -418,6 +419,8 @@ export class WebSocketHandler {
       lastPongTime: Date.now(),
       origin: null,
     };
+    const xff = req.headers?.['x-forwarded-for'];
+    if (xff) client.forwardedFor = Array.isArray(xff) ? xff.join(', ') : xff;
 
     this.clients.set(clientId, client);
     console.log(`WebSocket: Client connected (${clientId})`);
@@ -529,13 +532,14 @@ export class WebSocketHandler {
       }
 
       // Scoped trigger credential: may ONLY fire Herald triggers (see handleMessage).
-      if (
-        token !== undefined &&
-        !(expectedToken && token === expectedToken) &&
-        this.heraldTrigger.tokenMatches(token)
-      ) {
+      const triggerCred =
+        token !== undefined && !(expectedToken && token === expectedToken)
+          ? this.heraldTrigger.identify(token)
+          : null;
+      if (triggerCred) {
         client.authenticated = true;
         client.scope = 'trigger';
+        client.triggerCredential = triggerCred;
         client.origin = providedOrigin;
         this.send(client.ws, {
           type: 'authenticated',
@@ -544,7 +548,9 @@ export class WebSocketHandler {
           scope: 'trigger',
           requestId,
         });
-        console.log(`WebSocket: Client authenticated (${client.id}) with the trigger token`);
+        console.log(
+          `WebSocket: Client authenticated (${client.id}) with trigger token "${triggerCred.name}"`
+        );
         return;
       }
 

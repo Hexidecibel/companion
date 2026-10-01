@@ -9,7 +9,7 @@
 #   bin/herald-sandbox status    PID, port owner, and whether Herald's brain is configured
 #   bin/herald-sandbox logs [N]  Tail the sandbox daemon log (key-shaped strings redacted)
 #   bin/herald-sandbox env       Print the sandbox URL/port and config path (token not printed)
-#   bin/herald-sandbox trigger-token create|rotate|show-path
+#   bin/herald-sandbox trigger-token create|rotate|revoke|list|migrate|show-path [name]
 #                                Herald remote-trigger token for THIS instance (in its own HOME;
 #                                never printed). POST /herald/trigger on its port with it.
 #   bin/herald-sandbox https [on|off|status] [--tunnel]

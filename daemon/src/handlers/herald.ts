@@ -2,6 +2,7 @@ import { AuthenticatedClient, HandlerContext, MessageHandler } from '../handler-
 import { HeraldRequestError } from '../herald/service';
 import { VoiceError } from '../herald/voice/service';
 import type { AuditOrigin } from '../audit-log';
+import type { TriggerSource } from '../herald/trigger';
 
 /**
  * Herald WS endpoints. Each request is answered with a response of the SAME type
@@ -24,6 +25,64 @@ function auditOrigin(ctx: HandlerContext, client: AuthenticatedClient): AuditOri
 const VOICE_OFF = 'Herald voice is not enabled on this daemon';
 
 export function registerHeraldHandlers(ctx: HandlerContext): Record<string, MessageHandler> {
+  /**
+   * A trigger from a socket. Full-scope Companion clients are trusted; a
+   * trigger-token socket is re-checked (revoked since login = refused) and
+   * classified by its address like an HTTP trigger (mic opening needs a
+   * trusted network).
+   */
+  const fireFromSocket = async (
+    trigger: NonNullable<HandlerContext['heraldTrigger']>,
+    client: AuthenticatedClient,
+    payload: unknown,
+    requestId: string | undefined
+  ): Promise<void> => {
+    const origin = auditOrigin(ctx, client);
+    let source: TriggerSource = { via: 'ws', origin, auth: 'session' };
+    if (client.scope === 'trigger') {
+      const cred = client.triggerCredential;
+      if (!cred || !trigger.credentialValid(cred)) {
+        const out = trigger.rejectUnauthorized({ via: 'ws', origin }, payload ?? {});
+        ctx.send(client.ws, {
+          type: 'herald_trigger',
+          success: false,
+          error: out.ok ? 'unauthorized' : out.error,
+          payload: { code: out.ok ? 'unauthorized' : out.code },
+          requestId,
+        });
+        return;
+      }
+      const info = await trigger.classify(origin.addr, client.forwardedFor);
+      source = {
+        ...source,
+        network: info.network,
+        client: info.client,
+        credential: cred.name,
+        forwardedFor: client.forwardedFor,
+      };
+    }
+    const out = trigger.fire(payload ?? {}, source);
+    if (out.ok) {
+      ctx.send(client.ws, {
+        type: 'herald_trigger',
+        success: true,
+        payload: out.result,
+        requestId,
+      });
+    } else {
+      ctx.send(client.ws, {
+        type: 'herald_trigger',
+        success: false,
+        error: out.error,
+        payload: {
+          code: out.code,
+          ...(out.retryAfterMs ? { retryAfterMs: out.retryAfterMs } : {}),
+        },
+        requestId,
+      });
+    }
+  };
+
   const reply = (
     client: AuthenticatedClient,
     type: string,
@@ -209,26 +268,7 @@ export function registerHeraldHandlers(ctx: HandlerContext): Record<string, Mess
         });
         return;
       }
-      const out = trigger.fire(payload ?? {}, { via: 'ws', origin: auditOrigin(ctx, client) });
-      if (out.ok) {
-        ctx.send(client.ws, {
-          type: 'herald_trigger',
-          success: true,
-          payload: out.result,
-          requestId,
-        });
-      } else {
-        ctx.send(client.ws, {
-          type: 'herald_trigger',
-          success: false,
-          error: out.error,
-          payload: {
-            code: out.code,
-            ...(out.retryAfterMs ? { retryAfterMs: out.retryAfterMs } : {}),
-          },
-          requestId,
-        });
-      }
+      void fireFromSocket(trigger, client, payload, requestId);
     },
 
     /** Make this device (or `deviceId`) the active one; `pin` keeps it there. */

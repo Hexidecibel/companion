@@ -31,6 +31,10 @@ export interface AuthenticatedClient {
    * herald_trigger (and ping). Absent / 'full': the normal daemon token.
    */
   scope?: 'full' | 'trigger';
+  /** scope 'trigger': which trigger token (name + digest), re-checked on every trigger. */
+  triggerCredential?: { name: string; sha256: string };
+  /** X-Forwarded-For of the upgrade request (set behind a reverse proxy). */
+  forwardedFor?: string;
   // Set when the client authenticated against a per-origin credential
   // (remoteCapabilities.origins[]). Used to narrow capabilities per origin.
   originCredential?: OriginCredential;
@@ -79,7 +83,10 @@ export interface HandlerContext {
   // Shared state
   clients: Map<string, AuthenticatedClient>;
   autoApproveSessions: Set<string>;
-  pendingSentMessages: Map<string, Array<{ clientMessageId: string; content: string; sentAt: number }>>;
+  pendingSentMessages: Map<
+    string,
+    Array<{ clientMessageId: string; content: string; sentAt: number }>
+  >;
   tmuxSessionConfigs: Map<string, TmuxSessionConfig>;
   clientErrors: ClientError[];
   scrollLogs: Array<{ event: string; ts: number; [key: string]: unknown }>;

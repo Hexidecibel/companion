@@ -4,16 +4,33 @@
  * the daemon hands it to the ACTIVE device (the voice service's announcer) as a
  * `trigger` herald_event sent to that one client.
  *
- * Credential: a separate trigger token that can do nothing else. It lives in a
- * 0600 file outside the repo (`bin/companion trigger-token create`), stored the
- * same way as the main token (plain), and is re-read whenever the file changes,
- * so a rotation takes effect without a daemon restart. Comparison is constant
- * time. Every attempt is rate limited and audit-logged (never the token).
+ * Credentials: per-device trigger tokens that can do nothing else.
+ *  - The registry (`~/.companion/herald-trigger-tokens.json`, 0600, written by
+ *    `bin/companion trigger-token create <name>`) holds each token's NAME and
+ *    SHA-256, never the token. Revoked entries stay listed (and refused).
+ *  - The original single token file (`~/.companion/herald-trigger.token`) keeps
+ *    working as the token named "default" (deprecated; `trigger-token migrate`
+ *    registers it so it can be listed and revoked by name).
+ *  Both files are re-read when they change (no restart); comparison is constant
+ *  time; every attempt is rate limited and audit-logged with the token NAME.
+ *
+ * Trust: actions that open the mic (`listen`, and `toggle` when it would listen)
+ * are honoured only from this machine, the LAN (RFC 1918), the tailnet
+ * (100.64.0.0/10) or the home's own public IP (hairpin NAT through the public
+ * domain), unless herald.trigger_public_listen is set. Behind HAProxy the
+ * client is the X-Forwarded-For address, believed only from a trusted proxy.
+ *
+ * Optional signed mode (scripts: `signed=true`): instead of the bearer token,
+ * `X-Herald-Ts` (unix seconds) + `X-Herald-Sig` = hex HMAC-SHA256 keyed with
+ * the token's SHA-256 (hex) over `<ts>.<action>.<device>`; refused when the
+ * clock skew is over 60 s or the signature was already used.
  */
 
 import * as crypto from 'crypto';
+import * as dns from 'dns';
 import * as fs from 'fs';
 import * as http from 'http';
+import * as net from 'net';
 import * as os from 'os';
 import * as path from 'path';
 import type { AuditEntry, AuditOrigin } from '../audit-log';
@@ -43,12 +60,25 @@ export const TRIGGER_LIMITS = {
   maxBodyBytes: 1024,
   /** Shortest token we accept from the file (the CLI writes 64 hex chars). */
   minTokenLength: 32,
+  /** Signed mode: largest accepted clock skew. */
+  maxSkewMs: 60_000,
 };
+
+/** The name the legacy single token file goes by. */
+export const LEGACY_TOKEN_NAME = 'default';
 
 export function defaultTriggerTokenPath(): string {
   return (
     process.env.COMPANION_HERALD_TRIGGER_TOKEN_FILE ||
     path.join(os.homedir(), '.companion', 'herald-trigger.token')
+  );
+}
+
+/** The per-device token registry; next to the legacy file unless overridden. */
+export function defaultTriggerRegistryPath(tokenFile: string = defaultTriggerTokenPath()): string {
+  return (
+    process.env.COMPANION_HERALD_TRIGGER_TOKENS_FILE ||
+    path.join(path.dirname(tokenFile), 'herald-trigger-tokens.json')
   );
 }
 
@@ -62,61 +92,161 @@ function digest(s: string): Buffer {
   return crypto.createHash('sha256').update(s, 'utf8').digest();
 }
 
+export function sha256Hex(s: string): string {
+  return digest(s).toString('hex');
+}
+
 /** Constant-time string comparison (hashing first hides the length too). */
 export function safeEqual(a: string, b: string): boolean {
   return crypto.timingSafeEqual(digest(a), digest(b));
 }
 
+/** A recognised trigger credential (never the token itself). */
+export interface TriggerCredential {
+  name: string;
+  /** SHA-256 (hex) of the token: its identity, and the HMAC key in signed mode. */
+  sha256: string;
+}
+
+interface RegistryEntry {
+  name: string;
+  sha256: string;
+  revoked: boolean;
+}
+
+const NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,39}$/;
+const HEX64 = /^[0-9a-f]{64}$/;
+
 /**
- * The trigger token file. Cached by mtime/size/inode, so the hot path is one
- * stat. A file readable by group or others is refused (and logged once), like
- * ssh does with private keys.
+ * Trigger tokens: the per-device registry plus the legacy single file. Cached
+ * by each file's inode/size/mtime/mode, so the hot path is two stats. A file
+ * readable by group or others is refused (and logged once), like ssh does with
+ * private keys.
  */
 export class TriggerTokenFile {
-  private cached: { key: string; token: string | null } | null = null;
+  private cachedKey = '';
+  private entries: RegistryEntry[] = [];
   private warned = new Set<string>();
+  readonly registryPath: string;
 
-  constructor(private readonly filePath: string = defaultTriggerTokenPath()) {}
+  constructor(
+    private readonly filePath: string = defaultTriggerTokenPath(),
+    registryPath?: string
+  ) {
+    this.registryPath = registryPath ?? defaultTriggerRegistryPath(filePath);
+  }
 
   get path(): string {
     return this.filePath;
   }
 
-  /** The current token, or null when none is configured / the file is unsafe. */
-  current(): string | null {
-    let st: fs.Stats;
+  private statKey(p: string): { key: string; st: fs.Stats | null } {
     try {
-      st = fs.statSync(this.filePath);
+      const st = fs.statSync(p);
+      return { key: `${st.ino}:${st.size}:${st.mtimeMs}:${st.mode}`, st };
     } catch {
-      this.cached = null;
-      return null;
+      return { key: 'none', st: null };
     }
-    const key = `${st.ino}:${st.size}:${st.mtimeMs}:${st.mode}`;
-    if (this.cached?.key === key) return this.cached.token;
-    let token: string | null = null;
+  }
+
+  private safeMode(p: string, st: fs.Stats, key: string): boolean {
     if (process.platform !== 'win32' && (st.mode & 0o077) !== 0) {
       this.warnOnce(
-        `mode:${key}`,
-        `Herald trigger: ignoring ${this.filePath}: permissions ${(st.mode & 0o777).toString(8)} (must be 600)`
+        `mode:${p}:${key}`,
+        `Herald trigger: ignoring ${p}: permissions ${(st.mode & 0o777).toString(8)} (must be 600)`
       );
-    } else {
+      return false;
+    }
+    return true;
+  }
+
+  /** All entries (valid and revoked), reloaded when either file changed. */
+  private load(): RegistryEntry[] {
+    const legacy = this.statKey(this.filePath);
+    const reg = this.statKey(this.registryPath);
+    const key = `${legacy.key}|${reg.key}`;
+    if (key === this.cachedKey) return this.entries;
+    const entries: RegistryEntry[] = [];
+    if (reg.st && this.safeMode(this.registryPath, reg.st, reg.key)) {
       try {
-        const raw = fs.readFileSync(this.filePath, 'utf8').trim();
-        if (raw.length >= TRIGGER_LIMITS.minTokenLength && !/\s/.test(raw)) token = raw;
-        else this.warnOnce(`fmt:${key}`, `Herald trigger: ignoring malformed ${this.filePath}`);
+        const raw = JSON.parse(fs.readFileSync(this.registryPath, 'utf8')) as {
+          tokens?: unknown;
+        };
+        for (const t of Array.isArray(raw.tokens) ? raw.tokens : []) {
+          const e = t as Record<string, unknown>;
+          if (typeof e.name !== 'string' || !NAME_RE.test(e.name)) continue;
+          if (typeof e.sha256 !== 'string' || !HEX64.test(e.sha256)) continue;
+          entries.push({ name: e.name, sha256: e.sha256, revoked: !!e.revokedAt });
+        }
       } catch {
-        token = null;
+        this.warnOnce(`reg:${reg.key}`, `Herald trigger: ignoring malformed ${this.registryPath}`);
       }
     }
-    this.cached = { key, token };
-    return token;
+    if (legacy.st && this.safeMode(this.filePath, legacy.st, legacy.key)) {
+      try {
+        const tok = fs.readFileSync(this.filePath, 'utf8').trim();
+        if (tok.length >= TRIGGER_LIMITS.minTokenLength && !/\s/.test(tok)) {
+          const h = sha256Hex(tok);
+          // Registered (migrated): the registry entry decides its name and status.
+          if (!entries.some((e) => e.sha256 === h))
+            entries.push({ name: LEGACY_TOKEN_NAME, sha256: h, revoked: false });
+        } else {
+          this.warnOnce(`fmt:${legacy.key}`, `Herald trigger: ignoring malformed ${this.filePath}`);
+        }
+      } catch {
+        /* unreadable: no legacy token */
+      }
+    }
+    this.cachedKey = key;
+    this.entries = entries;
+    return entries;
+  }
+
+  /** Valid (non-revoked) credentials. */
+  credentials(): TriggerCredential[] {
+    return this.load()
+      .filter((e) => !e.revoked)
+      .map((e) => ({ name: e.name, sha256: e.sha256 }));
+  }
+
+  /** The legacy token, or null (kept for callers that want "is one configured"). */
+  current(): string | null {
+    const legacy = this.statKey(this.filePath);
+    if (!legacy.st) return null;
+    this.load();
+    try {
+      const tok = fs.readFileSync(this.filePath, 'utf8').trim();
+      return this.identify(tok) ? tok : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Which credential this token is, or null. Constant time over every entry
+   * (no early exit); a revoked token never matches.
+   */
+  identify(candidate: unknown): TriggerCredential | null {
+    if (typeof candidate !== 'string' || candidate.length === 0) return null;
+    const entries = this.load();
+    const h = digest(candidate);
+    let found: RegistryEntry | null = null;
+    for (const e of entries) {
+      const eq = crypto.timingSafeEqual(h, Buffer.from(e.sha256, 'hex'));
+      if (eq && !found) found = e;
+    }
+    // Still compare once when nothing is configured, so timing does not tell.
+    if (entries.length === 0) crypto.timingSafeEqual(h, digest('\0unset'));
+    return found && !found.revoked ? { name: found.name, sha256: found.sha256 } : null;
   }
 
   matches(candidate: unknown): boolean {
-    if (typeof candidate !== 'string' || candidate.length === 0) return false;
-    const token = this.current();
-    // Still hash + compare when unconfigured so the timing is the same.
-    return safeEqual(candidate, token ?? '\0unset') && token !== null;
+    return this.identify(candidate) !== null;
+  }
+
+  /** A WS session's credential is still valid (not revoked or rotated since login). */
+  stillValid(cred: TriggerCredential): boolean {
+    return this.credentials().some((c) => c.sha256 === cred.sha256);
   }
 
   private warnOnce(key: string, message: string): void {
@@ -124,6 +254,145 @@ export class TriggerTokenFile {
     this.warned.add(key);
     console.warn(message);
   }
+}
+
+// ---- origin trust -------------------------------------------------------------
+
+export type TriggerNetwork = 'local' | 'lan' | 'tailnet' | 'home' | 'public';
+
+export interface TriggerOriginInfo {
+  /** The client as best known (X-Forwarded-For behind a trusted proxy). */
+  client: string;
+  network: TriggerNetwork;
+  /** Arrived through a reverse proxy (e.g. HAProxy for the public domain). */
+  proxied: boolean;
+}
+
+function v4(addr: string): number[] | null {
+  const m = /^(?:::ffff:)?(\d+)\.(\d+)\.(\d+)\.(\d+)$/i.exec(addr);
+  if (!m) return null;
+  const o = m.slice(1, 5).map(Number);
+  return o.every((n) => n >= 0 && n <= 255) ? o : null;
+}
+
+/** Strip an IPv4-mapped prefix / brackets / zone id, lower-case. */
+export function normalizeIp(addr: string): string {
+  let a = addr
+    .trim()
+    .replace(/^\[|\]$/g, '')
+    .replace(/%.*$/, '')
+    .toLowerCase();
+  if (/^::ffff:\d+\.\d+\.\d+\.\d+$/.test(a)) a = a.slice(7);
+  return a;
+}
+
+/** Which network an address is on, ignoring the home-IP (hairpin) case. */
+export function ipNetwork(addr: string): Exclude<TriggerNetwork, 'home'> {
+  const a = normalizeIp(addr);
+  const o = v4(a);
+  if (o) {
+    if (o[0] === 127) return 'local';
+    if (o[0] === 10 || (o[0] === 172 && o[1] >= 16 && o[1] <= 31) || (o[0] === 192 && o[1] === 168))
+      return 'lan';
+    if (o[0] === 169 && o[1] === 254) return 'lan'; // link-local
+    if (o[0] === 100 && o[1] >= 64 && o[1] <= 127) return 'tailnet';
+    return 'public';
+  }
+  if (net.isIPv6(a)) {
+    if (a === '::1') return 'local';
+    if (a.startsWith('fd7a:115c:a1e0:')) return 'tailnet'; // Tailscale ULA
+    if (/^f[cd][0-9a-f]{2}:/.test(a) || /^fe[89ab][0-9a-f]:/.test(a)) return 'lan';
+  }
+  return 'public';
+}
+
+/**
+ * Who really sent a request. X-Forwarded-For is believed only when the TCP peer
+ * is a trusted proxy (HAProxy on this host sets it, overwriting anything the
+ * client sent); its LAST entry is the address the proxy saw. A forwarded
+ * request from an untrusted peer counts as the internet.
+ */
+export function classifyTriggerOrigin(opts: {
+  peer: string;
+  forwardedFor?: string;
+  trustedProxies: string[];
+  homeIps?: string[];
+}): TriggerOriginInfo {
+  const peer = normalizeIp(opts.peer || '');
+  const xff = (opts.forwardedFor || '').trim();
+  const trusted = new Set(opts.trustedProxies.map(normalizeIp));
+  let client = peer;
+  let proxied = false;
+  if (xff) {
+    proxied = true;
+    if (!trusted.has(peer)) return { client: peer, network: 'public', proxied };
+    const last = xff
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .pop();
+    if (!last || !net.isIP(normalizeIp(last))) return { client: peer, network: 'public', proxied };
+    client = normalizeIp(last);
+  }
+  let network: TriggerNetwork = ipNetwork(client);
+  if (network === 'public' && (opts.homeIps || []).map(normalizeIp).includes(client))
+    network = 'home';
+  return { client, network, proxied };
+}
+
+export function isTrustedNetwork(n: TriggerNetwork): boolean {
+  return n !== 'public';
+}
+
+/**
+ * The home's own public IPs, from DNS names that point at it (e.g. the public
+ * domain). Cached; refreshed in the background so a request never waits long.
+ */
+export class HomeIpResolver {
+  private ips: string[] = [];
+  private fetchedAt = -Infinity;
+  private inFlight: Promise<void> | null = null;
+
+  constructor(
+    private readonly hosts: string[],
+    private readonly ttlMs = 5 * 60_000,
+    private readonly lookup: (host: string) => Promise<string[]> = async (h) =>
+      (await dns.promises.lookup(h, { all: true })).map((r) => r.address),
+    private readonly now: () => number = Date.now
+  ) {}
+
+  /** Current home IPs; refreshes when stale (waits at most `waitMs`). */
+  async get(waitMs = 1500): Promise<string[]> {
+    if (this.hosts.length === 0) return [];
+    if (this.now() - this.fetchedAt > this.ttlMs) {
+      if (!this.inFlight) {
+        this.inFlight = Promise.all(this.hosts.map((h) => this.lookup(h).catch(() => [])))
+          .then((lists) => {
+            const all = Array.from(new Set(lists.flat().map(normalizeIp)));
+            if (all.length) this.ips = all;
+            this.fetchedAt = this.now();
+          })
+          .finally(() => {
+            this.inFlight = null;
+          });
+      }
+      await Promise.race([this.inFlight, new Promise((r) => setTimeout(r, waitMs).unref?.())]);
+    }
+    return this.ips;
+  }
+}
+
+/** Signed mode: HMAC-SHA256 hex over `<ts>.<action>.<device>`, keyed with the token's SHA-256 hex. */
+export function triggerSignature(
+  keySha256Hex: string,
+  ts: string,
+  action: string,
+  device = ''
+): string {
+  return crypto
+    .createHmac('sha256', keySha256Hex)
+    .update(`${ts}.${action}.${device}`, 'utf8')
+    .digest('hex');
 }
 
 /** Sliding-window counter per key. */
@@ -177,6 +446,16 @@ export interface TriggerSource {
   origin: AuditOrigin;
   /** HTTP behind a reverse proxy: the X-Forwarded-For chain (audit only). */
   forwardedFor?: string;
+  /**
+   * Where the caller is (see classifyTriggerOrigin). Absent = a full-scope
+   * Companion client, which is trusted like the local machine.
+   */
+  network?: TriggerNetwork;
+  /** The client address behind a proxy (audit). */
+  client?: string;
+  /** Which trigger token (by name) authorized this, and how. */
+  credential?: string;
+  auth?: 'bearer' | 'signed' | 'session';
 }
 
 export interface HeraldTriggerServiceOptions {
@@ -192,6 +471,10 @@ export interface HeraldTriggerServiceOptions {
   tokenFile?: TriggerTokenFile;
   now?: () => number;
   limits?: Partial<typeof TRIGGER_LIMITS>;
+  /** Trust rules (defaults: loopback proxy only, no home hosts, no public listen). */
+  trust?: { publicListen?: boolean; trustedProxies?: string[]; homeHosts?: string[] };
+  /** Injectable home-IP resolver (tests). */
+  homeResolver?: HomeIpResolver;
 }
 
 const MESSAGES: Record<HeraldTriggerErrorCode, string> = {
@@ -226,11 +509,19 @@ export class HeraldTriggerService {
   private readonly accepted: WindowLimiter;
   private readonly failures: WindowLimiter;
   private seq = 0;
+  private readonly publicListen: boolean;
+  private readonly trustedProxies: string[];
+  private readonly homeResolver: HomeIpResolver;
+  /** Signed mode: signatures seen recently (replay guard), value = expiry. */
+  private readonly usedSigs = new Map<string, number>();
 
   constructor(private readonly opts: HeraldTriggerServiceOptions) {
     this.limits = { ...TRIGGER_LIMITS, ...(opts.limits || {}) };
     this.now = opts.now || Date.now;
     this.tokenFile = opts.tokenFile || new TriggerTokenFile();
+    this.publicListen = opts.trust?.publicListen === true;
+    this.trustedProxies = opts.trust?.trustedProxies ?? ['127.0.0.1', '::1'];
+    this.homeResolver = opts.homeResolver || new HomeIpResolver(opts.trust?.homeHosts ?? []);
     this.accepted = new WindowLimiter(this.limits.maxTriggers, this.limits.windowMs, this.now);
     this.failures = new WindowLimiter(
       this.limits.maxFailures,
@@ -239,9 +530,33 @@ export class HeraldTriggerService {
     );
   }
 
-  /** Is this the trigger token? (WS authenticate uses this for a trigger-only session.) */
+  /** Is this a trigger token? (WS authenticate uses this for a trigger-only session.) */
   tokenMatches(candidate: unknown): boolean {
     return this.tokenFile.matches(candidate);
+  }
+
+  /** Which trigger token this is (name + digest), or null. */
+  identify(candidate: unknown): TriggerCredential | null {
+    return this.tokenFile.identify(candidate);
+  }
+
+  /** A trigger-token WS session's credential has not been revoked since login. */
+  credentialValid(cred: TriggerCredential): boolean {
+    return this.tokenFile.stillValid(cred);
+  }
+
+  /** Classify a caller by its TCP peer and X-Forwarded-For (see classifyTriggerOrigin). */
+  async classify(peer: string, forwardedFor?: string): Promise<TriggerOriginInfo> {
+    const first = classifyTriggerOrigin({
+      peer,
+      forwardedFor,
+      trustedProxies: this.trustedProxies,
+    });
+    if (first.network !== 'public') return first;
+    const homeIps = await this.homeResolver.get();
+    return homeIps.length
+      ? classifyTriggerOrigin({ peer, forwardedFor, trustedProxies: this.trustedProxies, homeIps })
+      : first;
   }
 
   /** An HTTP caller presented a bad / missing token. Audited until it floods. */
@@ -275,20 +590,30 @@ export class HeraldTriggerService {
   fire(raw: unknown, source: TriggerSource): TriggerOutcome {
     const started = this.now();
     const req = asRequest(raw);
-    const out = this.route(req);
+    const out = this.route(req, source);
     this.record(source, req, out, started);
+    const who = `${source.credential ? ` token=${source.credential}` : ''}${source.network ? ` from ${source.network}` : ''}`;
     if (out.ok) {
-      console.log(`Herald trigger: ${out.result.action} via ${source.via} -> ${out.target}`);
+      console.log(`Herald trigger: ${out.result.action} via ${source.via}${who} -> ${out.target}`);
     } else {
-      console.log(`Herald trigger: rejected via ${source.via}: ${out.code}`);
+      console.log(`Herald trigger: rejected via ${source.via}${who}: ${out.code}`);
     }
     return out;
   }
 
-  private route(req: TriggerRequest): TriggerOutcome {
+  /** May this caller open the mic on the active device? */
+  private mayListen(source: TriggerSource): boolean {
+    return !source.network || isTrustedNetwork(source.network) || this.publicListen;
+  }
+
+  private route(req: TriggerRequest, source: TriggerSource): TriggerOutcome {
     const action = parseTriggerAction(req.action);
     if (!action) {
       return { ok: false, status: 400, code: 'bad_request', error: MESSAGES.bad_request };
+    }
+    const mayListen = this.mayListen(source);
+    if (action === 'listen' && !mayListen) {
+      return { ok: false, status: 403, code: 'untrusted_origin', error: MESSAGES.untrusted_origin };
     }
     const wait = this.accepted.take('trigger');
     if (wait !== null) {
@@ -329,7 +654,12 @@ export class HeraldTriggerService {
       target = this.opts.activeClient();
     }
     const id = `trg-${this.now().toString(36)}-${++this.seq}`;
-    if (!target || !this.opts.deliver(target, { kind: 'trigger', action, id })) {
+    // From outside: toggle may stop or cancel, never open the mic.
+    const event: HeraldEvent =
+      action === 'toggle' && !mayListen
+        ? { kind: 'trigger', action, id, allowListen: false }
+        : { kind: 'trigger', action, id };
+    if (!target || !this.opts.deliver(target, event)) {
       return {
         ok: false,
         status: 409,
@@ -353,6 +683,12 @@ export class HeraldTriggerService {
       payload.pin = req.pin !== false;
     }
     if (source.forwardedFor) payload.forwardedFor = source.forwardedFor.slice(0, 200);
+    if (source.network) payload.network = source.network;
+    if (source.client && source.client !== source.origin.addr) payload.client = source.client;
+    if (source.credential) payload.token = source.credential;
+    if (source.auth) payload.auth = source.auth;
+    if (out.ok && parseTriggerAction(req.action) === 'toggle' && !this.mayListen(source))
+      payload.listenBlocked = true;
     const result: AuditEntry['result'] = out.ok
       ? { ok: true, target: out.target }
       : { ok: false, code: out.code, status: out.status };
@@ -401,12 +737,13 @@ export class HeraldTriggerService {
     }
 
     const addr = req.socket.remoteAddress || '';
-    const isLocal = addr === '127.0.0.1' || addr === '::1' || addr === '::ffff:127.0.0.1';
-    const xff = req.headers['x-forwarded-for'];
+    const xffRaw = req.headers['x-forwarded-for'];
+    const xff = Array.isArray(xffRaw) ? xffRaw.join(', ') : xffRaw;
+    // Provisional: the peer decides isLocal until the origin is classified.
     const source: TriggerSource = {
       via: 'http',
-      origin: { addr, clientId: 'http', isLocal, tls, origin: null },
-      forwardedFor: Array.isArray(xff) ? xff.join(', ') : xff,
+      origin: { addr, clientId: 'http', isLocal: false, tls, origin: null },
+      forwardedFor: xff,
     };
 
     const chunks: Buffer[] = [];
@@ -428,33 +765,104 @@ export class HeraldTriggerService {
     });
     req.on('end', () => {
       if (aborted) return;
-      let request: TriggerRequest;
-      const query = new URL(req.url || '/', 'http://x').searchParams;
-      const text = Buffer.concat(chunks).toString('utf8').trim();
-      if (text) {
-        try {
-          request = asRequest(JSON.parse(text));
-        } catch {
-          request = { action: 'invalid-json' };
-        }
-      } else {
-        const pin = query.get('pin');
-        request = {
-          action: query.get('action') ?? 'toggle',
-          device: query.get('device') ?? undefined,
-          pin: pin === null ? undefined : pin !== 'false' && pin !== '0',
-        };
-      }
+      void this.finishHttp(req, chunks, source, send, fail);
+    });
+  }
 
+  private async finishHttp(
+    req: http.IncomingMessage,
+    chunks: Buffer[],
+    source: TriggerSource,
+    send: (status: number, body: unknown, headers?: Record<string, string>) => void,
+    fail: (out: Extract<TriggerOutcome, { ok: false }>) => void
+  ): Promise<void> {
+    const info = await this.classify(source.origin.addr, source.forwardedFor);
+    source.network = info.network;
+    source.client = info.client;
+    source.origin.isLocal = info.network === 'local';
+    let request: TriggerRequest;
+    const query = new URL(req.url || '/', 'http://x').searchParams;
+    const text = Buffer.concat(chunks).toString('utf8').trim();
+    if (text) {
+      try {
+        request = asRequest(JSON.parse(text));
+      } catch {
+        request = { action: 'invalid-json' };
+      }
+    } else {
+      const pin = query.get('pin');
+      request = {
+        action: query.get('action') ?? 'toggle',
+        device: query.get('device') ?? undefined,
+        pin: pin === null ? undefined : pin !== 'false' && pin !== '0',
+      };
+    }
+
+    const sigHeader = req.headers['x-herald-sig'];
+    let cred: TriggerCredential | null;
+    let why: string | undefined;
+    if (typeof sigHeader === 'string' && sigHeader) {
+      const tsHeader = req.headers['x-herald-ts'];
+      const checked = this.verifySignature(
+        typeof tsHeader === 'string' ? tsHeader : '',
+        sigHeader,
+        request
+      );
+      cred = checked.cred;
+      why = checked.error;
+      source.auth = 'signed';
+    } else {
       const auth = req.headers['authorization'];
       const m = typeof auth === 'string' ? /^Bearer\s+(\S+)\s*$/i.exec(auth) : null;
-      if (!m || !this.tokenMatches(m[1])) {
-        fail(this.rejectUnauthorized(source, request) as Extract<TriggerOutcome, { ok: false }>);
-        return;
-      }
-      const out = this.fire(request, source);
-      if (out.ok) send(200, { success: true, ...out.result });
-      else fail(out);
-    });
+      cred = m ? this.identify(m[1]) : null;
+      source.auth = 'bearer';
+    }
+    if (!cred) {
+      const out = this.rejectUnauthorized(source, request) as Extract<
+        TriggerOutcome,
+        { ok: false }
+      >;
+      fail(why && out.status === 401 ? { ...out, error: why } : out);
+      return;
+    }
+    source.credential = cred.name;
+    const out = this.fire(request, source);
+    if (out.ok) send(200, { success: true, ...out.result });
+    else fail(out);
+  }
+
+  /**
+   * Signed mode: `ts` (unix seconds) within the skew window, an HMAC by one of
+   * the valid tokens over `<ts>.<action>.<device>`, and never seen before.
+   */
+  verifySignature(
+    ts: string,
+    sig: string,
+    request: TriggerRequest
+  ): { cred: TriggerCredential | null; error?: string } {
+    const now = this.now();
+    for (const [k, exp] of this.usedSigs) if (exp <= now) this.usedSigs.delete(k);
+    if (!/^\d{9,12}$/.test(ts))
+      return { cred: null, error: 'Signed trigger needs X-Herald-Ts (unix seconds)' };
+    if (Math.abs(now - Number(ts) * 1000) > this.limits.maxSkewMs)
+      return {
+        cred: null,
+        error: `Signed trigger rejected: timestamp is more than ${Math.round(this.limits.maxSkewMs / 1000)} s off (check this machine's clock)`,
+      };
+    const s = sig.trim().toLowerCase();
+    if (!/^[0-9a-f]{64}$/.test(s)) return { cred: null, error: 'Malformed X-Herald-Sig' };
+    const action = typeof request.action === 'string' ? request.action : '';
+    const device = typeof request.device === 'string' ? request.device : '';
+    const given = Buffer.from(s, 'hex');
+    let found: TriggerCredential | null = null;
+    for (const c of this.tokenFile.credentials()) {
+      const expected = Buffer.from(triggerSignature(c.sha256, ts, action, device), 'hex');
+      if (crypto.timingSafeEqual(expected, given) && !found) found = c;
+    }
+    if (!found) return { cred: null };
+    if (this.usedSigs.has(s))
+      return { cred: null, error: 'Signed trigger rejected: already used (replay)' };
+    this.usedSigs.set(s, now + 2 * this.limits.maxSkewMs);
+    return { cred: found };
   }
 }

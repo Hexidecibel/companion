@@ -12,7 +12,8 @@
 #   bin/companion status       Show daemon status
 #   bin/companion install-secrets   Materialize daemon secrets (Herald key) + systemd drop-in
 #   bin/companion herald-provider   Set herald.provider in the live config (idempotent)
-#   bin/companion trigger-token     Herald remote-trigger token: create | rotate | show-path
+#   bin/companion herald-set        Set one herald.* setting (budget, cache, trigger trust)
+#   bin/companion trigger-token     Herald remote-trigger tokens: create | rotate | revoke | list | migrate | show-path
 #   bin/companion help         Show all commands
 #
 # See README.md for full documentation.
@@ -283,68 +284,260 @@ cmd_herald_provider() {
   '
 }
 
+# --- Herald: herald-set ---
+# Set one whitelisted herald.* setting in the live config (JSON value), keeping
+# everything else. `--unset` removes it. Takes effect on the next restart.
+HERALD_SET_KEYS="monthly_budget_usd cache_ttl prompt_cache trigger_home_hosts trigger_public_listen trigger_trusted_proxies"
+cmd_herald_set() {
+  local key="" value="" unset_it="" config="${COMPANION_CONFIG:-${CONFIG_PATH:-$CONFIG_DIR/config.json}}"
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --config) config="${2:-}"; shift ;;
+      --unset) unset_it=1 ;;
+      -h|--help)
+        echo "Usage: companion herald-set <key> <json-value> | --unset <key> [--config PATH]"
+        echo "  Keys: $HERALD_SET_KEYS"
+        echo "  e.g.  companion herald-set trigger_home_hosts '[\"dev.example.org\"]'"
+        echo "        companion herald-set monthly_budget_usd 5"
+        echo "  Preserves all other settings. Takes effect on the next daemon restart."
+        return 0 ;;
+      *) if [ -z "$key" ]; then key="$1"; elif [ -z "$value" ]; then value="$1"; else echo "Unexpected argument: $1"; return 2; fi ;;
+    esac
+    shift
+  done
+  if [ -z "$key" ] || { [ -z "$unset_it" ] && [ -z "$value" ]; }; then
+    echo "Usage: companion herald-set <key> <json-value> | --unset <key>  (see --help)"; return 2
+  fi
+  case " $HERALD_SET_KEYS " in *" $key "*) ;; *) echo "Unknown key: $key (allowed: $HERALD_SET_KEYS)"; return 2 ;; esac
+  [ -f "$config" ] || { echo "ERROR: config not found: $config"; return 1; }
+  CFG="$config" KEY="$key" VALUE="$value" UNSET="$unset_it" node -e '
+    const fs = require("fs"), path = require("path");
+    const file = process.env.CFG, key = process.env.KEY;
+    let value;
+    if (!process.env.UNSET) {
+      try { value = JSON.parse(process.env.VALUE); } catch { console.error("Value must be JSON, e.g. 5, true, \"1h\", [\"host\"]"); process.exit(2); }
+      const ok = {
+        monthly_budget_usd: (v) => typeof v === "number" && v > 0 && v <= 10000,
+        cache_ttl: (v) => v === "5m" || v === "1h",
+        prompt_cache: (v) => typeof v === "boolean",
+        trigger_public_listen: (v) => typeof v === "boolean",
+        trigger_home_hosts: (v) => Array.isArray(v) && v.every((x) => typeof x === "string" && x.length > 0),
+        trigger_trusted_proxies: (v) => Array.isArray(v) && v.every((x) => typeof x === "string" && x.length > 0),
+      }[key];
+      if (!ok(value)) { console.error(`Invalid value for ${key}`); process.exit(2); }
+    }
+    const cfg = JSON.parse(fs.readFileSync(file, "utf-8"));
+    const herald = cfg.herald && typeof cfg.herald === "object" && !Array.isArray(cfg.herald) ? cfg.herald : {};
+    const before = JSON.stringify(herald);
+    if (process.env.UNSET) delete herald[key]; else herald[key] = value;
+    if (before === JSON.stringify(herald)) { console.log(`No change: herald.${key} in ${file}`); process.exit(0); }
+    cfg.herald = herald;
+    const mode = fs.statSync(file).mode & 0o777;
+    const tmp = path.join(path.dirname(file), `.${path.basename(file)}.${process.pid}.tmp`);
+    fs.writeFileSync(tmp, JSON.stringify(cfg, null, 2) + "\n", { mode });
+    fs.chmodSync(tmp, mode);
+    fs.renameSync(tmp, file);
+    console.log(process.env.UNSET ? `Removed herald.${key} from ${file}` : `Set herald.${key}=${JSON.stringify(value)} in ${file}`);
+    console.log("Takes effect on the next daemon restart (needs your sign-off).");
+  '
+}
+
 # --- Herald: trigger-token ---
-# A credential that can ONLY fire Herald triggers (POST /herald/trigger, or the
-# herald_trigger WS request); it cannot read sessions or send input. Written to a
-# 0600 file outside the repo. Never printed: only the path and a masked preview.
-# The daemon re-reads the file when it changes, so create/rotate need no restart.
+# Credentials that can ONLY fire Herald triggers (POST /herald/trigger, or the
+# herald_trigger WS request); they cannot read sessions or send input. One per
+# device, by name. The daemon only ever sees the registry
+# (herald-trigger-tokens.json: name + SHA-256, never the token); each token's
+# secret is written once to a 0600 file for copying to that device. The
+# original single token file keeps working as the token named "default".
+# Never printed: only paths and a masked preview. The daemon re-reads both
+# files when they change, so create / rotate / revoke need no restart.
+TRIGGER_REGISTRY="${COMPANION_HERALD_TRIGGER_TOKENS_FILE:-$(dirname "$TRIGGER_TOKEN_FILE")/herald-trigger-tokens.json}"
+TRIGGER_SECRETS_DIR="$(dirname "$TRIGGER_TOKEN_FILE")/herald-triggers"
+
 trigger_token_preview() {
   local tok
-  tok="$(cat "$TRIGGER_TOKEN_FILE")"
+  tok="$(cat "$1")"
   echo "${tok:0:4}…(${#tok} chars)"
+}
+
+trigger_secret_file() {
+  if [ "$1" = "default" ]; then echo "$TRIGGER_TOKEN_FILE"; else echo "$TRIGGER_SECRETS_DIR/$1.token"; fi
+}
+
+# Registry operations (JSON, atomic 0600 writes). Usage:
+#   trigger_registry list
+#   trigger_registry status NAME                 -> active | revoked | missing
+#   trigger_registry put NAME SECRET_FILE        (register / replace NAME with that token's hash)
+#   trigger_registry revoke NAME [LEGACY_FILE]   (registers the legacy token first when NAME=default)
+trigger_registry() {
+  REG="$TRIGGER_REGISTRY" LEGACY="$TRIGGER_TOKEN_FILE" SECRETS="$TRIGGER_SECRETS_DIR" node -e '
+    const fs = require("fs"), path = require("path"), crypto = require("crypto");
+    const [op, name, file] = process.argv.slice(1);
+    const reg = process.env.REG, legacy = process.env.LEGACY, secrets = process.env.SECRETS;
+    const sha = (p) => crypto.createHash("sha256").update(fs.readFileSync(p, "utf8").trim(), "utf8").digest("hex");
+    let data = { version: 1, tokens: [] };
+    try { data = JSON.parse(fs.readFileSync(reg, "utf8")); } catch (e) { if (e.code !== "ENOENT") { console.error("ERROR: cannot read " + reg + ": " + e.message); process.exit(1); } }
+    if (!Array.isArray(data.tokens)) data.tokens = [];
+    const save = () => {
+      fs.mkdirSync(path.dirname(reg), { recursive: true, mode: 0o700 });
+      const tmp = reg + ".tmp-" + process.pid;
+      fs.writeFileSync(tmp, JSON.stringify(data, null, 2) + "\n", { mode: 0o600 });
+      fs.chmodSync(tmp, 0o600);
+      fs.renameSync(tmp, reg);
+    };
+    const find = (n) => data.tokens.find((t) => t.name === n);
+    const legacyHash = () => { try { const t = fs.readFileSync(legacy, "utf8").trim(); return t.length >= 32 ? crypto.createHash("sha256").update(t, "utf8").digest("hex") : null; } catch { return null; } };
+    if (op === "status") {
+      const t = find(name);
+      if (t) { console.log(t.revokedAt ? "revoked" : "active"); process.exit(0); }
+      if (name === "default" && legacyHash()) { console.log("active"); process.exit(0); }
+      console.log("missing"); process.exit(0);
+    }
+    if (op === "put") {
+      const entry = { name, sha256: sha(file), createdAt: new Date().toISOString() };
+      data.tokens = data.tokens.filter((t) => t.name !== name).concat([entry]);
+      save(); process.exit(0);
+    }
+    if (op === "revoke") {
+      let t = find(name);
+      if (!t && name === "default") {
+        const h = legacyHash();
+        if (h) { t = { name, sha256: h, createdAt: new Date().toISOString(), source: "legacy" }; data.tokens.push(t); }
+      }
+      if (!t) { console.error("No trigger token named \"" + name + "\""); process.exit(3); }
+      if (t.revokedAt) { console.log("already revoked"); process.exit(0); }
+      t.revokedAt = new Date().toISOString();
+      save(); process.exit(0);
+    }
+    if (op === "migrate") {
+      const h = legacyHash();
+      if (!h) { console.log("no legacy token file"); process.exit(0); }
+      if (data.tokens.some((t) => t.sha256 === h)) { console.log("already registered"); process.exit(0); }
+      if (find("default")) { console.error("A different token is already registered as \"default\""); process.exit(3); }
+      data.tokens.push({ name: "default", sha256: h, createdAt: new Date().toISOString(), source: "legacy" });
+      save(); console.log("registered"); process.exit(0);
+    }
+    if (op === "list") {
+      const rows = data.tokens.map((t) => ({ ...t }));
+      const h = legacyHash();
+      if (h && !rows.some((t) => t.sha256 === h)) rows.unshift({ name: "default", createdAt: null, source: "legacy-unregistered" });
+      if (rows.length === 0) { console.log("No trigger tokens. Create one: companion trigger-token create <device-name>"); process.exit(0); }
+      const secretFile = (n) => (n === "default" ? legacy : path.join(secrets, n + ".token"));
+      console.log(["NAME".padEnd(20), "STATUS".padEnd(9), "CREATED (UTC)".padEnd(20), "SECRET FILE"].join(" "));
+      for (const t of rows) {
+        const status = t.revokedAt ? "revoked" : "active";
+        const created = t.createdAt ? t.createdAt.slice(0, 16).replace("T", " ") : (t.source === "legacy-unregistered" ? "(legacy file)" : "?");
+        const sf = secretFile(t.name);
+        const has = fs.existsSync(sf) ? sf : "(gone)";
+        console.log([t.name.padEnd(20), status.padEnd(9), created.padEnd(20), t.revokedAt ? "-" : has].join(" "));
+      }
+      if (h && !data.tokens.some((t) => t.sha256 === h))
+        console.log("\nNote: \"default\" is the original single token (deprecated, still accepted). Run `companion trigger-token migrate` to register it by name.");
+      process.exit(0);
+    }
+    console.error("unknown registry op " + op); process.exit(2);
+  ' "$@"
+}
+
+trigger_new_secret() {
+  # trigger_new_secret FILE: write a fresh 64-hex token to FILE (0600, atomic).
+  local file="$1" dir tmp tok
+  dir="$(dirname "$file")"
+  mkdir -p "$dir"
+  chmod 700 "$dir" 2>/dev/null || true
+  tok="$(od -An -tx1 -N32 /dev/urandom | tr -d ' \n')"
+  if [ "${#tok}" -ne 64 ]; then
+    echo "ERROR: could not read /dev/urandom" >&2
+    return 1
+  fi
+  tmp="$dir/.herald-trigger.tmp.$$"
+  ( umask 077; printf '%s\n' "$tok" > "$tmp" )
+  chmod 600 "$tmp"
+  mv -f "$tmp" "$file"
+  unset tok
+}
+
+trigger_valid_name() {
+  [[ "$1" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,39}$ ]]
 }
 
 cmd_trigger_token() {
   local sub="${1:-}"
+  local name="${2:-default}"
   case "$sub" in
     create|rotate)
-      if [ "$sub" = "create" ] && [ -s "$TRIGGER_TOKEN_FILE" ]; then
-        echo "A trigger token already exists: $TRIGGER_TOKEN_FILE ($(trigger_token_preview))"
-        echo "Use 'companion trigger-token rotate' to replace it (old triggers stop working)."
+      if ! trigger_valid_name "$name"; then
+        echo "Invalid name '$name': letters, digits, dot, dash, underscore (max 40), e.g. gaming-pc" >&2
+        return 2
+      fi
+      local file status
+      file="$(trigger_secret_file "$name")"
+      status="$(trigger_registry status "$name")" || return 1
+      if [ "$sub" = "create" ] && [ "$status" = "active" ]; then
+        echo "A trigger token named \"$name\" already exists (companion trigger-token list)."
+        echo "Use 'companion trigger-token rotate $name' to replace it (that device stops working until updated)."
         return 0
       fi
-      local dir tmp tok
-      dir="$(dirname "$TRIGGER_TOKEN_FILE")"
-      mkdir -p "$dir"
-      chmod 700 "$dir" 2>/dev/null || true
-      tok="$(od -An -tx1 -N32 /dev/urandom | tr -d ' \n')"
-      if [ "${#tok}" -ne 64 ]; then
-        echo "ERROR: could not read /dev/urandom" >&2
-        return 1
-      fi
-      tmp="$dir/.herald-trigger.token.$$"
-      ( umask 077; printf '%s\n' "$tok" > "$tmp" )
-      chmod 600 "$tmp"
-      mv -f "$tmp" "$TRIGGER_TOKEN_FILE"
-      unset tok
-      if [ "$sub" = "rotate" ]; then echo "Rotated the Herald trigger token."; else echo "Created a Herald trigger token."; fi
-      echo "  File:    $TRIGGER_TOKEN_FILE (mode 600)"
-      echo "  Preview: $(trigger_token_preview)"
+      trigger_new_secret "$file" || return 1
+      trigger_registry put "$name" "$file" || return 1
+      if [ "$sub" = "rotate" ]; then echo "Rotated the Herald trigger token \"$name\"."; else echo "Created the Herald trigger token \"$name\"."; fi
+      echo "  Secret:   $file (mode 600)"
+      echo "  Preview:  $(trigger_token_preview "$file")"
+      echo "  Registry: $TRIGGER_REGISTRY"
       echo ""
       echo "The running daemon picks it up on the next trigger (no restart)."
-      echo "Copy it to your trigger machines without pasting it in chat, e.g.:"
-      echo "  cat \"$TRIGGER_TOKEN_FILE\" | ~/local/src/cush-tools/bin/exchange herald-trigger --bg"
+      echo "Copy it to that device without pasting it in chat, e.g.:"
+      echo "  cat \"$file\" | ~/local/src/cush-tools/bin/exchange herald-trigger --bg"
       echo "  (then: ~/local/src/cush-tools/bin/status close herald-trigger)"
       echo "Setup per machine: triggers/README.md"
       ;;
+    revoke)
+      if [ -z "${2:-}" ]; then echo "Usage: companion trigger-token revoke <name>" >&2; return 2; fi
+      trigger_valid_name "$name" || { echo "Invalid name '$name'" >&2; return 2; }
+      trigger_registry revoke "$name" || return $?
+      local file
+      file="$(trigger_secret_file "$name")"
+      rm -f "$file"
+      echo "Revoked the Herald trigger token \"$name\" (its secret file is deleted)."
+      echo "Takes effect on that device's next trigger (no restart)."
+      ;;
+    list)
+      trigger_registry list
+      ;;
+    migrate)
+      local out
+      out="$(trigger_registry migrate)" || return $?
+      case "$out" in
+        registered) echo "Registered the original trigger token as \"default\" (it keeps working; list / revoke it by name)." ;;
+        "already registered") echo "The original trigger token is already registered." ;;
+        *) echo "Nothing to migrate: $out" ;;
+      esac
+      ;;
     show-path)
-      echo "$TRIGGER_TOKEN_FILE"
-      if [ -f "$TRIGGER_TOKEN_FILE" ]; then
+      local file
+      file="$(trigger_secret_file "$name")"
+      echo "$file"
+      if [ -f "$file" ]; then
         local mode
-        mode="$(stat -c '%a' "$TRIGGER_TOKEN_FILE" 2>/dev/null || stat -f '%Lp' "$TRIGGER_TOKEN_FILE")"
-        echo "  exists, mode $mode, preview $(trigger_token_preview)" >&2
+        mode="$(stat -c '%a' "$file" 2>/dev/null || stat -f '%Lp' "$file")"
+        echo "  exists, mode $mode, preview $(trigger_token_preview "$file")" >&2
         [ "$mode" = "600" ] || echo "  WARNING: the daemon ignores this file unless it is mode 600 (chmod 600 it)" >&2
       else
-        echo "  not created yet (companion trigger-token create)" >&2
+        echo "  not present (companion trigger-token create $name)" >&2
       fi
       ;;
     -h|--help|help|"")
-      echo "Usage: companion trigger-token <create|rotate|show-path>"
-      echo "  create     make a Herald trigger token if none exists ($TRIGGER_TOKEN_FILE)"
-      echo "  rotate     replace it (every trigger script needs the new one)"
-      echo "  show-path  print the file path (and, on stderr, a masked preview)"
-      echo "  The token can only fire Herald triggers. Override the path with"
-      echo "  COMPANION_HERALD_TRIGGER_TOKEN_FILE (the daemon must see the same value)."
+      echo "Usage: companion trigger-token <command> [name]"
+      echo "  create [name]   make a trigger token for one device (default name: default)"
+      echo "  rotate [name]   replace it (that device needs the new one)"
+      echo "  revoke <name>   refuse it from now on (and delete its secret file)"
+      echo "  list            names, status, and where each secret file is"
+      echo "  migrate         register the original single token as \"default\""
+      echo "  show-path [name]  the secret file (and, on stderr, a masked preview)"
+      echo ""
+      echo "  Tokens can only fire Herald triggers. Secrets: $TRIGGER_SECRETS_DIR/<name>.token"
+      echo "  (\"default\": $TRIGGER_TOKEN_FILE). Override with COMPANION_HERALD_TRIGGER_TOKEN_FILE /"
+      echo "  COMPANION_HERALD_TRIGGER_TOKENS_FILE (the daemon must see the same values)."
       [ -n "$sub" ] && return 0 || return 2 ;;
     *) echo "Unknown subcommand: $sub (see: companion trigger-token --help)"; return 2 ;;
   esac
@@ -354,6 +547,7 @@ case "${1:-}" in
   install-secrets) shift; cmd_install_secrets "$@"; exit $? ;;
   herald-provider) shift; cmd_herald_provider "$@"; exit $? ;;
   trigger-token) shift; cmd_trigger_token "$@"; exit $? ;;
+  herald-set) shift; cmd_herald_set "$@"; exit $? ;;
 esac
 
 # Every other launch path (foreground, background, CLI-driven restart) loads the
