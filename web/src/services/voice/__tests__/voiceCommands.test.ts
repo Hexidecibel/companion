@@ -24,6 +24,11 @@ describe('matchVoiceCommand: the command table', () => {
     ["Herald, what's up?", 'brief'],
     // RATE
     ['Slower.', 'slower'], ['Slow down.', 'slower'], ['Faster.', 'faster'], ['Speed up.', 'faster'],
+    // UNDO
+    ['Undo.', 'undo'], ['Undo that.', 'undo'], ['Undo that!', 'undo'], ['Take that back.', 'undo'],
+    ['Cancel that.', 'undo'], ["Don't send that.", 'undo'], ['Don’t send that!', 'undo'], ['Do not send that.', 'undo'],
+    ['Herald, undo that.', 'undo'], ['Hey Jarvis, undo that', 'undo'], ['Uh, undo that please.', 'undo'],
+    ['Okay, cancel that.', 'undo'], ['Scratch that.', 'undo'],
   ];
   it.each(cases)('%j -> %s', (text, cmd) => {
     expect(matchVoiceCommand(text)).toBe(cmd);
@@ -98,6 +103,15 @@ describe('matchVoiceCommand: ordinary messages are never commands', () => {
     'Anything for me from Out4?',
     'What did I miss in the companion session?',
     "What's everyone working on?",
+    // UNDO only as a whole utterance
+    'undo the migration',
+    'Undo the migration on Out4.',
+    'Undo the last commit in companion.',
+    'cancel that build',
+    "Don't send that email yet.",
+    'Take that back to the drawing board.',
+    'Can you undo that change in the parser?',
+    'Tell Out4 to undo that.',
   ])('%j', (text) => {
     expect(matchVoiceCommand(text)).toBeNull();
   });

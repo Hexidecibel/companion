@@ -8,6 +8,7 @@ import { DEFAULT_DISPLAY_NAME, derivePresence, type HeraldPresence } from '../se
 import { isMobileViewport } from '../utils/platform';
 import { eventBus } from '../utils/eventBus';
 import { routeVoiceTranscript } from '../services/voice/voiceCommandRouter';
+import { runUndo } from '../services/voice/voiceUndo';
 import type { HeraldActiveDevice, HeraldDeviceInfo, HeraldIntent } from '../types/herald';
 import { playChime } from '../services/tts/chime';
 import { DeferredNotice, runHeraldTrigger, type TriggerActions } from '../services/voice/heraldTrigger';
@@ -266,6 +267,13 @@ export function HeraldProvider({ children }: { children: ReactNode }) {
       expectBriefing: v.expectBriefing,
       sendIntent,
       notice: (m) => voiceInputRef.current?.controller.fail(m),
+      undo: () => void runUndo({
+        actions: () => heraldRef.current.state?.actions ?? [],
+        cancel: (id) => heraldRef.current.confirm(id, 'cancel'),
+        speaking: () => voiceRef.current.supported && voiceRef.current.speaking,
+        stopSpeech: () => voiceRef.current.stop(),
+        say: (line) => voiceRef.current.say(line),
+      }),
     });
     // Taken: a soft acknowledgement for commands that are otherwise silent.
     if (r.command === 'stop' && v.chimeOn) playChime('ok', 0.035);

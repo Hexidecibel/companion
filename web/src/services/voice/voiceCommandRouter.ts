@@ -19,6 +19,8 @@ export interface VoiceCommandActions {
   expectBriefing: () => void;
   /** Send a structured request to the brain (as a voice message). */
   sendIntent: (text: string, intent: HeraldIntent) => void;
+  /** UNDO: cancel the newest send still counting down (see voiceUndo.ts). */
+  undo: () => void;
   /** Short transient notice ("Nothing to repeat yet"). */
   notice: (text: string) => void;
 }
@@ -60,6 +62,9 @@ export function routeVoiceTranscript(text: string, a: VoiceCommandActions): Rout
       break;
     case 'faster':
       a.stepRate(1);
+      break;
+    case 'undo':
+      a.undo();
       break;
   }
   return { command, send: null };

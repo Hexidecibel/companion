@@ -12,7 +12,7 @@
  * Pure (no DOM, no React) so the table and its negative cases are unit-tested.
  */
 
-export type VoiceCommand = 'stop' | 'repeat' | 'shorter' | 'more' | 'slower' | 'faster' | 'brief';
+export type VoiceCommand = 'stop' | 'repeat' | 'shorter' | 'more' | 'slower' | 'faster' | 'brief' | 'undo';
 
 /** Longest utterance (in words, after normalising) that can be a command. */
 export const MAX_COMMAND_WORDS = 5;
@@ -21,7 +21,7 @@ export const MAX_COMMAND_WORDS = 5;
 export const COMMAND_PHRASES: Record<VoiceCommand, readonly string[]> = {
   stop: [
     'stop', 'stop it', 'stop talking', 'stop stop', 'quiet', 'be quiet', 'quiet please', 'shush', 'shh', 'hush',
-    'shut up', 'enough', 'thats enough', 'that is enough', 'never mind', 'nevermind', 'cancel', 'cancel that',
+    'shut up', 'enough', 'thats enough', 'that is enough', 'never mind', 'nevermind', 'cancel',
     'thanks', 'thank you', 'got it', 'i got it', 'silence', 'hold on', 'wait',
   ],
   repeat: [
@@ -41,6 +41,12 @@ export const COMMAND_PHRASES: Record<VoiceCommand, readonly string[]> = {
   brief: [
     'whats up', 'what is up', 'anything for me', 'anything new', 'whats new', 'what is new', 'brief me',
     'catch me up', 'what did i miss', 'what have i missed', 'give me the rundown', 'status report',
+  ],
+  // Cancel the newest pending (still counting down) send. With nothing pending,
+  // "cancel that" while Herald talks is a stop (see voiceCommandRouter).
+  undo: [
+    'undo', 'undo that', 'undo it', 'take that back', 'take it back', 'cancel that', 'cancel it',
+    'dont send that', 'dont send it', 'do not send that', 'do not send it', 'scratch that',
   ],
   slower: ['slower', 'slow down', 'talk slower', 'speak slower', 'slow it down', 'more slowly'],
   faster: ['faster', 'speed up', 'talk faster', 'speak faster', 'speed it up', 'quicker'],
@@ -146,4 +152,5 @@ export const VOICE_COMMAND_HELP: Array<{ say: string; does: string }> = [
   { say: '"Go on" · "tell me more"', does: 'Keep going / more detail' },
   { say: '"Slower" · "faster"', does: 'Change the speaking speed' },
   { say: '"What\'s up?" · "catch me up"', does: 'Brief me on what is new' },
+  { say: '"Undo that" · "don\'t send that"', does: 'Cancel a reply that is about to be sent' },
 ];

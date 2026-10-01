@@ -138,6 +138,8 @@ export interface HeraldVoice {
   stepRate: (dir: 1 | -1) => void;
   /** The next reply is a briefing (a longer spoken allowance). */
   expectBriefing: () => void;
+  /** Short spoken confirmation ("Cancelled."), replacing anything playing; also flashed. */
+  say: (text: string) => void;
   spokenLength: SpokenLength;
   setSpokenLength: (v: SpokenLength) => void;
   remind: boolean;
@@ -441,6 +443,10 @@ export function useHeraldVoice(
   }, [controller, showFlash]);
   const goOn = useCallback(() => controller.continueRemainder(), [controller]);
   const expectBriefing = useCallback(() => controller.setNextLimit(BRIEFING_SPOKEN_LIMIT), [controller]);
+  const say = useCallback((text: string) => {
+    controller.say(text);
+    showFlash(text.replace(/[.!]+$/, ''));
+  }, [controller, showFlash]);
   const stepRateCb = useCallback((dir: 1 | -1) => {
     const cur = prefsRef.current.rate;
     const next = stepRate(cur, dir);
@@ -499,6 +505,7 @@ export function useHeraldVoice(
     goOn,
     stepRate: stepRateCb,
     expectBriefing,
+    say,
     spokenLength: prefs.spokenLength,
     setSpokenLength,
     remind: prefs.remind,
@@ -515,5 +522,5 @@ export function useHeraldVoice(
     renameDevice,
     claimDevice,
     spokenLog,
-  }), [spokenLog, engine, hybrid, prefs, speaking, voices, voice, setVoiceOn, setChimeOn, setVoiceId, setRate, stop, stopCommand, repeat, goOn, stepRateCb, expectBriefing, setSpokenLength, setRemind, flash, announcer, testVoice, serverStatus, refreshStatus, allowBackground, selfId, label, renameDevice, claimDevice]);
+  }), [spokenLog, engine, hybrid, prefs, speaking, voices, voice, setVoiceOn, setChimeOn, setVoiceId, setRate, stop, stopCommand, repeat, goOn, stepRateCb, expectBriefing, say, setSpokenLength, setRemind, flash, announcer, testVoice, serverStatus, refreshStatus, allowBackground, selfId, label, renameDevice, claimDevice]);
 }

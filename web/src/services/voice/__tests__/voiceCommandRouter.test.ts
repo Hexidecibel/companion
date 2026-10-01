@@ -10,6 +10,7 @@ function actions(over: Partial<VoiceCommandActions> = {}) {
     expectBriefing: vi.fn(),
     sendIntent: vi.fn(),
     notice: vi.fn(),
+    undo: vi.fn(),
     ...over,
   };
   return a;
@@ -67,5 +68,22 @@ describe('routeVoiceTranscript', () => {
     expect(routeVoiceTranscript('Hey Jarvis.', a).send).toBeNull();
     expect(a.stop).not.toHaveBeenCalled();
     expect(a.sendIntent).not.toHaveBeenCalled();
+  });
+
+  it('UNDO is local: the undo action runs and nothing is sent to the brain', () => {
+    for (const t of ['Undo that.', "Don't send that!", 'Herald, take that back', 'cancel that', 'Scratch that.']) {
+      const a = actions();
+      expect(routeVoiceTranscript(t, a)).toEqual({ command: 'undo', send: null });
+      expect(a.undo).toHaveBeenCalledTimes(1);
+      expect(a.sendIntent).not.toHaveBeenCalled();
+      expect(a.stop).not.toHaveBeenCalled();
+    }
+  });
+
+  it('a sentence that starts like UNDO goes to the brain untouched', () => {
+    const a = actions();
+    expect(routeVoiceTranscript('Undo the migration on Out4', a)).toEqual({ command: null, send: 'Undo the migration on Out4' });
+    expect(routeVoiceTranscript("Don't send that email yet, ask me first", a).command).toBeNull();
+    expect(a.undo).not.toHaveBeenCalled();
   });
 });
