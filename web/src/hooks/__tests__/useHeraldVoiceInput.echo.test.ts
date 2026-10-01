@@ -55,20 +55,30 @@ describe('useHeraldVoiceInput: self-echo', () => {
     expect(hook.result.current.transcript).toBeNull();
     act(() => hook.result.current.controller.deliverExternal('Doc Upload', 'wake'));
     expect(hook.result.current.transcript).toBeNull();
-    act(() => hook.result.current.controller.deliverExternal('Doc upload site shipped', 'trigger'));
+    // A trigger is a gesture: only a long, close echo is dropped (strict rule)...
+    act(() => hook.result.current.controller.deliverExternal('Doc upload site shipped v2', 'trigger'));
     expect(host.sendVoice).not.toHaveBeenCalled();
+    // ...a short one goes through (echo cancellation handles those now).
+    act(() => hook.result.current.controller.deliverExternal('Doc upload site shipped', 'trigger'));
+    expect(host.sendVoice).toHaveBeenCalledWith('Doc upload site shipped');
+    host.sendVoice.mockClear();
     act(() => hook.result.current.controller.deliverExternal('wait tell Out4 to hold', 'interrupt'));
     expect(hook.result.current.transcript).toMatchObject({ text: 'wait tell Out4 to hold', autoSend: true });
   });
 
-  it('push-to-talk: a short answer is never dropped, a long echo is', () => {
+  it('push-to-talk: a short answer or a question is never dropped, a long close echo is', () => {
     const { hook, spokenLog } = setup();
     spokenLog.setSpeaking(true);
     spokenLog.record('Should I restart it, yes or no?');
+    spokenLog.record('Out4 finished the refund migration and the deploy checks passed.');
     act(() => hook.result.current.controller.deliverExternal('yes', 'button'));
     expect(hook.result.current.transcript).toMatchObject({ text: 'yes' });
     act(() => hook.result.current.consumeTranscript(hook.result.current.transcript!.id));
+    // A question is never an echo (the real false positive was a question).
     act(() => hook.result.current.controller.deliverExternal('should I restart it yes or no', 'space'));
+    expect(hook.result.current.transcript).toMatchObject({ text: 'should I restart it yes or no' });
+    act(() => hook.result.current.consumeTranscript(hook.result.current.transcript!.id));
+    act(() => hook.result.current.controller.deliverExternal('out four finished the refund migration and the deploy checks', 'space'));
     expect(hook.result.current.transcript).toBeNull();
   });
 

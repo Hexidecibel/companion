@@ -6,7 +6,7 @@ import { HeraldStore } from '../src/herald/store';
 import type { ResolvedHeraldConfig } from '../src/herald/config';
 import type { SessionSource } from '../src/herald/session-source';
 import type { LlmChatResult, LlmProvider } from '../src/herald/llm/provider';
-import { isLikelyEcho } from '../src/herald/voice/echo-match';
+import { isLikelyEcho, isLikelyTextEcho } from '../src/herald/voice/echo-match';
 
 const REPLY = 'Doc Upload Site shipped v2.28.0 to supdox.com. The deploy checks passed.';
 
@@ -124,6 +124,43 @@ describe('HeraldService voice echo guard', () => {
   it('only recent replies count', async () => {
     const { svc } = await withReply();
     now += ECHO_GUARD_WINDOW_MS + 1;
-    expect(svc.send('Doc Upload Site shipped', { mode: 'voice' }).ignored).toBeUndefined();
+    expect(svc.send('Doc Upload Site shipped v2', { mode: 'voice' }).ignored).toBeUndefined();
+  });
+
+  it('a gesture send (push-to-talk, hotkey) is never dropped as echo', async () => {
+    const { svc } = await withReply();
+    expect(svc.send('Doc Upload Site, shift V2.', { mode: 'voice', gesture: true }).ignored).toBeUndefined();
+  });
+
+  it('regression: "What is 2 plus 2?" right after a reply with "2 ... plus 2" goes through', async () => {
+    const p = provider([EARLIER, 'Four.']);
+    svc = new HeraldService({
+      config: cfg,
+      provider: p,
+      sources: [source],
+      store: new HeraldStore(dir, 10),
+      broadcast: () => {},
+      audit: () => {},
+      pollIntervalMs: 60_000,
+      now: () => now,
+    });
+    await svc.start();
+    svc.send('anything for me?', { mode: 'voice' });
+    await waitFor(() => !svc!.getState().busy);
+    const res = svc.send('What is 2 plus 2?', { mode: 'voice' });
+    expect(res.ignored).toBeUndefined();
+    expect(res.messageId).not.toBe('');
+  });
+});
+
+const EARLIER = 'You have 2 sessions waiting on you, plus 2 that finished. What next?';
+
+describe('isLikelyTextEcho (daemon copy): the strict send guard', () => {
+  it('the loose rule matched the real question; the strict one does not', () => {
+    expect(isLikelyEcho('What is 2 plus 2?', [EARLIER], { minTokens: 2 })).toBe(true);
+    expect(isLikelyTextEcho('What is 2 plus 2?', [EARLIER])).toBe(false);
+  });
+  it('still drops the earlier true echo', () => {
+    expect(isLikelyTextEcho('Doc Upload Site, shift V2.', [REPLY])).toBe(true);
   });
 });

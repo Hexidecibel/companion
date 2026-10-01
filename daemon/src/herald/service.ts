@@ -42,7 +42,7 @@ import type { CushCommand } from './knowledge/cush';
 import { sessionsMentioned } from './resolve';
 import { hasPendingPrompt, pickShowTarget } from './show';
 import { clip, firstSentence, formatAgo, oneLine, plainToolAction } from './text';
-import { echoWords, isLikelyEcho } from './voice/echo-match';
+import { isLikelyTextEcho } from './voice/echo-match';
 import { sanitizePronunciations } from './pronunciations';
 import { recentVersions } from './voice/versions';
 import { AskReporter, blockKeyOf, VOICE_EXCHANGE_WINDOW_MS } from './asks';
@@ -78,20 +78,6 @@ export const ECHO_GUARD_WINDOW_MS = 90_000;
 const ECHO_GUARD_REPLIES = 2;
 export const DEFAULT_POLL_INTERVAL_MS = 4000;
 /** Words that start a request to Herald: one Herald did not say is never self-echo. */
-const COMMAND_VERBS = new Set([
-  'interrupt',
-  'stop',
-  'cancel',
-  'ask',
-  'tell',
-  'start',
-  'launch',
-  'confirm',
-  'kill',
-  'check',
-  'brief',
-  'answer',
-]);
 const ACTIVITY_DEBOUNCE_MS = 800;
 const DELTA_FLUSH_MS = 60;
 const SNAPSHOT_MAX_SESSIONS = 20;
@@ -961,7 +947,9 @@ export class HeraldService {
   /**
    * Backstop for the client's self-echo filter: is this voice message just
    * Herald's own last reply (or the one before), heard through the speakers
-   * and transcribed? Two or more words only: a lone "yes" is an answer.
+   * and transcribed? Strict (echo cancellation and one speaking device do the
+   * heavy lifting): a long, close, in-order replay only, never a question or a
+   * command word Herald did not say (`isLikelyTextEcho`).
    */
   isVoiceEcho(text: string): boolean {
     const since = this.now() - ECHO_GUARD_WINDOW_MS;
@@ -971,11 +959,7 @@ export class HeraldService {
       .slice(-ECHO_GUARD_REPLIES)
       .map((m) => m.text);
     if (replies.length === 0) return false;
-    // "interrupt Out4" right after Herald said "Out4 ...": the session name (digits
-    // spelled out) matches, but a command verb Herald did not say is a person.
-    const said = new Set(echoWords(replies.join(' ')));
-    if (echoWords(text).some((w) => COMMAND_VERBS.has(w) && !said.has(w))) return false;
-    return isLikelyEcho(text, replies, { minTokens: 2 });
+    return isLikelyTextEcho(text, replies);
   }
 
   send(
@@ -1007,7 +991,8 @@ export class HeraldService {
       return { messageId: '', ignored: 'speaking' };
     }
     // Herald's own voice coming back as a "user" message: benign ack, no turn.
-    if (opts.mode === 'voice' && !opts.intent && this.isVoiceEcho(text)) {
+    // A deliberate gesture (push-to-talk, hotkey, trigger) is never an echo.
+    if (opts.mode === 'voice' && !opts.intent && opts.gesture !== true && this.isVoiceEcho(text)) {
       console.log(
         `Herald: ignored a voice message that matches its own last reply (${text.length} chars, likely self-echo)`
       );

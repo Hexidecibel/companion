@@ -8,7 +8,7 @@
  * Pure (inject `now`), no React / DOM.
  */
 import type { TtsEngine } from '../tts/types';
-import { isClearBargeIn, isLikelyEcho, stripEcho } from './echoMatch';
+import { isClearBargeIn, isLikelyEcho, isLikelyTextEcho, stripEcho } from './echoMatch';
 
 /** Sentences queued or played this recently count as "just said". */
 export const ECHO_WINDOW_MS = 10_000;
@@ -88,11 +88,14 @@ export class SpokenLog {
 
   /**
    * Is this transcript most likely Herald's own voice? `minTokens` raises the
-   * bar for deliberate captures (push-to-talk): only a long echo counts there.
+   * bar; `strict` is the text-echo rule for deliberate captures (see isLikelyTextEcho).
    */
-  isEcho(transcript: string, opts: { minTokens?: number } = {}): boolean {
+  isEcho(transcript: string, opts: { minTokens?: number; strict?: boolean } = {}): boolean {
     const spoken = this.recent();
     if (spoken.length === 0) return false;
+    // Deliberate captures (push-to-talk, hotkeys, triggers): only a long, close
+    // replay of Herald's words, never a question or an unsaid command word.
+    if (opts.strict) return isLikelyTextEcho(transcript, spoken);
     const echo = isLikelyEcho(transcript, spoken, { minTokens: opts.minTokens });
     if (!echo) return false;
     // One or two words: only while (or right after) Herald was talking.

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { echoScore, echoWords, isClearBargeIn, isLikelyEcho, keysMatch, soundKey, stripEcho } from '../echoMatch';
+import { closeSpanMatch, echoScore, echoWords, hasUnsaidCommandWord, isClearBargeIn, isLikelyEcho, isLikelyTextEcho, isQuestion, keysMatch, soundKey, stripEcho } from '../echoMatch';
 
 // Real production sequence (macOS app, speakers): Herald said this, then these
 // "user" messages arrived seconds apart.
@@ -140,5 +140,58 @@ describe('isClearBargeIn (partial transcripts while Herald talks)', () => {
   it('a stray word left after cutting the echo out is dropped', () => {
     expect(stripEcho('The billing session is still waiting on YouTube.', R)).toBe('');
     expect(stripEcho('The billing session is still waiting. Stop.', R)).toBe('Stop.');
+  });
+});
+
+describe('isLikelyTextEcho: the strict send guard', () => {
+  // The real false positive: Herald had answered with this, then the user asked
+  // a new question by push-to-talk and the loose guard dropped it as an echo.
+  const EARLIER = 'You have 2 sessions waiting on you, plus 2 that finished. What next?';
+
+  it('the loose rule used to call the real question an echo', () => {
+    expect(isLikelyEcho('What is 2 plus 2?', [EARLIER], { minTokens: 2 })).toBe(true);
+  });
+
+  it('never rejects "What is 2 plus 2?" (a question, and too short)', () => {
+    expect(isLikelyTextEcho('What is 2 plus 2?', [EARLIER])).toBe(false);
+    expect(isLikelyTextEcho('what is two plus two', [EARLIER])).toBe(false);
+    expect(isQuestion('What is 2 plus 2?')).toBe(true);
+    expect(isQuestion('how many sessions are waiting')).toBe(true);
+  });
+
+  it('still catches the earlier true echoes', () => {
+    expect(isLikelyTextEcho('Doc Upload Site, shift V2.', [SAID])).toBe(true);
+    expect(isLikelyTextEcho('doc upload sight shipped v2 28', [SAID])).toBe(true);
+    expect(isLikelyTextEcho('Doc Upload Site shipped version two', [SAID])).toBe(true);
+  });
+
+  it('short echoes are left to echo cancellation (under 5 content words)', () => {
+    expect(isLikelyTextEcho('Doc Upload', [SAID])).toBe(false);
+    expect(isLikelyTextEcho('The deploy checks passed.', [SAID])).toBe(false);
+  });
+
+  it('needs a CLOSE span: words scattered over a long reply are not an echo', () => {
+    const long =
+      'Doc Upload Site is idle. Out4 finished the migration an hour ago. ' +
+      'The refund job is still running, and the deploy to staging passed every check. Nothing else is waiting.';
+    expect(isLikelyTextEcho('doc upload migration refund staging', [long])).toBe(false);
+    expect(isLikelyTextEcho('the refund job is still running and the deploy to staging passed', [long])).toBe(true);
+  });
+
+  it('never rejects a command word Herald did not say', () => {
+    expect(isLikelyTextEcho('Doc Upload Site shipped v2, deploy it', [SAID.replace('deploy ', '')])).toBe(false);
+    expect(hasUnsaidCommandWord('send Doc Upload Site shipped v2', [SAID])).toBe(true);
+    expect(isLikelyTextEcho('Doc Upload Site shipped v2. Stop.', [SAID])).toBe(false);
+  });
+
+  it('nothing spoken: never echo', () => {
+    expect(isLikelyTextEcho('Doc Upload Site shipped v2.28.0', [])).toBe(false);
+    expect(isLikelyTextEcho('Doc Upload Site shipped v2.28.0', ['  '])).toBe(false);
+  });
+
+  it('closeSpanMatch counts in-order matches inside one window', () => {
+    const s = closeSpanMatch('Doc Upload Site, shift V2.', SAID);
+    expect(s.total).toBe(6);
+    expect(s.matched).toBe(6);
   });
 });

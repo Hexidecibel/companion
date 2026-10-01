@@ -298,6 +298,142 @@ export function isLikelyEcho(
   return score.matched >= required;
 }
 
+/** A text echo must have at least this many content words (shorter: a person). */
+export const TEXT_ECHO_MIN_TOKENS = 5;
+/** ...and at least this fraction of them in order within one close span of Herald's speech. */
+export const TEXT_ECHO_THRESHOLD = 0.8;
+
+/**
+ * Words a person uses to tell Herald or a session to do something. One the
+ * transcript has and Herald did not say means a person is talking.
+ */
+const COMMAND_WORDS = new Set([
+  ...INTERRUPT_WORDS,
+  'interrupt',
+  'ask',
+  'tell',
+  'start',
+  'launch',
+  'confirm',
+  'kill',
+  'check',
+  'brief',
+  'answer',
+  'send',
+  'run',
+  'open',
+  'show',
+  'approve',
+  'deny',
+  'reject',
+  'restart',
+  'deploy',
+  'merge',
+  'push',
+  'commit',
+]);
+
+/** Leading words of a spoken question (Whisper does not always add the "?"). */
+const QUESTION_WORDS = new Set([
+  'what',
+  'whats',
+  'how',
+  'hows',
+  'why',
+  'where',
+  'wheres',
+  'when',
+  'who',
+  'whos',
+  'which',
+  'is',
+  'are',
+  'was',
+  'were',
+  'can',
+  'could',
+  'would',
+  'should',
+  'do',
+  'does',
+  'did',
+  'will',
+  'has',
+  'have',
+  'any',
+  'anything',
+]);
+
+/** The transcript reads as a question ("What is 2 plus 2?"). */
+export function isQuestion(transcript: string): boolean {
+  if (/\?\s*$/.test(transcript)) return true;
+  const first = echoWords(transcript)[0];
+  return first !== undefined && QUESTION_WORDS.has(first);
+}
+
+/** The transcript has a command word ("send", "deploy", "stop") that Herald itself did not say. */
+export function hasUnsaidCommandWord(transcript: string, spokenTexts: string[]): boolean {
+  const said = new Set(echoWords(spokenTexts.join(' ')));
+  return echoWords(transcript).some((w) => COMMAND_WORDS.has(w) && !said.has(w));
+}
+
+/**
+ * Most content words of `transcript` matched in order inside ONE close span of
+ * `spoken` (a window at most half again as long as the transcript), so words
+ * scattered across a long reply never add up to an echo.
+ */
+export function closeSpanMatch(transcript: string, spoken: string): EchoScore {
+  const t = contentWords(echoWords(transcript));
+  const s = echoWords(spoken).filter((w) => !STOPWORDS.has(w));
+  const tk = t.map(soundKey);
+  const sk = s.map(soundKey);
+  const n = tk.length;
+  const m = sk.length;
+  if (n === 0 || m === 0) return { total: n, matched: 0, unmatched: t.slice() };
+  const width = Math.min(m, Math.ceil(n * 1.5) + 1);
+  let best = 0;
+  const row = new Array<number>(width + 1).fill(0);
+  for (let a = 0; a + 1 <= m && best < n; a++) {
+    if (!tk.some((k) => keysMatch(k, sk[a]))) continue;
+    const end = Math.min(m, a + width);
+    const w = end - a;
+    // LCS of the transcript with sk[a, end).
+    let prev = new Array<number>(w + 1).fill(0);
+    for (let i = 1; i <= n; i++) {
+      row.fill(0);
+      for (let j = 1; j <= w; j++) {
+        row[j] = keysMatch(tk[i - 1], sk[a + j - 1])
+          ? prev[j - 1] + 1
+          : Math.max(prev[j], row[j - 1]);
+      }
+      prev = row.slice(0, w + 1);
+    }
+    best = Math.max(best, prev[w]);
+  }
+  return { total: n, matched: best, unmatched: [] };
+}
+
+/**
+ * The strict guard for a text that is about to be SENT (the daemon's backstop,
+ * and the client for push-to-talk / hotkey captures). Echo cancellation and one
+ * speaking device do the heavy lifting now, so this only catches a long, close
+ * replay of Herald's own words: at least TEXT_ECHO_MIN_TOKENS content words, at
+ * least TEXT_ECHO_THRESHOLD of them in order within one close span of what
+ * Herald said. Never a question, never a command word Herald did not say.
+ */
+export function isLikelyTextEcho(transcript: string, spokenTexts: string[]): boolean {
+  const spokenList = spokenTexts.map((x) => x.trim()).filter(Boolean);
+  if (spokenList.length === 0) return false;
+  if (contentWords(echoWords(transcript)).length < TEXT_ECHO_MIN_TOKENS) return false;
+  if (isQuestion(transcript)) return false;
+  if (hasUnsaidCommandWord(transcript, spokenList)) return false;
+  const score = closeSpanMatch(transcript, spokenList.join(' . '));
+  return (
+    score.total >= TEXT_ECHO_MIN_TOKENS &&
+    score.matched >= Math.ceil(score.total * TEXT_ECHO_THRESHOLD)
+  );
+}
+
 /** The transcript has "stop", "wait"... that Herald itself did not say. */
 export function hasUnsaidInterruptWord(transcript: string, spokenTexts: string[]): boolean {
   const said = new Set(echoWords(spokenTexts.join(' ')));

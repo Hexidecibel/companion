@@ -210,7 +210,7 @@ export interface HeraldVoiceInput {
 
 /** Voice sources nobody pressed anything for: these can loop on Herald's own voice. */
 const HANDS_OFF_SOURCES: ReadonlySet<VoiceInputSource> = new Set(['interrupt', 'wake', 'followup']);
-/** Push-to-talk / hotkeys: deliberate, so only a long echo is dropped. */
+/** Push-to-talk / hotkeys: deliberate, so only a long, close echo is dropped (strict text-echo rule). */
 const DELIBERATE_SOURCES: ReadonlySet<VoiceInputSource> = new Set(['button', 'space', 'chord', 'global']);
 
 export interface VoiceInputHost {
@@ -304,7 +304,7 @@ export function useHeraldVoiceInput(host: VoiceInputHost): HeraldVoiceInput {
           }
           // Herald's own voice through the speakers: drop it, keep listening.
           const log = hostRef.current.spokenLog;
-          if (!hostRef.current.isPendingConfirm?.(text) && log?.isEcho(text, { minTokens: DELIBERATE_SOURCES.has(source) ? 3 : 1 })) {
+          if (!hostRef.current.isPendingConfirm?.(text) && log?.isEcho(text, DELIBERATE_SOURCES.has(source) || source === 'trigger' ? { strict: true } : { minTokens: 1 })) {
             console.debug(`Herald voice: dropped likely self-echo (${source}):`, JSON.stringify(text));
             return;
           }
