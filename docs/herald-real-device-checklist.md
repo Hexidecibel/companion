@@ -144,3 +144,61 @@ Android's platform canceller instead. Stored measurements: `herald.echoMeasureme
 - [ ] Plugging a new default mic in (e.g. a USB headset): Herald switches to it
       ("Listening with ...") unless it is a Bluetooth headset mic with the
       setting on.
+
+## Conversation feel: follow-up, tick, undo, pronunciation (voice UX)
+
+Needs the new web bundle (hard refresh) and, for pronunciations saved on the hub
+and spoken-version fixes, the daemon restarted on the new build.
+
+### Tonight: Windows gaming PC, headset + Discord + MX Master trigger
+- [ ] Hard-refresh the Companion tab, then click once in it: the amber "Sound is
+      off until you click" banner (shown after any reload) goes away and a test
+      line plays. Without that click Herald is silent mid-game.
+- [ ] Profile is Gaming. Advanced > After a reply: "Listen for a follow-up" is OFF
+      (also if Gaming was chosen before this build); Show floating orb is off.
+- [ ] Full-screen game in front, MX button: the "go ahead" tone, ask a question,
+      stop talking: a tiny tick right away (before any words come back), then a
+      short spoken answer. Nothing listens after it (no follow-up in Gaming).
+- [ ] Alt-tab back into the game while Herald answers: the answer keeps playing.
+- [ ] A session finishes or blocks while you play: a tone plays (even with the
+      browser tab hidden behind the game), nothing is spoken until you ask.
+- [ ] Discord teammates talking right after Herald answers never become a turn.
+
+### Follow-up window (Headphones / Phone + earbuds)
+- [ ] Ask something by voice (hold to talk, trigger, or "Hey Jarvis"). After the
+      spoken answer the orb turns soft violet with an emptying ring and the
+      status reads "Listening for a follow-up". Just ask the next question: no
+      key, no wake word. It is answered, and the window opens again after.
+- [ ] Say nothing: the ring empties in about 6 s (Advanced: 4-10 s) and it closes
+      without a tone or message. A cough re-opens what is left of the window.
+- [ ] Typed questions never open it; neither does a reply on another device
+      (only the active device listens); "stop" closes it.
+- [ ] Speakers instead of headphones with the Headphones profile on: Herald's own
+      last words are never taken as a follow-up (echo guard), and three hands-off
+      sends in a row pause auto-send ("Paused - possible echo").
+- [ ] Desktop app, Companion in the background: the floating orb shows "Follow-up?"
+      with the countdown ring and disappears the moment the window closes.
+
+### Tick and thinking tone
+- [ ] Every voice turn: the tick lands the moment you stop talking (hold-to-talk
+      release, trigger, hands-free, follow-up), quiet and short. Advanced > Tick
+      when I finish talking turns it off.
+- [ ] Advanced > Thinking tone on, ask something slow ("summarize every session"):
+      a very soft shimmer after about 1.5 s that stops the instant Herald speaks.
+      It never plays after "stop" or a local command.
+
+### Undo that
+- [ ] Ask Herald to send something to a session (an echo-tier card with a
+      countdown). During the countdown say "undo that" (or "don't send that",
+      "take that back"): the card shows cancelled and Herald says "Cancelled.".
+- [ ] Say "undo that" with nothing pending: "Nothing to undo." While Herald is
+      talking and nothing is pending, "cancel that" just stops it.
+- [ ] "Undo the migration on Out4" goes to Herald as a normal question.
+
+### Pronunciation and versions
+- [ ] Herald says "Out four", "version two point twenty-eight" (v2.28.0), "two
+      point oh point seven" (2.0.7), "A-P-K", "tee-mux", "H A proxy", "P-R".
+- [ ] Advanced > Pronunciations: add "Kokoro -> ko-ko-ro", tap the entry to hear
+      it, then check it is there on another device (saved on the hub).
+- [ ] With 2.0.7 mentioned in a session, ask "is two oh seven on the phone?":
+      the sent message reads "2.0.7"; "two or three tests" stays words.
