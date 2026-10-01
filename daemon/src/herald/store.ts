@@ -12,7 +12,8 @@ import * as fs from 'fs';
 import * as path from 'path';
 import type { HeraldPronunciation } from './protocol';
 import { sanitizePronunciations } from './pronunciations';
-import type { HeraldAction, HeraldMessage, HeraldVerbosity } from './protocol';
+import type { HeraldAction, HeraldInboxItem, HeraldMessage, HeraldVerbosity } from './protocol';
+import { sanitizeAsks, type AskLink } from './asks';
 import { PersistedUsage, sanitizeUsage } from './usage';
 
 export const MAX_PERSISTED_MESSAGES = 100;
@@ -34,6 +35,10 @@ export interface PersistedHeraldState {
   pronunciations?: HeraldPronunciation[];
   /** API usage meter (day / month totals, budget override, notices given). */
   usage?: PersistedUsage;
+  /** Open ask-and-report links (questions sent to sessions, awaiting the reply). */
+  asks?: AskLink[];
+  /** Ask answers in the inbox (so "brief me" still has them after a restart). */
+  answers?: HeraldInboxItem[];
 }
 
 export const VERBOSITY_LEVELS: readonly HeraldVerbosity[] = ['auto', 'brief', 'normal', 'detailed'];
@@ -80,11 +85,19 @@ function sanitizeMessage(raw: unknown): HeraldMessage | null {
   if (Array.isArray(m.actionIds)) out.actionIds = m.actionIds.filter(isStr).slice(0, 20);
   if (m.role === 'user' && (m.intent === 'shorter' || m.intent === 'more' || m.intent === 'brief'))
     out.intent = m.intent;
+  if (m.quiet === true) out.quiet = true;
   // A message persisted mid-stream is finalized on load.
   return out;
 }
 
 const ACTION_STATUSES = new Set(['pending', 'sent', 'cancelled', 'failed', 'expired']);
+const ACTION_KINDS = new Set([
+  'send_input',
+  'answer_choice',
+  'cush_command',
+  'interrupt',
+  'spawn_session',
+]);
 
 function sanitizeAction(raw: unknown): HeraldAction | null {
   if (!raw || typeof raw !== 'object') return null;
@@ -92,7 +105,7 @@ function sanitizeAction(raw: unknown): HeraldAction | null {
   if (
     !isStr(a.id) ||
     (a.tier !== 'echo' && a.tier !== 'hard_confirm') ||
-    (a.kind !== 'send_input' && a.kind !== 'answer_choice' && a.kind !== 'cush_command') ||
+    !ACTION_KINDS.has(a.kind as string) ||
     !isStr(a.serverId) ||
     !isStr(a.sessionId) ||
     !isStr(a.sessionName) ||
@@ -107,7 +120,7 @@ function sanitizeAction(raw: unknown): HeraldAction | null {
   const out: HeraldAction = {
     id: a.id,
     tier: a.tier,
-    kind: a.kind,
+    kind: a.kind as HeraldAction['kind'],
     serverId: a.serverId,
     sessionId: a.sessionId,
     sessionName: a.sessionName,
@@ -120,7 +133,37 @@ function sanitizeAction(raw: unknown): HeraldAction | null {
   if (isNum(a.autoSendAt)) out.autoSendAt = a.autoSendAt;
   if (isStr(a.error)) out.error = a.error;
   if (isNum(a.resolvedAt)) out.resolvedAt = a.resolvedAt;
+  if (isStr(a.confirmPhrase)) out.confirmPhrase = a.confirmPhrase.slice(0, 120);
+  if (isNum(a.voiceAttemptsLeft)) out.voiceAttemptsLeft = a.voiceAttemptsLeft;
   return out;
+}
+
+const MAX_PERSISTED_ANSWERS = 20;
+
+function sanitizeAnswer(raw: unknown): HeraldInboxItem | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const i = raw as Record<string, unknown>;
+  if (
+    !isStr(i.id) ||
+    !isStr(i.serverId) ||
+    !isStr(i.sessionId) ||
+    !isStr(i.sessionName) ||
+    !isStr(i.headline) ||
+    !isNum(i.createdAt) ||
+    (i.priority !== 'finished' && i.priority !== 'blocked')
+  )
+    return null;
+  return {
+    id: i.id,
+    serverId: i.serverId,
+    sessionId: i.sessionId,
+    sessionName: i.sessionName,
+    priority: i.priority,
+    headline: i.headline.slice(0, 400),
+    createdAt: i.createdAt,
+    heard: i.heard === true,
+    answer: true,
+  };
 }
 
 /** Validate + bound a parsed state object. Pending actions become expired. */
@@ -159,7 +202,20 @@ export function sanitizeState(raw: unknown, now: number): PersistedHeraldState {
     ...(isVerbosity(r.verbosity) && r.verbosity !== 'auto' ? { verbosity: r.verbosity } : {}),
     ...withPronunciations(r.pronunciations),
     ...(sanitizeUsage(r.usage) ? { usage: sanitizeUsage(r.usage) } : {}),
+    ...withAsks(r, now),
   };
+}
+
+function withAsks(
+  r: Record<string, unknown>,
+  now: number
+): Pick<PersistedHeraldState, 'asks' | 'answers'> {
+  const asks = sanitizeAsks(r.asks, now);
+  const answers = (Array.isArray(r.answers) ? r.answers : [])
+    .map(sanitizeAnswer)
+    .filter((a): a is HeraldInboxItem => a !== null)
+    .slice(-MAX_PERSISTED_ANSWERS);
+  return { ...(asks.length ? { asks } : {}), ...(answers.length ? { answers } : {}) };
 }
 
 function withPronunciations(raw: unknown): Pick<PersistedHeraldState, 'pronunciations'> {

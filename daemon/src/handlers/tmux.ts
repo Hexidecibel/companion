@@ -1,5 +1,4 @@
 import * as fs from 'fs';
-import * as path from 'path';
 import { HandlerContext, MessageHandler } from '../handler-context';
 import { DEFAULT_TOOL_CONFIG } from '../tool-config';
 import { detectActiveChoicePrompt } from '../parser';
@@ -8,13 +7,7 @@ import {
   CLI_READY_POLL_INTERVAL_MS,
   CLI_READY_TIMEOUT_MS,
 } from '../constants';
-
-function dirToFriendlyName(dirPath: string): string {
-  const base = path.basename(dirPath);
-  return base
-    .replace(/[-_]+/g, ' ')
-    .replace(/\b\w/g, c => c.toUpperCase());
-}
+import { createClaudeSession } from '../session-spawn';
 
 export function registerTmuxHandlers(
   ctx: HandlerContext
@@ -176,52 +169,25 @@ export function registerTmuxHandlers(
         return;
       }
 
-      if (!fs.existsSync(createPayload.workingDir)) {
-        ctx.send(client.ws, {
-          type: 'tmux_session_created',
-          success: false,
-          error: `Directory does not exist: ${createPayload.workingDir}`,
-          requestId,
-        });
-        return;
-      }
-
-      const sessionName = createPayload.name || ctx.tmux.generateSessionName(createPayload.workingDir);
-      const startCli = createPayload.startCli !== false;
-
-      console.log(`WebSocket: Creating tmux session "${sessionName}" in ${createPayload.workingDir}`);
-
-      // Pre-write bypass permissions so Claude starts without prompting
-      // Sessions created via Companion have no terminal for interactive approval
-      if (startCli) {
-        const settingsDir = path.join(createPayload.workingDir, '.claude');
-        const settingsPath = path.join(settingsDir, 'settings.json');
-        if (!fs.existsSync(settingsDir)) fs.mkdirSync(settingsDir, { recursive: true });
-        let existing: Record<string, unknown> = {};
-        if (fs.existsSync(settingsPath)) {
-          try { existing = JSON.parse(fs.readFileSync(settingsPath, 'utf-8')); } catch { existing = {}; }
+      const result = await createClaudeSession(
+        {
+          tmux: ctx.tmux,
+          storeTmuxSessionConfig: ctx.storeTmuxSessionConfig,
+          sessionNameStore: ctx.sessionNameStore,
+          watcher: ctx.watcher,
+        },
+        {
+          workingDir: createPayload.workingDir,
+          name: createPayload.name,
+          startCli: createPayload.startCli,
         }
-        const perms = (existing.permissions || {}) as Record<string, unknown>;
-        perms.allow = perms.allow || ['Bash', 'Edit', 'Write', 'Read', 'Glob', 'Grep', 'WebFetch', 'WebSearch', 'Task', 'NotebookEdit'];
-        perms.defaultMode = 'bypassPermissions';
-        existing.permissions = perms;
-        fs.writeFileSync(settingsPath, JSON.stringify(existing, null, 2), 'utf-8');
-        console.log(`WebSocket: Pre-wrote bypass permissions for ${createPayload.workingDir}`);
-      }
+      );
 
-      const result = await ctx.tmux.createSession(sessionName, createPayload.workingDir, startCli);
-
-      if (result.success) {
-        ctx.storeTmuxSessionConfig(sessionName, createPayload.workingDir, startCli);
-        // Auto-generate friendly name from directory if not already set
-        if (!ctx.sessionNameStore.get(sessionName)) {
-          ctx.sessionNameStore.set(sessionName, dirToFriendlyName(createPayload.workingDir));
-        }
+      if (result.success && result.sessionName) {
+        const sessionName = result.sessionName;
         ctx.injector.setActiveSession(sessionName);
-        ctx.watcher.markSessionAsNew(sessionName);
         ctx.watcher.clearActiveSession();
         console.log(`WebSocket: Cleared active session after creating tmux session "${sessionName}"`);
-        await ctx.watcher.refreshTmuxPaths();
 
         ctx.send(client.ws, {
           type: 'tmux_session_created',

@@ -68,6 +68,15 @@ export interface RecentTranscript {
   assistantTurns: TranscriptTurn[];
 }
 
+/** One user prompt and the session's reply to it (consecutive assistant text). */
+export interface TranscriptExchange {
+  prompt: string;
+  promptAt: number;
+  reply: string;
+  /** Time of the last assistant message of the reply (absent: no reply yet). */
+  replyAt?: number;
+}
+
 export interface SessionSource {
   readonly serverId: string;
   listSessions(): Promise<SessionSnapshot[]>;
@@ -85,6 +94,10 @@ export interface SessionSource {
     optionCount: number,
     multiSelect: boolean
   ): Promise<boolean>;
+  /** Prompt/reply pairs whose prompt is at or after `sinceMs`, oldest first (ask-and-report). */
+  getExchangesSince?(sessionId: string, sinceMs: number): Promise<TranscriptExchange[]>;
+  /** Interrupt the running turn (Ctrl+C). */
+  interrupt?(sessionId: string): Promise<boolean>;
 }
 
 // ---------------------------------------------------------------------------
@@ -128,6 +141,44 @@ export function extractRecentTranscript(
   }
   if (current && turns.length < maxTurns) turns.unshift(current);
   return { lastUserPrompt, assistantTurns: turns.slice(-maxTurns) };
+}
+
+/**
+ * Prompt/reply pairs from `sinceMs` on, oldest first. A reply is the assistant
+ * text between a prompt and the next one (tool results carry no text and do not
+ * split it). Bounded scan from the end.
+ */
+export function extractExchanges(
+  messages: ConversationMessage[],
+  sinceMs: number,
+  maxExchanges = 6
+): TranscriptExchange[] {
+  const out: TranscriptExchange[] = [];
+  let reply: string[] = [];
+  let replyAt: number | undefined;
+  const LIMIT_SCAN = 600;
+  let scanned = 0;
+  for (let i = messages.length - 1; i >= 0 && scanned < LIMIT_SCAN; i--, scanned++) {
+    const m = messages[i];
+    const text = (m.content || '').trim();
+    if (!text) continue;
+    if (m.type === 'assistant') {
+      reply.unshift(text);
+      if (replyAt === undefined) replyAt = m.timestamp;
+    } else if (m.type === 'user') {
+      if (m.timestamp < sinceMs) break;
+      out.unshift({
+        prompt: text,
+        promptAt: m.timestamp,
+        reply: reply.join('\n\n'),
+        ...(replyAt !== undefined ? { replyAt } : {}),
+      });
+      reply = [];
+      replyAt = undefined;
+      if (out.length >= maxExchanges) break;
+    }
+  }
+  return out;
 }
 
 function approvalDetail(input: Record<string, unknown> | undefined): string {
@@ -176,6 +227,8 @@ export interface LocalSourceDeps {
       targetSession?: string
     ): Promise<boolean>;
     checkSessionExists(sessionName?: string): Promise<boolean>;
+    /** Ctrl+C into the session (interrupt). */
+    cancelInput?(targetSession?: string): Promise<boolean>;
   };
   sessionNames: { getAll(): Record<string, string> };
   /** Override for tests; defaults to `tmux capture-pane` with a hard timeout. */
@@ -395,6 +448,15 @@ export class LocalSessionSource implements SessionSource {
 
   async getRecentTranscript(sessionId: string, maxTurns: number): Promise<RecentTranscript> {
     return extractRecentTranscript(this.messagesFor(sessionId), maxTurns);
+  }
+
+  async getExchangesSince(sessionId: string, sinceMs: number): Promise<TranscriptExchange[]> {
+    return extractExchanges(this.messagesFor(sessionId), sinceMs);
+  }
+
+  async interrupt(sessionId: string): Promise<boolean> {
+    if (!this.deps.injector.cancelInput) return false;
+    return this.deps.injector.cancelInput(sessionId);
   }
 
   getLiveChoice(sessionId: string): Promise<PendingChoice | null> {

@@ -8,6 +8,10 @@
  *              session is no longer blocked on that same thing.
  *   finished — a session went working -> idle (or produced a new turn) since the
  *              last observation. Removed when the session starts working again.
+ *   answer   — (a finished/blocked item with `answer: true`) what a session said
+ *              back to a question the user asked it through Herald. Replaces the
+ *              generic finished / question note for that turn (no double
+ *              notification), survives the session working again, expires by TTL.
  */
 
 import type { HeraldInboxItem, InboxPriority } from './protocol';
@@ -74,8 +78,16 @@ export class InboxTracker {
     this.heard = new Set(heardIds.slice(-MAX_HEARD));
   }
 
-  /** Apply a fresh set of snapshots. Returns true when the visible inbox changed. */
-  update(snaps: SessionSnapshot[], now: number): boolean {
+  /**
+   * Apply a fresh set of snapshots. Returns true when the visible inbox changed.
+   * `deferTurn(sessionKey)`: the session has an open ask, so its next finished /
+   * question note is left to the ask-answer item instead.
+   */
+  update(
+    snaps: SessionSnapshot[],
+    now: number,
+    deferTurn?: (sessionKey: string) => boolean
+  ): boolean {
     const before = this.signature();
     const present = new Set<string>();
 
@@ -103,7 +115,9 @@ export class InboxTracker {
         const turnChanged = !!prev && (prev.status === 'working' || prev.turnKey !== s.lastTurnKey);
         if (blocked.transitionOnly) {
           const id = `${sk}:${blocked.key}`;
-          if (this.primed && turnChanged && !this.seenKeys.has(id)) {
+          if (deferTurn?.(sk)) {
+            this.seenKeys.add(id);
+          } else if (this.primed && turnChanged && !this.seenKeys.has(id)) {
             this.add(id, s, 'blocked', blocked.headline, now);
             this.blockedBySession.set(sk, { key: blocked.key, id, misses: 0 });
           }
@@ -115,9 +129,12 @@ export class InboxTracker {
       }
 
       if (s.status === 'working') {
-        // Work resumed: any "finished" note for this session is stale.
+        // Work resumed: any "finished" note for this session is stale (an answer
+        // stays: it is what the user asked for; an answer that ended in a
+        // question has been answered).
         for (const [id, item] of this.items) {
-          if (item.priority === 'finished' && `${item.serverId}:${item.sessionId}` === sk)
+          if (`${item.serverId}:${item.sessionId}` !== sk) continue;
+          if (item.answer ? item.priority === 'blocked' : item.priority === 'finished')
             this.items.delete(id);
         }
       } else if (
@@ -129,10 +146,16 @@ export class InboxTracker {
         (prev.status === 'working' || prev.turnKey !== s.lastTurnKey)
       ) {
         const id = `${sk}:f${fnv1a(s.lastTurnKey)}`;
-        if (!this.items.has(id) && !this.seenKeys.has(id)) {
+        if (deferTurn?.(sk)) {
+          this.seenKeys.add(id);
+        } else if (!this.items.has(id) && !this.seenKeys.has(id)) {
           // One "finished" per session: a newer one replaces the older.
           for (const [oid, item] of this.items) {
-            if (item.priority === 'finished' && `${item.serverId}:${item.sessionId}` === sk)
+            if (
+              item.priority === 'finished' &&
+              !item.answer &&
+              `${item.serverId}:${item.sessionId}` === sk
+            )
               this.items.delete(oid);
           }
           const gist = s.lastTurnGist ? firstSentence(s.lastTurnGist, 120) : '';
@@ -188,9 +211,55 @@ export class InboxTracker {
     });
   }
 
+  /**
+   * An answer to the user's question (ask-and-report). One per ask; a newer
+   * answer from the same session sits beside it (each answers its own question).
+   */
+  addAnswer(a: {
+    askId: string;
+    serverId: string;
+    sessionId: string;
+    sessionName: string;
+    headline: string;
+    priority: 'finished' | 'blocked';
+    createdAt: number;
+  }): HeraldInboxItem {
+    const id = `${a.serverId}:${a.sessionId}:ans${fnv1a(a.askId)}`;
+    this.seenKeys.add(id);
+    const item: HeraldInboxItem = {
+      id,
+      serverId: a.serverId,
+      sessionId: a.sessionId,
+      sessionName: a.sessionName,
+      priority: a.priority,
+      headline: clip(oneLine(a.headline), 400),
+      createdAt: a.createdAt,
+      heard: this.heard.has(id),
+      answer: true,
+    };
+    this.items.set(id, item);
+    this.prune(a.createdAt);
+    return { ...item };
+  }
+
+  /** Answers restored after a restart (unheard ones are still news). */
+  restoreAnswers(items: HeraldInboxItem[], now: number): void {
+    for (const i of items) {
+      if (!i.answer || now - i.createdAt > FINISHED_TTL_MS) continue;
+      this.seenKeys.add(i.id);
+      this.items.set(i.id, { ...i, heard: i.heard || this.heard.has(i.id) });
+    }
+    this.prune(now);
+  }
+
+  /** Answer items (persisted so "brief me" still has them after a restart). */
+  answers(): HeraldInboxItem[] {
+    return this.list().filter((i) => i.answer);
+  }
+
   private prune(now: number): void {
     for (const [id, item] of this.items) {
-      if (item.priority !== 'blocked' && now - item.createdAt > FINISHED_TTL_MS)
+      if ((item.priority !== 'blocked' || item.answer) && now - item.createdAt > FINISHED_TTL_MS)
         this.items.delete(id);
     }
     if (this.items.size > MAX_ITEMS) {

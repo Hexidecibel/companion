@@ -14,6 +14,8 @@ export interface HeraldInboxItem {
   headline: string; // deterministic one-liner, NOT LLM-generated
   createdAt: number;
   heard: boolean;
+  /** Answer to something the user asked a session ("Out4 answered your question: ..."). */
+  answer?: boolean;
 }
 /**
  * How a message reached Herald: `voice` = push-to-talk, talking over Herald or
@@ -39,6 +41,8 @@ export interface HeraldMessage {
   sessionRefs?: HeraldSessionRef[];
   actionIds?: string[];
   streaming?: boolean;
+  /** Announcement posted on Herald's own initiative: shown + toned, never spoken unasked. */
+  quiet?: boolean;
   /** User lines only: sent as a voice command (shown as a chip, not raw text). */
   intent?: HeraldIntent;
 }
@@ -46,7 +50,7 @@ export interface HeraldAction {
   id: string;
   tier: HeraldActionTier;
   /** cush_command: a validated cush-tools command (payload = the command line; no session). */
-  kind: 'send_input' | 'answer_choice' | 'cush_command';
+  kind: 'send_input' | 'answer_choice' | 'cush_command' | 'interrupt' | 'spawn_session';
   serverId: string;
   sessionId: string;
   sessionName: string;
@@ -58,6 +62,10 @@ export interface HeraldAction {
   error?: string;
   createdAt: number;
   resolvedAt?: number;
+  /** hard_confirm: the words that confirm it by voice, e.g. "confirm deploy". */
+  confirmPhrase?: string;
+  /** hard_confirm: voice tries left (0 = on-screen only). */
+  voiceAttemptsLeft?: number;
 }
 export interface HeraldState {
   displayName: string;
@@ -155,6 +163,19 @@ export type HeraldEvent =
   /** The active device or the device list changed (broadcast). */
   | { kind: 'devices'; activeDevice: HeraldActiveDevice | null; devices: HeraldDeviceInfo[] }
   | { kind: 'error'; error: string };
+/**
+ * herald_confirm payload; answered with the HeraldAction. `method: 'voice'`
+ * confirms a hard_confirm action by its spoken phrase: the daemon checks its
+ * own transcript of this device's mic (`streamId`, else the latest), timing
+ * against Herald's speech, the active device and the attempt limit.
+ */
+export interface HeraldConfirmRequest {
+  actionId: string;
+  decision: 'confirm' | 'cancel';
+  method?: 'tap' | 'voice';
+  phrase?: string;
+  streamId?: string;
+}
 /** herald_set_verbosity payload; answered with { verbosity }. */
 export interface HeraldSetVerbosityRequest {
   verbosity: HeraldVerbosity;

@@ -1,8 +1,9 @@
-import { exec } from 'child_process';
+import { exec, execFile } from 'child_process';
 import { promisify } from 'util';
 import * as path from 'path';
 
 const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 
 export interface TmuxSessionInfo {
   name: string;
@@ -133,11 +134,12 @@ export class TmuxManager {
     }
 
     try {
-      // Create detached tmux session in the specified directory
-      await execAsync(`tmux new-session -d -s "${safeName}" -c "${workingDir}"`);
+      // Create detached tmux session in the specified directory. execFile, no
+      // shell: the directory is passed as one argument, never interpolated.
+      await execFileAsync('tmux', ['new-session', '-d', '-s', safeName, '-c', workingDir]);
 
       // Tag session as managed by Companion so daemon only monitors our sessions
-      await execAsync(`tmux set-environment -t "${safeName}" COMPANION_APP 1`);
+      await execFileAsync('tmux', ['set-environment', '-t', safeName, 'COMPANION_APP', '1']);
 
       console.log(`TmuxManager: Created session "${safeName}" in ${workingDir} (tagged)`);
 
@@ -147,7 +149,7 @@ export class TmuxManager {
         await new Promise((resolve) => setTimeout(resolve, 200));
 
         // Send the CLI command
-        await execAsync(`tmux send-keys -t "${safeName}" "claude" Enter`);
+        await execFileAsync('tmux', ['send-keys', '-t', safeName, 'claude', 'Enter']);
         console.log(`TmuxManager: Started CLI in session "${safeName}"`);
       }
 

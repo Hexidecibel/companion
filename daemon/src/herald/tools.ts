@@ -10,7 +10,14 @@ import type { LlmToolSpec } from './llm/provider';
 import type { PendingChoice, SessionSnapshot, SessionSource } from './session-source';
 import type { HeraldAction, HeraldSessionRef } from './protocol';
 import type { ActionManager } from './actions';
-import { classifyAction, classifyCushCommand, findSelectedOption } from './danger';
+import {
+  classifyAction,
+  classifyCushCommand,
+  classifyInterrupt,
+  classifySpawn,
+  findSelectedOption,
+} from './danger';
+import { cleanFirstPrompt, resolveSpawnDir, sessionsIn } from './spawn';
 import type { HeraldToolbox } from './knowledge/toolbox';
 import { cushCommandLine, cushReadback, CUSH_OPS, publicUrl } from './knowledge/cush';
 import { MAX_QUERY_CHARS } from './knowledge/sources';
@@ -194,6 +201,58 @@ export const KNOWLEDGE_TOOL_SPECS: LlmToolSpec[] = [
 
 TOOL_SPECS.push(...KNOWLEDGE_TOOL_SPECS);
 
+/** Session control: stop a running turn, start a new session. */
+export const SESSION_CONTROL_TOOL_SPECS: LlmToolSpec[] = [
+  {
+    name: 'propose_interrupt',
+    description:
+      'Propose interrupting a session that is running (Ctrl+C: stops its current turn, keeps the session). Only when the user asks to stop, cancel, interrupt or kill what a session is doing. ' +
+      'It does NOT happen immediately: it runs after a short countdown unless the user cancels.',
+    parameters: {
+      type: 'object',
+      properties: {
+        session: SESSION_PROP,
+        confirm: {
+          type: 'boolean',
+          description: 'Set true if you are at all unsure; forces an explicit confirmation.',
+        },
+      },
+      required: ['session'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'propose_spawn_session',
+    description:
+      'Propose starting a NEW Claude Code session in a project folder with a first prompt. Only when the user explicitly asks to start, open or spin up a new session. ' +
+      'It never starts without the user confirming (on the card, or by saying the confirm phrase). The session runs with permissions bypassed.',
+    parameters: {
+      type: 'object',
+      properties: {
+        project_or_dir: {
+          type: 'string',
+          description:
+            'Project folder name as the user said it (e.g. "companion"), or a path under ~/local/src. Never guess: ask if unsure.',
+          maxLength: 300,
+        },
+        first_prompt: {
+          type: 'string',
+          description: "The first instruction for the new session, in the user's words.",
+          maxLength: 2000,
+        },
+        confirm: {
+          type: 'boolean',
+          description: 'Unused: starting a session always needs confirmation.',
+        },
+      },
+      required: ['project_or_dir', 'first_prompt'],
+      additionalProperties: false,
+    },
+  },
+];
+
+TOOL_SPECS.push(...SESSION_CONTROL_TOOL_SPECS);
+
 export const VERBOSITY_TOOL_LEVELS = ['brief', 'normal', 'detailed', 'auto'] as const;
 
 TOOL_SPECS.push({
@@ -212,7 +271,12 @@ TOOL_SPECS.push({
 });
 
 /** Tools that create an action: never executed in an iteration with malformed calls. */
-export const ACTION_TOOLS = new Set(['propose_input', 'propose_cush_command']);
+export const ACTION_TOOLS = new Set([
+  'propose_input',
+  'propose_cush_command',
+  'propose_interrupt',
+  'propose_spawn_session',
+]);
 
 const SPEC_BY_NAME = new Map(TOOL_SPECS.map((t) => [t.name, t]));
 
@@ -323,6 +387,8 @@ function example(name: string): string {
       return '{"operation": "serve", "name": "phone-share", "dir": "~/local/src/<project>/dist"}';
     case 'set_verbosity':
       return '{"level": "brief"}';
+    case 'propose_spawn_session':
+      return '{"project_or_dir": "companion", "first_prompt": "run the tests and tell me what fails"}';
     default:
       return '{"session": "companion"}';
   }
@@ -340,6 +406,7 @@ export interface TurnToolState {
     sessionKey: string;
     sessionName: string;
     tier: HeraldAction['tier'];
+    confirmPhrase?: string;
   }>;
 }
 
@@ -355,6 +422,8 @@ export interface ToolEnv {
   toolbox?: HeraldToolbox;
   /** Persist the reply-length setting. Absent = set_verbosity reports unavailable. */
   setVerbosity?: (level: (typeof VERBOSITY_TOOL_LEVELS)[number]) => void;
+  /** Where new sessions may start. Absent = propose_spawn_session reports unavailable. */
+  spawn?: { roots: string[]; userHome: string };
 }
 
 export interface ToolOutcome {
@@ -596,6 +665,12 @@ export async function executeTool(
       case 'propose_cush_command':
         return await proposeCush(args, env, state);
 
+      case 'propose_interrupt':
+        return await proposeInterrupt(args, env, state);
+
+      case 'propose_spawn_session':
+        return await proposeSpawn(args, env, state);
+
       case 'set_verbosity': {
         const level = String(args.level || '').toLowerCase();
         const valid = (VERBOSITY_TOOL_LEVELS as readonly string[]).includes(level);
@@ -729,13 +804,14 @@ async function proposeInput(
     sessionName: s.sessionName,
     payload,
     readback,
-    meta,
+    meta: { ...meta, userText: state.userText, ruleIds: verdict.ruleIds },
   });
   state.proposals.push({
     actionId: action.id,
     sessionKey: key,
     sessionName: s.sessionName,
     tier: action.tier,
+    confirmPhrase: action.confirmPhrase,
   });
 
   const seconds = Math.round(env.echoDelayMs / 1000);
@@ -745,16 +821,30 @@ async function proposeInput(
     tier: action.tier,
     readback: action.readback,
     reasons: action.reasons.length ? action.reasons : undefined,
+    confirm_phrase: action.confirmPhrase,
     batch,
+    confirm_phrases: batch ? batchPhrases(state) : undefined,
     instruction: batch
       ? `This request now covers ${state.proposals.length} sessions, each judged on its own. ` +
         `In one or two short sentences say which are going ahead automatically in about ${seconds} seconds unless cancelled` +
-        `${batch.needs_confirmation.length ? ', and which are held back for on-screen confirmation and briefly why' : ''}. ` +
+        `${batch.needs_confirmation.length ? ', and which are held back for on-screen confirmation, briefly why, and the words that confirm each (confirm_phrases; quote each mid-sentence followed by "to go ahead")' : ''}. ` +
         'Never imply the held ones will send without the user confirming.'
       : action.tier === 'echo'
         ? `Read back in one short sentence what you are sending to ${s.sessionName}; it sends automatically in about ${seconds} seconds unless the user cancels.`
-        : `This needs the user's explicit confirmation on screen; it will NOT be sent otherwise. Read it back, say briefly why it needs confirming, and ask them to confirm.`,
+        : hardConfirmInstruction(action.confirmPhrase),
   });
+}
+
+/**
+ * How Herald asks for a hard confirmation. The phrase is quoted mid-sentence and
+ * never last ("say 'confirm deploy' to go ahead"), so a recording that starts
+ * late in Herald's own sentence can never contain exactly the phrase.
+ */
+function hardConfirmInstruction(phrase: string | undefined): string {
+  const how = phrase
+    ? `They confirm by holding the card or by saying "${phrase}". Ask in this shape: "That's a deploy to prod — say '${phrase}' to go ahead." Quote the phrase exactly, mid-sentence, followed by "to go ahead"; never end your reply with the phrase.`
+    : 'They confirm on the card.';
+  return `Nothing has been sent; it waits for the user's explicit confirmation. In one or two short sentences say what it is and briefly why it needs confirming. ${how} A plain "yes" does not confirm it.`;
 }
 
 /** Summarize this turn's proposals as the echo / hard-confirm split for the readback. */
@@ -770,6 +860,155 @@ function batchSplit(state: TurnToolState): {
       .filter((p) => p.tier === 'hard_confirm')
       .map((p) => p.sessionName),
   };
+}
+
+/** Held-back members' voice-confirm words, by session. */
+function batchPhrases(state: TurnToolState): Record<string, string> | undefined {
+  const held = state.proposals.filter((p) => p.tier === 'hard_confirm' && p.confirmPhrase);
+  if (!held.length) return undefined;
+  return Object.fromEntries(held.map((p) => [p.sessionName, p.confirmPhrase as string]));
+}
+
+async function proposeInterrupt(
+  args: Record<string, unknown>,
+  env: ToolEnv,
+  state: TurnToolState
+): Promise<ToolOutcome> {
+  if (state.proposals.length >= MAX_PROPOSALS_PER_TURN) {
+    return err(
+      `At most ${MAX_PROPOSALS_PER_TURN} actions per request. Ask the user to handle the rest one at a time.`
+    );
+  }
+  const r = await resolveFresh(env, String(args.session), state);
+  if (!r.ok) return err(r.error);
+  const s = r.session;
+  if (s.inactive) return err(`${s.sessionName} is closed; there is nothing to interrupt.`);
+  if (s.status === 'idle')
+    return err(
+      `${s.sessionName} is not running anything right now, so there is nothing to interrupt. Tell the user that.`
+    );
+  const key = sessionKey(s);
+  if (state.proposals.some((p) => p.sessionKey === key)) {
+    return err(
+      `You already proposed an action for ${s.sessionName} in this request. One action per session per request.`
+    );
+  }
+  const verdict = classifyInterrupt({ requestedConfirm: args.confirm === true });
+  // A second pending interrupt for the same session would be a double Ctrl+C (exits Claude).
+  for (const a of env.actions.list()) {
+    if (
+      a.status === 'pending' &&
+      a.kind === 'interrupt' &&
+      a.serverId === s.serverId &&
+      a.sessionId === s.sessionId
+    )
+      env.actions.cancel(a.id);
+  }
+  const action = env.actions.create({
+    tier: verdict.tier,
+    reasons: verdict.reasons,
+    kind: 'interrupt',
+    serverId: s.serverId,
+    sessionId: s.sessionId,
+    sessionName: s.sessionName,
+    payload: 'Ctrl+C',
+    readback: `Interrupting ${s.sessionName}`,
+    meta: { userText: state.userText, ruleIds: verdict.ruleIds },
+  });
+  state.proposals.push({
+    actionId: action.id,
+    sessionKey: key,
+    sessionName: s.sessionName,
+    tier: action.tier,
+    confirmPhrase: action.confirmPhrase,
+  });
+  const seconds = Math.round(env.echoDelayMs / 1000);
+  return ok({
+    action_id: action.id,
+    tier: action.tier,
+    readback: action.readback,
+    confirm_phrase: action.confirmPhrase,
+    instruction:
+      action.tier === 'echo'
+        ? `Say just "Interrupting ${s.sessionName}." It happens in about ${seconds} seconds unless the user cancels; it stops the current turn and keeps the session.`
+        : hardConfirmInstruction(action.confirmPhrase),
+  });
+}
+
+async function proposeSpawn(
+  args: Record<string, unknown>,
+  env: ToolEnv,
+  state: TurnToolState
+): Promise<ToolOutcome> {
+  if (!env.spawn) return err('Starting new sessions is not available on this server.');
+  if (state.proposals.length >= MAX_PROPOSALS_PER_TURN) {
+    return err(
+      `At most ${MAX_PROPOSALS_PER_TURN} actions per request. Ask the user to handle the rest one at a time.`
+    );
+  }
+  const where = resolveSpawnDir(
+    String(args.project_or_dir || ''),
+    env.spawn.roots,
+    env.spawn.userHome
+  );
+  if (!where.ok) return err(where.error);
+  const prompt = cleanFirstPrompt(args.first_prompt);
+  if (!prompt.ok) return err(prompt.error);
+  const key = `spawn:${where.dir}`;
+  if (state.proposals.some((p) => p.sessionKey === key))
+    return err(`You already proposed a new session in ${where.name} in this request.`);
+  const verdict = classifySpawn({
+    dir: where.dir,
+    userText: state.userText,
+    firstPrompt: prompt.prompt,
+  });
+  let already: SessionSnapshot[] = [];
+  try {
+    already = sessionsIn(where.dir, await env.listSessions());
+  } catch {
+    already = [];
+  }
+  if (already.length)
+    verdict.reasons.push(
+      `${already.map((x) => x.sessionName).join(', ')} already ${already.length === 1 ? 'runs' : 'run'} in this folder`
+    );
+  for (const a of env.actions.list()) {
+    if (a.status === 'pending' && a.kind === 'spawn_session' && a.sessionId === key)
+      env.actions.cancel(a.id);
+  }
+  const action = env.actions.create({
+    tier: 'hard_confirm',
+    reasons: verdict.reasons,
+    kind: 'spawn_session',
+    serverId: 'local',
+    sessionId: key,
+    sessionName: where.name,
+    payload: prompt.prompt,
+    readback: `New session in ${where.name}: "${clip(oneLine(prompt.prompt), 100)}"`,
+    meta: {
+      spawn: { dir: where.dir, firstPrompt: prompt.prompt, name: where.name },
+      userText: state.userText,
+      ruleIds: verdict.ruleIds,
+    },
+  });
+  state.proposals.push({
+    actionId: action.id,
+    sessionKey: key,
+    sessionName: where.name,
+    tier: action.tier,
+    confirmPhrase: action.confirmPhrase,
+  });
+  return ok({
+    action_id: action.id,
+    tier: action.tier,
+    folder: where.name,
+    readback: action.readback,
+    reasons: action.reasons,
+    confirm_phrase: action.confirmPhrase,
+    instruction:
+      `Nothing has started. ${hardConfirmInstruction(action.confirmPhrase)} ` +
+      'Once it starts, its first prompt is sent and you will report back what it says.',
+  });
 }
 
 async function proposeCush(
@@ -832,11 +1071,16 @@ async function proposeCush(
     action_id: action.id,
     tier: action.tier,
     readback: action.readback,
+    confirm_phrase: action.confirmPhrase,
     link: cmd.op === 'extend' || cmd.op === 'close' ? undefined : publicUrl(cmd.name),
     reasons: action.reasons.length ? action.reasons : undefined,
     instruction:
       action.tier === 'echo'
         ? `Say in one short sentence what will happen; it runs automatically in about ${seconds} seconds unless the user cancels.`
-        : 'Nothing has run. It needs the user to confirm on screen. In one or two short sentences say what it would make public and ask them to confirm on the card. Do not read the link out.',
+        : `Nothing has run. In one or two short sentences say what it would make public. ${
+            action.confirmPhrase
+              ? `They confirm on the card or by saying "${action.confirmPhrase}": say "say '${action.confirmPhrase}' to go ahead" (phrase mid-sentence, never last).`
+              : 'Ask them to confirm on the card.'
+          } Do not read the link out.`,
   });
 }

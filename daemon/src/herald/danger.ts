@@ -40,6 +40,8 @@ export interface ClassifyInput {
 export interface ClassifyResult {
   tier: HeraldActionTier;
   reasons: string[];
+  /** Rule ids that fired, most specific source first (drives the voice-confirm keyword). */
+  ruleIds?: string[];
 }
 
 interface Rule {
@@ -185,7 +187,9 @@ export function findSelectedOption(
 export function classifyAction(input: ClassifyInput): ClassifyResult {
   const reasons: string[] = [];
   const seen = new Set<string>();
-  const add = (reason: string) => {
+  const ruleIds: string[] = [];
+  const add = (reason: string, id?: string) => {
+    if (id && !ruleIds.includes(id)) ruleIds.push(id);
     if (!seen.has(reason)) {
       seen.add(reason);
       reasons.push(reason);
@@ -194,7 +198,7 @@ export function classifyAction(input: ClassifyInput): ClassifyResult {
 
   const requestText = `${norm(input.userText)}\n${norm(input.payload)}`;
   for (const id of scan(requestText, ACTION_RULES)) {
-    add(`your request involves: ${LABELS[id]}`);
+    add(`your request involves: ${LABELS[id]}`, id);
   }
 
   const selected = findSelectedOption(input.payload, input.pendingOptions);
@@ -206,19 +210,19 @@ export function classifyAction(input: ClassifyInput): ClassifyResult {
     .filter(Boolean)
     .join('\n');
   for (const id of scan(questionText, ACTION_RULES)) {
-    add(`the session's question involves: ${LABELS[id]}`);
+    add(`the session's question involves: ${LABELS[id]}`, id);
   }
 
   const targetText = `${norm(input.sessionName)}\n${norm(input.project)}`;
   for (const id of scan(targetText, TARGET_RULES)) {
-    add(`target session is sensitive: ${LABELS[id]}`);
+    add(`target session is sensitive: ${LABELS[id]}`, id);
   }
 
   if (input.requestedConfirm) {
     add('flagged for confirmation by the assistant');
   }
 
-  return { tier: reasons.length > 0 ? 'hard_confirm' : 'echo', reasons };
+  return { tier: reasons.length > 0 ? 'hard_confirm' : 'echo', reasons, ruleIds };
 }
 
 /** Tier ordering helper: returns the stricter of two tiers. */
@@ -286,4 +290,47 @@ export function classifyCushCommand(input: CushClassifyInput): ClassifyResult {
   reasons.push(...(input.warnings || []));
   if (input.requestedConfirm) reasons.push('flagged for confirmation by the assistant');
   return { tier: reasons.length > 0 ? 'hard_confirm' : 'echo', reasons };
+}
+
+// ---------------------------------------------------------------------------
+// Session control
+
+/**
+ * Interrupt (Ctrl+C) a running session: echo. Stopping a turn loses only the
+ * in-flight work, and the countdown leaves time to cancel. The model's confirm
+ * flag can raise it.
+ */
+export function classifyInterrupt(input: { requestedConfirm?: boolean }): ClassifyResult {
+  return input.requestedConfirm
+    ? {
+        tier: 'hard_confirm',
+        reasons: ['flagged for confirmation by the assistant'],
+        ruleIds: ['interrupt'],
+      }
+    : { tier: 'echo', reasons: [], ruleIds: [] };
+}
+
+/**
+ * Starting a new Claude Code session: ALWAYS hard_confirm. It runs unattended
+ * in bypass-permissions mode (the same path the app uses), so it can edit files
+ * and run commands without asking. Danger in the first prompt adds reasons.
+ */
+export function classifySpawn(input: {
+  dir: string;
+  userText: string;
+  firstPrompt: string;
+  requestedConfirm?: boolean;
+}): ClassifyResult {
+  const inner = classifyAction({
+    userText: input.userText,
+    payload: input.firstPrompt,
+    sessionName: '',
+    project: input.dir,
+  });
+  const reasons = [
+    `starts a new Claude Code session in ${input.dir} that runs with permissions bypassed (no approval prompts)`,
+    ...inner.reasons,
+  ];
+  if (input.requestedConfirm) reasons.push('flagged for confirmation by the assistant');
+  return { tier: 'hard_confirm', reasons, ruleIds: ['spawn', ...(inner.ruleIds || [])] };
 }

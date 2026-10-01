@@ -44,6 +44,15 @@ import { clip, firstSentence, formatAgo, oneLine, plainToolAction } from './text
 import { isLikelyEcho } from './voice/echo-match';
 import { sanitizePronunciations } from './pronunciations';
 import { recentVersions } from './voice/versions';
+import { AskReporter, VOICE_EXCHANGE_WINDOW_MS } from './asks';
+import { resolveSpawnDir, SpawnRunner, spawnRoots, type SessionSpawner } from './spawn';
+import type { ActionMeta, SpawnOutcome, SpawnRequest } from './actions';
+import {
+  checkVoiceConfirm,
+  rejectionMessage,
+  type SpokenEvidence,
+  type VoiceTranscriptEvidence,
+} from './voice-confirm';
 import { BudgetNotice, formatUsd, nextMonthStart, spokenUsd, usageAnswer, UsageMeter } from './usage';
 import {
   classifyFallback,
@@ -118,6 +127,30 @@ export interface HeraldServiceDeps {
   toolbox?: HeraldToolbox | null;
   /** Active device + connected devices (voice layer), folded into getState(). */
   devices?: () => HeraldDevicesSnapshot | null;
+  /** Starts Claude Code sessions (the app's own path). Absent = no propose_spawn_session. */
+  spawner?: SessionSpawner;
+  /** Voice-confirm evidence: the daemon's own transcript + Herald's speech for a client. */
+  voiceEvidence?: (
+    clientId: string,
+    streamId?: string | null
+  ) => {
+    transcript: VoiceTranscriptEvidence | null;
+    spoken: SpokenEvidence[];
+    speechEndAt: number;
+  } | null;
+  /** Mark a transcript used (it confirms one thing only). */
+  consumeTranscript?: (clientId: string, streamId: string) => void;
+  /** The active device's client id (voice confirm only from it). */
+  activeClientId?: () => string | null;
+}
+
+/** herald_confirm extras (voice confirmation). */
+export interface HeraldConfirmOptions {
+  method?: unknown;
+  phrase?: unknown;
+  streamId?: unknown;
+  /** The requesting connection. */
+  clientId?: string;
 }
 
 const SERVER_ORIGIN: AuditOrigin = {
@@ -177,6 +210,16 @@ export class HeraldService {
   /** The budget's "spent" announcement was made for this outage of the budget. */
   private budgetAnnounced = false;
   private statusSinceMap = new Map<string, { status: string; since: number | null }>();
+  /** Ask-and-report: questions sent to sessions, answered back when they reply. */
+  private asks: AskReporter;
+  private spawnRunner: SpawnRunner | null = null;
+  private spawnEnv: { roots: string[]; userHome: string } | undefined;
+  private voiceDeps: Pick<
+    HeraldServiceDeps,
+    'voiceEvidence' | 'consumeTranscript' | 'activeClientId'
+  >;
+  /** Last time the user spoke to Herald (answers are spoken during a voice exchange). */
+  private lastVoiceAt = 0;
 
   constructor(deps: HeraldServiceDeps) {
     this.cfg = deps.config;
@@ -203,10 +246,62 @@ export class HeraldService {
         this.emit({ kind: 'action', action: a });
         this.persist();
       },
-      onSent: (a, note) => this.onActionSent(a, note),
+      onSent: (a, note, meta, spawned) => this.onActionSent(a, note, meta, spawned),
       audit: (event, action, trigger, origin) => this.auditAction(event, action, trigger, origin),
       runCush: this.toolbox ? (cmd, action) => this.runCush(cmd, action) : undefined,
+      runSpawn: deps.spawner ? (req, action) => this.runSpawn(req, action) : undefined,
     });
+    this.voiceDeps = {
+      voiceEvidence: deps.voiceEvidence,
+      consumeTranscript: deps.consumeTranscript,
+      activeClientId: deps.activeClientId,
+    };
+    this.asks = new AskReporter({
+      getSource: (id) => this.getSource(id),
+      provider: () => this.provider,
+      now: this.now,
+      voiceActive: () => this.now() - this.lastVoiceAt < VOICE_EXCHANGE_WINDOW_MS,
+      busy: () => this.busy,
+      post: (p) =>
+        this.postMessage('herald', p.text, {
+          sessionRefs: [p.ref],
+          ...(p.quiet ? { quiet: true } : {}),
+        }),
+      addAnswer: (a) => {
+        const item = this.inbox.addAnswer(a);
+        // Spoken in a live voice exchange: already heard (no tone, not re-briefed).
+        if (a.heard) this.inbox.markHeard([item.id]);
+        this.emit({ kind: 'inbox', inbox: this.inbox.list() });
+      },
+      persist: () => this.persist(),
+      log: (l) => console.log(l),
+    });
+    if (deps.spawner) {
+      const paths = resolveKnowledgePaths(deps.codeHome);
+      this.spawnEnv = { roots: spawnRoots(paths.projectsRoot), userHome: paths.userHome };
+      this.spawnRunner = new SpawnRunner({
+        spawner: deps.spawner,
+        sendPrompt: async (id, text) => {
+          const src = this.getSource('local');
+          return src ? src.sendText(id, text, `herald-spawn-${id}`) : false;
+        },
+        // Later news (ready / closed): spoken only during a voice exchange.
+        post: (text, ref) =>
+          this.postMessage('herald', text, {
+            sessionRefs: [ref],
+            ...(this.now() - this.lastVoiceAt < VOICE_EXCHANGE_WINDOW_MS ? {} : { quiet: true }),
+          }),
+        onPromptSent: (info) =>
+          this.openAsk({
+            ...info,
+            serverId: 'local',
+            actionId: `spawn-${info.sessionId}-${info.sentAt}`,
+            userText: info.prompt,
+          }),
+        now: this.now,
+        log: (l) => console.log(l),
+      });
+    }
   }
 
   get enabled(): boolean {
@@ -227,6 +322,8 @@ export class HeraldService {
     this.messages = persisted.messages.slice(-MAX_PERSISTED_MESSAGES);
     this.inbox = new InboxTracker(persisted.heard);
     this.actions.loadPersisted(persisted.actions);
+    this.asks.load(persisted.asks ?? []);
+    this.inbox.restoreAnswers(persisted.answers ?? [], this.now());
     this.toolbox?.loadOpened(persisted.cushOpened);
     this.verbosity = persisted.verbosity ?? 'auto';
     this.pronunciations = persisted.pronunciations ?? [];
@@ -266,6 +363,7 @@ export class HeraldService {
     this.activityTimer = null;
     this.turnAbort?.abort();
     this.actions.dispose();
+    this.spawnRunner?.dispose();
     this.store.flushSyncOnShutdown();
     this.store.dispose();
   }
@@ -351,6 +449,8 @@ export class HeraldService {
       cushOpened: this.toolbox?.openedNames() ?? [],
       ...(this.verbosity !== 'auto' ? { verbosity: this.verbosity } : {}),
       ...(this.pronunciations.length ? { pronunciations: this.pronunciations } : {}),
+      asks: this.asks.list(),
+      answers: this.inbox.answers(),
       usage: this.usage.toPersisted(),
     };
   }
@@ -609,9 +709,11 @@ export class HeraldService {
 
   private applyInbox(snaps: SessionSnapshot[]): void {
     if (this.disposed) return;
-    if (this.inbox.update(snaps, this.now())) {
+    // A session the user asked something: its answer replaces the generic note.
+    if (this.inbox.update(snaps, this.now(), (key) => this.asks.hasOpen(key))) {
       this.emit({ kind: 'inbox', inbox: this.inbox.list() });
     }
+    this.asks.onSnapshots(snaps);
   }
 
   poll(): Promise<void> {
@@ -675,6 +777,8 @@ export class HeraldService {
     if (this.busy === busy) return;
     this.busy = busy;
     this.emit({ kind: 'busy', busy });
+    // Spoken ask answers held back so they would not cut this reply off.
+    if (!busy) this.asks.flush();
   }
 
   /**
@@ -721,6 +825,7 @@ export class HeraldService {
       );
 
     const mode: HeraldInputMode = opts.mode === 'voice' ? 'voice' : 'text';
+    if (mode === 'voice') this.lastVoiceAt = this.now();
     const intent: HeraldIntent | undefined =
       opts.intent === 'shorter' || opts.intent === 'more' || opts.intent === 'brief'
         ? opts.intent
@@ -823,6 +928,7 @@ export class HeraldService {
       statusSince: (s, id) => this.statusSince(s, id),
       echoDelayMs: this.cfg.echoDelayMs,
       toolbox: this.toolbox ?? undefined,
+      spawn: this.spawnEnv,
       setVerbosity: (level) => {
         this.setVerbosity(level);
         verbositySet = level;
@@ -978,16 +1084,23 @@ export class HeraldService {
       .filter((i) => !i.heard)
       .filter(
         (i) =>
+          i.answer ||
           !(i.priority === 'finished' && live.get(`${i.serverId}:${i.sessionId}`) === 'working')
       )
-      .sort((a, b) => INBOX_RANK[a.priority] - INBOX_RANK[b.priority] || b.createdAt - a.createdAt);
+      // Answers to the user's own questions first, then blocked, finished.
+      .sort(
+        (a, b) =>
+          Number(!!b.answer) - Number(!!a.answer) ||
+          INBOX_RANK[a.priority] - INBOX_RANK[b.priority] ||
+          b.createdAt - a.createdAt
+      );
   }
 
   private briefingLines(items: HeraldInboxItem[]): string[] {
     const now = this.now();
     return items.map(
       (i) =>
-        `[${i.priority}] ${clip(oneLine(i.headline), 200)} (${i.sessionName}, ${formatAgo(now - i.createdAt)} ago)`
+        `[${i.answer ? 'answer' : i.priority}] ${clip(oneLine(i.headline), i.answer ? 320 : 200)} (${i.sessionName}, ${formatAgo(now - i.createdAt)} ago)`
     );
   }
 
@@ -1136,7 +1249,13 @@ export class HeraldService {
     }
     if (pending.length)
       parts.push(
-        `Pending actions awaiting send/confirm: ${pending.map((a) => a.readback).join('; ')}`
+        `Pending actions awaiting send/confirm: ${pending
+          .map((a) =>
+            a.tier === 'hard_confirm' && a.confirmPhrase
+              ? `${a.readback} (needs confirmation: the card, or the user saying "${a.confirmPhrase}"; a plain "yes" does not confirm it)`
+              : a.readback
+          )
+          .join('; ')}`
       );
     parts.push('[End snapshot]');
     return parts.join('\n');
@@ -1156,15 +1275,124 @@ export class HeraldService {
 
   // ---------------------------------------------------------------- actions
 
-  async confirm(actionId: unknown, decision: unknown, origin: AuditOrigin): Promise<HeraldAction> {
+  async confirm(
+    actionId: unknown,
+    decision: unknown,
+    origin: AuditOrigin,
+    opts: HeraldConfirmOptions = {}
+  ): Promise<HeraldAction> {
     if (typeof actionId !== 'string' || !actionId)
       throw new HeraldRequestError('actionId is required');
     if (decision !== 'confirm' && decision !== 'cancel')
       throw new HeraldRequestError('decision must be "confirm" or "cancel"');
     if (!this.actions.get(actionId)) throw new HeraldRequestError('Unknown action');
+    if (decision === 'confirm' && opts.method === 'voice') return this.confirmByVoice(actionId, origin, opts);
     return decision === 'confirm'
       ? this.actions.confirm(actionId, origin)
       : this.actions.cancel(actionId, origin);
+  }
+
+  /**
+   * "confirm deploy", spoken. Verified against the daemon's OWN transcript of
+   * the requesting device's mic, never the client's word alone; rejected
+   * attempts throw a HeraldRequestError whose message Herald can say.
+   */
+  private async confirmByVoice(
+    actionId: string,
+    origin: AuditOrigin,
+    opts: HeraldConfirmOptions
+  ): Promise<HeraldAction> {
+    const clientId = opts.clientId || origin.clientId;
+    const streamId = typeof opts.streamId === 'string' && opts.streamId ? opts.streamId : null;
+    const claimed = typeof opts.phrase === 'string' ? opts.phrase.slice(0, 200) : '';
+    let usedStream: string | null = null;
+    const res = await this.actions.confirmByVoice(
+      actionId,
+      (a) => {
+        const active = this.voiceDeps.activeClientId?.() ?? null;
+        const ev = this.voiceDeps.voiceEvidence?.(clientId, streamId) ?? null;
+        usedStream = ev?.transcript?.streamId ?? null;
+        return checkVoiceConfirm({
+          now: this.now(),
+          phrase: a.confirmPhrase || '',
+          claimed,
+          isActiveDevice: !!active && active === clientId,
+          transcript: ev?.transcript ?? null,
+          spoken: ev?.spoken ?? [],
+          speechEndAt: ev?.speechEndAt ?? 0,
+        });
+      },
+      origin
+    );
+    if (usedStream) this.voiceDeps.consumeTranscript?.(clientId, usedStream);
+    if (res.ok) return res.action;
+    console.log(
+      `Herald: voice confirm rejected for ${res.action.sessionName} (${res.rejection}); ${res.action.voiceAttemptsLeft ?? 0} tries left`
+    );
+    throw new HeraldRequestError(
+      rejectionMessage(res.rejection, res.action.confirmPhrase || '', res.action.voiceAttemptsLeft ?? 0)
+    );
+  }
+
+  private async runSpawn(req: SpawnRequest, a: HeraldAction): Promise<SpawnOutcome> {
+    const runner = this.spawnRunner;
+    if (!runner) return { ok: false, message: '', error: 'Starting sessions is not available here.' };
+    // Re-validate against the allowed roots right before acting.
+    const where = this.spawnEnv
+      ? resolveSpawnDir(req.dir, this.spawnEnv.roots, this.spawnEnv.userHome)
+      : null;
+    if (!where || !where.ok || where.dir !== req.dir)
+      return { ok: false, message: '', error: `${req.name} is no longer an allowed folder; nothing was started.` };
+    const started = this.now();
+    const out = await runner.run(req);
+    try {
+      this.auditFn({
+        ts: this.now(),
+        origin: SERVER_ORIGIN,
+        action: 'herald_spawn_result',
+        payload: { actionId: a.id, dir: req.dir, promptLength: req.firstPrompt.length },
+        result: {
+          ok: out.ok,
+          ...(out.sessionId ? { sessionId: out.sessionId } : {}),
+          ...(out.error ? { error: out.error } : {}),
+        },
+        durationMs: Math.max(0, this.now() - started),
+      });
+    } catch (err) {
+      console.error('Herald: audit append failed:', err);
+    }
+    return out;
+  }
+
+  /** Remember a send that expects a reply (ask-and-report). */
+  private openAsk(info: {
+    actionId: string;
+    serverId: string;
+    sessionId: string;
+    sessionName: string;
+    userText: string;
+    prompt: string;
+    sentAt: number;
+  }): void {
+    const snap = this.lastSnapshots.find(
+      (s) => s.serverId === info.serverId && s.sessionId === info.sessionId
+    );
+    const block = snap?.pendingChoice
+      ? `c:${snap.pendingChoice.signature}`
+      : snap?.pendingApproval
+        ? `a:${snap.pendingApproval.toolUseId || snap.pendingApproval.tool}`
+        : null;
+    this.asks.open({
+      actionId: info.actionId,
+      serverId: info.serverId,
+      sessionId: info.sessionId,
+      sessionName: info.sessionName,
+      userQuestion: info.userText,
+      sentText: info.prompt,
+      sentAt: info.sentAt,
+      baselineTurnKey: snap?.lastTurnKey ?? null,
+      baselineBlockKey: block,
+    });
   }
 
   private async runCush(cmd: CushCommand, a: HeraldAction) {
@@ -1192,13 +1420,57 @@ export class HeraldService {
     return out;
   }
 
-  private onActionSent(a: HeraldAction, note?: string): void {
+  private onActionSent(
+    a: HeraldAction,
+    note?: string,
+    meta?: ActionMeta,
+    spawned?: SpawnOutcome
+  ): void {
     if (a.kind === 'cush_command') {
       this.postMessage('herald', note || `Done: ${a.readback}.`, { actionIds: [a.id] });
       return;
     }
+    if (a.kind === 'spawn_session') {
+      this.postMessage('herald', note || `Started a session in ${a.sessionName}.`, {
+        actionIds: [a.id],
+        ...(spawned?.sessionId
+          ? {
+              sessionRefs: [
+                {
+                  serverId: 'local',
+                  sessionId: spawned.sessionId,
+                  sessionName: spawned.sessionName || a.sessionName,
+                },
+              ],
+            }
+          : {}),
+      });
+      void this.poll();
+      return;
+    }
+    const ref = { serverId: a.serverId, sessionId: a.sessionId, sessionName: a.sessionName };
+    if (a.kind === 'interrupt') {
+      this.postMessage('herald', `Interrupted ${a.sessionName}.`, {
+        sessionRefs: [ref],
+        actionIds: [a.id],
+      });
+      void this.poll();
+      return;
+    }
+    // Free text is a question or a request: report back what the session says.
+    if (a.kind === 'send_input') {
+      this.openAsk({
+        actionId: a.id,
+        serverId: a.serverId,
+        sessionId: a.sessionId,
+        sessionName: a.sessionName,
+        userText: meta?.userText || a.payload,
+        prompt: a.payload,
+        sentAt: a.resolvedAt ?? this.now(),
+      });
+    }
     this.postMessage('herald', `Sent to ${a.sessionName}.`, {
-      sessionRefs: [{ serverId: a.serverId, sessionId: a.sessionId, sessionName: a.sessionName }],
+      sessionRefs: [ref],
       actionIds: [a.id],
     });
     void this.poll();
@@ -1220,6 +1492,12 @@ export class HeraldService {
           payload: clip(a.payload, 500),
           reasons: a.reasons,
           trigger,
+          ...(event === 'confirmed' || event === 'voice_rejected'
+            ? { method: trigger === 'voice' ? 'voice' : trigger === 'confirm' ? 'tap' : trigger }
+            : {}),
+          ...(a.confirmPhrase && trigger === 'voice'
+            ? { confirmPhrase: a.confirmPhrase, voiceAttemptsLeft: a.voiceAttemptsLeft ?? 0 }
+            : {}),
         },
         result: {
           ok: event !== 'failed',

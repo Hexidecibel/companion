@@ -6,6 +6,8 @@ export interface HeraldInboxItem {
   priority: InboxPriority;
   headline: string;
   createdAt: number; heard: boolean;
+  /** Answer to something the user asked a session ("Out4 answered your question: ..."). */
+  answer?: boolean;
 }
 /** voice = push-to-talk / talk-over / hands-free; text = typed. Voice replies are kept shorter. */
 export type HeraldInputMode = 'voice' | 'text';
@@ -24,11 +26,13 @@ export interface HeraldMessage {
   sessionRefs?: HeraldSessionRef[];
   actionIds?: string[];
   streaming?: boolean;
+  /** Announcement posted on Herald's own initiative: shown + toned, never spoken unasked. */
+  quiet?: boolean;
   intent?: HeraldIntent;  // user lines sent as a voice command (rendered as a chip)
 }
 export interface HeraldAction {
   id: string; tier: HeraldActionTier;
-  kind: 'send_input' | 'answer_choice' | 'cush_command';  // cush_command: payload is the command line, no session
+  kind: 'send_input' | 'answer_choice' | 'cush_command' | 'interrupt' | 'spawn_session';  // cush_command: payload is the command line, no session
   serverId: string; sessionId: string; sessionName: string;
   payload: string;
   readback: string;
@@ -36,6 +40,8 @@ export interface HeraldAction {
   status: 'pending' | 'sent' | 'cancelled' | 'failed' | 'expired';
   autoSendAt?: number;   // echo tier: server auto-sends at this epoch ms
   error?: string; createdAt: number; resolvedAt?: number;
+  confirmPhrase?: string;      // hard_confirm: the words that confirm it by voice ("confirm deploy")
+  voiceAttemptsLeft?: number;  // hard_confirm: voice tries left (0 = on-screen only)
 }
 export interface HeraldState {
   displayName: string;
@@ -131,6 +137,19 @@ export type HeraldEvent =
   /** The active device or the device list changed (broadcast). */
   | { kind: 'devices'; activeDevice: HeraldActiveDevice | null; devices: HeraldDeviceInfo[] }
   | { kind: 'error'; error: string };
+/**
+ * herald_confirm payload; answered with the HeraldAction. `method: 'voice'`
+ * confirms a hard_confirm action by its spoken phrase: the daemon checks its
+ * own transcript of this device's mic (`streamId`, else the latest), timing
+ * against Herald's speech, the active device and the attempt limit.
+ */
+export interface HeraldConfirmRequest {
+  actionId: string;
+  decision: 'confirm' | 'cancel';
+  method?: 'tap' | 'voice';
+  phrase?: string;
+  streamId?: string;
+}
 /** herald_set_verbosity payload; answered with { verbosity }. */
 export interface HeraldSetVerbosityRequest {
   verbosity: HeraldVerbosity;

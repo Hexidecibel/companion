@@ -33,6 +33,11 @@ import {
 } from './client';
 import { stripWakePhrase } from './wake-phrase';
 import { normalizeSpokenVersions } from './versions';
+import type { SpokenEvidence, VoiceTranscriptEvidence } from '../voice-confirm';
+
+/** Voice-confirm evidence is kept this long, at most this many transcripts per client. */
+const EVIDENCE_TTL_MS = 60_000;
+const EVIDENCE_MAX = 6;
 
 export class VoiceError extends Error {
   constructor(
@@ -105,6 +110,7 @@ interface VoiceStream {
   id: string;
   clientId: string;
   purpose: HeraldVoiceStreamPurpose;
+  startedAt: number;
   chunks: Buffer[];
   bytes: number;
   lastAt: number;
@@ -145,6 +151,8 @@ export class HeraldVoiceService {
   /** A pinned device that disconnected: its pin comes back if it reconnects in time. */
   private orphanPin: { deviceKey: string; until: number } | null = null;
   private lastDevices = '';
+  private transcripts = new Map<string, VoiceTranscriptEvidence[]>();
+  private speech = new Map<string, { entries: SpokenEvidence[]; endAt: number }>();
   private sweeper: ReturnType<typeof setInterval> | null = null;
   private readonly limits: typeof VOICE_LIMITS;
   private readonly now: () => number;
@@ -271,6 +279,7 @@ export class HeraldVoiceService {
             job.req.speed,
             ctrl.signal
           );
+          this.recordSpeech(clientId, job.req.text, a.audioMs);
           job.resolve({
             audio: a.pcm.toString('base64'),
             sampleRate: a.sampleRate,
@@ -292,6 +301,7 @@ export class HeraldVoiceService {
 
   /** Barge-in: drop this client's queued and in-flight synthesis. */
   cancelTts(clientId: string): number {
+    this.speechStopped(clientId);
     const ct = this.tts.get(clientId);
     if (!ct) return 0;
     const dropped = ct.queue.splice(0);
@@ -327,6 +337,7 @@ export class HeraldVoiceService {
       id,
       clientId,
       purpose: p.purpose,
+      startedAt: this.now(),
       chunks: [],
       bytes: 0,
       lastAt: this.now(),
@@ -434,6 +445,15 @@ export class HeraldVoiceService {
       const heard = purpose === 'wake' ? stripWakePhrase(r.text) : r.text.trim();
       // "two or seven" -> "2.0.7" when that version is in recent session text.
       const text = normalizeSpokenVersions(heard, hints?.versions ?? []);
+      const endedAt = this.now();
+      this.recordTranscript(clientId, {
+        streamId: s.id,
+        text,
+        // Earliest audio it can hold: pre-roll can predate the stream start.
+        captureStartAt: Math.min(s.startedAt, endedAt - audioMs),
+        endedAt,
+        consumed: false,
+      });
       if (this.opts.debugTranscripts) {
         console.log(
           `Herald voice: stt ${audioMs}ms audio -> ${r.sttMs}ms: ${JSON.stringify(text)}`
@@ -458,6 +478,70 @@ export class HeraldVoiceService {
     s.wakePending = [];
     this.streams.delete(s.id);
     if (s.purpose === 'wake') void this.opts.client.dropWake(s.id);
+  }
+
+  // ---- voice-confirm evidence --------------------------------------------
+  // What this client's mic was transcribed as (by the daemon itself) and what
+  // Herald said to it, with estimated playback times. Text only, in memory,
+  // short-lived; used to verify a spoken "confirm <keyword>".
+
+  private recordTranscript(clientId: string, rec: VoiceTranscriptEvidence): void {
+    const list = (this.transcripts.get(clientId) || []).filter(
+      (t) => rec.endedAt - t.endedAt < EVIDENCE_TTL_MS
+    );
+    list.push(rec);
+    this.transcripts.set(clientId, list.slice(-EVIDENCE_MAX));
+  }
+
+  /**
+   * Synthesized audio is played in order: this sentence starts when the previous
+   * one ends (or now) and lasts its audio length. An estimate of when the user
+   * actually HEARS it, erring late.
+   */
+  private recordSpeech(clientId: string, text: string, audioMs: number): void {
+    const now = this.now();
+    const prev = this.speech.get(clientId);
+    const entries = (prev?.entries || []).filter((e) => now - e.endAt < EVIDENCE_TTL_MS);
+    const startAt = Math.max(now, prev?.endAt ?? 0);
+    const endAt = startAt + Math.max(0, audioMs);
+    entries.push({ text, startAt, endAt });
+    this.speech.set(clientId, { entries: entries.slice(-EVIDENCE_MAX * 4), endAt });
+  }
+
+  /** Playback was cut (barge-in / stop): nothing more is heard after now. */
+  private speechStopped(clientId: string): void {
+    const sp = this.speech.get(clientId);
+    if (!sp) return;
+    const now = this.now();
+    if (sp.endAt > now) sp.endAt = now;
+    for (const e of sp.entries) if (e.endAt > now) e.endAt = Math.max(e.startAt, now);
+    sp.entries = sp.entries.filter((e) => e.startAt <= now);
+  }
+
+  /** Transcript (by stream id, else the newest) + Herald's recent speech for one client. */
+  voiceEvidence(
+    clientId: string,
+    streamId?: string | null
+  ): {
+    transcript: VoiceTranscriptEvidence | null;
+    spoken: SpokenEvidence[];
+    speechEndAt: number;
+  } {
+    const list = this.transcripts.get(clientId) || [];
+    const transcript =
+      (streamId ? list.find((t) => t.streamId === streamId) : list[list.length - 1]) || null;
+    const sp = this.speech.get(clientId);
+    return {
+      transcript: transcript ? { ...transcript } : null,
+      spoken: (sp?.entries || []).map((e) => ({ ...e })),
+      speechEndAt: sp?.endAt ?? 0,
+    };
+  }
+
+  /** A transcript confirms at most one thing. */
+  consumeTranscript(clientId: string, streamId: string): void {
+    const t = (this.transcripts.get(clientId) || []).find((x) => x.streamId === streamId);
+    if (t) t.consumed = true;
   }
 
   sweep(): void {
@@ -650,6 +734,8 @@ export class HeraldVoiceService {
   /** Client disconnected: drop everything it owned. A pin waits briefly for a reconnect. */
   clientGone(clientId: string): void {
     this.cancelTts(clientId);
+    this.transcripts.delete(clientId);
+    this.speech.delete(clientId);
     for (const s of [...this.streams.values()]) if (s.clientId === clientId) this.closeStream(s);
     if (this.handsFreeOwner === clientId) this.handsFreeOwner = null;
     if (this.claim?.clientId === clientId) {
