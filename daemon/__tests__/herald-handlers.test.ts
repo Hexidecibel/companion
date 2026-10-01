@@ -27,7 +27,12 @@ describe('herald WS handlers', () => {
     const { h, sent, client } = setup({ send });
     await h.herald_send(client, { text: 'hi' }, 'a');
     await h.herald_send(client, { text: '' }, 'b');
-    expect(send).toHaveBeenCalledWith('hi', { mode: undefined, intent: undefined });
+    expect(send).toHaveBeenCalledWith('hi', {
+      mode: undefined,
+      intent: undefined,
+      clientId: 'c1',
+      gesture: undefined,
+    });
     expect(sent[0]).toEqual({ type: 'herald_send', success: true, payload: { messageId: 'm1' }, requestId: 'a' });
     expect(sent[1]).toEqual({ type: 'herald_send', success: false, error: 'Message is empty.', requestId: 'b' });
   });
@@ -39,8 +44,13 @@ describe('herald WS handlers', () => {
       return { verbosity: v };
     });
     const { h, sent, client } = setup({ send, setVerbosity });
-    await h.herald_send(client, { text: 'Shorter.', mode: 'voice', intent: 'shorter' }, 'a');
-    expect(send).toHaveBeenCalledWith('Shorter.', { mode: 'voice', intent: 'shorter' });
+    await h.herald_send(client, { text: 'Shorter.', mode: 'voice', intent: 'shorter', gesture: true }, 'a');
+    expect(send).toHaveBeenCalledWith('Shorter.', {
+      mode: 'voice',
+      intent: 'shorter',
+      clientId: 'c1',
+      gesture: true,
+    });
     await h.herald_set_verbosity(client, { verbosity: 'brief' }, 'b');
     await h.herald_set_verbosity(client, { verbosity: 'loud' }, 'c');
     expect(sent[1]).toEqual({ type: 'herald_set_verbosity', success: true, payload: { verbosity: 'brief' }, requestId: 'b' });

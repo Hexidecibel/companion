@@ -151,9 +151,19 @@ export function registerHeraldHandlers(ctx: HandlerContext): Record<string, Mess
     },
 
     herald_send(client, payload, requestId) {
-      const p = (payload || {}) as { text?: unknown; mode?: unknown; intent?: unknown };
+      const p = (payload || {}) as {
+        text?: unknown;
+        mode?: unknown;
+        intent?: unknown;
+        gesture?: unknown;
+      };
       return reply(client, 'herald_send', requestId, () =>
-        ctx.herald!.send(p.text, { mode: p.mode, intent: p.intent })
+        ctx.herald!.send(p.text, {
+          mode: p.mode,
+          intent: p.intent,
+          clientId: client.id,
+          gesture: p.gesture,
+        })
       );
     },
 
@@ -293,6 +303,20 @@ export function registerHeraldHandlers(ctx: HandlerContext): Record<string, Mess
     herald_claim_device(client, payload, requestId) {
       return voiceReply(client, 'herald_claim_device', requestId, (v) =>
         v.claimDevice(client.id, payload)
+      );
+    },
+
+    /** This device started (or still is: heartbeat) / stopped playing Herald's voice. */
+    herald_speaking(client, payload, requestId) {
+      return voiceReply(client, 'herald_speaking', requestId, (v) =>
+        v.reportSpeaking(client.id, payload)
+      );
+    },
+
+    /** Stop Herald on whichever device is speaking (a stop button / "stop" elsewhere). */
+    herald_stop_speaking(client, payload, requestId) {
+      return voiceReply(client, 'herald_stop_speaking', requestId, (v) =>
+        v.stopSpeaking(client.id, payload)
       );
     },
 

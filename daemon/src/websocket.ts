@@ -349,6 +349,7 @@ export class WebSocketHandler {
           this.heraldVoice?.consumeTranscript(clientId, streamId),
         activeClientId: () => this.heraldVoice?.announcerClient ?? null,
         deliverToClient: (clientId, event) => this.sendToClient(clientId, 'herald_event', event),
+        speakingSuppresses: (clientId) => this.heraldVoice?.speakingSuppresses(clientId) ?? false,
       });
     } catch (err) {
       console.error('Herald: failed to initialize:', err);
@@ -369,6 +370,8 @@ export class WebSocketHandler {
       debugTranscripts: !!process.env.HERALD_DEBUG_TOOLS && process.env.HERALD_DEBUG_TOOLS !== '0',
       sttHints: () => this.herald?.sttHints() ?? null,
       onDevices: (snap) => this.broadcast('herald_event', { kind: 'devices', ...snap }),
+      onSpeaking: (speaking) => this.broadcast('herald_event', { kind: 'speaking', speaking }),
+      deliverEvent: (clientId, event) => this.sendToClient(clientId, 'herald_event', event),
     });
     voice.start();
     console.log(`Herald voice: using voice service at ${url}`);
@@ -511,8 +514,9 @@ export class WebSocketHandler {
 
   private handleMessage(client: AuthenticatedClient, message: WebSocketMessage): void {
     const { type, token, payload, requestId } = message;
-    // Audio chunks arrive ~10/s while someone talks: never log them.
-    if (type !== 'ping' && type !== 'herald_voice_audio') {
+    // Audio chunks arrive ~10/s while someone talks, speaking heartbeats ~1/s
+    // while Herald plays: never log them.
+    if (type !== 'ping' && type !== 'herald_voice_audio' && type !== 'herald_speaking') {
       console.log(`WebSocket: >> recv ${type} (${requestId || 'no-id'}) from ${client.id}`);
       updateLastActivity();
     }

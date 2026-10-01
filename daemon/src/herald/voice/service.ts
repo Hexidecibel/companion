@@ -15,6 +15,9 @@
 import type {
   HeraldActiveDevice,
   HeraldDeviceInfo,
+  HeraldEvent,
+  HeraldSpeakingSignal,
+  HeraldStopSpeakingResult,
   HeraldDevicesSnapshot,
   HeraldPresenceResult,
   HeraldSttResult,
@@ -34,6 +37,7 @@ import {
 import { stripWakePhrase } from './wake-phrase';
 import { normalizeSpokenVersions } from './versions';
 import type { SpokenEvidence, VoiceTranscriptEvidence } from '../voice-confirm';
+import { SpeakingError, SpeakingTracker, type SPEAKING_LIMITS } from './speaking';
 
 /** Voice-confirm evidence is kept this long, at most this many transcripts per client. */
 const EVIDENCE_TTL_MS = 60_000;
@@ -131,8 +135,13 @@ export interface HeraldVoiceServiceOptions {
   sttHints?: () => SttHints | null;
   /** The active device or the device list changed (broadcast it). */
   onDevices?: (snapshot: HeraldDevicesSnapshot) => void;
+  /** A device started / stopped speaking Herald's voice (broadcast as a `speaking` herald_event). */
+  onSpeaking?: (signal: HeraldSpeakingSignal) => void;
+  /** Push a herald_event to ONE client (remote stop); false if it is gone. */
+  deliverEvent?: (clientId: string, event: HeraldEvent) => boolean;
   now?: () => number;
   limits?: Partial<typeof VOICE_LIMITS>;
+  speakingLimits?: Partial<typeof SPEAKING_LIMITS>;
 }
 
 export class HeraldVoiceService {
@@ -156,10 +165,21 @@ export class HeraldVoiceService {
   private sweeper: ReturnType<typeof setInterval> | null = null;
   private readonly limits: typeof VOICE_LIMITS;
   private readonly now: () => number;
+  /** Which device is playing Herald's voice right now (fleet-wide echo guard). */
+  readonly speaking: SpeakingTracker;
 
   constructor(private opts: HeraldVoiceServiceOptions) {
     this.limits = { ...VOICE_LIMITS, ...(opts.limits || {}) };
     this.now = opts.now || Date.now;
+    this.speaking = new SpeakingTracker({
+      broadcast: (signal) => this.opts.onSpeaking?.(signal),
+      labelOf: (id) => this.presence.get(id)?.label ?? DEFAULT_LABEL,
+      now: this.now,
+      limits: opts.speakingLimits,
+      debug: (line) => {
+        if (this.opts.debugTranscripts) console.log(line);
+      },
+    });
   }
 
   start(): void {
@@ -545,6 +565,7 @@ export class HeraldVoiceService {
   }
 
   sweep(): void {
+    this.speaking.sweep();
     const now = this.now();
     for (const s of [...this.streams.values()]) {
       if (now - s.lastAt > this.limits.streamIdleMs) this.failStream(s, 'stream idle');
@@ -554,6 +575,50 @@ export class HeraldVoiceService {
   /** Test/diagnostic: open stream count. */
   get openStreams(): number {
     return this.streams.size;
+  }
+
+  // ---- fleet speaking signal ----------------------------------------------
+
+  /** herald_speaking: this client started (or still is: heartbeat) / stopped playing Herald. */
+  reportSpeaking(clientId: string, raw: unknown): { ok: true } {
+    try {
+      return this.speaking.report(clientId, raw);
+    } catch (err) {
+      if (err instanceof SpeakingError) throw new VoiceError(err.message, 'bad_request');
+      throw err;
+    }
+  }
+
+  /**
+   * herald_stop_speaking: stop the device that is speaking (or `deviceId`, if
+   * it is the one speaking) from any device: a stop button or a "stop" heard
+   * elsewhere. Its synthesis queue is dropped too.
+   */
+  stopSpeaking(requesterId: string, raw: unknown): HeraldStopSpeakingResult {
+    const p = (raw || {}) as { deviceId?: unknown };
+    const want = typeof p.deviceId === 'string' && p.deviceId ? p.deviceId : null;
+    const speaker = this.speaking.speakerId;
+    const target = want ?? speaker;
+    if (!target || (want && want !== speaker && !this.presence.has(want)))
+      return { stopped: false };
+    const utteranceId = target === speaker ? this.speaking.utteranceId : null;
+    const delivered =
+      this.opts.deliverEvent?.(target, {
+        kind: 'stop_speaking',
+        utteranceId,
+        by: this.presence.get(requesterId)?.label ?? null,
+      }) ?? false;
+    this.cancelTts(target);
+    this.speaking.stopped(target);
+    return delivered ? { stopped: true, deviceId: target } : { stopped: false };
+  }
+
+  /**
+   * This client is inside ANOTHER device's speaking window: a hands-off voice
+   * send from it is probably Herald's own voice (the voice-send backstop).
+   */
+  speakingSuppresses(clientId: string): boolean {
+    return this.speaking.suppresses(clientId);
   }
 
   // ---- active device arbitration ------------------------------------------
@@ -733,6 +798,7 @@ export class HeraldVoiceService {
 
   /** Client disconnected: drop everything it owned. A pin waits briefly for a reconnect. */
   clientGone(clientId: string): void {
+    this.speaking.clientGone(clientId);
     this.cancelTts(clientId);
     this.transcripts.delete(clientId);
     this.speech.delete(clientId);

@@ -32,6 +32,13 @@ export interface HeraldSendRequest {
   text: string;
   mode?: HeraldInputMode;
   intent?: HeraldIntent;
+  /**
+   * Voice only: the words came from a deliberate gesture (push-to-talk, a
+   * hotkey, a remote-trigger listen, a button), not a hands-off capture. While
+   * another device is speaking, the hub drops hands-off voice sends from the
+   * other devices (Herald's own voice heard by their mics); a gesture gets through.
+   */
+  gesture?: boolean;
 }
 export interface HeraldMessage {
   id: string;
@@ -45,6 +52,17 @@ export interface HeraldMessage {
   quiet?: boolean;
   /** User lines only: sent as a voice command (shown as a chip, not raw text). */
   intent?: HeraldIntent;
+  /**
+   * Herald lines only: the ONE device that speaks it aloud (a connection id, as
+   * in HeraldDeviceInfo.id); every other device shows it silently. A reply goes
+   * to the device the turn came from (the one that sent it, or the device a
+   * trigger was routed to), anything Herald says unasked to the active device;
+   * when that device has gone, the active device, else nobody. null = nobody
+   * speaks it. Absent = no routing (older hub, or a turn from a connection that
+   * is not a Herald device): each device decides as before. message_end carries
+   * the final value (it may change if the device disconnects mid-reply).
+   */
+  speakOn?: string | null;
 }
 export interface HeraldAction {
   id: string;
@@ -162,6 +180,14 @@ export type HeraldEvent =
   | { kind: 'brain'; brain: HeraldBrainStatus }
   /** The active device or the device list changed (broadcast). */
   | { kind: 'devices'; activeDevice: HeraldActiveDevice | null; devices: HeraldDeviceInfo[] }
+  /**
+   * A device started / is still (heartbeat) / stopped speaking Herald's voice
+   * (broadcast; see herald_speaking). Other devices hold back hands-off capture
+   * while it is active and for a short tail after.
+   */
+  | { kind: 'speaking'; speaking: HeraldSpeakingSignal }
+  /** Stop playing now (sent ONLY to the speaking device): another device asked (button or "stop"). */
+  | { kind: 'stop_speaking'; utteranceId: string | null; by: string | null }
   /**
    * "Show me": open this session's view, sent ONLY to the device that should
    * show it. `pending` = it has a question / choice waiting (scroll to it and
@@ -311,6 +337,8 @@ export type HeraldTriggerErrorCode =
  *   herald_handsfree           { on: boolean } -> { owner: boolean }
  *   herald_presence            HeraldPresence -> HeraldPresenceResult
  *   herald_claim_device        HeraldClaimDeviceRequest -> HeraldDevicesSnapshot
+ *   herald_speaking            HeraldSpeakingReport -> { ok: true }
+ *   herald_stop_speaking       HeraldStopSpeakingRequest -> HeraldStopSpeakingResult
  * Per-client pushes arrive as `herald_voice_event` with a HeraldVoiceEvent payload.
  *
  * ONE device is active (the announcer): it plays inbox tones, runs hands-free
@@ -320,6 +348,15 @@ export type HeraldTriggerErrorCode =
  * the one seen last. Clients report presence on connect / when shown
  * (interacted: false) and on use (true). The active device and the device list
  * reach everyone as a `devices` herald_event (and in HeraldState).
+ *
+ * ONE device speaks each Herald line (HeraldMessage.speakOn). While it plays,
+ * it reports herald_speaking `start` (again every ~1 s as a heartbeat) and
+ * `end`; the hub broadcasts a `speaking` herald_event. Every OTHER device then
+ * ignores barge-in, follow-up and hands-free captures (its mic hears Herald
+ * with nothing to cancel it against), except a wake word followed at once by
+ * "stop"; gestures (push-to-talk, hotkeys, triggers, buttons) still work.
+ * herald_stop_speaking from any device stops the speaker (a `stop_speaking`
+ * herald_event to it).
  */
 export interface HeraldPresence {
   /** The user just used this device (a key press or tap), not merely opened it. */
@@ -357,6 +394,34 @@ export interface HeraldClaimDeviceRequest {
 export interface HeraldDevicesSnapshot {
   activeDevice: HeraldActiveDevice | null;
   devices: HeraldDeviceInfo[];
+}
+export interface HeraldSpeakingReport {
+  /** `start` also serves as the ~1 s heartbeat while playing. */
+  state: 'start' | 'end';
+  /** One id per stretch of playback (start .. end). */
+  utteranceId: string;
+  /** Epoch ms (sender's clock) playback is expected to end; an estimate. */
+  approxEndAt?: number;
+  /** Epoch ms (sender's clock) of this report: re-bases approxEndAt across clock skew. */
+  sentAt?: number;
+}
+export interface HeraldSpeakingSignal {
+  /** True: playing (start / heartbeat). False: ended, stopped, timed out or disconnected. */
+  active: boolean;
+  deviceId: string;
+  label: string;
+  utteranceId: string;
+  /** Expected ms of playback left when the hub sent this (0 = unknown / ended). */
+  remainingMs: number;
+}
+/** Stop Herald speaking on another device. `deviceId` absent = whichever device is speaking. */
+export interface HeraldStopSpeakingRequest {
+  deviceId?: string;
+}
+export interface HeraldStopSpeakingResult {
+  /** A stop went to a speaking device. */
+  stopped: boolean;
+  deviceId?: string;
 }
 export interface HeraldVoiceInfo {
   id: string;

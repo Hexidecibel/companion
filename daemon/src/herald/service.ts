@@ -165,6 +165,27 @@ export interface HeraldServiceDeps {
   activeClientId?: () => string | null;
   /** Push an event to ONE client ("show me" navigation); false if it is gone. */
   deliverToClient?: (clientId: string, event: HeraldEvent) => boolean;
+  /**
+   * `clientId` is inside ANOTHER device's speaking window (Herald playing there,
+   * or just stopped): its hands-off voice sends are dropped (voice-send backstop).
+   */
+  speakingSuppresses?: (clientId: string) => boolean;
+}
+
+/** Where a turn came from: a connection, and whether it was a Herald device (reported presence) then. */
+export interface SpeechOrigin {
+  clientId: string;
+  device: boolean;
+}
+
+/** herald_send extras from the handler. */
+export interface HeraldSendOptions {
+  mode?: unknown;
+  intent?: unknown;
+  /** The sending connection (its replies are spoken there). */
+  clientId?: string;
+  /** Voice from a deliberate gesture (push-to-talk, hotkey, trigger): passes the speaking backstop. */
+  gesture?: unknown;
 }
 
 /** Who a navigation is for and how it is acknowledged. */
@@ -254,6 +275,7 @@ export class HeraldService {
   >;
   /** Last time the user spoke to Herald (answers are spoken during a voice exchange). */
   private lastVoiceAt = 0;
+  private speakingSuppressesFn: ((clientId: string) => boolean) | undefined;
 
   constructor(deps: HeraldServiceDeps) {
     this.cfg = deps.config;
@@ -263,6 +285,7 @@ export class HeraldService {
     this.broadcastFn = deps.broadcast;
     this.devicesFn = deps.devices;
     this.deliverFn = deps.deliverToClient;
+    this.speakingSuppressesFn = deps.speakingSuppresses;
     this.auditFn = deps.audit;
     this.now = deps.now || Date.now;
     this.pollIntervalMs = deps.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
@@ -876,6 +899,29 @@ export class HeraldService {
       this.messages.splice(0, this.messages.length - MAX_PERSISTED_MESSAGES);
   }
 
+  /**
+   * The ONE device that speaks a Herald line (HeraldMessage.speakOn).
+   * `origin` = the turn it answers (null: Herald speaking unasked).
+   *   - reply: the device the turn came from; gone since -> the active device, else nobody
+   *   - a turn from a connection that was not a Herald device (older client): no routing
+   *   - unasked: the active device, else nobody
+   * undefined = no routing (no voice layer): each client decides, as before.
+   */
+  speakOnFor(origin: SpeechOrigin | null): string | null | undefined {
+    const snap = this.devicesFn?.();
+    if (!snap) return undefined;
+    const active = snap.activeDevice?.id ?? null;
+    if (!origin) return active;
+    if (!origin.device) return undefined;
+    return snap.devices.some((d) => d.id === origin.clientId) ? origin.clientId : active;
+  }
+
+  /** `{ speakOn }` for a Herald line, or nothing when there is no routing. */
+  private speakExtra(origin: SpeechOrigin | null): Pick<HeraldMessage, 'speakOn'> {
+    const speakOn = this.speakOnFor(origin);
+    return speakOn === undefined ? {} : { speakOn };
+  }
+
   /** Append a complete (non-streamed) message and announce it. */
   private postMessage(
     role: HeraldMessage['role'],
@@ -887,9 +933,12 @@ export class HeraldService {
       role,
       text,
       createdAt: this.now(),
+      // Herald lines said unasked go to the active device (a reply passes its own).
+      ...(role === 'herald' && !('speakOn' in extra) ? this.speakExtra(null) : {}),
       ...extra,
       streaming: false,
     };
+    if (msg.speakOn === undefined) delete msg.speakOn;
     this.appendMessage(msg);
     this.emit({ kind: 'message_start', message: { ...msg } });
     this.emit({ kind: 'message_end', message: { ...msg } });
@@ -931,8 +980,8 @@ export class HeraldService {
 
   send(
     textRaw: unknown,
-    opts: { mode?: unknown; intent?: unknown } = {}
-  ): { messageId: string; ignored?: 'echo' } {
+    opts: HeraldSendOptions = {}
+  ): { messageId: string; ignored?: 'echo' | 'speaking' } {
     if (!this.cfg.featureEnabled)
       throw new HeraldRequestError(this.cfg.disabledReason || 'Herald is disabled.');
     if (!this.provider)
@@ -942,6 +991,21 @@ export class HeraldService {
     if (!text) throw new HeraldRequestError('Message is empty.');
     if (text.length > MAX_USER_TEXT)
       throw new HeraldRequestError(`Message is too long (max ${MAX_USER_TEXT} characters).`);
+    // Another device is playing Herald: this device's mic hears it with nothing
+    // to cancel it against. Only a deliberate gesture gets through (backstop
+    // for the client's own suppression).
+    const clientId = typeof opts.clientId === 'string' && opts.clientId ? opts.clientId : null;
+    if (
+      opts.mode === 'voice' &&
+      opts.gesture !== true &&
+      clientId &&
+      this.speakingSuppressesFn?.(clientId)
+    ) {
+      console.debug(
+        `Herald: ignored a hands-off voice message from ${clientId} while another device is speaking (${text.length} chars)`
+      );
+      return { messageId: '', ignored: 'speaking' };
+    }
     // Herald's own voice coming back as a "user" message: benign ack, no turn.
     if (opts.mode === 'voice' && !opts.intent && this.isVoiceEcho(text)) {
       console.log(
@@ -956,6 +1020,13 @@ export class HeraldService {
 
     const mode: HeraldInputMode = opts.mode === 'voice' ? 'voice' : 'text';
     if (mode === 'voice') this.lastVoiceAt = this.now();
+    // The reply is spoken on the device that asked (see speakOnFor).
+    const origin: SpeechOrigin | null = clientId
+      ? { clientId, device: !!this.devicesFn?.()?.devices.some((d) => d.id === clientId) }
+      : null;
+    // A turn from no known connection, or from one that is not a Herald device:
+    // no routing (`speakOn` stays absent), never the unasked default.
+    const reply: Partial<HeraldMessage> = { speakOn: origin ? this.speakOnFor(origin) : undefined };
     const intent: HeraldIntent | undefined =
       opts.intent === 'shorter' || opts.intent === 'more' || opts.intent === 'brief'
         ? opts.intent
@@ -964,7 +1035,7 @@ export class HeraldService {
     // "How much have you cost me?": answered from the meter, free and exact.
     if (!intent && isUsageQuestion(text)) {
       const userMsg = this.postMessage('user', text);
-      this.postMessage('herald', usageAnswer(this.usage.summary()));
+      this.postMessage('herald', usageAnswer(this.usage.summary()), reply);
       return { messageId: userMsg.id };
     }
 
@@ -975,7 +1046,7 @@ export class HeraldService {
       briefing = this.unheardForBriefing();
       if (briefing.length === 0) {
         const userMsg = this.postMessage('user', text, { intent });
-        this.postMessage('herald', 'Nothing new.');
+        this.postMessage('herald', 'Nothing new.', reply);
         return { messageId: userMsg.id };
       }
       // They are about to be told: heard from now on (the chips dim at once).
@@ -987,25 +1058,32 @@ export class HeraldService {
     if (skip) {
       const userMsg = this.postMessage('user', text, intent ? { intent } : {});
       this.emitBrainIfChanged();
-      this.postMessage('herald', this.answerFromFallback(text, intent, skip, briefing));
+      this.postMessage('herald', this.answerFromFallback(text, intent, skip, briefing), reply);
       return { messageId: userMsg.id };
     }
 
     this.setBusy(true);
     const history = this.messages.slice();
     const userMsg = this.postMessage('user', text, intent ? { intent } : {});
-    void this.runConversationTurn(text, history, { mode, intent, briefing }).catch((err) => {
-      console.error('Herald: turn crashed:', err);
-      // Never leave the turn lock held: the user could not send again until restart.
-      this.setBusy(false);
-    });
+    void this.runConversationTurn(text, history, { mode, intent, briefing, origin }).catch(
+      (err) => {
+        console.error('Herald: turn crashed:', err);
+        // Never leave the turn lock held: the user could not send again until restart.
+        this.setBusy(false);
+      }
+    );
     return { messageId: userMsg.id };
   }
 
   private async runConversationTurn(
     userText: string,
     history: HeraldMessage[],
-    turn: { mode: HeraldInputMode; intent?: HeraldIntent; briefing?: HeraldInboxItem[] } = {
+    turn: {
+      mode: HeraldInputMode;
+      intent?: HeraldIntent;
+      briefing?: HeraldInboxItem[];
+      origin?: SpeechOrigin | null;
+    } = {
       mode: 'text',
     }
   ): Promise<void> {
@@ -1021,6 +1099,7 @@ export class HeraldService {
       text: '',
       createdAt: this.now(),
       streaming: true,
+      ...(turn.origin ? this.speakExtra(turn.origin) : {}),
     };
     this.appendMessage(reply);
     this.emit({ kind: 'message_start', message: { ...reply } });
@@ -1196,6 +1275,8 @@ export class HeraldService {
     if (toolState.sessionRefs.size > 0)
       reply.sessionRefs = Array.from(toolState.sessionRefs.values()).slice(0, 20);
     if (actionIds.length > 0) reply.actionIds = actionIds;
+    // The asking device may have gone mid-reply: the final word on who speaks it.
+    if (turn.origin) Object.assign(reply, this.speakExtra(turn.origin));
     // The reply may have been dropped by a reset while we were finishing.
     if (this.messages.includes(reply)) {
       this.emit({ kind: 'message_end', message: { ...reply } });
