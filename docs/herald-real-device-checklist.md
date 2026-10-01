@@ -427,3 +427,40 @@ Native desktop app from the `native/herald-voice` CI build (Windows .exe, macOS 
       classic mixer): while Herald speaks, its audio appears as "Microsoft Edge
       WebView2" (the WebView2 process plays it); lowering that entry lowers
       Herald and its tones, nothing else. Note what it is actually called.
+
+## "Hey Jarvis" in the desktop apps, macOS shortcuts, Diagnostics (2026-10-01)
+
+Install the new dmg / exe first. Open Help > Diagnostics (or say "diagnostics")
+on the device under test and keep it open while you try each step; "Copy
+diagnostics" gives a JSON snapshot to paste back if something fails.
+
+### Mac desktop (several servers configured)
+
+- [ ] Diagnostics > Devices: "Herald hub" names the hexi server (of N servers).
+- [ ] Turn hands-free on. Hands-free > State: listening for "Hey Jarvis".
+- [ ] Say "Hey Jarvis, anything for me?" with Companion in front: chime, then an
+      answer. Wake word > Last wake shows a score; Last utterance: transcribed.
+- [ ] Same with Companion behind another app, then minimised, then closed to the
+      tray (red button): Window shows hidden, hands-free keeps listening, Herald
+      answers (the floating orb shows it).
+- [ ] Server journal (`journalctl --user -u companion | grep 'Herald voice: wake'`):
+      wake stream start, wake detected score=..., wake stream end transcribe woke=true.
+- [ ] Shortcuts: Advanced > System-wide shortcuts shows ⌘⌥Space, ⌘⌥⇧H, ⌘⌥⇧B, ⌘⌥⇧S
+      (an install that had the old Control+Option defaults moved over by itself;
+      a shortcut you had changed is kept). Hold ⌘⌥Space and talk: Herald listens.
+- [ ] Control+Option+Space still opens the macOS emoji / input-source switcher
+      (Herald does not take it). Recording a Control+Option chord in the
+      shortcut settings is refused with a note.
+- [ ] If ⌘⌥Space is still Finder's search on this Mac: the settings say "could
+      not be registered: in use by macOS or another app" with a "Use ⌘⌥⇧Space"
+      button; nothing is shown when registration works.
+- [ ] Input Monitoring: Diagnostics > Shortcuts shows allowed / not allowed; the
+      "Open System Settings > Privacy > Input Monitoring" button opens that pane.
+      Without the permission hold-to-talk still works (exclusive).
+
+### Windows desktop
+
+- [ ] Same hands-free steps: in front, covered by a game window, minimised, in
+      the tray. Diagnostics > Microphone > Input level moves when you talk.
+- [ ] The floating orb still appears (the overlay window shares the webview
+      arguments; it failing to appear would mean they differ).

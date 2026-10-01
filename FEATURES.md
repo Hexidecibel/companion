@@ -554,6 +554,13 @@ Follow-up fixes layered on the Mobile UX round above: walks back the activity-ro
 - **Doubled header inset fixed** — `.dashboard` already applies `var(--safe-top)`, and `.session-header-mobile` was applying it again, creating an excessive top band. Inset now applied once plus a 6px gap (`global.css` mobile media queries)
 - **Autolink URLs inside emphasis** — `MarkdownRenderer.tsx` previously stored bold/italic inner text as a raw string and never re-parsed it, so URLs inside `**…**` / `*…*` never became links. Bold/italic now carry children and recurse, so URLs (plus code/file links and nested emphasis) inside emphasis render as the accent link pill, enabling long-press → Open Link / Copy link
 
+## Herald — "Hey Jarvis" in the desktop apps, Diagnostics, macOS shortcuts (2026-10-01)
+- Fixed: hands-free in the Mac / Windows apps heard "Hey Jarvis" but never answered. With several servers the Herald hub connects after another one; the wake-word events stayed subscribed to the old connection, so every woken utterance was discarded. Subscriptions now follow the hub; a VAD misfire after the wake word still transcribes
+- The desktop app keeps listening while its window is covered, minimised or in the tray (default on; webview background throttling and Windows occlusion off)
+- Help > Diagnostics (or say "diagnostics"): live mic, level meter, echo canceller and ERLE, VAD, hands-free state and stand-down reason, speaking-elsewhere suppression, wake streaming and last score, asset status, active / speaking device, hub round trip, shortcuts and Input Monitoring; "Copy diagnostics" (redacted JSON)
+- Hub logs wake streams, detections with scores and hands-free decisions (rate limited); herald-voice logs each stream's best score
+- macOS shortcuts: ⌘⌥Space hold to talk, ⌘⌥⇧H toggle, ⌘⌥⇧B brief, ⌘⌥⇧S stop (never Control+Option); untouched old defaults migrate once; Mac key glyphs; a failed registration offers a free alternative in one click; button to open Input Monitoring settings
+
 ## Herald — cost control, offline fallback, hardened triggers (2026-09-30)
 - Prompt caching of tools + system (~5.9K tokens) on Haiku 4.5: a warm turn costs roughly a quarter of an uncached one
 - Usage meter in the Herald menu ("Today $0.04 · Month $1.10", turns, average per turn, cache hit rate) and an optional monthly budget (80% warning, fallback at 100%); "how much have you cost me" answered from the meter
