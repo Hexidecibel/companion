@@ -262,6 +262,30 @@ pass_button=false
    Scheduler task with **Run with highest privileges** if the game runs as
    administrator).
 
+## Mac: the Companion app's shortcuts
+
+On macOS the desktop app maps Windows' Ctrl to Cmd and never binds a
+Control+Option chord (macOS keeps those: Control+Option+Space is the emoji and
+symbols picker / next input source):
+
+| Action | macOS | Windows / Linux |
+|--------|-------|-----------------|
+| Hold to talk | **⌘⌥Space** (Cmd+Option+Space) | Ctrl+Alt+Space |
+| Listen / stop (`toggle`) | **⌘⌥⇧H** | Ctrl+Alt+Shift+H |
+| Brief me (`brief`) | **⌘⌥⇧B** | Ctrl+Alt+Shift+B |
+| Stop speaking (`stop`) | **⌘⌥⇧S** | Ctrl+Alt+Shift+S |
+
+A Mac install that still had the old Ctrl+Option defaults moves to these once,
+on first start of this version; shortcuts you changed yourself are kept. Cmd+Option+Space is
+Finder's search window on a stock Mac: if it is still bound there, the shortcut
+settings say "could not be registered" and offer a free alternative in one
+click (Herald menu > Advanced > System-wide shortcuts). Hold-to-talk is a
+passthrough shortcut on macOS, which needs **Input Monitoring** (System Settings >
+Privacy & Security > Input Monitoring > Companion on, then quit and reopen
+Companion); the shortcut settings and Help > Diagnostics show whether it is
+allowed and have a button that opens that pane. Without it the shortcut still
+works, as an exclusive one.
+
 ## Mac: Raycast
 
 Files: `mac/herald-toggle.sh`, `mac/herald-brief.sh`, `mac/herald-claim.sh`,
@@ -283,8 +307,13 @@ Files: `mac/herald-toggle.sh`, `mac/herald-brief.sh`, `mac/herald-claim.sh`,
    a short HUD (the first run may ask to allow Keychain access: choose Always
    Allow).
 4. **Hotkeys:** in Raycast Settings > Extensions, select Herald Toggle and set a
-   Hotkey (e.g. **Ctrl+Opt+Shift+H**); likewise Herald Brief (Ctrl+Opt+Shift+B)
-   and, optionally, Show Herald's Last Session (e.g. Ctrl+Opt+Shift+S).
+   Hotkey. With the Companion desktop app running on this Mac you do not need
+   these: the app already owns the macOS defaults below, so give Raycast other
+   keys (or none). Without the app, use the same keys the app would:
+   **⌘⌥⇧H** (Cmd+Option+Shift+H) for Herald Toggle, **⌘⌥⇧B** for Herald Brief
+   and, optionally, **⌘⌥⇧L** for Show Herald's Last Session. Never use
+   Control+Option combos: macOS keeps them (Control+Option+Space opens the
+   emoji and symbols picker / switches input source).
 5. **Mouse button (optional):** Logi Options+ on the Mac can map the gesture (or
    any) button to **Keyboard shortcut** > the Raycast hotkey above.
 

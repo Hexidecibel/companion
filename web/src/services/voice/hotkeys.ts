@@ -65,6 +65,24 @@ export function formatChord(c: Chord): string {
   return parts.join('+');
 }
 
+/**
+ * A chord for display: Mac key glyphs on macOS ("⌘⌥⇧H", "⌘⌥Space"), else
+ * "Ctrl+Alt+Shift+H". Storage keeps the portable text form.
+ */
+export function displayChord(c: Chord, mac: boolean): string {
+  if (!mac) return formatChord(c);
+  let key = c.code;
+  if (key.startsWith('Key')) key = key.slice(3);
+  else if (key.startsWith('Digit')) key = key.slice(5);
+  return `${c.meta ? '\u2318' : ''}${c.ctrl ? '\u2303' : ''}${c.alt ? '\u2325' : ''}${c.shift ? '\u21E7' : ''}${key}`;
+}
+
+/** Display a stored chord string; null when it is off / unparseable. */
+export function displayChordText(text: string | null | undefined, mac: boolean): string | null {
+  const c = text ? parseChord(text) : null;
+  return c ? displayChord(c, mac) : null;
+}
+
 /** Build a chord from a keydown (for "press your shortcut" capture). */
 export function chordFromEvent(e: Pick<KeyboardEvent, 'ctrlKey' | 'shiftKey' | 'altKey' | 'metaKey' | 'code'>): Chord | null {
   if (MOD_CODES.has(e.code)) return null;

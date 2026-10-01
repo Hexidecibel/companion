@@ -253,6 +253,23 @@ pub fn herald_request_input_monitoring() -> bool {
     crate::passthrough::request_permission()
 }
 
+/// macOS: open System Settings > Privacy & Security > Input Monitoring
+/// (no prompt). False elsewhere.
+#[tauri::command]
+pub fn herald_open_input_monitoring() -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent")
+            .spawn()
+            .is_ok()
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        false
+    }
+}
+
 /// Mirror the web "tones" preference and Herald's volume on the tray items.
 #[tauri::command]
 pub fn herald_set_tray_state(app: AppHandle, tones_muted: bool, volume: Option<f64>) {

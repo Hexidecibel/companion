@@ -18,8 +18,8 @@ import { setTriggerProbe } from '../../../services/heraldSetup/triggerProbe';
 import { measureEchoSuppression, type AudioEnvironment } from '../../../services/voice/audioEnvironment';
 import { getMicCapture } from '../../../services/voice/micCapture';
 import { VoiceInputController, type VoiceInputState } from '../../../services/voice/voiceInput';
-import { nativeHeraldStore, useNativeHeraldState } from '../../../hooks/useNativeHerald';
-import { formatChord, parseChord } from '../../../services/voice/hotkeys';
+import { isMacDesktop, nativeHeraldStore, useNativeHeraldState } from '../../../hooks/useNativeHerald';
+import { displayChordText } from '../../../services/voice/hotkeys';
 import { TriggersGuide } from './TriggersGuide';
 import type { NativePlatform } from '../../../utils/platform';
 
@@ -360,8 +360,7 @@ function WakeStep({ flow, dispatch }: { flow: SetupFlowState; dispatch: Dispatch
 }
 
 function chordText(c: string): string {
-  const p = parseChord(c);
-  return p ? formatChord(p) : 'Off';
+  return displayChordText(c, isMacDesktop()) ?? 'Off';
 }
 
 function TriggerStep({ flow, dispatch, platform }: { flow: SetupFlowState; dispatch: Dispatch; platform: NativePlatform }) {

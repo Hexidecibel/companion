@@ -209,7 +209,10 @@ cd desktop && cargo tauri ios build --export-method app-store-connect  # TestFli
 ### Native Herald (voice)
 - Desktop: `src-tauri/src/herald.rs` registers the Herald global shortcuts (the web layer sends the
   chords via `herald_set_shortcuts`: talk Ctrl+Alt+Space hold, toggle Ctrl+Alt+Shift+H, brief
-  Ctrl+Alt+Shift+B, stop Ctrl+Alt+Shift+S), adds the tray actions (Brief me, Toggle listening,
+  Ctrl+Alt+Shift+B, stop Ctrl+Alt+Shift+S; on macOS Ctrl becomes Cmd: ⌘⌥Space, ⌘⌥⇧H, ⌘⌥⇧B,
+  ⌘⌥⇧S, never a Control+Option chord (`MAC_NATIVE_CHORDS` in `useNativeHerald.ts`; untouched
+  old defaults migrate once, flag `macChords` in `herald_native_prefs`; a failed registration
+  shows "could not be registered" with a one-click alternative, `suggestChord`), adds the tray actions (Brief me, Toggle listening,
   Stop speaking, Herald volume submenu, Mute tones), and grants the mic to the app's own origin
   (WebKitGTK / WebView2). It only emits `herald-native` events `{ action, value? }`.
 - Passthrough shortcuts (`src-tauri/src/passthrough/`): per shortcut, "Let other apps see this key

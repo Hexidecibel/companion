@@ -9,14 +9,19 @@ const bridge = vi.hoisted(() => ({
   getPassthroughStatus: vi.fn(),
   listenPassthroughStatus: vi.fn(),
   requestInputMonitoring: vi.fn(),
+  openInputMonitoringSettings: vi.fn(async () => true),
   setMediaSession: vi.fn(),
   setAudioFocus: vi.fn(),
 }));
 vi.mock('../../services/nativeBridge', () => bridge);
 
 import {
+  CHORD_ALTERNATIVES,
+  CHORD_KEYS,
   DEFAULT_NATIVE_PREFS,
+  defaultNativePrefs,
   defaultPassthrough,
+  isMacReservedChord,
   loadNativePrefs,
   passthroughFor,
   nativeHandlers,
@@ -328,7 +333,10 @@ describe('NativeHeraldSettings', () => {
     render(<NativeHeraldSettings platform="desktop" />);
     expect(screen.getByText('Hold to talk')).toBeInTheDocument();
     expect(screen.getByText('Ctrl+Alt+Space')).toBeInTheDocument();
-    expect(screen.getByText(/Ctrl\+Alt\+Shift\+B is taken by another app/)).toBeInTheDocument();
+    expect(screen.getByText(/Ctrl\+Alt\+Shift\+B could not be registered: in use by another app \(already registered\)/)).toBeInTheDocument();
+    // One click moves it to a free alternative.
+    fireEvent.click(screen.getByText('Use Ctrl+Alt+Shift+N'));
+    expect(nativeHeraldStore.get().prefs.briefChord).toBe('Ctrl+Alt+Shift+N');
     expect(screen.getByText(/Wayland limits system-wide shortcuts/)).toBeInTheDocument();
     expect(screen.queryByText(/Earbud/)).toBeNull();
   });
@@ -388,5 +396,84 @@ describe('NativeHeraldSettings', () => {
     expect(screen.queryByText('Hold to talk')).toBeNull();
     fireEvent.click(toggle);
     expect(nativeHeraldStore.get().prefs.earbudButton).toBe(false);
+  });
+});
+
+describe('macOS shortcuts', () => {
+  const MAC_UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15';
+  let ua: PropertyDescriptor | undefined;
+  beforeEach(() => {
+    ua = Object.getOwnPropertyDescriptor(navigator, 'userAgent');
+    Object.defineProperty(navigator, 'userAgent', { value: MAC_UA, configurable: true });
+    (window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ = {};
+  });
+  afterEach(() => {
+    delete (window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
+    if (ua) Object.defineProperty(navigator, 'userAgent', ua);
+    else delete (navigator as unknown as Record<string, unknown>).userAgent;
+  });
+
+  it('defaults map Ctrl to Cmd and never bind Control+Option', () => {
+    const p = defaultNativePrefs(true);
+    expect(p.talkChord).toBe('Cmd+Alt+Space');
+    expect(p.toggleChord).toBe('Cmd+Alt+Shift+H');
+    expect(p.briefChord).toBe('Cmd+Alt+Shift+B');
+    expect(p.stopChord).toBe('Cmd+Alt+Shift+S');
+    for (const k of CHORD_KEYS) expect(isMacReservedChord(p[k])).toBe(false);
+    for (const k of CHORD_KEYS) for (const alt of CHORD_ALTERNATIVES.mac[k]) expect(isMacReservedChord(alt)).toBe(false);
+    expect(loadNativePrefs(true)).toEqual(p);
+  });
+
+  it('migrates untouched old defaults on a Mac, keeps customised chords, and runs once', () => {
+    localStorage.setItem('herald_native_prefs', JSON.stringify({
+      ...DEFAULT_NATIVE_PREFS, briefChord: 'Ctrl+Alt+Shift+Y',
+    }));
+    const p = loadNativePrefs(true);
+    expect(p.talkChord).toBe('Cmd+Alt+Space');
+    expect(p.toggleChord).toBe('Cmd+Alt+Shift+H');
+    expect(p.stopChord).toBe('Cmd+Alt+Shift+S');
+    expect(p.briefChord).toBe('Ctrl+Alt+Shift+Y'); // the user's own choice
+    const saved = JSON.parse(localStorage.getItem('herald_native_prefs')!);
+    expect(saved.macChords).toBe(true);
+    expect(saved.talkChord).toBe('Cmd+Alt+Space');
+    // Later, an explicit pick of the old chord is respected (no second migration).
+    localStorage.setItem('herald_native_prefs', JSON.stringify({ ...saved, talkChord: 'Ctrl+Alt+Space' }));
+    expect(loadNativePrefs(true).talkChord).toBe('Ctrl+Alt+Space');
+  });
+
+  it('Windows / Linux keep the Ctrl+Alt defaults and are never migrated', () => {
+    localStorage.setItem('herald_native_prefs', JSON.stringify(DEFAULT_NATIVE_PREFS));
+    expect(loadNativePrefs(false).talkChord).toBe('Ctrl+Alt+Space');
+    expect(JSON.parse(localStorage.getItem('herald_native_prefs')!).macChords).toBeUndefined();
+  });
+
+  it('settings show Mac glyphs, warn only on a failed registration, and refuse Control+Option', () => {
+    nativeHeraldStore.reset();
+    nativeHeraldStore.setInfo({ os: 'macos', wayland: false, passthrough: true });
+    nativeHeraldStore.setShortcuts([
+      { name: 'talk', accelerator: 'Alt+Super+Space', ok: false, error: 'HotKey already registered', mode: 'exclusive' },
+      { name: 'stop', accelerator: 'Alt+Shift+Super+KeyS', ok: true, error: null, mode: 'exclusive' },
+    ]);
+    render(<NativeHeraldSettings platform="desktop" />);
+    expect(screen.getAllByText('\u2318\u2325Space').length).toBeGreaterThan(0);
+    expect(screen.getByText('\u2318\u2325\u21E7S')).toBeInTheDocument();
+    expect(screen.getByTestId('shortcut-conflict-talk')).toHaveTextContent(/in use by macOS or another app/);
+    expect(screen.queryByTestId('shortcut-conflict-stop')).toBeNull();
+    fireEvent.click(screen.getByText('Use \u2318\u2325\u21E7Space'));
+    expect(nativeHeraldStore.get().prefs.talkChord).toBe('Cmd+Alt+Shift+Space');
+    fireEvent.click(screen.getByText('Listen / stop (tap)'));
+    fireEvent.keyDown(window, { key: ' ', code: 'Space', ctrlKey: true, altKey: true });
+    expect(screen.getByText(/Control\+Option is kept for macOS/)).toBeInTheDocument();
+    expect(nativeHeraldStore.get().prefs.toggleChord).toBe('Cmd+Alt+Shift+H');
+    fireEvent.keyDown(window, { key: 'j', code: 'KeyJ', metaKey: true, altKey: true });
+    expect(nativeHeraldStore.get().prefs.toggleChord).toBe('Alt+Meta+J');
+  });
+
+  it('offers to open the Input Monitoring pane when passthrough lacks the permission', () => {
+    nativeHeraldStore.setInfo({ os: 'macos', wayland: false, passthrough: true });
+    nativeHeraldStore.setShortcuts([{ name: 'talk', accelerator: 'Alt+Super+Space', ok: true, error: null, mode: 'exclusive', passthroughError: 'needs_permission' }]);
+    render(<NativeHeraldSettings platform="desktop" />);
+    fireEvent.click(screen.getByText(/Open System Settings > Privacy > Input Monitoring/));
+    expect(bridge.openInputMonitoringSettings).toHaveBeenCalled();
   });
 });

@@ -73,6 +73,9 @@ describe('dispatchNativeEvent', () => {
 describe('chordToAccelerator', () => {
   it('maps web chords to global-shortcut accelerators', () => {
     expect(chordToAccelerator('Ctrl+Alt+Space')).toBe('Ctrl+Alt+Space');
+    // macOS defaults: Cmd is Super for the global-shortcut plugin and the event tap.
+    expect(chordToAccelerator('Cmd+Alt+Space')).toBe('Alt+Super+Space');
+    expect(chordToAccelerator('Cmd+Alt+Shift+H')).toBe('Alt+Shift+Super+KeyH');
     expect(chordToAccelerator('Ctrl+Alt+Shift+H')).toBe('Ctrl+Alt+Shift+KeyH');
     expect(chordToAccelerator('Meta+Shift+1')).toBe('Shift+Super+Digit1');
     expect(chordToAccelerator('Alt+F9')).toBe('Alt+F9');

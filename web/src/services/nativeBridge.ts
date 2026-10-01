@@ -200,6 +200,12 @@ export async function requestInputMonitoring(): Promise<boolean> {
   return (await call<boolean>('herald_request_input_monitoring')) ?? false;
 }
 
+/** macOS: open System Settings > Privacy & Security > Input Monitoring (no prompt). */
+export async function openInputMonitoringSettings(): Promise<boolean> {
+  if (nativePlatform() !== 'desktop') return false;
+  return (await call<boolean>('herald_open_input_monitoring')) ?? false;
+}
+
 export async function getNativeInfo(): Promise<NativeInfo | null> {
   if (nativePlatform() !== 'desktop') return null;
   return call<NativeInfo>('herald_native_info');

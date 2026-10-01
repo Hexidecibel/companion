@@ -60,6 +60,68 @@ export const DEFAULT_NATIVE_PREFS: NativeHeraldPrefs = {
   duckOthers: true,
 };
 
+export type NativeChordKey = 'talkChord' | 'toggleChord' | 'briefChord' | 'stopChord';
+export const CHORD_KEYS: readonly NativeChordKey[] = ['talkChord', 'toggleChord', 'briefChord', 'stopChord'];
+
+/**
+ * macOS: Windows' Ctrl becomes Cmd. Control+Option is left alone on purpose
+ * (Control+Option+Space is the emoji / character picker or "next input
+ * source" there), so Herald never binds a Control+Option chord by default.
+ */
+export const MAC_NATIVE_CHORDS: Record<NativeChordKey, string> = {
+  talkChord: 'Cmd+Alt+Space',
+  toggleChord: 'Cmd+Alt+Shift+H',
+  briefChord: 'Cmd+Alt+Shift+B',
+  stopChord: 'Cmd+Alt+Shift+S',
+};
+
+/** The desktop app on a Mac (from the user agent: known before the native info call returns). */
+export function isMacDesktop(platform: NativePlatform = nativePlatform()): boolean {
+  return platform === 'desktop' && typeof navigator !== 'undefined' && /Macintosh|Mac OS X/.test(navigator.userAgent);
+}
+
+/** Default prefs for this device: Cmd-based chords on macOS. */
+export function defaultNativePrefs(mac: boolean = isMacDesktop()): NativeHeraldPrefs {
+  return mac ? { ...DEFAULT_NATIVE_PREFS, ...MAC_NATIVE_CHORDS } : DEFAULT_NATIVE_PREFS;
+}
+
+/**
+ * Other chords to offer when one cannot be registered (taken by the OS or
+ * another app). Never Control+Option on macOS.
+ */
+export const CHORD_ALTERNATIVES: Record<'mac' | 'other', Record<NativeChordKey, readonly string[]>> = {
+  mac: {
+    talkChord: ['Cmd+Alt+Shift+Space', 'Cmd+Alt+J', 'Cmd+Alt+F13'],
+    toggleChord: ['Cmd+Alt+Shift+J', 'Cmd+Alt+Shift+L'],
+    briefChord: ['Cmd+Alt+Shift+N', 'Cmd+Alt+Shift+U'],
+    stopChord: ['Cmd+Alt+Shift+X', 'Cmd+Alt+Shift+Period'],
+  },
+  other: {
+    talkChord: ['Ctrl+Alt+Shift+Space', 'Ctrl+Alt+J', 'Ctrl+Alt+F13'],
+    toggleChord: ['Ctrl+Alt+Shift+J', 'Ctrl+Alt+Shift+L'],
+    briefChord: ['Ctrl+Alt+Shift+N', 'Ctrl+Alt+Shift+U'],
+    stopChord: ['Ctrl+Alt+Shift+X', 'Ctrl+Alt+Shift+Period'],
+  },
+};
+
+/** First alternative for `key` that no other shortcut uses (null when all are taken). */
+export function suggestChord(key: NativeChordKey, prefs: Pick<NativeHeraldPrefs, NativeChordKey>, mac: boolean, failed: readonly string[] = []): string | null {
+  const used = new Set(CHORD_KEYS.map((k) => normChord(prefs[k])).concat(failed.map(normChord)));
+  for (const c of CHORD_ALTERNATIVES[mac ? 'mac' : 'other'][key]) if (!used.has(normChord(c))) return c;
+  return null;
+}
+
+function normChord(c: string): string {
+  const p = parseChord(c);
+  return p ? `${+p.ctrl}${+p.alt}${+p.shift}${+p.meta}:${p.code}` : c;
+}
+
+/** A Control+Option chord without Command (reserved for macOS's own shortcuts on a Mac). */
+export function isMacReservedChord(chord: string): boolean {
+  const p = parseChord(chord);
+  return !!p && p.ctrl && p.alt && !p.meta;
+}
+
 /** Passthrough on by default: hold-to-talk on Windows and macOS (push-to-talk next to Discord). */
 export function defaultPassthrough(name: ShortcutName, os: string | null | undefined): boolean {
   return name === 'talk' && (os === 'windows' || os === 'macos');
@@ -84,24 +146,51 @@ function parsePassthrough(v: unknown): Partial<Record<ShortcutName, boolean>> {
   return out;
 }
 
-export function loadNativePrefs(): NativeHeraldPrefs {
+/** Saved prefs carry this once the Mac chord migration ran (so a later explicit choice sticks). */
+const MAC_CHORDS_FLAG = 'macChords';
+
+export function loadNativePrefs(mac: boolean = isMacDesktop()): NativeHeraldPrefs {
+  const defaults = defaultNativePrefs(mac);
   try {
     const raw = localStorage.getItem(PREFS_KEY);
-    if (!raw) return DEFAULT_NATIVE_PREFS;
-    const p = JSON.parse(raw) as Partial<NativeHeraldPrefs>;
+    if (!raw) return defaults;
+    const p = JSON.parse(raw) as Partial<NativeHeraldPrefs> & { [MAC_CHORDS_FLAG]?: unknown };
     const chord = (v: unknown, d: string) => (typeof v === 'string' && (v === '' || parseChord(v)) ? v : d);
-    return {
-      globalShortcuts: typeof p.globalShortcuts === 'boolean' ? p.globalShortcuts : DEFAULT_NATIVE_PREFS.globalShortcuts,
-      talkChord: chord(p.talkChord, DEFAULT_NATIVE_PREFS.talkChord),
-      toggleChord: chord(p.toggleChord, DEFAULT_NATIVE_PREFS.toggleChord),
-      briefChord: chord(p.briefChord, DEFAULT_NATIVE_PREFS.briefChord),
-      stopChord: chord(p.stopChord, DEFAULT_NATIVE_PREFS.stopChord),
+    const prefs: NativeHeraldPrefs = {
+      globalShortcuts: typeof p.globalShortcuts === 'boolean' ? p.globalShortcuts : defaults.globalShortcuts,
+      talkChord: chord(p.talkChord, defaults.talkChord),
+      toggleChord: chord(p.toggleChord, defaults.toggleChord),
+      briefChord: chord(p.briefChord, defaults.briefChord),
+      stopChord: chord(p.stopChord, defaults.stopChord),
       passthrough: parsePassthrough(p.passthrough),
-      earbudButton: typeof p.earbudButton === 'boolean' ? p.earbudButton : DEFAULT_NATIVE_PREFS.earbudButton,
-      duckOthers: typeof p.duckOthers === 'boolean' ? p.duckOthers : DEFAULT_NATIVE_PREFS.duckOthers,
+      earbudButton: typeof p.earbudButton === 'boolean' ? p.earbudButton : defaults.earbudButton,
+      duckOthers: typeof p.duckOthers === 'boolean' ? p.duckOthers : defaults.duckOthers,
     };
+    if (mac && p[MAC_CHORDS_FLAG] !== true) {
+      // A Mac install saved before the Mac defaults existed: every chord still
+      // on the old (Control+Option) default moves to its Cmd one; chords the
+      // user picked are kept.
+      let changed = false;
+      for (const k of CHORD_KEYS) {
+        if (prefs[k] === DEFAULT_NATIVE_PREFS[k]) {
+          prefs[k] = MAC_NATIVE_CHORDS[k];
+          changed = true;
+        }
+      }
+      saveNativePrefs(prefs, true);
+      if (changed) console.info('Herald: moved the desktop shortcuts to the macOS defaults (Cmd+Option)');
+    }
+    return prefs;
   } catch {
-    return DEFAULT_NATIVE_PREFS;
+    return defaults;
+  }
+}
+
+function saveNativePrefs(prefs: NativeHeraldPrefs, mac: boolean = isMacDesktop()): void {
+  try {
+    localStorage.setItem(PREFS_KEY, JSON.stringify(mac ? { ...prefs, [MAC_CHORDS_FLAG]: true } : prefs));
+  } catch {
+    // storage unavailable: applies for this session only
   }
 }
 
@@ -138,11 +227,7 @@ export const nativeHeraldStore = {
   },
   setPref<K extends keyof NativeHeraldPrefs>(key: K, value: NativeHeraldPrefs[K]): void {
     const prefs = { ...state.prefs, [key]: value };
-    try {
-      localStorage.setItem(PREFS_KEY, JSON.stringify(prefs));
-    } catch {
-      // storage unavailable: applies for this session only
-    }
+    saveNativePrefs(prefs);
     setState({ prefs });
   },
   setShortcuts: (shortcuts: ShortcutResult[]) => setState({ shortcuts }),

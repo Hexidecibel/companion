@@ -1,10 +1,13 @@
 import { useEffect, useState } from 'react';
-import { nativeHeraldStore, passthroughFor, useNativeHeraldState, type NativeHeraldPrefs } from '../../hooks/useNativeHerald';
-import { requestInputMonitoring, type ShortcutName } from '../../services/nativeBridge';
-import { chordFromEvent, formatChord, parseChord } from '../../services/voice/hotkeys';
+import {
+  isMacDesktop, isMacReservedChord, nativeHeraldStore, passthroughFor, suggestChord, useNativeHeraldState,
+  type NativeChordKey, type NativeHeraldPrefs,
+} from '../../hooks/useNativeHerald';
+import { openInputMonitoringSettings, requestInputMonitoring, type ShortcutName } from '../../services/nativeBridge';
+import { chordFromEvent, displayChordText, formatChord } from '../../services/voice/hotkeys';
 import { nativePlatform, type NativePlatform } from '../../utils/platform';
 
-type ChordKey = 'talkChord' | 'toggleChord' | 'briefChord' | 'stopChord';
+type ChordKey = NativeChordKey;
 
 const ROWS: { key: ChordKey; name: ShortcutName; label: string }[] = [
   { key: 'talkChord', name: 'talk', label: 'Hold to talk' },
@@ -19,9 +22,8 @@ function Switch({ on }: { on: boolean }) {
   return <span className={`herald-switch${on ? ' herald-switch--on' : ''}`} aria-hidden="true" />;
 }
 
-function chordLabel(chord: string): string {
-  const c = parseChord(chord);
-  return c ? formatChord(c) : 'Off';
+function chordLabel(chord: string, mac: boolean): string {
+  return displayChordText(chord, mac) ?? 'Off';
 }
 
 /**
@@ -32,7 +34,9 @@ function chordLabel(chord: string): string {
 export function NativeHeraldSettings({ platform = nativePlatform() }: { platform?: NativePlatform }) {
   const { prefs, shortcuts, info, passthrough: ptStatus } = useNativeHeraldState();
   const [capturing, setCapturing] = useState<ChordKey | null>(null);
+  const [captureNote, setCaptureNote] = useState<string | null>(null);
   const set = <K extends keyof NativeHeraldPrefs>(k: K, v: NativeHeraldPrefs[K]) => nativeHeraldStore.setPref(k, v);
+  const macKeys = info ? info.os === 'macos' : isMacDesktop(platform);
 
   useEffect(() => {
     if (!capturing) return;
@@ -50,12 +54,19 @@ export function NativeHeraldSettings({ platform = nativePlatform() }: { platform
       }
       const c = chordFromEvent(e);
       if (!c) return; // modifiers alone, or no Ctrl/Alt/Meta: keep waiting
-      nativeHeraldStore.setPref(capturing, formatChord(c));
+      const text = formatChord(c);
+      if (macKeys && isMacReservedChord(text)) {
+        // Control+Option belongs to macOS (emoji picker, input sources).
+        setCaptureNote('Control+Option is kept for macOS. Use Command (\u2318) with Option instead.');
+        return;
+      }
+      setCaptureNote(null);
+      nativeHeraldStore.setPref(capturing, text);
       setCapturing(null);
     };
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
-  }, [capturing]);
+  }, [capturing, macKeys]);
 
   if (platform === 'browser') return null;
 
@@ -114,14 +125,26 @@ export function NativeHeraldSettings({ platform = nativePlatform() }: { platform
               title="Click, then press the keys. Backspace turns it off, Esc cancels."
             >
               {label}
-              <kbd className="herald-voice-set__kbd">{capturing === key ? 'Press keys…' : chordLabel(prefs[key])}</kbd>
+              <kbd className="herald-voice-set__kbd">{capturing === key ? 'Press keys…' : chordLabel(prefs[key], macKeys)}</kbd>
             </button>
-            {r && !r.ok && (
-              <div className="herald-voice-set__engine herald-voice-set__warn">
-                {chordLabel(prefs[key])} is taken by another app. Pick another
-                {canPassthrough ? `, or turn on "${PASSTHROUGH_LABEL}"` : ''}.
-              </div>
+            {capturing === key && captureNote && (
+              <div className="herald-voice-set__engine herald-voice-set__warn">{captureNote}</div>
             )}
+            {r && !r.ok && (() => {
+              const alt = suggestChord(key, prefs, macKeys, [prefs[key]]);
+              return (
+                <div className="herald-voice-set__engine herald-voice-set__warn" data-testid={`shortcut-conflict-${name}`}>
+                  {chordLabel(prefs[key], macKeys)} could not be registered: {macKeys ? 'in use by macOS or another app' : 'in use by another app'}
+                  {r.error ? ` (${r.error})` : ''}. Pick another
+                  {canPassthrough ? `, or turn on "${PASSTHROUGH_LABEL}"` : ''}.
+                  {alt && (
+                    <button type="button" className="herald-btn herald-btn--ghost herald-btn--sm" onClick={() => nativeHeraldStore.setPref(key, alt)}>
+                      Use {chordLabel(alt, macKeys)}
+                    </button>
+                  )}
+                </div>
+              );
+            })()}
             {canPassthrough && prefs[key] && (
               <button
                 type="button"
@@ -146,8 +169,14 @@ export function NativeHeraldSettings({ platform = nativePlatform() }: { platform
           <button type="button" className="herald-btn herald-btn--ghost herald-btn--sm" onClick={() => void requestInputMonitoring()}>
             Allow Input Monitoring…
           </button>
+          <button type="button" className="herald-btn herald-btn--ghost herald-btn--sm" onClick={() => void openInputMonitoringSettings()}>
+            Open System Settings &gt; Privacy &gt; Input Monitoring
+          </button>
           <span> Turn Companion on in System Settings, then quit and reopen Companion.</span>
         </div>
+      )}
+      {prefs.globalShortcuts && mac && ptStatus && !needsPermission && (
+        <div className="herald-voice-set__engine">Input Monitoring: allowed (passthrough shortcuts work).</div>
       )}
       {prefs.globalShortcuts && ptStatus?.foregroundElevated && (
         <div className="herald-voice-set__engine herald-voice-set__warn">

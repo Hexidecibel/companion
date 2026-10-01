@@ -5,7 +5,8 @@ import { useHeraldData, useHeraldSetupCtx, useHeraldVoiceInputCtx } from '../../
 import { IconBack, IconCheckup } from '../heraldIcons';
 import { TriggersGuide } from './TriggersGuide';
 import { useNativeHeraldState } from '../../../hooks/useNativeHerald';
-import { formatChord, parseChord } from '../../../services/voice/hotkeys';
+import { displayChordText } from '../../../services/voice/hotkeys';
+import { isMacDesktop } from '../../../hooks/useNativeHerald';
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
@@ -30,10 +31,8 @@ export function HeraldHelp({ onClose }: { onClose: () => void }) {
   const desktopApp = setup.platform === 'desktop';
   const phoneApp = setup.platform === 'android' || setup.platform === 'ios';
   const { prefs: nativePrefs } = useNativeHeraldState();
-  const label = (c: string) => {
-    const p = parseChord(c);
-    return p ? formatChord(p) : null;
-  };
+  const macKeys = isMacDesktop(setup.platform);
+  const label = (c: string) => displayChordText(c, macKeys);
   const shortcutsOn = desktopApp && nativePrefs.globalShortcuts;
   const stopKey = shortcutsOn ? label(nativePrefs.stopChord) : null;
   const talkKey = shortcutsOn ? label(nativePrefs.talkChord) : null;
