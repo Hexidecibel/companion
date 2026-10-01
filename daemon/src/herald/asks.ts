@@ -55,17 +55,25 @@ export type AskDecision =
 
 const sk = (s: { serverId: string; sessionId: string }) => `${s.serverId}:${s.sessionId}`;
 
+/**
+ * What the session is blocked on, for "needs your input" reports: only a prompt
+ * that is ON SCREEN (a choice box, which includes Claude's permission prompts).
+ * A tool call without a result in the transcript is not enough: in
+ * bypass-permissions mode that is simply a command still running.
+ */
 export function blockKeyOf(s: SessionSnapshot): string | null {
   if (s.pendingChoice) return `c:${s.pendingChoice.signature}`;
-  if (s.pendingApproval) return `a:${s.pendingApproval.toolUseId || s.pendingApproval.tool}`;
   return null;
 }
 
 /** "the deploy question" / "approval to run a command", for "Out4 needs your input on ...". */
 export function blockedWhat(s: SessionSnapshot): string {
   if (s.pendingChoice) {
-    const q = oneLine(s.pendingChoice.header || s.pendingChoice.question || 'a question');
-    return clip(q.replace(/[?.!\s]+$/, ''), 120);
+    const q = clip(oneLine(s.pendingChoice.question || s.pendingChoice.header || '').replace(/[?.!\s]+$/, ''), 120);
+    if (!q) return 'a question';
+    // "Which fixture" -> "which fixture" (mid-sentence), but keep "API ..." / "Out4 ...".
+    const lower = /^[A-Z][a-z]/.test(q) ? q[0].toLowerCase() + q.slice(1) : q;
+    return `"${lower}"`;
   }
   if (s.pendingApproval) return `approval to ${plainToolAction(s.pendingApproval.tool)}`;
   return 'a question';
@@ -182,7 +190,7 @@ export class AskTracker {
         out.push({ type: 'blocked', link: { ...link }, snap: s, what: blockedWhat(s) });
         continue;
       }
-      if (s.status === 'working' || block) continue;
+      if (s.status === 'working' || block || s.pendingApproval) continue;
       // Idle (or ended its turn with a question): a reply may be complete.
       if (s.lastTurnKey && s.lastTurnKey !== link.baselineTurnKey) {
         this.busy.add(link.actionId);
@@ -239,7 +247,7 @@ const ANSWER_SYSTEM = `You report back to the user what one of their AI coding s
 Rules:
 - Use ONLY the session's reply below. Never add facts, numbers, names or outcomes it does not state. If it did not answer the question, say briefly what it did say.
 - Keep its tense and certainty: "says it's deploying" is not "deployed"; a plan is a plan; a guess stays a guess.
-- One or two short spoken sentences, under 40 words, answer first. Do not start with the session's name or "It said".
+- One or two short spoken sentences, under 40 words, answer first. Give the content itself ("Two tests fail because..."), never a description of the reply ("The session replied with..."), and do not start with the session's name or "It said".
 - No markdown, lists, code, file paths, commands, URLs or commit hashes; paraphrase for the ear.
 - If the reply ends by asking the user something, end with that question in plain words.`;
 
@@ -350,7 +358,13 @@ export async function composeAnswer(
       .replace(
         new RegExp(`^${escapeRe(input.sessionName)}\\s+(?:says|said|answered)[:,]?\\s*`, 'i'),
         ''
+      )
+      // "The session replied (with ...): X" -> "X"
+      .replace(
+        /^(?:the session|it)\s+(?:replied|said|says|answered)(?:\s+(?:with|that)\b[^:]*)?:\s*/i,
+        ''
       );
+    if (text) text = text[0].toUpperCase() + text.slice(1);
     if (!text) return fallback('empty');
     if (text.length > ANSWER_MAX_CHARS) text = clip(text, ANSWER_MAX_CHARS);
     const invented = inventedNumbers(text, input.reply);

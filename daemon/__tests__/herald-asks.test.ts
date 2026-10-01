@@ -62,19 +62,31 @@ describe('AskTracker lifecycle', () => {
     const s = snap({ sessionId: 'out4', status: 'waiting', pendingChoice: choice, lastTurnKey: 'turn-1' });
     const d = t.update([s], T0 + 1000);
     expect(d).toHaveLength(1);
-    expect(d[0]).toMatchObject({ type: 'blocked', what: 'Which test fixture should I use' });
+    expect(d[0]).toMatchObject({ type: 'blocked', what: '"which test fixture should I use"' });
     expect(t.update([s], T0 + 2000)).toEqual([]);
     expect(t.size).toBe(1);
   });
 
   it('a block already on screen when we sent is not news', () => {
-    const t = new AskTracker([link({ baselineBlockKey: 'a:tool-1' })]);
+    const t = new AskTracker([link({ baselineBlockKey: 'c:sig' })]);
     const s = snap({
       sessionId: 'out4',
       status: 'waiting',
-      pendingApproval: { tool: 'Bash', detail: 'ls', toolUseId: 'tool-1' },
+      pendingChoice: { question: 'Proceed?', options: [{ label: 'Yes' }, { label: 'No' }], multiSelect: false, signature: 'sig' },
     });
     expect(t.update([s], T0 + 1000)).toEqual([]);
+  });
+
+  it('a tool call still running (transcript-only "approval", bypass mode) is not reported as needing input', () => {
+    const t = new AskTracker([link()]);
+    const s = snap({
+      sessionId: 'out4',
+      status: 'waiting',
+      lastTurnKey: 'turn-1',
+      pendingApproval: { tool: 'Bash', detail: 'for i in $(seq 40); do sleep 1; done', toolUseId: 'tool-1' },
+    });
+    expect(t.update([s], T0 + 1000)).toEqual([]);
+    expect(t.size).toBe(1);
   });
 
   it('drops quietly after 30 minutes without a reply, or when the session closes', () => {
@@ -205,9 +217,11 @@ describe('composeAnswer (grounding)', () => {
     expect((await composeAnswer(null, input)).via).toBe('fallback');
   });
 
-  it('strips a leading "Out4 says"', async () => {
-    const a = await composeAnswer(scripted(['Out4 says: two tests fail.']), input);
-    expect(a.text).toBe('two tests fail.');
+  it('strips a leading "Out4 says" / "The session replied with ...:"', async () => {
+    expect((await composeAnswer(scripted(['Out4 says: two tests fail.']), input)).text).toBe('Two tests fail.');
+    expect(
+      (await composeAnswer(scripted(['The session replied with the exact sentence you asked for: two tests fail.']), input)).text
+    ).toBe('Two tests fail.');
   });
 });
 
@@ -410,7 +424,7 @@ describe('ask-and-report through the service', () => {
     ];
     await svc.poll();
     await waitFor(() => answers(svc).length === 1);
-    expect(answers(svc)[0].text).toBe('Out4 needs your input on Which fixture.');
+    expect(answers(svc)[0].text).toBe('Out4 needs your input on "which fixture".');
     // The inbox has only the blocked item (the tracker's), not a duplicate.
     expect(svc.getState().inbox.map((i) => i.priority)).toEqual(['blocked']);
   });
@@ -462,5 +476,28 @@ describe('ask-and-report through the service', () => {
     await new Promise((r) => setTimeout(r, 50));
     expect(answers(svc)).toHaveLength(0);
     expect(svc.getState().inbox).toHaveLength(0);
+  });
+});
+
+describe('voice self-echo backstop and quiet announcements', () => {
+  it('quiet announcements are never treated as something Herald said aloud', () => {
+    const svc = new HeraldService({
+      config: cfg(fs.mkdtempSync(path.join(os.tmpdir(), 'herald-echo-'))),
+      provider: null,
+      sources: [],
+      store: new HeraldStore(fs.mkdtempSync(path.join(os.tmpdir(), 'herald-echo-')), 5),
+      broadcast: () => {},
+      audit: () => {},
+      toolbox: null,
+    });
+    const msgs = (svc as unknown as { messages: HeraldMessage[] }).messages;
+    msgs.push({ id: 'm1', role: 'herald', text: 'Out4 answered your question: two tests fail.', createdAt: Date.now(), quiet: true });
+    expect(svc.isVoiceEcho('Out4 answered your question')).toBe(false);
+    msgs.push({ id: 'm2', role: 'herald', text: 'Out4 answered your question: two tests fail.', createdAt: Date.now() });
+    expect(svc.isVoiceEcho('Out4 answered your question')).toBe(true);
+    // A command naming the session Herald just mentioned is the user, not echo.
+    expect(svc.isVoiceEcho('interrupt Out4')).toBe(false);
+    expect(svc.isVoiceEcho('ask Out4 why')).toBe(false);
+    svc.shutdown();
   });
 });

@@ -41,10 +41,10 @@ import { resolveKnowledgePaths } from './knowledge/sources';
 import type { CushCommand } from './knowledge/cush';
 import { sessionsMentioned } from './resolve';
 import { clip, firstSentence, formatAgo, oneLine, plainToolAction } from './text';
-import { isLikelyEcho } from './voice/echo-match';
+import { echoWords, isLikelyEcho } from './voice/echo-match';
 import { sanitizePronunciations } from './pronunciations';
 import { recentVersions } from './voice/versions';
-import { AskReporter, VOICE_EXCHANGE_WINDOW_MS } from './asks';
+import { AskReporter, blockKeyOf, VOICE_EXCHANGE_WINDOW_MS } from './asks';
 import { resolveSpawnDir, SpawnRunner, spawnRoots, type SessionSpawner } from './spawn';
 import type { ActionMeta, SpawnOutcome, SpawnRequest } from './actions';
 import {
@@ -71,6 +71,21 @@ export const ECHO_GUARD_WINDOW_MS = 90_000;
 /** ...the last this many of them. */
 const ECHO_GUARD_REPLIES = 2;
 export const DEFAULT_POLL_INTERVAL_MS = 4000;
+/** Words that start a request to Herald: one Herald did not say is never self-echo. */
+const COMMAND_VERBS = new Set([
+  'interrupt',
+  'stop',
+  'cancel',
+  'ask',
+  'tell',
+  'start',
+  'launch',
+  'confirm',
+  'kill',
+  'check',
+  'brief',
+  'answer',
+]);
 const ACTIVITY_DEBOUNCE_MS = 800;
 const DELTA_FLUSH_MS = 60;
 const SNAPSHOT_MAX_SESSIONS = 20;
@@ -793,10 +808,16 @@ export class HeraldService {
   isVoiceEcho(text: string): boolean {
     const since = this.now() - ECHO_GUARD_WINDOW_MS;
     const replies = this.messages
-      .filter((m) => m.role === 'herald' && m.createdAt >= since && m.text.trim())
+      // Quiet announcements were never spoken, so they cannot come back as echo.
+      .filter((m) => m.role === 'herald' && !m.quiet && m.createdAt >= since && m.text.trim())
       .slice(-ECHO_GUARD_REPLIES)
       .map((m) => m.text);
-    return replies.length > 0 && isLikelyEcho(text, replies, { minTokens: 2 });
+    if (replies.length === 0) return false;
+    // "interrupt Out4" right after Herald said "Out4 ...": the session name (digits
+    // spelled out) matches, but a command verb Herald did not say is a person.
+    const said = new Set(echoWords(replies.join(' ')));
+    if (echoWords(text).some((w) => COMMAND_VERBS.has(w) && !said.has(w))) return false;
+    return isLikelyEcho(text, replies, { minTokens: 2 });
   }
 
   send(
@@ -1377,11 +1398,7 @@ export class HeraldService {
     const snap = this.lastSnapshots.find(
       (s) => s.serverId === info.serverId && s.sessionId === info.sessionId
     );
-    const block = snap?.pendingChoice
-      ? `c:${snap.pendingChoice.signature}`
-      : snap?.pendingApproval
-        ? `a:${snap.pendingApproval.toolUseId || snap.pendingApproval.tool}`
-        : null;
+    const block = snap ? blockKeyOf(snap) : null;
     this.asks.open({
       actionId: info.actionId,
       serverId: info.serverId,
