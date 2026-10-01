@@ -48,7 +48,7 @@ export function VoiceTurnSettings({ input, voice }: { input: HeraldVoiceInput; v
         </label>
       )}
       <div className="herald-voice-set__engine">
-        {input.prefs.followUp === null
+        {input.prefs.followUp === null && !gaming && setup.profile !== 'desk'
           ? `Automatic: ${on ? 'on (headphones)' : 'off until headphones are detected'}.`
           : gaming && !on
             ? 'Off in the Gaming profile (Discord voices would count as follow-ups).'
@@ -207,5 +207,21 @@ export function HeraldVoiceExtras({ input, voice }: { input: HeraldVoiceInput; v
         disabled={!h.connected}
       />
     </>
+  );
+}
+
+/**
+ * Sound is blocked until the page gets a click or key (autoplay rules): after
+ * a reload, Herald would be silent mid-game. One click anywhere fixes it.
+ */
+export function AudioLockedNotice({ voice }: { voice: HeraldVoice }) {
+  if (!voice.audioLocked || !(voice.voiceOn || voice.chimeOn)) return null;
+  return (
+    <button type="button" className="herald-echo-paused herald-audio-locked" onClick={() => voice.testVoice()}>
+      <span>
+        <strong>Sound is off until you click.</strong> The browser blocks Herald&apos;s voice and tones on a freshly
+        loaded page. Click here once (before you start a game).
+      </span>
+    </button>
   );
 }

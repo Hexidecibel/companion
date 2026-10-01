@@ -17,7 +17,7 @@ import { pickVoice, voicesForPicker } from '../../services/tts/voices';
 import { HeraldOrb } from './HeraldOrb';
 import { HeraldBrainBadge, HeraldUsageMeter } from './HeraldUsage';
 import type { HeraldUsageSummary } from '../../types/herald';
-import { HeraldVoiceExtras } from './HeraldVoiceExtras';
+import { AudioLockedNotice, HeraldVoiceExtras } from './HeraldVoiceExtras';
 import { HeraldActionCard, HeraldPendingMarker, HeraldResolvedLine } from './HeraldActionCard';
 import { HeraldComposer } from './HeraldComposer';
 import { IconBack, IconBell, IconBrief, IconClose, IconDown, IconMore, IconPlay, IconRefresh, IconSpeaker, IconSpeakerOff, IconStop, IconTrash, IconX } from './heraldIcons';
@@ -912,6 +912,8 @@ export function HeraldPanel({ variant, onOpenSession, onClose }: HeraldPanelProp
             </span>
           </div>
         )}
+
+        <AudioLockedNotice voice={voice} />
 
         <HeraldNotices />
 

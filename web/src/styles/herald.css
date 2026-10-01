@@ -940,6 +940,8 @@
   line-height: 1.4;
 }
 .herald-echo-paused strong { color: #fcd34d; }
+.herald-audio-locked { width: 100%; text-align: left; font-family: inherit; font-size: 12.5px; cursor: pointer; }
+.herald-audio-locked:hover { border-color: rgba(252, 211, 77, 0.6); }
 .herald-echo-paused__actions { display: flex; gap: 6px; flex: none; margin-left: auto; }
 .herald-echo-paused__btn {
   padding: 4px 10px;

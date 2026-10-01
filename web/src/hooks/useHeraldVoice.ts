@@ -12,6 +12,8 @@ import { TICK_VOLUME, chimeSupported, playChime, unlockChime } from '../services
 import { pickVoice } from '../services/tts/voices';
 import { deviceKey, deviceLabel, saveCustomLabel } from '../services/heraldDevice';
 import { SpokenLog, recordingEngine } from '../services/voice/echoGuard';
+import { isGamingMode } from '../services/heraldSetup/setupStore';
+import { getAudioGraph } from '../services/voice/audioGraph';
 
 const PREFS_KEY = 'herald_voice_prefs';
 export const RATE_MIN = 0.9;
@@ -79,6 +81,14 @@ function pageVisible(): boolean {
   return typeof document === 'undefined' || document.visibilityState === 'visible';
 }
 
+/**
+ * News tones may play now. Normally only with the page in view, but in the
+ * Gaming profile the game is in front by design (Chrome on Windows marks a
+ * tab covered by a full-screen game as hidden): tones are the whole point there.
+ */
+function tonesAudible(): boolean {
+  return pageVisible() || isGamingMode();
+}
 
 const TTS_REQUEST_TIMEOUT = 25000;
 /** Report "the user is here" at most this often. */
@@ -161,6 +171,12 @@ export interface HeraldVoice {
   setThinkingTone: (on: boolean) => void;
   /** Replies may play in a hidden tab right now (a remote trigger asked recently). */
   backgroundAllowed: () => boolean;
+  /**
+   * The browser has not let this page play sound yet (no click or key since it
+   * loaded): voice and tones are silent until the user clicks once. Mid-game
+   * that means a silent Herald, so the panel says so.
+   */
+  audioLocked: boolean;
   /** Transient feedback for a voice command ("Stopped", "Slower"), or null. */
   flash: string | null;
   /** This device plays the inbox tones (one device at a time; true on older hubs). */
@@ -289,14 +305,14 @@ export function useHeraldVoice(
   useEffect(() => subscribeEvents((event, source) => {
     controller.handleEvent(event, source);
     const kind = chimes.handleEvent(event, source);
-    if (kind && prefsRef.current.chimeOn && announcerRef.current && pageVisible()) playChime(kind);
+    if (kind && prefsRef.current.chimeOn && announcerRef.current && tonesAudible()) playChime(kind);
   }), [subscribeEvents, controller, chimes]);
 
   // Gentle reminder: a blocked item nobody has heard gets its tone again.
   useEffect(() => {
     const t = setInterval(() => {
       const p = prefsRef.current;
-      if (!p.remind || !p.chimeOn || !announcerRef.current || !pageVisible()) return;
+      if (!p.remind || !p.chimeOn || !announcerRef.current || !tonesAudible()) return;
       const kind = chimes.dueReminder();
       if (kind) playChime(kind);
     }, REMINDER_CHECK_MS);
@@ -311,7 +327,9 @@ export function useHeraldVoice(
 
   // Leaving the tab (or locking the phone) silences immediately.
   useEffect(() => {
-    const onVis = () => { if (!pageVisible()) controller.stop(); };
+    // Not while a remote trigger allowed background speech (mid-game: the user
+    // asked from another window; alt-tabbing back into the game must not cut it).
+    const onVis = () => { if (!pageVisible() && Date.now() >= backgroundUntil.current) controller.stop(); };
     document.addEventListener('visibilitychange', onVis);
     return () => document.removeEventListener('visibilitychange', onVis);
   }, [controller]);
@@ -333,6 +351,20 @@ export function useHeraldVoice(
   }, [engine]);
 
   useEffect(() => () => controller.reset(), [controller]);
+
+  // Is sound allowed yet? A fresh page needs one gesture (autoplay rules).
+  const [audioLocked, setAudioLocked] = useState(false);
+  useEffect(() => {
+    if (engineOverride) return;
+    const ctx = getAudioGraph().context();
+    if (!ctx) return;
+    const update = () => setAudioLocked(ctx.state === 'suspended');
+    update();
+    // Allowed without a gesture when the page already had one (or the app allows autoplay).
+    void ctx.resume().catch(() => {}).finally(update);
+    ctx.addEventListener('statechange', update);
+    return () => ctx.removeEventListener('statechange', update);
+  }, [engineOverride]);
 
   // Voice-service status from the hub: drives neural voices (and voice input).
   const connected = host?.connected ?? false;
@@ -538,6 +570,7 @@ export function useHeraldVoice(
     thinkingTone: prefs.thinkingTone,
     setThinkingTone,
     backgroundAllowed,
+    audioLocked,
     flash,
     announcer,
     testVoice,
@@ -550,5 +583,5 @@ export function useHeraldVoice(
     renameDevice,
     claimDevice,
     spokenLog,
-  }), [spokenLog, engine, hybrid, prefs, speaking, voices, voice, setVoiceOn, setChimeOn, setVoiceId, setRate, stop, stopCommand, repeat, goOn, stepRateCb, expectBriefing, say, setSpokenLength, setRemind, setAckTick, setThinkingTone, backgroundAllowed, flash, announcer, testVoice, serverStatus, refreshStatus, allowBackground, selfId, label, renameDevice, claimDevice]);
+  }), [spokenLog, engine, hybrid, prefs, speaking, voices, voice, setVoiceOn, setChimeOn, setVoiceId, setRate, stop, stopCommand, repeat, goOn, stepRateCb, expectBriefing, say, setSpokenLength, setRemind, setAckTick, setThinkingTone, backgroundAllowed, audioLocked, flash, announcer, testVoice, serverStatus, refreshStatus, allowBackground, selfId, label, renameDevice, claimDevice]);
 }

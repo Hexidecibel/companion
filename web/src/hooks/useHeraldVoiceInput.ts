@@ -5,6 +5,8 @@ import { getMicCapture, micUnavailableReason } from '../services/voice/micCaptur
 import { VoiceInputController, type VoiceInputSource, type VoiceInputState } from '../services/voice/voiceInput';
 import { VadListener } from '../services/voice/vadListener';
 import { FOLLOW_UP_MS, VoiceAutomation, type FollowUpWindow } from '../services/voice/voiceAutomation';
+import { useHeraldSetupState } from '../services/heraldSetup/setupStore';
+import type { ProfileId } from '../services/heraldSetup/profiles';
 import { playChime } from '../services/tts/chime';
 import { voiceCopy } from '../services/voice/platformCopy';
 import type { SpokenLog } from '../services/voice/echoGuard';
@@ -86,6 +88,12 @@ export const DEFAULT_INPUT_PREFS: VoiceInputPrefs = {
   followUp: null,
   followUpMs: FOLLOW_UP_MS,
 };
+
+/** The follow-up window when the user never chose: on with headphones, off in Gaming / Desk. */
+export function autoFollowUp(headphones: boolean | null, profile: ProfileId | null): boolean {
+  if (profile === 'gaming' || profile === 'desk') return false;
+  return headphones === true;
+}
 
 export function loadInputPrefs(): VoiceInputPrefs {
   try {
@@ -506,8 +514,11 @@ export function useHeraldVoiceInput(host: VoiceInputHost): HeraldVoiceInput {
     });
   }, [automation, available, micGranted, interrupt, prefs.sensitivity, host.speaking, handsFreeActive, bargeIn.mode]);
 
-  // Follow-up window: explicit choice (profiles set it), else on with headphones.
-  const followUpOn = prefs.followUp ?? headphones === true;
+  // Follow-up window: explicit choice (profiles set it), else on with headphones,
+  // never by itself in Gaming (Discord voices) or Desk speakers (a profile chosen
+  // before this setting existed has never set it).
+  const profile = useHeraldSetupState().profile;
+  const followUpOn = prefs.followUp ?? autoFollowUp(headphones, profile);
   const followUpRef = useRef({ on: followUpOn, ms: prefs.followUpMs, micGranted, echoPaused });
   followUpRef.current = { on: followUpOn, ms: prefs.followUpMs, micGranted, echoPaused };
   const openFollowUp = useCallback((): boolean => {

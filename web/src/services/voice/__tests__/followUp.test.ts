@@ -105,3 +105,16 @@ describe('FollowUpTracker', () => {
     expect(arm).toHaveBeenCalledTimes(3);
   });
 });
+
+describe('autoFollowUp (no explicit choice)', () => {
+  it('on with headphones; never by itself in Gaming or Desk speakers', async () => {
+    const { autoFollowUp } = await import('../../../hooks/useHeraldVoiceInput');
+    expect(autoFollowUp(true, null)).toBe(true);
+    expect(autoFollowUp(true, 'headphones')).toBe(true);
+    expect(autoFollowUp(true, 'phone')).toBe(true);
+    expect(autoFollowUp(true, 'gaming')).toBe(false);
+    expect(autoFollowUp(true, 'desk')).toBe(false);
+    expect(autoFollowUp(false, null)).toBe(false);
+    expect(autoFollowUp(null, 'headphones')).toBe(false);
+  });
+});
