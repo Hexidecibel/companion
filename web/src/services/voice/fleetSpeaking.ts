@@ -127,6 +127,25 @@ export interface RemoteSpeaker {
   utteranceId: string;
 }
 
+/**
+ * What a STOP (voice "stop", the stop shortcut, the tray / orb stop, a stop
+ * trigger) does across devices. This device always goes quiet (and keeps the
+ * reply being thought about silent). The hub is asked to stop the speaker when
+ * another device is known to be speaking, and also whenever this device was
+ * NOT the one speaking: the hub knows the speaker even when this device missed
+ * its signal (it stops nobody when nobody speaks).
+ */
+export interface StopPlan {
+  local: true;
+  /** herald_stop_speaking payload, or null when this device was the speaker. */
+  hub: { deviceId?: string } | null;
+}
+
+export function planStop(o: { localSpeaking: boolean; remote: RemoteSpeaker | null }): StopPlan {
+  if (o.remote) return { local: true, hub: { deviceId: o.remote.deviceId } };
+  return { local: true, hub: o.localSpeaking ? null : {} };
+}
+
 interface Track extends RemoteSpeaker {
   startedAt: number;
   beatAt: number;

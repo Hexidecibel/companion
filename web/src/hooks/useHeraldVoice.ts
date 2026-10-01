@@ -12,7 +12,8 @@ import { TICK_VOLUME, chimeSupported, playChime, unlockChime } from '../services
 import { pickVoice } from '../services/tts/voices';
 import { deviceKey, deviceLabel, saveCustomLabel } from '../services/heraldDevice';
 import { SpokenLog, recordingEngine } from '../services/voice/echoGuard';
-import { FleetSpeakingTracker, SpeakingReporter, reportingEngine, type RemoteSpeaker } from '../services/voice/fleetSpeaking';
+import { FleetSpeakingTracker, SpeakingReporter, planStop, reportingEngine, type RemoteSpeaker } from '../services/voice/fleetSpeaking';
+import { heraldVolumeStore, stepVolume as nextVolume, volumePercent, webSpeechVolume, type HeraldVolume, type VolumeCommand } from '../services/tts/volume';
 import { isGamingMode } from '../services/heraldSetup/setupStore';
 import { getAudioGraph } from '../services/voice/audioGraph';
 
@@ -208,6 +209,14 @@ export interface HeraldVoice {
   remoteSpeaking: RemoteSpeaker | null;
   /** Stop Herald on the device that is speaking (via the hub). */
   stopRemote: () => void;
+  /** Herald's own volume on this device (voice + tones). */
+  volume: HeraldVolume;
+  /** Voice volume 0..1.5 (slider, tray). */
+  setVolume: (v: number) => void;
+  setTonesVolume: (v: number) => void;
+  setTonesFollowVoice: (on: boolean) => void;
+  /** "louder" / "quieter" / "volume 50": persisted, flashed, and confirmed out loud at the new level. */
+  volumeCommand: (cmd: VolumeCommand) => void;
   /**
    * Another device is speaking (or just stopped): this device's mic may be
    * hearing Herald with nothing to cancel it against. Hands-off capture holds back.
@@ -303,7 +312,7 @@ export function useHeraldVoice(
     () => new HeraldSpeechController(engine, {
       isEnabled: () => prefsRef.current.voiceOn,
       isVisible: () => pageVisible() || Date.now() < backgroundUntil.current,
-      speakOptions: () => ({ rate: prefsRef.current.rate, voiceId: voiceRef.current?.id ?? null }),
+      speakOptions: () => ({ rate: prefsRef.current.rate, voiceId: voiceRef.current?.id ?? null, volume: webSpeechVolume(heraldVolumeStore.get()) }),
       spokenLength: () => prefsRef.current.spokenLength,
       selfId: () => selfIdRef.current,
     }),
@@ -543,12 +552,17 @@ export function useHeraldVoice(
     if (!t || !t.isConnected()) return;
     t.request('herald_stop_speaking', r ? { deviceId: r.deviceId } : {}, 5000).catch(() => {});
   }, [fleet]);
+  const engineSpeakingRef = useRef(false);
+  engineSpeakingRef.current = speaking;
   const stopCommand = useCallback(() => {
+    // "stop", the stop shortcut, the tray / orb: quiet here, and on whichever
+    // device is speaking (the hub knows it even when this device missed it).
+    const plan = planStop({ localSpeaking: engineSpeakingRef.current || engine.speaking, remote: fleet.remote });
     controller.stop({ muteTurn: true });
-    // "stop" here while another device talks: it means that one.
-    if (fleet.remote) stopRemote();
+    const t = hostRef.current?.getTransport();
+    if (plan.hub && t && t.isConnected()) t.request('herald_stop_speaking', plan.hub, 5000).catch(() => {});
     showFlash('Stopped');
-  }, [controller, showFlash, fleet, stopRemote]);
+  }, [controller, showFlash, fleet, engine]);
   const fleetSuppressed = useCallback(() => fleet.suppressed(), [fleet]);
   const repeat = useCallback(() => {
     const ok = controller.repeat();
@@ -574,6 +588,26 @@ export function useHeraldVoice(
     showFlash(`${dir > 0 ? 'Faster' : 'Slower'} \u00b7 ${next.toFixed(2)}\u00d7`);
     // Said at the new speed, so the user hears the change.
     controller.say('Okay.');
+  }, [controller, showFlash]);
+  const [volume, setVolumeState] = useState<HeraldVolume>(() => heraldVolumeStore.get());
+  useEffect(() => heraldVolumeStore.subscribe(setVolumeState), []);
+  const setVolume = useCallback((v: number) => heraldVolumeStore.setVoice(v), []);
+  const setTonesVolume = useCallback((v: number) => heraldVolumeStore.setTones(v), []);
+  const setTonesFollowVoice = useCallback((on: boolean) => heraldVolumeStore.setTonesFollowVoice(on), []);
+  const volumeCommand = useCallback((cmd: VolumeCommand) => {
+    const cur = heraldVolumeStore.get().voice;
+    const next = cmd.kind === 'set' ? cmd.value : nextVolume(cur, cmd.dir);
+    if (next === null) {
+      const up = cmd.kind === 'step' && cmd.dir > 0;
+      showFlash(up ? 'Loudest' : 'Quietest');
+      controller.say(up ? "That's as loud as I go." : "That's as quiet as I go.");
+      return;
+    }
+    heraldVolumeStore.setVoice(next);
+    const pct = volumePercent(next);
+    showFlash(pct === 0 ? 'Muted' : `Volume ${pct}%`);
+    // Said at the new level (the gain applies at once), so the user hears the change.
+    if (pct > 0) controller.say(`Volume ${pct}.`);
   }, [controller, showFlash]);
   const setSpokenLength = useCallback((v: SpokenLength) => setPrefs((p) => ({ ...p, spokenLength: v })), []);
   const setRemind = useCallback((on: boolean) => setPrefs((p) => ({ ...p, remind: on })), []);
@@ -602,7 +636,7 @@ export function useHeraldVoice(
   const testVoice = useCallback(() => {
     controller.stop();
     engine.unlock();
-    engine.speak(TEST_LINE, { rate: prefsRef.current.rate, voiceId: voiceRef.current?.id ?? null });
+    engine.speak(TEST_LINE, { rate: prefsRef.current.rate, voiceId: voiceRef.current?.id ?? null, volume: webSpeechVolume(heraldVolumeStore.get()) });
   }, [controller, engine]);
 
   return useMemo(() => ({
@@ -651,5 +685,10 @@ export function useHeraldVoice(
     remoteSpeaking,
     stopRemote,
     fleetSuppressed,
-  }), [remoteSpeaking, stopRemote, fleetSuppressed, spokenLog, engine, hybrid, prefs, speaking, voices, voice, setVoiceOn, setChimeOn, setVoiceId, setRate, stop, stopCommand, repeat, goOn, stepRateCb, expectBriefing, say, setSpokenLength, setRemind, setAckTick, setThinkingTone, backgroundAllowed, audioLocked, flash, announcer, testVoice, serverStatus, refreshStatus, allowBackground, selfId, label, renameDevice, claimDevice]);
+    volume,
+    setVolume,
+    setTonesVolume,
+    setTonesFollowVoice,
+    volumeCommand,
+  }), [volume, setVolume, setTonesVolume, setTonesFollowVoice, volumeCommand, remoteSpeaking, stopRemote, fleetSuppressed, spokenLog, engine, hybrid, prefs, speaking, voices, voice, setVoiceOn, setChimeOn, setVoiceId, setRate, stop, stopCommand, repeat, goOn, stepRateCb, expectBriefing, say, setSpokenLength, setRemind, setAckTick, setThinkingTone, backgroundAllowed, audioLocked, flash, announcer, testVoice, serverStatus, refreshStatus, allowBackground, selfId, label, renameDevice, claimDevice]);
 }

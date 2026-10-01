@@ -1,15 +1,20 @@
 import { useEffect, useRef, useSyncExternalStore } from 'react';
 import {
   getNativeInfo,
+  getPassthroughStatus,
   listenNativeHerald,
+  listenPassthroughStatus,
   setAudioFocus,
   setGlobalShortcuts,
   setMediaSession,
-  setTrayTonesMuted,
+  setTrayState,
   type NativeHeraldHandlers,
   type NativeInfo,
+  type PassthroughStatus,
+  type ShortcutName,
   type ShortcutResult,
 } from '../services/nativeBridge';
+import type { VolumeCommand } from '../services/tts/volume';
 import { parseChord } from '../services/voice/hotkeys';
 import type { VoiceInputSource, VoiceInputState } from '../services/voice/voiceInput';
 import { nativePlatform, type NativePlatform } from '../utils/platform';
@@ -17,8 +22,13 @@ import { nativePlatform, type NativePlatform } from '../utils/platform';
 /**
  * Native-app Herald preferences (per device). Defaults avoid Discord's
  * defaults (Ctrl+Shift+M mute, Ctrl+Shift+D deafen, the unbound push-to-talk
- * key) and the browser-tab chords (Ctrl+Shift+Space talk, Ctrl+Shift+B brief),
- * which keep working inside the app window.
+ * key; Discord binds nothing with Ctrl+Alt+Shift) and the browser-tab chords
+ * (Ctrl+Shift+Space talk, Ctrl+Shift+B brief), which keep working inside the
+ * app window.
+ *
+ * Passthrough (per shortcut): observe the keys without taking them, so an app
+ * bound to the same chord (Discord push-to-mute on Ctrl+Alt+Space) still gets
+ * them. Default on for hold-to-talk on Windows / macOS, off otherwise.
  */
 export interface NativeHeraldPrefs {
   /** Desktop: register the system-wide shortcuts. */
@@ -29,6 +39,10 @@ export interface NativeHeraldPrefs {
   toggleChord: string;
   /** Desktop: tap for "brief me". */
   briefChord: string;
+  /** Desktop: tap to stop Herald speaking, on any device. */
+  stopChord: string;
+  /** Desktop: per shortcut, let other apps see the keys too (null / absent: the OS default). */
+  passthrough: Partial<Record<ShortcutName, boolean>>;
   /** Mobile: the earbud / headset play-pause toggles Herald. */
   earbudButton: boolean;
   /** Mobile: other audio ducks while Herald speaks. */
@@ -40,11 +54,35 @@ export const DEFAULT_NATIVE_PREFS: NativeHeraldPrefs = {
   talkChord: 'Ctrl+Alt+Space',
   toggleChord: 'Ctrl+Alt+Shift+H',
   briefChord: 'Ctrl+Alt+Shift+B',
+  stopChord: 'Ctrl+Alt+Shift+S',
+  passthrough: {},
   earbudButton: true,
   duckOthers: true,
 };
 
+/** Passthrough on by default: hold-to-talk on Windows and macOS (push-to-talk next to Discord). */
+export function defaultPassthrough(name: ShortcutName, os: string | null | undefined): boolean {
+  return name === 'talk' && (os === 'windows' || os === 'macos');
+}
+
+/** The effective passthrough choice for one shortcut. */
+export function passthroughFor(prefs: Pick<NativeHeraldPrefs, 'passthrough'>, name: ShortcutName, info: NativeInfo | null): boolean {
+  if (!info?.passthrough) return false;
+  const v = prefs.passthrough[name];
+  return typeof v === 'boolean' ? v : defaultPassthrough(name, info.os);
+}
+
 const PREFS_KEY = 'herald_native_prefs';
+
+function parsePassthrough(v: unknown): Partial<Record<ShortcutName, boolean>> {
+  const out: Partial<Record<ShortcutName, boolean>> = {};
+  if (!v || typeof v !== 'object') return out;
+  for (const k of ['talk', 'toggle', 'brief', 'stop'] as const) {
+    const b = (v as Record<string, unknown>)[k];
+    if (typeof b === 'boolean') out[k] = b;
+  }
+  return out;
+}
 
 export function loadNativePrefs(): NativeHeraldPrefs {
   try {
@@ -57,6 +95,8 @@ export function loadNativePrefs(): NativeHeraldPrefs {
       talkChord: chord(p.talkChord, DEFAULT_NATIVE_PREFS.talkChord),
       toggleChord: chord(p.toggleChord, DEFAULT_NATIVE_PREFS.toggleChord),
       briefChord: chord(p.briefChord, DEFAULT_NATIVE_PREFS.briefChord),
+      stopChord: chord(p.stopChord, DEFAULT_NATIVE_PREFS.stopChord),
+      passthrough: parsePassthrough(p.passthrough),
       earbudButton: typeof p.earbudButton === 'boolean' ? p.earbudButton : DEFAULT_NATIVE_PREFS.earbudButton,
       duckOthers: typeof p.duckOthers === 'boolean' ? p.duckOthers : DEFAULT_NATIVE_PREFS.duckOthers,
     };
@@ -70,6 +110,10 @@ interface NativeState {
   /** Last registration result per shortcut (desktop). */
   shortcuts: ShortcutResult[];
   info: NativeInfo | null;
+  /** The native info call finished (info may still be null: an older app / a browser). */
+  infoLoaded: boolean;
+  /** Passthrough hook status (desktop), or null. */
+  passthrough: PassthroughStatus | null;
 }
 
 /** A native input the device check is waiting for (it takes the press instead of Herald). */
@@ -78,7 +122,7 @@ let probe: NativeProbe | null = null;
 
 // A tiny store shared by the provider hook (which applies the prefs) and the
 // settings UI (which edits them), so neither needs a new React context.
-let state: NativeState = { prefs: loadNativePrefs(), shortcuts: [], info: null };
+let state: NativeState = { prefs: loadNativePrefs(), shortcuts: [], info: null, infoLoaded: false, passthrough: null };
 const listeners = new Set<() => void>();
 
 function setState(patch: Partial<NativeState>): void {
@@ -102,7 +146,12 @@ export const nativeHeraldStore = {
     setState({ prefs });
   },
   setShortcuts: (shortcuts: ShortcutResult[]) => setState({ shortcuts }),
-  setInfo: (info: NativeInfo | null) => setState({ info }),
+  setInfo: (info: NativeInfo | null) => setState({ info, infoLoaded: true }),
+  setPassthroughStatus: (passthrough: PassthroughStatus | null) => setState({ passthrough }),
+  /** One shortcut's passthrough choice. */
+  setPassthrough(name: ShortcutName, on: boolean): void {
+    nativeHeraldStore.setPref('passthrough', { ...state.prefs.passthrough, [name]: on });
+  },
   /** Device check: route the next native presses here instead of to Herald (null restores). */
   setProbe(p: NativeProbe | null): void {
     probe = p;
@@ -110,7 +159,7 @@ export const nativeHeraldStore = {
   /** Tests only. */
   reset(): void {
     probe = null;
-    state = { prefs: loadNativePrefs(), shortcuts: [], info: null };
+    state = { prefs: loadNativePrefs(), shortcuts: [], info: null, infoLoaded: false, passthrough: null };
     listeners.forEach((l) => l());
   },
 };
@@ -132,8 +181,16 @@ export interface NativeHeraldHost {
   };
   tonesOn: boolean;
   setTonesOn: (on: boolean) => void;
-  /** Herald is speaking right now (mobile audio focus). */
+  /** Herald is speaking right now on this device (mobile audio focus). */
   speaking: boolean;
+  /** Herald is speaking here or on another device. */
+  speakingAnywhere?: boolean;
+  /** Barge-in for a hold-to-talk key-down: stop Herald now (here and on the speaking device). */
+  bargeIn?: () => void;
+  /** Herald's voice volume on this device (tray checks). */
+  volume?: number;
+  /** Tray volume items. */
+  volumeCommand?: (cmd: VolumeCommand) => void;
   /** Herald is usable on this device (connected to its host). */
   enabled: boolean;
   tone: (kind: 'wake' | 'error') => void;
@@ -151,6 +208,9 @@ export function nativeHandlers(host: () => NativeHeraldHost): NativeHeraldHandle
     talkDown: () => {
       if (probed('talk_down')) return;
       const h = host();
+      // Holding the talk key while Herald speaks: quiet at once, on key-down,
+      // then listen if the key stays held (the capture below starts as usual).
+      if (h.speakingAnywhere || h.speaking) h.bargeIn?.();
       if (h.input.state.phase !== 'idle') return; // key auto-repeat, or already capturing
       if (!h.input.available) {
         h.tone('error');
@@ -171,6 +231,7 @@ export function nativeHandlers(host: () => NativeHeraldHost): NativeHeraldHandle
       const h = host();
       h.setTonesOn(!h.tonesOn);
     },
+    volume: (cmd) => host().volumeCommand?.(cmd),
   };
 }
 
@@ -209,27 +270,54 @@ export function useNativeHerald(host: NativeHeraldHost, platform: NativePlatform
     wasListening.current = listening;
   }, [phase, source]);
 
-  // Desktop: (re)register the system-wide shortcuts.
-  const { globalShortcuts, talkChord, toggleChord, briefChord } = prefs;
+  // Desktop: (re)register the system-wide shortcuts, once the OS is known
+  // (the passthrough defaults depend on it).
+  const { info, infoLoaded } = useNativeHeraldState();
+  const { globalShortcuts, talkChord, toggleChord, briefChord, stopChord } = prefs;
+  const ptTalk = passthroughFor(prefs, 'talk', info);
+  const ptToggle = passthroughFor(prefs, 'toggle', info);
+  const ptBrief = passthroughFor(prefs, 'brief', info);
+  const ptStop = passthroughFor(prefs, 'stop', info);
   useEffect(() => {
-    if (platform !== 'desktop') return;
+    if (platform !== 'desktop' || !infoLoaded) return;
     let cancelled = false;
-    const cfg = globalShortcuts ? { talk: talkChord, toggle: toggleChord, brief: briefChord } : {};
+    const cfg = globalShortcuts
+      ? {
+          talk: talkChord,
+          toggle: toggleChord,
+          brief: briefChord,
+          stop: stopChord,
+          passthrough: { talk: ptTalk, toggle: ptToggle, brief: ptBrief, stop: ptStop },
+        }
+      : {};
     void setGlobalShortcuts(cfg).then((res) => {
-      if (!cancelled) nativeHeraldStore.setShortcuts(res ?? []);
+      if (cancelled) return;
+      nativeHeraldStore.setShortcuts(res ?? []);
+      void getPassthroughStatus().then((st) => { if (!cancelled) nativeHeraldStore.setPassthroughStatus(st); });
     });
     return () => { cancelled = true; };
-  }, [platform, globalShortcuts, talkChord, toggleChord, briefChord]);
+  }, [platform, infoLoaded, globalShortcuts, talkChord, toggleChord, briefChord, stopChord, ptTalk, ptToggle, ptBrief, ptStop]);
   useEffect(() => {
     if (platform !== 'desktop') return;
-    void getNativeInfo().then((info) => nativeHeraldStore.setInfo(info));
+    void getNativeInfo().then((i) => nativeHeraldStore.setInfo(i));
+    let off: (() => void) | null = null;
+    let cancelled = false;
+    void listenPassthroughStatus((st) => nativeHeraldStore.setPassthroughStatus(st)).then((u) => {
+      if (cancelled) u();
+      else off = u;
+    });
+    return () => {
+      cancelled = true;
+      off?.();
+    };
   }, [platform]);
 
-  // Desktop: tray "Mute tones" mirrors the preference.
+  // Desktop: the tray's "Mute tones" and volume checks mirror the preferences.
   const tonesOn = host.tonesOn;
+  const volume = host.volume;
   useEffect(() => {
-    if (platform === 'desktop') void setTrayTonesMuted(!tonesOn);
-  }, [platform, tonesOn]);
+    if (platform === 'desktop') void setTrayState(!tonesOn, volume);
+  }, [platform, tonesOn, volume]);
 
   // Mobile: the earbud button belongs to Herald only while Herald is usable here.
   const mobile = platform === 'android' || platform === 'ios';

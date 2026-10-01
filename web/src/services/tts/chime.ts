@@ -106,7 +106,7 @@ export function playChime(kind: ToneKind, volume = 0.05): void {
     const t0 = c.currentTime + 0.02;
     const master = c.createGain();
     master.gain.value = kind === 'blocked' ? volume * 1.15 : volume;
-    master.connect(getAudioGraph().playbackBus() ?? c.destination);
+    master.connect(getAudioGraph().toneBus() ?? c.destination);
     for (const note of TONES[kind]) {
       const start = t0 + note.at;
       const osc = c.createOscillator();
@@ -143,7 +143,7 @@ export function playChime(kind: ToneKind, volume = 0.05): void {
 
 /**
  * A very soft "thinking" shimmer: a slow swell of two high partials every
- * SHIMMER_PERIOD_S until stopped. Plays through Herald's playback bus, so the
+ * SHIMMER_PERIOD_S until stopped. Plays through Herald's tone bus, so the
  * echo canceller hears it as Herald's own. Returns the stop function (safe to
  * call twice). Off by default (setting: Advanced > Thinking tone).
  */
@@ -158,7 +158,7 @@ export function startShimmer(volume = SHIMMER_VOLUME): () => void {
   try {
     master = c.createGain();
     master.gain.value = volume;
-    master.connect(getAudioGraph().playbackBus() ?? c.destination);
+    master.connect(getAudioGraph().toneBus() ?? c.destination);
   } catch {
     return () => {};
   }

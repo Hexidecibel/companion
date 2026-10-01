@@ -936,3 +936,10 @@ html.herald-overlay-root #root {
   .hs-backdrop, .hs-dialog, .hs-step, .hs-heard, .hs-result, .hs-summary__row, .hh, .hn { animation: none !important; }
   .herald-overlay__pill { transition: opacity 200ms linear; transform: none !important; }
 }
+
+/* Herald volume (main menu) */
+.hm-volume { padding: 6px 10px; }
+.hm-volume__label { display: inline-flex; align-items: center; gap: 8px; color: var(--h-text, #f3f4f6); }
+
+/* Native shortcuts: the per-shortcut passthrough switch */
+.herald-menu__item--fine { font-size: 12px; color: var(--h-text-2, #9ca3af); }

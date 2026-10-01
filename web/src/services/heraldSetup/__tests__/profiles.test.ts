@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   applyProfileSettings,
+  GAMING_VOLUME,
   availableProfiles,
   environmentSuggestion,
   gradeEcho,
@@ -104,6 +105,23 @@ function targets(over: Partial<ProfileTargets['current']> = {}, platform: Profil
 }
 
 describe('applyProfileSettings', () => {
+  it('Gaming sets Herald to 80 %; others to 100 %; only when picked (setVolume given) and different', () => {
+    expect(profileSettings('gaming', { echo: null }).voice.volume).toBe(GAMING_VOLUME);
+    expect(GAMING_VOLUME).toBe(0.8);
+    expect(profileSettings('headphones', { echo: null }).voice.volume).toBe(1);
+    const setVolume = vi.fn();
+    const t = targets({ volume: 1 });
+    applyProfileSettings(profileSettings('gaming', { echo: null }), { ...t, voice: { ...t.voice, setVolume } });
+    expect(setVolume).toHaveBeenCalledWith(0.8);
+    setVolume.mockClear();
+    const same = targets({ volume: 0.8 });
+    applyProfileSettings(profileSettings('gaming', { echo: null }), { ...same, voice: { ...same.voice, setVolume } });
+    expect(setVolume).not.toHaveBeenCalled();
+    // A re-apply (echo check, "read whole replies") passes no setVolume: the user's level stays.
+    const keep = targets({ volume: 1.2 });
+    expect(() => applyProfileSettings(profileSettings('desk', { echo: null }), keep)).not.toThrow();
+  });
+
   it('sets only what differs, and always makes interrupt explicit', () => {
     const t = targets({ interrupt: true, interruptExplicit: false });
     applyProfileSettings(profileSettings('headphones', { echo: null }), t);

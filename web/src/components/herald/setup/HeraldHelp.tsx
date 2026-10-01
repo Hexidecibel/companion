@@ -4,6 +4,8 @@ import { PROFILES } from '../../../services/heraldSetup/profiles';
 import { useHeraldData, useHeraldSetupCtx, useHeraldVoiceInputCtx } from '../../../context/HeraldContext';
 import { IconBack, IconCheckup } from '../heraldIcons';
 import { TriggersGuide } from './TriggersGuide';
+import { useNativeHeraldState } from '../../../hooks/useNativeHerald';
+import { formatChord, parseChord } from '../../../services/voice/hotkeys';
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
@@ -27,6 +29,14 @@ export function HeraldHelp({ onClose }: { onClose: () => void }) {
   const mod = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform) ? 'Cmd' : 'Ctrl';
   const desktopApp = setup.platform === 'desktop';
   const phoneApp = setup.platform === 'android' || setup.platform === 'ios';
+  const { prefs: nativePrefs } = useNativeHeraldState();
+  const label = (c: string) => {
+    const p = parseChord(c);
+    return p ? formatChord(p) : null;
+  };
+  const shortcutsOn = desktopApp && nativePrefs.globalShortcuts;
+  const stopKey = shortcutsOn ? label(nativePrefs.stopChord) : null;
+  const talkKey = shortcutsOn ? label(nativePrefs.talkChord) : null;
 
   return (
     <div
@@ -58,6 +68,13 @@ export function HeraldHelp({ onClose }: { onClose: () => void }) {
             <li><strong>Brief me:</strong> <kbd>{input.briefChordLabel}</kbd>, the button in the header, or say “what's up”.</li>
             <li><strong>Open or close:</strong> <kbd>{mod}</kbd>+<kbd>J</kbd>.</li>
             {desktopApp && <li><strong>From any app:</strong> the system-wide shortcuts (Advanced &gt; System-wide shortcuts) and the tray icon.</li>}
+            <li>
+              <strong>Stop her talking:</strong> say “stop”, press <kbd>Esc</kbd> in the app
+              {stopKey && <>, <kbd>{stopKey}</kbd> from any app (stops whichever device is speaking)</>}
+              {talkKey && <>, or just hold <kbd>{talkKey}</kbd> to talk over her</>}
+              {desktopApp && <>; also the tray’s Stop speaking and the floating orb’s stop button</>}.
+            </li>
+            <li><strong>Volume:</strong> the slider in the menu, or say “louder”, “quieter”, “volume 50”. It is Herald’s own level on this device, separate from the system volume{desktopApp ? ' (also in the tray)' : ''}.</li>
             {phoneApp && <li><strong>Earbuds:</strong> tap play/pause to ask; tap again to stop Herald.</li>}
           </ul>
         </Section>
@@ -89,7 +106,7 @@ export function HeraldHelp({ onClose }: { onClose: () => void }) {
         <Section title="Talking over Herald">
           <p className="hh-p">
             With headphones you can interrupt by just talking. Through speakers Herald could hear itself, so this stays off unless
-            the echo test in the device check passes. “Stop” or <kbd>Esc</kbd> always works.
+            the echo test in the device check passes. “Stop”, <kbd>Esc</kbd>{stopKey ? <> or <kbd>{stopKey}</kbd></> : null} always works.
           </p>
         </Section>
 

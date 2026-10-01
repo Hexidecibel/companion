@@ -6,7 +6,8 @@
  *   headphones  Herald cannot hear itself: interrupt on, hands-free allowed, follow-up window.
  *   desk        Speakers: interrupt only when the echo check passed; push-to-talk; short replies.
  *   gaming      Tones only, hotkey / mouse trigger, hands-free off (Discord), short replies,
- *               no follow-up window (teammates on Discord would be taken as follow-ups).
+ *               no follow-up window (teammates on Discord would be taken as follow-ups),
+ *               Herald at 80 % (under the game and Discord).
  *   phone       Earbuds: earbud button, brief replies, ducking, phone mic, follow-up window.
  *
  * Reply length on the hub (`verbosity`) is shared by every device, so profiles
@@ -50,7 +51,7 @@ export const PROFILES: Record<ProfileId, ProfileInfo> = {
     id: 'gaming',
     name: 'Gaming',
     tagline: 'Headset and Discord. Tones only, one button to talk.',
-    bullets: ['Tones for news, nothing spoken unasked', 'Hotkey or mouse button to talk', 'Hands-free off (Discord hears your mic)', 'Short spoken replies'],
+    bullets: ['Tones for news, nothing spoken unasked', 'Hotkey or mouse button to talk', 'Hands-free off (Discord hears your mic)', 'Short spoken replies', 'Herald at 80% volume'],
   },
   phone: {
     id: 'phone',
@@ -106,6 +107,8 @@ export interface ProfileSettings {
     /** Replay the tone for an unheard block. */
     remind: boolean;
     spokenLength: 'short' | 'full';
+    /** Herald's own volume on this device (0..1.5). Gaming: 80 % (under the game and Discord). */
+    volume: number;
   };
   input: {
     interrupt: boolean;
@@ -143,9 +146,12 @@ export interface ProfileContext {
   fullReplies?: boolean;
 }
 
+/** The Gaming profile's default Herald volume. */
+export const GAMING_VOLUME = 0.8;
+
 export function profileSettings(id: ProfileId, ctx: ProfileContext): ProfileSettings {
   const base: ProfileSettings = {
-    voice: { voiceOn: true, chimeOn: true, remind: true, spokenLength: 'short' },
+    voice: { voiceOn: true, chimeOn: true, remind: true, spokenLength: 'short', volume: 1 },
     input: { interrupt: false, sensitivity: 'normal', reviewBeforeSend: false, spaceToTalk: true, handsFree: 'keep', followUp: false },
     native: { globalShortcuts: true, earbudButton: true, duckOthers: true },
     gamingMode: false,
@@ -177,7 +183,7 @@ export function profileSettings(id: ProfileId, ctx: ProfileContext): ProfileSett
     case 'gaming':
       return {
         ...base,
-        voice: { ...base.voice, remind: false, spokenLength: 'short' },
+        voice: { ...base.voice, remind: false, spokenLength: 'short', volume: GAMING_VOLUME },
         // Discord hears the same mic, and teammates talking must never cut Herald off.
         input: { ...base.input, interrupt: false, spaceToTalk: false, handsFree: 'off', followUp: false },
         native: { ...base.native, globalShortcuts: true },
@@ -202,6 +208,8 @@ export interface ProfileTargets {
     setChimeOn: (on: boolean) => void;
     setRemind: (on: boolean) => void;
     setSpokenLength: (v: 'short' | 'full') => void;
+    /** Absent: the profile leaves the volume alone (re-applied for an echo check, not picked). */
+    setVolume?: (v: number) => void;
   };
   input: {
     setPref: (key: 'interrupt' | 'sensitivity' | 'reviewBeforeSend' | 'spaceToTalk' | 'builtInMicWithBluetooth' | 'followUp', value: boolean | 'low' | 'normal' | 'high') => void;
@@ -216,6 +224,8 @@ export interface ProfileTargets {
     chimeOn: boolean;
     remind: boolean;
     spokenLength: 'short' | 'full';
+    /** Current Herald volume (absent: always set when `setVolume` is given). */
+    volume?: number;
     interrupt: boolean;
     interruptExplicit: boolean;
     sensitivity: 'low' | 'normal' | 'high';
@@ -240,6 +250,7 @@ export function applyProfileSettings(s: ProfileSettings, t: ProfileTargets): voi
   if (c.chimeOn !== s.voice.chimeOn) t.voice.setChimeOn(s.voice.chimeOn);
   if (c.remind !== s.voice.remind) t.voice.setRemind(s.voice.remind);
   if (c.spokenLength !== s.voice.spokenLength) t.voice.setSpokenLength(s.voice.spokenLength);
+  if (t.voice.setVolume && (c.volume === undefined || Math.abs(c.volume - s.voice.volume) > 0.001)) t.voice.setVolume(s.voice.volume);
   // Interrupt is always made explicit, so it no longer follows the old headphone guess.
   if (c.interrupt !== s.input.interrupt || !c.interruptExplicit) t.input.setPref('interrupt', s.input.interrupt);
   if (c.sensitivity !== s.input.sensitivity) t.input.setPref('sensitivity', s.input.sensitivity);

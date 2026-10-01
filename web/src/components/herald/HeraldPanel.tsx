@@ -1,4 +1,5 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
+import { HeraldTonesVolume } from './HeraldVolume';
 import type { HeraldAction, HeraldInboxItem, HeraldMessage, HeraldSessionRef, HeraldVerbosity, InboxPriority } from '../../types/herald';
 import { INTENT_LABELS, VOICE_COMMAND_HELP } from '../../services/voice/voiceCommands';
 import { sortInbox, sortPendingByUrgency } from '../../services/heraldReducer';
@@ -292,6 +293,7 @@ function VoiceSettings({ voice }: { voice: HeraldVoice }) {
           <span className={`herald-switch${voice.chimeOn ? ' herald-switch--on' : ''}`} aria-hidden="true" />
         </button>
       )}
+      {voice.chimeSupported && voice.chimeOn && <HeraldTonesVolume voice={voice} />}
       {voice.chimeSupported && voice.chimeOn && (
         <button
           type="button"

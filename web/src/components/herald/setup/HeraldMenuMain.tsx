@@ -3,6 +3,7 @@ import { useHeraldData, useHeraldSetupCtx, useHeraldVoiceCtx, useHeraldVoiceInpu
 import { PROFILES, type ProfileId } from '../../../services/heraldSetup/profiles';
 import { heraldSetupStore, overlayEnabled, setOverlayEnabled } from '../../../services/heraldSetup/setupStore';
 import { nativeHeraldStore, useNativeHeraldState } from '../../../hooks/useNativeHerald';
+import { HeraldVolumeSlider } from '../HeraldVolume';
 import {
   IconBrief,
   IconCheckup,
@@ -30,7 +31,7 @@ function Switch({ on }: { on: boolean }) {
 }
 
 /**
- * The Herald menu's main view: the profile, who is in control, voice and
+ * The Herald menu's main view: the profile, who is in control, voice, volume and
  * hands-free, Brief me, the device check and Help. Every other knob lives in
  * Advanced.
  */
@@ -115,6 +116,7 @@ export function HeraldMenuMain({ onClose, onAdvanced }: { onClose: () => void; o
           <Switch on={voice.voiceOn} />
         </button>
       )}
+      {(voice.supported || voice.chimeSupported) && <HeraldVolumeSlider voice={voice} />}
       <button
         type="button"
         role="menuitemcheckbox"

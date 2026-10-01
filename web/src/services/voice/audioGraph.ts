@@ -3,12 +3,18 @@
  * listens to goes through this graph, so the echo canceller gets the exact
  * playback samples as its reference.
  *
- *   TTS / chimes --> playbackBus --------------------------------> destination
- *                         |
- *                         +--(reference)--> [herald-aec] input 1
+ *   TTS ----> voiceBus (Herald volume) --+
+ *   chimes --> toneBus (tones volume) ----+--> playbackBus --> outputClamp --> destination
+ *                                                                  |
+ *                                                                  +--(reference)--> [herald-aec] input 1
  *   mic source ------------------------->  [herald-aec] input 0 --> cleanedBus --> capture worklet (16 kHz PCM)
  *        |                                                               +--------> cleanedStream (VAD)
  *        +--> rawBus (measurement only)
+ *
+ * Volume (`services/tts/volume.ts`) is applied by the voice / tone gains, and
+ * the output clamp is the same hard limit the destination applies: the echo
+ * reference is taken AFTER both, so it is exactly what is played, boost
+ * (up to 150 %) and clipping included.
  *
  * The mic source can be swapped (device change, native capture) without the
  * consumers noticing: they hang off `cleanedBus`, which never changes. When the
@@ -19,6 +25,7 @@ import aecWorkletUrl from './aec/aecWorklet?worker&url';
 import aecWasmUrl from '@ennuicastr/webrtcaec3.js/dist/webrtcaec3-0.3.0.wasm?url';
 import type { AecWorkletOut } from './aec/aecWorklet';
 import { emptyStats, mergeStats, type AecStats } from './aec/aecCore';
+import { busGains, heraldVolumeStore } from '../tts/volume';
 
 export type GraphAecState = 'idle' | 'loading' | 'ready' | 'failed';
 
@@ -68,9 +75,23 @@ function loadWasm(): Promise<ArrayBuffer> {
   return wasmBytes;
 }
 
+/** Identity in [-1, 1], clamped outside: the WaveShaper curve of the output clamp. */
+export function clampCurve(): Float32Array<ArrayBuffer> {
+  return new Float32Array([-1, 1]);
+}
+
+/** What a WaveShaper with `clampCurve()` does to one sample (the reference math). */
+export function clampSample(x: number): number {
+  return Math.max(-1, Math.min(1, x));
+}
+
 export class HeraldAudioGraph {
   private ctx: AudioContext | null = null;
   private _playbackBus: GainNode | null = null;
+  private _voiceBus: GainNode | null = null;
+  private _toneBus: GainNode | null = null;
+  private _output: AudioNode | null = null;
+  private gains = { voice: 1, tones: 1 };
   private _cleanedBus: GainNode | null = null;
   private _rawBus: GainNode | null = null;
   private keepAlive: GainNode | null = null;
@@ -121,10 +142,35 @@ export class HeraldAudioGraph {
     return (ctx.state as string) === 'running';
   }
 
-  /** Everything Herald plays connects here (it is the echo reference). */
+  /** Everything Herald plays ends up here (the echo reference is taken after it). */
   playbackBus(): GainNode | null {
     if (!this.context()) return null;
     return this._playbackBus;
+  }
+
+  /** Herald's voice connects here (Herald volume applied). */
+  voiceBus(): GainNode | null {
+    if (!this.context()) return null;
+    return this._voiceBus;
+  }
+
+  /** Tones connect here (tones volume applied). */
+  toneBus(): GainNode | null {
+    if (!this.context()) return null;
+    return this._toneBus;
+  }
+
+  /** The node the echo canceller's reference comes from: post-volume, post-clamp, exactly what plays. */
+  referenceNode(): AudioNode | null {
+    if (!this.context()) return null;
+    return this._output;
+  }
+
+  /** Herald / tones volume as gains (see `busGains` in services/tts/volume.ts). */
+  setVolume(voice: number, tones: number): void {
+    this.gains = { voice, tones };
+    if (this._voiceBus) this._voiceBus.gain.value = voice;
+    if (this._toneBus) this._toneBus.gain.value = tones;
   }
 
   /** The mic, echo-cancelled when possible. Consumers connect from here. */
@@ -216,7 +262,7 @@ export class HeraldAudioGraph {
           return false;
         }
         node.port.onmessage = (e: MessageEvent<AecWorkletOut>) => this.onAecMessage(e.data);
-        this._playbackBus!.connect(node, 0, 1);
+        this._output!.connect(node, 0, 1);
         node.connect(this.keepAlive!);
         this.aecNode = node;
         this.setAecState('ready');
@@ -327,7 +373,26 @@ export class HeraldAudioGraph {
 
   private buildBuses(ctx: AudioContext): void {
     this._playbackBus = ctx.createGain();
-    this._playbackBus.connect(ctx.destination);
+    // The same hard limit the destination applies, made explicit so the echo
+    // reference (taken from here) clips exactly like the speakers do.
+    let output: AudioNode = this._playbackBus;
+    try {
+      const clamp = ctx.createWaveShaper();
+      clamp.curve = clampCurve();
+      clamp.oversample = 'none';
+      this._playbackBus.connect(clamp);
+      output = clamp;
+    } catch {
+      // no WaveShaper: the destination clamps; the reference is unclamped (gain <= 1 is identical)
+    }
+    output.connect(ctx.destination);
+    this._output = output;
+    this._voiceBus = ctx.createGain();
+    this._voiceBus.gain.value = this.gains.voice;
+    this._voiceBus.connect(this._playbackBus);
+    this._toneBus = ctx.createGain();
+    this._toneBus.gain.value = this.gains.tones;
+    this._toneBus.connect(this._playbackBus);
     this._cleanedBus = ctx.createGain();
     this._cleanedBus.channelCount = 1;
     this._cleanedBus.channelCountMode = 'explicit';
@@ -385,6 +450,16 @@ export class HeraldAudioGraph {
 
 let shared: HeraldAudioGraph | null = null;
 export function getAudioGraph(): HeraldAudioGraph {
-  if (!shared) shared = new HeraldAudioGraph();
+  if (!shared) {
+    const graph = new HeraldAudioGraph();
+    // Herald's volume (per device) follows the store.
+    const apply = () => {
+      const g = busGains(heraldVolumeStore.get());
+      graph.setVolume(g.voice, g.tones);
+    };
+    apply();
+    heraldVolumeStore.subscribe(apply);
+    shared = graph;
+  }
   return shared;
 }

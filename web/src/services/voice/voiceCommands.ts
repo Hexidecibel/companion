@@ -12,6 +12,8 @@
  * Pure (no DOM, no React) so the table and its negative cases are unit-tested.
  */
 
+import { matchVolumePhrase, type VolumeCommand } from '../tts/volume';
+
 export type VoiceCommand = 'stop' | 'repeat' | 'shorter' | 'more' | 'slower' | 'faster' | 'brief' | 'undo';
 
 /** Longest utterance (in words, after normalising) that can be a command. */
@@ -121,6 +123,18 @@ export function matchVoiceCommand(text: string): VoiceCommand | null {
   // retry with the fillers kept, so both spellings resolve.
   const kept = stripAddress(normalizeUtterance(text));
   return PHRASE_TO_COMMAND.get(kept) ?? null;
+}
+
+/**
+ * VOLUME: "louder", "quieter", "softer", "volume up/down", "volume 50" (whole
+ * utterance, see services/tts/volume.ts). "turn up the logging" or "what's the
+ * volume on the build" are ordinary messages for the brain.
+ */
+export function matchVolumeCommand(text: string): VolumeCommand | null {
+  if (!text || text.length > 80) return null;
+  const addressed = stripAddress(normalizeUtterance(text));
+  if (!addressed) return null;
+  return matchVolumePhrase(addressed);
 }
 
 // ---------------------------------------------------------------------------
@@ -272,6 +286,7 @@ export const VOICE_COMMAND_HELP: Array<{ say: string; does: string }> = [
   { say: '"Shorter" · "TL;DR" · "bottom line"', does: 'One-sentence version' },
   { say: '"Go on" · "tell me more"', does: 'Keep going / more detail' },
   { say: '"Slower" · "faster"', does: 'Change the speaking speed' },
+  { say: '"Louder" · "quieter" · "volume 50"', does: "Change Herald's volume (this device)" },
   { say: '"What\'s up?" · "catch me up"', does: 'Brief me on what is new' },
   { say: '"Undo that" · "don\'t send that"', does: 'Cancel a reply that is about to be sent' },
   { say: '"Show me" · "show me Out4" · "pull it up on my phone"', does: 'Open the session Herald is talking about' },

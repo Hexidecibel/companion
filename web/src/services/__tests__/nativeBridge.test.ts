@@ -17,13 +17,13 @@ import {
   setAudioFocus,
   setGlobalShortcuts,
   setMediaSession,
-  setTrayTonesMuted,
+  setTrayState,
   type NativeHeraldHandlers,
 } from '../nativeBridge';
 import { setNativeEnv } from '../../test/nativeEnv';
 
 function handlers(): NativeHeraldHandlers & Record<string, ReturnType<typeof vi.fn>> {
-  return { talkDown: vi.fn(), talkUp: vi.fn(), toggle: vi.fn(), brief: vi.fn(), muteTones: vi.fn(), stop: vi.fn() };
+  return { talkDown: vi.fn(), talkUp: vi.fn(), toggle: vi.fn(), brief: vi.fn(), muteTones: vi.fn(), stop: vi.fn(), volume: vi.fn() };
 }
 
 beforeEach(() => {
@@ -49,6 +49,18 @@ describe('dispatchNativeEvent', () => {
     const h = handlers();
     expect(dispatchNativeEvent({ action }, h)).toBe(true);
     for (const [name, fn] of Object.entries(h)) expect(fn).toHaveBeenCalledTimes(name === handler ? 1 : 0);
+  });
+
+  it('tray volume: louder / quieter / a level', () => {
+    const h = handlers();
+    expect(dispatchNativeEvent({ action: 'volume_up' }, h)).toBe(true);
+    expect(dispatchNativeEvent({ action: 'volume_down' }, h)).toBe(true);
+    expect(dispatchNativeEvent({ action: 'volume_set', value: 0.8 }, h)).toBe(true);
+    expect(vi.mocked(h.volume).mock.calls).toEqual([[{ kind: 'step', dir: 1 }], [{ kind: 'step', dir: -1 }], [{ kind: 'set', value: 0.8 }]]);
+    // A level without a number is not ours.
+    expect(dispatchNativeEvent({ action: 'volume_set' }, h)).toBe(false);
+    expect(dispatchNativeEvent({ action: 'volume_set', value: 'loud' }, h)).toBe(false);
+    expect(h.volume).toHaveBeenCalledTimes(3);
   });
 
   it.each([null, undefined, 'toggle', {}, { action: 'reboot' }, { action: 3 }])('ignores %j', (payload) => {
@@ -128,7 +140,28 @@ describe('desktop commands', () => {
     invoke.mockResolvedValue(results);
     await expect(setGlobalShortcuts({ talk: 'Ctrl+Alt+Space', toggle: 'Ctrl+Alt+Shift+H', brief: '' })).resolves.toEqual(results);
     expect(invoke).toHaveBeenCalledWith('herald_set_shortcuts', {
-      config: { talk: 'Ctrl+Alt+Space', toggle: 'Ctrl+Alt+Shift+KeyH', brief: null },
+      config: {
+        talk: 'Ctrl+Alt+Space',
+        toggle: 'Ctrl+Alt+Shift+KeyH',
+        brief: null,
+        stop: null,
+        passthrough: { talk: false, toggle: false, brief: false, stop: false },
+      },
+    });
+  });
+
+  it('sends the stop chord and the passthrough choices', async () => {
+    setNativeEnv('desktop');
+    invoke.mockResolvedValue([]);
+    await setGlobalShortcuts({ talk: 'Ctrl+Alt+Space', stop: 'Ctrl+Alt+Shift+S', passthrough: { talk: true } });
+    expect(invoke).toHaveBeenCalledWith('herald_set_shortcuts', {
+      config: {
+        talk: 'Ctrl+Alt+Space',
+        toggle: null,
+        brief: null,
+        stop: 'Ctrl+Alt+Shift+KeyS',
+        passthrough: { talk: true, toggle: false, brief: false, stop: false },
+      },
     });
   });
 
@@ -136,15 +169,19 @@ describe('desktop commands', () => {
     setNativeEnv('desktop');
     invoke.mockResolvedValue([]);
     await setGlobalShortcuts({});
-    expect(invoke).toHaveBeenCalledWith('herald_set_shortcuts', { config: { talk: null, toggle: null, brief: null } });
+    expect(invoke).toHaveBeenCalledWith('herald_set_shortcuts', {
+      config: { talk: null, toggle: null, brief: null, stop: null, passthrough: { talk: false, toggle: false, brief: false, stop: false } },
+    });
   });
 
   it('tray and info commands', async () => {
     setNativeEnv('desktop');
     invoke.mockResolvedValue({ os: 'linux', wayland: true });
     await expect(getNativeInfo()).resolves.toEqual({ os: 'linux', wayland: true });
-    await setTrayTonesMuted(true);
+    await setTrayState(true);
     expect(invoke).toHaveBeenCalledWith('herald_set_tray_state', { tonesMuted: true });
+    await setTrayState(false, 0.8);
+    expect(invoke).toHaveBeenCalledWith('herald_set_tray_state', { tonesMuted: false, volume: 0.8 });
   });
 
   it('a failed command resolves to null instead of throwing', async () => {
@@ -157,7 +194,7 @@ describe('desktop commands', () => {
     setNativeEnv(env);
     await expect(setGlobalShortcuts({ talk: 'Ctrl+Alt+Space' })).resolves.toBeNull();
     await expect(getNativeInfo()).resolves.toBeNull();
-    await setTrayTonesMuted(false);
+    await setTrayState(false);
     expect(invoke).not.toHaveBeenCalled();
   });
 });

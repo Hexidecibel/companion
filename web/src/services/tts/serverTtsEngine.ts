@@ -338,7 +338,8 @@ export class ServerTtsEngine implements TtsEngine {
 
 /**
  * WebAudio output through Herald's shared audio graph: every sentence plays
- * via the graph's playback bus, which is also the echo canceller's reference.
+ * via the graph's voice bus (Herald volume) into the playback bus, whose
+ * clamped output is also the echo canceller's reference.
  * The context is created lazily (and resumed inside a user gesture).
  */
 export class WebAudioSink implements AudioSink {
@@ -363,7 +364,8 @@ export class WebAudioSink implements AudioSink {
     for (let i = 0; i < pcm.length; i++) ch[i] = pcm[i] / 32768;
     const src = ctx.createBufferSource();
     src.buffer = buf;
-    src.connect(this.graph.playbackBus() ?? ctx.destination);
+    // The voice bus carries Herald's volume; the echo reference is taken after it.
+    src.connect(this.graph.voiceBus() ?? ctx.destination);
     let done = false;
     src.onended = () => {
       if (done) return;

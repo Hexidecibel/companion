@@ -5,7 +5,10 @@ const bridge = vi.hoisted(() => ({
   listenNativeHerald: vi.fn(),
   setGlobalShortcuts: vi.fn(),
   getNativeInfo: vi.fn(),
-  setTrayTonesMuted: vi.fn(),
+  setTrayState: vi.fn(),
+  getPassthroughStatus: vi.fn(),
+  listenPassthroughStatus: vi.fn(),
+  requestInputMonitoring: vi.fn(),
   setMediaSession: vi.fn(),
   setAudioFocus: vi.fn(),
 }));
@@ -13,7 +16,9 @@ vi.mock('../../services/nativeBridge', () => bridge);
 
 import {
   DEFAULT_NATIVE_PREFS,
+  defaultPassthrough,
   loadNativePrefs,
+  passthroughFor,
   nativeHandlers,
   nativeHeraldStore,
   useNativeHerald,
@@ -50,7 +55,10 @@ beforeEach(() => {
   bridge.listenNativeHerald.mockReset().mockImplementation(async (h: NativeHeraldHandlers) => { captured = h; return unlisten; });
   bridge.setGlobalShortcuts.mockReset().mockResolvedValue([]);
   bridge.getNativeInfo.mockReset().mockResolvedValue({ os: 'linux', wayland: false });
-  bridge.setTrayTonesMuted.mockReset().mockResolvedValue(undefined);
+  bridge.setTrayState.mockReset().mockResolvedValue(undefined);
+  bridge.getPassthroughStatus.mockReset().mockResolvedValue(null);
+  bridge.listenPassthroughStatus.mockReset().mockResolvedValue(() => {});
+  bridge.requestInputMonitoring.mockReset().mockResolvedValue(false);
   bridge.setMediaSession.mockReset().mockResolvedValue(undefined);
   bridge.setAudioFocus.mockReset().mockResolvedValue(undefined);
 });
@@ -104,10 +112,46 @@ describe('nativeHandlers', () => {
     expect(host.setTonesOn).toHaveBeenCalledWith(false);
   });
 
-  it('the overlay stop button runs the stop trigger', () => {
+  it('the overlay stop button, the tray item and the stop shortcut run the stop trigger', () => {
     const host = makeHost();
     nativeHandlers(() => host).stop();
     expect(host.runTrigger).toHaveBeenCalledWith('stop');
+  });
+
+  it('hold-to-talk while Herald speaks: stops on key-down, then listens', () => {
+    const order: string[] = [];
+    const host = makeHost(
+      { speaking: true, speakingAnywhere: true, bargeIn: vi.fn(() => order.push('stop')) },
+      { start: vi.fn(() => order.push('listen')) },
+    );
+    nativeHandlers(() => host).talkDown();
+    expect(order).toEqual(['stop', 'listen']);
+    expect(host.input.start).toHaveBeenCalledWith('global');
+  });
+
+  it('hold-to-talk while ANOTHER device speaks: stops that one too', () => {
+    const bargeIn = vi.fn();
+    const host = makeHost({ speaking: false, speakingAnywhere: true, bargeIn });
+    nativeHandlers(() => host).talkDown();
+    expect(bargeIn).toHaveBeenCalledTimes(1);
+  });
+
+  it('hold-to-talk while quiet: no barge-in; auto-repeat while speaking still stops (idempotent)', () => {
+    const bargeIn = vi.fn();
+    const quiet = makeHost({ bargeIn });
+    nativeHandlers(() => quiet).talkDown();
+    expect(bargeIn).not.toHaveBeenCalled();
+    const busy = makeHost({ speaking: true, bargeIn }, { state: { ...idle, phase: 'listening', source: 'global' } });
+    nativeHandlers(() => busy).talkDown();
+    expect(bargeIn).toHaveBeenCalledTimes(1);
+    expect(busy.input.start).not.toHaveBeenCalled();
+  });
+
+  it('tray volume reaches the volume command', () => {
+    const volumeCommand = vi.fn();
+    const host = makeHost({ volumeCommand });
+    nativeHandlers(() => host).volume({ kind: 'set', value: 0.8 });
+    expect(volumeCommand).toHaveBeenCalledWith({ kind: 'set', value: 0.8 });
   });
 
   it('while the device check waits for a press, presses go to it instead of Herald', () => {
@@ -128,11 +172,46 @@ describe('nativeHandlers', () => {
   });
 });
 
+describe('passthrough defaults', () => {
+  it('on for hold-to-talk on Windows and macOS only', () => {
+    const prefs = DEFAULT_NATIVE_PREFS;
+    expect(passthroughFor(prefs, 'talk', { os: 'windows', wayland: false, passthrough: true })).toBe(true);
+    expect(passthroughFor(prefs, 'talk', { os: 'macos', wayland: false, passthrough: true })).toBe(true);
+    expect(passthroughFor(prefs, 'stop', { os: 'windows', wayland: false, passthrough: true })).toBe(false);
+    expect(passthroughFor(prefs, 'toggle', { os: 'macos', wayland: false, passthrough: true })).toBe(false);
+    // Linux (or an older app without the feature): never.
+    expect(passthroughFor(prefs, 'talk', { os: 'linux', wayland: false, passthrough: false })).toBe(false);
+    expect(passthroughFor(prefs, 'talk', { os: 'windows', wayland: false })).toBe(false);
+    expect(passthroughFor(prefs, 'talk', null)).toBe(false);
+    expect(defaultPassthrough('talk', 'windows')).toBe(true);
+  });
+
+  it('an explicit choice wins and persists', () => {
+    const win = { os: 'windows', wayland: false, passthrough: true };
+    nativeHeraldStore.setPassthrough('talk', false);
+    nativeHeraldStore.setPassthrough('stop', true);
+    const p = loadNativePrefs();
+    expect(passthroughFor(p, 'talk', win)).toBe(false);
+    expect(passthroughFor(p, 'stop', win)).toBe(true);
+  });
+
+  it('desktop on Windows: hold-to-talk is registered as passthrough', async () => {
+    bridge.getNativeInfo.mockResolvedValue({ os: 'windows', wayland: false, passthrough: true });
+    renderHook(() => useNativeHerald(makeHost(), 'desktop'));
+    await act(async () => {});
+    expect(bridge.setGlobalShortcuts).toHaveBeenLastCalledWith(
+      expect.objectContaining({ talk: 'Ctrl+Alt+Space', passthrough: { talk: true, toggle: false, brief: false, stop: false } }),
+    );
+  });
+});
+
 describe('native prefs', () => {
   it('defaults avoid Discord and the browser chords', () => {
     expect(loadNativePrefs()).toEqual(DEFAULT_NATIVE_PREFS);
-    const chords = [DEFAULT_NATIVE_PREFS.talkChord, DEFAULT_NATIVE_PREFS.toggleChord, DEFAULT_NATIVE_PREFS.briefChord];
+    const chords = [DEFAULT_NATIVE_PREFS.talkChord, DEFAULT_NATIVE_PREFS.toggleChord, DEFAULT_NATIVE_PREFS.briefChord, DEFAULT_NATIVE_PREFS.stopChord];
     for (const c of chords) expect(['Ctrl+Shift+M', 'Ctrl+Shift+D', 'Ctrl+Shift+Space', 'Ctrl+Shift+B']).not.toContain(c);
+    expect(DEFAULT_NATIVE_PREFS.stopChord).toBe('Ctrl+Alt+Shift+S');
+    expect(new Set(chords).size).toBe(chords.length);
   });
 
   it('persists edits and drops invalid stored chords', () => {
@@ -159,10 +238,17 @@ describe('useNativeHerald', () => {
     bridge.setGlobalShortcuts.mockResolvedValue([{ name: 'talk', accelerator: 'Ctrl+Alt+Space', ok: false, error: 'taken' }]);
     const { unmount } = renderHook(() => useNativeHerald(makeHost(), 'desktop'));
     await act(async () => {});
-    expect(bridge.setGlobalShortcuts).toHaveBeenLastCalledWith({ talk: 'Ctrl+Alt+Space', toggle: 'Ctrl+Alt+Shift+H', brief: 'Ctrl+Alt+Shift+B' });
+    expect(bridge.setGlobalShortcuts).toHaveBeenLastCalledWith({
+      talk: 'Ctrl+Alt+Space',
+      toggle: 'Ctrl+Alt+Shift+H',
+      brief: 'Ctrl+Alt+Shift+B',
+      stop: 'Ctrl+Alt+Shift+S',
+      // Linux: no passthrough (the info says so), everything exclusive.
+      passthrough: { talk: false, toggle: false, brief: false, stop: false },
+    });
     expect(nativeHeraldStore.get().shortcuts[0].ok).toBe(false);
     expect(nativeHeraldStore.get().info).toEqual({ os: 'linux', wayland: false });
-    expect(bridge.setTrayTonesMuted).toHaveBeenLastCalledWith(false);
+    expect(bridge.setTrayState).toHaveBeenLastCalledWith(false, undefined);
 
     await act(async () => nativeHeraldStore.setPref('toggleChord', 'Ctrl+Alt+Shift+J'));
     expect(bridge.setGlobalShortcuts).toHaveBeenLastCalledWith(expect.objectContaining({ toggle: 'Ctrl+Alt+Shift+J' }));
@@ -245,6 +331,43 @@ describe('NativeHeraldSettings', () => {
     expect(screen.getByText(/Ctrl\+Alt\+Shift\+B is taken by another app/)).toBeInTheDocument();
     expect(screen.getByText(/Wayland limits system-wide shortcuts/)).toBeInTheDocument();
     expect(screen.queryByText(/Earbud/)).toBeNull();
+  });
+
+  it('desktop on Windows: the stop row and the per-shortcut passthrough switch (on for talk)', () => {
+    nativeHeraldStore.setInfo({ os: 'windows', wayland: false, passthrough: true });
+    render(<NativeHeraldSettings platform="desktop" />);
+    expect(screen.getByText('Stop speaking (tap)')).toBeInTheDocument();
+    expect(screen.getByText('Ctrl+Alt+Shift+S')).toBeInTheDocument();
+    const talk = screen.getByText(/Let other apps see this key too \(recommended for push-to-talk\)/).closest('button')!;
+    expect(talk).toHaveAttribute('aria-checked', 'true');
+    const others = screen.getAllByRole('menuitemcheckbox').filter((b) => /Let other apps see this key too$/.test(b.textContent ?? ''));
+    expect(others).toHaveLength(3);
+    for (const b of others) expect(b).toHaveAttribute('aria-checked', 'false');
+    fireEvent.click(talk);
+    expect(nativeHeraldStore.get().prefs.passthrough.talk).toBe(false);
+  });
+
+  it('desktop on macOS without Input Monitoring: explains and offers the permission', () => {
+    nativeHeraldStore.setInfo({ os: 'macos', wayland: false, passthrough: true });
+    nativeHeraldStore.setShortcuts([{ name: 'talk', accelerator: 'Ctrl+Alt+Space', ok: true, error: null, mode: 'exclusive', passthroughError: 'needs_permission' }]);
+    render(<NativeHeraldSettings platform="desktop" />);
+    expect(screen.getByText(/macOS needs the Input Monitoring permission/)).toBeInTheDocument();
+    fireEvent.click(screen.getByText('Allow Input Monitoring…'));
+    expect(bridge.requestInputMonitoring).toHaveBeenCalled();
+  });
+
+  it('desktop on Windows with an elevated game in front: says to run Companion as admin', () => {
+    nativeHeraldStore.setInfo({ os: 'windows', wayland: false, passthrough: true });
+    nativeHeraldStore.setPassthroughStatus({ supported: true, running: true, needsPermission: false, selfElevated: false, foregroundElevated: true });
+    render(<NativeHeraldSettings platform="desktop" />);
+    expect(screen.getByText(/runs as administrator/)).toBeInTheDocument();
+  });
+
+  it('desktop on Linux: no passthrough switch, a note instead', () => {
+    nativeHeraldStore.setInfo({ os: 'linux', wayland: false, passthrough: false });
+    render(<NativeHeraldSettings platform="desktop" />);
+    expect(screen.queryByText(/Let other apps see this key too/)).toBeNull();
+    expect(screen.getByText(/On Linux these keys belong to Companion alone/)).toBeInTheDocument();
   });
 
   it('desktop: capture a new chord; Backspace turns one off', () => {

@@ -61,7 +61,7 @@ describe('useHeraldVoiceInput: self-echo', () => {
     // ...a short one goes through (echo cancellation handles those now).
     act(() => hook.result.current.controller.deliverExternal('Doc upload site shipped', 'trigger'));
     expect(host.sendVoice).toHaveBeenCalledWith('Doc upload site shipped');
-    host.sendVoice.mockClear();
+    vi.mocked(host.sendVoice!).mockClear();
     act(() => hook.result.current.controller.deliverExternal('wait tell Out4 to hold', 'interrupt'));
     expect(hook.result.current.transcript).toMatchObject({ text: 'wait tell Out4 to hold', autoSend: true });
   });

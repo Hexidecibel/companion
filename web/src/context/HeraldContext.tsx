@@ -380,6 +380,7 @@ export function HeraldProvider({ children }: { children: ReactNode }) {
       repeat: v.repeat,
       goOn: v.goOn,
       stepRate: v.stepRate,
+      volume: v.volumeCommand,
       expectBriefing: v.expectBriefing,
       sendIntent,
       notice: (m) => voiceInputRef.current?.controller.fail(m),
@@ -395,7 +396,7 @@ export function HeraldProvider({ children }: { children: ReactNode }) {
     if (r.command === 'stop' && v.chimeOn) playChime('ok', 0.035);
     // STOP: no follow-up, no thinking tone. Commands that answer out loud
     // (repeat, go on, shorter, undo...) are a voice turn: a follow-up may come.
-    if (r.command === 'stop') {
+    if (r.command === 'stop' || r.command === 'volume') {
       followUp.cancel();
       cues.turnDone();
     } else if (r.command) {
@@ -602,10 +603,31 @@ export function HeraldProvider({ children }: { children: ReactNode }) {
     tonesOn: voice.chimeOn,
     setTonesOn: voice.setChimeOn,
     speaking: voice.supported && voice.speaking,
+    speakingAnywhere: (voice.supported && voice.speaking) || !!voice.remoteSpeaking,
+    // Hold-to-talk pressed while Herald talks (here or on another device): quiet now.
+    bargeIn: () => {
+      voiceRef.current.stop();
+      if (voiceRef.current.remoteSpeaking) voiceRef.current.stopRemote();
+    },
+    volume: voice.volume.voice,
+    volumeCommand: voice.volumeCommand,
     enabled: available,
     tone: (kind) => playChime(kind, 0.06),
     notice: (m) => triggerNotice.post(m),
   });
+  // Esc anywhere in the app stops Herald talking (the panel handles its own
+  // Esc first; this covers focus elsewhere in the app). Never swallows the key.
+  const speakingHere = voice.supported && voice.speaking;
+  useEffect(() => {
+    if (!speakingHere) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape' || e.defaultPrevented || e.repeat) return;
+      voiceRef.current.stopCommand();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [speakingHere]);
+
   // "Hey Jarvis" heard: the capture that follows is a wake one.
   const wakeListening = voiceInput.state.source === 'wake' && voiceInput.state.phase !== 'idle';
   useEffect(() => {

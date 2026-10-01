@@ -1,15 +1,19 @@
 import { useEffect, useState } from 'react';
-import { nativeHeraldStore, useNativeHeraldState, type NativeHeraldPrefs } from '../../hooks/useNativeHerald';
+import { nativeHeraldStore, passthroughFor, useNativeHeraldState, type NativeHeraldPrefs } from '../../hooks/useNativeHerald';
+import { requestInputMonitoring, type ShortcutName } from '../../services/nativeBridge';
 import { chordFromEvent, formatChord, parseChord } from '../../services/voice/hotkeys';
 import { nativePlatform, type NativePlatform } from '../../utils/platform';
 
-type ChordKey = 'talkChord' | 'toggleChord' | 'briefChord';
+type ChordKey = 'talkChord' | 'toggleChord' | 'briefChord' | 'stopChord';
 
-const ROWS: { key: ChordKey; name: 'talk' | 'toggle' | 'brief'; label: string }[] = [
+const ROWS: { key: ChordKey; name: ShortcutName; label: string }[] = [
   { key: 'talkChord', name: 'talk', label: 'Hold to talk' },
+  { key: 'stopChord', name: 'stop', label: 'Stop speaking (tap)' },
   { key: 'toggleChord', name: 'toggle', label: 'Listen / stop (tap)' },
   { key: 'briefChord', name: 'brief', label: 'Brief me (tap)' },
 ];
+
+const PASSTHROUGH_LABEL = 'Let other apps see this key too';
 
 function Switch({ on }: { on: boolean }) {
   return <span className={`herald-switch${on ? ' herald-switch--on' : ''}`} aria-hidden="true" />;
@@ -26,7 +30,7 @@ function chordLabel(chord: string): string {
  * earbud / headset button. Renders nothing in a browser.
  */
 export function NativeHeraldSettings({ platform = nativePlatform() }: { platform?: NativePlatform }) {
-  const { prefs, shortcuts, info } = useNativeHeraldState();
+  const { prefs, shortcuts, info, passthrough: ptStatus } = useNativeHeraldState();
   const [capturing, setCapturing] = useState<ChordKey | null>(null);
   const set = <K extends keyof NativeHeraldPrefs>(k: K, v: NativeHeraldPrefs[K]) => nativeHeraldStore.setPref(k, v);
 
@@ -81,6 +85,9 @@ export function NativeHeraldSettings({ platform = nativePlatform() }: { platform
   }
 
   const results = new Map(shortcuts.map((r) => [r.name, r]));
+  const canPassthrough = !!info?.passthrough;
+  const mac = info?.os === 'macos';
+  const needsPermission = mac && (ptStatus?.needsPermission || shortcuts.some((r) => r.passthroughError === 'needs_permission'));
   return (
     <div className="herald-voice-set" role="group" aria-label="System-wide shortcuts">
       <div className="herald-menu__label">System-wide shortcuts</div>
@@ -111,19 +118,55 @@ export function NativeHeraldSettings({ platform = nativePlatform() }: { platform
             </button>
             {r && !r.ok && (
               <div className="herald-voice-set__engine herald-voice-set__warn">
-                {chordLabel(prefs[key])} is taken by another app. Pick another.
+                {chordLabel(prefs[key])} is taken by another app. Pick another
+                {canPassthrough ? `, or turn on "${PASSTHROUGH_LABEL}"` : ''}.
               </div>
+            )}
+            {canPassthrough && prefs[key] && (
+              <button
+                type="button"
+                role="menuitemcheckbox"
+                aria-checked={passthroughFor(prefs, name, info)}
+                className="herald-menu__item herald-menu__item--sub herald-menu__item--fine"
+                onClick={() => nativeHeraldStore.setPassthrough(name, !passthroughFor(prefs, name, info))}
+                title="Companion watches the key without taking it, so Discord (or a game) bound to the same keys still gets them"
+              >
+                {PASSTHROUGH_LABEL}{name === 'talk' ? ' (recommended for push-to-talk)' : ''}
+                <Switch on={passthroughFor(prefs, name, info)} />
+              </button>
             )}
           </div>
         );
       })}
+      {prefs.globalShortcuts && needsPermission && (
+        <div className="herald-voice-set__engine herald-voice-set__warn">
+          To let Discord and other apps see these keys too, macOS needs the Input Monitoring permission:
+          Companion only watches for its own shortcuts and never records what you type. Until then the
+          shortcut works but only Companion gets the keys.
+          <button type="button" className="herald-btn herald-btn--ghost herald-btn--sm" onClick={() => void requestInputMonitoring()}>
+            Allow Input Monitoring…
+          </button>
+          <span> Turn Companion on in System Settings, then quit and reopen Companion.</span>
+        </div>
+      )}
+      {prefs.globalShortcuts && ptStatus?.foregroundElevated && (
+        <div className="herald-voice-set__engine herald-voice-set__warn">
+          The app in front runs as administrator, so Windows hides its keys from Companion. Run Companion as
+          administrator too if your game runs as administrator.
+        </div>
+      )}
       {prefs.globalShortcuts && info?.wayland && (
         <div className="herald-voice-set__engine herald-voice-set__warn">
           Wayland limits system-wide shortcuts: they only work while a Companion window is focused. For a key
           that works everywhere, bind a desktop shortcut to the trigger script (triggers/README.md).
         </div>
       )}
-      <div className="herald-voice-set__engine">The tray icon also has Brief me, Toggle listening and Mute tones.</div>
+      {prefs.globalShortcuts && info && !canPassthrough && !info.wayland && (
+        <div className="herald-voice-set__engine">
+          On Linux these keys belong to Companion alone (another app bound to the same keys will not get them).
+        </div>
+      )}
+      <div className="herald-voice-set__engine">The tray icon also has Brief me, Toggle listening, Stop speaking, Herald volume and Mute tones.</div>
     </div>
   );
 }

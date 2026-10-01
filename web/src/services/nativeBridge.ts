@@ -17,9 +17,13 @@
 import { parseChord } from './voice/hotkeys';
 import { nativePlatform, type NativePlatform } from '../utils/platform';
 
-export type NativeHeraldAction = 'talk_down' | 'talk_up' | 'toggle' | 'brief' | 'mute_tones' | 'stop';
+export type NativeHeraldAction =
+  | 'talk_down' | 'talk_up' | 'toggle' | 'brief' | 'mute_tones' | 'stop'
+  | 'volume_up' | 'volume_down' | 'volume_set';
 
-const ACTIONS: ReadonlySet<string> = new Set<NativeHeraldAction>(['talk_down', 'talk_up', 'toggle', 'brief', 'mute_tones', 'stop']);
+const ACTIONS: ReadonlySet<string> = new Set<NativeHeraldAction>([
+  'talk_down', 'talk_up', 'toggle', 'brief', 'mute_tones', 'stop', 'volume_up', 'volume_down', 'volume_set',
+]);
 
 export interface NativeHeraldHandlers {
   /** Hold-to-talk pressed (desktop global shortcut). */
@@ -32,14 +36,17 @@ export interface NativeHeraldHandlers {
   brief: () => void;
   /** Tray "Mute tones". */
   muteTones: () => void;
-  /** The floating orb's stop button: stop speaking and cancel any capture. */
+  /** Stop speaking (on any device) and cancel any capture: the stop shortcut, the tray, the orb's button. */
   stop: () => void;
+  /** Tray "Herald volume": louder / quieter (one step) or a level (0..1.5). */
+  volume: (cmd: { kind: 'step'; dir: 1 | -1 } | { kind: 'set'; value: number }) => void;
 }
 
 /** Validate a native payload and run its handler. False when it was not ours. */
 export function dispatchNativeEvent(payload: unknown, h: NativeHeraldHandlers): boolean {
   const action = (payload as { action?: unknown } | null)?.action;
   if (typeof action !== 'string' || !ACTIONS.has(action)) return false;
+  const value = (payload as { value?: unknown }).value;
   switch (action as NativeHeraldAction) {
     case 'talk_down': h.talkDown(); break;
     case 'talk_up': h.talkUp(); break;
@@ -47,6 +54,12 @@ export function dispatchNativeEvent(payload: unknown, h: NativeHeraldHandlers): 
     case 'brief': h.brief(); break;
     case 'mute_tones': h.muteTones(); break;
     case 'stop': h.stop(); break;
+    case 'volume_up': h.volume({ kind: 'step', dir: 1 }); break;
+    case 'volume_down': h.volume({ kind: 'step', dir: -1 }); break;
+    case 'volume_set':
+      if (typeof value !== 'number' || !Number.isFinite(value)) return false;
+      h.volume({ kind: 'set', value });
+      break;
   }
   return true;
 }
@@ -90,24 +103,46 @@ async function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T |
 
 // ---------------------------------------------------------------- desktop
 
+export type ShortcutName = 'talk' | 'toggle' | 'brief' | 'stop';
+
 export interface ShortcutConfig {
   talk?: string | null;
   toggle?: string | null;
   brief?: string | null;
+  stop?: string | null;
+  /** Per shortcut: observe the keys without taking them (Discord etc. still get them). */
+  passthrough?: Partial<Record<ShortcutName, boolean>>;
 }
 
 export interface ShortcutResult {
-  name: 'talk' | 'toggle' | 'brief';
+  name: ShortcutName;
   accelerator: string;
   ok: boolean;
   error: string | null;
+  /** How it is held: 'exclusive' (only Companion gets the keys) or 'passthrough'. Absent on older apps. */
+  mode?: 'exclusive' | 'passthrough';
+  /** Passthrough was asked for and is not possible ('unsupported', 'needs_permission', ...). */
+  passthroughError?: string | null;
 }
 
 export interface NativeInfo {
   os: string;
   /** Linux Wayland session: system-wide shortcuts only work while a Companion window is focused. */
   wayland: boolean;
+  /** Passthrough shortcuts work here (Windows, macOS). Absent on older apps. */
+  passthrough?: boolean;
 }
+
+/** Passthrough status (desktop): the hook, macOS permission, Windows elevation. */
+export interface PassthroughStatus {
+  supported: boolean;
+  running: boolean;
+  needsPermission: boolean;
+  selfElevated: boolean;
+  foregroundElevated: boolean;
+}
+
+export const NATIVE_STATUS_EVENT = 'herald-native-status';
 
 /**
  * Web chord ("Ctrl+Alt+Shift+H", KeyboardEvent.code keys) to a Tauri global
@@ -132,8 +167,37 @@ export async function setGlobalShortcuts(cfg: ShortcutConfig): Promise<ShortcutR
     talk: cfg.talk ? chordToAccelerator(cfg.talk) : null,
     toggle: cfg.toggle ? chordToAccelerator(cfg.toggle) : null,
     brief: cfg.brief ? chordToAccelerator(cfg.brief) : null,
+    stop: cfg.stop ? chordToAccelerator(cfg.stop) : null,
+    passthrough: {
+      talk: !!cfg.passthrough?.talk,
+      toggle: !!cfg.passthrough?.toggle,
+      brief: !!cfg.passthrough?.brief,
+      stop: !!cfg.passthrough?.stop,
+    },
   };
   return call<ShortcutResult[]>('herald_set_shortcuts', { config });
+}
+
+export async function getPassthroughStatus(): Promise<PassthroughStatus | null> {
+  if (nativePlatform() !== 'desktop') return null;
+  return call<PassthroughStatus>('herald_passthrough_status');
+}
+
+/** Status changes pushed by the native side (Windows: an elevated app took focus). */
+export async function listenPassthroughStatus(cb: (s: PassthroughStatus) => void): Promise<() => void> {
+  if (nativePlatform() !== 'desktop') return () => {};
+  try {
+    const { listen } = await import('@tauri-apps/api/event');
+    return await listen<PassthroughStatus>(NATIVE_STATUS_EVENT, (e) => cb(e.payload));
+  } catch {
+    return () => {};
+  }
+}
+
+/** macOS: ask for Input Monitoring (prompt once, then System Settings). True when granted. */
+export async function requestInputMonitoring(): Promise<boolean> {
+  if (nativePlatform() !== 'desktop') return false;
+  return (await call<boolean>('herald_request_input_monitoring')) ?? false;
 }
 
 export async function getNativeInfo(): Promise<NativeInfo | null> {
@@ -141,10 +205,10 @@ export async function getNativeInfo(): Promise<NativeInfo | null> {
   return call<NativeInfo>('herald_native_info');
 }
 
-/** Keep the tray's "Mute tones" check in sync (desktop only). */
-export async function setTrayTonesMuted(muted: boolean): Promise<void> {
+/** Keep the tray's "Mute tones" check and volume level in sync (desktop only). */
+export async function setTrayState(muted: boolean, volume?: number): Promise<void> {
   if (nativePlatform() !== 'desktop') return;
-  await call('herald_set_tray_state', { tonesMuted: muted });
+  await call('herald_set_tray_state', volume === undefined ? { tonesMuted: muted } : { tonesMuted: muted, volume });
 }
 
 // ---------------------------------------------------------------- mobile

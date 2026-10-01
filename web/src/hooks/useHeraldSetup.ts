@@ -82,12 +82,20 @@ export function useHeraldSetup(host: SetupHost): HeraldSetupControl {
   const hostRef = useRef(host);
   hostRef.current = host;
 
-  const apply = useCallback((id: ProfileId, s: HeraldSetupState = heraldSetupStore.get()): string[] => {
+  // `withVolume`: the profile was picked (or switched to), so its volume default applies;
+  // a re-apply for an echo check or "read whole replies" keeps the user's volume.
+  const apply = useCallback((id: ProfileId, s: HeraldSetupState = heraldSetupStore.get(), withVolume = true): string[] => {
     const { voice, input } = hostRef.current;
     const settings = profileSettings(id, { echo: s.echo, fullReplies: s.fullReplies });
     const native = nativeHeraldStore.get().prefs;
     applyProfileSettings(settings, {
-      voice,
+      voice: {
+        setVoiceOn: voice.setVoiceOn,
+        setChimeOn: voice.setChimeOn,
+        setRemind: voice.setRemind,
+        setSpokenLength: voice.setSpokenLength,
+        ...(withVolume && voice.setVolume ? { setVolume: voice.setVolume } : {}),
+      },
       input: {
         setPref: (k, v) => input.setPref(k, v as never),
         setHandsFree: input.setHandsFree,
@@ -98,6 +106,7 @@ export function useHeraldSetup(host: SetupHost): HeraldSetupControl {
         chimeOn: voice.chimeOn,
         remind: voice.remind,
         spokenLength: voice.spokenLength,
+        volume: voice.volume?.voice,
         interrupt: input.prefs.interrupt,
         interruptExplicit: input.prefs.interruptOrigin === 'explicit',
         sensitivity: input.prefs.sensitivity,
@@ -121,13 +130,13 @@ export function useHeraldSetup(host: SetupHost): HeraldSetupControl {
   const setFullReplies = useCallback((on: boolean) => {
     heraldSetupStore.set('fullReplies', on);
     const s = heraldSetupStore.get();
-    if (s.profile === 'headphones') apply('headphones', s);
+    if (s.profile === 'headphones') apply('headphones', s, false);
   }, [apply]);
 
   const recordEcho = useCallback((r: Omit<EchoCheck, 'at'>) => {
     heraldSetupStore.set('echo', { ...r, at: Date.now() });
     const s = heraldSetupStore.get();
-    if (s.profile === 'desk') apply('desk', s);
+    if (s.profile === 'desk') apply('desk', s, false);
     // Failing the check never leaves talk-over on, whatever the profile.
     const grade = gradeEcho(r);
     if (grade !== 'good' && hostRef.current.input.prefs.interrupt && s.profile !== 'headphones' && s.profile !== 'phone') {

@@ -4,7 +4,8 @@
  * actions so every branch is unit-tested.
  */
 import type { HeraldIntent } from '../../types/herald';
-import { matchVoiceCommand, stripWakeWord, type VoiceCommand } from './voiceCommands';
+import { matchVoiceCommand, matchVolumeCommand, stripWakeWord, type VoiceCommand } from './voiceCommands';
+import type { VolumeCommand } from '../tts/volume';
 
 export interface VoiceCommandActions {
   /** STOP: silence now (client and server queues); a reply being thought about stays silent. */
@@ -23,16 +24,25 @@ export interface VoiceCommandActions {
   undo: () => void;
   /** Short transient notice ("Nothing to repeat yet"). */
   notice: (text: string) => void;
+  /** LOUDER / QUIETER / VOLUME 50 (this device's Herald volume). Absent: those go to the brain. */
+  volume?: (cmd: VolumeCommand) => void;
 }
 
 export interface RouteResult {
   /** The command that matched, if any. */
-  command: VoiceCommand | null;
+  command: VoiceCommand | 'volume' | null;
   /** Text to send on as an ordinary message (null: handled, or nothing left). */
   send: string | null;
 }
 
 export function routeVoiceTranscript(text: string, a: VoiceCommandActions): RouteResult {
+  if (a.volume) {
+    const vol = matchVolumeCommand(text);
+    if (vol) {
+      a.volume(vol);
+      return { command: 'volume', send: null };
+    }
+  }
   const command = matchVoiceCommand(text);
   if (!command) {
     const rest = stripWakeWord(text);

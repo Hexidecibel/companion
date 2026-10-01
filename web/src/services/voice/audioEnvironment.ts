@@ -509,7 +509,8 @@ async function runMeasurement(): Promise<EchoMeasurement> {
     if (!(await graph.resume(1500))) throw new Error('Audio is blocked: tap the page and try again');
     await refresh('measure');
     const ctx = graph.context()!;
-    const bus = graph.playbackBus()!;
+    // Played at Herald's own volume, so the check measures what the user hears.
+    const bus = graph.voiceBus()!;
     const probe = await probeAudio(ctx.sampleRate);
     const key = envKey;
 
