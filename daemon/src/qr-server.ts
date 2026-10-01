@@ -4,6 +4,7 @@ import * as path from 'path';
 import * as os from 'os';
 import QRCode from 'qrcode';
 import { DaemonConfig } from './types';
+import { handleUpdatesRequest } from './update-feed';
 
 export interface QRConfig {
   host: string;
@@ -170,6 +171,11 @@ export function createQRRequestHandler(
           res.end(JSON.stringify({ success: false, error: 'Upload failed' }));
         }
       });
+      return;
+    }
+
+    // Desktop auto-update feed (read-only static files; bundles are signed).
+    if (await handleUpdatesRequest(req, res, urlPath)) {
       return;
     }
 
