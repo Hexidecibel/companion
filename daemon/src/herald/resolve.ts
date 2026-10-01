@@ -9,7 +9,7 @@ import type { SessionSnapshot } from './session-source';
 
 export type ResolveResult =
   | { ok: true; session: SessionSnapshot }
-  | { ok: false; error: string; candidates: string[] };
+  | { ok: false; error: string; candidates: string[]; ambiguous?: boolean };
 
 const FILLER = new Set([
   'the',
@@ -136,6 +136,7 @@ function ambiguous(raw: string, list: SessionSnapshot[]): ResolveResult {
     ok: false,
     error: `"${raw}" matches ${list.length} sessions (${names.join(', ')}). Do not guess — ask the user which one they mean.`,
     candidates: names,
+    ambiguous: true,
   };
 }
 

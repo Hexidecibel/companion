@@ -117,8 +117,8 @@ describe('HeraldTriggerService routing', () => {
   });
   afterEach(() => log.mockRestore());
 
-  it('parses exactly the six actions', () => {
-    expect(TRIGGER_ACTIONS).toEqual(['brief', 'listen', 'stop', 'repeat', 'toggle', 'claim']);
+  it('parses exactly the seven actions', () => {
+    expect(TRIGGER_ACTIONS).toEqual(['brief', 'listen', 'stop', 'repeat', 'toggle', 'claim', 'show']);
     for (const a of TRIGGER_ACTIONS) expect(parseTriggerAction(a)).toBe(a);
     expect(parseTriggerAction('TOGGLE')).toBeNull();
     expect(parseTriggerAction(undefined)).toBeNull();
@@ -127,7 +127,8 @@ describe('HeraldTriggerService routing', () => {
 
   it('routes each action to the active device as a trigger herald_event', () => {
     const { svc, delivered } = makeService({ active: 'desk-browser' });
-    const ROUTED = TRIGGER_ACTIONS.filter((a) => a !== 'claim');
+    // claim needs a device; show is a navigate event (herald-show.test.ts).
+    const ROUTED = TRIGGER_ACTIONS.filter((a) => a !== 'claim' && a !== 'show');
     for (const action of ROUTED) {
       const out = svc.fire(action, { via: 'http', origin });
       expect(out).toMatchObject({

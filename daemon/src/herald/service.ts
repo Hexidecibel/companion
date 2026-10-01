@@ -40,6 +40,7 @@ import { HeraldToolbox } from './knowledge/toolbox';
 import { resolveKnowledgePaths } from './knowledge/sources';
 import type { CushCommand } from './knowledge/cush';
 import { sessionsMentioned } from './resolve';
+import { hasPendingPrompt, pickShowTarget } from './show';
 import { clip, firstSentence, formatAgo, oneLine, plainToolAction } from './text';
 import { echoWords, isLikelyEcho } from './voice/echo-match';
 import { sanitizePronunciations } from './pronunciations';
@@ -62,7 +63,12 @@ import {
   REASON_TEXT,
   recoveryDelayMs,
 } from './fallback';
-import type { HeraldBrainDownReason } from './protocol';
+import type {
+  HeraldBrainDownReason,
+  HeraldSessionRef,
+  HeraldShowResult,
+  HeraldShowVia,
+} from './protocol';
 import type { LlmUsage } from './llm/provider';
 
 export const MAX_USER_TEXT = 4000;
@@ -157,6 +163,17 @@ export interface HeraldServiceDeps {
   consumeTranscript?: (clientId: string, streamId: string) => void;
   /** The active device's client id (voice confirm only from it). */
   activeClientId?: () => string | null;
+  /** Push an event to ONE client ("show me" navigation); false if it is gone. */
+  deliverToClient?: (clientId: string, event: HeraldEvent) => boolean;
+}
+
+/** Who a navigation is for and how it is acknowledged. */
+export interface HeraldShowOptions {
+  via: HeraldShowVia;
+  /** The connection that asked (fallback target when no device is active). */
+  requesterId?: string | null;
+  /** The receiving device acknowledges it (triggers: nobody else is talking). */
+  ack?: boolean;
 }
 
 /** herald_confirm extras (voice confirmation). */
@@ -183,6 +200,8 @@ export class HeraldService {
   private store: HeraldStore;
   private broadcastFn: (event: HeraldEvent) => void;
   private devicesFn: (() => HeraldDevicesSnapshot | null) | undefined;
+  private deliverFn: ((clientId: string, event: HeraldEvent) => boolean) | undefined;
+  private navSeq = 0;
   private auditFn: (entry: AuditEntry) => void;
   private now: () => number;
   private pollIntervalMs: number;
@@ -243,6 +262,7 @@ export class HeraldService {
     this.store = deps.store;
     this.broadcastFn = deps.broadcast;
     this.devicesFn = deps.devices;
+    this.deliverFn = deps.deliverToClient;
     this.auditFn = deps.audit;
     this.now = deps.now || Date.now;
     this.pollIntervalMs = deps.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
@@ -748,6 +768,95 @@ export class HeraldService {
     return this.pollInFlight;
   }
 
+  // ---------------------------------------------------------------- show me
+
+  /**
+   * herald_show: open a session's view on the active device (or `device`).
+   * Never changes the active device. See HeraldShowRequest.
+   */
+  async show(raw: unknown, opts: HeraldShowOptions): Promise<HeraldShowResult> {
+    const p = (raw && typeof raw === 'object' ? raw : {}) as { session?: unknown; device?: unknown };
+    const session = typeof p.session === 'string' ? oneLine(p.session).slice(0, 200) : '';
+    const device = typeof p.device === 'string' ? p.device.trim().slice(0, 200) : '';
+    const sessions = await this.listAll().catch(() => this.lastSnapshots);
+    return this.showWith(session, device, sessions, opts);
+  }
+
+  /** Synchronous form over the last poll's listing (remote `show` trigger). */
+  showCached(session: string | undefined, device: string, opts: HeraldShowOptions): HeraldShowResult {
+    return this.showWith(session || '', device, this.lastSnapshots, opts);
+  }
+
+  /** The brain's show_session tool: the session is already resolved. */
+  showResolved(s: SessionSnapshot): HeraldShowResult {
+    return this.navigateTo(
+      { serverId: s.serverId, sessionId: s.sessionId, sessionName: s.sessionName },
+      hasPendingPrompt(s),
+      '',
+      { via: 'brain' }
+    );
+  }
+
+  private showWith(
+    session: string,
+    device: string,
+    sessions: SessionSnapshot[],
+    opts: HeraldShowOptions
+  ): HeraldShowResult {
+    const target = pickShowTarget(session, {
+      actions: this.actions.list(),
+      messages: this.messages,
+      inbox: this.inbox.list(),
+      sessions,
+    });
+    if (!target.ok) {
+      return {
+        status: target.status,
+        ...(target.candidates.length ? { candidates: target.candidates.slice(0, 5) } : {}),
+      };
+    }
+    return this.navigateTo(target.session, target.pending, device, opts);
+  }
+
+  /** The device a navigation goes to: `device` (id or label), else the active one, else the requester. */
+  private showDevice(device: string, requesterId?: string | null): { id: string; label: string } | null {
+    const snap = this.devicesFn?.() ?? null;
+    const labelOf = (id: string) => snap?.devices.find((d) => d.id === id)?.label || 'this device';
+    if (device) {
+      if (!snap) return null;
+      const byId = snap.devices.find((d) => d.id === device);
+      if (byId) return { id: byId.id, label: byId.label };
+      const want = device.toLowerCase();
+      const byLabel = snap.devices.find((d) => d.label.toLowerCase() === want);
+      return byLabel ? { id: byLabel.id, label: byLabel.label } : null;
+    }
+    const id = snap?.activeDevice?.id ?? this.voiceDeps.activeClientId?.() ?? requesterId ?? null;
+    return id ? { id, label: labelOf(id) } : null;
+  }
+
+  private navigateTo(
+    session: HeraldSessionRef,
+    pending: boolean,
+    device: string,
+    opts: HeraldShowOptions
+  ): HeraldShowResult {
+    const dev = this.showDevice(device, opts.requesterId);
+    const missing: HeraldShowResult = { status: device ? 'offline' : 'no_device', session };
+    if (!dev || !this.deliverFn) return missing;
+    const id = `nav-${this.now().toString(36)}-${++this.navSeq}`;
+    const delivered = this.deliverFn(dev.id, {
+      kind: 'navigate',
+      id,
+      session,
+      via: opts.via,
+      ...(pending ? { pending: true } : {}),
+      ...(opts.ack ? { ack: true } : {}),
+    });
+    if (!delivered) return missing;
+    console.log(`Herald: show ${session.sessionName} on ${dev.label} (${opts.via})`);
+    return { status: 'shown', session, device: dev };
+  }
+
   markHeard(itemIds: string[]): void {
     if (!Array.isArray(itemIds)) throw new HeraldRequestError('itemIds must be an array');
     const ids = itemIds
@@ -954,6 +1063,7 @@ export class HeraldService {
         this.setVerbosity(level);
         verbositySet = level;
       },
+      showSession: (s) => this.showResolved(s),
     };
     let verbositySet: HeraldVerbosity | null = null;
     const started = Date.now();

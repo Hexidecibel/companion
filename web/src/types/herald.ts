@@ -1,57 +1,83 @@
 export type InboxPriority = 'blocked' | 'finished' | 'progress';
 export type HeraldActionTier = 'echo' | 'hard_confirm';
-export interface HeraldSessionRef { serverId: string; sessionId: string; sessionName: string; }
+export interface HeraldSessionRef {
+  serverId: string;
+  sessionId: string;
+  sessionName: string;
+}
 export interface HeraldInboxItem {
-  id: string; serverId: string; sessionId: string; sessionName: string;
+  id: string;
+  serverId: string;
+  sessionId: string;
+  sessionName: string;
   priority: InboxPriority;
-  headline: string;
-  createdAt: number; heard: boolean;
+  headline: string; // deterministic one-liner, NOT LLM-generated
+  createdAt: number;
+  heard: boolean;
   /** Answer to something the user asked a session ("Out4 answered your question: ..."). */
   answer?: boolean;
 }
-/** voice = push-to-talk / talk-over / hands-free; text = typed. Voice replies are kept shorter. */
+/**
+ * How a message reached Herald: `voice` = push-to-talk, talking over Herald or
+ * hands-free; `text` = typed (or reviewed in the composer). Voice replies are
+ * kept shorter. Optional: an older client sends neither field.
+ */
 export type HeraldInputMode = 'voice' | 'text';
-/** A spoken command turned into a structured brain request. */
+/** A spoken command the client turned into a structured brain request. */
 export type HeraldIntent = 'shorter' | 'more' | 'brief';
 /** Reply length. `auto` = brief for voice, normal for text. */
 export type HeraldVerbosity = 'auto' | 'brief' | 'normal' | 'detailed';
-/** herald_send payload. Unknown mode / intent values are ignored by the daemon. */
+/** herald_send payload. Unknown `mode` / `intent` values are ignored. */
 export interface HeraldSendRequest {
   text: string;
   mode?: HeraldInputMode;
   intent?: HeraldIntent;
 }
 export interface HeraldMessage {
-  id: string; role: 'user' | 'herald'; text: string; createdAt: number;
+  id: string;
+  role: 'user' | 'herald';
+  text: string;
+  createdAt: number;
   sessionRefs?: HeraldSessionRef[];
   actionIds?: string[];
   streaming?: boolean;
   /** Announcement posted on Herald's own initiative: shown + toned, never spoken unasked. */
   quiet?: boolean;
-  intent?: HeraldIntent;  // user lines sent as a voice command (rendered as a chip)
+  /** User lines only: sent as a voice command (shown as a chip, not raw text). */
+  intent?: HeraldIntent;
 }
 export interface HeraldAction {
-  id: string; tier: HeraldActionTier;
-  kind: 'send_input' | 'answer_choice' | 'cush_command' | 'interrupt' | 'spawn_session';  // cush_command: payload is the command line, no session
-  serverId: string; sessionId: string; sessionName: string;
-  payload: string;
-  readback: string;
-  reasons: string[];
+  id: string;
+  tier: HeraldActionTier;
+  /** cush_command: a validated cush-tools command (payload = the command line; no session). */
+  kind: 'send_input' | 'answer_choice' | 'cush_command' | 'interrupt' | 'spawn_session';
+  serverId: string;
+  sessionId: string;
+  sessionName: string;
+  payload: string; // exact text / option that will be sent
+  readback: string; // human confirmation line, e.g. "companion: option 2, skip tests"
+  reasons: string[]; // why this tier (danger classifier hits); empty for plain echo
   status: 'pending' | 'sent' | 'cancelled' | 'failed' | 'expired';
-  autoSendAt?: number;   // echo tier: server auto-sends at this epoch ms
-  error?: string; createdAt: number; resolvedAt?: number;
-  confirmPhrase?: string;      // hard_confirm: the words that confirm it by voice ("confirm deploy")
-  voiceAttemptsLeft?: number;  // hard_confirm: voice tries left (0 = on-screen only)
+  autoSendAt?: number; // echo tier only: epoch ms when server auto-sends
+  error?: string;
+  createdAt: number;
+  resolvedAt?: number;
+  /** hard_confirm: the words that confirm it by voice, e.g. "confirm deploy". */
+  confirmPhrase?: string;
+  /** hard_confirm: voice tries left (0 = on-screen only). */
+  voiceAttemptsLeft?: number;
 }
 export interface HeraldState {
   displayName: string;
-  enabled: boolean; disabledReason?: string;
+  enabled: boolean;
+  disabledReason?: string;
   model: string;
   busy: boolean;
-  messages: HeraldMessage[];
+  messages: HeraldMessage[]; // most recent N (e.g. 100)
   inbox: HeraldInboxItem[];
-  actions: HeraldAction[];
-  verbosity?: HeraldVerbosity;  // persisted on the hub; absent on older daemons
+  actions: HeraldAction[]; // pending + recently resolved
+  /** Reply length setting (persisted server-side, follows the user). Absent on older daemons. */
+  verbosity?: HeraldVerbosity;
   /** The device that acts (tones, triggers, hands-free); absent on older daemons. */
   activeDevice?: HeraldActiveDevice | null;
   /** Connected Herald devices (those that reported presence). */
@@ -136,6 +162,21 @@ export type HeraldEvent =
   | { kind: 'brain'; brain: HeraldBrainStatus }
   /** The active device or the device list changed (broadcast). */
   | { kind: 'devices'; activeDevice: HeraldActiveDevice | null; devices: HeraldDeviceInfo[] }
+  /**
+   * "Show me": open this session's view, sent ONLY to the device that should
+   * show it. `pending` = it has a question / choice waiting (scroll to it and
+   * highlight it); `ack` = the receiving device acknowledges it ("Here's Out4.",
+   * or a tick in the Gaming profile); voice requests are acknowledged by the
+   * device that heard them, brain requests by the reply.
+   */
+  | {
+      kind: 'navigate';
+      id: string;
+      session: HeraldSessionRef;
+      via: HeraldShowVia;
+      pending?: boolean;
+      ack?: boolean;
+    }
   | { kind: 'error'; error: string };
 /**
  * herald_confirm payload; answered with the HeraldAction. `method: 'voice'`
@@ -164,6 +205,40 @@ export interface HeraldSetPronunciationsRequest {
   pronunciations: HeraldPronunciation[];
 }
 
+/** Who asked for a `navigate`: a spoken "show me", the brain's show_session tool, a `show` trigger. */
+export type HeraldShowVia = 'voice' | 'brain' | 'trigger';
+/**
+ * herald_show payload ("show me", "show me Out4 on my phone"). `session`: a
+ * session name as said (fuzzy, like every session tool); absent = what Herald
+ * just talked about: the newest pending card's session, else the latest Herald
+ * message's first session, else the newest unheard inbox item. `device`: a
+ * device id or label; absent = the active device (else the requester). Never
+ * changes the active device. Answered with HeraldShowResult.
+ */
+export interface HeraldShowRequest {
+  session?: string;
+  device?: string;
+}
+export type HeraldShowStatus =
+  /** Delivered: `session` is opening on `device`. */
+  | 'shown'
+  /** `session` matches several: ask "Which one, A or B?" (`candidates`). */
+  | 'ambiguous'
+  /** `session` names no session (the client sends the words to the brain instead). */
+  | 'not_found'
+  /** No session named and nothing recent to show. */
+  | 'nothing'
+  /** `device` is not connected. */
+  | 'offline'
+  /** No device to show it on. */
+  | 'no_device';
+export interface HeraldShowResult {
+  status: HeraldShowStatus;
+  session?: HeraldSessionRef;
+  device?: { id: string; label: string };
+  candidates?: string[];
+}
+
 /**
  * Remote triggers: a hotkey on another machine (AutoHotkey, Raycast), a Stream
  * Deck, a phone shortcut. `POST /herald/trigger` with the scoped trigger token
@@ -178,8 +253,17 @@ export interface HeraldSetPronunciationsRequest {
  *            From an untrusted origin the event carries allowListen=false: stop/cancel only.
  *   claim  - make `device` (a label or id) the active device; pinned unless pin=false.
  *            Any action may name a `device`: it is made active first, then acts.
+ *   show   - open a session's view (`session`, else what Herald just talked about),
+ *            delivered as a `navigate` herald_event with ack=true.
  */
-export type HeraldTriggerAction = 'brief' | 'listen' | 'stop' | 'repeat' | 'toggle' | 'claim';
+export type HeraldTriggerAction =
+  | 'brief'
+  | 'listen'
+  | 'stop'
+  | 'repeat'
+  | 'toggle'
+  | 'claim'
+  | 'show';
 /** herald_trigger payload and the POST /herald/trigger JSON body. */
 export interface HeraldTriggerRequest {
   action: HeraldTriggerAction;
@@ -190,6 +274,8 @@ export interface HeraldTriggerRequest {
   device?: string;
   /** With `device`: keep it active against other devices' activity (default true). */
   pin?: boolean;
+  /** `show` only: the session to open (fuzzy name); absent = Herald's latest session. */
+  session?: string;
 }
 /** A delivered trigger. Failures carry `error` plus `code` instead. */
 export interface HeraldTriggerResult {
@@ -205,7 +291,13 @@ export type HeraldTriggerErrorCode =
   | 'unknown_device'
   | 'unavailable'
   /** A mic-opening action from outside the home network / tailnet (see herald.trigger_public_listen). */
-  | 'untrusted_origin';
+  | 'untrusted_origin'
+  /** `show`: `session` names no session. */
+  | 'unknown_session'
+  /** `show`: `session` matches several. */
+  | 'ambiguous_session'
+  /** `show` without `session`: nothing recent to show. */
+  | 'nothing_to_show';
 
 // --- voice protocol (mirrored byte-for-byte in web/src/types/herald.ts; a web test enforces it) ---
 /**

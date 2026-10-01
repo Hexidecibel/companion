@@ -140,6 +140,10 @@ export class WebSocketHandler {
       activeClient: () => this.heraldVoice?.announcerClient ?? null,
       claimDevice: (device, pin) => this.heraldVoice?.claimByName(device, pin) ?? null,
       deliver: (clientId, event) => this.sendToClient(clientId, 'herald_event', event),
+      show: (session, clientId) =>
+        this.herald
+          ? this.herald.showCached(session, clientId, { via: 'trigger', ack: true })
+          : { status: 'no_device' },
       audit: (entry) => this.auditLog.append(entry),
       trust: resolveHeraldConfig(this.config.herald).trigger,
     });
@@ -344,6 +348,7 @@ export class WebSocketHandler {
         consumeTranscript: (clientId, streamId) =>
           this.heraldVoice?.consumeTranscript(clientId, streamId),
         activeClientId: () => this.heraldVoice?.announcerClient ?? null,
+        deliverToClient: (clientId, event) => this.sendToClient(clientId, 'herald_event', event),
       });
     } catch (err) {
       console.error('Herald: failed to initialize:', err);

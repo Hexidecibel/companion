@@ -197,6 +197,13 @@ export function registerHeraldHandlers(ctx: HandlerContext): Record<string, Mess
       );
     },
 
+    /** "Show me": open a session on the active device (or `device`). See HeraldShowRequest. */
+    herald_show(client, payload, requestId) {
+      return reply(client, 'herald_show', requestId, () =>
+        ctx.herald!.show(payload, { via: 'voice', requesterId: client.id })
+      );
+    },
+
     herald_mark_heard(client, payload, requestId) {
       return reply(client, 'herald_mark_heard', requestId, () => {
         const ids = (payload as { itemIds?: unknown } | undefined)?.itemIds;

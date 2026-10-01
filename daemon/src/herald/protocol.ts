@@ -162,6 +162,21 @@ export type HeraldEvent =
   | { kind: 'brain'; brain: HeraldBrainStatus }
   /** The active device or the device list changed (broadcast). */
   | { kind: 'devices'; activeDevice: HeraldActiveDevice | null; devices: HeraldDeviceInfo[] }
+  /**
+   * "Show me": open this session's view, sent ONLY to the device that should
+   * show it. `pending` = it has a question / choice waiting (scroll to it and
+   * highlight it); `ack` = the receiving device acknowledges it ("Here's Out4.",
+   * or a tick in the Gaming profile); voice requests are acknowledged by the
+   * device that heard them, brain requests by the reply.
+   */
+  | {
+      kind: 'navigate';
+      id: string;
+      session: HeraldSessionRef;
+      via: HeraldShowVia;
+      pending?: boolean;
+      ack?: boolean;
+    }
   | { kind: 'error'; error: string };
 /**
  * herald_confirm payload; answered with the HeraldAction. `method: 'voice'`
@@ -190,6 +205,40 @@ export interface HeraldSetPronunciationsRequest {
   pronunciations: HeraldPronunciation[];
 }
 
+/** Who asked for a `navigate`: a spoken "show me", the brain's show_session tool, a `show` trigger. */
+export type HeraldShowVia = 'voice' | 'brain' | 'trigger';
+/**
+ * herald_show payload ("show me", "show me Out4 on my phone"). `session`: a
+ * session name as said (fuzzy, like every session tool); absent = what Herald
+ * just talked about: the newest pending card's session, else the latest Herald
+ * message's first session, else the newest unheard inbox item. `device`: a
+ * device id or label; absent = the active device (else the requester). Never
+ * changes the active device. Answered with HeraldShowResult.
+ */
+export interface HeraldShowRequest {
+  session?: string;
+  device?: string;
+}
+export type HeraldShowStatus =
+  /** Delivered: `session` is opening on `device`. */
+  | 'shown'
+  /** `session` matches several: ask "Which one, A or B?" (`candidates`). */
+  | 'ambiguous'
+  /** `session` names no session (the client sends the words to the brain instead). */
+  | 'not_found'
+  /** No session named and nothing recent to show. */
+  | 'nothing'
+  /** `device` is not connected. */
+  | 'offline'
+  /** No device to show it on. */
+  | 'no_device';
+export interface HeraldShowResult {
+  status: HeraldShowStatus;
+  session?: HeraldSessionRef;
+  device?: { id: string; label: string };
+  candidates?: string[];
+}
+
 /**
  * Remote triggers: a hotkey on another machine (AutoHotkey, Raycast), a Stream
  * Deck, a phone shortcut. `POST /herald/trigger` with the scoped trigger token
@@ -204,8 +253,17 @@ export interface HeraldSetPronunciationsRequest {
  *            From an untrusted origin the event carries allowListen=false: stop/cancel only.
  *   claim  - make `device` (a label or id) the active device; pinned unless pin=false.
  *            Any action may name a `device`: it is made active first, then acts.
+ *   show   - open a session's view (`session`, else what Herald just talked about),
+ *            delivered as a `navigate` herald_event with ack=true.
  */
-export type HeraldTriggerAction = 'brief' | 'listen' | 'stop' | 'repeat' | 'toggle' | 'claim';
+export type HeraldTriggerAction =
+  | 'brief'
+  | 'listen'
+  | 'stop'
+  | 'repeat'
+  | 'toggle'
+  | 'claim'
+  | 'show';
 /** herald_trigger payload and the POST /herald/trigger JSON body. */
 export interface HeraldTriggerRequest {
   action: HeraldTriggerAction;
@@ -216,6 +274,8 @@ export interface HeraldTriggerRequest {
   device?: string;
   /** With `device`: keep it active against other devices' activity (default true). */
   pin?: boolean;
+  /** `show` only: the session to open (fuzzy name); absent = Herald's latest session. */
+  session?: string;
 }
 /** A delivered trigger. Failures carry `error` plus `code` instead. */
 export interface HeraldTriggerResult {
@@ -231,7 +291,13 @@ export type HeraldTriggerErrorCode =
   | 'unknown_device'
   | 'unavailable'
   /** A mic-opening action from outside the home network / tailnet (see herald.trigger_public_listen). */
-  | 'untrusted_origin';
+  | 'untrusted_origin'
+  /** `show`: `session` names no session. */
+  | 'unknown_session'
+  /** `show`: `session` matches several. */
+  | 'ambiguous_session'
+  /** `show` without `session`: nothing recent to show. */
+  | 'nothing_to_show';
 
 // --- voice protocol (mirrored byte-for-byte in web/src/types/herald.ts; a web test enforces it) ---
 /**

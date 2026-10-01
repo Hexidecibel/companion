@@ -36,6 +36,7 @@ import * as path from 'path';
 import type { AuditEntry, AuditOrigin } from '../audit-log';
 import type {
   HeraldEvent,
+  HeraldShowResult,
   HeraldTriggerAction,
   HeraldTriggerErrorCode,
   HeraldTriggerResult,
@@ -48,6 +49,7 @@ export const TRIGGER_ACTIONS: readonly HeraldTriggerAction[] = [
   'repeat',
   'toggle',
   'claim',
+  'show',
 ];
 
 export const TRIGGER_LIMITS = {
@@ -382,17 +384,20 @@ export class HomeIpResolver {
   }
 }
 
-/** Signed mode: HMAC-SHA256 hex over `<ts>.<action>.<device>`, keyed with the token's SHA-256 hex. */
+/**
+ * Signed mode: HMAC-SHA256 hex over `<ts>.<action>.<device>`, keyed with the
+ * token's SHA-256 hex. A `show` that names a session signs
+ * `<ts>.<action>.<device>.<session>` (so the session cannot be swapped).
+ */
 export function triggerSignature(
   keySha256Hex: string,
   ts: string,
   action: string,
-  device = ''
+  device = '',
+  session = ''
 ): string {
-  return crypto
-    .createHmac('sha256', keySha256Hex)
-    .update(`${ts}.${action}.${device}`, 'utf8')
-    .digest('hex');
+  const msg = session ? `${ts}.${action}.${device}.${session}` : `${ts}.${action}.${device}`;
+  return crypto.createHmac('sha256', keySha256Hex).update(msg, 'utf8').digest('hex');
 }
 
 /** Sliding-window counter per key. */
@@ -467,6 +472,11 @@ export interface HeraldTriggerServiceOptions {
   claimDevice?: (device: string, pin: boolean) => string | null;
   /** Push an event to one client; false if it is gone. */
   deliver: (clientId: string, event: HeraldEvent) => boolean;
+  /**
+   * `show`: resolve `session` (absent = Herald's latest session) and send a
+   * `navigate` event (ack=true) to `clientId`. Absent = `show` is unavailable.
+   */
+  show?: (session: string | undefined, clientId: string) => HeraldShowResult;
   audit: (entry: AuditEntry) => void;
   tokenFile?: TriggerTokenFile;
   now?: () => number;
@@ -486,6 +496,9 @@ const MESSAGES: Record<HeraldTriggerErrorCode, string> = {
     'No active device: open Companion (Herald) in a browser or the app on the device that should respond',
   unavailable: 'Herald voice is not enabled on this daemon',
   unknown_device: 'No connected device has that name or id',
+  unknown_session: 'No session has that name',
+  ambiguous_session: 'That name matches several sessions',
+  nothing_to_show: 'Nothing to show: Herald has not talked about a session lately',
   untrusted_origin:
     'Opening the mic remotely is only allowed from your home network, tailnet or this machine (set herald.trigger_public_listen=true to allow it from anywhere)',
 };
@@ -495,6 +508,8 @@ export interface TriggerRequest {
   action?: unknown;
   device?: unknown;
   pin?: unknown;
+  /** `show` only. */
+  session?: unknown;
 }
 
 function asRequest(raw: unknown): TriggerRequest {
@@ -653,6 +668,7 @@ export class HeraldTriggerService {
     } else {
       target = this.opts.activeClient();
     }
+    if (action === 'show') return this.routeShow(req, target);
     const id = `trg-${this.now().toString(36)}-${++this.seq}`;
     // From outside: toggle may stop or cancel, never open the mic.
     const event: HeraldEvent =
@@ -670,6 +686,48 @@ export class HeraldTriggerService {
     return { ok: true, status: 200, result: { action, delivered: true }, target };
   }
 
+  /** `show`: resolve the session and hand a `navigate` event to `target`. */
+  private routeShow(req: TriggerRequest, target: string | null): TriggerOutcome {
+    const session = typeof req.session === 'string' ? req.session.trim() : '';
+    if (session.length > 200) {
+      return { ok: false, status: 400, code: 'bad_request', error: 'session is too long' };
+    }
+    if (!this.opts.show) {
+      return { ok: false, status: 503, code: 'unavailable', error: MESSAGES.unavailable };
+    }
+    if (!target) {
+      return { ok: false, status: 409, code: 'no_active_device', error: MESSAGES.no_active_device };
+    }
+    const r = this.opts.show(session || undefined, target);
+    switch (r.status) {
+      case 'shown':
+        return { ok: true, status: 200, result: { action: 'show', delivered: true }, target };
+      case 'ambiguous':
+        return {
+          ok: false,
+          status: 409,
+          code: 'ambiguous_session',
+          error: `${MESSAGES.ambiguous_session}: ${(r.candidates || []).join(', ')}`,
+        };
+      case 'not_found':
+        return {
+          ok: false,
+          status: 404,
+          code: 'unknown_session',
+          error: `${MESSAGES.unknown_session} ("${session.slice(0, 60)}")`,
+        };
+      case 'nothing':
+        return { ok: false, status: 404, code: 'nothing_to_show', error: MESSAGES.nothing_to_show };
+      default:
+        return {
+          ok: false,
+          status: 409,
+          code: 'no_active_device',
+          error: MESSAGES.no_active_device,
+        };
+    }
+  }
+
   private record(
     source: TriggerSource,
     req: TriggerRequest,
@@ -682,6 +740,7 @@ export class HeraldTriggerService {
       payload.device = req.device.slice(0, 80);
       payload.pin = req.pin !== false;
     }
+    if (typeof req.session === 'string' && req.session) payload.session = req.session.slice(0, 80);
     if (source.forwardedFor) payload.forwardedFor = source.forwardedFor.slice(0, 200);
     if (source.network) payload.network = source.network;
     if (source.client && source.client !== source.origin.addr) payload.client = source.client;
@@ -794,6 +853,7 @@ export class HeraldTriggerService {
       request = {
         action: query.get('action') ?? 'toggle',
         device: query.get('device') ?? undefined,
+        session: query.get('session') ?? undefined,
         pin: pin === null ? undefined : pin !== 'false' && pin !== '0',
       };
     }
@@ -833,7 +893,8 @@ export class HeraldTriggerService {
 
   /**
    * Signed mode: `ts` (unix seconds) within the skew window, an HMAC by one of
-   * the valid tokens over `<ts>.<action>.<device>`, and never seen before.
+   * the valid tokens over `<ts>.<action>.<device>` (plus `.<session>` when a
+   * `show` names one), and never seen before.
    */
   verifySignature(
     ts: string,
@@ -853,10 +914,11 @@ export class HeraldTriggerService {
     if (!/^[0-9a-f]{64}$/.test(s)) return { cred: null, error: 'Malformed X-Herald-Sig' };
     const action = typeof request.action === 'string' ? request.action : '';
     const device = typeof request.device === 'string' ? request.device : '';
+    const session = typeof request.session === 'string' ? request.session : '';
     const given = Buffer.from(s, 'hex');
     let found: TriggerCredential | null = null;
     for (const c of this.tokenFile.credentials()) {
-      const expected = Buffer.from(triggerSignature(c.sha256, ts, action, device), 'hex');
+      const expected = Buffer.from(triggerSignature(c.sha256, ts, action, device, session), 'hex');
       if (crypto.timingSafeEqual(expected, given) && !found) found = c;
     }
     if (!found) return { cred: null };

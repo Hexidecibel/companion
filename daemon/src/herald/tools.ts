@@ -8,7 +8,7 @@
 
 import type { LlmToolSpec } from './llm/provider';
 import type { PendingChoice, SessionSnapshot, SessionSource } from './session-source';
-import type { HeraldAction, HeraldSessionRef } from './protocol';
+import type { HeraldAction, HeraldSessionRef, HeraldShowResult } from './protocol';
 import type { ActionManager } from './actions';
 import {
   classifyAction,
@@ -270,6 +270,20 @@ TOOL_SPECS.push({
   },
 });
 
+TOOL_SPECS.push({
+  name: 'show_session',
+  description:
+    "Open a session's view on the user's active device (their screen jumps to it, scrolled to any question or choice waiting there). " +
+    'When the user asks to see, open, pull up or be taken to a session ("pull up whatever Out4 is stuck on", "show me the deploy session"). ' +
+    'Nothing is sent to the session. Then say in a few words what is on screen, e.g. "Here\'s Out4, it\'s asking which branch."',
+  parameters: {
+    type: 'object',
+    properties: { session: SESSION_PROP },
+    required: ['session'],
+    additionalProperties: false,
+  },
+});
+
 /** Tools that create an action: never executed in an iteration with malformed calls. */
 export const ACTION_TOOLS = new Set([
   'propose_input',
@@ -424,6 +438,8 @@ export interface ToolEnv {
   setVerbosity?: (level: (typeof VERBOSITY_TOOL_LEVELS)[number]) => void;
   /** Where new sessions may start. Absent = propose_spawn_session reports unavailable. */
   spawn?: { roots: string[]; userHome: string };
+  /** Open a session on the active device. Absent = show_session reports unavailable. */
+  showSession?: (s: SessionSnapshot) => HeraldShowResult;
 }
 
 export interface ToolOutcome {
@@ -681,6 +697,37 @@ export async function executeTool(
           ok: true,
           level,
           instruction: 'Saved. Confirm in a few words, e.g. "Okay, I\'ll keep it short."',
+        });
+      }
+
+      case 'show_session': {
+        const r = await resolveFresh(env, String(args.session), state);
+        if (!r.ok) return err(r.error);
+        const s = r.session;
+        if (!env.showSession) return err('Opening sessions on a screen is not available here.');
+        const shown = env.showSession(s);
+        if (shown.status !== 'shown') {
+          return err(
+            shown.status === 'no_device'
+              ? 'No device is open to show it on. Tell the user to open Companion first.'
+              : `Could not show ${s.sessionName} (${shown.status}).`
+          );
+        }
+        state.sessionRefs.set(sessionKey(s), {
+          serverId: s.serverId,
+          sessionId: s.sessionId,
+          sessionName: s.sessionName,
+        });
+        const choice = s.pendingChoice ? describeChoice(s.pendingChoice) : undefined;
+        return ok({
+          shown: s.sessionName,
+          on: shown.device?.label,
+          waiting_on_user:
+            choice ?? (s.pendingQuestion ? clip(oneLine(s.pendingQuestion), 300) : undefined),
+          instruction:
+            'It is on their screen now. Confirm in a few words ("Here\'s ' +
+            s.sessionName +
+            '.") and, if something is waiting on them, name it in one short sentence. Do not read the screen out.',
         });
       }
 
