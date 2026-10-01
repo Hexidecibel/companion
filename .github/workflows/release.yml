@@ -558,7 +558,8 @@ jobs:
             spctl -a -vvv -t install "$DMG" 2>&1
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY"
-          spctl -a -t install "$DMG" 2>&1 | grep -q accepted || { echo "::error::Gatekeeper rejects the dmg"; exit 1; }
+          # Without -v spctl prints nothing on success: judge by its exit status.
+          spctl -a -t install "$DMG" || { echo "::error::Gatekeeper rejects the dmg"; exit 1; }
           spctl -a -vvv -t install "$DMG" 2>&1 | grep -q 'Notarized Developer ID' || { echo "::error::dmg is not notarized"; exit 1; }
           rm -f ~/private_keys/AuthKey_*.p8
       - name: Verify ad-hoc signature (macOS, no Developer ID)
