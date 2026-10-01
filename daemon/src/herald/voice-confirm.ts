@@ -25,8 +25,14 @@ import { echoWords, isLikelyEcho, keysMatch, soundKey } from './voice/echo-match
 export const MAX_VOICE_ATTEMPTS = 3;
 /** A transcript older than this cannot confirm anything. */
 export const VOICE_TRANSCRIPT_MAX_AGE_MS = 20_000;
-/** Speech that ended this shortly before the capture still counts for the echo check. */
-export const ECHO_TAIL_MS = 1500;
+/**
+ * Speech that ended this shortly before the capture still counts for the echo
+ * check (playback-estimate slack). Kept short: Herald never ends a sentence on
+ * the phrase ("say 'confirm deploy' to go ahead"), so a capture that overlaps its
+ * speech holds extra words and fails the exact match anyway, while a real user
+ * answering quickly must not be called an echo.
+ */
+export const ECHO_TAIL_MS = 400;
 
 /** Danger rule -> the spoken keyword (most salient first). */
 const KEYWORDS: Array<[string, string]> = [
