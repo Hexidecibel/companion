@@ -43,6 +43,12 @@ export interface OverlayInput {
 export const OVERLAY_LINGER_MS = 2600;
 export const OVERLAY_FADE_MS = 500;
 export const TONE_SHOW_MS = 3200;
+/**
+ * Backstop: an activity whose inputs have not changed for this long is taken
+ * as stale (a `busy` flag left over from a dropped connection, a speaking flag
+ * that never cleared) and the orb hides until something changes.
+ */
+export const OVERLAY_STALE_MS = 120_000;
 const CAPTION_MAX = 72;
 
 /** First words of a text, one line: whole words up to about 72 characters. */
@@ -82,6 +88,11 @@ export interface PresenterDeps {
 export class OverlayPresenter {
   private view: OverlayView = { phase: 'hidden', orb: 'thinking', caption: '' };
   private timer: Timer | null = null;
+  private staleTimer: Timer | null = null;
+  private stale = false;
+  /** Nothing sent to the native window yet: the first view always goes out
+   * (a reloaded page must hide an orb the previous page left on screen). */
+  private synced = false;
   private last: OverlayInput | null = null;
   private readonly now: () => number;
   private readonly setTimer: (fn: () => void, ms: number) => Timer;
@@ -97,10 +108,16 @@ export class OverlayPresenter {
     return this.view;
   }
 
-  update(i: OverlayInput): void {
+  update(i: OverlayInput, opts: { fromTimer?: boolean } = {}): void {
+    const changed = !opts.fromTimer;
     this.last = i;
-    if (!i.enabled || i.mainFocused) {
+    if (changed) {
+      this.stale = false;
+      this.cancelStale();
+    }
+    if (!i.enabled || i.mainFocused || this.stale) {
       this.cancelTimer();
+      this.cancelStale();
       this.emit({ ...this.view, phase: 'hidden' });
       return;
     }
@@ -108,13 +125,22 @@ export class OverlayPresenter {
     if (a) {
       this.cancelTimer();
       this.emit({ phase: 'active', ...a });
+      if (changed) {
+        this.staleTimer = this.setTimer(() => {
+          this.staleTimer = null;
+          this.stale = true;
+          this.cancelTimer();
+          this.emit({ ...this.view, phase: 'hidden' });
+        }, OVERLAY_STALE_MS);
+      }
       // A tone is its own activity: schedule its end.
       if (a.orb === 'tone' && i.tone) {
         const left = Math.max(0, TONE_SHOW_MS - (this.now() - i.tone.at));
-        this.timer = this.setTimer(() => { this.timer = null; if (this.last) this.update(this.last); }, left + 1);
+        this.timer = this.setTimer(() => { this.timer = null; if (this.last) this.update(this.last, { fromTimer: true }); }, left + 1);
       }
       return;
     }
+    if (!this.synced) this.emit({ ...this.view, phase: 'hidden' });
     if (this.view.phase === 'active' && !this.timer) {
       // A follow-up window that closed in silence just goes: no lingering
       // "listening" when it no longer is.
@@ -131,6 +157,12 @@ export class OverlayPresenter {
 
   dispose(): void {
     this.cancelTimer();
+    this.cancelStale();
+  }
+
+  private cancelStale(): void {
+    if (this.staleTimer) this.clearTimer(this.staleTimer);
+    this.staleTimer = null;
   }
 
   private cancelTimer(): void {
@@ -140,6 +172,12 @@ export class OverlayPresenter {
 
   private emit(v: OverlayView): void {
     const cur = this.view;
+    if (!this.synced) {
+      this.synced = true;
+      this.view = v;
+      this.onView(v);
+      return;
+    }
     if (cur.phase === v.phase && cur.orb === v.orb && cur.caption === v.caption && cur.countdown?.until === v.countdown?.until) return;
     this.view = v;
     this.onView(v);

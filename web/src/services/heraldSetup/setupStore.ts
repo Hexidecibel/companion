@@ -114,6 +114,18 @@ export const heraldSetupStore = {
     if (state.dismissed.includes(key)) return;
     commit({ ...state, dismissed: [...state.dismissed, key].slice(-MAX_DISMISSED) });
   },
+  /**
+   * Re-read from storage. The native apps restore localStorage from their
+   * own store at startup AFTER this module loaded (initStorage), so main.tsx
+   * calls this once that finished: a Gaming profile's "orb off" must hold
+   * from the first frame.
+   */
+  reload(): void {
+    const next = load();
+    if (JSON.stringify(next) === JSON.stringify(state)) return;
+    state = next;
+    listeners.forEach((l) => l());
+  },
   /** Tests only. */
   reset(): void {
     state = load();

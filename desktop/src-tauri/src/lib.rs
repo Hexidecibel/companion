@@ -101,6 +101,7 @@ pub fn run() {
             herald::herald_request_input_monitoring,
             herald::herald_open_input_monitoring,
             overlay::herald_overlay_update,
+            overlay::herald_overlay_set_enabled,
             overlay::herald_overlay_ready,
             overlay::herald_overlay_regions,
             overlay::herald_overlay_drag,

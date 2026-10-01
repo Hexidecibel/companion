@@ -19,10 +19,10 @@ import { nativePlatform, type NativePlatform } from '../utils/platform';
 
 export type NativeHeraldAction =
   | 'talk_down' | 'talk_up' | 'toggle' | 'brief' | 'mute_tones' | 'stop'
-  | 'volume_up' | 'volume_down' | 'volume_set';
+  | 'volume_up' | 'volume_down' | 'volume_set' | 'orb';
 
 const ACTIONS: ReadonlySet<string> = new Set<NativeHeraldAction>([
-  'talk_down', 'talk_up', 'toggle', 'brief', 'mute_tones', 'stop', 'volume_up', 'volume_down', 'volume_set',
+  'talk_down', 'talk_up', 'toggle', 'brief', 'mute_tones', 'stop', 'volume_up', 'volume_down', 'volume_set', 'orb',
 ]);
 
 export interface NativeHeraldHandlers {
@@ -40,6 +40,8 @@ export interface NativeHeraldHandlers {
   stop: () => void;
   /** Tray "Herald volume": louder / quieter (one step) or a level (0..1.5). */
   volume: (cmd: { kind: 'step'; dir: 1 | -1 } | { kind: 'set'; value: number }) => void;
+  /** Tray "Hide floating orb" / "Show floating orb" (value 0 / 1). Optional for older hosts. */
+  orb?: (on: boolean) => void;
 }
 
 /** Validate a native payload and run its handler. False when it was not ours. */
@@ -59,6 +61,10 @@ export function dispatchNativeEvent(payload: unknown, h: NativeHeraldHandlers): 
     case 'volume_set':
       if (typeof value !== 'number' || !Number.isFinite(value)) return false;
       h.volume({ kind: 'set', value });
+      break;
+    case 'orb':
+      if (typeof value !== 'number') return false;
+      h.orb?.(value > 0);
       break;
   }
   return true;

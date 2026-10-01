@@ -141,6 +141,8 @@ pub fn setup_desktop(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Err
     let brief_item = MenuItemBuilder::with_id("herald-brief", "Brief me").build(app)?;
     let listen_item = MenuItemBuilder::with_id("herald-toggle", "Toggle listening").build(app)?;
     let stop_item = MenuItemBuilder::with_id("herald-stop", "Stop speaking").build(app)?;
+    let orb_item =
+        MenuItemBuilder::with_id(herald::TRAY_ORB_ID, herald::orb_tray_label(true)).build(app)?;
     let tones_item = CheckMenuItemBuilder::with_id("herald-mute-tones", "Mute tones")
         .checked(false)
         .build(app)?;
@@ -170,6 +172,7 @@ pub fn setup_desktop(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Err
             &stop_item,
             &volume_menu,
             &tones_item,
+            &orb_item,
             &PredefinedMenuItem::separator(app)?,
             &show_item,
             &update_check_item,
@@ -182,6 +185,8 @@ pub fn setup_desktop(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Err
     app.manage(herald::TrayState {
         tones: std::sync::Mutex::new(Some(tones_item)),
         volumes: std::sync::Mutex::new(volume_items),
+        orb: std::sync::Mutex::new(Some(orb_item)),
+        orb_enabled: std::sync::Mutex::new(true),
     });
     app.manage(herald::Registered::default());
     herald::setup_mic_permission(app);
@@ -209,6 +214,7 @@ pub fn setup_desktop(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Err
             "herald-toggle" => herald::emit(app, "toggle"),
             "herald-mute-tones" => herald::emit(app, "mute_tones"),
             "herald-stop" => herald::emit(app, "stop"),
+            herald::TRAY_ORB_ID => herald::toggle_orb_from_tray(app),
             "herald-vol-up" => herald::emit(app, "volume_up"),
             "herald-vol-down" => herald::emit(app, "volume_down"),
             id if herald::tray_volume_level(id).is_some() => {
@@ -241,7 +247,13 @@ pub fn setup_desktop(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Err
 
 pub fn setup_desktop_plugins(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
     builder
-        .plugin(tauri_plugin_window_state::Builder::new().build())
+        .plugin(
+            // The floating orb manages its own position and visibility; the
+            // plugin would restore it visible (and focus it) when it is created.
+            tauri_plugin_window_state::Builder::new()
+                .with_denylist(&[crate::overlay::LABEL])
+                .build(),
+        )
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_autostart::init(

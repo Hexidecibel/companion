@@ -41,6 +41,16 @@ export async function pushOverlayView(view: OverlayView): Promise<void> {
   await call('herald_overlay_update', { view });
 }
 
+/**
+ * The floating orb is on / off for this device and profile. The native side
+ * hides it at once when off and refuses to show it, and the tray item
+ * ("Hide floating orb" / "Show floating orb") follows.
+ */
+export async function pushOverlayEnabled(enabled: boolean): Promise<void> {
+  if (nativePlatform() !== 'desktop') return;
+  await call('herald_overlay_set_enabled', { enabled });
+}
+
 /** Show and focus the Companion window (wake word / trigger). */
 export async function bringToFront(): Promise<void> {
   if (nativePlatform() !== 'desktop') return;

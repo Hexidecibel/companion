@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { OverlayPresenter, type OverlayInput } from '../services/heraldSetup/overlay';
-import { pushOverlayView } from '../services/overlayBridge';
+import { pushOverlayEnabled, pushOverlayView } from '../services/overlayBridge';
 import type { HeraldInboxItem, HeraldMessage } from '../types/herald';
 
 export interface OverlayHost {
@@ -32,6 +32,21 @@ export function useHeraldOverlay(host: OverlayHost): void {
   useEffect(() => () => {
     presenter.dispose();
     if (presenter.current.phase !== 'hidden') void pushOverlayView({ ...presenter.current, phase: 'hidden' });
+  }, [presenter]);
+
+  // The native side gates on the setting too (and the tray item mirrors it).
+  useEffect(() => {
+    void pushOverlayEnabled(host.enabled);
+  }, [host.enabled]);
+
+  // A reload or close of this page never runs React cleanups: hide the orb
+  // first so it is not left on screen with nothing driving it.
+  useEffect(() => {
+    const onUnload = () => {
+      if (presenter.current.phase !== 'hidden') void pushOverlayView({ ...presenter.current, phase: 'hidden' });
+    };
+    window.addEventListener('beforeunload', onUnload);
+    return () => window.removeEventListener('beforeunload', onUnload);
   }, [presenter]);
 
   const [focused, setFocused] = useState(windowFocused);

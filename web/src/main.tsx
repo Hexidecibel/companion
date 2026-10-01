@@ -10,6 +10,7 @@ import './styles/herald.css';
 import './styles/herald-setup.css';
 import { isOverlayWindow } from './services/overlayBridge';
 import { HeraldOverlayApp } from './components/herald/HeraldOverlayApp';
+import { heraldSetupStore } from './services/heraldSetup/setupStore';
 
 if (isOverlayWindow()) {
   // The desktop app's floating orb window: just the orb, no app.
@@ -28,6 +29,8 @@ function startApp(): void {
   // then apply settings and render.
   initStorage().then(() => {
     applyFontScale();
+    // Herald setup (profile, floating orb) was read before the restore.
+    heraldSetupStore.reload();
     ReactDOM.createRoot(document.getElementById('root')!).render(
       <React.StrictMode>
         <App />

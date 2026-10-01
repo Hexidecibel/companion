@@ -63,6 +63,14 @@ describe('dispatchNativeEvent', () => {
     expect(h.volume).toHaveBeenCalledTimes(3);
   });
 
+  it('tray "Hide floating orb" / "Show floating orb"', () => {
+    const h = { ...handlers(), orb: vi.fn() };
+    expect(dispatchNativeEvent({ action: 'orb', value: 0 }, h)).toBe(true);
+    expect(dispatchNativeEvent({ action: 'orb', value: 1 }, h)).toBe(true);
+    expect(h.orb.mock.calls).toEqual([[false], [true]]);
+    expect(dispatchNativeEvent({ action: 'orb' }, h)).toBe(false);
+  });
+
   it.each([null, undefined, 'toggle', {}, { action: 'reboot' }, { action: 3 }])('ignores %j', (payload) => {
     const h = handlers();
     expect(dispatchNativeEvent(payload, h)).toBe(false);

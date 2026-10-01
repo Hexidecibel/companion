@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { TIPS_KEY, tipsStore } from '../tips';
 import { DEFAULT_SETUP, heraldSetupStore, isGamingMode, overlayEnabled, parseSetup, setOverlayEnabled, SETUP_KEY } from '../setupStore';
 
@@ -77,5 +77,17 @@ describe('setup store', () => {
     setOverlayEnabled(false);
     expect(overlayEnabled(heraldSetupStore.get(), 'desktop')).toBe(false);
     expect(heraldSetupStore.get().overlayInGaming).toBe(true);
+  });
+
+  it('startup: a Gaming profile restored from the native store after load keeps the orb off', () => {
+    expect(overlayEnabled(heraldSetupStore.get(), 'desktop')).toBe(true);
+    // initStorage() writes the saved setup into localStorage after this module loaded.
+    localStorage.setItem(SETUP_KEY, JSON.stringify({ ...DEFAULT_SETUP, profile: 'gaming' }));
+    const seen = vi.fn();
+    const off = heraldSetupStore.subscribe(seen);
+    heraldSetupStore.reload();
+    off();
+    expect(seen).toHaveBeenCalledTimes(1);
+    expect(overlayEnabled(heraldSetupStore.get(), 'desktop')).toBe(false);
   });
 });

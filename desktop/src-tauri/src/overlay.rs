@@ -12,6 +12,14 @@
 //! and never activates, so a full-screen game keeps focus. macOS: it joins all
 //! Spaces and may sit over full-screen apps (FullScreenAuxiliary, status level).
 //!
+//! Never stuck on screen: every update (and the cursor poller, as a backstop)
+//! reconciles the window with the LATEST wanted view under one lock, so two
+//! commands racing (a hide arriving while the first show is still creating
+//! the window) can no longer leave it visible with nothing in it. The window
+//! has no menu bar (Windows / Linux attach the app menu to every window), is
+//! kept out of the window-state plugin (which would restore it visible), and
+//! the tray's "Hide floating orb" turns it off at once.
+//!
 //! Also here: `herald_bring_to_front` (wake word / trigger shows Companion).
 
 use serde::{Deserialize, Serialize};
@@ -67,6 +75,42 @@ struct Inner {
     /// Latest position and when it last changed (saved once it settles).
     moved: Option<(PhysicalPosition<i32>, Instant)>,
     polling: bool,
+    /// The orb is turned off (tray "Hide floating orb", or the web setting):
+    /// never shown, whatever views arrive.
+    suppressed: bool,
+}
+
+/// Serializes window changes (create / show / hide), so the latest wanted
+/// view always wins.
+fn apply_lock() -> std::sync::MutexGuard<'static, ()> {
+    static APPLY: OnceLock<Mutex<()>> = OnceLock::new();
+    APPLY
+        .get_or_init(|| Mutex::new(()))
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+}
+
+/// The window should be on screen: a non-hidden view and the orb not turned off.
+fn wants_visible(view: Option<&OverlayView>, suppressed: bool) -> bool {
+    !suppressed && view.is_some_and(|v| v.phase != "hidden")
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum Step {
+    Nothing,
+    Hide,
+    Show,
+    CreateAndShow,
+}
+
+/// What to do to the window to match what is wanted. Pure, so it is unit tested.
+fn plan(want_visible: bool, exists: bool, visible: bool) -> Step {
+    match (want_visible, exists, visible) {
+        (true, false, _) => Step::CreateAndShow,
+        (true, true, false) => Step::Show,
+        (false, true, true) => Step::Hide,
+        _ => Step::Nothing,
+    }
 }
 
 fn state() -> &'static Mutex<Inner> {
@@ -166,6 +210,16 @@ fn create(app: &AppHandle) -> Result<WebviewWindow, String> {
     #[cfg(windows)]
     let builder = builder.additional_browser_args(crate::WEBVIEW2_ARGS);
     let w = builder.build().map_err(|e| e.to_string())?;
+    // Windows / Linux attach the app menu ("Companion File Edit View Window")
+    // to every window that does not have its own; on this frameless,
+    // transparent window it would be the only visible thing. Remove it before
+    // the window is ever shown, and restore the content size it took.
+    // (macOS: the menu is app-wide, never part of a window.)
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = w.remove_menu();
+        let _ = w.set_size(tauri::LogicalSize::new(WIDTH, HEIGHT));
+    }
     if let Some(pos) = load_pos(app).or_else(|| default_pos(app)) {
         let _ = w.set_position(pos);
     }
@@ -238,6 +292,19 @@ fn ensure_poller(app: &AppHandle) {
         if let Some(pos) = settled {
             save_pos(&app, pos);
         }
+        // Backstop: visible while nothing is wanted (a lost or reordered
+        // update) -> hide now.
+        if visible {
+            let want = {
+                let st = lock();
+                wants_visible(st.view.as_ref(), st.suppressed)
+            };
+            if !want {
+                let _guard = apply_lock();
+                let _ = w.hide();
+                continue;
+            }
+        }
         if !visible {
             let mut st = lock();
             if st.moved.is_none() {
@@ -266,30 +333,68 @@ fn ensure_poller(app: &AppHandle) {
     });
 }
 
+/// Make the window match the latest wanted view (under the apply lock).
+fn reconcile(app: &AppHandle) -> Result<(), String> {
+    let _guard = apply_lock();
+    let (view, suppressed) = {
+        let st = lock();
+        (st.view.clone(), st.suppressed)
+    };
+    let want = wants_visible(view.as_ref(), suppressed);
+    let existing = app.get_webview_window(LABEL);
+    let visible = existing
+        .as_ref()
+        .map(|w| w.is_visible().unwrap_or(false))
+        .unwrap_or(false);
+    let step = plan(want, existing.is_some(), visible);
+    let w = match (step, existing) {
+        (Step::CreateAndShow, _) => Some(create(app)?),
+        (_, w) => w,
+    };
+    let Some(w) = w else { return Ok(()) };
+    if let Some(v) = &view {
+        let shown = if want {
+            v.clone()
+        } else {
+            OverlayView {
+                phase: "hidden".into(),
+                ..v.clone()
+            }
+        };
+        let _ = app.emit_to(LABEL, VIEW_EVENT, &shown);
+    }
+    match plan(want, true, w.is_visible().unwrap_or(false)) {
+        Step::Show => {
+            // Not focusable: showing never activates it (a game keeps focus).
+            let _ = w.show();
+            ensure_poller(app);
+        }
+        Step::Hide => {
+            let _ = w.hide();
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
 /// Show / update / hide the floating orb. `phase: "hidden"` hides it.
 #[tauri::command]
 pub async fn herald_overlay_update(app: AppHandle, view: OverlayView) -> Result<(), String> {
-    let hidden = view.phase == "hidden";
-    lock().view = Some(view.clone());
-    let existing = app.get_webview_window(LABEL);
-    if hidden {
-        if let Some(w) = existing {
-            let _ = app.emit_to(LABEL, VIEW_EVENT, &view);
-            let _ = w.hide();
-        }
-        return Ok(());
-    }
-    let w = match existing {
-        Some(w) => w,
-        None => create(&app)?,
-    };
-    let _ = app.emit_to(LABEL, VIEW_EVENT, &view);
-    if !w.is_visible().unwrap_or(false) {
-        // Not focusable: showing never activates it (a game keeps focus).
-        let _ = w.show();
-        ensure_poller(&app);
-    }
-    Ok(())
+    lock().view = Some(view);
+    reconcile(&app)
+}
+
+/// The floating orb is turned on / off for this device and profile (the web
+/// setting, or the tray). Off hides it at once and keeps it hidden.
+#[tauri::command]
+pub async fn herald_overlay_set_enabled(app: AppHandle, enabled: bool) -> Result<(), String> {
+    set_enabled(&app, enabled)
+}
+
+pub fn set_enabled(app: &AppHandle, enabled: bool) -> Result<(), String> {
+    lock().suppressed = !enabled;
+    crate::herald::set_orb_tray(app, enabled);
+    reconcile(app)
 }
 
 /// The overlay page loaded: send it the current view (it may have missed it).
@@ -388,6 +493,49 @@ mod tests {
         // A zero scale is treated as 1.
         assert!(over_regions(&regions, (0.0, 0.0), 0.0, (20.0, 20.0)));
         assert!(!over_regions(&[], (0.0, 0.0), 1.0, (20.0, 20.0)));
+    }
+
+    fn view(phase: &str) -> OverlayView {
+        OverlayView {
+            phase: phase.into(),
+            orb: "speaking".into(),
+            caption: "Hi".into(),
+        }
+    }
+
+    #[test]
+    fn wanted_only_with_a_live_view_and_not_suppressed() {
+        assert!(!wants_visible(None, false));
+        assert!(!wants_visible(Some(&view("hidden")), false));
+        assert!(wants_visible(Some(&view("active")), false));
+        assert!(wants_visible(Some(&view("fading")), false));
+        // Turned off (tray / Gaming profile setting): never shown.
+        assert!(!wants_visible(Some(&view("active")), true));
+    }
+
+    #[test]
+    fn plan_matches_the_window_to_the_wanted_state() {
+        assert_eq!(plan(true, false, false), Step::CreateAndShow);
+        assert_eq!(plan(true, true, false), Step::Show);
+        assert_eq!(plan(true, true, true), Step::Nothing);
+        assert_eq!(plan(false, true, true), Step::Hide);
+        assert_eq!(plan(false, true, false), Step::Nothing);
+        // Nothing wanted and no window: never create one just to hide it.
+        assert_eq!(plan(false, false, false), Step::Nothing);
+    }
+
+    /// The race behind a stuck, empty overlay: a "hidden" update lands while
+    /// the first "active" one is still creating the window. Reconciling
+    /// against the latest view (not the call's own argument) hides it.
+    #[test]
+    fn a_late_show_after_hide_reconciles_to_hidden() {
+        let latest = view("hidden");
+        // The slow show finishes creating the window and checks again.
+        let step = plan(wants_visible(Some(&latest), false), true, false);
+        assert_eq!(step, Step::Nothing);
+        // A window someone left visible is hidden by the poller backstop.
+        assert!(!wants_visible(Some(&latest), false));
+        assert_eq!(plan(false, true, true), Step::Hide);
     }
 
     #[test]

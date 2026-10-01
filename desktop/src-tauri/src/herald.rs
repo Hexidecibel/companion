@@ -25,7 +25,10 @@
 
 use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
-use tauri::{menu::CheckMenuItem, AppHandle, Emitter, Manager, Wry};
+use tauri::{
+    menu::{CheckMenuItem, MenuItem},
+    AppHandle, Emitter, Manager, Wry,
+};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 
 pub const EVENT: &str = "herald-native";
@@ -60,6 +63,53 @@ pub struct Registered(Mutex<Vec<Shortcut>>);
 pub struct TrayState {
     pub tones: Mutex<Option<CheckMenuItem<Wry>>>,
     pub volumes: Mutex<Vec<(u32, CheckMenuItem<Wry>)>>,
+    /// "Hide floating orb" / "Show floating orb" (text follows the setting).
+    pub orb: Mutex<Option<MenuItem<Wry>>>,
+    /// The orb setting as last reported (the tray item toggles it).
+    pub orb_enabled: Mutex<bool>,
+}
+
+/// Tray id of the floating orb toggle.
+pub const TRAY_ORB_ID: &str = "herald-orb";
+
+/// The tray item's text for the current orb setting.
+pub fn orb_tray_label(enabled: bool) -> &'static str {
+    if enabled {
+        "Hide floating orb"
+    } else {
+        "Show floating orb"
+    }
+}
+
+/// Mirror the orb setting in the tray item.
+pub fn set_orb_tray(app: &AppHandle, enabled: bool) {
+    let Some(tray) = app.try_state::<TrayState>() else {
+        return;
+    };
+    *tray.orb_enabled.lock().unwrap_or_else(|e| e.into_inner()) = enabled;
+    let item = tray.orb.lock().unwrap_or_else(|e| e.into_inner()).clone();
+    if let Some(item) = item {
+        let _ = item.set_text(orb_tray_label(enabled));
+    }
+}
+
+/// Tray "Hide floating orb" / "Show floating orb": flip it natively at once
+/// (hidden immediately, even before the web layer answers) and tell the web
+/// layer, which saves it as the "Show floating orb" setting of the profile.
+pub fn toggle_orb_from_tray(app: &AppHandle) {
+    let enabled = app
+        .try_state::<TrayState>()
+        .map(|t| *t.orb_enabled.lock().unwrap_or_else(|e| e.into_inner()))
+        .unwrap_or(true);
+    let next = !enabled;
+    emit_value(app, "orb", if next { 1.0 } else { 0.0 });
+    // Off the main thread: it may create or hide the overlay window.
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        if let Err(e) = crate::overlay::set_enabled(&app, next) {
+            log::warn!("herald overlay: {e}");
+        }
+    });
 }
 
 /// The tray's volume levels (percent).
@@ -396,6 +446,12 @@ fn is_own_origin(uri: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn orb_tray_item_says_what_it_will_do() {
+        assert_eq!(orb_tray_label(true), "Hide floating orb");
+        assert_eq!(orb_tray_label(false), "Show floating orb");
+    }
 
     #[test]
     fn default_chords_parse() {

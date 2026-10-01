@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { activeView, firstWords, OVERLAY_FADE_MS, OVERLAY_LINGER_MS, OverlayPresenter, shouldBringToFront, TONE_SHOW_MS, type OverlayInput, type OverlayView } from '../overlay';
+import { activeView, firstWords, OVERLAY_FADE_MS, OVERLAY_LINGER_MS, OVERLAY_STALE_MS, OverlayPresenter, shouldBringToFront, TONE_SHOW_MS, type OverlayInput, type OverlayView } from '../overlay';
 
 const idle: OverlayInput = {
   enabled: true,
@@ -84,7 +84,8 @@ describe('OverlayPresenter (overlay state sync)', () => {
   it('hidden while the Companion window is focused, or when turned off', () => {
     p.update({ ...idle, speaking: true, mainFocused: true });
     expect(p.current.phase).toBe('hidden');
-    expect(views).toEqual([]);
+    // Only the initial sync (hidden) went out.
+    expect(views.map((v) => v.phase)).toEqual(['hidden']);
     p.update({ ...idle, speaking: true });
     expect(p.current.phase).toBe('active');
     p.update({ ...idle, speaking: true, enabled: false });
@@ -100,6 +101,54 @@ describe('OverlayPresenter (overlay state sync)', () => {
     expect(p.current.phase).toBe('fading');
     tick(OVERLAY_FADE_MS);
     expect(p.current.phase).toBe('hidden');
+  });
+
+  it('the first update always syncs the native window, even when idle (a reloaded page hides a stuck orb)', () => {
+    p.update(idle);
+    expect(views.map((v) => v.phase)).toEqual(['hidden']);
+    p.update(idle);
+    expect(views).toHaveLength(1);
+  });
+
+  it('never stays up with no activity: idle after speaking always ends hidden', () => {
+    for (const busy of [{ listening: true }, { thinking: true }, { speaking: true }, { transcribing: true }]) {
+      p.update({ ...idle, ...busy });
+      expect(p.current.phase).toBe('active');
+      p.update(idle);
+      tick(OVERLAY_LINGER_MS + OVERLAY_FADE_MS);
+      expect(p.current.phase).toBe('hidden');
+    }
+  });
+
+  it('focus changes: focusing Companion hides at once, leaving it while idle keeps it hidden', () => {
+    p.update({ ...idle, speaking: true });
+    p.update({ ...idle, speaking: true, mainFocused: true });
+    expect(p.current.phase).toBe('hidden');
+    p.update({ ...idle, mainFocused: true });
+    p.update(idle); // blur with nothing going on
+    tick(OVERLAY_LINGER_MS + OVERLAY_FADE_MS);
+    expect(p.current.phase).toBe('hidden');
+  });
+
+  it('turning the orb off (tray, or the Gaming profile default) hides it mid-activity and keeps it hidden', () => {
+    p.update({ ...idle, listening: true });
+    p.update({ ...idle, listening: true, enabled: false });
+    expect(p.current.phase).toBe('hidden');
+    p.update({ ...idle, speaking: true, enabled: false });
+    tick(OVERLAY_LINGER_MS + OVERLAY_FADE_MS + TONE_SHOW_MS);
+    expect(p.current.phase).toBe('hidden');
+    expect(views.filter((v) => v.phase !== 'hidden')).toHaveLength(1);
+  });
+
+  it('an activity that never changes (stuck busy flag, missed sleep/resume) hides after the stale cap', () => {
+    p.update({ ...idle, thinking: true });
+    tick(OVERLAY_STALE_MS - 1);
+    expect(p.current.phase).toBe('active');
+    tick(1);
+    expect(p.current.phase).toBe('hidden');
+    // Something new happens: it comes back.
+    p.update({ ...idle, listening: true });
+    expect(p.current.phase).toBe('active');
   });
 
   it('emits only on change', () => {

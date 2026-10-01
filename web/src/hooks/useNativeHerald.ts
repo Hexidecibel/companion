@@ -16,6 +16,7 @@ import {
 } from '../services/nativeBridge';
 import type { VolumeCommand } from '../services/tts/volume';
 import { parseChord } from '../services/voice/hotkeys';
+import { setOverlayEnabled } from '../services/heraldSetup/setupStore';
 import { registerDiagnostics } from '../services/diagnostics';
 import type { VoiceInputSource, VoiceInputState } from '../services/voice/voiceInput';
 import { nativePlatform, type NativePlatform } from '../utils/platform';
@@ -318,6 +319,8 @@ export function nativeHandlers(host: () => NativeHeraldHost): NativeHeraldHandle
       h.setTonesOn(!h.tonesOn);
     },
     volume: (cmd) => host().volumeCommand?.(cmd),
+    // Saved as the "Show floating orb" setting of the current profile.
+    orb: (on) => setOverlayEnabled(on),
   };
 }
 
