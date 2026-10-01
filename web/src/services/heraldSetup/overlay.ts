@@ -149,15 +149,19 @@ export class OverlayPresenter {
 // ---------------------------------------------------------------------------
 // Bring to front
 
-export type FrontSource = 'wake' | 'trigger';
+export type FrontSource = 'wake' | 'trigger' | 'show';
 
 /**
  * "Hey Jarvis" or a trigger shows and focuses the Companion window, when the
  * user turned that on. Never in the Gaming profile (it would pull a game out
- * of full screen), and only in the desktop app.
+ * of full screen), and only in the desktop app. "Show me" is an explicit
+ * request to look at a session: it always comes forward (desktop app only),
+ * whatever the setting and even in the Gaming profile.
  */
 export function shouldBringToFront(o: { enabled: boolean; profile: ProfileId | null; platform: NativePlatform; source: FrontSource }): boolean {
-  if (!o.enabled || o.platform !== 'desktop') return false;
+  if (o.platform !== 'desktop') return false;
+  if (o.source === 'show') return true;
+  if (!o.enabled) return false;
   if (o.profile === 'gaming') return false;
   return o.source === 'wake' || o.source === 'trigger';
 }

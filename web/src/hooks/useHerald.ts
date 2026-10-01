@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useReducer, useRef, useMemo } from 'react';
-import type { HeraldAction, HeraldEvent, HeraldInputMode, HeraldIntent, HeraldMessage, HeraldPronunciation, HeraldState, HeraldUsageSummary, HeraldVerbosity } from '../types/herald';
+import type { HeraldAction, HeraldEvent, HeraldInputMode, HeraldShowRequest, HeraldShowResult, HeraldIntent, HeraldMessage, HeraldPronunciation, HeraldState, HeraldUsageSummary, HeraldVerbosity } from '../types/herald';
 import {
   heraldReducer,
   initialHeraldClientState,
@@ -53,6 +53,8 @@ export interface UseHeraldReturn {
   /** Confirm a red card by its spoken phrase; the hub verifies it. `error` is sayable. */
   confirmByVoice: (actionId: string, phrase: string, streamId?: string) => Promise<{ action: HeraldAction | null; error: string | null }>;
   markHeard: (itemIds: string[]) => void;
+  /** "Show me": open a session on the active device (or `device`). Rejects when the hub cannot. */
+  show: (req: HeraldShowRequest) => Promise<HeraldShowResult>;
   reset: () => Promise<boolean>;
   refresh: () => void;
   clearError: () => void;
@@ -237,6 +239,14 @@ export function useHerald(serverId: string | null): UseHeraldReturn {
     }
   }, [fetchState]);
 
+  const show = useCallback(async (req: HeraldShowRequest): Promise<HeraldShowResult> => {
+    const t = transportRef.current;
+    if (!t || !t.isConnected()) throw new Error('Not connected to the Herald host');
+    const res = await t.request('herald_show', req);
+    if (!res.success || !res.payload) throw new Error(res.error || 'Show is not available on this hub');
+    return res.payload as HeraldShowResult;
+  }, []);
+
   const markHeard = useCallback((itemIds: string[]) => {
     if (itemIds.length === 0) return;
     dispatch({ type: 'mark_heard_local', ids: itemIds });
@@ -338,6 +348,7 @@ export function useHerald(serverId: string | null): UseHeraldReturn {
     confirm,
     confirmByVoice,
     markHeard,
+    show,
     reset,
     refresh,
     clearError,

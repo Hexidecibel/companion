@@ -10,6 +10,8 @@ import { eventBus } from '../utils/eventBus';
 import { routeVoiceTranscript } from '../services/voice/voiceCommandRouter';
 import { detectVoiceConfirm, isPendingConfirmPhrase, runVoiceConfirm } from '../services/voice/confirmPhrase';
 import { runUndo } from '../services/voice/voiceUndo';
+import { matchShowCommand, stripWakeWord, type ShowCommand } from '../services/voice/voiceCommands';
+import { localShowTarget, matchClarifyAnswer, runShowCommand, showLines, type ShowClarify } from '../services/voice/showCommand';
 import type { HeraldActiveDevice, HeraldDeviceInfo, HeraldIntent } from '../types/herald';
 import { TICK_VOLUME, playChime, startShimmer } from '../services/tts/chime';
 import { FollowUpTracker } from '../services/voice/followUp';
@@ -302,6 +304,44 @@ export function HeraldProvider({ children }: { children: ReactNode }) {
     sendIntent('Brief me', 'brief');
   }, [sendIntent]);
 
+  // "Show me": the hub picks the session and opens it on the right device
+  // (a `navigate` event, handled below); this device speaks the short answer.
+  const showClarify = useRef<ShowClarify | null>(null);
+  const showAck = useCallback((line: string) => {
+    // Gaming: a tick, never a voice over the game.
+    if (heraldSetupStore.get().profile === 'gaming') playChime('tick', TICK_VOLUME);
+    else voiceRef.current.say(line);
+  }, []);
+  const runShow = useCallback((cmd: ShowCommand, said: string, presetDeviceId?: string) => {
+    void runShowCommand(cmd, said, {
+      devices: () => heraldRef.current.state?.devices ?? [],
+      selfId: () => voiceRef.current.selfId,
+      activeId: () => heraldRef.current.state?.activeDevice?.id ?? null,
+      request: (req) => heraldRef.current.show(req),
+      localTarget: () => localShowTarget({
+        actions: heraldRef.current.state?.actions,
+        messages: heraldRef.current.messages,
+        inbox: heraldRef.current.state?.inbox,
+      }),
+      navigateHere: (ref) => {
+        maybeBringToFront('show');
+        eventBus.emit('herald-show-session', { serverId: ref.serverId, sessionId: ref.sessionId, pending: false });
+      },
+      say: (line) => voiceRef.current.say(line),
+      ack: showAck,
+      sendToBrain: (t) => {
+        const rest = stripWakeWord(t);
+        if (rest) sendVoiceTurn(rest);
+      },
+      setClarify: (c) => {
+        showClarify.current = c;
+        // "Which one, A or B?" is a question: let the follow-up window catch the answer.
+        if (c) followUp.voiceTurn();
+      },
+      now: () => Date.now(),
+    }, presetDeviceId);
+  }, [showAck, sendVoiceTurn, followUp]);
+
   const onVoiceTranscript = useCallback((text: string): string | null => {
     const v = voiceRef.current;
     // Red card by voice ("confirm deploy"; the hub verifies) or a bare "yes" at
@@ -314,6 +354,25 @@ export function HeraldProvider({ children }: { children: ReactNode }) {
         tone: (kind) => playChime(kind),
       });
       cues.turnDone();
+      return null;
+    }
+    // The answer to "Which one, Out4 or Docs?" (only right after asking).
+    const clarify = showClarify.current;
+    showClarify.current = null;
+    if (clarify && Date.now() < clarify.until) {
+      const picked = matchClarifyAnswer(text, clarify.candidates);
+      if (picked) {
+        followUp.cancel();
+        cues.turnDone();
+        runShow({ target: picked, device: null }, text, clarify.deviceId);
+        return null;
+      }
+    }
+    const show = matchShowCommand(text, (heraldRef.current.state?.devices ?? []).map((d) => d.label));
+    if (show) {
+      followUp.cancel();
+      cues.turnDone();
+      runShow(show, text);
       return null;
     }
     const r = routeVoiceTranscript(text, {
@@ -345,7 +404,7 @@ export function HeraldProvider({ children }: { children: ReactNode }) {
       cues.turnDone();
     }
     return r.send;
-  }, [sendIntent, followUp, cues, noteVoiceTurn]);
+  }, [sendIntent, followUp, cues, noteVoiceTurn, runShow]);
   const voiceInputRef = useRef<ReturnType<typeof useHeraldVoiceInput> | null>(null);
   const isPendingConfirmText = useCallback(
     (text: string) => isPendingConfirmPhrase(text, heraldRef.current.state?.actions),
@@ -497,6 +556,26 @@ export function HeraldProvider({ children }: { children: ReactNode }) {
     };
     void runHeraldTrigger(event.action, remote);
   }), [subscribeEvents, triggerActions]);
+  // "Show me" landed on THIS device (from this device's voice, another
+  // device's, the brain or a `show` trigger): bring the window forward
+  // (desktop app; an explicit request, so even in Gaming) and open it.
+  const seenNav = useRef<string[]>([]);
+  useEffect(() => subscribeEvents((event, source) => {
+    if (event.kind !== 'navigate' || source !== 'push') return;
+    if (seenNav.current.includes(event.id)) return;
+    seenNav.current = [...seenNav.current.slice(-19), event.id];
+    maybeBringToFront('show');
+    eventBus.emit('herald-show-session', {
+      serverId: event.session.serverId,
+      sessionId: event.session.sessionId,
+      pending: event.pending === true,
+    });
+    if (event.ack) {
+      // A trigger: the window may be hidden; the answer may still be heard.
+      voiceRef.current.allowBackground();
+      showAck(showLines.here(event.session.sessionName));
+    }
+  }), [subscribeEvents, showAck]);
   // Budget notices (80% / used up): a tone on the active device; the message itself is spoken as a reply.
   useEffect(() => subscribeEvents((event, source) => {
     if (event.kind !== 'usage' || !event.notice || source !== 'push') return;

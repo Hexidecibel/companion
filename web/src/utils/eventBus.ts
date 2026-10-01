@@ -5,6 +5,8 @@ type EventMap = {
   'open-new-project': void;
   'open-concierge': { serverId: string; sessionId: string };
   'toggle-herald': void;
+  /** Herald "show me": open this session (Dashboard navigates; MessageList focuses). */
+  'herald-show-session': { serverId: string; sessionId: string; pending: boolean };
   'companion-in-app-notification': { title: string; body?: string; tag?: string };
 };
 

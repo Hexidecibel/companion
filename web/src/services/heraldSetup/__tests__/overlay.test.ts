@@ -145,4 +145,11 @@ describe('shouldBringToFront', () => {
     expect(shouldBringToFront({ ...base, platform: 'browser', source: 'wake' })).toBe(false);
     expect(shouldBringToFront({ ...base, profile: null, source: 'trigger' })).toBe(true);
   });
+
+  it('"show me" is an explicit request: always in the desktop app, even in Gaming or with the setting off', () => {
+    const base = { enabled: false, profile: 'gaming' as const, platform: 'desktop' as const };
+    expect(shouldBringToFront({ ...base, source: 'show' })).toBe(true);
+    expect(shouldBringToFront({ ...base, platform: 'android', source: 'show' })).toBe(false);
+    expect(shouldBringToFront({ ...base, platform: 'browser', source: 'show' })).toBe(false);
+  });
 });

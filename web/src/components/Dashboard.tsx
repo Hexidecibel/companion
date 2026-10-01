@@ -19,6 +19,8 @@ import { isTauri, isTauriDesktop, isMobileViewport } from '../utils/platform';
 import { useServers } from '../hooks/useServers';
 import { SIDEBAR_WIDTH_KEY, SPLIT_RATIO_KEY } from '../services/storageKeys';
 import { eventBus } from '../utils/eventBus';
+import { requestSessionFocus } from '../services/sessionFocus';
+import { resolveHeraldServerId } from '../services/heraldNav';
 import { connectionManager } from '../services/ConnectionManager';
 import { useHeraldUi } from '../context/HeraldContext';
 import { HeraldPanel } from './herald/HeraldPanel';
@@ -315,8 +317,14 @@ export function Dashboard({ onSettings }: DashboardProps) {
     herald.close();
   }, [herald.close]);
 
+  // Herald names its own sessions under its own server id ('local'): those
+  // live on the Herald host, which this app knows by its connection id.
+  const snapshotsRef = useRef(snapshots);
+  snapshotsRef.current = snapshots;
+  const heraldHostId = herald.hostId;
   // Session chips inside Herald jump straight to that session's view.
-  const handleHeraldOpenSession = useCallback((serverId: string, sessionId: string) => {
+  const handleHeraldOpenSession = useCallback((rawServerId: string, sessionId: string) => {
+    const serverId = resolveHeraldServerId(rawServerId, heraldHostId, snapshotsRef.current.map((s) => s.serverId));
     if (isMobile) {
       herald.close();
       setActiveSession({ serverId, sessionId });
@@ -326,7 +334,18 @@ export function Dashboard({ onSettings }: DashboardProps) {
       return;
     }
     setActiveSession({ serverId, sessionId });
-  }, [isMobile, herald.close]);
+  }, [isMobile, herald.close, heraldHostId]);
+
+  // "Show me" (voice, the brain, a trigger): open the session, then let its
+  // message list scroll to the waiting prompt (or the latest message).
+  useEffect(() => eventBus.on('herald-show-session', ({ serverId, sessionId, pending }) => {
+    handleHeraldOpenSession(serverId, sessionId);
+    requestSessionFocus(
+      resolveHeraldServerId(serverId, heraldHostId, snapshotsRef.current.map((s) => s.serverId)),
+      sessionId,
+      pending,
+    );
+  }), [handleHeraldOpenSession, heraldHostId]);
 
   const heraldScreen = heraldScreenOpen ? (
     <ComponentErrorBoundary name="Herald">

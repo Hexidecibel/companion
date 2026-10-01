@@ -3,6 +3,7 @@ import { ConversationHighlight } from '../types';
 import { MessageBubble } from './MessageBubble';
 import { SkeletonMessageBubble } from './Skeleton';
 import scrollDebugger from '../utils/scrollDebugger';
+import { FOCUS_CLASS, FOCUS_HIGHLIGHT_MS, findPromptElement, hasSessionFocus, onSessionFocus, takeSessionFocus } from '../services/sessionFocus';
 
 interface MessageListProps {
   highlights: ConversationHighlight[];
@@ -293,6 +294,49 @@ export const MessageList = memo(function MessageList({
     vv.addEventListener('resize', onResize);
     return () => vv.removeEventListener('resize', onResize);
   }, [scrollToBottom]);
+
+  // Herald "show me": scroll to the waiting question / choice and highlight it,
+  // else to the latest message. Runs once the list has loaded, after (and
+  // again shortly after) the session-switch scroll so that one cannot undo it.
+  const [focusNonce, setFocusNonce] = useState(0);
+  const focusTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const flashedRef = useRef<HTMLElement | null>(null);
+  useEffect(() => onSessionFocus(() => setFocusNonce((n) => n + 1)), []);
+  useEffect(() => () => {
+    for (const t of focusTimers.current) clearTimeout(t);
+    flashedRef.current?.classList.remove(FOCUS_CLASS);
+  }, []);
+  useEffect(() => {
+    if (!sessionId || loading || highlights.length === 0) return;
+    if (!hasSessionFocus(sessionId)) return;
+    if (!takeSessionFocus(sessionId)) return;
+    for (const t of focusTimers.current) clearTimeout(t);
+    flashedRef.current?.classList.remove(FOCUS_CLASS);
+    const focus = (flash: boolean) => {
+      const container = scrollContainerRef.current;
+      if (!container) return;
+      const el = findPromptElement(container);
+      if (el) {
+        el.scrollIntoView({ behavior: 'auto', block: 'center' });
+        if (flash) {
+          el.classList.remove(FOCUS_CLASS);
+          void el.offsetWidth; // restart the animation on a repeat request
+          el.classList.add(FOCUS_CLASS);
+          flashedRef.current = el;
+        }
+      } else {
+        container.scrollTop = container.scrollHeight;
+      }
+      const nearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 200;
+      isNearBottomRef.current = nearBottom;
+      setShowScrollButton(!nearBottom);
+    };
+    focusTimers.current = [
+      setTimeout(() => requestAnimationFrame(() => focus(true)), 120),
+      setTimeout(() => focus(false), 700),
+      setTimeout(() => flashedRef.current?.classList.remove(FOCUS_CLASS), 700 + FOCUS_HIGHLIGHT_MS),
+    ];
+  }, [sessionId, loading, highlights.length, focusNonce]);
 
   // Scroll to current search match
   useEffect(() => {

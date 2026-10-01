@@ -5066,6 +5066,21 @@ html {
    Question Block (multi-select)
    ======================================== */
 
+/* Herald "show me": the waiting question / choice it scrolled to. */
+.herald-focus-flash {
+  border-radius: 8px;
+  animation: heraldFocusFlash 2.6s ease-out;
+}
+
+@keyframes heraldFocusFlash {
+  0%, 35% { box-shadow: 0 0 0 2px #3b82f6, 0 0 18px rgba(59, 130, 246, 0.45); }
+  100% { box-shadow: 0 0 0 2px rgba(59, 130, 246, 0), 0 0 18px rgba(59, 130, 246, 0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .herald-focus-flash { animation: none; box-shadow: 0 0 0 2px #3b82f6; }
+}
+
 .question-block {
   margin-top: 8px;
   max-width: 80%;
