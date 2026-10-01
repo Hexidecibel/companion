@@ -243,7 +243,7 @@ cd desktop && cargo tauri ios build --export-method app-store-connect  # TestFli
 - **Updater:** `src-tauri/src/updater.rs` (startup + every 6h, background download, tray "Restart to update", install on quit). Feed: `https://dev.cush.rocks/updates/stable/latest.json`, served by the daemon from `~/.companion/updates` (`daemon/src/update-feed.ts`; `COMPANION_UPDATES_DIR` overrides). Linux updates only the AppImage; deb installs and dev builds never self-update.
 - **Publish:** `bin/companion publish-update --run <id|latest>` (CI `updater-*` artifacts) or `--from <dir>`; verifies every signature against `plugins.updater.pubkey` first.
 - **Keys:** `bin/desktop-signing` (`csr`, `import-devid <.cer>`, `updater-keygen`, `status`). Private material lives in `~/.companion/signing` + GH secrets + `inf://prod/companion/*`. Rotating the updater key strands installed apps.
-- **macOS:** with `APPLE_DEVID_CERT_P12_B64`/`APPLE_DEVID_CERT_PASSWORD` set, CI signs with Developer ID (hardened runtime), notarizes + staples the app and dmg, and logs `spctl`; otherwise ad-hoc.
+- **macOS:** with `APPLE_DEVID_CERT_P12_B64`/`APPLE_DEVID_CERT_PASSWORD` set, CI signs with Developer ID (hardened runtime; Tauri signs only), then `desktop/scripts/macos-notarize.sh` notarizes + staples the app (retried submit, polling in rounds that survive network blips and a slow Apple queue, up to 3 h), re-packs + re-signs the updater `.app.tar.gz`, rebuilds the dmg from the stapled app, notarizes + staples the dmg, and logs `codesign`/`spctl`; otherwise ad-hoc.
 
 ### APK Signing
 ```bash

@@ -458,10 +458,11 @@ jobs:
       - run: cd web && npm ci
       - run: cd desktop && npm ci
       # macOS signing: with the APPLE_DEVID_CERT_* secrets the app is signed with the
-      # Developer ID Application identity (hardened runtime) and notarized + stapled by
-      # the Tauri bundler via the App Store Connect API key; the dmg is then signed,
-      # notarized and stapled below. Without them it falls back to the ad-hoc "-"
-      # identity from tauri.conf.json (unsigned Apple Silicon apps show as "damaged").
+      # Developer ID Application identity (hardened runtime) by the Tauri bundler; the
+      # app and then the dmg are notarized + stapled below by scripts/macos-notarize.sh
+      # (not by Tauri: its notarytool --wait dies on one network blip during a slow
+      # Apple queue). Without them it falls back to the ad-hoc "-" identity from
+      # tauri.conf.json (unsigned Apple Silicon apps show as "damaged").
       - name: Import Developer ID certificate (macOS)
         if: matrix.os == 'macos-latest' && env.HAS_DEVID == 'true'
         env:
@@ -496,25 +497,50 @@ jobs:
           echo "$APPLE_API_KEY_B64" | base64 --decode > ~/private_keys/AuthKey_${APPLE_API_KEY_ID}.p8
           {
             echo "APPLE_SIGNING_IDENTITY=$IDENTITY"
-            # Tauri notarizes (notarytool, API key auth) and staples the .app when set.
+            # Notarization credentials for scripts/macos-notarize.sh (API key auth).
             echo "APPLE_API_KEY=$APPLE_API_KEY_ID"
             echo "APPLE_API_ISSUER=$APPLE_API_ISSUER"
             echo "APPLE_API_KEY_PATH=$HOME/private_keys/AuthKey_${APPLE_API_KEY_ID}.p8"
           } >> "$GITHUB_ENV"
       - name: Build desktop app
         shell: bash
-        run: cd desktop && npm run build
+        run: |
+          # Tauri signs (APPLE_SIGNING_IDENTITY) but must not notarize: without the API
+          # key variables it skips that, and the next step does it robustly.
+          unset APPLE_API_KEY APPLE_API_ISSUER APPLE_API_KEY_PATH
+          cd desktop && npm run build
+      - name: Notarize and staple app, rebuild updater bundle and dmg (macOS, Developer ID)
+        if: matrix.os == 'macos-latest' && env.HAS_DEVID == 'true'
+        timeout-minutes: 200
+        run: |
+          set -euo pipefail
+          B=desktop/src-tauri/target/release/bundle
+          APP=$(ls -d $B/macos/*.app | head -1)
+          bash desktop/scripts/macos-notarize.sh "$APP"
+          # The updater payload must carry the ticket: re-pack and re-sign it.
+          TGZ=$(ls $B/macos/*.app.tar.gz 2>/dev/null | head -1 || true)
+          if [ -n "$TGZ" ]; then
+            rm -f "$TGZ" "$TGZ.sig"
+            COPYFILE_DISABLE=1 tar -C "$B/macos" -czf "$TGZ" "$(basename "$APP")"
+            (cd desktop && npx tauri signer sign "$GITHUB_WORKSPACE/$TGZ")
+            test -s "$TGZ.sig"
+          fi
+          # The dmg was made from the app before it was stapled: make it again.
+          DMG=$(ls $B/dmg/*.dmg | head -1)
+          STAGE=$(mktemp -d)
+          ditto "$APP" "$STAGE/$(basename "$APP")"
+          ln -s /Applications "$STAGE/Applications"
+          rm -f "$DMG"
+          hdiutil create -volname "$(basename "$APP" .app)" -srcfolder "$STAGE" -ov -format UDZO "$DMG"
       - name: Notarize and staple dmg, verify (macOS, Developer ID)
         if: matrix.os == 'macos-latest' && env.HAS_DEVID == 'true'
+        timeout-minutes: 200
         run: |
           set -euo pipefail
           APP=$(ls -d desktop/src-tauri/target/release/bundle/macos/*.app | head -1)
           DMG=$(ls desktop/src-tauri/target/release/bundle/dmg/*.dmg | head -1)
           codesign --force --sign "$APPLE_SIGNING_IDENTITY" --timestamp "$DMG"
-          xcrun notarytool submit "$DMG" --key "$APPLE_API_KEY_PATH" --key-id "$APPLE_API_KEY" \
-            --issuer "$APPLE_API_ISSUER" --wait --timeout 30m 2>&1 | tee "$RUNNER_TEMP/notary-dmg.log"
-          grep -q 'status: Accepted' "$RUNNER_TEMP/notary-dmg.log" || { echo "::error::dmg notarization not accepted"; exit 1; }
-          xcrun stapler staple "$DMG"
+          bash desktop/scripts/macos-notarize.sh "$DMG"
           {
             echo "## macOS signing"
             echo '```'
