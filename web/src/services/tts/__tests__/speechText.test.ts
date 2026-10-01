@@ -82,7 +82,7 @@ describe('normalizeForSpeech', () => {
 
   it('shortens paths and cleans symbols', () => {
     expect(n('Edited /home/hexi/src/web/App.tsx today')).toBe('Edited App.tsx today');
-    expect(n('PR #42 -> merged')).toBe('PR number 42 to merged');
+    expect(n('PR #42 -> merged')).toBe('P-R number 42 to merged');
     expect(n('api & web, ~5 min')).toBe('api and web, about 5 min');
     expect(n('rename user_id first')).toBe('rename user id first');
     expect(n('All green ✅🎉')).toBe('All green');

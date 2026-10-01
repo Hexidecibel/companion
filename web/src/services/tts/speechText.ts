@@ -4,6 +4,8 @@
  * engine reads naturally. No DOM, no engine: fully unit-testable.
  */
 
+import { applyPronunciations } from './pronounce';
+
 // ---------------------------------------------------------------------------
 // Normaliser
 // ---------------------------------------------------------------------------
@@ -124,6 +126,8 @@ export function normalizeForSpeech(input: string): string {
   s = s.replace(/(\d)\s?x\b/g, '$1 times');
   // snake_case identifiers read better as words.
   s = s.replace(/\b([a-z][a-z0-9]*)(?:_([a-z0-9]+))+\b/gi, (m) => m.replace(/_/g, ' '));
+  // Pronunciation lexicon: versions, "Out4", acronyms, the user's own list.
+  s = applyPronunciations(s);
 
   // Emoji and pictographs.
   s = s.replace(/[\p{Extended_Pictographic}\u{FE0F}\u{200D}]/gu, '');

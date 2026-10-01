@@ -231,7 +231,7 @@ describe('HeraldSpeechController: spoken length, repeat, go on, stop', () => {
   it('short: speaks at most two sentences / 40 words, then a spoken tail; the rest waits', () => {
     reply('r1', LONG);
     expect(engine.spoken).toEqual([
-      'Out4 is blocked on your approval to run the refund migration.',
+      'Out four is blocked on your approval to run the refund migration.',
       'Doc Upload Site finished its deploy to prod ten minutes ago.',
       MORE_TAIL,
     ]);
@@ -247,7 +247,7 @@ describe('HeraldSpeechController: spoken length, repeat, go on, stop', () => {
 
   it('a reply within the cap is spoken whole with no tail', () => {
     reply('r1', 'Out4 is waiting on you. Everything else is running.');
-    expect(engine.spoken).toEqual(['Out4 is waiting on you.', 'Everything else is running.']);
+    expect(engine.spoken).toEqual(['Out four is waiting on you.', 'Everything else is running.']);
     expect(ctl.hasRemainder).toBe(false);
   });
 
