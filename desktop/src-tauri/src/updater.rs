@@ -7,6 +7,9 @@
 //!
 //! Quiet by design: no network, a 404 or a bad signature only log and surface
 //! as `error` in the status (shown in Settings, never as a prompt).
+//!
+//! `COMPANION_UPDATE_URL` replaces the feed URL (testing a channel or a staging
+//! feed); HTTPS and the pubkey in tauri.conf.json still apply.
 
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -21,6 +24,7 @@ use tauri_plugin_updater::{Update, UpdaterExt};
 pub const STATUS_EVENT: &str = "updater-status";
 pub const TRAY_INSTALL_ID: &str = "update-install";
 pub const TRAY_CHECK_ID: &str = "update-check";
+pub const MENU_CHECK_ID: &str = "app-update-check";
 
 const FIRST_CHECK_DELAY: Duration = Duration::from_secs(20);
 const CHECK_INTERVAL: Duration = Duration::from_secs(6 * 60 * 60);
@@ -29,6 +33,13 @@ const CHECK_INTERVAL: Duration = Duration::from_secs(6 * 60 * 60);
 const TICK: Duration = Duration::from_secs(10 * 60);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(300);
 const SETTINGS_FILE: &str = "updater.json";
+const FEED_OVERRIDE_ENV: &str = "COMPANION_UPDATE_URL";
+
+/// The app has no logger installed; updater events go to stderr (terminal,
+/// journald for autostarted Linux sessions, Console.app on macOS).
+macro_rules! ulog {
+    ($($arg:tt)*) => { eprintln!("[updater] {}", format!($($arg)*)) };
+}
 
 #[derive(Clone, Serialize, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -85,7 +96,10 @@ pub fn enabled() -> bool {
 }
 
 fn settings_path(app: &AppHandle) -> Option<std::path::PathBuf> {
-    app.path().app_config_dir().ok().map(|d| d.join(SETTINGS_FILE))
+    app.path()
+        .app_config_dir()
+        .ok()
+        .map(|d| d.join(SETTINGS_FILE))
 }
 
 fn load_auto_install(app: &AppHandle) -> bool {
@@ -210,8 +224,9 @@ fn refresh_tray(app: &AppHandle) {
             let _ = item.set_text(format!("Restart to update ({v})"));
         }
         (Some(v), None) => {
-            let item = MenuItemBuilder::with_id(TRAY_INSTALL_ID, format!("Restart to update ({v})"))
-                .build(app);
+            let item =
+                MenuItemBuilder::with_id(TRAY_INSTALL_ID, format!("Restart to update ({v})"))
+                    .build(app);
             let sep = PredefinedMenuItem::separator(app);
             if let (Ok(item), Ok(sep)) = (item, sep) {
                 if tray.menu.insert_items(&[&item, &sep], 0).is_ok() {
@@ -257,7 +272,7 @@ pub async fn check(app: &AppHandle, manual: bool) -> Option<UpdateStatus> {
             s.error = None;
         });
     }
-    let result = match app.updater_builder().timeout(REQUEST_TIMEOUT).build() {
+    let result = match build_updater(app) {
         Ok(updater) => updater.check().await,
         Err(e) => Err(e),
     };
@@ -278,6 +293,11 @@ pub async fn check(app: &AppHandle, manual: bool) -> Option<UpdateStatus> {
             }
             let version = update.version.clone();
             let notes = update.body.clone();
+            ulog!(
+                "{} available (running {}), downloading",
+                version,
+                update.current_version
+            );
             update_status(app, |s| {
                 s.state = "downloading".into();
                 s.version = Some(version.clone());
@@ -285,7 +305,7 @@ pub async fn check(app: &AppHandle, manual: bool) -> Option<UpdateStatus> {
             });
             match update.download(|_, _| {}, || {}).await {
                 Ok(bytes) => {
-                    log::info!("updater: {version} downloaded and verified");
+                    ulog!("{version} downloaded and verified");
                     *state.ready.lock().unwrap() = Some((update, bytes));
                     update_status(app, |s| {
                         s.state = "ready".into();
@@ -293,7 +313,7 @@ pub async fn check(app: &AppHandle, manual: bool) -> Option<UpdateStatus> {
                     });
                 }
                 Err(e) => {
-                    log::warn!("updater: download of {version} failed: {e}");
+                    ulog!("download of {version} failed: {e}");
                     update_status(app, |s| {
                         s.state = if had_ready { "ready" } else { "error" }.into();
                         s.error = Some(format!("Download failed: {e}"));
@@ -302,19 +322,22 @@ pub async fn check(app: &AppHandle, manual: bool) -> Option<UpdateStatus> {
                 }
             }
         }
-        Ok(None) => update_status(app, |s| {
-            if !had_ready {
-                s.state = "up-to-date".into();
-                s.version = None;
-                s.notes = None;
-            } else {
-                s.state = "ready".into();
-            }
-            s.error = None;
-            s.last_check = Some(now_ms());
-        }),
+        Ok(None) => {
+            ulog!("up to date");
+            update_status(app, |s| {
+                if !had_ready {
+                    s.state = "up-to-date".into();
+                    s.version = None;
+                    s.notes = None;
+                } else {
+                    s.state = "ready".into();
+                }
+                s.error = None;
+                s.last_check = Some(now_ms());
+            })
+        }
         Err(e) => {
-            log::info!("updater: check failed: {e}");
+            ulog!("check failed: {e}");
             update_status(app, |s| {
                 s.state = if had_ready { "ready" } else { "error" }.into();
                 s.error = Some(friendly_error(&e.to_string()));
@@ -323,6 +346,17 @@ pub async fn check(app: &AppHandle, manual: bool) -> Option<UpdateStatus> {
         }
     }
     snapshot(app)
+}
+
+fn build_updater(app: &AppHandle) -> tauri_plugin_updater::Result<tauri_plugin_updater::Updater> {
+    let mut builder = app.updater_builder().timeout(REQUEST_TIMEOUT);
+    if let Ok(url) = std::env::var(FEED_OVERRIDE_ENV) {
+        let url = tauri::Url::parse(&url).map_err(|e| {
+            tauri_plugin_updater::Error::Network(format!("{FEED_OVERRIDE_ENV}: {e}"))
+        })?;
+        builder = builder.endpoints(vec![url])?;
+    }
+    builder.build()
 }
 
 fn friendly_error(e: &str) -> String {
@@ -353,11 +387,11 @@ fn install_ready(app: &AppHandle, relaunch: bool) -> Result<bool, String> {
     let version = update.version.clone();
     match update.restart_after_install(relaunch).install(&bytes) {
         Ok(()) => {
-            log::info!("updater: installed {version}");
+            ulog!("installed {version}");
             Ok(true)
         }
         Err(e) => {
-            log::warn!("updater: install of {version} failed: {e}");
+            ulog!("install of {version} failed: {e}");
             update_status(app, |s| {
                 s.state = "error".into();
                 s.error = Some(format!("Install failed: {e}"));
@@ -377,7 +411,9 @@ pub fn install_and_restart(app: &AppHandle) -> Result<(), String> {
 
 /// RunEvent::ExitRequested: apply a ready update on the way out.
 pub fn on_exit(app: &AppHandle) {
-    let auto = snapshot(app).map(|s| s.auto_install_on_quit).unwrap_or(false);
+    let auto = snapshot(app)
+        .map(|s| s.auto_install_on_quit)
+        .unwrap_or(false);
     if auto {
         let _ = install_ready(app, false);
     }
@@ -406,7 +442,10 @@ pub fn updater_install(app: AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn updater_set_auto_install(app: AppHandle, enabled: bool) -> Result<Option<UpdateStatus>, String> {
+pub fn updater_set_auto_install(
+    app: AppHandle,
+    enabled: bool,
+) -> Result<Option<UpdateStatus>, String> {
     save_auto_install(&app, enabled)?;
     update_status(&app, |s| s.auto_install_on_quit = enabled);
     Ok(snapshot(&app))

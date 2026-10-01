@@ -43,6 +43,10 @@ pub fn setup_desktop(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Err
     // -- Custom menu bar --
     let app_menu = SubmenuBuilder::new(app, "Companion")
         .about(None)
+        .item(
+            &MenuItemBuilder::with_id(updater::MENU_CHECK_ID, "Check for Updates...")
+                .build(app)?,
+        )
         .separator()
         .services()
         .separator()
@@ -127,6 +131,7 @@ pub fn setup_desktop(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Err
             | "zoom-reset" | "fullscreen" => {
                 let _ = app_handle.emit("menu-event", id);
             }
+            updater::MENU_CHECK_ID => updater::spawn_check(&app_handle),
             _ => {}
         }
     });
@@ -220,7 +225,7 @@ pub fn setup_desktop(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Err
             }
             updater::TRAY_INSTALL_ID => {
                 if let Err(e) = updater::install_and_restart(app) {
-                    log::warn!("updater: {e}");
+                    eprintln!("[updater] {e}");
                 }
             }
             updater::TRAY_CHECK_ID => updater::spawn_check(app),
