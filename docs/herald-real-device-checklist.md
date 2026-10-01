@@ -271,3 +271,63 @@ MX Master trigger, Companion is the ACTIVE device.
 - [ ] Let the card expire (10 minutes): the phrase no longer works.
 - [ ] Teammates on Discord saying "confirm" do nothing (hands-free is off in
       Gaming; only your trigger opens the mic).
+
+## Show me (navigation)
+
+Needs the daemon restarted with this build (older hubs only do a plain "show me"
+on the same device, from the app's own copy of Herald's state). Have at least
+two sessions with recent news, ideally one parked on a question or choice.
+
+### Show me, on the device you are talking to
+- [ ] Herald mentions a session ("Out4 finished"). Say "show me": Out4's view
+      opens, scrolled to its latest message, and Herald says "Here's Out4."
+      No reply from the brain, no chat line.
+- [ ] A session is waiting on a question / choice: "show me" scrolls to that
+      prompt and it glows blue for a couple of seconds.
+- [ ] An echo or red card is pending: "show me" opens THAT card's session, even
+      if Herald's last line was about another one.
+- [ ] Each phrase works: "show me that", "show me it", "open it", "take me
+      there", "pull it up", "let me see". With a name: "show me Out4", "open Doc
+      Upload Site", "show me the deploy session".
+- [ ] Two sessions match ("show me docs" with Docs and Docs API): Herald asks
+      "Which one, Docs or Docs API?"; answer "the API one" (or "the second
+      one") in the follow-up window and it opens.
+- [ ] Negative: "show me how to deploy", "show me what Out4 did", "open a new
+      session in companion" are answered by Herald normally (no jump).
+      "Open the pod bay doors" goes to Herald too (no such session).
+- [ ] Nothing recent ("show me" right after "brief me" marked everything
+      heard, no cards): "Nothing to show right now."
+- [ ] Session chips in Herald's replies still open the session (they now map
+      the hub's own sessions to this server).
+
+### Per platform
+- [ ] Desktop app, window behind other windows / minimized: "show me" brings it
+      to the front and focuses it. Also in the Gaming profile, with
+      "Bring to front" turned off (an explicit request).
+- [ ] Gaming profile: success is just a tick, no spoken "Here's Out4."
+- [ ] Phone app (Herald full screen open): "show me" closes Herald and opens
+      the session screen; Back returns to the dashboard in one press.
+- [ ] Browser tab: navigates; the tab does not steal focus.
+
+### Cross-device
+- [ ] On the phone, say "show me on my computer": the PC (or Mac) opens it and
+      comes forward; the phone says "Out4 is up on <device>." The active
+      device does NOT change (the header bar still names the phone).
+- [ ] "Show me Out4 on the Mac" / "on my phone" / "on <renamed device>" work;
+      "show me here" opens on the device you spoke to even if another one is
+      active.
+- [ ] The named device is closed: "Your phone isn't connected."
+- [ ] Two computers connected and neither active: "Which device, Chrome on
+      Windows or Work Mac?"
+
+### Brain and triggers
+- [ ] "Can you pull up whatever Out4 is stuck on?": Out4 opens on the active
+      device and Herald says what is waiting ("Here's Out4, it's asking which
+      branch.").
+- [ ] Raycast "Show Herald's Last Session" (empty argument): opens the session
+      Herald last talked about on the Mac, which comes forward and says "Here's
+      Out4." (tick in Gaming). With "Out4" as the argument: Out4.
+- [ ] AutoHotkey `show_key` (and `show_session=Out4`): same on Windows, mid-game.
+- [ ] Signed mode on (`signed=true` / `HERALD_TRIGGER_SIGNED=true`) with a
+      session: works; an unknown session gives the tray tip / HUD "No session
+      has that name".
