@@ -134,9 +134,24 @@ pub fn setup_desktop(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Err
     // Herald actions only deliver input to the web layer (see herald.rs).
     let brief_item = MenuItemBuilder::with_id("herald-brief", "Brief me").build(app)?;
     let listen_item = MenuItemBuilder::with_id("herald-toggle", "Toggle listening").build(app)?;
+    let stop_item = MenuItemBuilder::with_id("herald-stop", "Stop speaking").build(app)?;
     let tones_item = CheckMenuItemBuilder::with_id("herald-mute-tones", "Mute tones")
         .checked(false)
         .build(app)?;
+    // Herald's own volume (the web layer owns the value; checks mirror it).
+    let mut volume_menu = SubmenuBuilder::new(app, "Herald volume")
+        .item(&MenuItemBuilder::with_id("herald-vol-up", "Louder").build(app)?)
+        .item(&MenuItemBuilder::with_id("herald-vol-down", "Quieter").build(app)?)
+        .separator();
+    let mut volume_items = Vec::new();
+    for pct in herald::TRAY_VOLUMES {
+        let item = CheckMenuItemBuilder::with_id(format!("herald-vol-{pct}"), format!("{pct}%"))
+            .checked(pct == 100)
+            .build(app)?;
+        volume_menu = volume_menu.item(&item);
+        volume_items.push((pct, item));
+    }
+    let volume_menu = volume_menu.build()?;
     let show_item = MenuItemBuilder::with_id("show", "Open Companion").build(app)?;
     let quit_item = MenuItemBuilder::with_id("quit-app", "Quit").build(app)?;
     let tray_menu = Menu::with_items(
@@ -144,6 +159,8 @@ pub fn setup_desktop(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Err
         &[
             &brief_item,
             &listen_item,
+            &stop_item,
+            &volume_menu,
             &tones_item,
             &PredefinedMenuItem::separator(app)?,
             &show_item,
@@ -151,7 +168,10 @@ pub fn setup_desktop(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Err
             &quit_item,
         ],
     )?;
-    app.manage(herald::TrayState(std::sync::Mutex::new(Some(tones_item))));
+    app.manage(herald::TrayState {
+        tones: std::sync::Mutex::new(Some(tones_item)),
+        volumes: std::sync::Mutex::new(volume_items),
+    });
     app.manage(herald::Registered::default());
     herald::setup_mic_permission(app);
 
@@ -177,6 +197,14 @@ pub fn setup_desktop(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Err
             "herald-brief" => herald::emit(app, "brief"),
             "herald-toggle" => herald::emit(app, "toggle"),
             "herald-mute-tones" => herald::emit(app, "mute_tones"),
+            "herald-stop" => herald::emit(app, "stop"),
+            "herald-vol-up" => herald::emit(app, "volume_up"),
+            "herald-vol-down" => herald::emit(app, "volume_down"),
+            id if herald::tray_volume_level(id).is_some() => {
+                if let Some(v) = herald::tray_volume_level(id) {
+                    herald::emit_value(app, "volume_set", v);
+                }
+            }
             "show" => {
                 if let Some(window) = app.get_webview_window("main") {
                     let _ = window.show();

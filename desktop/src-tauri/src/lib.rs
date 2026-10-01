@@ -4,6 +4,8 @@ mod desktop;
 mod herald;
 #[cfg(desktop)]
 mod overlay;
+#[cfg(desktop)]
+mod passthrough;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -70,6 +72,8 @@ pub fn run() {
             herald::herald_set_shortcuts,
             herald::herald_native_info,
             herald::herald_set_tray_state,
+            herald::herald_passthrough_status,
+            herald::herald_request_input_monitoring,
             overlay::herald_overlay_update,
             overlay::herald_overlay_ready,
             overlay::herald_overlay_regions,

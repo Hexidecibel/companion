@@ -5,8 +5,17 @@
 //! event `{ action }`. The web layer owns the behaviour (push-to-talk, the
 //! remote-trigger `toggle` / `brief` logic, tones), so nothing is duplicated.
 //!
-//! Actions: `talk_down`, `talk_up` (hold-to-talk), `toggle`, `brief`,
-//! `mute_tones`.
+//! Actions: `talk_down`, `talk_up` (hold-to-talk), `toggle`, `brief`, `stop`,
+//! `mute_tones`, and from the tray `volume_up`, `volume_down`, `volume_set`
+//! (with a `value`, 0..1.5).
+//!
+//! A shortcut is registered one of two ways. Exclusive (the global-shortcut
+//! plugin): the OS hands the chord to us and nobody else. Passthrough
+//! (`passthrough.rs`): observed with a low-level hook / listen-only tap, so
+//! another app bound to the same chord (Discord push-to-mute) still gets it.
+//! A passthrough chord is never also registered exclusively; if it cannot be
+//! observed (Linux, macOS without Input Monitoring) it falls back to
+//! exclusive and the result says why.
 //!
 //! TODO(plan.md "Voice Front Layer" Phase 2 / "Native desktop Herald"): Discord
 //! mic hiding and ducking other audio need native OS audio control (PipeWire,
@@ -24,19 +33,46 @@ pub const EVENT: &str = "herald-native";
 #[derive(Clone, Serialize)]
 struct NativeEvent {
     action: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    value: Option<f64>,
 }
 
 pub fn emit(app: &AppHandle, action: &'static str) {
-    let _ = app.emit(EVENT, NativeEvent { action });
+    let _ = app.emit(EVENT, NativeEvent { action, value: None });
+}
+
+pub fn emit_value(app: &AppHandle, action: &'static str, value: f64) {
+    let _ = app.emit(
+        EVENT,
+        NativeEvent {
+            action,
+            value: Some(value),
+        },
+    );
 }
 
 /// Shortcuts this module registered (so a reconfigure removes exactly those).
 #[derive(Default)]
 pub struct Registered(Mutex<Vec<Shortcut>>);
 
-/// The tray's "Mute tones" check item, kept in sync with the web preference.
-#[derive(Default)]
-pub struct TrayState(pub Mutex<Option<CheckMenuItem<Wry>>>);
+/// Tray items kept in sync with the web preferences: "Mute tones" and the
+/// volume levels (percent, item).
+pub struct TrayState {
+    pub tones: Mutex<Option<CheckMenuItem<Wry>>>,
+    pub volumes: Mutex<Vec<(u32, CheckMenuItem<Wry>)>>,
+}
+
+/// The tray's volume levels (percent).
+pub const TRAY_VOLUMES: [u32; 6] = [25, 50, 80, 100, 125, 150];
+
+#[derive(Deserialize, Default)]
+#[serde(rename_all = "camelCase", default)]
+pub struct PassthroughConfig {
+    pub talk: bool,
+    pub toggle: bool,
+    pub brief: bool,
+    pub stop: bool,
+}
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -47,6 +83,12 @@ pub struct ShortcutConfig {
     pub toggle: Option<String>,
     /// Tap: brief me.
     pub brief: Option<String>,
+    /// Tap: stop Herald speaking (on any device).
+    #[serde(default)]
+    pub stop: Option<String>,
+    /// Per shortcut: observe without taking the keys (other apps still get them).
+    #[serde(default)]
+    pub passthrough: PassthroughConfig,
 }
 
 #[derive(Serialize)]
@@ -56,6 +98,11 @@ pub struct ShortcutResult {
     pub accelerator: String,
     pub ok: bool,
     pub error: Option<String>,
+    /// "exclusive" (only Companion gets the keys) or "passthrough" (observed).
+    pub mode: &'static str,
+    /// Passthrough was asked for but is not possible: "unsupported" (Linux),
+    /// "needs_permission" (macOS Input Monitoring), "key_unsupported", "hook_failed...".
+    pub passthrough_error: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -64,6 +111,8 @@ pub struct NativeInfo {
     pub os: &'static str,
     /// Running under a Wayland session (system-wide shortcuts are limited).
     pub wayland: bool,
+    /// Passthrough shortcuts work on this OS (Windows, macOS).
+    pub passthrough: bool,
 }
 
 fn on_shortcut(app: &AppHandle, name: &'static str, state: ShortcutState) {
@@ -72,13 +121,27 @@ fn on_shortcut(app: &AppHandle, name: &'static str, state: ShortcutState) {
         ("talk", ShortcutState::Released) => emit(app, "talk_up"),
         ("toggle", ShortcutState::Pressed) => emit(app, "toggle"),
         ("brief", ShortcutState::Pressed) => emit(app, "brief"),
+        ("stop", ShortcutState::Pressed) => emit(app, "stop"),
         _ => {}
     }
 }
 
+/// A passthrough chord was pressed (true) or released (false).
+pub fn on_observed(app: &AppHandle, name: &'static str, pressed: bool) {
+    on_shortcut(
+        app,
+        name,
+        if pressed {
+            ShortcutState::Pressed
+        } else {
+            ShortcutState::Released
+        },
+    );
+}
+
 /// Replace the Herald shortcuts. Empty / missing entries are left unbound.
 /// Returns one result per requested shortcut so the UI can show conflicts
-/// (e.g. another app already owns the chord).
+/// (e.g. another app already owns the chord) and how each one is held.
 #[tauri::command]
 pub fn herald_set_shortcuts(app: AppHandle, config: ShortcutConfig) -> Vec<ShortcutResult> {
     let gs = app.global_shortcut();
@@ -87,18 +150,51 @@ pub fn herald_set_shortcuts(app: AppHandle, config: ShortcutConfig) -> Vec<Short
     for sc in registered.drain(..) {
         let _ = gs.unregister(sc);
     }
-    let mut out = Vec::new();
-    for (name, accel) in [
-        ("talk", config.talk),
-        ("toggle", config.toggle),
-        ("brief", config.brief),
-    ] {
-        let Some(accel) = accel
+    let pt = &config.passthrough;
+    let wanted: Vec<(&'static str, String, bool)> = [
+        ("talk", config.talk, pt.talk),
+        ("toggle", config.toggle, pt.toggle),
+        ("brief", config.brief, pt.brief),
+        ("stop", config.stop, pt.stop),
+    ]
+    .into_iter()
+    .filter_map(|(name, accel, pass)| {
+        accel
             .map(|a| a.trim().to_string())
             .filter(|a| !a.is_empty())
-        else {
-            continue;
-        };
+            .map(|a| (name, a, pass))
+    })
+    .collect();
+
+    // Observed chords first (an empty list stops the hook).
+    let observed = crate::passthrough::apply(
+        &app,
+        wanted
+            .iter()
+            .filter(|(_, _, pass)| *pass)
+            .map(|(n, a, _)| (*n, a.clone()))
+            .collect(),
+    );
+    let mut out = Vec::new();
+    for (name, accel, pass) in wanted {
+        let mut passthrough_error = None;
+        if pass {
+            match observed.iter().find(|(n, _)| *n == name).map(|(_, r)| r) {
+                Some(Ok(())) => {
+                    out.push(ShortcutResult {
+                        name,
+                        accelerator: accel,
+                        ok: true,
+                        error: None,
+                        mode: "passthrough",
+                        passthrough_error: None,
+                    });
+                    continue;
+                }
+                Some(Err(e)) => passthrough_error = Some(e.clone()),
+                None => passthrough_error = Some("unsupported".into()),
+            }
+        }
         let result = accel
             .parse::<Shortcut>()
             .map_err(|e| e.to_string())
@@ -115,6 +211,8 @@ pub fn herald_set_shortcuts(app: AppHandle, config: ShortcutConfig) -> Vec<Short
                     accelerator: accel,
                     ok: true,
                     error: None,
+                    mode: "exclusive",
+                    passthrough_error,
                 });
             }
             Err(e) => {
@@ -124,6 +222,8 @@ pub fn herald_set_shortcuts(app: AppHandle, config: ShortcutConfig) -> Vec<Short
                     accelerator: accel,
                     ok: false,
                     error: Some(e),
+                    mode: "exclusive",
+                    passthrough_error,
                 });
             }
         }
@@ -136,21 +236,47 @@ pub fn herald_native_info() -> NativeInfo {
     NativeInfo {
         os: std::env::consts::OS,
         wayland: is_wayland(),
+        passthrough: crate::passthrough::supported(),
     }
 }
 
-/// Mirror the web "tones" preference on the tray check item.
+/// Passthrough status: running, macOS permission, Windows elevation.
 #[tauri::command]
-pub fn herald_set_tray_state(app: AppHandle, tones_muted: bool) {
-    if let Some(item) = app
-        .state::<TrayState>()
-        .0
+pub fn herald_passthrough_status() -> crate::passthrough::Status {
+    crate::passthrough::status()
+}
+
+/// macOS: ask for Input Monitoring (system prompt once, then the settings pane).
+/// Returns true when already granted.
+#[tauri::command]
+pub fn herald_request_input_monitoring() -> bool {
+    crate::passthrough::request_permission()
+}
+
+/// Mirror the web "tones" preference and Herald's volume on the tray items.
+#[tauri::command]
+pub fn herald_set_tray_state(app: AppHandle, tones_muted: bool, volume: Option<f64>) {
+    let tray = app.state::<TrayState>();
+    if let Some(item) = tray
+        .tones
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .as_ref()
     {
         let _ = item.set_checked(tones_muted);
     }
+    if let Some(v) = volume {
+        let pct = (v * 100.0).round() as i64;
+        for (level, item) in tray.volumes.lock().unwrap_or_else(|e| e.into_inner()).iter() {
+            let _ = item.set_checked(i64::from(*level) == pct);
+        }
+    }
+}
+
+/// Tray menu ids for the volume levels: "herald-vol-80" -> 0.8.
+pub fn tray_volume_level(id: &str) -> Option<f64> {
+    let pct: u32 = id.strip_prefix("herald-vol-")?.parse().ok()?;
+    TRAY_VOLUMES.contains(&pct).then(|| f64::from(pct) / 100.0)
 }
 
 fn is_wayland() -> bool {
@@ -260,10 +386,34 @@ mod tests {
             "Ctrl+Alt+Space",
             "Ctrl+Alt+Shift+H",
             "Ctrl+Alt+Shift+B",
+            "Ctrl+Alt+Shift+S",
             "Super+Shift+KeyK",
         ] {
             assert!(a.parse::<Shortcut>().is_ok(), "{a}");
         }
+    }
+
+    #[test]
+    fn stop_chord_parses_and_tray_levels() {
+        assert!("Ctrl+Alt+Shift+KeyS".parse::<Shortcut>().is_ok());
+        assert_eq!(tray_volume_level("herald-vol-80"), Some(0.8));
+        assert_eq!(tray_volume_level("herald-vol-150"), Some(1.5));
+        assert_eq!(tray_volume_level("herald-vol-77"), None);
+        assert_eq!(tray_volume_level("herald-vol-up"), None);
+    }
+
+    #[test]
+    fn shortcut_config_defaults() {
+        let c: ShortcutConfig =
+            serde_json::from_str(r#"{"talk":"Ctrl+Alt+Space","toggle":null,"brief":null}"#).unwrap();
+        assert!(c.stop.is_none());
+        assert!(!c.passthrough.talk);
+        let c: ShortcutConfig = serde_json::from_str(
+            r#"{"talk":"Ctrl+Alt+Space","toggle":null,"brief":null,"stop":"Ctrl+Alt+Shift+KeyS","passthrough":{"talk":true}}"#,
+        )
+        .unwrap();
+        assert!(c.passthrough.talk && !c.passthrough.stop);
+        assert_eq!(c.stop.as_deref(), Some("Ctrl+Alt+Shift+KeyS"));
     }
 
     #[test]
