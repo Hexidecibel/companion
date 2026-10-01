@@ -21,6 +21,8 @@ function control(over: Partial<HeraldDeviceControl> = {}): HeraldDeviceControl {
     switchTo: vi.fn(),
     rename: vi.fn(),
     handoffNote: null,
+    takeControlNudge: false,
+    dismissNudge: vi.fn(),
     ...over,
   };
 }
@@ -35,6 +37,20 @@ describe('HeraldDeviceBar', () => {
     expect(d.takeControl).toHaveBeenCalled();
     fireEvent.click(screen.getByRole('switch', { name: /Keep on this device/ }));
     expect(d.setKeepPinned).toHaveBeenCalledWith(true);
+  });
+
+  it('"Use Herald here? Take control": one line, takes control or is dismissed, never switches by itself', () => {
+    const d = control({ takeControlNudge: true });
+    const { rerender } = render(<HeraldDeviceBar device={d} />);
+    expect(screen.getByRole('status').textContent).toContain('Use Herald here?');
+    expect(d.takeControl).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }));
+    expect(d.dismissNudge).toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Take control' }));
+    expect(d.takeControl).toHaveBeenCalledTimes(1);
+    // Already active here: no nudge.
+    rerender(<HeraldDeviceBar device={control({ takeControlNudge: true, isActive: true, activeDevice: { id: 'me', label: 'Chrome on Windows', pinned: false, reason: 'recent' } })} />);
+    expect(screen.queryByText('Use Herald here?')).toBeNull();
   });
 
   it('this device active: no Take control; the hand-off note replaces the line after losing it', () => {

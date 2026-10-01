@@ -21,6 +21,26 @@ function activeName(d: HeraldDeviceControl): string {
 export function HeraldDeviceBar({ device: d }: { device: HeraldDeviceControl }) {
   if (!showDeviceBar(d)) return null;
   const a = d.activeDevice;
+  if (d.takeControlNudge && !d.isActive) {
+    return (
+      <div className="herald-device herald-device--nudge" role="status" aria-live="polite">
+        <span className="herald-device__dot" aria-hidden="true" />
+        <span className="herald-device__text" title={a ? `Active now: ${a.label}` : undefined}>
+          Use Herald here?
+        </span>
+        <button
+          type="button"
+          className="herald-btn herald-btn--primary herald-btn--xs"
+          onClick={() => { d.dismissNudge(); d.takeControl(); }}
+        >
+          Take control
+        </button>
+        <button type="button" className="herald-device__dismiss" onClick={d.dismissNudge} aria-label="Dismiss" title="Not now">
+          {'\u00d7'}
+        </button>
+      </div>
+    );
+  }
   return (
     <div className={`herald-device${d.isActive ? ' herald-device--here' : ''}`} role="status" aria-live="polite">
       <span className="herald-device__dot" aria-hidden="true" />

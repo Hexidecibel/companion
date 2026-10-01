@@ -22,6 +22,7 @@ import { DeferredNotice, runHeraldTrigger, type TriggerActions } from '../servic
 import { useNativeHerald } from '../hooks/useNativeHerald';
 import { useHeraldSetup, type HeraldSetupControl } from '../hooks/useHeraldSetup';
 import { useHeraldOverlay } from '../hooks/useHeraldOverlay';
+import { markNudgeShown, nudgeShownThisSession, shouldNudgeTakeControl } from '../services/heraldTakeControlNudge';
 import { heraldSetupStore, overlayEnabled } from '../services/heraldSetup/setupStore';
 import { shouldBringToFront, type FrontSource } from '../services/heraldSetup/overlay';
 import { probeTrigger } from '../services/heraldSetup/triggerProbe';
@@ -98,6 +99,9 @@ export interface HeraldDeviceControl {
   rename: (label: string) => void;
   /** "Now on <other device>" for a few seconds after losing control. */
   handoffNote: string | null;
+  /** "Use Herald here? Take control": Herald was used here while another device is active. */
+  takeControlNudge: boolean;
+  dismissNudge: () => void;
 }
 
 export interface HeraldDataValue extends UseHeraldReturn {
@@ -258,8 +262,11 @@ export function HeraldProvider({ children }: { children: ReactNode }) {
     cues.turnSent();
   }, [followUp, cues]);
   const pendingIntent = useRef<{ text: string; intent?: HeraldIntent; at: number } | null>(null);
+  /** Herald used on this device (set below, once the device state exists). */
+  const noteLocalUseRef = useRef<() => void>(() => {});
   /** A voice turn outside the composer (commands, remote-trigger speech). Waits for a running turn. */
   const sendVoiceTurn = useCallback((text: string, intent?: HeraldIntent) => {
+    noteLocalUseRef.current();
     const h = heraldRef.current;
     if ((h.state?.busy ?? false) || h.sending) {
       pendingIntent.current = { text, intent, at: Date.now() };
@@ -466,6 +473,22 @@ export function HeraldProvider({ children }: { children: ReactNode }) {
     }
     if (next === selfId) setHandoffNote(null);
   }, [activeDevice?.id, activeDevice?.label, selfId]);
+
+  // "Use Herald here? Take control": once per session, never switches by itself.
+  const [takeControlNudge, setTakeControlNudge] = useState(false);
+  const nudgeInputRef = useRef({ supported: false, selfId: null as string | null, isActive: true });
+  nudgeInputRef.current = { supported: !!herald.state?.devices, selfId, isActive };
+  const noteLocalUse = useCallback(() => {
+    const n = nudgeInputRef.current;
+    if (!shouldNudgeTakeControl({ ...n, shownThisSession: nudgeShownThisSession() })) return;
+    markNudgeShown();
+    setTakeControlNudge(true);
+  }, []);
+  noteLocalUseRef.current = noteLocalUse;
+  const dismissNudge = useCallback(() => setTakeControlNudge(false), []);
+  useEffect(() => {
+    if (isActive) setTakeControlNudge(false);
+  }, [isActive]);
 
   const voiceInput = useHeraldVoiceInput({
     pausedBy: controlledElsewhere ? activeDevice?.label ?? 'another device' : null,
@@ -718,15 +741,18 @@ export function HeraldProvider({ children }: { children: ReactNode }) {
     switchTo,
     rename: voice.renameDevice,
     handoffNote,
-  }), [herald.state?.devices, selfId, voice.deviceLabel, activeDevice, devices, isActive, controlledElsewhere, keepPinned, setKeepPinned, takeControl, switchTo, voice.renameDevice, handoffNote]);
+    takeControlNudge,
+    dismissNudge,
+  }), [herald.state?.devices, selfId, voice.deviceLabel, activeDevice, devices, isActive, controlledElsewhere, keepPinned, setKeepPinned, takeControl, switchTo, voice.renameDevice, handoffNote, takeControlNudge, dismissNudge]);
 
   // Composer sends: an auto-sent transcript ('voice') is a voice turn; typing is not.
   const heraldSend = herald.send;
   const send = useCallback<UseHeraldReturn['send']>((text, opts) => {
     if (opts?.mode === 'voice') noteVoiceTurn();
     else followUp.cancel();
+    noteLocalUse();
     return heraldSend(text, opts);
-  }, [heraldSend, noteVoiceTurn, followUp]);
+  }, [heraldSend, noteVoiceTurn, followUp, noteLocalUse]);
   const data: HeraldDataValue = useMemo(() => ({
     ...herald,
     send,
