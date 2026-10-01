@@ -15,6 +15,7 @@ import type { HeraldVoice } from '../../hooks/useHeraldVoice';
 import { RATE_MAX, RATE_MIN } from '../../hooks/useHeraldVoice';
 import { pickVoice, voicesForPicker } from '../../services/tts/voices';
 import { HeraldOrb } from './HeraldOrb';
+import { HeraldVoiceExtras } from './HeraldVoiceExtras';
 import { HeraldActionCard, HeraldPendingMarker, HeraldResolvedLine } from './HeraldActionCard';
 import { HeraldComposer } from './HeraldComposer';
 import { IconBack, IconBell, IconBrief, IconClose, IconDown, IconMore, IconPlay, IconRefresh, IconSpeaker, IconSpeakerOff, IconStop, IconTrash, IconX } from './heraldIcons';
@@ -445,6 +446,8 @@ function OverflowMenu({ model, onReset, onRefresh, disabled, voice, input, verbo
               <div className="herald-menu__sep" role="separator" />
               <VoiceInputSettings input={input} />
               <div className="herald-menu__sep" role="separator" />
+              <HeraldVoiceExtras input={input} voice={voice} />
+              <div className="herald-menu__sep" role="separator" />
               <SetupAdvancedSettings />
               <div className="herald-menu__sep" role="separator" />
               <VoiceCommandsHelp />
@@ -557,7 +560,9 @@ export function HeraldPanel({ variant, onOpenSession, onClose }: HeraldPanelProp
   const { state, messages, connected, supported, loaded, skewMs, presence, displayName, available } = h;
   const speaking = voice.supported && voice.speaking;
   const listening = input.state.phase === 'starting' || input.state.phase === 'listening';
-  const orbState = listening ? 'listening' as const : speaking ? 'speaking' as const : presence;
+  // Follow-up window: listening a few seconds for more (no wake word, no key).
+  const followUp = input.followUpWindow;
+  const orbState = listening ? 'listening' as const : speaking ? 'speaking' as const : followUp ? 'followup' as const : presence;
 
   const enabled = state?.enabled ?? true;
   const busy = (state?.busy ?? false) || h.sending;
@@ -680,6 +685,7 @@ export function HeraldPanel({ variant, onOpenSession, onClose }: HeraldPanelProp
   else if (listening) statusText = 'Listening';
   else if (voice.flash) statusText = voice.flash;
   else if (speaking) statusText = 'Speaking';
+  else if (followUp) statusText = 'Listening for a follow-up';
   else if (busy) statusText = 'Thinking';
   else if (h.unheardBlocked > 0) statusText = `${h.unheardBlocked} waiting on you`;
   else statusText = 'Standing by';
@@ -720,11 +726,11 @@ export function HeraldPanel({ variant, onOpenSession, onClose }: HeraldPanelProp
           </button>
         )}
         <div className={`herald-header__orb${isEmpty && !showOffline ? ' herald-header__orb--hidden' : ''}`}>
-          <HeraldOrb presence={orbState} size={34} mini />
+          <HeraldOrb presence={orbState} size={34} mini countdown={followUp} />
         </div>
         <div className="herald-header__title">
           <span className="herald-header__name">{displayName}</span>
-          <span className={`herald-header__status herald-header__status--${listening ? 'listening' : voice.flash ? 'flash' : speaking ? 'speaking' : presence}`} aria-live="polite">
+          <span className={`herald-header__status herald-header__status--${listening ? 'listening' : voice.flash ? 'flash' : speaking ? 'speaking' : followUp ? 'followup' : presence}`} aria-live="polite">
             {statusText}
           </span>
         </div>
@@ -826,7 +832,7 @@ export function HeraldPanel({ variant, onOpenSession, onClose }: HeraldPanelProp
 
           {isEmpty && !showOffline && (
             <div className="herald-empty">
-              <HeraldOrb presence={orbState} size={132} />
+              <HeraldOrb presence={orbState} size={132} countdown={followUp} />
               <h2 className="herald-empty__title">Your sessions, at a glance.</h2>
               <p className="herald-empty__sub">
                 Ask what is happening, what is blocked, or tell a session what to do next.

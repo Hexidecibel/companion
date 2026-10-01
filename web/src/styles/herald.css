@@ -1727,6 +1727,39 @@
 }
 .herald-orb--listening .herald-orb__halo { animation: herald-listen-halo 1.2s ease-in-out infinite; }
 
+/* Follow-up window: still listening, quieter than a capture, with a countdown ring. */
+.herald-orb--followup {
+  --orb-a: #6d28d9;
+  --orb-b: #c4b5fd;
+  --orb-c: #67e8f9;
+  --orb-glow: rgba(167, 139, 250, 0.38);
+  --orb-spin: 9s;
+  --orb-breathe: 2.2s;
+}
+.herald-orb__ring--countdown {
+  color: #c4b5fd;
+  transform: rotate(-90deg);
+  animation: none;
+}
+.herald-orb__ring--countdown circle {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-dasharray: 100;
+  opacity: 0.8;
+  animation-name: herald-countdown;
+  animation-timing-function: linear;
+  animation-fill-mode: forwards;
+  animation-iteration-count: 1;
+}
+.herald-orb--mini .herald-orb__ring--countdown circle { stroke-width: 3; }
+@keyframes herald-countdown {
+  from { stroke-dashoffset: 0; }
+  to { stroke-dashoffset: 100; }
+}
+.herald-header__status--followup { color: #c4b5fd; }
+
 @keyframes herald-listen-halo {
   0%, 100% { transform: scale(1); opacity: 0.75; }
   50% { transform: scale(1.12); opacity: 1; }
@@ -1901,6 +1934,45 @@
   color: #d1d5db;
 }
 .herald-voice-set__rate-label { flex: none; }
+
+/* Pronunciations (Advanced) */
+.herald-pron__list { list-style: none; margin: 0; padding: 0 6px 4px; display: flex; flex-direction: column; gap: 2px; }
+.herald-pron__item { display: flex; align-items: center; gap: 4px; }
+.herald-pron__say {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 5px 6px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: #e5e7eb;
+  font: inherit;
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+}
+.herald-pron__say:hover:not(:disabled) { background: rgba(255, 255, 255, 0.05); }
+.herald-pron__say:disabled { cursor: default; }
+.herald-pron__from { font-family: var(--h-mono); font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 45%; }
+.herald-pron__arrow { flex: none; color: var(--h-text-2); }
+.herald-pron__to { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #d1d5db; }
+.herald-pron__add { display: flex; gap: 6px; padding: 2px 10px 6px; }
+.herald-pron__input {
+  flex: 1;
+  min-width: 0;
+  height: 28px;
+  padding: 0 8px;
+  border-radius: 8px;
+  border: 1px solid var(--h-border);
+  background: var(--h-bg);
+  color: #e5e7eb;
+  font: inherit;
+  font-size: 12px;
+}
+.herald-pron__input:focus { outline: none; border-color: #3b82f6; }
 .herald-voice-set__rate input { flex: 1; min-width: 0; accent-color: #2dd4bf; }
 .herald-voice-set__rate-val {
   flex: none;
@@ -1950,6 +2022,8 @@
   .herald-countdown__fill { transition: none !important; }
   .herald-orb__glint { display: none; }
   .herald-orb__voice { display: none; }
+  /* The follow-up countdown is information: a steady full ring instead. */
+  .herald-orb__ring--countdown circle { animation: none !important; stroke-dashoffset: 0; }
   /* Speaking stays legible without motion: a steady brighter core. */
   .herald-orb--speaking .herald-orb__core { transform: scale(1.06); }
   .herald-speaking__bars span { transform: scaleY(0.7); }

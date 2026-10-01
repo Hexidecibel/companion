@@ -8,7 +8,7 @@ import { HybridTtsEngine } from '../services/tts/hybridTtsEngine';
 import { NEURAL_PREFIX, TtsRequestError, WebAudioSink, decodePcm16, type TtsRequester } from '../services/tts/serverTtsEngine';
 import { ECHO_PROBE_LINE, setBrowserVoice, setEchoProbeSource } from '../services/voice/audioEnvironment';
 import { BRIEFING_SPOKEN_LIMIT, HeraldSpeechController, InboxChimeTracker, type SpokenLength } from '../services/tts/heraldSpeech';
-import { chimeSupported, playChime, unlockChime } from '../services/tts/chime';
+import { TICK_VOLUME, chimeSupported, playChime, unlockChime } from '../services/tts/chime';
 import { pickVoice } from '../services/tts/voices';
 import { deviceKey, deviceLabel, saveCustomLabel } from '../services/heraldDevice';
 import { SpokenLog, recordingEngine } from '../services/voice/echoGuard';
@@ -29,9 +29,15 @@ interface VoicePrefs {
   spokenLength: SpokenLength;
   /** Replay the tone for a blocked item nobody has heard after 5 minutes (twice at most). */
   remind: boolean;
+  /** A tiny tick the moment a voice turn ends ("heard you"). */
+  ackTick: boolean;
+  /** A very soft looping tone while Herald thinks (after 1.5 s with no audio). */
+  thinkingTone: boolean;
 }
 
-const DEFAULT_PREFS: VoicePrefs = { voiceOn: true, chimeOn: true, voiceId: null, rate: RATE_DEFAULT, spokenLength: 'short', remind: true };
+const DEFAULT_PREFS: VoicePrefs = {
+  voiceOn: true, chimeOn: true, voiceId: null, rate: RATE_DEFAULT, spokenLength: 'short', remind: true, ackTick: true, thinkingTone: false,
+};
 
 /** Next rate for "slower" / "faster", clamped; null when already at the limit. */
 export function stepRate(rate: number, dir: 1 | -1): number | null {
@@ -53,6 +59,8 @@ function loadPrefs(): VoicePrefs {
         : DEFAULT_PREFS.rate,
       spokenLength: p.spokenLength === 'full' ? 'full' : 'short',
       remind: typeof p.remind === 'boolean' ? p.remind : DEFAULT_PREFS.remind,
+      ackTick: typeof p.ackTick === 'boolean' ? p.ackTick : DEFAULT_PREFS.ackTick,
+      thinkingTone: typeof p.thinkingTone === 'boolean' ? p.thinkingTone : DEFAULT_PREFS.thinkingTone,
     };
   } catch {
     return DEFAULT_PREFS;
@@ -70,6 +78,7 @@ function savePrefs(p: VoicePrefs): void {
 function pageVisible(): boolean {
   return typeof document === 'undefined' || document.visibilityState === 'visible';
 }
+
 
 const TTS_REQUEST_TIMEOUT = 25000;
 /** Report "the user is here" at most this often. */
@@ -144,6 +153,14 @@ export interface HeraldVoice {
   setSpokenLength: (v: SpokenLength) => void;
   remind: boolean;
   setRemind: (on: boolean) => void;
+  /** Tick when a voice turn ends (on by default). */
+  ackTick: boolean;
+  setAckTick: (on: boolean) => void;
+  /** Soft thinking loop while waiting for the first audio (off by default). */
+  thinkingTone: boolean;
+  setThinkingTone: (on: boolean) => void;
+  /** Replies may play in a hidden tab right now (a remote trigger asked recently). */
+  backgroundAllowed: () => boolean;
   /** Transient feedback for a voice command ("Stopped", "Slower"), or null. */
   flash: string | null;
   /** This device plays the inbox tones (one device at a time; true on older hubs). */
@@ -463,6 +480,12 @@ export function useHeraldVoice(
   }, [controller, showFlash]);
   const setSpokenLength = useCallback((v: SpokenLength) => setPrefs((p) => ({ ...p, spokenLength: v })), []);
   const setRemind = useCallback((on: boolean) => setPrefs((p) => ({ ...p, remind: on })), []);
+  const setAckTick = useCallback((on: boolean) => {
+    setPrefs((p) => ({ ...p, ackTick: on }));
+    if (on) playChime('tick', TICK_VOLUME);
+  }, []);
+  const setThinkingTone = useCallback((on: boolean) => setPrefs((p) => ({ ...p, thinkingTone: on })), []);
+  const backgroundAllowed = useCallback(() => Date.now() < backgroundUntil.current, []);
 
   const setVoiceOn = useCallback((on: boolean) => {
     setPrefs((p) => ({ ...p, voiceOn: on }));
@@ -510,6 +533,11 @@ export function useHeraldVoice(
     setSpokenLength,
     remind: prefs.remind,
     setRemind,
+    ackTick: prefs.ackTick,
+    setAckTick,
+    thinkingTone: prefs.thinkingTone,
+    setThinkingTone,
+    backgroundAllowed,
     flash,
     announcer,
     testVoice,
@@ -522,5 +550,5 @@ export function useHeraldVoice(
     renameDevice,
     claimDevice,
     spokenLog,
-  }), [spokenLog, engine, hybrid, prefs, speaking, voices, voice, setVoiceOn, setChimeOn, setVoiceId, setRate, stop, stopCommand, repeat, goOn, stepRateCb, expectBriefing, say, setSpokenLength, setRemind, flash, announcer, testVoice, serverStatus, refreshStatus, allowBackground, selfId, label, renameDevice, claimDevice]);
+  }), [spokenLog, engine, hybrid, prefs, speaking, voices, voice, setVoiceOn, setChimeOn, setVoiceId, setRate, stop, stopCommand, repeat, goOn, stepRateCb, expectBriefing, say, setSpokenLength, setRemind, setAckTick, setThinkingTone, backgroundAllowed, flash, announcer, testVoice, serverStatus, refreshStatus, allowBackground, selfId, label, renameDevice, claimDevice]);
 }

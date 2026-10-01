@@ -14,7 +14,8 @@ import { VoiceUplink, VoiceUplinkError } from './voiceUplink';
 export type VoiceInputPhase = 'idle' | 'starting' | 'listening' | 'transcribing';
 /** `trigger`: a remote trigger (hotkey on another machine) opened the mic; ends on VAD. */
 /** 'global': the desktop app's system-wide hold-to-talk shortcut (sent like a trigger, never via the composer). */
-export type VoiceInputSource = 'button' | 'space' | 'chord' | 'interrupt' | 'wake' | 'trigger' | 'global';
+/** 'followup': said in the follow-up window right after Herald answered a voice turn (no wake word, no key). */
+export type VoiceInputSource = 'button' | 'space' | 'chord' | 'interrupt' | 'wake' | 'trigger' | 'global' | 'followup';
 
 export interface VoiceInputState {
   phase: VoiceInputPhase;

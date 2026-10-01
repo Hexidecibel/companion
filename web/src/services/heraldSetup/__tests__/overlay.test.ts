@@ -109,6 +109,31 @@ describe('OverlayPresenter (overlay state sync)', () => {
   });
 });
 
+describe('follow-up window on the floating orb', () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  it('shows "follow-up" with its countdown while the window is open, below every activity', () => {
+    const fu = { until: 10_000, ms: 6000 };
+    expect(activeView({ ...idle, followUp: fu }, 5000)).toEqual({ orb: 'followup', caption: expect.any(String), countdown: fu });
+    expect(activeView({ ...idle, followUp: fu, speaking: true }, 5000)?.orb).toBe('speaking');
+    expect(activeView({ ...idle, followUp: fu, listening: true }, 5000)?.orb).toBe('listening');
+    expect(activeView({ ...idle, followUp: fu }, 10_000)).toBeNull(); // expired
+  });
+
+  it('a window that closes in silence hides at once (no lingering "listening")', () => {
+    const views: OverlayView[] = [];
+    const p = new OverlayPresenter((v) => views.push(v), { now: () => 5000 });
+    p.update({ ...idle, followUp: { until: 10_000, ms: 6000 } });
+    expect(views[views.length - 1]).toMatchObject({ phase: 'active', orb: 'followup' });
+    p.update({ ...idle, followUp: null });
+    vi.advanceTimersByTime(1);
+    expect(views[views.length - 1].phase).toBe('fading');
+    vi.advanceTimersByTime(OVERLAY_FADE_MS);
+    expect(views[views.length - 1].phase).toBe('hidden');
+  });
+});
+
 describe('shouldBringToFront', () => {
   it('only when enabled, only in the desktop app, never in Gaming', () => {
     const base = { enabled: true, profile: 'headphones' as const, platform: 'desktop' as const };

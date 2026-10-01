@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useReducer, useRef, useMemo } from 'react';
-import type { HeraldAction, HeraldEvent, HeraldInputMode, HeraldIntent, HeraldMessage, HeraldState, HeraldVerbosity } from '../types/herald';
+import type { HeraldAction, HeraldEvent, HeraldInputMode, HeraldIntent, HeraldMessage, HeraldPronunciation, HeraldState, HeraldVerbosity } from '../types/herald';
 import {
   heraldReducer,
   initialHeraldClientState,
@@ -45,7 +45,11 @@ export interface UseHeraldReturn {
   send: (text: string, opts?: SendOptions) => Promise<boolean>;
   /** Reply length setting on the hub (no-op on daemons without it). */
   setVerbosity: (v: HeraldVerbosity) => Promise<boolean>;
+  /** Replace the voice's pronunciation list on the hub. Resolves an error, or null. */
+  setPronunciations: (list: HeraldPronunciation[]) => Promise<string | null>;
   confirm: (actionId: string, decision: 'confirm' | 'cancel') => Promise<HeraldAction | null>;
+  /** Confirm a red card by its spoken phrase; the hub verifies it. `error` is sayable. */
+  confirmByVoice: (actionId: string, phrase: string, streamId?: string) => Promise<{ action: HeraldAction | null; error: string | null }>;
   markHeard: (itemIds: string[]) => void;
   reset: () => Promise<boolean>;
   refresh: () => void;
@@ -213,6 +217,24 @@ export function useHerald(serverId: string | null): UseHeraldReturn {
     }
   }, [fetchState]);
 
+  const confirmByVoice = useCallback(async (actionId: string, phrase: string, streamId?: string): Promise<{ action: HeraldAction | null; error: string | null }> => {
+    const t = transportRef.current;
+    if (!t || !t.isConnected()) return { action: null, error: 'Not connected to the Herald host' };
+    try {
+      const res = await t.request('herald_confirm', { actionId, decision: 'confirm', method: 'voice', phrase, ...(streamId ? { streamId } : {}) });
+      if (res.success && res.payload) {
+        const action = res.payload as HeraldAction;
+        dispatch({ type: 'action_result', action });
+        return { action, error: null };
+      }
+      // Attempts left changed on the hub: resync the card.
+      void fetchState();
+      return { action: null, error: res.error || 'Could not confirm that by voice' };
+    } catch (err) {
+      return { action: null, error: errorText(err, 'Could not confirm that by voice') };
+    }
+  }, [fetchState]);
+
   const markHeard = useCallback((itemIds: string[]) => {
     if (itemIds.length === 0) return;
     dispatch({ type: 'mark_heard_local', ids: itemIds });
@@ -261,6 +283,22 @@ export function useHerald(serverId: string | null): UseHeraldReturn {
     }
   }, [fetchState]);
 
+  const setPronunciations = useCallback(async (list: HeraldPronunciation[]): Promise<string | null> => {
+    const t = transportRef.current;
+    if (!t || !t.isConnected()) return 'Not connected to the Herald host';
+    try {
+      const res = await t.request('herald_set_pronunciations', { pronunciations: list });
+      if (!res.success) {
+        return isUnsupportedError(res.error) ? 'This hub is too old to save pronunciations' : res.error || 'Could not save';
+      }
+      const saved = (res.payload as { pronunciations?: HeraldPronunciation[] } | undefined)?.pronunciations ?? list;
+      dispatch({ type: 'event', event: { kind: 'pronunciations', pronunciations: saved }, receivedAt: Date.now() });
+      return null;
+    } catch (err) {
+      return errorText(err, 'Could not save');
+    }
+  }, []);
+
   const getTransport = useCallback(() => transportRef.current, []);
   const clearError = useCallback(() => dispatch({ type: 'clear_error' }), []);
   const refresh = useCallback(() => { void fetchState(); }, [fetchState]);
@@ -277,7 +315,9 @@ export function useHerald(serverId: string | null): UseHeraldReturn {
     skewMs: client.skewMs,
     send,
     setVerbosity,
+    setPronunciations,
     confirm,
+    confirmByVoice,
     markHeard,
     reset,
     refresh,

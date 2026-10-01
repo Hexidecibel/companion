@@ -105,6 +105,7 @@ export function useHeraldSetup(host: SetupHost): HeraldSetupControl {
         spaceToTalk: input.prefs.spaceToTalk,
         handsFree: input.prefs.handsFree,
         builtInMicWithBluetooth: input.prefs.builtInMicWithBluetooth,
+        followUp: input.prefs.followUp,
         globalShortcuts: native.globalShortcuts,
         earbudButton: native.earbudButton,
         duckOthers: native.duckOthers,

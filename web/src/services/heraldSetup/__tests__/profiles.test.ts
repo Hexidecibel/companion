@@ -142,6 +142,27 @@ describe('applyProfileSettings', () => {
   });
 });
 
+describe('follow-up window per profile', () => {
+  it('on for Headphones and Phone + earbuds, off for Gaming and Desk speakers', () => {
+    expect(profileSettings('headphones', { echo: null }).input.followUp).toBe(true);
+    expect(profileSettings('phone', { echo: null }).input.followUp).toBe(true);
+    expect(profileSettings('gaming', { echo: null }).input.followUp).toBe(false);
+    expect(profileSettings('desk', { echo: { erleDb: 30, residualSpeechDetected: false } }).input.followUp).toBe(false);
+  });
+
+  it('applying a profile makes the choice explicit (automatic -> on/off), and leaves a matching value alone', () => {
+    const auto = targets({ followUp: null });
+    applyProfileSettings(profileSettings('gaming', { echo: null }), auto);
+    expect(auto.input.setPref).toHaveBeenCalledWith('followUp', false);
+    const on = targets({ followUp: true });
+    applyProfileSettings(profileSettings('headphones', { echo: null }), on);
+    expect(on.input.setPref).not.toHaveBeenCalledWith('followUp', expect.anything());
+    const was = targets({ followUp: true });
+    applyProfileSettings(profileSettings('desk', { echo: null }), was);
+    expect(was.input.setPref).toHaveBeenCalledWith('followUp', false);
+  });
+});
+
 describe('availableProfiles', () => {
   it('phones and tablets get Phone; computers get Gaming', () => {
     expect(availableProfiles('android')).toEqual(['phone', 'headphones', 'desk']);

@@ -38,6 +38,14 @@
  * next utterance is captured whole and transcribed when the speaker pauses.
  * Nothing heard within LISTEN_WAIT_MS gives up quietly.
  *
+ * Follow-up window (`followUp`): right after Herald finishes speaking a reply
+ * to a voice turn, the next utterance within a few seconds is a follow-up: no
+ * wake word, no key. Like a trigger listen, minus the "go ahead" tone, and
+ * silence closes it quietly. The VAD listens to the CLEANED mic (Herald has
+ * stopped, so the canceller only has the room tail to remove), speech that
+ * starts inside the echo tail is not taken, Herald speaking again closes it,
+ * and the transcript still goes through the self-echo filter downstream.
+ *
  * Interrupt never opens the mic on its own (permission must already be
  * granted); hands-free is turned on by the user, which may prompt.
  *
@@ -100,7 +108,17 @@ export interface AutomationDeps {
   onBargeInLatency?: (ms: number, mode: 'vad' | 'gated') => void;
   /** The mic before echo cancellation (16 kHz), when the graph cancels in-app. */
   raw?: () => RawAudio | null;
+  /** The follow-up window opened (`until`: epoch ms it closes, `ms`: its length) or closed (null). */
+  onFollowUp?: (w: FollowUpWindow | null) => void;
 }
+
+export interface FollowUpWindow {
+  until: number;
+  ms: number;
+}
+
+/** Default follow-up window after a spoken reply to a voice turn. */
+export const FOLLOW_UP_MS = 6000;
 
 /** Keep listening this long after Herald stops, for an immediate reply. */
 export const INTERRUPT_GRACE_MS = 1500;
@@ -180,7 +198,7 @@ function concatFrames(frames: Float32Array[]): Float32Array {
   return out;
 }
 
-type Capture = 'interrupt' | 'wake' | 'command' | 'listen';
+type Capture = 'interrupt' | 'wake' | 'command' | 'listen' | 'followup';
 
 interface WakeStream {
   uplink: VoiceUplink;
@@ -212,6 +230,12 @@ export class VoiceAutomation implements VadEvents {
   private listenTimer: ReturnType<typeof setTimeout> | null = null;
   private lastStartError: string | null = null;
   private tailUntil = 0;
+  /** Follow-up window: waiting for speech until this time (0: closed). */
+  private followUntil = 0;
+  private followMs = 0;
+  /** When the current window closes, kept while a follow-up is being captured. */
+  private followDeadline = 0;
+  private followTimer: ReturnType<typeof setTimeout> | null = null;
   private gate: InterruptGate | null = null;
   protected readonly now: () => number;
 
@@ -222,6 +246,8 @@ export class VoiceAutomation implements VadEvents {
   update(next: AutomationConfig): void {
     const prev = this.cfg;
     this.cfg = { ...next, handsFree: !!next.handsFree, bargeIn: next.bargeIn ?? 'gated' };
+    // Herald talks again (a new reply, a confirmation): the window is over.
+    if (next.speaking && this.followUpWaiting) this.closeFollowUp();
     if (prev.speaking && !next.speaking) {
       this.tailUntil = this.now() + ECHO_TAIL_MS;
       this.graceUntil = this.now() + INTERRUPT_GRACE_MS;
@@ -253,7 +279,7 @@ export class VoiceAutomation implements VadEvents {
   }
 
   protected wantVad(): boolean {
-    return this.interruptArmed || this.handsFreeActive || this.listenWaiting || this.capturing !== null;
+    return this.interruptArmed || this.handsFreeActive || this.listenWaiting || this.followUpWaiting || this.capturing !== null;
   }
 
   protected reconcile(): void {
@@ -269,9 +295,12 @@ export class VoiceAutomation implements VadEvents {
           this.wantRunning = false;
           const message = (err as Error)?.message || String(err);
           this.lastStartError = message;
+          // A follow-up window that cannot open just closes, quietly.
+          const onlyFollowUp = this.followUpWaiting && !this.listenWaiting && !this.interruptArmed && !this.handsFreeActive;
+          if (this.followUpWaiting) this.closeFollowUp();
           // A trigger listen reports its own failure (tone + notice); the
           // interrupt / hands-free path turns hands-free off via onError.
-          if (!this.listenWaiting) this.deps.onError?.(`Voice detection unavailable: ${message}`);
+          if (!this.listenWaiting && !onlyFollowUp) this.deps.onError?.(`Voice detection unavailable: ${message}`);
         })
         .finally(() => {
           this.starting = null;
@@ -303,6 +332,9 @@ export class VoiceAutomation implements VadEvents {
   async listen(): Promise<boolean> {
     if (this.disposed) return false;
     if (this.listenActive) return true;
+    // A trigger during a follow-up window: the trigger's capture takes over.
+    if (this.followUpWaiting) this.closeFollowUp();
+    if (this.capturing === 'followup') return true; // already capturing the follow-up
     if (this.capturing === 'interrupt' || this.capturing === 'command') return true; // already capturing speech
     if (this.capturing === 'wake' && !this.wake?.woke) {
       // Someone is mid-utterance and hands-free was checking it for the wake
@@ -356,6 +388,76 @@ export class VoiceAutomation implements VadEvents {
     this.listenWaiting = false;
   }
 
+  // ---- follow-up window -------------------------------------------------------
+
+  /** Waiting for a follow-up (speech not started yet). */
+  get followUpWaiting(): boolean {
+    return this.followUntil > 0;
+  }
+
+  /**
+   * Open the follow-up window for `ms`: the next utterance that starts in it is
+   * captured whole (source `followup`) and transcribed when the speaker pauses.
+   * False when it cannot open now (something else is capturing, Herald is
+   * talking, voice input unavailable).
+   */
+  followUp(ms: number = FOLLOW_UP_MS): boolean {
+    if (this.disposed || ms <= 0) return false;
+    if (!this.cfg.available || this.cfg.speaking) return false;
+    if (this.capturing || this.listenWaiting || this.awaitingCommand) return false;
+    if (this.deps.input.state.phase !== 'idle') return false;
+    this.armFollowUp(this.now() + ms, ms);
+    this.reconcile();
+    return true;
+  }
+
+  /** Close the window without capturing (push-to-talk took over, user dismissed). */
+  cancelFollowUp(): void {
+    if (this.followUpWaiting) this.closeFollowUp();
+  }
+
+  private armFollowUp(until: number, ms: number): void {
+    if (this.followTimer) clearTimeout(this.followTimer);
+    this.followUntil = until;
+    this.followDeadline = until;
+    this.followMs = ms;
+    this.followTimer = setTimeout(() => {
+      this.followTimer = null;
+      // Silence: close quietly (no tone, no message).
+      if (this.followUpWaiting) this.closeFollowUp();
+    }, Math.max(0, until - this.now()));
+    this.deps.onFollowUp?.({ until, ms });
+  }
+
+  private closeFollowUp(): void {
+    if (this.followTimer) clearTimeout(this.followTimer);
+    this.followTimer = null;
+    const was = this.followUpWaiting;
+    this.followUntil = 0;
+    if (was) this.deps.onFollowUp?.(null);
+    this.reconcile();
+  }
+
+  /** The follow-up window takes this utterance (true) or leaves it to the other layers. */
+  private takeFollowUp(): boolean {
+    if (!this.followUpWaiting || this.capturing) return false;
+    if (this.deps.input.state.phase !== 'idle') {
+      // Push-to-talk (or another capture) owns the mic now.
+      this.closeFollowUp();
+      return false;
+    }
+    // Herald's last word still ringing in the room: not the user.
+    if (this.now() < this.tailUntil) return false;
+    if (this.followTimer) clearTimeout(this.followTimer);
+    this.followTimer = null;
+    if (!this.deps.input.beginExternal('followup')) return false;
+    // The deadline stays in `followDeadline`: a cough (misfire) re-opens what is left.
+    this.followUntil = 0;
+    this.deps.onFollowUp?.(null);
+    this.capturing = 'followup';
+    return true;
+  }
+
   // ---- VAD events -----------------------------------------------------------
 
   onSpeechStart(): void {
@@ -367,6 +469,8 @@ export class VoiceAutomation implements VadEvents {
       this.capturing = 'listen';
       return;
     }
+    // Follow-up window: this utterance is for Herald, no wake word needed.
+    if (this.takeFollowUp()) return;
     // Interrupt waits for onSpeechRealStart (a single loud frame must not cut
     // Herald off). Hands-free starts streaming at once so the wake word's
     // first syllable is not lost; misfires are simply discarded.
@@ -551,6 +655,10 @@ export class VoiceAutomation implements VadEvents {
       this.startAwait(); // still waiting for the actual command
     } else if (cap === 'listen') {
       this.armListenWait(); // a cough is not the question: keep waiting
+    } else if (cap === 'followup') {
+      this.deps.input.endExternal();
+      // A cough is not the follow-up: re-open what is left of the window.
+      if (this.followDeadline - this.now() > 300) this.armFollowUp(this.followDeadline, this.followMs);
     }
     this.reconcile();
   }
@@ -560,6 +668,9 @@ export class VoiceAutomation implements VadEvents {
     this.capturing = null;
     if (cap === 'listen') {
       void this.deps.input.transcribeUtterance(float32ToInt16Frames(audio), 'trigger');
+    } else if (cap === 'followup') {
+      this.followDeadline = 0;
+      void this.deps.input.transcribeUtterance(float32ToInt16Frames(audio), 'followup');
     } else if (cap === 'interrupt') {
       const g = this.gate;
       this.gate = null;
@@ -606,7 +717,7 @@ export class VoiceAutomation implements VadEvents {
       this.preroll.push(frame);
       if (this.preroll.length > PREROLL_FRAMES) this.preroll.shift();
     }
-    if ((this.capturing === 'interrupt' && g?.confirmed) || this.capturing === 'command' || this.capturing === 'listen' || (this.capturing === 'wake' && w?.woke)) {
+    if ((this.capturing === 'interrupt' && g?.confirmed) || this.capturing === 'command' || this.capturing === 'listen' || this.capturing === 'followup' || (this.capturing === 'wake' && w?.woke)) {
       this.deps.input.setLevel(meterLevel(rms16(floatToInt16(frame))));
     }
   }
@@ -631,6 +742,8 @@ export class VoiceAutomation implements VadEvents {
   dispose(): void {
     this.disposed = true;
     if (this.graceTimer) clearTimeout(this.graceTimer);
+    if (this.followTimer) clearTimeout(this.followTimer);
+    this.followUntil = 0;
     this.clearListenWait();
     this.clearAwait();
     this.dropWakeStream();

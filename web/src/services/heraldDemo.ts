@@ -196,6 +196,12 @@ function createDemoTransport(): HeraldTransport {
           emit({ kind: 'inbox', inbox: state.inbox });
           return ok(type, {});
         }
+        case 'herald_set_pronunciations': {
+          const list = Array.isArray(p.pronunciations) ? (p.pronunciations as HeraldState['pronunciations']) ?? [] : [];
+          state = { ...state, pronunciations: list };
+          emit({ kind: 'pronunciations', pronunciations: list });
+          return ok(type, { pronunciations: list });
+        }
         case 'herald_reset':
           state = { ...state, messages: [], actions: [], busy: false };
           return ok(type, state);

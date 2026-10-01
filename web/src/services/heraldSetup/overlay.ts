@@ -10,13 +10,15 @@
 import type { NativePlatform } from '../../utils/platform';
 import type { ProfileId } from './profiles';
 
-export type OverlayOrb = 'listening' | 'thinking' | 'speaking' | 'tone';
+export type OverlayOrb = 'listening' | 'thinking' | 'speaking' | 'tone' | 'followup';
 export type OverlayPhase = 'hidden' | 'active' | 'fading';
 
 export interface OverlayView {
   phase: OverlayPhase;
   orb: OverlayOrb;
   caption: string;
+  /** Follow-up window countdown (epoch ms it closes, total ms). */
+  countdown?: { until: number; ms: number };
 }
 
 export interface OverlayInput {
@@ -28,6 +30,8 @@ export interface OverlayInput {
   transcribing: boolean;
   thinking: boolean;
   speaking: boolean;
+  /** Follow-up window open (listening a few seconds for more, no wake word). */
+  followUp?: { until: number; ms: number } | null;
   /** A tone just played for news (epoch ms of it), with what it was about. */
   tone: { at: number; text: string } | null;
   /** What the user just said (shown while Herald thinks). */
@@ -56,6 +60,9 @@ export function activeView(i: OverlayInput, now: number): Omit<OverlayView, 'pha
   if (i.transcribing) return { orb: 'thinking', caption: 'Transcribing…' };
   if (i.speaking) return { orb: 'speaking', caption: i.replyText ? firstWords(i.replyText) : 'Speaking…' };
   if (i.thinking) return { orb: 'thinking', caption: i.lastUserText ? `“${firstWords(i.lastUserText, 60)}”` : 'Thinking…' };
+  if (i.followUp && now < i.followUp.until) {
+    return { orb: 'followup', caption: 'Go ahead, I\u2019m listening', countdown: { until: i.followUp.until, ms: i.followUp.ms } };
+  }
   if (i.tone && now - i.tone.at < TONE_SHOW_MS) return { orb: 'tone', caption: firstWords(i.tone.text) };
   return null;
 }
@@ -109,13 +116,16 @@ export class OverlayPresenter {
       return;
     }
     if (this.view.phase === 'active' && !this.timer) {
+      // A follow-up window that closed in silence just goes: no lingering
+      // "listening" when it no longer is.
+      const linger = this.view.orb === 'followup' ? 0 : OVERLAY_LINGER_MS;
       this.timer = this.setTimer(() => {
         this.emit({ ...this.view, phase: 'fading' });
         this.timer = this.setTimer(() => {
           this.timer = null;
           this.emit({ ...this.view, phase: 'hidden' });
         }, OVERLAY_FADE_MS);
-      }, OVERLAY_LINGER_MS);
+      }, linger);
     }
   }
 
@@ -130,7 +140,7 @@ export class OverlayPresenter {
 
   private emit(v: OverlayView): void {
     const cur = this.view;
-    if (cur.phase === v.phase && cur.orb === v.orb && cur.caption === v.caption) return;
+    if (cur.phase === v.phase && cur.orb === v.orb && cur.caption === v.caption && cur.countdown?.until === v.countdown?.until) return;
     this.view = v;
     this.onView(v);
   }

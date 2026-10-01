@@ -904,6 +904,8 @@ html.herald-overlay-root #root {
 .herald-overlay__text { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.25; padding-right: 4px; }
 .herald-overlay__state { font-size: 10.5px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--h-blue-light); }
 .herald-overlay--listening .herald-overlay__state { color: #67e8f9; }
+.herald-overlay--followup .herald-overlay__pill { border-color: rgba(196, 181, 253, 0.4); }
+.herald-overlay--followup .herald-overlay__state { color: #c4b5fd; }
 .herald-overlay--tone .herald-overlay__state { color: #fcd34d; }
 .herald-overlay__caption {
   max-width: 270px;

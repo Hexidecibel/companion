@@ -4,7 +4,7 @@ import type { HeraldVoiceStatus } from '../types/herald';
 import { getMicCapture, micUnavailableReason } from '../services/voice/micCapture';
 import { VoiceInputController, type VoiceInputSource, type VoiceInputState } from '../services/voice/voiceInput';
 import { VadListener } from '../services/voice/vadListener';
-import { VoiceAutomation } from '../services/voice/voiceAutomation';
+import { FOLLOW_UP_MS, VoiceAutomation, type FollowUpWindow } from '../services/voice/voiceAutomation';
 import { playChime } from '../services/tts/chime';
 import { voiceCopy } from '../services/voice/platformCopy';
 import type { SpokenLog } from '../services/voice/echoGuard';
@@ -62,6 +62,14 @@ export interface VoiceInputPrefs {
    * (A2DP) rather than dropping to a phone call (HFP).
    */
   builtInMicWithBluetooth: boolean;
+  /**
+   * Follow-up window: after Herald speaks its answer to something you SAID,
+   * keep listening a few seconds for a follow-up (no wake word, no key).
+   * null = automatic (on with headphones detected); profiles set it explicitly.
+   */
+  followUp: boolean | null;
+  /** How long the follow-up window stays open (ms). */
+  followUpMs: number;
 }
 
 export const DEFAULT_INPUT_PREFS: VoiceInputPrefs = {
@@ -75,6 +83,8 @@ export const DEFAULT_INPUT_PREFS: VoiceInputPrefs = {
   handsFree: false,
   handsFreeInBackground: false,
   builtInMicWithBluetooth: true,
+  followUp: null,
+  followUpMs: FOLLOW_UP_MS,
 };
 
 export function loadInputPrefs(): VoiceInputPrefs {
@@ -95,6 +105,8 @@ export function loadInputPrefs(): VoiceInputPrefs {
       handsFree: bool(p.handsFree, false),
       handsFreeInBackground: bool(p.handsFreeInBackground, false),
       builtInMicWithBluetooth: bool(p.builtInMicWithBluetooth, true),
+      followUp: typeof p.followUp === 'boolean' ? p.followUp : null,
+      followUpMs: typeof p.followUpMs === 'number' && p.followUpMs >= 2000 && p.followUpMs <= 15000 ? p.followUpMs : FOLLOW_UP_MS,
     };
   } catch {
     return DEFAULT_INPUT_PREFS;
@@ -174,10 +186,21 @@ export interface HeraldVoiceInput {
   bargeIn: BargeInDecision;
   /** A short-lived note about the microphone (switched, disconnected, Bluetooth-only). */
   audioNotice: string | null;
+  /** The follow-up window is on for this device (effective: `prefs.followUp` or automatic). */
+  followUpOn: boolean;
+  /** Open follow-up window (counting down), or null. */
+  followUpWindow: FollowUpWindow | null;
+  /**
+   * Open the follow-up window now, if allowed: setting on, voice input usable,
+   * mic already allowed (never prompts), no echo pause, nothing capturing.
+   */
+  openFollowUp: () => boolean;
+  /** Close the follow-up window without listening further. */
+  cancelFollowUp: () => void;
 }
 
 /** Voice sources nobody pressed anything for: these can loop on Herald's own voice. */
-const HANDS_OFF_SOURCES: ReadonlySet<VoiceInputSource> = new Set(['interrupt', 'wake']);
+const HANDS_OFF_SOURCES: ReadonlySet<VoiceInputSource> = new Set(['interrupt', 'wake', 'followup']);
 /** Push-to-talk / hotkeys: deliberate, so only a long echo is dropped. */
 const DELIBERATE_SOURCES: ReadonlySet<VoiceInputSource> = new Set(['button', 'space', 'chord', 'global']);
 
@@ -261,6 +284,18 @@ export function useHeraldVoiceInput(host: VoiceInputHost): HeraldVoiceInput {
           const direct = hostRef.current.sendVoice;
           if ((source === 'trigger' || source === 'global') && direct) {
             direct(rest);
+            return;
+          }
+          // A follow-up is a voice turn too (the panel may be closed), unless the
+          // user reviews before sending or the loop breaker paused auto-send.
+          if (source === 'followup' && direct && !prefsRef.current.reviewBeforeSend) {
+            if (breaker.allowSend()) {
+              direct(rest);
+              return;
+            }
+            console.debug('Herald voice: follow-up held for review (possible echo loop)');
+            seq.current += 1;
+            setTranscript({ id: seq.current, text: rest, autoSend: false, mode: 'voice' });
             return;
           }
           seq.current += 1;
@@ -386,6 +421,7 @@ export function useHeraldVoiceInput(host: VoiceInputHost): HeraldVoiceInput {
   });
 
   // Voice interrupt (barge-in) and hands-free wake word over the VAD.
+  const [followUpWindow, setFollowUpWindow] = useState<FollowUpWindow | null>(null);
   const automation = useMemo(
     () =>
       new VoiceAutomation({
@@ -401,6 +437,7 @@ export function useHeraldVoiceInput(host: VoiceInputHost): HeraldVoiceInput {
         onEchoHeard: () => reportEchoHeard(),
         onFalseBargeIn: () => reportFalseBargeIn(),
         onBargeInLatency: (ms, mode) => console.info(`Herald voice: talk-over stopped Herald after ${Math.round(ms)} ms (${mode})`),
+        onFollowUp: (w) => setFollowUpWindow(w),
         onError: (m) => {
           controller.fail(m);
           // Never show "listening" when we cannot: drop hands-free on this device.
@@ -469,6 +506,25 @@ export function useHeraldVoiceInput(host: VoiceInputHost): HeraldVoiceInput {
     });
   }, [automation, available, micGranted, interrupt, prefs.sensitivity, host.speaking, handsFreeActive, bargeIn.mode]);
 
+  // Follow-up window: explicit choice (profiles set it), else on with headphones.
+  const followUpOn = prefs.followUp ?? headphones === true;
+  const followUpRef = useRef({ on: followUpOn, ms: prefs.followUpMs, micGranted, echoPaused });
+  followUpRef.current = { on: followUpOn, ms: prefs.followUpMs, micGranted, echoPaused };
+  const openFollowUp = useCallback((): boolean => {
+    const f = followUpRef.current;
+    if (!f.on || !availableRef.current || !f.micGranted || f.echoPaused) return false;
+    return automation.followUp(f.ms);
+  }, [automation]);
+  const cancelFollowUp = useCallback(() => automation.cancelFollowUp(), [automation]);
+  // Anything else starting a capture (push-to-talk, a hotkey) closes the window.
+  useEffect(() => controller.subscribe((st) => {
+    if (st.phase !== 'idle' && st.source !== 'followup') automation.cancelFollowUp();
+  }), [controller, automation]);
+  // Turning it off closes an open window.
+  useEffect(() => {
+    if (!followUpOn) automation.cancelFollowUp();
+  }, [followUpOn, automation]);
+
   let handsFreeNote: string | null = null;
   if (prefs.handsFree && !handsFreeActive) {
     if (pausedBy) handsFreeNote = `Paused: ${pausedBy} has control`;
@@ -517,6 +573,7 @@ export function useHeraldVoiceInput(host: VoiceInputHost): HeraldVoiceInput {
   const stop = useCallback(() => void controller.stop(), [controller]);
   const cancel = useCallback(() => {
     automation.cancelListen();
+    automation.cancelFollowUp();
     controller.cancel();
   }, [automation, controller]);
 
@@ -635,5 +692,9 @@ export function useHeraldVoiceInput(host: VoiceInputHost): HeraldVoiceInput {
     audioEnv,
     bargeIn,
     audioNotice,
-  }), [echoPaused, resumeAutoSend, headphones, audioEnv, bargeIn, audioNotice, available, unavailableReason, state, effectivePrefs, setPref, chord, briefChord, start, stop, cancel, onComposerKeyDown, onComposerKeyUp, transcript, consumeTranscript, controller, micGranted, handsFreeAvailable, handsFreeActive, handsFreeNote, setHandsFree, listen, isCapturing]);
+    followUpOn,
+    followUpWindow,
+    openFollowUp,
+    cancelFollowUp,
+  }), [followUpOn, followUpWindow, openFollowUp, cancelFollowUp, echoPaused, resumeAutoSend, headphones, audioEnv, bargeIn, audioNotice, available, unavailableReason, state, effectivePrefs, setPref, chord, briefChord, start, stop, cancel, onComposerKeyDown, onComposerKeyUp, transcript, consumeTranscript, controller, micGranted, handsFreeAvailable, handsFreeActive, handsFreeNote, setHandsFree, listen, isCapturing]);
 }

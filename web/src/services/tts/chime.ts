@@ -35,9 +35,11 @@ export function unlockChime(): void {
  *   ok       - one soft note (a voice command was taken)
  *   error    - a low falling pair, off the motif (could not do that: e.g. the
  *              mic is not available to a remote trigger in a background tab)
+ *   tick     - a tiny G-C grace note (under 80 ms): "heard you, working on it",
+ *              the moment a voice turn ends, so the wait is not dead air
  * Quiet on purpose: about -26 dBFS peak at the default volume.
  */
-export type ToneKind = ChimeKind | 'wake' | 'ok' | 'error';
+export type ToneKind = ChimeKind | 'wake' | 'ok' | 'error' | 'tick';
 
 interface Note {
   freq: number;
@@ -72,7 +74,14 @@ export const TONES: Record<ToneKind, Note[]> = {
     { freq: 392.0, at: 0, dur: 0.22, gain: 0.8 },
     { freq: 311.13, at: 0.14, dur: 0.4, gain: 0.8 },
   ],
+  tick: [
+    { freq: G5 * 2, at: 0, dur: 0.035, gain: 0.7 },
+    { freq: C6 * 2, at: 0.018, dur: 0.045, gain: 0.45 },
+  ],
 };
+
+/** Volume of the acknowledgement tick: softer than the news tones. */
+export const TICK_VOLUME = 0.03;
 
 /** Total length of a tone in seconds (tests, scheduling). */
 export function toneDuration(kind: ToneKind): number {
@@ -99,12 +108,13 @@ export function playChime(kind: ToneKind, volume = 0.05): void {
       osc.frequency.value = note.freq;
       // Soft attack, exponential tail: a struck-glass feel, no click.
       g.gain.setValueAtTime(0.0001, start);
-      g.gain.exponentialRampToValueAtTime(note.gain, start + 0.012);
+      g.gain.exponentialRampToValueAtTime(note.gain, start + (kind === 'tick' ? 0.004 : 0.012));
       g.gain.exponentialRampToValueAtTime(0.0001, start + note.dur);
       osc.connect(g);
       g.connect(master);
       osc.start(start);
-      osc.stop(start + note.dur + 0.05);
+      // The tick must stay short: no tail past its own envelope.
+      osc.stop(start + note.dur + (kind === 'tick' ? 0.005 : 0.05));
       // A quiet octave partial adds a little shimmer.
       const partial = c.createOscillator();
       const pg = c.createGain();
@@ -122,4 +132,61 @@ export function playChime(kind: ToneKind, volume = 0.05): void {
   } catch {
     // audio graph failures are never fatal
   }
+}
+
+/**
+ * A very soft "thinking" shimmer: a slow swell of two high partials every
+ * SHIMMER_PERIOD_S until stopped. Plays through Herald's playback bus, so the
+ * echo canceller hears it as Herald's own. Returns the stop function (safe to
+ * call twice). Off by default (setting: Advanced > Thinking tone).
+ */
+export const SHIMMER_PERIOD_S = 1.6;
+export const SHIMMER_VOLUME = 0.012;
+
+export function startShimmer(volume = SHIMMER_VOLUME): () => void {
+  const c = getContext();
+  if (!c) return () => {};
+  if (c.state === 'suspended') void c.resume().catch(() => {});
+  let master: GainNode;
+  try {
+    master = c.createGain();
+    master.gain.value = volume;
+    master.connect(getAudioGraph().playbackBus() ?? c.destination);
+  } catch {
+    return () => {};
+  }
+  const swell = () => {
+    try {
+      const t0 = c.currentTime + 0.02;
+      for (const [freq, gain] of [[E6, 1], [E6 * 1.5, 0.45]] as const) {
+        const osc = c.createOscillator();
+        const g = c.createGain();
+        osc.type = 'sine';
+        osc.frequency.value = freq;
+        g.gain.setValueAtTime(0.0001, t0);
+        g.gain.exponentialRampToValueAtTime(gain, t0 + 0.45);
+        g.gain.exponentialRampToValueAtTime(0.0001, t0 + 1.25);
+        osc.connect(g);
+        g.connect(master);
+        osc.start(t0);
+        osc.stop(t0 + 1.3);
+      }
+    } catch {
+      // never fatal
+    }
+  };
+  swell();
+  const timer = setInterval(swell, SHIMMER_PERIOD_S * 1000);
+  let stopped = false;
+  return () => {
+    if (stopped) return;
+    stopped = true;
+    clearInterval(timer);
+    try {
+      master.gain.setTargetAtTime(0.0001, c.currentTime, 0.05);
+      setTimeout(() => master.disconnect(), 400);
+    } catch {
+      // ignore
+    }
+  };
 }

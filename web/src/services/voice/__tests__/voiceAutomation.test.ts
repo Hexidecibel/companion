@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-  COMMAND_WAIT_MS, ECHO_TAIL_MS, GATE_CHECK_EVERY_FRAMES, GATE_FIRST_CHECK_FRAMES, INTERRUPT_GRACE_MS, LISTEN_WAIT_MS,
+  COMMAND_WAIT_MS, ECHO_TAIL_MS, FOLLOW_UP_MS, GATE_CHECK_EVERY_FRAMES, GATE_FIRST_CHECK_FRAMES, INTERRUPT_GRACE_MS, LISTEN_WAIT_MS,
   VoiceAutomation, type AutomationConfig, RAW_LEAD_SAMPLES, stripEchoPrefix,
 } from '../voiceAutomation';
 import { SpokenLog } from '../echoGuard';
@@ -507,6 +507,178 @@ describe('VoiceAutomation (remote-trigger listen)', () => {
     vad.events!.onSpeechEnd(new Float32Array(16000));
     await vi.advanceTimersByTimeAsync(0);
     expect(onTranscript).toHaveBeenCalledWith('what finished?', 'trigger');
+  });
+});
+
+describe('VoiceAutomation (follow-up window)', () => {
+  let now = 0;
+  beforeEach(() => {
+    vi.useFakeTimers();
+    now = 70_000;
+  });
+  afterEach(() => vi.useRealTimers());
+
+  function setup(cfg: Partial<AutomationConfig> = {}, sttText: string | string[] = 'and what about the tests?', vad = fakeVad()) {
+    const tr = fakeTransport(sttText);
+    const onTranscript = vi.fn();
+    const input = new VoiceInputController({
+      mic: { permission: 'granted', start: async () => {}, stop: () => {} },
+      getTransport: () => tr.t,
+      onTranscript,
+      onBargeIn: () => {},
+      now: () => now,
+    });
+    const onError = vi.fn();
+    const windows: Array<{ until: number; ms: number } | null> = [];
+    const auto = new VoiceAutomation({
+      vad, input, stopSpeech: vi.fn(), now: () => now, getTransport: () => tr.t, onError,
+      onFollowUp: (w) => windows.push(w),
+    });
+    auto.update({ ...base, interrupt: false, ...cfg });
+    return { vad, input, auto, onTranscript, onError, windows, ...tr };
+  }
+
+  /** Herald just finished a reply: past the echo tail. */
+  function afterReply(auto: VoiceAutomation, cfg: Partial<AutomationConfig> = {}) {
+    auto.update({ ...base, interrupt: false, ...cfg, speaking: true });
+    auto.update({ ...base, interrupt: false, ...cfg, speaking: false });
+    now += ECHO_TAIL_MS + 10;
+  }
+
+  it('a follow-up question with no wake word is captured and transcribed as a follow-up', async () => {
+    const { vad, input, auto, onTranscript, windows } = setup();
+    afterReply(auto);
+    expect(auto.followUp(FOLLOW_UP_MS)).toBe(true);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(vad.running).toBe(true);
+    expect(auto.followUpWaiting).toBe(true);
+    expect(windows).toEqual([{ until: now + FOLLOW_UP_MS, ms: FOLLOW_UP_MS }]);
+    expect(input.state.phase).toBe('idle'); // push-to-talk stays possible while waiting
+    vad.events!.onSpeechStart();
+    expect(input.state).toMatchObject({ phase: 'listening', source: 'followup' });
+    expect(windows[windows.length - 1]).toBeNull(); // the countdown ends: now it is listening
+    vad.events!.onSpeechRealStart();
+    vad.events!.onSpeechEnd(new Float32Array(16000));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(onTranscript).toHaveBeenCalledWith('and what about the tests?', 'followup');
+    await vi.advanceTimersByTimeAsync(INTERRUPT_GRACE_MS + 50);
+    expect(vad.running).toBe(false);
+  });
+
+  it('silence closes the window quietly: no tone, no message, VAD off', async () => {
+    const { vad, input, auto, onTranscript, windows, requests } = setup();
+    afterReply(auto);
+    auto.followUp(FOLLOW_UP_MS);
+    await vi.advanceTimersByTimeAsync(INTERRUPT_GRACE_MS + 50);
+    expect(vad.running).toBe(true);
+    now += FOLLOW_UP_MS;
+    await vi.advanceTimersByTimeAsync(FOLLOW_UP_MS);
+    expect(auto.followUpWaiting).toBe(false);
+    expect(windows[windows.length - 1]).toBeNull();
+    expect(input.state).toMatchObject({ phase: 'idle', error: null });
+    expect(onTranscript).not.toHaveBeenCalled();
+    expect(requests).toHaveLength(0); // nothing left the device
+    expect(vad.running).toBe(false);
+  });
+
+  it('a cough re-opens what is left of the window', async () => {
+    const { vad, input, auto, windows } = setup();
+    afterReply(auto);
+    const until = now + FOLLOW_UP_MS;
+    auto.followUp(FOLLOW_UP_MS);
+    await vi.advanceTimersByTimeAsync(0);
+    now += 1000;
+    vad.events!.onSpeechStart();
+    vad.events!.onMisfire();
+    expect(input.state.phase).toBe('idle');
+    expect(auto.followUpWaiting).toBe(true);
+    expect(windows[windows.length - 1]).toEqual({ until, ms: FOLLOW_UP_MS });
+  });
+
+  it("speech inside Herald's echo tail is not a follow-up", async () => {
+    const { vad, input, auto } = setup();
+    auto.update({ ...base, interrupt: false, speaking: true });
+    auto.update({ ...base, interrupt: false, speaking: false });
+    auto.followUp(FOLLOW_UP_MS);
+    await vi.advanceTimersByTimeAsync(0);
+    now += ECHO_TAIL_MS - 100;
+    vad.events!.onSpeechStart();
+    expect(input.state.phase).toBe('idle');
+    expect(auto.followUpWaiting).toBe(true);
+  });
+
+  it('Herald speaking again closes the window; it never opens while Herald talks', async () => {
+    const { auto, windows } = setup();
+    afterReply(auto);
+    auto.followUp(FOLLOW_UP_MS);
+    auto.update({ ...base, interrupt: false, speaking: true });
+    expect(auto.followUpWaiting).toBe(false);
+    expect(windows[windows.length - 1]).toBeNull();
+    expect(auto.followUp(FOLLOW_UP_MS)).toBe(false);
+  });
+
+  it('push-to-talk during the window: the follow-up stands aside', async () => {
+    const { vad, input, auto, onTranscript } = setup();
+    afterReply(auto);
+    auto.followUp(FOLLOW_UP_MS);
+    await vi.advanceTimersByTimeAsync(0);
+    await input.start('button');
+    vad.events!.onSpeechStart();
+    expect(auto.followUpWaiting).toBe(false);
+    expect(input.state.source).toBe('button');
+    vad.events!.onSpeechEnd(new Float32Array(16000));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(onTranscript).not.toHaveBeenCalledWith(expect.anything(), 'followup');
+  });
+
+  it('with hands-free on, a follow-up needs no wake word (no wake stream is opened)', async () => {
+    const { vad, auto, onTranscript, requests } = setup({ handsFree: true });
+    await vi.advanceTimersByTimeAsync(0);
+    afterReply(auto, { handsFree: true });
+    auto.followUp(FOLLOW_UP_MS);
+    vad.events!.onSpeechStart();
+    vad.events!.onSpeechEnd(new Float32Array(16000));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(requests.some((r) => r.type === 'herald_voice_stream_start' && r.payload.purpose === 'wake')).toBe(false);
+    expect(onTranscript).toHaveBeenCalledWith('and what about the tests?', 'followup');
+  });
+
+  it('a remote trigger during the window takes over as a trigger listen', async () => {
+    const { vad, auto, onTranscript } = setup();
+    afterReply(auto);
+    auto.followUp(FOLLOW_UP_MS);
+    await expect(auto.listen()).resolves.toBe(true);
+    expect(auto.followUpWaiting).toBe(false);
+    vad.events!.onSpeechStart();
+    vad.events!.onSpeechEnd(new Float32Array(16000));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(onTranscript).toHaveBeenCalledWith('and what about the tests?', 'trigger');
+  });
+
+  it('a VAD that cannot start closes the window without the hands-free error path', async () => {
+    const vad = fakeVad();
+    vad.start = async () => {
+      throw new Error('blocked');
+    };
+    const { auto, onError, windows } = setup({}, undefined, vad);
+    afterReply(auto);
+    auto.followUp(FOLLOW_UP_MS);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(auto.followUpWaiting).toBe(false);
+    expect(windows[windows.length - 1]).toBeNull();
+    expect(onError).not.toHaveBeenCalled();
+  });
+
+  it('declines when unavailable or already capturing; cancelFollowUp closes it', async () => {
+    const off = setup({ available: false });
+    expect(off.auto.followUp()).toBe(false);
+    const { auto, input } = setup();
+    await input.start('button');
+    expect(auto.followUp()).toBe(false);
+    input.cancel();
+    expect(auto.followUp()).toBe(true);
+    auto.cancelFollowUp();
+    expect(auto.followUpWaiting).toBe(false);
   });
 });
 

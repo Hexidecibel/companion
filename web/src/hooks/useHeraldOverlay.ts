@@ -10,6 +10,8 @@ export interface OverlayHost {
   transcribing: boolean;
   thinking: boolean;
   speaking: boolean;
+  /** Follow-up window open, or null. */
+  followUp?: { until: number; ms: number } | null;
   messages: HeraldMessage[];
   inbox: HeraldInboxItem[];
   /** This device plays the news tones. */
@@ -71,6 +73,7 @@ export function useHeraldOverlay(host: OverlayHost): void {
     transcribing: host.transcribing,
     thinking: host.thinking,
     speaking: host.speaking,
+    followUp: host.followUp ?? null,
     tone,
     lastUserText: lastUser?.text ?? null,
     replyText,

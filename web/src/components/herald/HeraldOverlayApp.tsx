@@ -9,6 +9,7 @@ const ORB_STATE: Record<OverlayOrb, HeraldOrbState> = {
   thinking: 'busy',
   speaking: 'speaking',
   tone: 'attention',
+  followup: 'followup',
 };
 
 const ORB_LABEL: Record<OverlayOrb, string> = {
@@ -16,6 +17,7 @@ const ORB_LABEL: Record<OverlayOrb, string> = {
   thinking: 'Thinking',
   speaking: 'Speaking',
   tone: 'News',
+  followup: 'Follow-up?',
 };
 
 function rectOf(el: Element | null): OverlayRect | null {
@@ -53,7 +55,7 @@ export function HeraldOverlayApp({ initial = null }: { initial?: OverlayView | n
 
   const phase = view?.phase ?? 'hidden';
   const orb = view?.orb ?? 'thinking';
-  const stoppable = orb === 'listening' || orb === 'speaking' || orb === 'thinking';
+  const stoppable = orb === 'listening' || orb === 'speaking' || orb === 'thinking' || orb === 'followup';
 
   // Tell the native side where the clickable parts are (after every layout change).
   useLayoutEffect(() => {
@@ -79,7 +81,7 @@ export function HeraldOverlayApp({ initial = null }: { initial?: OverlayView | n
           onPointerDown={onOrbDown}
           title="Drag to move. Double-click to open Companion."
         >
-          <HeraldOrb presence={ORB_STATE[orb]} size={44} mini />
+          <HeraldOrb presence={ORB_STATE[orb]} size={44} mini countdown={orb === 'followup' ? view?.countdown ?? null : null} />
         </div>
         <div className="herald-overlay__text">
           <span className="herald-overlay__state">{ORB_LABEL[orb]}</span>

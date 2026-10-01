@@ -10,7 +10,10 @@ import { eventBus } from '../utils/eventBus';
 import { routeVoiceTranscript } from '../services/voice/voiceCommandRouter';
 import { runUndo } from '../services/voice/voiceUndo';
 import type { HeraldActiveDevice, HeraldDeviceInfo, HeraldIntent } from '../types/herald';
-import { playChime } from '../services/tts/chime';
+import { TICK_VOLUME, playChime, startShimmer } from '../services/tts/chime';
+import { FollowUpTracker } from '../services/voice/followUp';
+import { TurnCues } from '../services/voice/turnCues';
+import { setUserPronunciations } from '../services/tts/pronounce';
 import { DeferredNotice, runHeraldTrigger, type TriggerActions } from '../services/voice/heraldTrigger';
 import { useNativeHerald } from '../hooks/useNativeHerald';
 import { useHeraldSetup, type HeraldSetupControl } from '../hooks/useHeraldSetup';
@@ -217,6 +220,37 @@ export function HeraldProvider({ children }: { children: ReactNode }) {
   heraldRef.current = herald;
   const voiceRef = useRef(voice);
   voiceRef.current = voice;
+  // Sound cues around a voice turn: a tick at end-of-speech, an optional
+  // thinking shimmer until Herald's first audio (turnCues.ts).
+  const cues = useMemo(() => new TurnCues({
+    tick: () => playChime('tick', TICK_VOLUME),
+    startShimmer: () => startShimmer(),
+    tickOn: () => voiceRef.current.ackTick,
+    shimmerOn: () => voiceRef.current.thinkingTone && voiceRef.current.voiceOn,
+  }), []);
+  // Follow-up window: opens after Herald SPEAKS its answer to a turn that came by
+  // voice from this device (followUp.ts); the voice-input hook checks the rest.
+  const isActiveRef = useRef(true);
+  const followUp = useMemo(() => new FollowUpTracker({
+    arm: () => {
+      const vi = voiceInputRef.current;
+      const v = voiceRef.current;
+      if (!vi || !isActiveRef.current || !v.voiceOn) return;
+      // A hidden tab only when a remote trigger allowed background speech.
+      const visible = typeof document === 'undefined' || document.visibilityState === 'visible';
+      if (!visible && !v.backgroundAllowed()) return;
+      vi.openFollowUp();
+    },
+  }), []);
+  useEffect(() => () => {
+    cues.dispose();
+    followUp.dispose();
+  }, [cues, followUp]);
+  /** A turn that came by voice went out (composer auto-send, trigger, follow-up, a spoken command). */
+  const noteVoiceTurn = useCallback(() => {
+    followUp.voiceTurn();
+    cues.turnSent();
+  }, [followUp, cues]);
   const pendingIntent = useRef<{ text: string; intent?: HeraldIntent; at: number } | null>(null);
   /** A voice turn outside the composer (commands, remote-trigger speech). Waits for a running turn. */
   const sendVoiceTurn = useCallback((text: string, intent?: HeraldIntent) => {
@@ -228,6 +262,16 @@ export function HeraldProvider({ children }: { children: ReactNode }) {
     void h.send(text, intent ? { mode: 'voice', intent } : { mode: 'voice' });
   }, []);
   const sendIntent = useCallback((text: string, intent: HeraldIntent) => sendVoiceTurn(text, intent), [sendVoiceTurn]);
+  /**
+   * Speech sent straight out (remote trigger, desktop global hold-to-talk,
+   * follow-up): the window is often hidden (mid-game), so the reply may play
+   * in the background for a while, and it counts as a voice turn.
+   */
+  const sendVoiceDirect = useCallback((text: string) => {
+    voiceRef.current.allowBackground();
+    noteVoiceTurn();
+    sendVoiceTurn(text);
+  }, [noteVoiceTurn, sendVoiceTurn]);
   const busyNow = (herald.state?.busy ?? false) || herald.sending;
   useEffect(() => {
     const p = pendingIntent.current;
@@ -277,8 +321,18 @@ export function HeraldProvider({ children }: { children: ReactNode }) {
     });
     // Taken: a soft acknowledgement for commands that are otherwise silent.
     if (r.command === 'stop' && v.chimeOn) playChime('ok', 0.035);
+    // STOP: no follow-up, no thinking tone. Commands that answer out loud
+    // (repeat, go on, shorter, undo...) are a voice turn: a follow-up may come.
+    if (r.command === 'stop') {
+      followUp.cancel();
+      cues.turnDone();
+    } else if (r.command) {
+      noteVoiceTurn();
+    } else if (!r.send) {
+      cues.turnDone();
+    }
     return r.send;
-  }, [sendIntent]);
+  }, [sendIntent, followUp, cues, noteVoiceTurn]);
   const voiceInputRef = useRef<ReturnType<typeof useHeraldVoiceInput> | null>(null);
 
   // ---- active device ------------------------------------------------------
@@ -286,6 +340,7 @@ export function HeraldProvider({ children }: { children: ReactNode }) {
   const devices = useMemo(() => herald.state?.devices ?? [], [herald.state?.devices]);
   const selfId = voice.selfId;
   const isActive = !activeDevice || !selfId || activeDevice.id === selfId;
+  isActiveRef.current = isActive;
   const controlledElsewhere = !isActive && activeDevice?.reason === 'claimed';
   const [keepPinned, setKeepPinnedState] = useState(() => readStorage(PIN_KEY) === '1');
   const claimFail = useCallback((err: string | null) => {
@@ -334,10 +389,43 @@ export function HeraldProvider({ children }: { children: ReactNode }) {
     },
     onVoiceTranscript,
     briefMe,
-    sendVoice: sendVoiceTurn,
+    sendVoice: sendVoiceDirect,
     spokenLog: voice.spokenLog,
   });
   voiceInputRef.current = voiceInput;
+
+  // The tick: the moment a capture ends and is being transcribed.
+  useEffect(() => {
+    let prev = voiceInput.controller.state.phase;
+    return voiceInput.controller.subscribe((st) => {
+      if (st.phase === 'transcribing' && prev !== 'transcribing') cues.endOfSpeech();
+      // Someone started talking again: whatever was pending is superseded.
+      if (st.phase === 'listening' && prev !== 'listening') followUp.cancel();
+      prev = st.phase;
+    });
+  }, [voiceInput.controller, cues, followUp]);
+  // Herald speaking / thinking -> follow-up timing and the shimmer.
+  const speakingForCues = voice.supported && voice.speaking;
+  const busyForCues = (herald.state?.busy ?? false) || herald.sending;
+  useEffect(() => {
+    followUp.update({ speaking: speakingForCues, busy: busyForCues });
+    if (speakingForCues) cues.audioStarted();
+  }, [followUp, cues, speakingForCues, busyForCues]);
+  const wasBusy = useRef(false);
+  useEffect(() => {
+    if (wasBusy.current && !busyForCues && !speakingForCues) cues.turnDone();
+    wasBusy.current = busyForCues;
+  }, [cues, busyForCues, speakingForCues]);
+  // The user's pronunciation list (on the hub, follows them) -> the speech normaliser.
+  const pronunciations = herald.state?.pronunciations;
+  useEffect(() => {
+    setUserPronunciations(pronunciations ?? []);
+  }, [pronunciations]);
+  // New host or this device stood down: no follow-up from the old context.
+  useEffect(() => {
+    followUp.cancel();
+    voiceInputRef.current?.cancelFollowUp();
+  }, [hostId, isActive, followUp]);
 
   // Remote triggers (hotkeys on other machines): the daemon sends them only to
   // the active device, i.e. this one. Works with the tab hidden; a failure is a
@@ -421,6 +509,7 @@ export function HeraldProvider({ children }: { children: ReactNode }) {
     transcribing: voiceInput.state.phase === 'transcribing',
     thinking: (herald.state?.busy ?? false) || herald.sending,
     speaking: voice.supported && voice.speaking,
+    followUp: voiceInput.followUpWindow,
     messages: herald.messages,
     inbox: herald.state?.inbox ?? EMPTY,
     tonesHere: voice.chimeOn && voice.announcer,
@@ -455,8 +544,16 @@ export function HeraldProvider({ children }: { children: ReactNode }) {
     handoffNote,
   }), [herald.state?.devices, selfId, voice.deviceLabel, activeDevice, devices, isActive, controlledElsewhere, keepPinned, setKeepPinned, takeControl, switchTo, voice.renameDevice, handoffNote]);
 
+  // Composer sends: an auto-sent transcript ('voice') is a voice turn; typing is not.
+  const heraldSend = herald.send;
+  const send = useCallback<UseHeraldReturn['send']>((text, opts) => {
+    if (opts?.mode === 'voice') noteVoiceTurn();
+    else followUp.cancel();
+    return heraldSend(text, opts);
+  }, [heraldSend, noteVoiceTurn, followUp]);
   const data: HeraldDataValue = useMemo(() => ({
     ...herald,
+    send,
     device,
     briefMe,
     displayName: herald.state?.displayName || DEFAULT_DISPLAY_NAME,
@@ -469,7 +566,7 @@ export function HeraldProvider({ children }: { children: ReactNode }) {
     unheardCount,
     unheardBlocked,
     available,
-  }), [herald, device, briefMe, available, inbox, unheardCount, unheardBlocked]);
+  }), [herald, send, device, briefMe, available, inbox, unheardCount, unheardBlocked]);
 
   const ui: HeraldUiValue = useMemo(() => ({
     panelOpen, screenOpen, open, close, toggle, focusNonce,

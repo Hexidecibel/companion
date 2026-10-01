@@ -3,10 +3,11 @@
  * at once. Everything here is pure (no React, no storage), so the mapping is
  * unit tested; `useHeraldSetup` applies it through the existing setters.
  *
- *   headphones  Herald cannot hear itself: interrupt on, hands-free allowed.
+ *   headphones  Herald cannot hear itself: interrupt on, hands-free allowed, follow-up window.
  *   desk        Speakers: interrupt only when the echo check passed; push-to-talk; short replies.
- *   gaming      Tones only, hotkey / mouse trigger, hands-free off (Discord), short replies.
- *   phone       Earbuds: earbud button, brief replies, ducking, phone mic.
+ *   gaming      Tones only, hotkey / mouse trigger, hands-free off (Discord), short replies,
+ *               no follow-up window (teammates on Discord would be taken as follow-ups).
+ *   phone       Earbuds: earbud button, brief replies, ducking, phone mic, follow-up window.
  *
  * Reply length on the hub (`verbosity`) is shared by every device, so profiles
  * never touch it; they set this device's spoken length, and voice turns are
@@ -37,7 +38,7 @@ export const PROFILES: Record<ProfileId, ProfileInfo> = {
     id: 'headphones',
     name: 'Headphones',
     tagline: 'Talk over Herald any time. Hands-free works well.',
-    bullets: ['Interrupt by talking', 'Hands-free "Hey Jarvis" allowed', 'Short spoken replies (full replies optional)'],
+    bullets: ['Interrupt by talking', 'Ask a follow-up right after a reply, no key needed', 'Hands-free "Hey Jarvis" allowed', 'Short spoken replies (full replies optional)'],
   },
   desk: {
     id: 'desk',
@@ -55,7 +56,7 @@ export const PROFILES: Record<ProfileId, ProfileInfo> = {
     id: 'phone',
     name: 'Phone + earbuds',
     tagline: 'Tap an earbud to talk. Music ducks while Herald speaks.',
-    bullets: ['Earbud tap talks to Herald', 'Brief spoken replies', 'Other audio ducks', 'Phone mic for clearer speech'],
+    bullets: ['Earbud tap talks to Herald', 'Ask a follow-up right after a reply', 'Brief spoken replies', 'Other audio ducks', 'Phone mic for clearer speech'],
   },
 };
 
@@ -113,6 +114,8 @@ export interface ProfileSettings {
     spaceToTalk: boolean;
     /** 'off' turns hands-free off; 'keep' leaves the user's choice (turning it ON needs a click for the mic prompt). */
     handsFree: 'off' | 'keep';
+    /** Listen a few seconds for a follow-up after a spoken reply to a voice turn. */
+    followUp: boolean;
   };
   native: {
     globalShortcuts: boolean;
@@ -143,7 +146,7 @@ export interface ProfileContext {
 export function profileSettings(id: ProfileId, ctx: ProfileContext): ProfileSettings {
   const base: ProfileSettings = {
     voice: { voiceOn: true, chimeOn: true, remind: true, spokenLength: 'short' },
-    input: { interrupt: false, sensitivity: 'normal', reviewBeforeSend: false, spaceToTalk: true, handsFree: 'keep' },
+    input: { interrupt: false, sensitivity: 'normal', reviewBeforeSend: false, spaceToTalk: true, handsFree: 'keep', followUp: false },
     native: { globalShortcuts: true, earbudButton: true, duckOthers: true },
     gamingMode: false,
     micPreference: 'auto',
@@ -154,7 +157,7 @@ export function profileSettings(id: ProfileId, ctx: ProfileContext): ProfileSett
       return {
         ...base,
         voice: { ...base.voice, spokenLength: ctx.fullReplies ? 'full' : 'short' },
-        input: { ...base.input, interrupt: true },
+        input: { ...base.input, interrupt: true, followUp: true },
       };
     case 'desk': {
       const grade = gradeEcho(ctx.echo);
@@ -176,7 +179,7 @@ export function profileSettings(id: ProfileId, ctx: ProfileContext): ProfileSett
         ...base,
         voice: { ...base.voice, remind: false, spokenLength: 'short' },
         // Discord hears the same mic, and teammates talking must never cut Herald off.
-        input: { ...base.input, interrupt: false, spaceToTalk: false, handsFree: 'off' },
+        input: { ...base.input, interrupt: false, spaceToTalk: false, handsFree: 'off', followUp: false },
         native: { ...base.native, globalShortcuts: true },
         gamingMode: true,
         notes: ['Hands-free is off so Discord calls never wake Herald. Use the hotkey or mouse button.'],
@@ -185,7 +188,7 @@ export function profileSettings(id: ProfileId, ctx: ProfileContext): ProfileSett
       return {
         ...base,
         voice: { ...base.voice, spokenLength: 'short' },
-        input: { ...base.input, interrupt: true, spaceToTalk: false },
+        input: { ...base.input, interrupt: true, spaceToTalk: false, followUp: true },
         native: { ...base.native, earbudButton: true, duckOthers: true },
         micPreference: 'builtin',
       };
@@ -201,7 +204,7 @@ export interface ProfileTargets {
     setSpokenLength: (v: 'short' | 'full') => void;
   };
   input: {
-    setPref: (key: 'interrupt' | 'sensitivity' | 'reviewBeforeSend' | 'spaceToTalk' | 'builtInMicWithBluetooth', value: boolean | 'low' | 'normal' | 'high') => void;
+    setPref: (key: 'interrupt' | 'sensitivity' | 'reviewBeforeSend' | 'spaceToTalk' | 'builtInMicWithBluetooth' | 'followUp', value: boolean | 'low' | 'normal' | 'high') => void;
     setHandsFree: (on: boolean) => void;
   };
   native: {
@@ -224,6 +227,8 @@ export interface ProfileTargets {
     duckOthers: boolean;
     /** Voice-input setting behind `micPreference` (absent: treated as on, its default). */
     builtInMicWithBluetooth?: boolean;
+    /** Follow-up window setting (null: automatic; absent: not reported, always set). */
+    followUp?: boolean | null;
   };
   platform: NativePlatform;
 }
@@ -241,6 +246,8 @@ export function applyProfileSettings(s: ProfileSettings, t: ProfileTargets): voi
   if (c.reviewBeforeSend !== s.input.reviewBeforeSend) t.input.setPref('reviewBeforeSend', s.input.reviewBeforeSend);
   if (c.spaceToTalk !== s.input.spaceToTalk) t.input.setPref('spaceToTalk', s.input.spaceToTalk);
   if (s.input.handsFree === 'off' && c.handsFree) t.input.setHandsFree(false);
+  // Always made explicit, like interrupt: it no longer follows the headphone guess.
+  if (c.followUp !== s.input.followUp) t.input.setPref('followUp', s.input.followUp);
   if (s.micPreference === 'builtin' && c.builtInMicWithBluetooth === false) t.input.setPref('builtInMicWithBluetooth', true);
   if (t.platform === 'desktop' && c.globalShortcuts !== s.native.globalShortcuts) {
     t.native.setPref('globalShortcuts', s.native.globalShortcuts);
