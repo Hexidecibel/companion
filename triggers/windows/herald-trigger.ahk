@@ -16,11 +16,14 @@
 ; Default keys (change them in the ini):
 ;   Ctrl+Alt+Shift+H  toggle  (Herald talking: stop; listening: cancel; else listen)
 ;   Ctrl+Alt+Shift+B  brief   (spoken rundown of what is new)
-; Optional: listen_key, stop_key, repeat_key, claim_key (needs device=).
+; Optional: listen_key, stop_key, repeat_key, claim_key (needs device=),
+;   show_key (open the session Herald last talked about on the active device;
+;   show_session= names a fixed session instead, e.g. Out4).
 ;
 ; signed=true (optional, off by default): the token is never sent. Each
 ; request carries X-Herald-Ts + X-Herald-Sig instead (HMAC-SHA256 keyed with
-; the token's SHA-256, over "<ts>.<action>.<device>", via Windows CNG), which
+; the token's SHA-256, over "<ts>.<action>.<device>", plus ".<session>" when
+; show names one, via Windows CNG), which
 ; the daemon refuses after 60 s or on reuse. Needs a correct clock (Windows
 ; time sync is on by default).
 ;
@@ -43,6 +46,7 @@ BindKey("listen_key", "listen", "")
 BindKey("stop_key", "stop", "")
 BindKey("repeat_key", "repeat", "")
 BindKey("claim_key", "claim", "")
+BindKey("show_key", "show", "")
 
 if (Cfg.url = "" || Cfg.token = "")
   Notify("Herald trigger is not configured: set url and token in herald-trigger.ini", true)
@@ -69,6 +73,7 @@ LoadConfig() {
     url: RTrim(url, "/"),
     token: token,
     device: device,
+    showSession: read("show_session"),
     pin: StrLower(read("pin", "true")) != "false",
     signed: StrLower(read("signed", "false")) = "true",
     timeoutMs: IsInteger(timeout) ? Integer(timeout) : 4000,
@@ -102,9 +107,12 @@ Fire(action) {
     Notify("claim_key needs device= in herald-trigger.ini", true)
     return
   }
+  session := action = "show" ? Cfg.showSession : ""
   body := '{"action":"' action '"'
   if (Cfg.device != "")
     body .= ',"device":"' JsonEscape(Cfg.device) '","pin":' (Cfg.pin ? "true" : "false")
+  if (session != "")
+    body .= ',"session":"' JsonEscape(session) '"'
   body .= "}"
   try {
     req := ComObject("WinHttp.WinHttpRequest.5.1")
@@ -114,7 +122,8 @@ Fire(action) {
     if (Cfg.signed) {
       ts := DateDiff(A_NowUTC, "19700101000000", "Seconds")
       req.SetRequestHeader("X-Herald-Ts", ts)
-      req.SetRequestHeader("X-Herald-Sig", HmacSha256Hex(Sha256Hex(Cfg.token), ts "." action "." Cfg.device))
+      msg := ts "." action "." Cfg.device (session != "" ? "." session : "")
+      req.SetRequestHeader("X-Herald-Sig", HmacSha256Hex(Sha256Hex(Cfg.token), msg))
     } else {
       req.SetRequestHeader("Authorization", "Bearer " Cfg.token)
     }
@@ -186,7 +195,7 @@ Explain(status, body) {
   switch status {
     case 401: return "bad or revoked trigger token, or signed=true with a wrong clock (401)"
     case 403: return "listening is only allowed from your home network or tailnet (403)"
-    case 404: return "not found (404): old daemon, or no device named as in device="
+    case 404: return "not found (404): old daemon, no device named as in device=, or (show) no such session / nothing to show"
     case 409: return "no active device: open Companion somewhere (409)"
     case 429: return "too many triggers, slow down (429)"
   }

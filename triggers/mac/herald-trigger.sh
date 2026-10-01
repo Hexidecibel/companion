@@ -1,9 +1,12 @@
 #!/bin/bash
-# herald-trigger.sh ACTION - fire a Herald remote trigger from a Mac (or any
+# herald-trigger.sh ACTION [SESSION] - fire a Herald remote trigger from a Mac (or any
 # Unix shell). Used by the Raycast script commands next to it; also fine from
 # a terminal, Keyboard Maestro, BetterTouchTool or a Shortcuts "Run Shell Script".
 #
-#   ACTION: toggle | brief | listen | stop | repeat | claim
+#   ACTION: toggle | brief | listen | stop | repeat | claim | show
+#   SESSION (show only, optional): the session to open, e.g. Out4; without it,
+#     show opens what Herald last talked about (its newest card, the session in
+#     its latest reply, else the newest unheard inbox item).
 #
 # Daemon URL (not secret): $HERALD_TRIGGER_URL, else the first line of
 #   ~/.config/herald-trigger/url   (e.g. https://dev.cush.rocks)
@@ -21,15 +24,20 @@
 # Signed mode (optional, off by default): HERALD_TRIGGER_SIGNED=true, or a line
 # "true" in ~/.config/herald-trigger/signed. The token is then never sent:
 # each request carries X-Herald-Ts + X-Herald-Sig (HMAC-SHA256 keyed with the
-# token's SHA-256, over "<ts>.<action>.<device>"), which the daemon refuses
+# token's SHA-256, over "<ts>.<action>.<device>", plus ".<session>" when show
+# names one), which the daemon refuses
 # after 60 s or on reuse. Needs perl (built in on macOS) and a correct clock.
 set -euo pipefail
 
 action="${1:-toggle}"
 case "$action" in
-  toggle|brief|listen|stop|repeat|claim) ;;
+  toggle|brief|listen|stop|repeat|claim|show) ;;
   *) echo "Herald: unknown action '$action'"; exit 2 ;;
 esac
+session=""
+if [ "$action" = "show" ]; then
+  session="$(printf '%s' "${2:-}" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+fi
 
 url="${HERALD_TRIGGER_URL:-}"
 if [ -z "$url" ] && [ -r "$HOME/.config/herald-trigger/url" ]; then
@@ -65,6 +73,10 @@ if [ -n "$device" ]; then
   [ "${HERALD_TRIGGER_PIN:-true}" = "false" ] && pin=false
   json="$json,\"device\":\"$esc\",\"pin\":$pin"
 fi
+if [ -n "$session" ]; then
+  sesc="$(printf '%s' "$session" | sed 's/\\/\\\\/g; s/"/\\"/g')"
+  json="$json,\"session\":\"$sesc\""
+fi
 json="$json}"
 
 signed="${HERALD_TRIGGER_SIGNED:-}"
@@ -73,10 +85,12 @@ if [ -z "$signed" ] && [ -r "$HOME/.config/herald-trigger/signed" ]; then
 fi
 if [ "$signed" = "true" ] || [ "$signed" = "1" ]; then
   ts="$(date +%s)"
+  sigmsg="$ts.$action.$device"
+  [ -n "$session" ] && sigmsg="$sigmsg.$session"
   # The token goes to perl on stdin, never on a command line.
   sig="$(printf '%s' "$token" | perl -MDigest::SHA=hmac_sha256_hex,sha256_hex -e \
     'my $t = <STDIN>; $t =~ s/\s+$//; print hmac_sha256_hex($ARGV[0], sha256_hex($t));' \
-    "$ts.$action.$device")"
+    "$sigmsg")"
   auth_headers="$(printf 'header = "X-Herald-Ts: %s"\nheader = "X-Herald-Sig: %s"\n' "$ts" "$sig")"
 else
   auth_headers="$(printf 'header = "Authorization: Bearer %s"\n' "$token")"
@@ -100,6 +114,7 @@ if [ "$code" = "200" ]; then
     stop) echo "Herald: stopped" ;;
     repeat) echo "Herald: repeating" ;;
     claim) echo "Herald: now on ${device}" ;;
+    show) echo "Herald: showing ${session:-the latest session}" ;;
   esac
   exit 0
 fi

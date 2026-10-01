@@ -15,6 +15,9 @@ its tab or window in the background if need be.
 | `stop`   | Stop talking and cancel any capture                                    |
 | `repeat` | Say the last reply again                                               |
 | `claim`  | Make `device` the active device (pinned unless `"pin": false`), nothing else |
+| `show`   | Open a session's view and scroll to the question or choice waiting there (else its latest message), with a short "Here's Out4." (a tick in the Gaming profile). Optional `"session": "Out4"`; without it, what Herald last talked about: its newest pending card, else the session in its latest reply, else the newest unheard inbox item. The desktop app comes forward, even in the Gaming profile (you asked to see it) |
+
+`show` never opens a mic and works from anywhere with a valid token.
 
 Any action can carry `"device": "<name>"`: that device is made active first
 (pinned unless `"pin": false`), then acts. Set it in each machine's script so
@@ -69,7 +72,8 @@ Content-Type: application/json
 {"action": "toggle"}
 ```
 
-An empty body means `toggle`; `?action=brief&device=Windows%20PC` works too. Answers:
+An empty body means `toggle`; `?action=brief&device=Windows%20PC` (and
+`?action=show&session=Out4`) works too. Answers:
 
 | Status | Meaning |
 |--------|---------|
@@ -77,8 +81,8 @@ An empty body means `toggle`; `?action=brief&device=Windows%20PC` works too. Ans
 | 400 | Unknown action, or `claim` without `device` |
 | 401 | Missing, wrong or revoked trigger token; or a signed request that is stale (over 60 s), replayed or badly signed |
 | 403 | `listen` from outside the home network / tailnet (`untrusted_origin`) |
-| 404 | `device` names no connected device (`unknown_device`) |
-| 409 | No active device: open Companion (Herald) somewhere first |
+| 404 | `device` names no connected device (`unknown_device`); `show`: `session` names no session (`unknown_session`), or nothing to show (`nothing_to_show`) |
+| 409 | No active device: open Companion (Herald) somewhere first; `show`: `session` matches several (`ambiguous_session`, the names are in `error`) |
 | 429 | More than 10 triggers in 10 s (`Retry-After` header) |
 | 503 | Herald voice is off on that daemon |
 
@@ -127,7 +131,8 @@ By default a script sends the token as `Authorization: Bearer` over HTTPS. In
 signed mode it never sends the token: each request carries
 `X-Herald-Ts` (unix seconds) and `X-Herald-Sig` = hex HMAC-SHA256, keyed with
 the token's SHA-256 (as lowercase hex text), over `<ts>.<action>.<device>`
-(`device` empty when not set). The daemon refuses it when the clock differs by
+(`device` empty when not set), plus `.<session>` when a `show` names a
+session. The daemon refuses it when the clock differs by
 more than 60 s, when that signature was already used, or when the device or
 action was changed. Turn it on with `signed=true` in the AutoHotkey ini, or
 `HERALD_TRIGGER_SIGNED=true` / `~/.config/herald-trigger/signed` for the shell
@@ -175,7 +180,9 @@ Default keys: **Ctrl+Alt+Shift+H** = `toggle`, **Ctrl+Alt+Shift+B** = `brief`.
    server; the original single token also works). Set `device=` to this PC's Herald device name (e.g. `Windows
    PC`, see Devices above) so the keys always act on this PC; leave it empty to
    act on whichever device is active. Optionally bind `listen_key`, `stop_key`,
-   `repeat_key`, `claim_key` (just take control).
+   `repeat_key`, `claim_key` (just take control) and `show_key` (open the
+   session Herald last talked about; `show_session=Out4` makes it always open
+   that session).
    Double-click the script; press Ctrl+Alt+Shift+H with a Companion tab open
    somewhere to test. Errors appear only as a tray tip.
 3. **Start with Windows.** Press Win+R, run `shell:startup`, and put a shortcut to
@@ -201,8 +208,9 @@ Default keys: **Ctrl+Alt+Shift+H** = `toggle`, **Ctrl+Alt+Shift+B** = `brief`.
 
 ## Mac: Raycast
 
-Files: `mac/herald-toggle.sh`, `mac/herald-brief.sh`, `mac/herald-claim.sh`
-(Raycast script commands), all calling `mac/herald-trigger.sh ACTION`.
+Files: `mac/herald-toggle.sh`, `mac/herald-brief.sh`, `mac/herald-claim.sh`,
+`mac/herald-show.sh` (Raycast script commands), all calling
+`mac/herald-trigger.sh ACTION` (`herald-trigger.sh show [SESSION]` for show).
 
 1. **Token into the Keychain** (prompts, so it never lands in shell history):
    `security add-generic-password -s herald-trigger -a "$USER" -w`
@@ -211,13 +219,16 @@ Files: `mac/herald-toggle.sh`, `mac/herald-brief.sh`, `mac/herald-claim.sh`
    with this Mac's Herald device name, so its hotkeys act on this Mac
    (`HERALD_TRIGGER_PIN=false` in the environment to claim without pinning).
 3. **Add the scripts to Raycast:** copy the `mac/` folder somewhere permanent
-   (keep the three files together, executable), then Raycast > Settings >
+   (keep the files together, executable), then Raycast > Settings >
    Extensions > **+** > Add Script Directory > that folder. "Herald Toggle",
-   "Herald Brief" and "Herald Take Control" appear as commands. Test one from Raycast; the result shows as
+   "Herald Brief", "Herald Take Control" and "Show Herald's Last Session"
+   appear as commands (the last takes an optional session name: leave it
+   empty for what Herald last talked about). Test one from Raycast; the result shows as
    a short HUD (the first run may ask to allow Keychain access: choose Always
    Allow).
 4. **Hotkeys:** in Raycast Settings > Extensions, select Herald Toggle and set a
-   Hotkey (e.g. **Ctrl+Opt+Shift+H**); likewise Herald Brief (Ctrl+Opt+Shift+B).
+   Hotkey (e.g. **Ctrl+Opt+Shift+H**); likewise Herald Brief (Ctrl+Opt+Shift+B)
+   and, optionally, Show Herald's Last Session (e.g. Ctrl+Opt+Shift+S).
 5. **Mouse button (optional):** Logi Options+ on the Mac can map the gesture (or
    any) button to **Keyboard shortcut** > the Raycast hotkey above.
 
@@ -240,8 +251,10 @@ device. `mac/herald-trigger.sh` also works on Linux with `HERALD_TRIGGER_URL`,
 
 An authenticated Companion client (the main token) or a socket authenticated
 with the trigger token can send `herald_trigger` with `{ "action": "brief" }`
-(plus optional `device` / `pin`); it is answered with the same result as the
+(plus optional `device` / `pin`, and `session` for `show`); it is answered with the same result as the
 HTTP call (errors carry `payload.code`: `bad_request`, `rate_limited`,
 `no_active_device`, `unknown_device`, `unavailable`, or `forbidden` for anything
 other than `herald_trigger` on a trigger-token socket). Companion clients claim
-with `herald_claim_device { pin, deviceId? }`.
+with `herald_claim_device { pin, deviceId? }`, and open a session somewhere with
+`herald_show { session?, device? }` (the "show me" voice command; never changes
+the active device).
