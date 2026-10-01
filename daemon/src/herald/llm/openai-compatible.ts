@@ -212,6 +212,12 @@ export class OpenAiCompatibleProvider implements LlmProvider {
     }
   }
 
+  /** Outage recovery: the brain server accepts TCP connections again. */
+  async healthCheck(): Promise<void> {
+    this.probeOkUntil = 0;
+    await this.ensureReachable();
+  }
+
   async chat(req: LlmChatRequest): Promise<LlmChatResult> {
     if (req.signal.aborted) throw new LlmError('aborted', 'Request aborted');
     await this.ensureReachable();

@@ -146,7 +146,7 @@ describe('HeraldService', () => {
     await svc.start();
     const { messageId } = svc.send('what is companion doing?');
     await waitFor(() => !svc.getState().busy);
-    const kinds = events.filter((e) => e.kind !== 'inbox').map((e) => e.kind);
+    const kinds = events.filter((e) => e.kind !== 'inbox' && e.kind !== 'usage').map((e) => e.kind);
     expect(kinds).toEqual(['busy', 'message_start', 'message_end', 'message_start', 'message_delta', 'message_end', 'busy']);
     const userEnd = events.find((e) => e.kind === 'message_end') as Extract<HeraldEvent, { kind: 'message_end' }>;
     expect(userEnd.message.id).toBe(messageId);
@@ -337,18 +337,19 @@ describe('HeraldService', () => {
     expect(statuses).toContain('deploy it:cancelled');
   });
 
-  it('unreachable brain: error event + spoken fallback, enabled stays true', async () => {
+  it('unreachable brain: fallback answer (no raw error), brain degraded, enabled stays true', async () => {
     const p = scripted([{ throws: new LlmError('unreachable', 'Brain server unreachable at http://spark:8000/v1 (connect ECONNREFUSED)') }]);
     const { svc, events } = make(p, fakeSource([]));
     await svc.start();
     svc.send('status?');
     await waitFor(() => !svc.getState().busy);
-    const err = events.find((e) => e.kind === 'error') as Extract<HeraldEvent, { kind: 'error' }>;
-    expect(err.error).toMatch(/^Brain server unreachable at http:\/\/spark:8000\/v1/);
+    expect(events.find((e) => e.kind === 'error')).toBeUndefined();
     const last = svc.getState().messages.pop()!;
-    expect(last.text).toBe("I can't reach my brain server right now.");
+    expect(last.text).toBe("My brain's offline right now (I can't reach the API), so here's the short version. No sessions are running.");
     expect(last.streaming).toBe(false);
     expect(svc.getState().enabled).toBe(true);
+    expect(svc.getState().brain).toMatchObject({ state: 'degraded', reason: 'unreachable' });
+    expect(events.some((e) => e.kind === 'brain')).toBe(true);
   });
 
   it('reset aborts the in-flight turn, clears conversation, keeps inbox', async () => {

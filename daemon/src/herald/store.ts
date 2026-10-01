@@ -11,6 +11,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import type { HeraldAction, HeraldMessage, HeraldVerbosity } from './protocol';
+import { PersistedUsage, sanitizeUsage } from './usage';
 
 export const MAX_PERSISTED_MESSAGES = 100;
 export const MAX_PERSISTED_ACTIONS = 50;
@@ -27,6 +28,8 @@ export interface PersistedHeraldState {
   cushOpened?: string[];
   /** Reply length setting; absent = 'auto'. */
   verbosity?: HeraldVerbosity;
+  /** API usage meter (day / month totals, budget override, notices given). */
+  usage?: PersistedUsage;
 }
 
 export const VERBOSITY_LEVELS: readonly HeraldVerbosity[] = ['auto', 'brief', 'normal', 'detailed'];
@@ -150,6 +153,7 @@ export function sanitizeState(raw: unknown, now: number): PersistedHeraldState {
     actions,
     ...(cushOpened.length ? { cushOpened } : {}),
     ...(isVerbosity(r.verbosity) && r.verbosity !== 'auto' ? { verbosity: r.verbosity } : {}),
+    ...(sanitizeUsage(r.usage) ? { usage: sanitizeUsage(r.usage) } : {}),
   };
 }
 

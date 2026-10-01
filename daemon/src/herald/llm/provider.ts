@@ -29,6 +29,11 @@ export interface LlmChatRequest {
   system: string;
   messages: LlmTurn[];
   tools: LlmToolSpec[];
+  /**
+   * Prompt caching hint: system + tools are a stable prefix the provider may
+   * cache. Providers without caching ignore it.
+   */
+  cache?: { ttl: '5m' | '1h' };
   /** 'none' forces a text-only answer (used on the final loop iteration). */
   toolChoice: 'auto' | 'none';
   maxTokens: number;
@@ -40,8 +45,13 @@ export interface LlmChatRequest {
 export type LlmStopReason = 'end' | 'tool_calls' | 'max_tokens' | 'refusal' | 'other';
 
 export interface LlmUsage {
+  /** Uncached input tokens (billed at the base input rate). */
   inputTokens?: number;
   outputTokens?: number;
+  /** Input tokens served from the prompt cache (billed at the cache-read rate). */
+  cacheReadInputTokens?: number;
+  /** Input tokens written to the prompt cache (billed at the cache-write rate). */
+  cacheCreationInputTokens?: number;
 }
 
 export interface LlmChatResult {
@@ -58,6 +68,10 @@ export type LlmErrorCode =
   | 'timeout'
   | 'auth'
   | 'rate_limited'
+  /** Out of API credit / billing problem (402, or "credit balance is too low"). */
+  | 'credit'
+  /** The API is overloaded (529). */
+  | 'overloaded'
   | 'bad_request'
   | 'server'
   | 'aborted'
@@ -65,10 +79,13 @@ export type LlmErrorCode =
 
 export class LlmError extends Error {
   readonly code: LlmErrorCode;
-  constructor(code: LlmErrorCode, message: string) {
+  /** HTTP status from the API, when there was one. */
+  readonly status?: number;
+  constructor(code: LlmErrorCode, message: string, status?: number) {
     super(message);
     this.name = 'LlmError';
     this.code = code;
+    if (status !== undefined) this.status = status;
   }
 }
 
@@ -76,4 +93,9 @@ export interface LlmProvider {
   readonly name: string;
   readonly model: string;
   chat(req: LlmChatRequest): Promise<LlmChatResult>;
+  /**
+   * Cheap health check used to recover from an outage without a user turn.
+   * Resolves when the brain answers; rejects with an LlmError otherwise.
+   */
+  healthCheck?(signal: AbortSignal): Promise<void>;
 }

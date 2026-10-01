@@ -203,6 +203,8 @@ const MESSAGES: Record<HeraldTriggerErrorCode, string> = {
     'No active device: open Companion (Herald) in a browser or the app on the device that should respond',
   unavailable: 'Herald voice is not enabled on this daemon',
   unknown_device: 'No connected device has that name or id',
+  untrusted_origin:
+    'Opening the mic remotely is only allowed from your home network, tailnet or this machine (set herald.trigger_public_listen=true to allow it from anywhere)',
 };
 
 /** What a caller asks for: the action, plus the target device for `claim`. */

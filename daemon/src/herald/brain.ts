@@ -35,6 +35,10 @@ export interface TurnInput {
   signal: AbortSignal;
   onText: (delta: string) => void;
   runTool: (name: string, args: Record<string, unknown>) => Promise<ToolOutcome>;
+  /** Prompt caching for the stable prefix (system + tools); omitted = off. */
+  cache?: { ttl: '5m' | '1h' };
+  /** Called after every brain request with its usage (cost accounting survives a failed turn). */
+  onUsage?: (usage: LlmUsage) => void;
 }
 
 export type TurnOutcome = 'ok' | 'tool_limit' | 'malformed' | 'refusal' | 'truncated';
@@ -105,7 +109,12 @@ export async function runTurn(provider: LlmProvider, input: TurnInput): Promise<
       text: `${input.snapshot}${input.turnNote ? `\n${input.turnNote}` : ''}\n\n${input.userText}`,
     },
   ];
-  const usage = { inputTokens: 0, outputTokens: 0 };
+  const usage = {
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheReadInputTokens: 0,
+    cacheCreationInputTokens: 0,
+  };
   const toolCallsMade: string[] = [];
   let text = '';
   let firstTokenMs: number | undefined;
@@ -172,11 +181,19 @@ export async function runTurn(provider: LlmProvider, input: TurnInput): Promise<
       tools: TOOL_SPECS,
       toolChoice: finalRound ? 'none' : 'auto',
       maxTokens: input.maxTokens,
+      ...(input.cache ? { cache: input.cache } : {}),
       signal: input.signal,
       onText: hold,
     });
     usage.inputTokens += res.usage.inputTokens || 0;
     usage.outputTokens += res.usage.outputTokens || 0;
+    usage.cacheReadInputTokens += res.usage.cacheReadInputTokens || 0;
+    usage.cacheCreationInputTokens += res.usage.cacheCreationInputTokens || 0;
+    try {
+      input.onUsage?.(res.usage);
+    } catch (err) {
+      console.error('Herald: usage accounting failed:', err);
+    }
     if (held) {
       if (res.toolCalls.length > 0 && !finalRound && res.stopReason !== 'refusal') {
         droppedNarration.push(held.trim());

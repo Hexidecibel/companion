@@ -104,6 +104,14 @@ export function registerHeraldHandlers(ctx: HandlerContext): Record<string, Mess
       );
     },
 
+    /** Monthly API cap: `{monthlyUsd: number | null}`; omit monthlyUsd to go back to config. */
+    herald_set_budget(client, payload, requestId) {
+      return reply(client, 'herald_set_budget', requestId, () => {
+        const p = (payload || {}) as { monthlyUsd?: unknown };
+        return ctx.herald!.setBudget('monthlyUsd' in p ? p.monthlyUsd : undefined);
+      });
+    },
+
     herald_confirm(client, payload, requestId) {
       const p = (payload || {}) as { actionId?: unknown; decision?: unknown };
       return reply(client, 'herald_confirm', requestId, () =>

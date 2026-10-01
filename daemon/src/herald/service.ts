@@ -7,6 +7,7 @@
 import { randomUUID } from 'crypto';
 import type { AuditEntry, AuditOrigin } from '../audit-log';
 import type {
+  HeraldBrainStatus,
   HeraldDevicesSnapshot,
   HeraldAction,
   HeraldEvent,
@@ -15,6 +16,7 @@ import type {
   HeraldIntent,
   HeraldMessage,
   HeraldState,
+  HeraldUsageSummary,
   HeraldVerbosity,
 } from './protocol';
 import { ResolvedHeraldConfig } from './config';
@@ -39,6 +41,17 @@ import type { CushCommand } from './knowledge/cush';
 import { sessionsMentioned } from './resolve';
 import { clip, firstSentence, formatAgo, oneLine, plainToolAction } from './text';
 import { isLikelyEcho } from './voice/echo-match';
+import { BudgetNotice, formatUsd, nextMonthStart, spokenUsd, usageAnswer, UsageMeter } from './usage';
+import {
+  classifyFallback,
+  fallbackReply,
+  isUsageQuestion,
+  outageReason,
+  REASON_TEXT,
+  recoveryDelayMs,
+} from './fallback';
+import type { HeraldBrainDownReason } from './protocol';
+import type { LlmUsage } from './llm/provider';
 
 export const MAX_USER_TEXT = 4000;
 /** A voice message is checked against Herald's replies started this recently. */
@@ -139,6 +152,25 @@ export class HeraldService {
   private activityTimer: NodeJS.Timeout | null = null;
   private pollInFlight: Promise<void> | null = null;
   private lastSnapshots: SessionSnapshot[] = [];
+
+  /** API spend meter (persisted with the rest of Herald's state). */
+  private usage: UsageMeter;
+  /** Budget notice to post once the current turn's reply is out. */
+  private pendingNotice: BudgetNotice | null = null;
+  /** Current LLM outage (null = brain healthy). Budget exhaustion is derived, not stored. */
+  private outage: {
+    reason: HeraldBrainDownReason;
+    since: number;
+    failures: number;
+    retryAt: number;
+    announced: boolean;
+  } | null = null;
+  private recoveryTimer: NodeJS.Timeout | null = null;
+  private recoveryAbort: AbortController | null = null;
+  /** Last brain status sent to clients (to emit only on change). */
+  private lastBrainKey = 'ok';
+  /** The budget's "spent" announcement was made for this outage of the budget. */
+  private budgetAnnounced = false;
   private statusSinceMap = new Map<string, { status: string; since: number | null }>();
 
   constructor(deps: HeraldServiceDeps) {
@@ -152,6 +184,7 @@ export class HeraldService {
     this.now = deps.now || Date.now;
     this.pollIntervalMs = deps.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
     this.systemPrompt = buildSystemPrompt(this.cfg.displayName, deps.selfInfo);
+    this.usage = this.newUsageMeter(undefined);
     this.toolbox =
       deps.toolbox === null
         ? null
@@ -191,6 +224,8 @@ export class HeraldService {
     this.actions.loadPersisted(persisted.actions);
     this.toolbox?.loadOpened(persisted.cushOpened);
     this.verbosity = persisted.verbosity ?? 'auto';
+    this.usage = this.newUsageMeter(persisted.usage);
+    this.lastBrainKey = this.brainKey(this.brainStatus());
     if (persisted.actions.some((a) => a.status === 'expired' && a.error?.includes('restarted')))
       this.persist();
     const brain = this.enabled
@@ -218,6 +253,9 @@ export class HeraldService {
     this.disposed = true;
     if (this.pollTimer) clearInterval(this.pollTimer);
     if (this.activityTimer) clearTimeout(this.activityTimer);
+    if (this.recoveryTimer) clearTimeout(this.recoveryTimer);
+    this.recoveryTimer = null;
+    this.recoveryAbort?.abort();
     this.pollTimer = null;
     this.activityTimer = null;
     this.turnAbort?.abort();
@@ -239,6 +277,8 @@ export class HeraldService {
       inbox: this.inbox.list(),
       actions: this.actions.list(),
       verbosity: this.verbosity,
+      usage: this.usage.summary(),
+      brain: this.brainStatus(),
       ...this.deviceFields(),
     };
   }
@@ -290,7 +330,212 @@ export class HeraldService {
       actions: this.actions.list().slice(0, MAX_PERSISTED_ACTIONS),
       cushOpened: this.toolbox?.openedNames() ?? [],
       ...(this.verbosity !== 'auto' ? { verbosity: this.verbosity } : {}),
+      usage: this.usage.toPersisted(),
     };
+  }
+
+  // ---------------------------------------------------------------- usage + budget
+
+  private newUsageMeter(persisted: PersistedHeraldState['usage']): UsageMeter {
+    return new UsageMeter(persisted, {
+      model: this.cfg.model,
+      now: this.now,
+      pricing: this.cfg.pricing,
+      cacheTtl: this.cfg.promptCache?.ttl,
+      configBudgetUsd: this.cfg.monthlyBudgetUsd,
+    });
+  }
+
+  getUsage(): HeraldUsageSummary {
+    return this.usage.summary();
+  }
+
+  /**
+   * Monthly cap from the app: a number (USD), null for no cap, undefined to go
+   * back to herald.monthly_budget_usd. Raising it past the spend lifts the
+   * fallback at once.
+   */
+  setBudget(raw: unknown): HeraldUsageSummary {
+    let v: number | null | undefined;
+    if (raw === undefined) v = undefined;
+    else if (raw === null) v = null;
+    else if (typeof raw === 'number' && Number.isFinite(raw) && raw > 0 && raw <= 10_000)
+      v = Math.round(raw * 100) / 100;
+    else throw new HeraldRequestError('monthlyUsd must be a positive number of dollars, or null');
+    this.usage.setBudget(v);
+    if (!this.usage.overBudget()) this.budgetAnnounced = false;
+    console.log(
+      `Herald: monthly budget ${v === undefined ? 'reset to config' : v === null ? 'removed' : `set to ${formatUsd(v)}`}`
+    );
+    this.persist();
+    this.emit({ kind: 'usage', usage: this.usage.summary() });
+    this.emitBrainIfChanged();
+    return this.usage.summary();
+  }
+
+  /** Account one brain request; queue a budget notice for after the reply. */
+  private onUsage(u: LlmUsage): void {
+    this.usage.recordRequest(u);
+    const notice = this.usage.takeNotice();
+    if (notice) this.pendingNotice = notice;
+    this.persist();
+  }
+
+  /** Post a due budget notice (after the reply that crossed the line). */
+  private flushBudgetNotice(): void {
+    const notice = this.pendingNotice;
+    this.pendingNotice = null;
+    const usage = this.usage.summary();
+    if (!notice) {
+      this.emit({ kind: 'usage', usage });
+      return;
+    }
+    const cap = usage.budgetUsd ?? 0;
+    const spent = usage.month.costUsd;
+    let text: string;
+    if (notice === 'budget_warning') {
+      text = `Heads up: I've used ${Math.round((spent / cap) * 100)}% of this month's ${spokenUsd(cap)} budget. At 100% I switch to offline answers.`;
+    } else {
+      this.budgetAnnounced = true;
+      const resets = new Date(nextMonthStart(this.now())).toLocaleDateString('en-US', {
+        month: 'long',
+        day: 'numeric',
+      });
+      text = `That's this month's ${spokenUsd(cap)} budget used up. Until ${resets}, or until you raise the cap in my menu, I'll answer from what I can see without the AI.`;
+    }
+    console.log(`Herald: ${notice} (${formatUsd(spent)} of ${formatUsd(cap)} this month)`);
+    this.emit({ kind: 'usage', usage, notice });
+    this.postMessage('herald', text);
+    this.emitBrainIfChanged();
+  }
+
+  // ---------------------------------------------------------------- brain health
+
+  brainStatus(): HeraldBrainStatus {
+    if (this.usage.overBudget()) {
+      return {
+        state: 'degraded',
+        reason: 'budget',
+        detail: REASON_TEXT.budget,
+        since: this.outage?.since,
+      };
+    }
+    if (!this.outage) return { state: 'ok' };
+    return {
+      state: 'degraded',
+      reason: this.outage.reason,
+      detail: REASON_TEXT[this.outage.reason],
+      since: this.outage.since,
+      retryAt: this.outage.retryAt,
+    };
+  }
+
+  private brainKey(b: HeraldBrainStatus): string {
+    return b.state === 'ok' ? 'ok' : `${b.reason}:${b.retryAt ?? ''}`;
+  }
+
+  private emitBrainIfChanged(): void {
+    const brain = this.brainStatus();
+    const key = this.brainKey(brain);
+    if (key === this.lastBrainKey) return;
+    this.lastBrainKey = key;
+    this.emit({ kind: 'brain', brain });
+  }
+
+  /** Why the brain should not be called right now, or null to call it. */
+  private skipBrainReason(): HeraldBrainDownReason | null {
+    if (this.usage.overBudget()) return 'budget';
+    if (this.outage && this.now() < this.outage.retryAt) return this.outage.reason;
+    return null;
+  }
+
+  /** The LLM failed in a way that means "brain down": enter / extend the outage. */
+  private noteOutage(reason: HeraldBrainDownReason): void {
+    const now = this.now();
+    if (!this.outage || this.outage.reason !== reason) {
+      const announced = this.outage?.announced ?? false;
+      this.outage = { reason, since: this.outage?.since ?? now, failures: 0, retryAt: now, announced };
+      console.log(`Herald: brain offline (${REASON_TEXT[reason]}); answering from the fallback`);
+    }
+    this.outage.failures += 1;
+    this.outage.retryAt = now + recoveryDelayMs(reason, this.outage.failures);
+    this.scheduleRecovery();
+    this.emitBrainIfChanged();
+  }
+
+  private noteBrainOk(): void {
+    if (!this.outage) return;
+    console.log(
+      `Herald: brain back online after ${Math.round((this.now() - this.outage.since) / 1000)}s`
+    );
+    this.outage = null;
+    if (this.recoveryTimer) clearTimeout(this.recoveryTimer);
+    this.recoveryTimer = null;
+    this.emitBrainIfChanged();
+  }
+
+  /** Background health check at retryAt, so the brain recovers without a user turn. */
+  private scheduleRecovery(): void {
+    if (this.recoveryTimer) clearTimeout(this.recoveryTimer);
+    this.recoveryTimer = null;
+    const provider = this.provider;
+    if (!this.outage || this.disposed || !provider?.healthCheck) return;
+    const delay = Math.max(1000, this.outage.retryAt - this.now());
+    this.recoveryTimer = setTimeout(() => {
+      this.recoveryTimer = null;
+      if (!this.outage || this.disposed || this.busy) {
+        if (this.outage && !this.disposed) this.scheduleRecovery();
+        return;
+      }
+      const abort = new AbortController();
+      this.recoveryAbort = abort;
+      const timer = setTimeout(() => abort.abort(), 15_000);
+      timer.unref?.();
+      provider.healthCheck!(abort.signal).then(
+        () => {
+          clearTimeout(timer);
+          this.noteBrainOk();
+        },
+        (err) => {
+          clearTimeout(timer);
+          if (this.disposed || !this.outage) return;
+          const reason = outageReason(err) ?? this.outage.reason;
+          this.noteOutage(reason);
+        }
+      );
+    }, delay);
+    this.recoveryTimer.unref?.();
+  }
+
+  /**
+   * Answer without the LLM (brain down or budget spent): one deterministic
+   * reply. Says what is wrong once per outage.
+   */
+  private answerFromFallback(
+    text: string,
+    intent: HeraldIntent | undefined,
+    reason: HeraldBrainDownReason,
+    briefing: HeraldInboxItem[] = []
+  ): string {
+    const kind = classifyFallback(text, intent);
+    let announce: boolean;
+    if (reason === 'budget') {
+      announce = !this.budgetAnnounced;
+      this.budgetAnnounced = true;
+    } else {
+      announce = !this.outage?.announced;
+      if (this.outage) this.outage.announced = true;
+    }
+    const items = kind === 'brief' && intent !== 'brief' ? this.unheardForBriefing() : briefing;
+    if (kind === 'brief' && items.length && intent !== 'brief') this.markHeard(items.map((i) => i.id));
+    return fallbackReply({
+      kind,
+      reason,
+      announce,
+      snapshots: this.lastSnapshots,
+      briefing: items,
+      usage: kind === 'usage' ? usageAnswer(this.usage.summary()) : undefined,
+    });
   }
 
   private getSource(serverId: string): SessionSource | null {
@@ -354,6 +599,8 @@ export class HeraldService {
       try {
         const snaps = await this.listAll();
         this.applyInbox(snaps);
+        // Month rollover / cap changes lift a budget fallback without a turn.
+        this.emitBrainIfChanged();
       } catch (err) {
         console.error('Herald: inbox poll failed:', err);
       } finally {
@@ -458,6 +705,13 @@ export class HeraldService {
         ? opts.intent
         : undefined;
 
+    // "How much have you cost me?": answered from the meter, free and exact.
+    if (!intent && isUsageQuestion(text)) {
+      const userMsg = this.postMessage('user', text);
+      this.postMessage('herald', usageAnswer(this.usage.summary()));
+      return { messageId: userMsg.id };
+    }
+
     // "Brief me": only what the user has not been told yet. Nothing new is
     // answered deterministically, without a brain turn.
     let briefing: HeraldInboxItem[] | undefined;
@@ -470,6 +724,15 @@ export class HeraldService {
       }
       // They are about to be told: heard from now on (the chips dim at once).
       this.markHeard(briefing.map((i) => i.id));
+    }
+
+    // Brain down (inside its retry backoff) or budget spent: answer from data.
+    const skip = this.skipBrainReason();
+    if (skip) {
+      const userMsg = this.postMessage('user', text, intent ? { intent } : {});
+      this.emitBrainIfChanged();
+      this.postMessage('herald', this.answerFromFallback(text, intent, skip, briefing));
+      return { messageId: userMsg.id };
     }
 
     this.setBusy(true);
@@ -547,6 +810,7 @@ export class HeraldService {
     let verbositySet: HeraldVerbosity | null = null;
     const started = Date.now();
     let errorText: string | null = null;
+    let outage: HeraldBrainDownReason | null = null;
     let aborted = false;
 
     try {
@@ -572,6 +836,8 @@ export class HeraldService {
         systemPrompt: this.systemPrompt,
         maxTokens: this.cfg.maxTokens,
         signal: abort.signal,
+        ...(this.cfg.promptCache ? { cache: this.cfg.promptCache } : {}),
+        onUsage: (u) => this.onUsage(u),
         onText,
         runTool: async (name, args) => {
           const out = await executeTool(name, args, env, toolState);
@@ -586,12 +852,15 @@ export class HeraldService {
       });
       flush();
       reply.text = result.text;
+      this.usage.recordTurn();
+      this.noteBrainOk();
       console.log(
         `Herald: turn done provider=${provider.name} model=${provider.model} outcome=${result.outcome} ` +
           `mode=${turn.mode}${turn.intent ? ` intent=${turn.intent}` : ''} verbosity=${this.verbosity} ` +
           `ttft=${result.firstTokenMs !== undefined ? `${result.firstTokenMs}ms` : 'n/a'} total=${Date.now() - started}ms ` +
           `iterations=${result.iterations} tools=[${result.toolCalls.join(',')}] ` +
-          `tokens in=${result.usage.inputTokens} out=${result.usage.outputTokens}` +
+          `tokens in=${result.usage.inputTokens} out=${result.usage.outputTokens} ` +
+          `cache_read=${result.usage.cacheReadInputTokens} cache_write=${result.usage.cacheCreationInputTokens}` +
           (result.droppedNarration.length
             ? ` dropped_narration=${JSON.stringify(result.droppedNarration)}`
             : '')
@@ -602,10 +871,12 @@ export class HeraldService {
         // Our own turn timer fired (turn still current) vs. a reset/shutdown.
         if (!this.disposed && this.turnAbort === abort) {
           errorText = `Brain took longer than ${Math.round(TURN_TIMEOUT_MS / 1000)}s to answer; gave up.`;
+          outage = 'timeout';
         } else {
           aborted = true;
         }
       } else {
+        outage = outageReason(err);
         errorText =
           err instanceof LlmError
             ? err.message
@@ -628,7 +899,12 @@ export class HeraldService {
       return;
     }
 
-    if (errorText) {
+    if (errorText && outage) {
+      // Brain down: a deterministic answer instead of an error (fallback brain).
+      this.noteOutage(outage);
+      const fb = this.answerFromFallback(userText, turn.intent, outage, turn.briefing ?? []);
+      reply.text = reply.text.trim() ? `${reply.text.trim()} ${fb}` : fb;
+    } else if (errorText) {
       this.emit({ kind: 'error', error: errorText });
       const note = errorText.startsWith('Brain server unreachable')
         ? "I can't reach my brain server right now."
@@ -668,6 +944,7 @@ export class HeraldService {
       this.persist();
     }
     this.setBusy(false);
+    this.flushBudgetNotice();
   }
 
   /** Unheard inbox items for "brief me", most urgent first, newest first within a rank. */

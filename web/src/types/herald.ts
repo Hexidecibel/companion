@@ -50,6 +50,64 @@ export interface HeraldState {
   activeDevice?: HeraldActiveDevice | null;
   /** Connected Herald devices (those that reported presence). */
   devices?: HeraldDeviceInfo[];
+  /** API spend (today / this month) and the monthly budget. Absent on older daemons. */
+  usage?: HeraldUsageSummary;
+  /** Brain health: 'degraded' = answering from the fallback (no LLM). Absent = ok. */
+  brain?: HeraldBrainStatus;
+}
+/** Token and dollar totals for one period. */
+export interface HeraldUsageBucket {
+  /** Conversation turns that reached the brain. */
+  turns: number;
+  /** Brain requests (a turn with tool calls makes several). */
+  requests: number;
+  /** Uncached input tokens. */
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  costUsd: number;
+}
+export interface HeraldUsageSummary {
+  model: string;
+  /** False when the model has no price list (a local server): costs read 0. */
+  priced: boolean;
+  today: HeraldUsageBucket;
+  month: HeraldUsageBucket;
+  /** Local calendar month of `month`, YYYY-MM. */
+  monthKey: string;
+  /** Monthly cap in USD, or null for none. */
+  budgetUsd: number | null;
+  /** Where the cap comes from: set in the app, or herald.monthly_budget_usd. */
+  budgetSource?: 'app' | 'config';
+  overBudget: boolean;
+  /** Epoch ms of the next month start (the budget resets then). */
+  resetsAt: number;
+}
+/** Why the brain is unavailable (plain-word text is in `detail`). */
+export type HeraldBrainDownReason =
+  | 'budget'
+  | 'credit'
+  | 'auth'
+  | 'rate_limited'
+  | 'unreachable'
+  | 'timeout'
+  | 'server'
+  | 'bad_request'
+  | 'other';
+export interface HeraldBrainStatus {
+  state: 'ok' | 'degraded';
+  reason?: HeraldBrainDownReason;
+  /** Plain words for the reason, e.g. "out of API credit". */
+  detail?: string;
+  /** Epoch ms the outage started. */
+  since?: number;
+  /** Epoch ms of the next automatic recovery attempt (absent for 'budget'). */
+  retryAt?: number;
+}
+/** herald_set_budget payload: monthly cap in USD; null = no cap; omitted = back to config. Answered with HeraldUsageSummary. */
+export interface HeraldSetBudgetRequest {
+  monthlyUsd?: number | null;
 }
 export type HeraldEvent =
   | { kind: 'state'; state: HeraldState }
@@ -61,7 +119,11 @@ export type HeraldEvent =
   | { kind: 'busy'; busy: boolean }
   | { kind: 'settings'; verbosity: HeraldVerbosity }
   /** Remote trigger, sent ONLY to the active device (see HeraldTriggerAction). */
-  | { kind: 'trigger'; action: HeraldTriggerAction; id: string }
+  | { kind: 'trigger'; action: HeraldTriggerAction; id: string; allowListen?: boolean }
+  /** Usage totals changed; `notice` = a one-shot budget warning to announce (tone). */
+  | { kind: 'usage'; usage: HeraldUsageSummary; notice?: 'budget_warning' | 'budget_exceeded' }
+  /** The brain went down (fallback answers) or came back. */
+  | { kind: 'brain'; brain: HeraldBrainStatus }
   /** The active device or the device list changed (broadcast). */
   | { kind: 'devices'; activeDevice: HeraldActiveDevice | null; devices: HeraldDeviceInfo[] }
   | { kind: 'error'; error: string };
@@ -80,7 +142,8 @@ export interface HeraldSetVerbosityRequest {
  *   listen - open the mic, capture one utterance (ends on VAD), send it as a voice turn
  *   stop   - stop speaking and cancel any capture
  *   repeat - say the last reply again
- *   toggle - Herald speaking: stop; otherwise listen (the one-button default)
+ *   toggle - Herald speaking: stop; otherwise listen (the one-button default).
+ *            From an untrusted origin the event carries allowListen=false: stop/cancel only.
  *   claim  - make `device` (a label or id) the active device; pinned unless pin=false.
  *            Any action may name a `device`: it is made active first, then acts.
  */
@@ -108,7 +171,9 @@ export type HeraldTriggerErrorCode =
   | 'rate_limited'
   | 'no_active_device'
   | 'unknown_device'
-  | 'unavailable';
+  | 'unavailable'
+  /** A mic-opening action from outside the home network / tailnet (see herald.trigger_public_listen). */
+  | 'untrusted_origin';
 
 // --- voice protocol (mirrored byte-for-byte in web/src/types/herald.ts; a web test enforces it) ---
 /**
