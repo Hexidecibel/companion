@@ -677,8 +677,12 @@ export class VoiceAutomation implements VadEvents {
       if (this.gate?.confirmed) this.deps.input.endExternal();
       this.gate = null;
     }
-    else if (cap === 'wake') this.dropWakeStream();
-    else if (cap === 'command') {
+    else if (cap === 'wake') {
+      // The hub already heard the wake word: the VAD just scored the rest low
+      // (a quiet or far mic). Never throw the request away; transcribe it.
+      if (this.wake?.woke) void this.finishWakeStream();
+      else this.dropWakeStream();
+    } else if (cap === 'command') {
       this.deps.input.endExternal();
       this.startAwait(); // still waiting for the actual command
     } else if (cap === 'listen') {

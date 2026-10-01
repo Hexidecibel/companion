@@ -160,6 +160,11 @@ fn create(app: &AppHandle) -> Result<WebviewWindow, String> {
         .visible(false)
         // The web bundle renders the overlay page instead of the app.
         .initialization_script("window.__HERALD_OVERLAY__ = true;");
+    // Windows: every webview of the app shares one WebView2 environment, which
+    // refuses a second webview with different browser arguments. Same as the
+    // main window's (tauri.conf.json).
+    #[cfg(windows)]
+    let builder = builder.additional_browser_args(crate::WEBVIEW2_ARGS);
     let w = builder.build().map_err(|e| e.to_string())?;
     if let Some(pos) = load_pos(app).or_else(|| default_pos(app)) {
         let _ = w.set_position(pos);

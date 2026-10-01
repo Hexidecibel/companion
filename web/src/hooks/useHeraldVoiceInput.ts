@@ -57,8 +57,14 @@ export interface VoiceInputPrefs {
   sensitivity: InterruptSensitivity;
   /** "Hey Jarvis" wake word (always listening while on). Per device. */
   handsFree: boolean;
-  /** Keep hands-free on while the tab is hidden. */
+  /**
+   * Keep hands-free on while the tab / window is hidden. Default off in a
+   * browser, ON in the desktop app: it lives in the tray, and a window that is
+   * closed, minimised or covered reports itself hidden (WKWebView / WebView2).
+   */
   handsFreeInBackground: boolean;
+  /** `explicit`: the user chose `handsFreeInBackground`; `auto`: the platform default. */
+  handsFreeInBackgroundOrigin: 'explicit' | 'auto';
   /**
    * With a Bluetooth headset as the default mic, listen with the built-in (or
    * another non-Bluetooth) mic instead, so the headphones stay in music quality
@@ -85,6 +91,7 @@ export const DEFAULT_INPUT_PREFS: VoiceInputPrefs = {
   sensitivity: 'normal',
   handsFree: false,
   handsFreeInBackground: false,
+  handsFreeInBackgroundOrigin: 'auto',
   builtInMicWithBluetooth: true,
   followUp: null,
   followUpMs: FOLLOW_UP_MS,
@@ -96,11 +103,18 @@ export function autoFollowUp(headphones: boolean | null, profile: ProfileId | nu
   return headphones === true;
 }
 
+/** Hands-free while hidden when the user never chose: on in the desktop app only. */
+export function defaultHandsFreeInBackground(): boolean {
+  return nativePlatform() === 'desktop';
+}
+
 export function loadInputPrefs(): VoiceInputPrefs {
   try {
     const raw = localStorage.getItem(PREFS_KEY);
-    if (!raw) return DEFAULT_INPUT_PREFS;
-    const p = JSON.parse(raw) as Partial<VoiceInputPrefs> & { interruptExplicit?: unknown };
+    if (!raw) return { ...DEFAULT_INPUT_PREFS, handsFreeInBackground: defaultHandsFreeInBackground() };
+    const p = JSON.parse(raw) as Partial<VoiceInputPrefs> & { interruptExplicit?: unknown; handsFreeInBackgroundExplicit?: unknown };
+    // Older builds always saved `false` without the user choosing: only an explicit choice sticks.
+    const bgExplicit = p.handsFreeInBackgroundExplicit === true && typeof p.handsFreeInBackground === 'boolean';
     const bool = (v: unknown, d: boolean) => (typeof v === 'boolean' ? v : d);
     const hasInterrupt = typeof p.interrupt === 'boolean';
     return {
@@ -112,21 +126,23 @@ export function loadInputPrefs(): VoiceInputPrefs {
       interruptOrigin: hasInterrupt ? (p.interruptExplicit === true ? 'explicit' : 'saved') : 'auto',
       sensitivity: p.sensitivity === 'low' || p.sensitivity === 'high' ? p.sensitivity : 'normal',
       handsFree: bool(p.handsFree, false),
-      handsFreeInBackground: bool(p.handsFreeInBackground, false),
+      handsFreeInBackground: bgExplicit ? !!p.handsFreeInBackground : defaultHandsFreeInBackground(),
+      handsFreeInBackgroundOrigin: bgExplicit ? 'explicit' : 'auto',
       builtInMicWithBluetooth: bool(p.builtInMicWithBluetooth, true),
       followUp: typeof p.followUp === 'boolean' ? p.followUp : null,
       followUpMs: typeof p.followUpMs === 'number' && p.followUpMs >= 2000 && p.followUpMs <= 15000 ? p.followUpMs : FOLLOW_UP_MS,
     };
   } catch {
-    return DEFAULT_INPUT_PREFS;
+    return { ...DEFAULT_INPUT_PREFS, handsFreeInBackground: defaultHandsFreeInBackground() };
   }
 }
 
 function saveInputPrefs(p: VoiceInputPrefs): void {
   try {
-    const { interruptOrigin, interrupt, ...rest } = p;
+    const { interruptOrigin, interrupt, handsFreeInBackgroundOrigin, handsFreeInBackground, ...rest } = p;
     // `auto` is not saved: the default can still follow the headphones later.
-    const stored = interruptOrigin === 'auto' ? rest : { ...rest, interrupt, interruptExplicit: interruptOrigin === 'explicit' };
+    const base = interruptOrigin === 'auto' ? rest : { ...rest, interrupt, interruptExplicit: interruptOrigin === 'explicit' };
+    const stored = handsFreeInBackgroundOrigin === 'explicit' ? { ...base, handsFreeInBackground, handsFreeInBackgroundExplicit: true } : base;
     localStorage.setItem(PREFS_KEY, JSON.stringify(stored));
   } catch {
     // storage unavailable
@@ -216,6 +232,14 @@ const DELIBERATE_SOURCES: ReadonlySet<VoiceInputSource> = new Set(['button', 'sp
 export interface VoiceInputHost {
   getTransport: () => HeraldTransport | null;
   connected: boolean;
+  /**
+   * Which hub `getTransport()` talks to. The host can switch between two hubs
+   * that are both connected (the preferred one connects after another), and
+   * `connected` stays true across the switch: everything subscribed to the
+   * transport must re-run when this changes, or wake events from the new hub
+   * never arrive (the wake stream is then discarded).
+   */
+  hostId?: string | null;
   serverStatus: HeraldVoiceStatus | null;
   /** Barge-in: stop Herald speaking. */
   stopSpeech: () => void;
@@ -497,6 +521,7 @@ export function useHeraldVoiceInput(host: VoiceInputHost): HeraldVoiceInput {
   const pausedBy = host.pausedBy ?? null;
   const wantHandsFree = prefs.handsFree && handsFreeAvailable && (visible || prefs.handsFreeInBackground) && !pausedBy;
   const [owner, setOwner] = useState(false);
+  const hostId = host.hostId ?? null;
   useEffect(() => {
     const t = hostRef.current.getTransport();
     if (!t || !host.connected) {
@@ -512,8 +537,14 @@ export function useHeraldVoiceInput(host: VoiceInputHost): HeraldVoiceInput {
       setOwner(false);
       t.request('herald_handsfree', { on: false }, 5000).catch(() => {});
     }
-    return () => { cancelled = true; };
-  }, [wantHandsFree, host.connected]);
+    return () => {
+      cancelled = true;
+      // Moving to another hub: the old one must not keep this device as its hands-free one.
+      if (wantHandsFree && hostRef.current.getTransport() !== t && t.isConnected()) {
+        t.request('herald_handsfree', { on: false }, 5000).catch(() => {});
+      }
+    };
+  }, [wantHandsFree, host.connected, hostId]);
   const handsFreeActive = wantHandsFree && owner;
 
   // Per-client daemon events -> automation; revocation turns hands-free off here.
@@ -529,7 +560,7 @@ export function useHeraldVoiceInput(host: VoiceInputHost): HeraldVoiceInput {
       }
       automation.onVoiceEvent(ev);
     });
-  }, [host.connected, automation, controller]);
+  }, [host.connected, hostId, automation, controller]);
 
   useEffect(() => {
     automation.update({
@@ -694,7 +725,11 @@ export function useHeraldVoiceInput(host: VoiceInputHost): HeraldVoiceInput {
   }, [controller]);
 
   const setPref = useCallback(<K extends keyof VoiceInputPrefs>(key: K, value: VoiceInputPrefs[K]) => {
-    setPrefs((p) => (key === 'interrupt' ? { ...p, interrupt: value as boolean, interruptOrigin: 'explicit' } : { ...p, [key]: value }));
+    setPrefs((p) => {
+      if (key === 'interrupt') return { ...p, interrupt: value as boolean, interruptOrigin: 'explicit' };
+      if (key === 'handsFreeInBackground') return { ...p, handsFreeInBackground: value as boolean, handsFreeInBackgroundOrigin: 'explicit' };
+      return { ...p, [key]: value };
+    });
   }, []);
   const resumeAutoSend = useCallback(() => breaker.resume(), [breaker]);
   const effectivePrefs = useMemo(() => ({ ...prefs, interrupt }), [prefs, interrupt]);

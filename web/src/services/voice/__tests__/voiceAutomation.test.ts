@@ -248,6 +248,30 @@ describe('VoiceAutomation (hands-free wake word)', () => {
     expect(input.state.phase).toBe('idle');
   });
 
+  it('a VAD misfire after the wake word still transcribes (the hub heard it; quiet or far mic)', async () => {
+    const { vad, auto, onTranscript, requests } = setup();
+    auto.update(hf);
+    await vi.advanceTimersByTimeAsync(0);
+    vad.events!.onSpeechStart();
+    for (let i = 0; i < 8; i++) vad.events!.onFrame(frame(), 0.9);
+    auto.onVoiceEvent({ kind: 'wake', streamId: streamId(requests), score: 0.95, model: 'hey_jarvis' });
+    vad.events!.onMisfire();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(requests.find((r) => r.type === 'herald_voice_stream_end')!.payload.action).toBe('transcribe');
+    expect(onTranscript).toHaveBeenCalledWith('Anything for me?', 'wake');
+  });
+
+  it('a VAD misfire without the wake word is still discarded', async () => {
+    const { vad, auto, onTranscript, requests } = setup();
+    auto.update(hf);
+    await vi.advanceTimersByTimeAsync(0);
+    vad.events!.onSpeechStart();
+    vad.events!.onMisfire();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(requests.find((r) => r.type === 'herald_voice_stream_end')!.payload.action).toBe('discard');
+    expect(onTranscript).not.toHaveBeenCalled();
+  });
+
   it('speech without the wake word is discarded, never transcribed', async () => {
     const { vad, auto, onTranscript, requests } = setup();
     auto.update(hf);

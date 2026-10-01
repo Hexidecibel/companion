@@ -7,6 +7,29 @@ mod overlay;
 #[cfg(desktop)]
 mod passthrough;
 
+/// WebView2 (Windows) browser arguments for every Companion webview: wry's
+/// defaults plus no occlusion / background throttling, so Herald hands-free
+/// keeps listening while the window is covered, minimised or in the tray. Must
+/// equal `additionalBrowserArgs` in tauri.conf.json (the main window; tested).
+#[cfg(desktop)]
+#[allow(dead_code)]
+pub(crate) const WEBVIEW2_ARGS: &str = "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection,CalculateNativeWinOcclusion --disable-background-timer-throttling --disable-renderer-backgrounding";
+
+#[cfg(all(test, desktop))]
+mod webview_args_tests {
+    #[test]
+    fn main_window_and_overlay_share_webview2_args() {
+        let conf: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        let main = &conf["app"]["windows"][0];
+        assert_eq!(
+            main["additionalBrowserArgs"].as_str(),
+            Some(super::WEBVIEW2_ARGS)
+        );
+        assert_eq!(main["backgroundThrottling"].as_str(), Some("disabled"));
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let mut builder = tauri::Builder::default()

@@ -457,6 +457,7 @@ export function HeraldProvider({ children }: { children: ReactNode }) {
     pausedBy: controlledElsewhere ? activeDevice?.label ?? 'another device' : null,
     getTransport: herald.getTransport,
     connected: herald.connected,
+    hostId,
     serverStatus: voice.serverStatus,
     stopSpeech: voice.stop,
     speaking: voice.supported && voice.speaking,
