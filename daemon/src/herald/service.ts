@@ -18,6 +18,7 @@ import type {
   HeraldState,
   HeraldUsageSummary,
   HeraldVerbosity,
+  HeraldPronunciation,
 } from './protocol';
 import { ResolvedHeraldConfig } from './config';
 import { ActionManager } from './actions';
@@ -41,6 +42,8 @@ import type { CushCommand } from './knowledge/cush';
 import { sessionsMentioned } from './resolve';
 import { clip, firstSentence, formatAgo, oneLine, plainToolAction } from './text';
 import { isLikelyEcho } from './voice/echo-match';
+import { sanitizePronunciations } from './pronunciations';
+import { recentVersions } from './voice/versions';
 import { BudgetNotice, formatUsd, nextMonthStart, spokenUsd, usageAnswer, UsageMeter } from './usage';
 import {
   classifyFallback,
@@ -144,6 +147,8 @@ export class HeraldService {
   private toolbox: HeraldToolbox | null;
   private busy = false;
   private verbosity: HeraldVerbosity = 'auto';
+  /** The user's pronunciations for the voice (the web applies them). */
+  private pronunciations: HeraldPronunciation[] = [];
   private turnAbort: AbortController | null = null;
   private started = false;
   private disposed = false;
@@ -224,6 +229,7 @@ export class HeraldService {
     this.actions.loadPersisted(persisted.actions);
     this.toolbox?.loadOpened(persisted.cushOpened);
     this.verbosity = persisted.verbosity ?? 'auto';
+    this.pronunciations = persisted.pronunciations ?? [];
     this.usage = this.newUsageMeter(persisted.usage);
     this.lastBrainKey = this.brainKey(this.brainStatus());
     if (persisted.actions.some((a) => a.status === 'expired' && a.error?.includes('restarted')))
@@ -277,6 +283,7 @@ export class HeraldService {
       inbox: this.inbox.list(),
       actions: this.actions.list(),
       verbosity: this.verbosity,
+      pronunciations: this.pronunciations.map((p) => ({ ...p })),
       usage: this.usage.summary(),
       brain: this.brainStatus(),
       ...this.deviceFields(),
@@ -310,6 +317,19 @@ export class HeraldService {
     return { verbosity: this.verbosity };
   }
 
+  /** The voice's pronunciation list (Advanced > Pronunciations). Replaced whole; persisted. */
+  setPronunciations(raw: unknown): { pronunciations: HeraldPronunciation[] } {
+    if (!Array.isArray(raw)) throw new HeraldRequestError('pronunciations must be an array');
+    const next = sanitizePronunciations(raw);
+    if (JSON.stringify(next) !== JSON.stringify(this.pronunciations)) {
+      this.pronunciations = next;
+      this.emit({ kind: 'pronunciations', pronunciations: next.map((p) => ({ ...p })) });
+      this.persist();
+      console.log(`Herald: ${next.length} pronunciation(s) saved`);
+    }
+    return { pronunciations: this.pronunciations.map((p) => ({ ...p })) };
+  }
+
   private emit(event: HeraldEvent): void {
     try {
       this.broadcastFn(event);
@@ -330,6 +350,7 @@ export class HeraldService {
       actions: this.actions.list().slice(0, MAX_PERSISTED_ACTIONS),
       cushOpened: this.toolbox?.openedNames() ?? [],
       ...(this.verbosity !== 'auto' ? { verbosity: this.verbosity } : {}),
+      ...(this.pronunciations.length ? { pronunciations: this.pronunciations } : {}),
       usage: this.usage.toPersisted(),
     };
   }
@@ -976,7 +997,7 @@ export class HeraldService {
    * Built from the latest session listing, so it follows sessions as they come
    * and go. Short on purpose (Whisper's prompt window is ~220 tokens).
    */
-  sttHints(): { prompt: string; hotwords: string } {
+  sttHints(): { prompt: string; hotwords: string; versions: string[] } {
     const names: string[] = [];
     const seen = new Set<string>();
     const add = (n: string | undefined) => {
@@ -995,12 +1016,25 @@ export class HeraldService {
       if (names.length >= STT_HINT_MAX_NAMES) break;
     }
     const self = [this.cfg.displayName, 'Jarvis'];
+    // Versions people are talking about right now ("2.0.7" was heard as "two or seven").
+    const versions = recentVersions(this.recentHintTexts(live));
+    // The user's own pronunciation words are their vocabulary too ("k8s").
+    const own = this.pronunciations.slice(0, 10).map((p) => p.from);
     const prompt = clip(
-      `${self.join(', ')}.${names.length ? ` Sessions: ${names.join(', ')}.` : ''} ${STT_HINT_TERMS.join(', ')}.`,
+      `${self.join(', ')}.${names.length ? ` Sessions: ${names.join(', ')}.` : ''}${versions.length ? ` Versions: ${versions.join(', ')}.` : ''} ${[...STT_HINT_TERMS, ...own].join(', ')}.`,
       STT_HINT_MAX_CHARS
     );
-    const hotwords = clip([...self, ...names, ...STT_HINT_TERMS].join(' '), STT_HINT_MAX_CHARS);
-    return { prompt, hotwords };
+    const hotwords = clip([...self, ...names, ...versions, ...STT_HINT_TERMS, ...own].join(' '), STT_HINT_MAX_CHARS);
+    return { prompt, hotwords, versions };
+  }
+
+  /** Recent text that may mention versions, newest first: the conversation, then sessions and inbox. */
+  private recentHintTexts(live: SessionSnapshot[]): string[] {
+    const texts: string[] = [];
+    for (let i = this.messages.length - 1, n = 0; i >= 0 && n < 30; i--, n++) texts.push(this.messages[i].text);
+    for (const s of live) texts.push(s.lastTurnGist ?? '', s.currentActivity ?? '', s.pendingQuestion ?? '');
+    for (const item of this.inbox.list()) texts.push(item.headline);
+    return texts;
   }
 
   /**

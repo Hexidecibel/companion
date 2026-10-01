@@ -78,6 +78,8 @@ export interface HeraldState {
   usage?: HeraldUsageSummary;
   /** Brain health: 'degraded' = answering from the fallback (no LLM). Absent = ok. */
   brain?: HeraldBrainStatus;
+  /** The user's pronunciations for Herald's voice (persisted on the hub, follows the user). Absent on older daemons. */
+  pronunciations?: HeraldPronunciation[];
 }
 /** Token and dollar totals for one period. */
 export interface HeraldUsageBucket {
@@ -142,6 +144,8 @@ export type HeraldEvent =
   | { kind: 'action'; action: HeraldAction }
   | { kind: 'busy'; busy: boolean }
   | { kind: 'settings'; verbosity: HeraldVerbosity }
+  /** The pronunciation list changed (herald_set_pronunciations). */
+  | { kind: 'pronunciations'; pronunciations: HeraldPronunciation[] }
   /** Remote trigger, sent ONLY to the active device (see HeraldTriggerAction). */
   | { kind: 'trigger'; action: HeraldTriggerAction; id: string; allowListen?: boolean }
   /** Usage totals changed; `notice` = a one-shot budget warning to announce (tone). */
@@ -154,6 +158,15 @@ export type HeraldEvent =
 /** herald_set_verbosity payload; answered with { verbosity }. */
 export interface HeraldSetVerbosityRequest {
   verbosity: HeraldVerbosity;
+}
+/** One entry of the voice's pronunciation list: whole-word `from` (any case) is spoken as `to`. */
+export interface HeraldPronunciation {
+  from: string;
+  to: string;
+}
+/** herald_set_pronunciations payload (the whole list); answered with { pronunciations } (cleaned). */
+export interface HeraldSetPronunciationsRequest {
+  pronunciations: HeraldPronunciation[];
 }
 
 /**

@@ -32,6 +32,7 @@ import {
   type VoiceHealth,
 } from './client';
 import { stripWakePhrase } from './wake-phrase';
+import { normalizeSpokenVersions } from './versions';
 
 export class VoiceError extends Error {
   constructor(
@@ -430,7 +431,9 @@ export class HeraldVoiceService {
         hints = null; // hints are an accuracy aid, never a reason to fail
       }
       const r = await this.opts.client.stt(audio, undefined, hints);
-      const text = purpose === 'wake' ? stripWakePhrase(r.text) : r.text.trim();
+      const heard = purpose === 'wake' ? stripWakePhrase(r.text) : r.text.trim();
+      // "two or seven" -> "2.0.7" when that version is in recent session text.
+      const text = normalizeSpokenVersions(heard, hints?.versions ?? []);
       if (this.opts.debugTranscripts) {
         console.log(
           `Herald voice: stt ${audioMs}ms audio -> ${r.sttMs}ms: ${JSON.stringify(text)}`

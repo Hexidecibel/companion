@@ -112,6 +112,14 @@ export function registerHeraldHandlers(ctx: HandlerContext): Record<string, Mess
       });
     },
 
+    herald_set_pronunciations(client, payload, requestId) {
+      return reply(client, 'herald_set_pronunciations', requestId, () =>
+        ctx.herald!.setPronunciations(
+          (payload as { pronunciations?: unknown } | undefined)?.pronunciations
+        )
+      );
+    },
+
     herald_confirm(client, payload, requestId) {
       const p = (payload || {}) as { actionId?: unknown; decision?: unknown };
       return reply(client, 'herald_confirm', requestId, () =>

@@ -49,6 +49,8 @@ export interface SttText {
 export interface SttHints {
   prompt?: string;
   hotwords?: string;
+  /** Versions in recent session text: spoken ones are rewritten to match (never sent to the service). */
+  versions?: string[];
 }
 
 export interface WakeScore {

@@ -385,6 +385,21 @@ describe('STT vocabulary hints', () => {
     expect(client.stt.mock.calls[2][2]).toBeNull();
   });
 
+  it('a spoken version from the hints comes back written ("two or seven" -> 2.0.7); versions never reach the service', async () => {
+    const client = fakeClient({ stt: jest.fn(async () => ({ text: 'Is two or seven on the phone?', audioMs: 0, sttMs: 20 })) });
+    const svc = new HeraldVoiceService({ client, sendEvent: () => {}, sttHints: () => ({ prompt: 'p', hotwords: 'h', versions: ['2.0.7'] }) });
+    svc.startStream('c1', { streamId: 'v1', purpose: 'stt', sampleRate: 16000 });
+    svc.pushAudio('c1', { streamId: 'v1', seq: 0, pcm: pcm(1600) });
+    await expect(svc.endStream('c1', { streamId: 'v1', action: 'transcribe' })).resolves.toMatchObject({ text: 'Is 2.0.7 on the phone?' });
+    const urls: string[] = [];
+    const c = new VoiceServiceClient('http://v', (async (u: string) => {
+      urls.push(u);
+      return new Response(JSON.stringify({ text: 'x', audioMs: 1, sttMs: 1 }), { status: 200 });
+    }) as any);
+    await c.stt(Buffer.alloc(4), undefined, { prompt: 'p', versions: ['2.0.7'] });
+    expect(new URL(urls[0]).searchParams.has('versions')).toBe(false);
+  });
+
   it('the HTTP client sends hints as query parameters, and nothing when there are none', async () => {
     const urls: string[] = [];
     const c = new VoiceServiceClient('http://v', (async (u: string) => {

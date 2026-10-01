@@ -10,6 +10,8 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
+import type { HeraldPronunciation } from './protocol';
+import { sanitizePronunciations } from './pronunciations';
 import type { HeraldAction, HeraldMessage, HeraldVerbosity } from './protocol';
 import { PersistedUsage, sanitizeUsage } from './usage';
 
@@ -28,6 +30,8 @@ export interface PersistedHeraldState {
   cushOpened?: string[];
   /** Reply length setting; absent = 'auto'. */
   verbosity?: HeraldVerbosity;
+  /** The user's pronunciations for Herald's voice. */
+  pronunciations?: HeraldPronunciation[];
   /** API usage meter (day / month totals, budget override, notices given). */
   usage?: PersistedUsage;
 }
@@ -153,8 +157,14 @@ export function sanitizeState(raw: unknown, now: number): PersistedHeraldState {
     actions,
     ...(cushOpened.length ? { cushOpened } : {}),
     ...(isVerbosity(r.verbosity) && r.verbosity !== 'auto' ? { verbosity: r.verbosity } : {}),
+    ...withPronunciations(r.pronunciations),
     ...(sanitizeUsage(r.usage) ? { usage: sanitizeUsage(r.usage) } : {}),
   };
+}
+
+function withPronunciations(raw: unknown): Pick<PersistedHeraldState, 'pronunciations'> {
+  const list = sanitizePronunciations(raw);
+  return list.length ? { pronunciations: list } : {};
 }
 
 export class HeraldStore {
