@@ -934,6 +934,16 @@ export function HeraldPanel({ variant, onOpenSession, onClose }: HeraldPanelProp
           </div>
         )}
 
+        {!speaking && voice.remoteSpeaking && (
+          <div className="herald-speaking herald-speaking--remote" role="status">
+            <span className="herald-speaking__bars" aria-hidden="true"><span /><span /><span /><span /></span>
+            <span className="herald-speaking__label">Speaking on {voice.remoteSpeaking.label}</span>
+            <button type="button" className="herald-speaking__stop" onClick={voice.stopRemote} title={`Stop Herald on ${voice.remoteSpeaking.label}`}>
+              <IconStop size={13} /> Stop
+            </button>
+          </div>
+        )}
+
         <HeraldComposer
           displayName={displayName}
           onSend={send}

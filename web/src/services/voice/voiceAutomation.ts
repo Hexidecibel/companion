@@ -62,6 +62,7 @@ import type { VadEvents, VadLike, VadSensitivity } from './vadListener';
 import type { VoiceInputController } from './voiceInput';
 import { VoiceUplink } from './voiceUplink';
 import type { RawAudio } from './rawTap';
+import { isStopUtterance, stopAfterWake } from './fleetSpeaking';
 
 export interface AutomationConfig {
   /** Voice input usable (connected, service up, secure context). */
@@ -110,6 +111,14 @@ export interface AutomationDeps {
   raw?: () => RawAudio | null;
   /** The follow-up window opened (`until`: epoch ms it closes, `ms`: its length) or closed (null). */
   onFollowUp?: (w: FollowUpWindow | null) => void;
+  /**
+   * Herald is speaking on ANOTHER device (or just stopped): this mic hears it
+   * with nothing to cancel it against. No talk-over, no follow-up, and a wake
+   * word only counts when "stop" follows at once (`onFleetStop`).
+   */
+  fleetSuppressed?: () => boolean;
+  /** "Hey Jarvis, stop" heard while another device speaks. */
+  onFleetStop?: () => void;
 }
 
 export interface FollowUpWindow {
@@ -208,7 +217,18 @@ interface WakeStream {
   /** Streaming the raw mic from here (position), instead of the VAD's frames. */
   raw: RawAudio | null;
   rawPos: number;
+  /** Woken while another device was speaking: no chime, no listening UI; only "stop" counts. */
+  quiet?: boolean;
+  /** The latest ~3 s of frames (no raw tap): a quiet wake's early stop checks look back at them. */
+  recent?: Float32Array[];
+  /** Quiet wake: "stop" already acted on. */
+  stopFired?: boolean;
 }
+
+/** Quiet wake: look for "Jarvis, stop" this long after the wake word, without waiting for a pause. */
+export const FLEET_STOP_CHECKS_MS = [300, 700, 1200, 1800, 2600];
+/** Each early check transcribes the latest this-much audio (16 kHz samples). */
+const FLEET_STOP_WINDOW = 16000 * 3;
 
 export class VoiceAutomation implements VadEvents {
   protected cfg: AutomationConfig = { available: false, micGranted: false, interrupt: false, sensitivity: 'normal', speaking: false, handsFree: false, bargeIn: 'gated' };
@@ -404,6 +424,7 @@ export class VoiceAutomation implements VadEvents {
   followUp(ms: number = FOLLOW_UP_MS): boolean {
     if (this.disposed || ms <= 0) return false;
     if (!this.cfg.available || this.cfg.speaking) return false;
+    if (this.fleetSuppressed()) return false;
     if (this.capturing || this.listenWaiting || this.awaitingCommand) return false;
     if (this.deps.input.state.phase !== 'idle') return false;
     this.armFollowUp(this.now() + ms, ms);
@@ -448,6 +469,11 @@ export class VoiceAutomation implements VadEvents {
     }
     // Herald's last word still ringing in the room: not the user.
     if (this.now() < this.tailUntil) return false;
+    // Herald talking on another device: what this mic hears is probably Herald.
+    if (this.fleetSuppressed()) {
+      this.closeFollowUp();
+      return false;
+    }
     if (this.followTimer) clearTimeout(this.followTimer);
     this.followTimer = null;
     if (!this.deps.input.beginExternal('followup')) return false;
@@ -501,6 +527,8 @@ export class VoiceAutomation implements VadEvents {
     if (this.capturing === 'wake' || this.capturing === 'command') return;
     if (this.capturing || !this.interruptArmed) return;
     if (this.deps.input.state.phase !== 'idle') return; // push-to-talk owns the mic
+    // Not speaking here, but another device is: its voice is not ours to cancel.
+    if (!this.cfg.speaking && this.fleetSuppressed()) return;
     // Herald just stopped: what the VAD hears now is its last word in the room.
     if (!this.cfg.speaking && this.now() < this.tailUntil) return;
     this.capturing = 'interrupt';
@@ -697,6 +725,10 @@ export class VoiceAutomation implements VadEvents {
   onFrame(frame: Float32Array, _probability: number): void {
     const w = this.wake;
     const g = this.capturing === 'interrupt' ? this.gate : null;
+    if (w && w.recent) {
+      w.recent.push(frame);
+      if (w.recent.length > FLEET_STOP_WINDOW / FRAME) w.recent.shift();
+    }
     if (w && !w.closed) {
       let chunk = frame;
       if (w.raw) {
@@ -727,6 +759,14 @@ export class VoiceAutomation implements VadEvents {
     const w = this.wake;
     if (ev.kind === 'wake' && w && ev.streamId === w.uplink.streamId && !w.woke) {
       w.woke = true;
+      if (!this.cfg.speaking && this.fleetSuppressed()) {
+        // Herald's own speech on another device can say "Jarvis": stay quiet
+        // and only act on an immediate "stop". Herald keeps talking into this
+        // mic, so the utterance may not end until it stops: check early too.
+        w.quiet = true;
+        this.scheduleFleetStopChecks(w);
+        return;
+      }
       // "Hey Jarvis" always silences Herald, even with talk-over interrupt off.
       if (this.cfg.speaking) this.deps.stopSpeech();
       this.deps.onWake?.();
@@ -750,6 +790,52 @@ export class VoiceAutomation implements VadEvents {
     this.deps.vad.destroy();
   }
 
+  private fleetSuppressed(): boolean {
+    return this.deps.fleetSuppressed?.() ?? false;
+  }
+
+  private fleetStop(w: WakeStream): void {
+    if (w.stopFired) return;
+    w.stopFired = true;
+    this.deps.onFleetStop?.();
+  }
+
+  /** Transcribe the latest few seconds a few times after a quiet wake: "Jarvis, stop" acts at once. */
+  private scheduleFleetStopChecks(w: WakeStream): void {
+    const start = this.now();
+    let i = 0;
+    const next = () => {
+      if (this.disposed || w.stopFired || i >= FLEET_STOP_CHECKS_MS.length) return;
+      const wait = Math.max(0, start + FLEET_STOP_CHECKS_MS[i++] - this.now());
+      setTimeout(() => void check(), wait);
+    };
+    const check = async () => {
+      if (this.disposed || w.stopFired) return;
+      let audio: Float32Array;
+      if (w.raw) {
+        const to = w.raw.position();
+        audio = w.raw.slice(Math.max(0, to - FLEET_STOP_WINDOW), to);
+      } else {
+        audio = concatFrames(w.recent ?? []);
+      }
+      let text = '';
+      if (audio.length > 0) {
+        try {
+          text = await this.quickTranscribe(audio);
+        } catch {
+          text = '';
+        }
+      }
+      if (stopAfterWake(text)) {
+        console.debug('Herald voice: "stop" after the wake word while another device speaks:', JSON.stringify(text));
+        this.fleetStop(w);
+        return;
+      }
+      next();
+    };
+    next();
+  }
+
   // ---- wake stream ------------------------------------------------------------
 
   private openWakeStream(): void {
@@ -757,7 +843,11 @@ export class VoiceAutomation implements VadEvents {
     if (!t || !t.isConnected()) return;
     const uplink = new VoiceUplink(t, 'wake');
     const raw = this.raw;
-    const w: WakeStream = { uplink, framer: new Framer(), woke: false, closed: false, raw, rawPos: raw ? raw.position() : 0 };
+    const w: WakeStream = {
+      uplink, framer: new Framer(), woke: false, closed: false, raw, rawPos: raw ? raw.position() : 0,
+      // Without a raw tap, keep the latest frames for a quiet wake's stop checks.
+      recent: raw ? undefined : this.preroll.slice(),
+    };
     if (raw) {
       for (const out of w.framer.push(floatToInt16(raw.slice(this.rawStart, w.rawPos)))) uplink.push(out);
     } else {
@@ -790,6 +880,18 @@ export class VoiceAutomation implements VadEvents {
     if (this.wake === w) this.wake = null;
     if (!w.woke) {
       w.uplink.discard();
+      return;
+    }
+    if (w.quiet) {
+      let text = '';
+      try {
+        text = (await w.uplink.finish('transcribe')).text.trim();
+      } catch {
+        return;
+      }
+      if (w.stopFired) return;
+      if (isStopUtterance(text)) this.fleetStop(w);
+      else console.debug('Herald voice: ignored a wake word while another device speaks:', JSON.stringify(text));
       return;
     }
     this.deps.input.externalTranscribing('wake');

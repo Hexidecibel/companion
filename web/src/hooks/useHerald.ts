@@ -10,6 +10,7 @@ import {
   HERALD_DEMO_SERVER_ID,
   type HeraldTransport,
 } from '../services/heraldTransport';
+import { gestureLedger } from '../services/voice/fleetSpeaking';
 
 const STATE_TIMEOUT = 10000;
 const SEND_TIMEOUT = 20000;
@@ -67,6 +68,8 @@ export interface UseHeraldReturn {
 export interface SendOptions {
   mode?: HeraldInputMode;
   intent?: HeraldIntent;
+  /** Voice from a deliberate gesture; default: the voice input's own note (gestureLedger). */
+  gesture?: boolean;
 }
 
 export function useHerald(serverId: string | null): UseHeraldReturn {
@@ -177,7 +180,15 @@ export function useHerald(serverId: string | null): UseHeraldReturn {
     setSending(true);
     try {
       // Older daemons ignore mode / intent (the words still go through).
-      const payload = { text, ...(opts.mode ? { mode: opts.mode } : {}), ...(opts.intent ? { intent: opts.intent } : {}) };
+      // A voice turn captured by a gesture (push-to-talk, hotkey, trigger) passes
+      // the hub's speaking backstop even while another device is talking.
+      const gesture = opts.mode === 'voice' && (opts.gesture ?? gestureLedger.take());
+      const payload = {
+        text,
+        ...(opts.mode ? { mode: opts.mode } : {}),
+        ...(opts.intent ? { intent: opts.intent } : {}),
+        ...(gesture ? { gesture: true } : {}),
+      };
       const res = await t.request('herald_send', payload, SEND_TIMEOUT);
       if (!res.success) {
         dispatch({ type: 'optimistic_remove', id: optimistic.id });

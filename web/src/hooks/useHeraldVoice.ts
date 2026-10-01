@@ -12,6 +12,7 @@ import { TICK_VOLUME, chimeSupported, playChime, unlockChime } from '../services
 import { pickVoice } from '../services/tts/voices';
 import { deviceKey, deviceLabel, saveCustomLabel } from '../services/heraldDevice';
 import { SpokenLog, recordingEngine } from '../services/voice/echoGuard';
+import { FleetSpeakingTracker, SpeakingReporter, reportingEngine, type RemoteSpeaker } from '../services/voice/fleetSpeaking';
 import { isGamingMode } from '../services/heraldSetup/setupStore';
 import { getAudioGraph } from '../services/voice/audioGraph';
 
@@ -203,6 +204,15 @@ export interface HeraldVoice {
   claimDevice: (pin: boolean, deviceId?: string) => Promise<string | null>;
   /** Everything Herald said lately (voice input drops transcripts of it: self-echo). */
   spokenLog: SpokenLog;
+  /** Herald is speaking on ANOTHER device right now ("Speaking on <device>"), or null. */
+  remoteSpeaking: RemoteSpeaker | null;
+  /** Stop Herald on the device that is speaking (via the hub). */
+  stopRemote: () => void;
+  /**
+   * Another device is speaking (or just stopped): this device's mic may be
+   * hearing Herald with nothing to cancel it against. Hands-off capture holds back.
+   */
+  fleetSuppressed: () => boolean;
 }
 
 const TEST_LINE = "Hi, I'm Herald. Two sessions finished, and one is waiting on you.";
@@ -224,8 +234,33 @@ export function useHeraldVoice(
     [engineOverride],
   );
   const spokenLog = useMemo(() => new SpokenLog(), []);
+  // This connection's id on the hub: lines name the ONE device that speaks them.
+  const selfIdRef = useRef<string | null>(null);
+  // Fleet signal: this device tells the others while it plays Herald.
+  // An older hub answers "unknown message type": stop reporting to it.
+  const speakingUnsupported = useRef(false);
+  const reporter = useMemo(() => new SpeakingReporter({
+    enabled: () => !speakingUnsupported.current && !!selfIdRef.current && !!hostRef.current?.getTransport()?.isConnected(),
+    send: (r) => {
+      const t = hostRef.current?.getTransport();
+      if (!t || !t.isConnected()) return;
+      t.request('herald_speaking', r, 5000)
+        .then((res) => {
+          if (!res.success && /unknown message type/i.test(res.error ?? '')) speakingUnsupported.current = true;
+        })
+        .catch(() => {});
+    },
+  }), []);
+  useEffect(() => () => reporter.dispose(), [reporter]);
   // Every sentence handed to the engine is remembered for the self-echo filter.
-  const engine: TtsEngine = useMemo(() => recordingEngine(engineOverride ?? hybrid!, spokenLog), [engineOverride, hybrid, spokenLog]);
+  const engine: TtsEngine = useMemo(
+    () => recordingEngine(reportingEngine(engineOverride ?? hybrid!, reporter), spokenLog),
+    [engineOverride, hybrid, spokenLog, reporter],
+  );
+  // ...and hears when another device plays it.
+  const fleet = useMemo(() => new FleetSpeakingTracker(), []);
+  const [remoteSpeaking, setRemoteSpeaking] = useState<RemoteSpeaker | null>(null);
+  useEffect(() => fleet.subscribe(setRemoteSpeaking), [fleet]);
   const [serverStatus, setServerStatus] = useState<HeraldVoiceStatus | null>(null);
   const [statusNonce, setStatusNonce] = useState(0);
   const [prefs, setPrefs] = useState<VoicePrefs>(loadPrefs);
@@ -270,6 +305,7 @@ export function useHeraldVoice(
       isVisible: () => pageVisible() || Date.now() < backgroundUntil.current,
       speakOptions: () => ({ rate: prefsRef.current.rate, voiceId: voiceRef.current?.id ?? null }),
       spokenLength: () => prefsRef.current.spokenLength,
+      selfId: () => selfIdRef.current,
     }),
     [engine],
   );
@@ -281,9 +317,12 @@ export function useHeraldVoice(
     flashTimer.current = setTimeout(() => setFlash(null), FLASH_MS);
   }, []);
   useEffect(() => () => { if (flashTimer.current) clearTimeout(flashTimer.current); }, []);
+  const showFlashRef = useRef(showFlash);
+  showFlashRef.current = showFlash;
   // One device plays inbox tones; older hubs (no arbitration) leave every device on.
   const [announcer, setAnnouncer] = useState(true);
   const [selfId, setSelfId] = useState<string | null>(null);
+  selfIdRef.current = selfId;
   const [label, setLabel] = useState(deviceLabel);
   const labelRef = useRef(label);
   labelRef.current = label;
@@ -306,7 +345,15 @@ export function useHeraldVoice(
     controller.handleEvent(event, source);
     const kind = chimes.handleEvent(event, source);
     if (kind && prefsRef.current.chimeOn && announcerRef.current && tonesAudible()) playChime(kind);
-  }), [subscribeEvents, controller, chimes]);
+    if (source !== 'push') return;
+    if (event.kind === 'speaking') {
+      fleet.handle(event.speaking, selfIdRef.current);
+    } else if (event.kind === 'stop_speaking') {
+      // Another device said "stop" or pressed its stop button.
+      controller.stop({ muteTurn: true });
+      showFlashRef.current(event.by ? `Stopped from ${event.by}` : 'Stopped');
+    }
+  }), [subscribeEvents, controller, chimes, fleet]);
 
   // Gentle reminder: a blocked item nobody has heard gets its tone again.
   useEffect(() => {
@@ -323,7 +370,8 @@ export function useHeraldVoice(
   useEffect(() => {
     controller.reset();
     chimes.reset();
-  }, [hostId, controller, chimes]);
+    fleet.reset();
+  }, [hostId, controller, chimes, fleet]);
 
   // Leaving the tab (or locking the phone) silences immediately.
   useEffect(() => {
@@ -414,6 +462,10 @@ export function useHeraldVoice(
   useEffect(() => {
     setAnnouncer(true);
     setSelfId(null);
+    selfIdRef.current = null;
+    speakingUnsupported.current = false;
+    // A new connection: the old speaking signal is stale (a new one arrives within a second).
+    fleet.reset();
     if (!connected || !hostRef.current) return;
     let cancelled = false;
     let lastInteract = 0;
@@ -427,7 +479,10 @@ export function useHeraldVoice(
           // Older hub / voice off: no arbitration, keep toning here.
           const p = res.payload as HeraldPresenceResult | undefined;
           setAnnouncer(res.success ? !!p?.announcer : true);
-          if (res.success && typeof p?.clientId === 'string') setSelfId(p.clientId);
+          if (res.success && typeof p?.clientId === 'string') {
+            selfIdRef.current = p.clientId;
+            setSelfId(p.clientId);
+          }
         })
         .catch(() => {});
     };
@@ -455,7 +510,7 @@ export function useHeraldVoice(
       document.removeEventListener('visibilitychange', onVis);
       off?.();
     };
-  }, [connected, hostId]);
+  }, [connected, hostId, fleet]);
 
   const refreshStatus = useCallback(() => setStatusNonce((n) => n + 1), []);
   const renameDevice = useCallback((raw: string) => {
@@ -481,10 +536,20 @@ export function useHeraldVoice(
   useEffect(() => () => hybrid?.dispose(), [hybrid]);
 
   const stop = useCallback(() => controller.stop(), [controller]);
+  /** Stop Herald on the device that is speaking it (the hub forwards the stop). */
+  const stopRemote = useCallback(() => {
+    const t = hostRef.current?.getTransport();
+    const r = fleet.remote;
+    if (!t || !t.isConnected()) return;
+    t.request('herald_stop_speaking', r ? { deviceId: r.deviceId } : {}, 5000).catch(() => {});
+  }, [fleet]);
   const stopCommand = useCallback(() => {
     controller.stop({ muteTurn: true });
+    // "stop" here while another device talks: it means that one.
+    if (fleet.remote) stopRemote();
     showFlash('Stopped');
-  }, [controller, showFlash]);
+  }, [controller, showFlash, fleet, stopRemote]);
+  const fleetSuppressed = useCallback(() => fleet.suppressed(), [fleet]);
   const repeat = useCallback(() => {
     const ok = controller.repeat();
     if (ok) showFlash('Repeating');
@@ -583,5 +648,8 @@ export function useHeraldVoice(
     renameDevice,
     claimDevice,
     spokenLog,
-  }), [spokenLog, engine, hybrid, prefs, speaking, voices, voice, setVoiceOn, setChimeOn, setVoiceId, setRate, stop, stopCommand, repeat, goOn, stepRateCb, expectBriefing, say, setSpokenLength, setRemind, setAckTick, setThinkingTone, backgroundAllowed, audioLocked, flash, announcer, testVoice, serverStatus, refreshStatus, allowBackground, selfId, label, renameDevice, claimDevice]);
+    remoteSpeaking,
+    stopRemote,
+    fleetSuppressed,
+  }), [remoteSpeaking, stopRemote, fleetSuppressed, spokenLog, engine, hybrid, prefs, speaking, voices, voice, setVoiceOn, setChimeOn, setVoiceId, setRate, stop, stopCommand, repeat, goOn, stepRateCb, expectBriefing, say, setSpokenLength, setRemind, setAckTick, setThinkingTone, backgroundAllowed, audioLocked, flash, announcer, testVoice, serverStatus, refreshStatus, allowBackground, selfId, label, renameDevice, claimDevice]);
 }

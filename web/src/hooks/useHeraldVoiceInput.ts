@@ -11,6 +11,7 @@ import { playChime } from '../services/tts/chime';
 import { voiceCopy } from '../services/voice/platformCopy';
 import type { SpokenLog } from '../services/voice/echoGuard';
 import { VoiceLoopBreaker } from '../services/voice/voiceLoopBreaker';
+import { fleetDecision, gestureLedger } from '../services/voice/fleetSpeaking';
 import { interruptDefault } from '../services/voice/headphones';
 import {
   getAudioEnvironment,
@@ -248,6 +249,14 @@ export interface VoiceInputHost {
    * own device / timing / echo checks). See confirmPhrase.isPendingConfirmPhrase.
    */
   isPendingConfirm?: (text: string) => boolean;
+  /**
+   * Herald is speaking on ANOTHER device (or just stopped): this mic may be
+   * hearing it with nothing to cancel it against. Hands-off captures (talk-over,
+   * follow-up, hands-free) are dropped; gestures go through. See fleetSpeaking.ts.
+   */
+  fleetSuppressed?: () => boolean;
+  /** "Hey Jarvis, stop" while another device speaks: stop that device. */
+  onFleetStop?: () => void;
 }
 
 export function useHeraldVoiceInput(host: VoiceInputHost): HeraldVoiceInput {
@@ -281,6 +290,18 @@ export function useHeraldVoiceInput(host: VoiceInputHost): HeraldVoiceInput {
         getTransport: () => hostRef.current.getTransport(),
         onBargeIn: () => hostRef.current.stopSpeech(),
         onTranscript: (text, source) => {
+          // Gesture captures are flagged on the send that follows (the hub's backstop).
+          gestureLedger.note(source);
+          // Another device is speaking: a hands-off capture here is probably Herald.
+          const fleet = fleetDecision(source, text, hostRef.current.fleetSuppressed?.() ?? false);
+          if (fleet === 'drop') {
+            console.debug(`Herald voice: dropped a ${source} capture while another device speaks:`, JSON.stringify(text));
+            return;
+          }
+          if (fleet === 'stop') {
+            hostRef.current.onFleetStop?.();
+            return;
+          }
           // Herald's own voice through the speakers: drop it, keep listening.
           const log = hostRef.current.spokenLog;
           if (!hostRef.current.isPendingConfirm?.(text) && log?.isEcho(text, { minTokens: DELIBERATE_SOURCES.has(source) ? 3 : 1 })) {
@@ -452,6 +473,8 @@ export function useHeraldVoiceInput(host: VoiceInputHost): HeraldVoiceInput {
         onFalseBargeIn: () => reportFalseBargeIn(),
         onBargeInLatency: (ms, mode) => console.info(`Herald voice: talk-over stopped Herald after ${Math.round(ms)} ms (${mode})`),
         onFollowUp: (w) => setFollowUpWindow(w),
+        fleetSuppressed: () => hostRef.current.fleetSuppressed?.() ?? false,
+        onFleetStop: () => hostRef.current.onFleetStop?.(),
         onError: (m) => {
           controller.fail(m);
           // Never show "listening" when we cannot: drop hands-free on this device.

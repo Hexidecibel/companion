@@ -5,6 +5,7 @@
 import type { HeraldEvent, HeraldInboxItem, HeraldMessage } from '../../types/herald';
 import { SentenceChunker, isSpeakable, normalizeForSpeech } from './speechText';
 import type { TtsEngine, TtsSpeakOptions } from './types';
+import { shouldSpeakLine } from '../voice/fleetSpeaking';
 
 /**
  * Where an event came from. `push` = live `herald_event` from the socket;
@@ -65,6 +66,11 @@ export interface SpeechControllerOptions {
   speakOptions: () => TtsSpeakOptions;
   /** Spoken length preference (default: full, i.e. no cap). */
   spokenLength?: () => SpokenLength;
+  /**
+   * This device's id on the hub (null until known / older hub). Lines name the
+   * ONE device that speaks them (`speakOn`); the others stay silent.
+   */
+  selfId?: () => string | null;
 }
 
 export function countWords(text: string): number {
@@ -74,6 +80,8 @@ export function countWords(text: string): number {
 
 export class HeraldSpeechController {
   private known = new Set<string>();
+  /** Lines being spoken on another device (`speakOn`): one may come back to us at message_end. */
+  private elsewhere = new Set<string>();
   private live: LiveReply | null = null;
   private last: LastReply | null = null;
   /** A Herald turn is running (busy). */
@@ -214,6 +222,7 @@ export class HeraldSpeechController {
     this.live = null;
     this.last = null;
     this.known.clear();
+    this.elsewhere.clear();
     this.turnActive = false;
     this.muteTurn = false;
     this.nextLimit = null;
@@ -223,6 +232,10 @@ export class HeraldSpeechController {
 
   private canSpeak(): boolean {
     return this.engine.available && this.opts.isEnabled() && this.opts.isVisible();
+  }
+
+  private forMe(message: Pick<HeraldMessage, 'speakOn'>): boolean {
+    return shouldSpeakLine(message, this.opts.selfId?.() ?? null);
   }
 
   private limitFor(): SpokenLimit | null {
@@ -267,6 +280,23 @@ export class HeraldSpeechController {
     }
     // Replayed / already-seen message (history, reconnect): never speak.
     if (this.known.has(message.id)) return;
+    // Another device speaks this one (the hub picked it): show it, stay silent.
+    if (!this.forMe(message)) {
+      this.known.add(message.id);
+      this.elsewhere.add(message.id);
+      // A new line replaces whatever was still being said, fleet-wide: one
+      // voice. Also the queued tail of a reply that finished streaming.
+      const live = this.live;
+      if (live) {
+        this.engine.cancel();
+        live.silenced = true;
+        this.rememberLive(live);
+        this.live = null;
+      } else if (this.engine.speaking) {
+        this.engine.cancel();
+      }
+      return;
+    }
     const live = this.beginLive(message.id);
     if (live && message.text) this.feed(live, message.text);
   }
@@ -275,8 +305,9 @@ export class HeraldSpeechController {
     if (!delta) return;
     let live = this.live && this.live.id === id ? this.live : null;
     if (!live) {
-      // Delta without a start we saw: only a brand-new message qualifies.
-      if (this.known.has(id)) return;
+      // Delta without a start we saw: only a brand-new message qualifies, and
+      // only when lines are not routed (with routing, the start says who speaks).
+      if (this.known.has(id) || this.opts.selfId?.()) return;
       live = this.beginLive(id);
       if (!live) return;
     }
@@ -292,8 +323,16 @@ export class HeraldSpeechController {
       this.finishLive(message.text);
       return;
     }
-    if (this.known.has(message.id)) return;
-    // Complete message delivered in one go (no start seen).
+    const wasElsewhere = this.elsewhere.delete(message.id);
+    // The device that was speaking it went away mid-reply and the hub handed
+    // it to this one: say it whole now.
+    const handedOver = wasElsewhere && this.forMe(message);
+    if (this.known.has(message.id) && !handedOver) return;
+    if (!this.forMe(message)) {
+      this.known.add(message.id);
+      return;
+    }
+    // Complete message delivered in one go (no start seen), or handed over.
     const live = this.beginLive(message.id);
     if (!live) return;
     this.feed(live, message.text);

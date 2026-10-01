@@ -468,6 +468,12 @@ export function HeraldProvider({ children }: { children: ReactNode }) {
     sendVoice: sendVoiceDirect,
     spokenLog: voice.spokenLog,
     isPendingConfirm: isPendingConfirmText,
+    fleetSuppressed: voice.fleetSuppressed,
+    onFleetStop: () => {
+      // "Hey Jarvis, stop" heard here while another device speaks.
+      voiceRef.current.stopCommand();
+      if (voiceRef.current.chimeOn) playChime('ok', 0.035);
+    },
   });
   voiceInputRef.current = voiceInput;
 
@@ -521,7 +527,8 @@ export function HeraldProvider({ children }: { children: ReactNode }) {
     };
   }, [triggerNotice]);
   const triggerActions = useMemo<TriggerActions>(() => ({
-    speaking: () => voiceRef.current.supported && voiceRef.current.speaking,
+    // Speaking here, or on another device (a stop / toggle then stops that one).
+    speaking: () => (voiceRef.current.supported && voiceRef.current.speaking) || !!voiceRef.current.remoteSpeaking,
     capturing: () => voiceInputRef.current?.isCapturing() ?? false,
     stopSpeech: () => voiceRef.current.stopCommand(),
     cancelCapture: () => voiceInputRef.current?.cancel(),
