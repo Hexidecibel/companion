@@ -256,6 +256,9 @@ File-based permission bypass that works for all sessions and subagents in a proj
 - Window state persistence: remembers position and size across launches
 - Auto-launch on login toggle in settings
 - Builds to .app/.dmg (macOS), .deb/.AppImage (Linux), .msi (Windows)
+- Herald floating orb: no menu bar on Windows/Linux, shown only during Herald activity (plus a short linger), never when "Show floating orb" is off (Gaming profile default), self-heals after reloads, races and stuck flags; tray "Hide floating orb" / "Show floating orb"
+- Herald "show me ... on my PC": device words resolve by each device's reported platform (OS, native vs browser), not just its label; asks "Which one, A or B?" on a tie and says "I don't see a PC connected." instead of falling back to the active device
+- "Use Herald here? Take control": one dismissible nudge per session when Herald is used on a device that is not active
 
 ## Mobile App (Tauri 2.0)
 - Android APK and iOS IPA built from the same web codebase
