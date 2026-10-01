@@ -6,6 +6,7 @@ import type { HeraldEvent, HeraldInboxItem, HeraldMessage } from '../../types/he
 import { SentenceChunker, isSpeakable, normalizeForSpeech } from './speechText';
 import type { TtsEngine, TtsSpeakOptions } from './types';
 import { shouldSpeakLine } from '../voice/fleetSpeaking';
+import { diag } from '../diagnostics';
 
 /**
  * Where an event came from. `push` = live `herald_event` from the socket;
@@ -235,7 +236,9 @@ export class HeraldSpeechController {
   }
 
   private forMe(message: Pick<HeraldMessage, 'speakOn'>): boolean {
-    return shouldSpeakLine(message, this.opts.selfId?.() ?? null);
+    const mine = shouldSpeakLine(message, this.opts.selfId?.() ?? null);
+    diag.speakOn(message.speakOn, mine);
+    return mine;
   }
 
   private limitFor(): SpokenLimit | null {

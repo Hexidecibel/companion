@@ -9,6 +9,7 @@
  * removed before the VAD hears it, and a microphone switch mid-session is
  * invisible to it (the cleaned stream never changes).
  */
+import { diag } from '../diagnostics';
 import type { MicCapture } from './micCapture';
 
 export type VadSensitivity = 'low' | 'normal' | 'high';
@@ -106,6 +107,7 @@ export class VadListener implements VadLike {
   private load(sensitivity: VadSensitivity): Promise<MicVADInstance> {
     if (this.vad) return Promise.resolve(this.vad);
     if (this.loading) return this.loading;
+    diag.asset('vad', 'loading', null, assetBase());
     this.loading = (async () => {
       const [mod, ort] = await Promise.all([import('@ricky0123/vad-web'), import('onnxruntime-web/wasm')]);
       // Same module instance vad-web uses. No cross-origin isolation: one thread.
@@ -132,9 +134,11 @@ export class VadListener implements VadLike {
         onFrameProcessed: (p: { isSpeech: number }, frame: Float32Array) => this.events?.onFrame(frame, p.isSpeech),
       })) as unknown as MicVADInstance;
       this.vad = vad;
+      diag.asset('vad', 'ok', null, base);
       return vad;
     })();
-    this.loading.catch(() => {
+    this.loading.catch((err: unknown) => {
+      diag.asset('vad', 'error', (err as Error)?.message || String(err), assetBase());
       this.loading = null;
     });
     return this.loading;

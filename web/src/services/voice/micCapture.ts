@@ -24,6 +24,7 @@
  * The mic is released after a short idle so the "mic in use" indicator does not
  * stay lit when nothing is listening.
  */
+import { diag } from '../diagnostics';
 import captureWorkletUrl from './captureWorklet?worker&url';
 import { voiceCopy } from './platformCopy';
 import { getAudioGraph, type GraphAecMode, type HeraldAudioGraph } from './audioGraph';
@@ -483,7 +484,7 @@ export class MicCapture {
     if (!ctx || !raw) return;
     if (this.workletCtx !== ctx) {
       this.workletCtx = ctx;
-      this.workletReady = ctx.audioWorklet.addModule(captureWorkletUrl);
+      this.workletReady = loadCaptureWorklet(ctx);
     }
     await this.workletReady;
     if (this.users === 0 || this.rawNode) return;
@@ -516,7 +517,7 @@ export class MicCapture {
     const ctx = this.graph.context()!;
     if (this.workletCtx !== ctx) {
       this.workletCtx = ctx;
-      this.workletReady = ctx.audioWorklet.addModule(captureWorkletUrl);
+      this.workletReady = loadCaptureWorklet(ctx);
     }
     await this.workletReady;
     if (ctx.state !== 'running') await ctx.resume().catch(() => {});
@@ -607,4 +608,16 @@ let shared: MicCapture | null = null;
 export function getMicCapture(): MicCapture {
   if (!shared) shared = new MicCapture();
   return shared;
+}
+
+/** Load the capture worklet, recording the outcome for Help > Diagnostics. */
+function loadCaptureWorklet(ctx: AudioContext): Promise<void> {
+  diag.asset('worklet', 'loading');
+  return ctx.audioWorklet.addModule(captureWorkletUrl).then(
+    () => diag.asset('worklet', 'ok'),
+    (err: unknown) => {
+      diag.asset('worklet', 'error', (err as Error)?.message || String(err));
+      throw err;
+    },
+  );
 }

@@ -8,6 +8,7 @@ import { HeraldMenuMain, SetupAdvancedSettings } from './setup/HeraldMenuMain';
 import { HeraldNotices } from './setup/HeraldNotices';
 import { HeraldSetup } from './setup/HeraldSetup';
 import { HeraldHelp } from './setup/HeraldHelp';
+import { HeraldDiagnostics } from './setup/HeraldDiagnostics';
 import type { HeraldVoiceInput } from '../../hooks/useHeraldVoiceInput';
 import { HandsFreeIndicator, HeraldListeningBar, HeraldMicButton, VoiceInputSettings } from './HeraldVoiceControls';
 import { HeraldDeviceBar, HeraldDevicesMenu } from './HeraldDevices';
@@ -972,7 +973,8 @@ export function HeraldPanel({ variant, onOpenSession, onClose }: HeraldPanelProp
             : pending.some((a) => a.tier === 'echo') && <><span className="herald-hint__sep" /><kbd>Esc</kbd> stop send</>}
         </div>
       </div>
-      {setup.helpOpen && <HeraldHelp onClose={() => setup.setHelpOpen(false)} />}
+      {setup.helpOpen && !setup.diagnosticsOpen && <HeraldHelp onClose={() => setup.setHelpOpen(false)} />}
+      {setup.diagnosticsOpen && <HeraldDiagnostics onClose={() => setup.setDiagnosticsOpen(false)} />}
       {/* One device check at a time: the docked and full-screen panels can both be mounted. */}
       {(variant === 'screen' ? ui.screenOpen : ui.panelOpen && !ui.screenOpen) && <HeraldSetup />}
     </section>

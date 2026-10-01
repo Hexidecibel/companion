@@ -55,6 +55,7 @@
  * the user's voice while Herald is still talking, exactly when they say
  * "stop". Herald's words in the raw audio are cut at the text level.
  */
+import { diag } from '../diagnostics';
 import type { HeraldVoiceEvent } from '../../types/herald';
 import type { HeraldTransport } from '../heraldTransport';
 import { Framer, float32ToInt16Frames, floatToInt16, meterLevel, rms16 } from './pcm';
@@ -257,6 +258,7 @@ export class VoiceAutomation implements VadEvents {
   private followDeadline = 0;
   private followTimer: ReturnType<typeof setTimeout> | null = null;
   private gate: InterruptGate | null = null;
+  private diagFrames = 0;
   protected readonly now: () => number;
 
   constructor(protected deps: AutomationDeps) {
@@ -311,7 +313,9 @@ export class VoiceAutomation implements VadEvents {
       this.lastStartError = null;
       this.starting = this.deps.vad
         .start(this, this.cfg.sensitivity)
+        .then(() => diag.vadRunning(true))
         .catch((err: unknown) => {
+          diag.vadRunning(false);
           this.wantRunning = false;
           const message = (err as Error)?.message || String(err);
           this.lastStartError = message;
@@ -331,6 +335,7 @@ export class VoiceAutomation implements VadEvents {
         });
     } else if (!this.starting) {
       this.deps.vad.pause();
+      diag.vadRunning(false);
       this.preroll = [];
     }
   }
@@ -487,6 +492,7 @@ export class VoiceAutomation implements VadEvents {
   // ---- VAD events -----------------------------------------------------------
 
   onSpeechStart(): void {
+    diag.speechStart();
     this.speechStartAt = this.now();
     this.raw = this.deps.raw?.() ?? null;
     this.rawStart = this.raw ? Math.max(0, this.raw.position() - RAW_LEAD_SAMPLES) : 0;
@@ -671,6 +677,7 @@ export class VoiceAutomation implements VadEvents {
   }
 
   onMisfire(): void {
+    diag.speechEnd(true);
     const cap = this.capturing;
     this.capturing = null;
     if (cap === 'interrupt') {
@@ -696,6 +703,7 @@ export class VoiceAutomation implements VadEvents {
   }
 
   onSpeechEnd(audio: Float32Array): void {
+    diag.speechEnd();
     const cap = this.capturing;
     this.capturing = null;
     if (cap === 'listen') {
@@ -727,6 +735,11 @@ export class VoiceAutomation implements VadEvents {
   }
 
   onFrame(frame: Float32Array, _probability: number): void {
+    if ((this.diagFrames = (this.diagFrames + 1) % 3) === 0) {
+      let sum = 0;
+      for (let i = 0; i < frame.length; i += 4) sum += frame[i] * frame[i];
+      diag.level(Math.sqrt(sum / Math.max(1, Math.ceil(frame.length / 4))));
+    }
     const w = this.wake;
     const g = this.capturing === 'interrupt' ? this.gate : null;
     if (w && w.recent) {
@@ -762,6 +775,7 @@ export class VoiceAutomation implements VadEvents {
   onVoiceEvent(ev: HeraldVoiceEvent): void {
     const w = this.wake;
     if (ev.kind === 'wake' && w && ev.streamId === w.uplink.streamId && !w.woke) {
+      diag.wakeDetected(ev.score);
       w.woke = true;
       if (!this.cfg.speaking && this.fleetSuppressed()) {
         // Herald's own speech on another device can say "Jarvis": stay quiet
@@ -860,6 +874,7 @@ export class VoiceAutomation implements VadEvents {
     this.preroll = [];
     this.wake = w;
     this.capturing = 'wake';
+    diag.wakeOpened(uplink.streamId);
   }
 
   private dropWakeStream(): void {
@@ -868,6 +883,7 @@ export class VoiceAutomation implements VadEvents {
     if (!w || w.closed) return;
     w.closed = true;
     w.uplink.discard();
+    diag.wakeClosed(w.woke ? 'dropped after the wake word (hands-free stopped)' : 'dropped');
   }
 
   private async finishWakeStream(): Promise<void> {
@@ -884,8 +900,10 @@ export class VoiceAutomation implements VadEvents {
     if (this.wake === w) this.wake = null;
     if (!w.woke) {
       w.uplink.discard();
+      diag.wakeClosed('discarded (no wake word)');
       return;
     }
+    diag.wakeClosed(w.quiet ? 'quiet (another device was speaking)' : 'transcribed');
     if (w.quiet) {
       let text = '';
       try {

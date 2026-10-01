@@ -125,6 +125,22 @@ export function matchVoiceCommand(text: string): VoiceCommand | null {
   return PHRASE_TO_COMMAND.get(kept) ?? null;
 }
 
+const DIAGNOSTICS_PHRASES = new Set([
+  'diagnostics', 'diagnostic', 'diagnose', 'show diagnostics', 'open diagnostics', 'run diagnostics',
+  'show the diagnostics', 'open the diagnostics', 'show me diagnostics', 'show me the diagnostics',
+  'voice diagnostics', 'herald diagnostics',
+]);
+
+/**
+ * DIAGNOSTICS: "diagnostics", "show diagnostics", "open the diagnostics" (whole
+ * utterance) opens Help > Diagnostics. Checked before "show me ...".
+ */
+export function matchDiagnosticsCommand(text: string): boolean {
+  if (!text || text.length > 60) return false;
+  const core = commandCore(text);
+  return !!core && DIAGNOSTICS_PHRASES.has(core);
+}
+
 /**
  * VOLUME: "louder", "quieter", "softer", "volume up/down", "volume 50" (whole
  * utterance, see services/tts/volume.ts). "turn up the logging" or "what's the
@@ -290,4 +306,5 @@ export const VOICE_COMMAND_HELP: Array<{ say: string; does: string }> = [
   { say: '"What\'s up?" · "catch me up"', does: 'Brief me on what is new' },
   { say: '"Undo that" · "don\'t send that"', does: 'Cancel a reply that is about to be sent' },
   { say: '"Show me" · "show me Out4" · "pull it up on my phone"', does: 'Open the session Herald is talking about' },
+  { say: '"Diagnostics"', does: 'Open Help > Diagnostics (mic, wake word, hands-free, devices)' },
 ];

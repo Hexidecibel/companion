@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { registerDiagnostics } from '../services/diagnostics';
 import type { HeraldEventListener } from './useHerald';
 import type { TtsEngine, TtsVoice } from '../services/tts/types';
 import type { HeraldPresenceResult, HeraldTtsResult, HeraldVoiceEvent, HeraldVoiceStatus } from '../types/herald';
@@ -270,6 +271,11 @@ export function useHeraldVoice(
   const fleet = useMemo(() => new FleetSpeakingTracker(), []);
   const [remoteSpeaking, setRemoteSpeaking] = useState<RemoteSpeaker | null>(null);
   useEffect(() => fleet.subscribe(setRemoteSpeaking), [fleet]);
+  // Help > Diagnostics: is hands-off capture held back because Herald speaks elsewhere?
+  useEffect(() => registerDiagnostics('speakingElsewhere', () => {
+    const remote = fleet.remote;
+    return { suppressed: fleet.suppressed(), speaker: remote?.label ?? null, speakerId: remote?.deviceId ?? null, remainingMs: fleet.remainingMs() };
+  }), [fleet]);
   const [serverStatus, setServerStatus] = useState<HeraldVoiceStatus | null>(null);
   const [statusNonce, setStatusNonce] = useState(0);
   const [prefs, setPrefs] = useState<VoicePrefs>(loadPrefs);

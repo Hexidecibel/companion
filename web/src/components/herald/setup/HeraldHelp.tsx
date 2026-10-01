@@ -60,6 +60,13 @@ export function HeraldHelp({ onClose }: { onClose: () => void }) {
             <span className="hh-check__sub">About a minute: profile, mic, echo, wake word, trigger.</span>
           </span>
         </button>
+        <button type="button" className="hh-check" onClick={() => setup.setDiagnosticsOpen(true)}>
+          <span className="hh-check__icon" aria-hidden="true"><IconCheckup size={18} /></span>
+          <span>
+            <span className="hh-check__title">Diagnostics</span>
+            <span className="hh-check__sub">Live: mic, echo canceller, wake word, hands-free, devices, shortcuts. Or say “diagnostics”.</span>
+          </span>
+        </button>
 
         <Section title="Talking to it">
           <ul className="hh-list">

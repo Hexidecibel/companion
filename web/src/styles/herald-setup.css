@@ -943,3 +943,24 @@ html.herald-overlay-root #root {
 
 /* Native shortcuts: the per-shortcut passthrough switch */
 .herald-menu__item--fine { font-size: 12px; color: var(--h-text-2, #9ca3af); }
+
+/* --------------------------------------------------------------------------
+   Diagnostics (Help > Diagnostics)
+   -------------------------------------------------------------------------- */
+
+.hd-spacer { flex: 1; }
+.hd-rows .hd-row dd { overflow-wrap: anywhere; }
+.hd-row--ok dd { color: #a7f3d0; }
+.hd-row--warn dd { color: #fde68a; }
+.hd-row--bad dd { color: #fca5a5; }
+.hd-meter {
+  display: block;
+  width: 100%;
+  max-width: 220px;
+  height: 8px;
+  margin-top: 4px;
+  border-radius: 4px;
+  background: #374151;
+  overflow: hidden;
+}
+.hd-meter__fill { display: block; height: 100%; background: #10b981; transition: width 120ms linear; }

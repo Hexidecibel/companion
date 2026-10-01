@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { registerDiagnostics } from '../services/diagnostics';
 import { useConnections } from '../hooks/useConnections';
 import { useHerald, type UseHeraldReturn } from '../hooks/useHerald';
 import { useHeraldVoice, type HeraldVoice } from '../hooks/useHeraldVoice';
@@ -10,7 +11,7 @@ import { eventBus } from '../utils/eventBus';
 import { routeVoiceTranscript } from '../services/voice/voiceCommandRouter';
 import { detectVoiceConfirm, isPendingConfirmPhrase, runVoiceConfirm } from '../services/voice/confirmPhrase';
 import { runUndo } from '../services/voice/voiceUndo';
-import { matchShowCommand, stripWakeWord, type ShowCommand } from '../services/voice/voiceCommands';
+import { matchDiagnosticsCommand, matchShowCommand, stripWakeWord, type ShowCommand } from '../services/voice/voiceCommands';
 import { localShowTarget, matchClarifyAnswer, runShowCommand, showLines, type ShowClarify } from '../services/voice/showCommand';
 import type { HeraldActiveDevice, HeraldDeviceInfo, HeraldIntent } from '../types/herald';
 import { TICK_VOLUME, playChime, startShimmer } from '../services/tts/chime';
@@ -215,6 +216,8 @@ export function HeraldProvider({ children }: { children: ReactNode }) {
   );
   const voice = useHeraldVoice(herald.subscribeEvents, hostId, undefined, voiceHost);
   const openRef = useRef(open);
+  /** The setup control (declared further down): the "diagnostics" voice command opens its page. */
+  const setupRef = useRef<{ setHelpOpen: (o: boolean) => void; setDiagnosticsOpen: (o: boolean) => void } | null>(null);
   openRef.current = open;
 
   // Structured brain requests from voice commands. A turn may still be running
@@ -367,6 +370,14 @@ export function HeraldProvider({ children }: { children: ReactNode }) {
         runShow({ target: picked, device: null }, text, clarify.deviceId);
         return null;
       }
+    }
+    if (matchDiagnosticsCommand(text)) {
+      followUp.cancel();
+      cues.turnDone();
+      openRef.current();
+      setupRef.current?.setHelpOpen(true);
+      setupRef.current?.setDiagnosticsOpen(true);
+      return null;
     }
     const show = matchShowCommand(text, (heraldRef.current.state?.devices ?? []).map((d) => d.label));
     if (show) {
@@ -645,6 +656,7 @@ export function HeraldProvider({ children }: { children: ReactNode }) {
     actions: herald.state?.actions ?? EMPTY,
     inbox: herald.state?.inbox ?? EMPTY,
   });
+  setupRef.current = setup;
 
   // Desktop app: the floating orb.
   useHeraldOverlay({
@@ -671,6 +683,23 @@ export function HeraldProvider({ children }: { children: ReactNode }) {
     }
     return { unheardCount: count, unheardBlocked: blocked };
   }, [inbox]);
+
+  // Help > Diagnostics: which device is active and why.
+  const devDiagRef = useRef<Record<string, unknown>>({});
+  devDiagRef.current = {
+    selfId,
+    selfLabel: voice.deviceLabel,
+    isActive,
+    controlledElsewhere,
+    activeDevice,
+    devices,
+    announcer: voice.announcer,
+    hostId,
+    hostName,
+    hubs: hostOptions.map((o) => ({ id: o.serverId, name: o.name, connected: o.connected })),
+    profile: setup.state.profile,
+  };
+  useEffect(() => registerDiagnostics('devices', () => devDiagRef.current), []);
 
   const device: HeraldDeviceControl = useMemo(() => ({
     supported: herald.state?.devices !== undefined,

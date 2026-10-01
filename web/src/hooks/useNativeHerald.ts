@@ -16,6 +16,7 @@ import {
 } from '../services/nativeBridge';
 import type { VolumeCommand } from '../services/tts/volume';
 import { parseChord } from '../services/voice/hotkeys';
+import { registerDiagnostics } from '../services/diagnostics';
 import type { VoiceInputSource, VoiceInputState } from '../services/voice/voiceInput';
 import { nativePlatform, type NativePlatform } from '../utils/platform';
 
@@ -395,6 +396,23 @@ export function useNativeHerald(host: NativeHeraldHost, platform: NativePlatform
       cancelled = true;
       off?.();
     };
+  }, [platform]);
+
+  // Help > Diagnostics: registered shortcuts, their mode and errors, the macOS permission.
+  useEffect(() => {
+    if (platform === 'browser') return;
+    return registerDiagnostics('shortcuts', () => {
+      const st = nativeHeraldStore.get();
+      return {
+        platform,
+        os: st.info?.os ?? null,
+        enabled: st.prefs.globalShortcuts,
+        chords: { talk: st.prefs.talkChord, toggle: st.prefs.toggleChord, brief: st.prefs.briefChord, stop: st.prefs.stopChord },
+        registered: st.shortcuts.map((r) => ({ name: r.name, accelerator: r.accelerator, ok: r.ok, mode: r.mode ?? null, error: r.error, passthroughError: r.passthroughError ?? null })),
+        passthrough: st.passthrough,
+        inputMonitoring: st.info?.os === 'macos' ? (st.passthrough ? (st.passthrough.needsPermission ? 'not allowed' : 'allowed') : 'unknown') : 'n/a',
+      };
+    });
   }, [platform]);
 
   // Desktop: the tray's "Mute tones" and volume checks mirror the preferences.

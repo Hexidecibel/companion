@@ -200,6 +200,23 @@ export class FleetSpeakingTracker {
     return !!this.cur || (this.endedAt > 0 && this.now() - this.endedAt < FLEET_TAIL_MS);
   }
 
+  /**
+   * How long hands-off capture stays held back at most, if nothing changes
+   * (ms; 0 = not suppressed): until the heartbeat would time out or the cap,
+   * plus the tail. Diagnostics only.
+   */
+  remainingMs(): number {
+    this.expire();
+    const now = this.now();
+    const c = this.cur;
+    if (c) {
+      const end = Math.min(c.beatAt + FLEET_HEARTBEAT_TIMEOUT_MS, c.startedAt + FLEET_MAX_MS);
+      return Math.max(0, end - now) + FLEET_TAIL_MS;
+    }
+    if (this.endedAt > 0) return Math.max(0, this.endedAt + FLEET_TAIL_MS - now);
+    return 0;
+  }
+
   subscribe(fn: (s: RemoteSpeaker | null) => void): () => void {
     this.listeners.add(fn);
     return () => this.listeners.delete(fn);

@@ -56,6 +56,9 @@ export interface HeraldSetupControl {
   /** Help page (in the panel). */
   helpOpen: boolean;
   setHelpOpen: (open: boolean) => void;
+  /** Help > Diagnostics (also the voice command "diagnostics"). */
+  diagnosticsOpen: boolean;
+  setDiagnosticsOpen: (open: boolean) => void;
 }
 
 export interface SetupHost {
@@ -216,6 +219,7 @@ export function useHeraldSetup(host: SetupHost): HeraldSetupControl {
     heraldSetupStore.set('onboarded', true);
   }, []);
   const [helpOpen, setHelpOpen] = useState(false);
+  const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
   // First run on this device: the check opens by itself once Herald is usable
   // (it shows the next time the panel is open). Finishing or closing it ends that.
   const available = host.available;
@@ -266,5 +270,7 @@ export function useHeraldSetup(host: SetupHost): HeraldSetupControl {
     closeCheck,
     helpOpen,
     setHelpOpen,
-  }), [state, platform, mobileBrowser, profiles, env, recommended, applyProfile, setFullReplies, recordEcho, suggestion, acceptSuggestion, dismissSuggestion, autoNote, checkOpen, openCheck, closeCheck, helpOpen]);
+    diagnosticsOpen,
+    setDiagnosticsOpen,
+  }), [state, platform, mobileBrowser, profiles, env, recommended, applyProfile, setFullReplies, recordEcho, suggestion, acceptSuggestion, dismissSuggestion, autoNote, checkOpen, openCheck, closeCheck, helpOpen, diagnosticsOpen]);
 }

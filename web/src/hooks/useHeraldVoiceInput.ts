@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { diag, registerDiagnostics } from '../services/diagnostics';
 import type { HeraldTransport } from '../services/heraldTransport';
 import type { HeraldVoiceStatus } from '../types/herald';
 import { getMicCapture, micUnavailableReason } from '../services/voice/micCapture';
@@ -500,6 +501,7 @@ export function useHeraldVoiceInput(host: VoiceInputHost): HeraldVoiceInput {
         fleetSuppressed: () => hostRef.current.fleetSuppressed?.() ?? false,
         onFleetStop: () => hostRef.current.onFleetStop?.(),
         onError: (m) => {
+          diag.standDown(m);
           controller.fail(m);
           // Never show "listening" when we cannot: drop hands-free on this device.
           setPrefs((p) => (p.handsFree ? { ...p, handsFree: false } : p));
@@ -555,6 +557,7 @@ export function useHeraldVoiceInput(host: VoiceInputHost): HeraldVoiceInput {
       if (ev.kind === 'handsfree_revoked') {
         setOwner(false);
         setPrefs((p) => ({ ...p, handsFree: false }));
+        diag.standDown('Hands-free moved to another device (the hub allows one listening device)');
         controller.fail('Hands-free moved to another device');
         return;
       }
@@ -603,6 +606,29 @@ export function useHeraldVoiceInput(host: VoiceInputHost): HeraldVoiceInput {
     else if (!visible && !prefs.handsFreeInBackground) handsFreeNote = voiceCopy().pausedHidden;
     else handsFreeNote = 'Starting…';
   }
+
+  // Help > Diagnostics: the hands-free decision and its inputs, live.
+  const diagRef = useRef<Record<string, unknown>>({});
+  diagRef.current = {
+    pref: prefs.handsFree,
+    active: handsFreeActive,
+    want: wantHandsFree,
+    ownerOnHub: owner,
+    note: handsFreeNote,
+    pageVisible: visible,
+    keepListeningWhenHidden: prefs.handsFreeInBackground,
+    keepListeningWhenHiddenOrigin: prefs.handsFreeInBackgroundOrigin,
+    pausedBy,
+    wakeReadyOnHub: !!host.serverStatus?.wake.ready,
+    voiceInputAvailable: available,
+    unavailableReason,
+    micGranted,
+    hostId: host.hostId ?? null,
+    connected: host.connected,
+    automationActive: automation.handsFreeActive,
+    awaitingCommand: automation.awaitingCommand,
+  };
+  useEffect(() => registerDiagnostics('handsFree', () => diagRef.current), []);
 
   const setHandsFree = useCallback((on: boolean) => {
     if (!on) {
