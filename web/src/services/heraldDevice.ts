@@ -4,7 +4,7 @@
  * renameable, plus a random device key that lets a pinned device keep its pin
  * across a quick reconnect. Both persist per browser / app install.
  */
-import type { HeraldActiveDevice } from '../types/herald';
+import type { HeraldActiveDevice, HeraldDevicePlatform } from '../types/herald';
 
 const LABEL_KEY = 'herald_device_label';
 const DEVICE_KEY = 'herald_device_key';
@@ -50,6 +50,30 @@ export function detectDeviceLabel(h: PlatformHints): string {
   }
   const browser = browserName(h.userAgent) ?? 'Browser';
   return os ? `${browser} on ${os}` : browser;
+}
+
+const OS_OF: Record<string, HeraldDevicePlatform['os']> = {
+  Android: 'android',
+  iPhone: 'ios',
+  iPad: 'ipados',
+  Windows: 'windows',
+  Mac: 'macos',
+  ChromeOS: 'chromeos',
+  Linux: 'linux',
+};
+
+/**
+ * What this device runs on, reported with presence so "on my PC" / "the
+ * phone" find it whatever the user renamed it to.
+ */
+export function detectDevicePlatform(h: PlatformHints): HeraldDevicePlatform {
+  const os = osName(h.userAgent, h.platform ?? '');
+  return { os: (os && OS_OF[os]) || 'unknown', app: h.tauri ? 'native' : 'browser' };
+}
+
+/** This device's platform (see detectDevicePlatform). */
+export function devicePlatform(): HeraldDevicePlatform {
+  return detectDevicePlatform(currentHints());
 }
 
 export function cleanLabel(raw: string): string {

@@ -40,7 +40,8 @@ import { HeraldToolbox } from './knowledge/toolbox';
 import { resolveKnowledgePaths } from './knowledge/sources';
 import type { CushCommand } from './knowledge/cush';
 import { sessionsMentioned } from './resolve';
-import { hasPendingPrompt, pickShowTarget } from './show';
+import { hasPendingPrompt, pickShowTarget, resolveShowDevice } from './show';
+import type { DeviceAliasResult } from './device-alias';
 import { clip, firstSentence, formatAgo, oneLine, plainToolAction } from './text';
 import { isLikelyTextEcho } from './voice/echo-match';
 import { sanitizePronunciations } from './pronunciations';
@@ -796,12 +797,12 @@ export class HeraldService {
     return this.showWith(session || '', device, this.lastSnapshots, opts);
   }
 
-  /** The brain's show_session tool: the session is already resolved. */
-  showResolved(s: SessionSnapshot): HeraldShowResult {
+  /** The brain's show_session tool: the session (and any device) already resolved. */
+  showResolved(s: SessionSnapshot, deviceId = ''): HeraldShowResult {
     return this.navigateTo(
       { serverId: s.serverId, sessionId: s.sessionId, sessionName: s.sessionName },
       hasPendingPrompt(s),
-      '',
+      deviceId,
       { via: 'brain' }
     );
   }
@@ -827,20 +828,26 @@ export class HeraldService {
     return this.navigateTo(target.session, target.pending, device, opts);
   }
 
-  /** The device a navigation goes to: `device` (id or label), else the active one, else the requester. */
+  /**
+   * The device a navigation goes to: `device` (id, label or the user's words
+   * like "my PC"; see resolveShowDevice), else the active one, else the requester.
+   */
   private showDevice(device: string, requesterId?: string | null): { id: string; label: string } | null {
     const snap = this.devicesFn?.() ?? null;
     const labelOf = (id: string) => snap?.devices.find((d) => d.id === id)?.label || 'this device';
     if (device) {
       if (!snap) return null;
-      const byId = snap.devices.find((d) => d.id === device);
-      if (byId) return { id: byId.id, label: byId.label };
-      const want = device.toLowerCase();
-      const byLabel = snap.devices.find((d) => d.label.toLowerCase() === want);
-      return byLabel ? { id: byLabel.id, label: byLabel.label } : null;
+      const r = resolveShowDevice(device, snap.devices, requesterId ?? null);
+      return r.kind === 'device' && r.id ? { id: r.id, label: r.label } : null;
     }
     const id = snap?.activeDevice?.id ?? this.voiceDeps.activeClientId?.() ?? requesterId ?? null;
     return id ? { id, label: labelOf(id) } : null;
+  }
+
+  /** The brain's show_session `device`: the user's words, from the device that asked. */
+  resolveDeviceWords(phrase: string, requesterId: string | null): DeviceAliasResult {
+    const devices = this.devicesFn?.()?.devices ?? [];
+    return resolveShowDevice(phrase, devices, requesterId);
   }
 
   private navigateTo(
@@ -1127,7 +1134,8 @@ export class HeraldService {
         this.setVerbosity(level);
         verbositySet = level;
       },
-      showSession: (s) => this.showResolved(s),
+      showSession: (s, deviceId) => this.showResolved(s, deviceId),
+      resolveDevice: (phrase) => this.resolveDeviceWords(phrase, turn.origin?.clientId ?? null),
     };
     let verbositySet: HeraldVerbosity | null = null;
     const started = Date.now();

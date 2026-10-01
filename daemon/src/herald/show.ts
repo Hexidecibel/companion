@@ -18,6 +18,7 @@ import type {
   HeraldShowStatus,
 } from './protocol';
 import { resolveSession } from './resolve';
+import { resolveDeviceAlias, type AliasDevice, type DeviceAliasResult } from './device-alias';
 import type { SessionSnapshot } from './session-source';
 
 export type ShowTarget =
@@ -132,4 +133,23 @@ export function pickShowTarget(
   const latest = latestShowRef(ctx);
   if (!latest) return { ok: false, status: 'nothing', candidates: [] };
   return toTarget(latest.ref, ctx.sessions, latest.from);
+}
+
+/**
+ * The device a show goes to, from what the caller passed: a connection id, a
+ * device's label, or the user's words ("my PC", "the phone", "here";
+ * device-alias.ts, by reported platform first). `requesterId` is the device
+ * that asked ("here", and the tie-break when several match). Never falls
+ * back to the active device: a phrase that matches nothing is `none`.
+ */
+export function resolveShowDevice(
+  device: string,
+  devices: readonly AliasDevice[],
+  requesterId: string | null
+): DeviceAliasResult {
+  const byId = devices.find((d) => d.id === device);
+  if (byId) {
+    return { kind: 'device', id: byId.id, label: byId.label, self: byId.id === requesterId };
+  }
+  return resolveDeviceAlias(device, devices, requesterId);
 }

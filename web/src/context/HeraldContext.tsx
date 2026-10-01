@@ -367,7 +367,10 @@ export function HeraldProvider({ children }: { children: ReactNode }) {
       if (picked) {
         followUp.cancel();
         cues.turnDone();
-        runShow({ target: picked, device: null }, text, clarify.deviceId);
+        // "Which one, Windows desktop or Chrome on Windows?" -> that device.
+        const dev = clarify.devices?.find((d) => d.label === picked);
+        if (dev) runShow({ target: clarify.target ?? null, device: null }, text, dev.id);
+        else runShow({ target: picked, device: null }, text, clarify.deviceId);
         return null;
       }
     }

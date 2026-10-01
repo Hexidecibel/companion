@@ -365,6 +365,14 @@ export interface HeraldPresence {
   label?: string;
   /** Stable random id of this browser / app install: a pin survives a quick reconnect. */
   deviceKey?: string;
+  /** OS and app kind, so "on my PC" / "the phone" resolve whatever the label says. Absent on older clients. */
+  platform?: HeraldDevicePlatform;
+}
+/** What a device runs on (reported with presence). */
+export interface HeraldDevicePlatform {
+  os: 'windows' | 'macos' | 'linux' | 'chromeos' | 'android' | 'ios' | 'ipados' | 'unknown';
+  /** The Companion app (Tauri) or a browser tab. */
+  app: 'native' | 'browser';
 }
 export interface HeraldPresenceResult {
   announcer: boolean;
@@ -377,6 +385,8 @@ export interface HeraldDeviceInfo {
   label: string;
   /** Holds hands-free (wake word) mode. */
   handsFree: boolean;
+  /** Reported platform. Absent for an older client (then read from the label). */
+  platform?: HeraldDevicePlatform;
 }
 export interface HeraldActiveDevice {
   id: string;

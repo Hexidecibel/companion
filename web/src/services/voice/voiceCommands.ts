@@ -206,6 +206,7 @@ const NOT_A_NAME = new Set([
 export const DEVICE_WORDS = new Set([
   'computer', 'desktop', 'pc', 'laptop', 'mac', 'macbook', 'imac', 'windows', 'linux', 'browser',
   'phone', 'mobile', 'android', 'iphone', 'ipad', 'tablet', 'device', 'screen', 'monitor',
+  'cellphone', 'smartphone', 'ubuntu', 'rig',
 ]);
 
 /** Pronouns that, as the whole target, mean "the thing we are talking about". */
@@ -263,7 +264,9 @@ export function matchShowCommand(text: string, deviceLabels: readonly string[] =
   }
   if (verbless === null) return null;
   let t = verbless.split(' ').filter(Boolean);
-  if (t[0] === 'the') t = t.slice(1);
+  // "the deploy session", and "a companion" (Whisper often hears an article
+  // that was never said: "show me a companion on my PC").
+  if (t.length > 1 && (t[0] === 'the' || t[0] === 'a' || t[0] === 'an')) t = t.slice(1);
   // "the deploy session" / "the Out4 one" / "the docs window".
   while (t.length > 1 && ['session', 'one', 'window', 'tab', 'project'].includes(t[t.length - 1])) t = t.slice(0, -1);
   if (t.length === 0) return { target: null, device };

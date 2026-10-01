@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { cleanLabel, describeActive, detectDeviceLabel, deviceKey, deviceLabel, loadCustomLabel, saveCustomLabel } from '../heraldDevice';
+import { cleanLabel, describeActive, detectDeviceLabel, detectDevicePlatform, deviceKey, deviceLabel, loadCustomLabel, saveCustomLabel } from '../heraldDevice';
 
 const UA = {
   chromeWin: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
@@ -53,5 +53,20 @@ describe('device identity storage', () => {
     expect(describeActive(null, 'me')).toBeNull();
     expect(describeActive({ id: 'me', label: 'Chrome on Mac', pinned: false, reason: 'recent' }, 'me')).toBe('This device');
     expect(describeActive({ id: 'pc', label: 'Windows PC', pinned: true, reason: 'claimed' }, 'me')).toBe('Windows PC · pinned');
+  });
+});
+
+describe('detectDevicePlatform (reported with presence for "on my PC")', () => {
+  const WIN = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36 Edg/129.0.0.0';
+  const MAC = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko)';
+  const ANDROID = 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Mobile Safari/537.36';
+  const IPAD = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1';
+  it('OS and native-vs-browser', () => {
+    expect(detectDevicePlatform({ userAgent: WIN, tauri: true })).toEqual({ os: 'windows', app: 'native' });
+    expect(detectDevicePlatform({ userAgent: WIN })).toEqual({ os: 'windows', app: 'browser' });
+    expect(detectDevicePlatform({ userAgent: MAC, tauri: true })).toEqual({ os: 'macos', app: 'native' });
+    expect(detectDevicePlatform({ userAgent: ANDROID, tauri: true })).toEqual({ os: 'android', app: 'native' });
+    expect(detectDevicePlatform({ userAgent: IPAD })).toEqual({ os: 'ipados', app: 'browser' });
+    expect(detectDevicePlatform({ userAgent: 'curl/8' })).toEqual({ os: 'unknown', app: 'browser' });
   });
 });

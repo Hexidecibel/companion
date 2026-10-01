@@ -82,25 +82,122 @@ const devices: HeraldDeviceInfo[] = [
 
 describe('resolveDevicePhrase (cross-device)', () => {
   it('maps device words to the device list', () => {
-    expect(resolveDevicePhrase('my phone', devices, 'pc', 'pc')).toMatchObject({ kind: 'device', id: 'ph', self: false });
-    expect(resolveDevicePhrase('the mac', devices, 'pc', 'pc')).toMatchObject({ kind: 'device', id: 'mac' });
-    expect(resolveDevicePhrase('work mac', devices, 'pc', 'pc')).toMatchObject({ kind: 'device', id: 'mac' });
-    expect(resolveDevicePhrase('windows', devices, 'mac', 'mac')).toMatchObject({ kind: 'device', id: 'pc' });
-    expect(resolveDevicePhrase('here', devices, 'ph', 'pc')).toMatchObject({ kind: 'device', id: 'ph', self: true });
+    expect(resolveDevicePhrase('my phone', devices, 'pc')).toMatchObject({ kind: 'device', id: 'ph', self: false });
+    expect(resolveDevicePhrase('the mac', devices, 'pc')).toMatchObject({ kind: 'device', id: 'mac' });
+    expect(resolveDevicePhrase('work mac', devices, 'pc')).toMatchObject({ kind: 'device', id: 'mac' });
+    expect(resolveDevicePhrase('windows', devices, 'mac')).toMatchObject({ kind: 'device', id: 'pc' });
+    expect(resolveDevicePhrase('here', devices, 'ph')).toMatchObject({ kind: 'device', id: 'ph', self: true });
   });
 
-  it('"my computer" with two computers: the active one, else this one, else ask', () => {
-    expect(resolveDevicePhrase('my computer', devices, 'ph', 'mac')).toMatchObject({ id: 'mac' });
-    expect(resolveDevicePhrase('my computer', devices, 'pc', 'ph')).toMatchObject({ id: 'pc' });
-    expect(resolveDevicePhrase('my computer', devices, 'ph', 'ph')).toEqual({
+  it('PC / computer / desktop mean the Windows device, wherever the user is and whichever device is active', () => {
+    for (const phrase of ['my pc', 'my computer', 'the desktop', 'windows', 'my gaming pc']) {
+      expect(resolveDevicePhrase(phrase, devices, 'ph')).toMatchObject({ kind: 'device', id: 'pc' });
+      expect(resolveDevicePhrase(phrase, devices, 'mac')).toMatchObject({ kind: 'device', id: 'pc' });
+    }
+  });
+
+  it('a device that is not connected is offline, said the way it was asked', () => {
+    expect(resolveDevicePhrase('my phone', devices.slice(0, 2), 'pc')).toEqual({ kind: 'offline', noun: 'a phone' });
+    expect(resolveDevicePhrase('the ipad', devices, 'pc')).toEqual({ kind: 'offline', noun: 'an iPad' });
+    expect(resolveDevicePhrase('my pc', devices.slice(1), 'mac')).toEqual({ kind: 'offline', noun: 'a PC' });
+  });
+
+  it('two Windows devices: this one when it is one of them, else ask', () => {
+    const two: HeraldDeviceInfo[] = [...devices, { id: 'pc2', label: 'Windows desktop', handsFree: false }];
+    expect(resolveDevicePhrase('my pc', two, 'pc2')).toMatchObject({ kind: 'device', id: 'pc2', self: true });
+    expect(resolveDevicePhrase('my pc', two, 'mac')).toEqual({
       kind: 'ambiguous',
-      labels: ['Chrome on Windows', 'Work Mac'],
+      labels: ['Chrome on Windows', 'Windows desktop'],
+      devices: [{ id: 'pc', label: 'Chrome on Windows' }, { id: 'pc2', label: 'Windows desktop' }],
     });
   });
+});
 
-  it('a device that is not connected is offline, named the way it was said', () => {
-    expect(resolveDevicePhrase('my phone', devices.slice(0, 2), 'pc', 'pc')).toEqual({ kind: 'offline', name: 'Your phone' });
-    expect(resolveDevicePhrase('the ipad', devices, 'pc', 'pc')).toEqual({ kind: 'offline', name: 'Your iPad' });
+describe('"Show me a companion on my PC." (bug: answered on the Mac)', () => {
+  // As the hub listed them: the Mac app is the active device, the user is on the Windows app.
+  const fleet: HeraldDeviceInfo[] = [
+    { id: 'mac', label: 'Mac desktop', handsFree: false, platform: { os: 'macos', app: 'native' } },
+    { id: 'win', label: 'Windows desktop', handsFree: false, platform: { os: 'windows', app: 'native' } },
+    { id: 'ph', label: 'Companion app on Android', handsFree: false, platform: { os: 'android', app: 'native' } },
+  ];
+
+  it('is a show command for "companion" on "my pc" (the extra "a" is dropped)', () => {
+    expect(matchShowCommand('Show me a companion on my PC.', fleet.map((d) => d.label))).toEqual({ target: 'companion', device: 'my pc' });
+    expect(matchShowCommand('show me an out4 on the phone')).toEqual({ target: 'out4', device: 'the phone' });
+  });
+
+  it('"my PC" is the Windows device, never the active Mac', () => {
+    expect(resolveDevicePhrase('my pc', fleet, 'win')).toMatchObject({ kind: 'device', id: 'win', self: true });
+    expect(resolveDevicePhrase('my pc', fleet, 'ph')).toMatchObject({ kind: 'device', id: 'win', self: false });
+  });
+
+  it('platform beats the label: a renamed Windows PC is still "my PC"', () => {
+    const renamed = fleet.map((d) => (d.id === 'win' ? { ...d, label: 'Battlestation' } : d));
+    expect(resolveDevicePhrase('my pc', renamed, 'mac')).toMatchObject({ kind: 'device', id: 'win' });
+    expect(resolveDevicePhrase('battlestation', renamed, 'mac')).toMatchObject({ kind: 'device', id: 'win' });
+  });
+
+  it.each([
+    ['PC', 'win'], ['my PC', 'win'], ['computer', 'win'], ['desktop', 'win'], ['Windows', 'win'], ['gaming PC', 'win'],
+    ['Mac', 'mac'], ['MacBook', 'mac'], ['laptop', 'mac'],
+    ['phone', 'ph'], ['Android', 'ph'],
+    ['here', 'win'], ['this one', 'win'],
+  ])('"%s" -> %s', (phrase, id) => {
+    expect(resolveDevicePhrase(phrase, fleet, 'win')).toMatchObject({ kind: 'device', id });
+  });
+
+  it('iPhone / iPad / tablet with none connected: "I don\'t see ..."', () => {
+    expect(resolveDevicePhrase('iPhone', fleet, 'win')).toEqual({ kind: 'offline', noun: 'an iPhone' });
+    expect(resolveDevicePhrase('tablet', fleet, 'win')).toEqual({ kind: 'offline', noun: 'a tablet' });
+    const withPad = [...fleet, { id: 'pad', label: 'Safari on iPad', handsFree: false, platform: { os: 'ipados' as const, app: 'browser' as const } }];
+    expect(resolveDevicePhrase('iPad', withPad, 'win')).toMatchObject({ kind: 'device', id: 'pad' });
+    expect(resolveDevicePhrase('tablet', withPad, 'win')).toMatchObject({ kind: 'device', id: 'pad' });
+  });
+
+  it('runs end to end: asks the hub for the Windows device', async () => {
+    const requests: unknown[] = [];
+    const acks: string[] = [];
+    const cmd = matchShowCommand('Show me a companion on my PC.', fleet.map((d) => d.label))!;
+    const out = await runShowCommand(cmd, 'Show me a companion on my PC.', {
+      devices: () => fleet,
+      selfId: () => 'win',
+      activeId: () => 'mac',
+      request: async (req) => {
+        requests.push(req);
+        return { status: 'shown', session: { serverId: 'local', sessionId: 'c', sessionName: 'Companion' }, device: { id: 'win', label: 'Windows desktop' } };
+      },
+      localTarget: () => null,
+      navigateHere: () => {},
+      say: () => {},
+      ack: (l) => acks.push(l),
+      sendToBrain: () => {},
+      setClarify: () => {},
+      now: () => 0,
+    });
+    expect(requests).toEqual([{ session: 'companion', device: 'win' }]);
+    expect(out).toBe('shown_here');
+    expect(acks).toEqual(["Here's Companion."]);
+  });
+
+  it('no PC connected: says so, never shows it on the Mac', async () => {
+    const said: string[] = [];
+    const request = vi.fn();
+    const out = await runShowCommand({ target: 'companion', device: 'my pc' }, 'Show me a companion on my PC.', {
+      devices: () => fleet.filter((d) => d.id !== 'win'),
+      selfId: () => 'ph',
+      activeId: () => 'mac',
+      request,
+      localTarget: () => null,
+      navigateHere: () => {},
+      say: (l) => said.push(l),
+      ack: () => {},
+      sendToBrain: () => {},
+      setClarify: () => {},
+      now: () => 0,
+    });
+    expect(out).toBe('offline');
+    expect(request).not.toHaveBeenCalled();
+    expect(said).toEqual(["I don't see a PC connected."]);
   });
 });
 
@@ -181,7 +278,22 @@ describe('runShowCommand', () => {
     const { a, calls } = actions({ status: 'shown' }, { devices: () => devices.slice(0, 2) });
     expect(await runShowCommand({ target: null, device: 'my phone' }, 'show me on my phone', a)).toBe('offline');
     expect(calls.requests).toHaveLength(0);
-    expect(calls.said).toEqual(["Your phone isn't connected."]);
+    expect(calls.said).toEqual(["I don't see a phone connected."]);
+  });
+
+  it('several devices match: asks which one and keeps the session for the answer', async () => {
+    const two: HeraldDeviceInfo[] = [...devices, { id: 'pc2', label: 'Windows desktop', handsFree: false }];
+    const { a, calls } = actions({ status: 'shown' }, { devices: () => two, selfId: () => 'ph' });
+    expect(await runShowCommand({ target: 'out4', device: 'my pc' }, 'show me out4 on my pc', a)).toBe('ambiguous_device');
+    expect(calls.requests).toHaveLength(0);
+    expect(calls.said).toEqual(['Which one, Chrome on Windows or Windows desktop?']);
+    expect(calls.clarify).toEqual([{
+      candidates: ['Chrome on Windows', 'Windows desktop'],
+      devices: [{ id: 'pc', label: 'Chrome on Windows' }, { id: 'pc2', label: 'Windows desktop' }],
+      target: 'out4',
+      until: 21_000,
+    }]);
+    expect(matchClarifyAnswer('the windows desktop', ['Chrome on Windows', 'Windows desktop'])).toBe('Windows desktop');
   });
 
   it('ambiguous: asks which one and waits for the answer', async () => {

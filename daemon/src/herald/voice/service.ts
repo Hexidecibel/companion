@@ -15,6 +15,7 @@
 import type {
   HeraldActiveDevice,
   HeraldDeviceInfo,
+  HeraldDevicePlatform,
   HeraldEvent,
   HeraldSpeakingSignal,
   HeraldStopSpeakingResult,
@@ -84,6 +85,27 @@ interface Presence {
   interactedAt: number;
   label: string;
   deviceKey: string | null;
+  platform: HeraldDevicePlatform | null;
+}
+
+const PLATFORM_OS = new Set<HeraldDevicePlatform['os']>([
+  'windows',
+  'macos',
+  'linux',
+  'chromeos',
+  'android',
+  'ios',
+  'ipados',
+  'unknown',
+]);
+
+/** A reported platform, validated (anything else is dropped). */
+export function cleanDevicePlatform(raw: unknown): HeraldDevicePlatform | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const p = raw as { os?: unknown; app?: unknown };
+  if (typeof p.os !== 'string' || !PLATFORM_OS.has(p.os as HeraldDevicePlatform['os'])) return null;
+  if (p.app !== 'native' && p.app !== 'browser') return null;
+  return { os: p.os as HeraldDevicePlatform['os'], app: p.app };
 }
 
 /** Friendly device label: printable, collapsed whitespace, capped. */
@@ -689,7 +711,12 @@ export class HeraldVoiceService {
    * elsewhere; a pinned claim is untouched.
    */
   setPresence(clientId: string, raw: unknown): HeraldPresenceResult {
-    const p0 = (raw || {}) as { interacted?: unknown; label?: unknown; deviceKey?: unknown };
+    const p0 = (raw || {}) as {
+      interacted?: unknown;
+      label?: unknown;
+      deviceKey?: unknown;
+      platform?: unknown;
+    };
     const interacted = p0.interacted === true;
     const now = this.now();
     const prev = this.presence.get(clientId);
@@ -698,8 +725,11 @@ export class HeraldVoiceService {
       interactedAt: 0,
       label: DEFAULT_LABEL,
       deviceKey: null,
+      platform: null,
     };
     p.seenAt = now;
+    const platform = cleanDevicePlatform(p0.platform);
+    if (platform) p.platform = platform;
     if (interacted) p.interactedAt = now;
     const label = cleanDeviceLabel(p0.label, this.limits.maxLabelChars);
     if (label) p.label = label;
@@ -773,7 +803,12 @@ export class HeraldVoiceService {
 
   devicesSnapshot(): HeraldDevicesSnapshot {
     const devices: HeraldDeviceInfo[] = [...this.presence.entries()]
-      .map(([id, p]) => ({ id, label: p.label, handsFree: this.handsFreeOwner === id }))
+      .map(([id, p]) => ({
+        id,
+        label: p.label,
+        handsFree: this.handsFreeOwner === id,
+        ...(p.platform ? { platform: p.platform } : {}),
+      }))
       .sort((a, b) => a.label.localeCompare(b.label) || a.id.localeCompare(b.id));
     const id = this.announcer;
     const p = id ? this.presence.get(id) : undefined;

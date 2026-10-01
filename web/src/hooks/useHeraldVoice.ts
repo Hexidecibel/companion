@@ -11,7 +11,7 @@ import { ECHO_PROBE_LINE, setBrowserVoice, setEchoProbeSource } from '../service
 import { BRIEFING_SPOKEN_LIMIT, HeraldSpeechController, InboxChimeTracker, type SpokenLength } from '../services/tts/heraldSpeech';
 import { TICK_VOLUME, chimeSupported, playChime, unlockChime } from '../services/tts/chime';
 import { pickVoice } from '../services/tts/voices';
-import { deviceKey, deviceLabel, saveCustomLabel } from '../services/heraldDevice';
+import { deviceKey, deviceLabel, devicePlatform, saveCustomLabel } from '../services/heraldDevice';
 import { SpokenLog, recordingEngine } from '../services/voice/echoGuard';
 import { FleetSpeakingTracker, SpeakingReporter, planStop, reportingEngine, type RemoteSpeaker } from '../services/voice/fleetSpeaking';
 import { heraldVolumeStore, stepVolume as nextVolume, volumePercent, webSpeechVolume, type HeraldVolume, type VolumeCommand } from '../services/tts/volume';
@@ -485,10 +485,11 @@ export function useHeraldVoice(
     let cancelled = false;
     let lastInteract = 0;
     const key = deviceKey();
+    const platform = devicePlatform();
     const report = (interacted: boolean) => {
       const t = hostRef.current?.getTransport();
       if (!t || !t.isConnected() || cancelled) return;
-      t.request('herald_presence', { interacted, label: labelRef.current, deviceKey: key }, 5000)
+      t.request('herald_presence', { interacted, label: labelRef.current, deviceKey: key, platform }, 5000)
         .then((res) => {
           if (cancelled) return;
           // Older hub / voice off: no arbitration, keep toning here.

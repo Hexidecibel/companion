@@ -9,6 +9,7 @@
 import type { LlmToolSpec } from './llm/provider';
 import type { PendingChoice, SessionSnapshot, SessionSource } from './session-source';
 import type { HeraldAction, HeraldSessionRef, HeraldShowResult } from './protocol';
+import { deviceNotFoundLine, type DeviceAliasResult } from './device-alias';
 import type { ActionManager } from './actions';
 import {
   classifyAction,
@@ -273,12 +274,20 @@ TOOL_SPECS.push({
 TOOL_SPECS.push({
   name: 'show_session',
   description:
-    "Open a session's view on the user's active device (their screen jumps to it, scrolled to any question or choice waiting there). " +
-    'When the user asks to see, open, pull up or be taken to a session ("pull up whatever Out4 is stuck on", "show me the deploy session"). ' +
+    "Open a session's view on the user's active device, or on the device they named (their screen jumps to it, scrolled to any question or choice waiting there). " +
+    'When the user asks to see, open, pull up or be taken to a session ("pull up whatever Out4 is stuck on", "show me the deploy session on my PC"). ' +
     'Nothing is sent to the session. Then say in a few words what is on screen, e.g. "Here\'s Out4, it\'s asking which branch."',
   parameters: {
     type: 'object',
-    properties: { session: SESSION_PROP },
+    properties: {
+      session: SESSION_PROP,
+      device: {
+        type: 'string',
+        description:
+          'The device the user named, in their words ("my PC", "the phone", "Mac", "here"). Omit when they named none.',
+        maxLength: 60,
+      },
+    },
     required: ['session'],
     additionalProperties: false,
   },
@@ -439,7 +448,9 @@ export interface ToolEnv {
   /** Where new sessions may start. Absent = propose_spawn_session reports unavailable. */
   spawn?: { roots: string[]; userHome: string };
   /** Open a session on the active device. Absent = show_session reports unavailable. */
-  showSession?: (s: SessionSnapshot) => HeraldShowResult;
+  showSession?: (s: SessionSnapshot, deviceId?: string) => HeraldShowResult;
+  /** The device the user's words name ("my PC"), from the device that asked. */
+  resolveDevice?: (phrase: string) => DeviceAliasResult;
 }
 
 export interface ToolOutcome {
@@ -701,11 +712,29 @@ export async function executeTool(
       }
 
       case 'show_session': {
+        // The named device first: never quietly show it somewhere else.
+        const phrase = typeof args.device === 'string' ? oneLine(args.device).slice(0, 60) : '';
+        let deviceId: string | undefined;
+        if (phrase && env.resolveDevice) {
+          const d = env.resolveDevice(phrase);
+          if (d.kind === 'none') {
+            return err(
+              `${deviceNotFoundLine(d.noun)} Tell the user exactly that in one short sentence; do not show it on another device.`
+            );
+          }
+          if (d.kind === 'ambiguous') {
+            const labels = d.devices.map((x) => x.label);
+            return err(
+              `Several connected devices match "${phrase}": ${labels.join(', ')}. Ask which one in a few words ("Which one, ${labels.slice(0, -1).join(', ')} or ${labels[labels.length - 1]}?"); do not show it yet.`
+            );
+          }
+          deviceId = d.id || undefined;
+        }
         const r = await resolveFresh(env, String(args.session), state);
         if (!r.ok) return err(r.error);
         const s = r.session;
         if (!env.showSession) return err('Opening sessions on a screen is not available here.');
-        const shown = env.showSession(s);
+        const shown = env.showSession(s, deviceId);
         if (shown.status !== 'shown') {
           return err(
             shown.status === 'no_device'

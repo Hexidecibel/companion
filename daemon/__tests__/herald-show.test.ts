@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { latestShowRef, pickShowTarget } from '../src/herald/show';
+import { latestShowRef, pickShowTarget, resolveShowDevice } from '../src/herald/show';
 import { HeraldService } from '../src/herald/service';
 import { HeraldStore } from '../src/herald/store';
 import type { ResolvedHeraldConfig } from '../src/herald/config';
@@ -246,6 +246,39 @@ describe('HeraldService.show (routing)', () => {
     expect(await gone.svc.show({ session: 'docs' }, { via: 'voice' })).toMatchObject({ status: 'no_device' });
   });
 
+  // "Show me a companion on my PC." from the Windows PC while the Mac was active.
+  const macActive: HeraldDevicesSnapshot = {
+    activeDevice: { id: 'mac', label: 'Mac desktop', pinned: false, reason: 'recent' },
+    devices: [
+      { id: 'mac', label: 'Mac desktop', handsFree: false, platform: { os: 'macos', app: 'native' } },
+      { id: 'win', label: 'Windows desktop', handsFree: false, platform: { os: 'windows', app: 'native' } },
+    ],
+  };
+
+  it('device words ("my PC") go to the Windows device, not the active Mac', async () => {
+    const { svc, delivered } = make(macActive);
+    expect(await svc.show({ session: 'docs', device: 'my PC' }, { via: 'voice', requesterId: 'win' })).toMatchObject({
+      status: 'shown',
+      device: { id: 'win', label: 'Windows desktop' },
+    });
+    expect(delivered.map((d) => d.clientId)).toEqual(['win']);
+  });
+
+  it('device words that match nothing never fall back to the active device', async () => {
+    const { svc, delivered } = make(macActive);
+    expect(await svc.show({ session: 'docs', device: 'my phone' }, { via: 'voice', requesterId: 'win' })).toMatchObject({
+      status: 'offline',
+    });
+    expect(delivered).toHaveLength(0);
+  });
+
+  it('the brain\'s device words resolve from the device that asked', () => {
+    const { svc } = make(macActive);
+    expect(svc.resolveDeviceWords('here', 'win')).toMatchObject({ kind: 'device', id: 'win', self: true });
+    expect(svc.resolveDeviceWords('the computer', 'mac')).toMatchObject({ kind: 'device', id: 'win' });
+    expect(svc.resolveDeviceWords('my phone', 'win')).toEqual({ kind: 'none', noun: 'a phone' });
+  });
+
   it('with no active device it falls back to the requester', async () => {
     const { svc, delivered } = make({ activeDevice: null, devices: [{ id: 'ph', label: 'Phone', handsFree: false }] });
     expect(await svc.show({ session: 'docs' }, { via: 'voice', requesterId: 'ph' })).toMatchObject({ status: 'shown' });
@@ -313,6 +346,67 @@ describe('show_session brain tool', () => {
     const body = JSON.parse(out.content);
     expect(body).toMatchObject({ shown: 'Out4', on: 'Windows PC', waiting_on_user: { question: 'Which branch?' } });
     expect([...t.sessionRefs.values()].map((r) => r.sessionId)).toEqual(['out4']);
+  });
+
+  it('takes an optional device in the user\'s words', () => {
+    expect(validateToolCall('show_session', '{"session":"companion","device":"my PC"}')).toEqual({
+      ok: true,
+      value: { session: 'companion', device: 'my PC' },
+    });
+  });
+
+  it('"Show me a companion on my PC.": shows it on the device the words name', async () => {
+    const shownOn: Array<string | undefined> = [];
+    const out = await executeTool(
+      'show_session',
+      { session: 'docs', device: 'my PC' },
+      env({
+        resolveDevice: (p) => (p === 'my PC' ? { kind: 'device', id: 'win', label: 'Windows desktop', self: true } : { kind: 'none', noun: 'x' }),
+        showSession: (s, deviceId): HeraldShowResult => {
+          shownOn.push(deviceId);
+          return { status: 'shown', session: ref2(s.sessionId, s.sessionName), device: { id: 'win', label: 'Windows desktop' } };
+        },
+      }),
+      turn()
+    );
+    expect(out.isError).toBe(false);
+    expect(shownOn).toEqual(['win']);
+    expect(JSON.parse(out.content)).toMatchObject({ on: 'Windows desktop' });
+  });
+
+  it('a named device that is not connected: says so, shows nothing elsewhere', async () => {
+    const showSession = jest.fn();
+    const out = await executeTool(
+      'show_session',
+      { session: 'docs', device: 'my PC' },
+      env({ resolveDevice: () => ({ kind: 'none', noun: 'a PC' }), showSession }),
+      turn()
+    );
+    expect(out.isError).toBe(true);
+    expect(out.content).toContain("I don't see a PC connected.");
+    expect(showSession).not.toHaveBeenCalled();
+  });
+
+  it('several devices match: asks which one', async () => {
+    const showSession = jest.fn();
+    const out = await executeTool(
+      'show_session',
+      { session: 'docs', device: 'pc' },
+      env({
+        resolveDevice: () => ({
+          kind: 'ambiguous',
+          devices: [
+            { id: 'a', label: 'Windows desktop' },
+            { id: 'b', label: 'Chrome on Windows' },
+          ],
+        }),
+        showSession,
+      }),
+      turn()
+    );
+    expect(out.isError).toBe(true);
+    expect(out.content).toContain('Which one, Windows desktop or Chrome on Windows?');
+    expect(showSession).not.toHaveBeenCalled();
   });
 
   it('asks instead of guessing, and reports no device', async () => {
@@ -400,5 +494,49 @@ describe('show trigger action', () => {
     const k = 'f'.repeat(64);
     expect(triggerSignature(k, '1', 'show', '', '')).toBe(triggerSignature(k, '1', 'show', ''));
     expect(triggerSignature(k, '1', 'show', '', 'Out4')).not.toBe(triggerSignature(k, '1', 'show', '', 'Docs'));
+  });
+});
+
+// ---------------------------------------------------------------------------
+
+describe('resolveShowDevice (device aliases, shared with the web)', () => {
+  const fleet = [
+    { id: 'mac', label: 'Mac desktop', platform: { os: 'macos', app: 'native' } },
+    { id: 'win', label: 'Gaming rig', platform: { os: 'windows', app: 'native' } },
+    { id: 'ph', label: 'Companion app on Android', platform: { os: 'android', app: 'native' } },
+    { id: 'pad', label: 'Safari on iPad' },
+  ];
+
+  it.each([
+    ['PC', 'win'],
+    ['my PC', 'win'],
+    ['computer', 'win'],
+    ['desktop', 'win'],
+    ['Windows', 'win'],
+    ['gaming PC', 'win'],
+    ['Mac', 'mac'],
+    ['MacBook', 'mac'],
+    ['laptop', 'mac'],
+    ['phone', 'ph'],
+    ['Android', 'ph'],
+    ['tablet', 'pad'],
+    ['iPad', 'pad'],
+    ['here', 'ph'],
+    ['this one', 'ph'],
+    ['ph', 'ph'],
+    ['Gaming rig', 'win'],
+  ])('"%s" -> %s', (phrase, id) => {
+    expect(resolveShowDevice(phrase, fleet, 'ph')).toMatchObject({ kind: 'device', id });
+  });
+
+  it('none: "I don\'t see an iPhone connected." material', () => {
+    expect(resolveShowDevice('iPhone', fleet, 'ph')).toEqual({ kind: 'none', noun: 'an iPhone' });
+    expect(resolveShowDevice('my PC', fleet.filter((d) => d.id !== 'win'), 'ph')).toEqual({ kind: 'none', noun: 'a PC' });
+  });
+
+  it('a PC-word with only a Linux desktop falls back to it; "Windows" does not', () => {
+    const linux = [{ id: 'lx', label: 'Firefox on Linux', platform: { os: 'linux', app: 'browser' } }];
+    expect(resolveShowDevice('my computer', linux, null)).toMatchObject({ kind: 'device', id: 'lx' });
+    expect(resolveShowDevice('windows', linux, null)).toEqual({ kind: 'none', noun: 'a Windows PC' });
   });
 });

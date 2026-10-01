@@ -507,6 +507,20 @@ describe('claiming the active device', () => {
     expect(svc.devicesSnapshot().devices.find((d) => d.id === 'b')!.label).toHaveLength(60);
   });
 
+  it('keeps each device\'s reported platform (validated) for "on my PC" resolution', () => {
+    const { svc } = setup();
+    svc.setPresence('win', { interacted: false, label: 'Battlestation', platform: { os: 'windows', app: 'native' } });
+    svc.setPresence('old', { interacted: false, label: 'Chrome on Mac' });
+    svc.setPresence('bad', { interacted: false, label: 'X', platform: { os: 'amiga', app: 'native' } });
+    const devs = svc.devicesSnapshot().devices;
+    expect(devs.find((d) => d.id === 'win')!.platform).toEqual({ os: 'windows', app: 'native' });
+    expect(devs.find((d) => d.id === 'old')!.platform).toBeUndefined();
+    expect(devs.find((d) => d.id === 'bad')!.platform).toBeUndefined();
+    // A refresh without platform keeps the reported one.
+    svc.setPresence('win', { interacted: true });
+    expect(svc.devicesSnapshot().devices.find((d) => d.id === 'win')!.platform).toEqual({ os: 'windows', app: 'native' });
+  });
+
   it('a claim makes that device active and stands the old one down', () => {
     const { svc, events, tick } = setup();
     svc.setPresence('desk', { interacted: true, label: 'Desk' });

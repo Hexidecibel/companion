@@ -20,39 +20,16 @@ import type {
   HeraldShowResult,
 } from '../../types/herald';
 import { normalizeUtterance, stripAddress, type ShowCommand } from './voiceCommands';
+import { deviceNotFoundLine, resolveDeviceAlias } from './deviceAlias';
 
 /** How long a "Which one, A or B?" waits for its answer. */
 export const CLARIFY_WINDOW_MS = 20_000;
 
 export type DeviceResolution =
   | { kind: 'device'; id: string; label: string; self: boolean }
-  | { kind: 'offline'; name: string }
-  | { kind: 'ambiguous'; labels: string[] };
-
-const PHONE_RE = /\b(?:android|iphone|phone|mobile|ios)\b/;
-const TABLET_RE = /\b(?:ipad|tablet)\b/;
-const MAC_RE = /\b(?:mac|macos|macbook|imac|osx)\b/;
-const WINDOWS_RE = /\b(?:windows|win|pc)\b/;
-const LINUX_RE = /\b(?:linux|ubuntu)\b/;
-
-/** Which labels a device word means. */
-const CATEGORY: Record<string, (label: string) => boolean> = {
-  phone: (l) => PHONE_RE.test(l),
-  mobile: (l) => PHONE_RE.test(l),
-  android: (l) => /\bandroid\b/.test(l),
-  iphone: (l) => /\b(?:iphone|ios)\b/.test(l),
-  ipad: (l) => TABLET_RE.test(l),
-  tablet: (l) => TABLET_RE.test(l),
-  mac: (l) => MAC_RE.test(l),
-  macbook: (l) => MAC_RE.test(l),
-  imac: (l) => MAC_RE.test(l),
-  windows: (l) => WINDOWS_RE.test(l),
-  pc: (l) => WINDOWS_RE.test(l) || (!PHONE_RE.test(l) && !TABLET_RE.test(l) && !MAC_RE.test(l)),
-  linux: (l) => LINUX_RE.test(l),
-  computer: (l) => !PHONE_RE.test(l) && !TABLET_RE.test(l),
-  desktop: (l) => !PHONE_RE.test(l) && !TABLET_RE.test(l),
-  laptop: (l) => !PHONE_RE.test(l) && !TABLET_RE.test(l),
-};
+  /** Nothing connected matches: "I don't see a PC connected." (`noun` = "a PC"). */
+  | { kind: 'offline'; noun: string }
+  | { kind: 'ambiguous'; labels: string[]; devices: Array<{ id: string; label: string }> };
 
 /** "my phone" -> "Your phone"; "the Mac" -> "Your Mac"; a label stays as is. */
 export function spokenDeviceName(phrase: string): string {
@@ -65,50 +42,20 @@ export function spokenDeviceName(phrase: string): string {
 }
 
 /**
- * The device the words name. "here" / "this device" = this one. A label match
- * wins; else the device word's category ("phone" = an Android / iPhone label).
- * Several in a category: the active one, else this one, else ambiguous.
+ * The device the words name ("my PC", "the phone", "here"): by each device's
+ * reported platform, else its label (deviceAlias.ts, shared with the hub).
+ * Several matches: this device when it is one of them, else ask which. None:
+ * offline, never the active device instead.
  */
 export function resolveDevicePhrase(
   phrase: string,
   devices: readonly HeraldDeviceInfo[],
   selfId: string | null,
-  activeId: string | null,
 ): DeviceResolution {
-  const norm = normalizeUtterance(phrase);
-  let words = norm.split(' ').filter(Boolean);
-  const pick = (d: HeraldDeviceInfo): DeviceResolution => ({ kind: 'device', id: d.id, label: d.label, self: d.id === selfId });
-  const self = selfId ? devices.find((d) => d.id === selfId) : undefined;
-  if (norm === 'here' || norm === 'on here' || norm === 'this device' || norm === 'this one' || words[0] === 'this') {
-    return self ? pick(self) : { kind: 'device', id: selfId ?? '', label: 'this device', self: true };
-  }
-  if (words[0] === 'my' || words[0] === 'the') words = words.slice(1);
-  const joined = words.join(' ');
-  const labelled = devices.filter((d) => normalizeUtterance(d.label) === joined);
-  if (labelled.length === 1) return pick(labelled[0]);
-  let matches: HeraldDeviceInfo[] = labelled;
-  if (matches.length === 0) {
-    const preds = words.map((w) => CATEGORY[w]).filter(Boolean);
-    if (preds.length > 0) {
-      matches = devices.filter((d) => {
-        const l = normalizeUtterance(d.label);
-        return preds.every((p) => p(l));
-      });
-    } else {
-      // Part of a label ("work mac" for "Work Mac Chrome").
-      matches = devices.filter((d) => {
-        const lw = normalizeUtterance(d.label).split(' ');
-        return words.length > 0 && words.every((w) => lw.includes(w));
-      });
-    }
-  }
-  if (matches.length === 0) return { kind: 'offline', name: spokenDeviceName(phrase) };
-  if (matches.length === 1) return pick(matches[0]);
-  const active = matches.find((d) => d.id === activeId);
-  if (active) return pick(active);
-  const mine = matches.find((d) => d.id === selfId);
-  if (mine) return pick(mine);
-  return { kind: 'ambiguous', labels: matches.map((d) => d.label) };
+  const r = resolveDeviceAlias(phrase, devices, selfId);
+  if (r.kind === 'none') return { kind: 'offline', noun: r.noun };
+  if (r.kind === 'ambiguous') return { kind: 'ambiguous', labels: r.devices.map((d) => d.label), devices: r.devices };
+  return r;
 }
 
 /** "Out4 or Docs" / "Out4, Docs or Blog" (at most three). */
@@ -122,18 +69,24 @@ export const showLines = {
   here: (name: string) => `Here's ${name}.`,
   there: (name: string, device: string) => `${name} is up on ${device}.`,
   which: (names: readonly string[]) => `Which one, ${orList(names)}?`,
-  whichDevice: (labels: readonly string[]) => `Which device, ${orList(labels)}?`,
+  whichDevice: (labels: readonly string[]) => `Which one, ${orList(labels)}?`,
   offline: (name: string) => `${name} isn't connected.`,
+  /** A device word that matches nothing connected: "I don't see a PC connected." */
+  notConnected: (noun: string) => deviceNotFoundLine(noun),
   nothing: () => 'Nothing to show right now.',
   noDevice: () => 'No device is open to show it on.',
   failed: () => "I couldn't open that.",
 };
 
-/** A pending "Which one, A or B?". */
+/** A pending "Which one, A or B?" (sessions, or devices when `devices` is set). */
 export interface ShowClarify {
   candidates: string[];
   /** Device id the original request named (kept for the answer). */
   deviceId?: string;
+  /** Asking which DEVICE: the candidates' ids (same order as `candidates`). */
+  devices?: Array<{ id: string; label: string }>;
+  /** The session the original request named (kept for a device answer). */
+  target?: string | null;
   until: number;
 }
 
@@ -240,13 +193,16 @@ export async function runShowCommand(
 ): Promise<ShowOutcome> {
   let deviceId: string | undefined = presetDeviceId;
   if (!deviceId && cmd.device) {
-    const r = resolveDevicePhrase(cmd.device, a.devices(), a.selfId(), a.activeId());
+    const r = resolveDevicePhrase(cmd.device, a.devices(), a.selfId());
     if (r.kind === 'offline') {
-      a.say(showLines.offline(r.name));
+      // Never quietly show it on another device instead.
+      a.say(showLines.notConnected(r.noun));
       return 'offline';
     }
     if (r.kind === 'ambiguous') {
-      a.say(showLines.whichDevice(r.labels));
+      const devices = r.devices.slice(0, 3);
+      a.setClarify({ candidates: devices.map((d) => d.label), devices, target: cmd.target, until: a.now() + CLARIFY_WINDOW_MS });
+      a.say(showLines.whichDevice(devices.map((d) => d.label)));
       return 'ambiguous_device';
     }
     deviceId = r.id || undefined;
