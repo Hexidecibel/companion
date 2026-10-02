@@ -10,6 +10,7 @@ import { useOpenFiles } from '../hooks/useOpenFiles';
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
 import { connectionManager } from '../services/ConnectionManager';
 import { isMobileViewport } from '../utils/platform';
+import { focusTrapActive } from '../utils/focusTrap';
 import { useSessionMute } from '../hooks/useSessionMute';
 import { useSkills } from '../hooks/useSkills';
 import { WaitingIndicator } from './WaitingIndicator';
@@ -265,6 +266,7 @@ export function SessionView({
     setViewingFile(null);
     if (serverId && sessionId && !isMobileViewport()) {
       requestAnimationFrame(() => {
+        if (focusTrapActive()) return;
         const textarea = document.querySelector('.input-bar-textarea') as HTMLElement | null;
         textarea?.focus();
       });
@@ -281,6 +283,8 @@ export function SessionView({
       mouseDown = false;
       // After mouseup, refocus if no text was selected and focus isn't on an interactive element
       requestAnimationFrame(() => {
+        // The review drawer owns the keyboard while open.
+        if (focusTrapActive()) return;
         const active = document.activeElement;
         if (active && active.closest('input, textarea:not(.input-bar-textarea), [contenteditable], select, a, button, [role="button"], .context-menu')) return;
         const selection = window.getSelection();
@@ -293,6 +297,7 @@ export function SessionView({
     const refocus = () => {
       requestAnimationFrame(() => {
         if (mouseDown) return;
+        if (focusTrapActive()) return;
         const active = document.activeElement;
         // Don't steal focus from other interactive elements
         if (active && active.closest('input, textarea:not(.input-bar-textarea), [contenteditable], select, a, button, [role="button"], .context-menu')) return;
@@ -309,6 +314,7 @@ export function SessionView({
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key.length !== 1) return; // Ignore non-printable keys (arrows, function keys, etc.)
       if (e.ctrlKey || e.altKey || e.metaKey) return; // Ignore keyboard shortcuts
+      if (focusTrapActive()) return; // drawer shortcuts (j/k/...) are not typing
       const active = document.activeElement;
       if (active && active !== document.body) return;
       const textarea = document.querySelector('.input-bar-textarea') as HTMLElement | null;
@@ -330,7 +336,7 @@ export function SessionView({
 
   // Click on conversation area focuses textarea (desktop only)
   const handleConversationClick = useCallback((e: React.MouseEvent) => {
-    if (isMobileViewport()) return;
+    if (isMobileViewport() || focusTrapActive()) return;
     const target = e.target as HTMLElement;
     // Don't steal focus from interactive elements
     if (target.closest('button, a, input, textarea, [role="button"], .msg-option-btn, .tool-card, .question-block, .dispatch-panel, .dispatch-mobile-overlay')) return;

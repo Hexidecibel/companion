@@ -14,6 +14,7 @@ import { FileDiff } from './FileDiff';
 import { TurnGroup } from './TurnGroup';
 import { IconCheck, IconClose, IconKeyboard, IconRevert } from './reviewIcons';
 import { formatAgo, formatStat, plural, TRIVIAL_LABEL } from './format';
+import { FOCUS_TRAP_ATTR, focusables } from '../../utils/focusTrap';
 
 const WIDTH_KEY = 'companion_review_drawer_width';
 const MIN_W = 420;
@@ -261,15 +262,23 @@ function DrawerInner({ onAsk, onRevertHunk, renderFileExtra, onRevertFile, liveS
     // only when the request or data identity changes
   }, [drawer.focusEditId, drawer.focusTurnId, data, scroller]);
 
+  // --- focus: the drawer owns the keyboard while open ---
+  const asideRef = useRef<HTMLElement | null>(null);
+  useDrawerFocus(asideRef, mobile);
+
   // --- keyboard ---
   const keyState = useRef({ moveHunk, moveFile, nextUnreviewedTurn, approve, markAll, focusedHunk, focusedNav, focusedTurnId, turnsWithEdits, isApproved, onAsk, onRevertHunk, onToggleLive, ctx, drawer });
   keyState.current = { moveHunk, moveFile, nextUnreviewedTurn, approve, markAll, focusedHunk, focusedNav, focusedTurnId, turnsWithEdits, isApproved, onAsk, onRevertHunk, onToggleLive, ctx, drawer };
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey) return;
-      const t = e.target as HTMLElement | null;
-      if (t && (t.closest('input, textarea, select, [contenteditable="true"]') || t.closest('.rv-dialog'))) return;
-      if (document.querySelector('.rv-dialog')) return;
+      const t = e.target instanceof Element ? e.target : null;
+      // Typing in the drawer's own fields (or a dialog) is text, not shortcuts.
+      // A text field outside the drawer (the composer) never holds focus while
+      // it is open; if one still sends the key, the drawer handles it.
+      const editable = t?.closest('input, textarea, select, [contenteditable="true"]');
+      if (editable && asideRef.current?.contains(editable)) return;
+      if (t?.closest('.rv-dialog') || document.querySelector('.rv-dialog')) return;
       const s = keyState.current;
       const hunkCtx = s.focusedNav && s.focusedHunk ? { absPath: s.focusedNav.absPath, path: s.focusedNav.path, editId: s.focusedNav.editId } : null;
       let handled = true;
@@ -496,6 +505,9 @@ function DrawerInner({ onAsk, onRevertHunk, renderFileExtra, onRevertFile, liveS
         aria-modal={mobile ? 'true' : 'false'}
         aria-label="Code review"
         data-testid="rv-drawer"
+        ref={asideRef}
+        tabIndex={-1}
+        {...{ [FOCUS_TRAP_ATTR]: 'review' }}
       >
         {!mobile && <div className="rv-drawer__resize" onPointerDown={onResizeStart} aria-hidden="true" />}
         <header className="rv-drawer__head">
@@ -576,6 +588,64 @@ function DrawerInner({ onAsk, onRevertHunk, renderFileExtra, onRevertFile, liveS
       </aside>
     </>
   );
+}
+
+/** Selector for things outside the drawer that may hold focus while it is open. */
+const FOCUS_OK_OUTSIDE = '.rv-dialog, .rv-dialog-scrim, .rv-toasts';
+
+/**
+ * Move focus into the drawer on open, keep it there (Tab cycles; focus that
+ * lands outside comes back), and hand it back on close. On phones a text
+ * field is never refocused on close (it would pop the soft keyboard).
+ */
+function useDrawerFocus(ref: React.MutableRefObject<HTMLElement | null>, mobile: boolean) {
+  const mobileRef = useRef(mobile);
+  mobileRef.current = mobile;
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const prev = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    el.focus({ preventScroll: true });
+    const inside = (n: EventTarget | null) =>
+      n instanceof Element && (el.contains(n) || !!n.closest(FOCUS_OK_OUTSIDE));
+    const onFocusIn = (e: FocusEvent) => {
+      if (!inside(e.target)) el.focus({ preventScroll: true });
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'Tab' || document.querySelector('.rv-dialog')) return;
+      const items = focusables(el);
+      const active = document.activeElement;
+      if (!items.length) {
+        e.preventDefault();
+        el.focus({ preventScroll: true });
+        return;
+      }
+      const first = items[0];
+      const last = items[items.length - 1];
+      if (!active || !el.contains(active)) {
+        e.preventDefault();
+        (e.shiftKey ? last : first).focus();
+      } else if (e.shiftKey && (active === first || active === el)) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && active === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener('focusin', onFocusIn);
+    document.addEventListener('keydown', onKeyDown, true);
+    return () => {
+      document.removeEventListener('focusin', onFocusIn);
+      document.removeEventListener('keydown', onKeyDown, true);
+      if (!prev || !prev.isConnected || prev === document.body) return;
+      if (mobileRef.current && prev.matches('input, textarea, [contenteditable="true"]')) return;
+      // Only when focus was still ours (closing must not yank it from elsewhere).
+      const now = document.activeElement;
+      if (now && now !== document.body && !el.contains(now) && el.isConnected) return;
+      prev.focus({ preventScroll: true });
+    };
+  }, [ref]);
 }
 
 /** `through` for "Mark all reviewed" from what a review_get response showed. */

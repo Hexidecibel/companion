@@ -386,7 +386,7 @@ Real-time utilization gauges using Claude Code OAuth credentials — no admin AP
 - **Live edit stream** (`review_watch` / `review_live`) for the drawer's live feed
 - **Herald:** `review_changes` tool ("what did Out4 change?", grounded, risky first, at most three files named), high-risk changes as quiet inbox news (deduped 30 min, coalesced 20 s, resolved when you mark the session reviewed)
 - **Bounded git everywhere:** one GitRunner (no shell, SIGKILL timeouts, dedupe, concurrency 3, breaker); legacy `get_session_diff` rebuilt on it (no more shell per file; untracked new files no longer dropped)
-- Web client: change strip, review drawer (by turn / by file), inline edit chips (with tool cards hidden: a "3 files changed · +12 −3" row under the assistant message, expandable to per-file chips and hunks), risk badges, revert dialog with undo, live feed and risk tone (see the plan's web workstream)
+- Web client: change strip, review drawer (by turn / by file), inline edit chips (with tool cards hidden: a "3 files changed · +12 −3" row under the assistant message, expandable to per-file chips and hunks), risk badges, revert dialog with undo, live feed and risk tone (see the plan's web workstream). The drawer owns the keyboard while open: focus moves into it (Tab stays inside, focus returns on close), the composer never grabs focus back (and on phones never pops the keyboard), its shortcuts work, typing in its own fields stays text, and the j/k position has a visible ring
 
 ## Mobile Session Context Menu
 Long-press or right-click on a mobile session to get a full context menu.

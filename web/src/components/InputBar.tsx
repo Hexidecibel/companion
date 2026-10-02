@@ -5,6 +5,7 @@ import { useUndoHistory } from '../hooks/useUndoHistory';
 import { SlashMenu, SlashMenuItem } from './SlashMenu';
 import { isMobileViewport, isTauriMobile } from '../utils/platform';
 import { compressImage } from '../utils/imageCompression';
+import { focusTrapActive } from '../utils/focusTrap';
 
 interface InputBarProps {
   onSend: (text: string) => Promise<boolean>;
@@ -14,6 +15,12 @@ interface InputBarProps {
   terminalMode?: boolean;
   onTerminalSend?: (text: string) => Promise<boolean>;
   onTerminalKey?: (key: string) => void;
+}
+
+/** Focus the composer unless a panel (review drawer) owns the keyboard. */
+function focusComposer(el: HTMLTextAreaElement | null): void {
+  if (!el || focusTrapActive()) return;
+  el.focus();
 }
 
 export interface InputBarHandle {
@@ -68,7 +75,7 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
     prefill(newText: string) {
       setText(newText);
       requestAnimationFrame(() => {
-        textareaRef.current?.focus();
+        focusComposer(textareaRef.current);
       });
     },
   }), [setText]);
@@ -129,7 +136,7 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
       savedImages.forEach((img) => { if (img.previewUrl) URL.revokeObjectURL(img.previewUrl); });
     }
     setSending(false);
-    requestAnimationFrame(() => textareaRef.current?.focus());
+    requestAnimationFrame(() => focusComposer(textareaRef.current));
   }, [text, images, sending, disabled, onSend, onSendWithImages, resetHistory]);
 
   const handleTerminalSend = useCallback(async () => {
@@ -152,7 +159,7 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
         savedImages.forEach((img) => { if (img.previewUrl) URL.revokeObjectURL(img.previewUrl); });
       }
       setSending(false);
-      requestAnimationFrame(() => textareaRef.current?.focus());
+      requestAnimationFrame(() => focusComposer(textareaRef.current));
       return;
     }
 
@@ -172,7 +179,7 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
       setText(savedText);
     }
     setSending(false);
-    requestAnimationFrame(() => textareaRef.current?.focus());
+    requestAnimationFrame(() => focusComposer(textareaRef.current));
   }, [text, images, sending, onTerminalSend, onSendWithImages, resetHistory, setText]);
 
   const handleSlashSelect = useCallback(
@@ -185,7 +192,7 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
       } else {
         // Skills and built-ins: insert /<name> and let user press Enter
         setText(`/${item.name}`);
-        requestAnimationFrame(() => textareaRef.current?.focus());
+        requestAnimationFrame(() => focusComposer(textareaRef.current));
       }
     },
     [onSend, setText]

@@ -164,6 +164,7 @@
 
 /* ---------- Drawer ---------- */
 
+.rv-drawer:focus { outline: none; }
 .rv-drawer {
   position: fixed;
   top: 0;
@@ -618,6 +619,9 @@
   border-left: 2px solid transparent;
 }
 .rv-hunk-head--focus { border-left-color: var(--rv-blue); background: rgba(59, 130, 246, 0.14); color: #c7d7f0; }
+/* Keyboard position (j/k): a visible ring, not just a tint. */
+.rv-hunk-head--focus { box-shadow: inset 0 0 0 1px rgba(59, 130, 246, 0.7); }
+.rv-file--focus > :first-child { box-shadow: inset 3px 0 0 var(--rv-blue); }
 .rv-hunk-head--trivial { opacity: 0.7; }
 .rv-hunk-head__range { color: #7f92b0; flex-shrink: 0; }
 .rv-hunk-head__section { color: var(--rv-text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 1; }
