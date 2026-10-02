@@ -25,7 +25,7 @@ Two sources of truth:
   - Subagent sidechain files attributed to parent turn by time window (Phase 2).
 - **Checkpoint** (persisted), key = app sessionId (tmux name) + `projectPath` (reused tmux name with different project resets):
   `{ reviewedThrough: ms, approvedTurnIds: string[], snapshots: [{repoRoot, tree}], baseline?: [{repoRoot, tree}], updatedAt, updatedBy }`
-  Edit unreviewed iff `edit.at > reviewedThrough && !approvedTurnIds.includes(edit.turnId)`; contiguous approvals compact into `reviewedThrough`.
+  Edit unreviewed iff `edit.at > reviewedThrough && !approvedTurnIds.includes(edit.turnId)`; approvals stay individual (reversible: un-approving makes the turn unreviewed again) and are compacted into `reviewedThrough` only by "mark all reviewed".
 - **Snapshot trees:** copy repo index (`git rev-parse --git-path index`, worktree-correct) to temp; `GIT_INDEX_FILE=tmp git add -A [-- paths]`; `git write-tree`. Taken at mark-reviewed/approve, and baseline first time a session with empty ledger is seen. Net diff: temp-index snapshot of "now" restricted to touched paths, `git diff --cached -M <tree> -- <pathspec>`; cached by `(repo, baseTree, now-fingerprint)`. Writes dangling objects only (never refs). If gc pruned a tree → fall back to HEAD + "checkpoint snapshot expired".
 - **Risk** — pure `classifyChangedFile` in `danger.ts`:
   | Kind | Level | Examples |

@@ -88,15 +88,44 @@ describe('ReviewService (transcript mode)', () => {
     expect([...versions].sort((a, b) => a - b)).toEqual(versions);
   });
 
-  it('approving the oldest turn compacts into reviewedThrough', async () => {
+  it('approvals stay individual and reversible; mark all compacts them', async () => {
     const { svc } = scenario();
     const a = await svc.approveTurn('sess', 't2', true);
     expect(a.checkpoint.approvedTurnIds).toEqual(['t2']);
     expect(a.summary.unreviewedTurns).toBe(1);
     const b = await svc.approveTurn('sess', 't1', true);
-    expect(b.checkpoint.approvedTurnIds).toEqual([]);
-    expect(b.checkpoint.reviewedThrough).toBe(T0 + 12_000);
+    expect(b.checkpoint.approvedTurnIds).toEqual(['t2', 't1']);
+    expect(b.checkpoint.reviewedThrough).toBe(0);
     expect(b.summary.unreviewedFiles).toBe(0);
+    expect(b.summary.unreviewedTurns).toBe(0);
+    // Un-approve after everything was approved: the turn is unreviewed again.
+    const c = await svc.approveTurn('sess', 't1', false);
+    expect(c.checkpoint.approvedTurnIds).toEqual(['t2']);
+    expect(c.summary.unreviewedTurns).toBe(1);
+    expect(c.summary.unreviewedFiles).toBe(1);
+    expect((await svc.summary('sess'))!.unreviewedTurns).toBe(1);
+    const since = await svc.get({ sessionId: 'sess', scope: 'since_checkpoint', view: 'turns' });
+    expect(since.turns.map((t) => t.id)).toEqual(['t1']);
+    const all = await svc.get({ sessionId: 'sess', scope: 'all', view: 'turns' });
+    expect(all.turns.map((t) => [t.id, t.approved])).toEqual([['t1', false], ['t2', true]]);
+    // Mark all reviewed folds the approvals into reviewedThrough (monotonic).
+    const m = await svc.markReviewed('sess', T0 + 59_000);
+    expect(m.checkpoint.reviewedThrough).toBe(T0 + 59_000);
+    expect(m.checkpoint.approvedTurnIds).toEqual([]);
+    expect(m.summary.unreviewedTurns).toBe(0);
+  });
+
+  it('un-approving after every turn was approved restores the unreviewed count in summaries', async () => {
+    const { svc, broadcasts } = scenario();
+    await svc.approveTurn('sess', 't1', true);
+    await svc.approveTurn('sess', 't2', true);
+    expect((await svc.summary('sess'))!.unreviewedTurns).toBe(0);
+    const r = await svc.approveTurn('sess', 't2', false);
+    expect(r.summary.unreviewedTurns).toBe(1);
+    expect(r.summary.riskLevel).toBe('high');
+    await new Promise((res) => setTimeout(res, 20));
+    const sums = broadcasts.filter((b) => b.type === 'review_summary');
+    expect(sums[sums.length - 1].payload.summary.unreviewedTurns).toBe(1);
   });
 
   it('new edits after a mark show up again (incremental)', async () => {

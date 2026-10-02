@@ -1192,18 +1192,21 @@ export class ReviewService {
     if (!ctx.led.getTurn(turnId)) throw new ReviewServiceError('not_found', `Unknown turn ${turnId}`);
     return this.withLock(`cp:${sessionId}`, async () => {
       const cur = this.store.get(sessionId, ctx.led.projectPath);
+      // Approvals stay individual (never folded into reviewedThrough here) so
+      // they can be taken back; only "mark all reviewed" compacts them.
       const ids = cur.approvedTurnIds.filter((id) => id !== turnId);
       if (approved) ids.push(turnId);
-      const next: StoredCheckpoint = {
+      const cp: StoredCheckpoint = {
         ...cur,
         approvedTurnIds: ids,
         updatedAt: this.now(),
         updatedBy: device ? String(device).slice(0, 80) : null,
       };
-      let cp = compactApprovals(next, this.turnEdgeTimes(ctx.led));
-      const moved = cp.reviewedThrough !== cur.reviewedThrough;
-      if (moved) cp = { ...cp, snapshots: await this.takeSnapshots(ctx, cp) };
-      return this.commitCheckpoint(ctx, cp, moved);
+      const out = this.commitCheckpoint(ctx, cp, false);
+      // Everything is now approved: the user looked, resolve their risk alerts.
+      if (approved && out.summary.unreviewedTurns === 0 && out.summary.unreviewedFiles === 0)
+        this.onCheckpointMoved({ ...ctx, cp: this.store.get(sessionId, ctx.led.projectPath) }, true);
+      return out;
     });
   }
 
