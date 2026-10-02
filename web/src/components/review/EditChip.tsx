@@ -13,7 +13,7 @@ import { baseName } from '../../utils/diff/patchText';
 import { formatStat, maxLevel } from './format';
 import { IconChevronDown, IconChevronRight } from './reviewIcons';
 
-export const EDIT_CHIP_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
+export { EDIT_CHIP_TOOLS } from './editChipTools';
 
 export const EditChip = memo(function EditChip({ toolId }: { toolId: string }) {
   const ctx = useReviewContext();

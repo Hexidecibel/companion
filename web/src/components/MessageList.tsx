@@ -1,9 +1,11 @@
 import { useRef, useState, useEffect, useLayoutEffect, useCallback, useMemo, memo } from 'react';
 import { ConversationHighlight } from '../types';
 import { MessageBubble } from './MessageBubble';
+import { EMPTY_EDIT_ROWS, hiddenEditRows } from './review/editRows';
 import { SkeletonMessageBubble } from './Skeleton';
 import scrollDebugger from '../utils/scrollDebugger';
 import { FOCUS_CLASS, FOCUS_HIGHLIGHT_MS, findPromptElement, hasSessionFocus, onSessionFocus, takeSessionFocus } from '../services/sessionFocus';
+
 
 interface MessageListProps {
   highlights: ConversationHighlight[];
@@ -370,15 +372,18 @@ export const MessageList = memo(function MessageList({
   // (e.g. while highlights had just populated but the parent hadn't pushed a
   // fresh `hideTools` value yet) — toggling the filter forced a recompute and
   // the list "appeared". Memoizing at this level closes that timing gap.
-  const visibleMessages = useMemo(() => {
-    if (!hideTools) return highlights;
-    return highlights.map((msg) => {
-      if (!msg.toolCalls) return msg;
-      return {
-        ...msg,
-        toolCalls: msg.toolCalls.filter(t => t.status === 'pending' || t.name === 'ExitPlanMode'),
-      };
-    });
+  const { visibleMessages, editRows } = useMemo(() => {
+    if (!hideTools) return { visibleMessages: highlights, editRows: EMPTY_EDIT_ROWS };
+    return {
+      visibleMessages: highlights.map((msg) => {
+        if (!msg.toolCalls) return msg;
+        return {
+          ...msg,
+          toolCalls: msg.toolCalls.filter(t => t.status === 'pending' || t.name === 'ExitPlanMode'),
+        };
+      }),
+      editRows: hiddenEditRows(highlights),
+    };
   }, [highlights, hideTools]);
 
   const handleClick = useCallback((e: React.MouseEvent) => {
@@ -443,6 +448,7 @@ export const MessageList = memo(function MessageList({
               isBookmarked={isBookmarked?.(msg.id)}
               onToggleBookmark={onToggleBookmark}
               serverId={serverId}
+              editIds={editRows.get(msg.id)}
             />
           </div>
         ))}

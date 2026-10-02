@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef, useMemo, memo } from 'react';
 import { ConversationHighlight } from '../types';
 import { ToolCard } from './ToolCard';
+import { EditSummaryRow } from './review/EditSummaryRow';
 import { MarkdownRenderer, extractFilePaths } from './MarkdownRenderer';
 import { ContextMenu, ContextMenuEntry } from './ContextMenu';
 import { QuestionBlock, MultiQuestionFlow, ChoiceData, normalizeOptions } from './QuestionBlock';
@@ -42,6 +43,8 @@ interface MessageBubbleProps {
   isBookmarked?: boolean;
   onToggleBookmark?: (messageId: string, content: string) => void;
   serverId?: string | null;
+  /** Tools hidden: edit tool_use ids summarized in one chip row under this message. */
+  editIds?: string[];
 }
 
 // Highlight search matches in text
@@ -197,7 +200,7 @@ function SkillCard({ skillName, content, onViewFile, existingFiles }: { skillNam
   );
 }
 
-export const MessageBubble = memo(function MessageBubble({ message, onSelectOption, onSelectChoice, onCancelMessage, onViewFile, onViewArtifact, searchTerm, isCurrentMatch, planFilePath, isBookmarked, onToggleBookmark, serverId }: MessageBubbleProps) {
+export const MessageBubble = memo(function MessageBubble({ message, onSelectOption, onSelectChoice, onCancelMessage, onViewFile, onViewArtifact, searchTerm, isCurrentMatch, planFilePath, isBookmarked, onToggleBookmark, serverId, editIds }: MessageBubbleProps) {
   const isUser = message.type === 'user';
   const isSystem = message.type === 'system';
   const [allExpanded, setAllExpanded] = useState<boolean | undefined>(undefined);
@@ -397,7 +400,7 @@ export const MessageBubble = memo(function MessageBubble({ message, onSelectOpti
   const isLargeContent = !isUser && hasContent && (message.content.split('\n').length > ARTIFACT_THRESHOLD);
 
   // Hide completely empty assistant messages that have no text, no tools, and no options
-  if (!isUser && !hasContent && (!toolCalls || toolCalls.length === 0) && !message.isWaitingForChoice) {
+  if (!isUser && !hasContent && (!toolCalls || toolCalls.length === 0) && !message.isWaitingForChoice && !editIds?.length) {
     return null;
   }
 
@@ -581,6 +584,8 @@ export const MessageBubble = memo(function MessageBubble({ message, onSelectOpti
         </div>
         );
       })()}
+
+      {!isUser && editIds && editIds.length > 0 && <EditSummaryRow toolIds={editIds} />}
 
       {message.isWaitingForChoice && (onSelectChoice || onSelectOption) && (() => {
         // Defensive rendering against every shape the daemon may emit:

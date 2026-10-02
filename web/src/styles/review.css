@@ -928,6 +928,9 @@
 .rv-editchip .rv-risk-dot { margin-left: 0; }
 .rv-editchip__body { margin-top: 6px; }
 .rv-editchip__body .rv-file { margin-top: 0; background: var(--rv-card); }
+.rv-editsum__sep { color: var(--rv-text-3); }
+.rv-editsum__list { margin-top: 2px; padding-left: 10px; border-left: 1px solid var(--rv-border); }
+.rv-editsum__list .rv-editchip-wrap { margin-top: 4px; }
 
 /* ---------- Dialogs (revert / ask why) ---------- */
 
