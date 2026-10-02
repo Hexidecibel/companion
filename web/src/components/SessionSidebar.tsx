@@ -7,6 +7,8 @@ import { connectionManager } from '../services/ConnectionManager';
 import { NewSessionPanel } from './NewSessionPanel';
 import { TmuxModal } from './TmuxModal';
 
+import { ReviewSidebarPill } from './review/ReviewSidebarPill';
+
 const NewProjectModal = lazy(() => import('./NewProjectModal').then(m => ({ default: m.NewProjectModal })));
 import { ServerForm } from './ServerForm';
 import { ContextMenu, ContextMenuEntry } from './ContextMenu';
@@ -764,6 +766,7 @@ export function SessionSidebar({
                             </span>
                           )}
                         </div>
+                        <ReviewSidebarPill serverId={snap.serverId} sessionId={session.id} />
                         {session.recentTimestamps && session.recentTimestamps.length > 0 && (
                           <Sparkline timestamps={session.recentTimestamps} />
                         )}

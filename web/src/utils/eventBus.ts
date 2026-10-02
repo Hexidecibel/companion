@@ -8,6 +8,8 @@ type EventMap = {
   /** Herald "show me": open this session (Dashboard navigates; MessageList focuses). */
   'herald-show-session': { serverId: string; sessionId: string; pending: boolean };
   'companion-in-app-notification': { title: string; body?: string; tag?: string };
+  /** Open the Code Review drawer for a session (consumed via reviewNav). */
+  'review-open': { serverId: string; sessionId: string };
 };
 
 type Handler<T> = T extends void ? () => void : (data: T) => void;

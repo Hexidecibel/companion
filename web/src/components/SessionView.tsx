@@ -4,7 +4,6 @@ import { useState, useEffect, useCallback, useMemo, useRef, lazy, Suspense } fro
 import { PendingAttachment, WorkGroup } from '../types';
 import { useConversation } from '../hooks/useConversation';
 import { useTasks } from '../hooks/useTasks';
-import { useCodeReview } from '../hooks/useCodeReview';
 import { useSubAgents } from '../hooks/useSubAgents';
 import { useBypassPermissions } from '../hooks/useBypassPermissions';
 import { useOpenFiles } from '../hooks/useOpenFiles';
@@ -15,7 +14,6 @@ import { useSessionMute } from '../hooks/useSessionMute';
 import { useSkills } from '../hooks/useSkills';
 import { WaitingIndicator } from './WaitingIndicator';
 import { TaskList } from './TaskList';
-import { CodeReviewCard } from './CodeReviewCard';
 import { MessageList } from './MessageList';
 import { InputBar, InputBarHandle } from './InputBar';
 import { DispatchPanel } from './DispatchPanel';
@@ -37,8 +35,12 @@ import { ScrollDebugPanel } from './ScrollDebugPanel';
 import { SettingsModal } from './SettingsModal';
 import { HeaderOverflowMenu, OverflowMenuItem } from './HeaderOverflowMenu';
 import { hideToolsKey } from '../services/storageKeys';
+import { ReviewProvider, type ReviewApi } from './review/ReviewContext';
+import { ChangeStrip } from './review/ChangeStrip';
+import { ReviewShell } from './review/ReviewShell';
+import { ReviewHeaderButton } from './review/ReviewHeaderButton';
+import { useReviewSummary } from '../hooks/useReviewSummary';
 
-const CodeReviewModal = lazy(() => import('./CodeReviewModal').then(m => ({ default: m.CodeReviewModal })));
 const FileViewerModal = lazy(() => import('./FileViewerModal').then(m => ({ default: m.FileViewerModal })));
 
 interface SessionViewProps {
@@ -88,7 +90,8 @@ export function SessionView({
   } = useConversation(serverId, sessionId, tmuxSessionName);
 
   const { tasks, loading: tasksLoading, error: tasksError, refresh: refreshTasks } = useTasks(serverId, sessionId);
-  const { fileChanges, loading: reviewLoading, error: reviewError, refresh: refreshReview } = useCodeReview(serverId, sessionId);
+  const reviewSummary = useReviewSummary(serverId, sessionId);
+  const reviewApi = useRef<ReviewApi | null>(null);
   const { agents, runningCount, totalAgents, error: agentsError } = useSubAgents(serverId, sessionId);
   const bypass = useBypassPermissions(serverId, sessionId);
   const sessionMute = useSessionMute(serverId);
@@ -145,8 +148,12 @@ export function SessionView({
   // File finder state
   const [showFileFinder, setShowFileFinder] = useState(false);
 
-  // Code review modal state
-  const [showCodeReviewModal, setShowCodeReviewModal] = useState(false);
+  // Code review drawer state (owned by ReviewProvider; mirrored for overlay/back handling)
+  const [showCodeReviewModal, setShowCodeReviewModalState] = useState(false);
+  const setShowCodeReviewModal = useCallback((open: boolean) => {
+    if (open) reviewApi.current?.openDrawer();
+    else reviewApi.current?.closeDrawer();
+  }, []);
 
   // Skill browser state
   const [showSkillBrowser, setShowSkillBrowser] = useState(false);
@@ -340,6 +347,8 @@ export function SessionView({
     },
     [sendInput],
   );
+
+  const handleReviewComment = useCallback((text: string) => { void sendInput(text); }, [sendInput]);
 
   const handleSendWithAttachments = useCallback(
     async (text: string, attachments: PendingAttachment[]): Promise<boolean> => {
@@ -606,15 +615,7 @@ export function SessionView({
           Bookmarks ({currentBookmarks.length})
         </button>
       )}
-      {fileChanges.length > 0 && (
-        <button
-          className="session-header-btn"
-          onClick={() => setShowCodeReviewModal(true)}
-          title="Review file changes"
-        >
-          Review ({fileChanges.length})
-        </button>
-      )}
+      <ReviewHeaderButton />
       <button
         className="session-header-btn"
         onClick={() => setShowSkillBrowser(true)}
@@ -704,8 +705,8 @@ export function SessionView({
     { label: 'Files', onClick: () => setShowFileFinder(true) },
     { label: 'Search', onClick: () => setShowConversationSearch(true) },
     { label: 'Skills', onClick: () => setShowSkillBrowser(true) },
-    ...(fileChanges.length > 0
-      ? [{ label: 'Review', badge: fileChanges.length, onClick: () => setShowCodeReviewModal(true) }]
+    ...(reviewSummary && reviewSummary.totalFiles > 0
+      ? [{ label: 'Review', badge: reviewSummary.unreviewedFiles || undefined, onClick: () => setShowCodeReviewModal(true) }]
       : []),
   ];
 
@@ -722,6 +723,15 @@ export function SessionView({
   );
 
   return (
+    <ReviewProvider
+      serverId={serverId}
+      sessionId={sessionId}
+      sessionName={tmuxSessionName ?? null}
+      sendToSession={handleReviewComment}
+      onViewFile={handleViewFile}
+      apiRef={reviewApi}
+      onDrawerChange={setShowCodeReviewModalState}
+    >
     <div className="session-view" style={style}>
       {/* Top header: back arrow on mobile, full header on desktop */}
       <div className={`session-header ${mobile ? 'session-header-mobile' : ''}`}>
@@ -751,6 +761,8 @@ export function SessionView({
             lower-frequency actions collapse into the "Tools" dropdown. */}
         {mobile ? mobileActionButtons : actionButtons}
       </div>
+
+      <ChangeStrip />
 
       {showTerminal && tmuxSessionName && serverId && (
         <TerminalPanel
@@ -831,18 +843,9 @@ export function SessionView({
 
             <TaskList tasks={tasks} loading={tasksLoading} />
 
-            <CodeReviewCard
-              fileChanges={fileChanges}
-              loading={reviewLoading}
-              onOpenModal={() => setShowCodeReviewModal(true)}
-              onRefresh={refreshReview}
-            />
 
             {tasksError && (
               <FetchErrorBanner message={`Tasks: ${tasksError}`} onRetry={refreshTasks} />
-            )}
-            {reviewError && (
-              <FetchErrorBanner message={`Code review: ${reviewError}`} onRetry={refreshReview} />
             )}
             {agentsError && (
               <FetchErrorBanner message={`Agents: ${agentsError}`} />
@@ -959,18 +962,7 @@ export function SessionView({
         />
       )}
 
-      {showCodeReviewModal && fileChanges.length > 0 && (
-        <Suspense fallback={null}>
-          <CodeReviewModal
-            fileChanges={fileChanges}
-            onViewFile={handleViewFile}
-            onRefresh={refreshReview}
-            onClose={() => setShowCodeReviewModal(false)}
-            onComment={handleSend}
-            sessionId={sessionId}
-          />
-        </Suspense>
-      )}
+      <ReviewShell />
 
       {showConversationSearch && serverId && (
         <ConversationSearch serverId={serverId} onClose={() => setShowConversationSearch(false)} />
@@ -1013,5 +1005,6 @@ export function SessionView({
         onToggleHideTools={() => setHideTools(!hideTools)}
       />
     </div>
+    </ReviewProvider>
   );
 }

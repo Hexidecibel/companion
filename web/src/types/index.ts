@@ -215,6 +215,7 @@ export interface PendingAttachment {
 }
 
 // Code review types (file changes extracted from session)
+/** @deprecated Legacy get_session_diff shape; use ReviewFileChange / ReviewEdit. */
 export interface FileChange {
   path: string;
   action: 'write' | 'edit';
@@ -359,3 +360,6 @@ export interface AuditLogResponse {
   entries: AuditEntry[];
   hasMore: boolean;
 }
+
+// Code Review 2.0 protocol (mirror of daemon/src/review/protocol.ts).
+export * from './review';
