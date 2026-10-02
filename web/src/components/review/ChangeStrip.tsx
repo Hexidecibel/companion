@@ -54,7 +54,7 @@ export function ChangeStrip() {
         ) : unreviewed ? (
           <span className="rv-strip__text">
             <span className="rv-strip__delta" aria-hidden="true">{'Δ'}</span>
-            {plural(summary.unreviewedFiles, 'file')} {since}
+            {plural(summary.unreviewedFiles, 'file')}<span className="rv-strip__since"> {since}</span>
             <span className="rv-strip__sep">·</span>
             <span className="rv-num rv-add">{stat.add}</span>{' '}
             <span className="rv-num rv-del">{stat.del}</span>

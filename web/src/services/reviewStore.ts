@@ -136,13 +136,17 @@ export class ReviewStore {
     if (existing?.conn === conn) return;
     existing?.off();
     let wasConnected = false;
+    // Register before subscribing: onStateChange fires synchronously with the
+    // current state, and an already-connected socket must fetch right away.
+    const entry = { conn, off: () => {} };
+    this.attached.set(serverId, entry);
     const offMsg = conn.onMessage((msg) => this.handleMessage(serverId, msg));
     const offState = conn.onStateChange((state) => {
       const now = state.status === 'connected';
       if (now && !wasConnected) void this.refresh(serverId);
       wasConnected = now;
     });
-    this.attached.set(serverId, { conn, off: () => { offMsg(); offState(); } });
+    entry.off = () => { offMsg(); offState(); };
   }
 
   attachedIds(): string[] {

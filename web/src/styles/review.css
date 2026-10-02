@@ -869,6 +869,7 @@
 
 @media (max-width: 768px) {
   .rv-strip { font-size: 12px; }
+  .rv-strip__since { display: none; }
   .rv-strip .rv-risks .rv-risk:nth-child(n+2) { display: none; }
   .rv-drawer__body { padding: 8px 8px 24px; }
   .rv-gutter__old, .rv-gutter__new { display: none; }

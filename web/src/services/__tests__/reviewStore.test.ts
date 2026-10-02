@@ -56,6 +56,14 @@ describe('ReviewStore', () => {
     expect(store.supported('srv')).toBe(true);
   });
 
+  it('fetches at once when attached to an already-connected socket', async () => {
+    const store = new ReviewStore();
+    const conn = fakeConn({ type: 'review_summary_list', success: true, payload: { summaries: [fxSummary({ version: 2 })] } });
+    conn.setState('connected');
+    store.attach('srv', conn);
+    await vi.waitFor(() => expect(store.get('srv', 'sess-1')?.version).toBe(2));
+  });
+
   it('marks an old daemon unsupported', async () => {
     const store = new ReviewStore();
     const conn = fakeConn({ type: 'error', success: false, error: 'Unknown message type: review_summary_list' });
