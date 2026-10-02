@@ -241,7 +241,7 @@ export const FileDiff = memo(function FileDiff(props: FileDiffProps) {
         {pending && <span className="rv-tag rv-tag--live">writing</span>}
         {failed && <span className="rv-tag">failed, no change</span>}
         <span className="rv-file__spacer" />
-        <RiskBadges risks={risks} max={2} compact />
+        <RiskBadges risks={trivial ? risks.filter((r) => r.kind !== 'lockfile') : risks} max={2} compact />
         <span className="rv-file__stat rv-num">
           <span className="rv-add">{stat.add}</span> <span className="rv-del">{stat.del}</span>
         </span>
