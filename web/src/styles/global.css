@@ -1054,6 +1054,39 @@ body {
   text-decoration: underline;
 }
 
+/* Slash command run directly in the CLI (e.g. "Ran /login") */
+.local-command-marker {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  max-width: 90%;
+  padding: 2px 10px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  opacity: 0.85;
+}
+
+.local-command-name {
+  font-family: var(--font-mono, monospace);
+  white-space: nowrap;
+}
+
+.local-command-output {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.local-command-output::before {
+  content: '\00b7';
+  margin-right: 8px;
+}
+
+.local-command-marker-error .local-command-output {
+  color: var(--accent-red);
+}
+
 /* Inline task-notification pill (inside assistant messages) */
 .task-notification-pill {
   display: inline-flex;

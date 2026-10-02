@@ -131,6 +131,9 @@ export interface ConversationHighlight {
   toolCalls?: ToolCall[];
   isCompaction?: boolean;
   skillName?: string;
+  /** System marker for a slash command the user ran directly in the CLI
+   *  (e.g. "/login"), not sent to the model. Content is the marker text. */
+  localCommand?: { name: string; args?: string; output?: string; isError?: boolean };
   /** True when this highlight was synthesized from a live terminal capture (e.g. an
    *  active AskUserQuestion selector) rather than parsed from JSONL. */
   liveSourced?: boolean;

@@ -20,6 +20,8 @@ High-level features of the Companion daemon, web client, and desktop/mobile apps
 - Session mapping persistence across daemon restarts (`~/.claude/companion-session-mappings.json`); each mapping remembers the session identity (tmux creation time, pane pid, claude pid), so a reused tmux name or a restarted claude gets a fresh transcript instead of the old one
 - Project paths with dots, underscores or spaces (`~/.cache/...`) link to their transcripts (Claude Code's project dir encoding: every non-alphanumeric becomes `-`)
 - Event-driven compaction re-mapping when context compaction creates new JSONL files
+- Conversation chains (infinite scroll across a session's transcripts) are ordered by each file's first entry with the live conversation always last; a short side transcript (e.g. `/login` run inside a live claude writes its own file) never takes over the mapping or renders after the newest message, and a command-only file adds no "Previous session" divider
+- Slash commands run directly in the CLI (`/login`, `/model`, `/clear`) render as a quiet "Ran /login · Login successful" marker (short output only); `<local-command-caveat>`/stdout/stderr tags are never shown, and Herald does not treat them as prompts
 - ExitPlanMode and AskUserQuestion detected as "waiting for input" (triggers status banner, push notifications)
 - Pending multiple-choice AskUserQuestion prompts render as tappable options in the Chat view — these are buffered by Claude Code and never hit the session JSONL until answered, so the live tmux pane is scraped and surfaced as a synthetic live highlight
 - Session status indicators (waiting, working, idle)

@@ -668,6 +668,132 @@ describe('SessionWatcher', () => {
     });
   });
 
+  // A `/login` (or any directly-run command) run inside a live claude writes
+  // its own short transcript while the conversation goes on in the old file.
+  // Observed 2026-10-02: the mapping flipped to that file and back, history
+  // ended up [main, login], and the chain rendered the login file (with a
+  // "Previous session" divider) AFTER the newest message.
+  describe('chain ordering with side transcripts', () => {
+    const MAPPINGS = `${CODE_HOME}/companion-session-mappings.json`;
+    const FILE_A3 = `${PROJECT_DIR_A}/${FILE_UUID_3}.jsonl`;
+    const line = (o: object) => JSON.stringify(o);
+    const conv = (startIso: string, text: string) =>
+      [
+        line({ type: 'user', message: { content: `${text} prompt` }, uuid: `${text}-u`, timestamp: startIso }),
+        line({ type: 'assistant', message: { content: `${text} reply` }, uuid: `${text}-a`, timestamp: startIso }),
+      ].join('\n');
+    const LOGIN = [
+      line({ type: 'mode', mode: 'normal', sessionId: FILE_UUID_2 }),
+      line({
+        type: 'user',
+        isMeta: true,
+        message: { role: 'user', content: '<local-command-caveat>The command below was run directly in Claude Code, not sent to you as a request, and its output goes straight to the user.</local-command-caveat>' },
+        uuid: 'cav',
+        timestamp: '2026-10-02T05:32:04.041Z',
+      }),
+      line({
+        type: 'user',
+        message: { role: 'user', content: '<command-name>/login</command-name>\n            <command-message>login</command-message>\n            <command-args></command-args>' },
+        uuid: 'cmd',
+        timestamp: '2026-10-02T05:32:04.040Z',
+      }),
+      line({
+        type: 'user',
+        message: { role: 'user', content: '<local-command-stdout>Login successful</local-command-stdout>' },
+        uuid: 'out',
+        timestamp: '2026-10-02T05:32:04.040Z',
+      }),
+    ].join('\n');
+
+    let files: Record<string, string>;
+    function serve(extra: Record<string, string> = {}) {
+      files = { ...extra };
+      const fds = new Map<number, string>();
+      let nextFd = 100;
+      mockFs.readFileSync.mockImplementation(((p: any) => {
+        const f = files[String(p)];
+        if (f === undefined) throw new Error('ENOENT');
+        return f;
+      }) as any);
+      mockFs.existsSync.mockImplementation(((p: any) => String(p) in files || !String(p).endsWith('.jsonl')) as any);
+      mockFs.openSync.mockImplementation(((p: any) => {
+        if (!(String(p) in files)) throw new Error('ENOENT');
+        fds.set(nextFd, String(p));
+        return nextFd++;
+      }) as any);
+      mockFs.readSync.mockImplementation(((fd: number, buf: Buffer, off: number, len: number, pos: number) => {
+        const data = Buffer.from(files[fds.get(fd) || ''] || '', 'utf-8');
+        return data.copy(buf, off, pos, Math.min(data.length, pos + len));
+      }) as any);
+    }
+    const ids = (w: SessionWatcher) => (w as any).tmuxConversationIds as Map<string, string>;
+    const hist = (w: SessionWatcher) => (w as any).tmuxConversationHistory as Map<string, string[]>;
+
+    it('a login-only transcript never takes over the mapping or joins the chain', async () => {
+      addTmuxSession(TMUX_SESSION_A, '/home/user/project-a');
+      serve({ [FILE_A1]: conv('2026-09-30T07:00:51.344Z', 'main') });
+      await startWatcher(watcher);
+      mockWatcher.emit('add', FILE_A1);
+      await jest.advanceTimersByTimeAsync(200);
+      expect(ids(watcher).get(TMUX_SESSION_A)).toBe(FILE_UUID_1);
+
+      files[FILE_A2] = LOGIN;
+      mockWatcher.emit('add', FILE_A2);
+      await jest.advanceTimersByTimeAsync(200);
+      expect(ids(watcher).get(TMUX_SESSION_A)).toBe(FILE_UUID_1);
+
+      files[FILE_A1] += '\n' + line({ type: 'user', message: { content: 'keep going' }, uuid: 'u2', timestamp: '2026-10-02T05:32:20.000Z' });
+      mockWatcher.emit('change', FILE_A1);
+      await jest.advanceTimersByTimeAsync(200);
+      expect(watcher.getConversationChain(TMUX_SESSION_A)).toEqual([FILE_A1]);
+    });
+
+    it('a re-detected mapping moves to the end of history', async () => {
+      addTmuxSession(TMUX_SESSION_A, '/home/user/project-a');
+      serve({});
+      await startWatcher(watcher);
+      (watcher as any).setConversationMapping(TMUX_SESSION_A, FILE_UUID_1);
+      (watcher as any).setConversationMapping(TMUX_SESSION_A, FILE_UUID_2);
+      (watcher as any).setConversationMapping(TMUX_SESSION_A, FILE_UUID_1);
+      expect(hist(watcher).get(TMUX_SESSION_A)).toEqual([FILE_UUID_2, FILE_UUID_1]);
+    });
+
+    it('migrates the observed scrambled mapping on restart: the newest message stays last', async () => {
+      serve({
+        [MAPPINGS]: JSON.stringify({
+          mappings: { [TMUX_SESSION_A]: FILE_UUID_1 },
+          history: { [TMUX_SESSION_A]: [FILE_UUID_1, FILE_UUID_2, FILE_UUID_1] },
+        }),
+        [FILE_A1]: conv('2026-09-30T07:00:51.344Z', 'main'),
+        [FILE_A2]: LOGIN,
+      });
+      addTmuxSession(TMUX_SESSION_A, '/home/user/project-a');
+      watcher.stop();
+      watcher = new SessionWatcher(CODE_HOME);
+      expect(hist(watcher).get(TMUX_SESSION_A)).toEqual([FILE_UUID_2, FILE_UUID_1]);
+      await startWatcher(watcher);
+      expect(ids(watcher).get(TMUX_SESSION_A)).toBe(FILE_UUID_1);
+      expect(watcher.getConversationChain(TMUX_SESSION_A)).toEqual([FILE_A1]);
+    });
+
+    it('orders a compaction chain by first entry, not by history order', async () => {
+      serve({
+        [MAPPINGS]: JSON.stringify({
+          mappings: { [TMUX_SESSION_A]: FILE_UUID_3 },
+          history: { [TMUX_SESSION_A]: [FILE_UUID_3, FILE_UUID_2, FILE_UUID_1] },
+        }),
+        [FILE_A1]: conv('2026-09-01T00:00:00.000Z', 'first'),
+        [FILE_A2]: conv('2026-09-02T00:00:00.000Z', 'second'),
+        [FILE_A3]: conv('2026-09-03T00:00:00.000Z', 'third'),
+      });
+      addTmuxSession(TMUX_SESSION_A, '/home/user/project-a');
+      watcher.stop();
+      watcher = new SessionWatcher(CODE_HOME);
+      await startWatcher(watcher);
+      expect(watcher.getConversationChain(TMUX_SESSION_A)).toEqual([FILE_A1, FILE_A2, FILE_A3]);
+    });
+  });
+
   // ========================================
   // Stop / cleanup
   // ========================================

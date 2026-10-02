@@ -85,6 +85,7 @@ export interface ConversationHighlight {
   isCompaction?: boolean;
   isPending?: boolean; // Optimistic sent message not yet confirmed by JSONL
   skillName?: string; // User message is an expanded skill invocation (e.g., "todo", "apk")
+  localCommand?: { name: string; args?: string; output?: string; isError?: boolean }; // Slash command run directly in the CLI (system marker)
   liveSourced?: boolean; // Synthesized from a live terminal capture (e.g. active AskUserQuestion), not JSONL
 }
 

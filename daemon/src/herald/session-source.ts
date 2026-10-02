@@ -8,7 +8,12 @@
 
 import { execFile } from 'child_process';
 import * as path from 'path';
-import { detectActiveChoicePrompt, getPendingApprovalTools } from '../parser';
+import {
+  classifyLocalCommands,
+  detectActiveChoicePrompt,
+  getPendingApprovalTools,
+  parseLocalCommandPart,
+} from '../parser';
 import type { ConversationMessage } from '../types';
 import { BoundedMap } from '../utils';
 import { fnv1a, oneLine, clip, trailingQuestion } from './text';
@@ -110,6 +115,25 @@ export function choiceSignature(q: {
   return fnv1a([q.header || '', q.question || '', ...q.options.map((o) => o.label)].join('\u0001'));
 }
 
+/**
+ * Entries that are not prompts to the model: a directly-run slash command
+ * (`/login`), its caveat and its output. Skill triggers stay (unchanged
+ * behaviour). Only the tail that the bounded scans below can reach is
+ * classified.
+ */
+function localCommandIndices(messages: ConversationMessage[]): Set<number> {
+  const TAIL = 700;
+  const start = Math.max(0, messages.length - TAIL);
+  const tail = messages.slice(start);
+  const { hidden, markers } = classifyLocalCommands(tail);
+  const out = new Set<number>();
+  for (const i of hidden) {
+    if (parseLocalCommandPart(tail[i].content)?.kind !== 'command') out.add(i + start);
+  }
+  for (const i of markers.keys()) out.add(i + start);
+  return out;
+}
+
 /** Split messages into the last user prompt + trailing assistant turns. */
 export function extractRecentTranscript(
   messages: ConversationMessage[],
@@ -118,11 +142,13 @@ export function extractRecentTranscript(
   const turns: TranscriptTurn[] = [];
   let lastUserPrompt: TranscriptTurn | null = null;
   let current: TranscriptTurn | null = null;
+  const plumbing = localCommandIndices(messages);
   // Walk backwards so we can stop early on huge transcripts.
   const LIMIT_SCAN = 400;
   let scanned = 0;
   for (let i = messages.length - 1; i >= 0 && scanned < LIMIT_SCAN; i--, scanned++) {
     const m = messages[i];
+    if (plumbing.has(i)) continue;
     if (m.type === 'assistant') {
       const text = (m.content || '').trim();
       if (!text) continue;
@@ -158,8 +184,10 @@ export function extractExchanges(
   let replyAt: number | undefined;
   const LIMIT_SCAN = 600;
   let scanned = 0;
+  const plumbing = localCommandIndices(messages);
   for (let i = messages.length - 1; i >= 0 && scanned < LIMIT_SCAN; i--, scanned++) {
     const m = messages[i];
+    if (plumbing.has(i)) continue;
     const text = (m.content || '').trim();
     if (!text) continue;
     if (m.type === 'assistant') {

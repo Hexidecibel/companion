@@ -325,7 +325,8 @@ export function parseConversationFile(
         const skillName = cmdMatch[1];
         for (let j = i + 1; j < trimmed.length; j++) {
           if (trimmed[j].type === 'user' && !trimmed[j].skillName) {
-            trimmed[j].skillName = skillName;
+            // A directly-run command's output/caveat is not a skill expansion
+            if (!parseLocalCommandPart(trimmed[j].content)) trimmed[j].skillName = skillName;
             break;
           }
           if (trimmed[j].type === 'assistant') break;
@@ -1064,6 +1065,124 @@ function parseEntry(
 }
 
 /**
+ * Claude Code records a slash command the user runs directly in the CLI
+ * (`/login`, `/model`, `/clear`, ...) as plain user entries:
+ *   1. `<local-command-caveat>...</local-command-caveat>` (isMeta)
+ *   2. `<command-name>/login</command-name><command-message>..</command-message><command-args>..</command-args>`
+ *   3. `<local-command-stdout>Login successful</local-command-stdout>` (or `-stderr`)
+ * None of them is a prompt to the model. A skill trigger also uses
+ * `<command-name>`, but is followed by the expanded skill text instead of output.
+ */
+export type LocalCommandPart =
+  | { kind: 'caveat' }
+  | { kind: 'command'; name: string; args: string }
+  | { kind: 'output'; text: string; isError: boolean };
+
+// eslint-disable-next-line no-control-regex
+const ANSI_RE = /\x1b\[[0-9;?]*[A-Za-z]/g;
+
+export function parseLocalCommandPart(content: string): LocalCommandPart | null {
+  if (!content || !content.includes('<')) return null;
+  let t = content.replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, '').trim();
+  const caveat = t.match(/^<local-command-caveat>[\s\S]*?<\/local-command-caveat>/);
+  if (caveat) {
+    t = t.slice(caveat[0].length).trim();
+    if (!t) return { kind: 'caveat' };
+  }
+  const out = t.match(/^<local-command-(stdout|stderr)>([\s\S]*?)<\/local-command-\1>$/);
+  if (out) {
+    return { kind: 'output', text: out[2].replace(ANSI_RE, '').trim(), isError: out[1] === 'stderr' };
+  }
+  const cmd = t.match(/<command-name>([^<]*)<\/command-name>/);
+  if (cmd) {
+    const raw = cmd[1].trim();
+    const args = t.match(/<command-args>([\s\S]*?)<\/command-args>/);
+    return {
+      kind: 'command',
+      name: raw.startsWith('/') ? raw : `/${raw}`,
+      args: args ? args[1].trim() : '',
+    };
+  }
+  return null;
+}
+
+/** Longest command output shown inline in a "Ran /x" marker. */
+const LOCAL_COMMAND_OUTPUT_MAX = 120;
+
+export interface LocalCommandMarker {
+  name: string;
+  args?: string;
+  output?: string;
+  isError?: boolean;
+}
+
+/**
+ * Classify the local-command plumbing in a message list.
+ * - `hidden`: indices of entries that must never render (caveats, outputs,
+ *   skill triggers);
+ * - `markers`: index of a directly-run command -> its compact marker. A short,
+ *   single-line output is folded into the marker; longer output is dropped.
+ */
+export function classifyLocalCommands(messages: ConversationMessage[]): {
+  hidden: Set<number>;
+  markers: Map<number, LocalCommandMarker>;
+} {
+  const hidden = new Set<number>();
+  const markers = new Map<number, LocalCommandMarker>();
+  const parts: Array<LocalCommandPart | null> = messages.map((m) =>
+    m.type === 'user' && typeof m.content === 'string' ? parseLocalCommandPart(m.content) : null
+  );
+  let openCommand: number | null = null; // marker that a following output may attach to
+  for (let i = 0; i < messages.length; i++) {
+    const p = parts[i];
+    if (!p) {
+      if (messages[i].type !== 'user' || (messages[i].content || '').trim()) openCommand = null;
+      continue;
+    }
+    if (p.kind === 'caveat') {
+      hidden.add(i);
+      continue;
+    }
+    if (p.kind === 'command') {
+      const prev = parts[i - 1];
+      const next = parts[i + 1];
+      const local = prev?.kind === 'caveat' || next?.kind === 'output';
+      hidden.add(i);
+      if (local) {
+        markers.set(i, { name: p.name, ...(p.args ? { args: p.args } : {}) });
+        hidden.delete(i);
+        openCommand = i;
+      } else {
+        openCommand = null;
+      }
+      continue;
+    }
+    // output
+    hidden.add(i);
+    if (openCommand !== null) {
+      const marker = markers.get(openCommand)!;
+      const text = p.text;
+      if (text && !text.includes('\n') && text.length <= LOCAL_COMMAND_OUTPUT_MAX && !marker.output) {
+        marker.output = text;
+      }
+      if (p.isError) marker.isError = true;
+      openCommand = null;
+    }
+  }
+  return { hidden, markers };
+}
+
+export function formatLocalCommandMarker(m: LocalCommandMarker): string {
+  const head = `Ran ${m.name}${m.args ? ` ${m.args}` : ''}`;
+  return m.output ? `${head} · ${m.output}` : head;
+}
+
+/** True when the highlights carry nothing but local-command markers (or nothing). */
+export function isTrivialHighlights(highlights: ConversationHighlight[]): boolean {
+  return highlights.every((h) => !!h.localCommand);
+}
+
+/**
  * Parse a chain of conversation files for cross-session infinite scroll.
  * Files are ordered oldest-first. Pagination counts from the END of the
  * newest (last) file backwards through older files.
@@ -1083,15 +1202,22 @@ export function parseConversationChain(
   // We cache this lazily — only parse as many files as needed
   const allHighlights: ConversationHighlight[] = [];
   let totalCount = 0;
+  let newerHasContent = false;
 
   // Walk from newest to oldest, stop once we have enough
   for (let i = files.length - 1; i >= 0; i--) {
     const messages = parseConversationFile(files[i]);
     const highlights = extractHighlights(messages);
+    // An older file holding only a directly-run command (e.g. a `/login` that
+    // wrote its own transcript) is not a previous session: skip it, no divider.
+    const isNewest = i === files.length - 1;
+    const trivial = isTrivialHighlights(highlights);
+    if (!isNewest && trivial) continue;
 
     if (highlights.length > 0) {
-      // Insert a session boundary marker between files (not before the first/newest)
-      if (allHighlights.length > 0 && messages.length > 0) {
+      // Insert a session boundary marker between real sessions only (never
+      // below a newest file that holds just a command marker)
+      if (newerHasContent && messages.length > 0) {
         const boundaryTime = messages[messages.length - 1]?.timestamp || Date.now();
         allHighlights.unshift({
           id: `boundary-${i}`,
@@ -1105,6 +1231,7 @@ export function parseConversationChain(
       // Prepend older highlights before newer ones
       allHighlights.unshift(...highlights);
       totalCount += highlights.length;
+      if (!trivial) newerHasContent = true;
     }
 
     // Check if we have enough messages to satisfy the request
@@ -1125,12 +1252,18 @@ export function parseConversationChain(
 }
 
 export function extractHighlights(messages: ConversationMessage[]): ConversationHighlight[] {
+  const localCommands = classifyLocalCommands(messages);
+  const indexOf = new Map<ConversationMessage, number>();
+  messages.forEach((m, i) => indexOf.set(m, i));
   // Find the index of the last user message - anything before this has been "responded to"
   const rawHighlights = messages
-    .filter((msg) => {
+    .filter((msg, i) => {
+      if (localCommands.hidden.has(i)) return false;
+      if (localCommands.markers.has(i)) return true;
       // Include user messages with content (but hide internal plumbing)
       if (msg.type === 'user' && msg.content && msg.content.trim()) {
         if (msg.content.includes('<command-name>')) return false;
+        if (msg.content.includes('<local-command-')) return false;
         if (msg.content.includes('<task-notification>')) return false;
         // Skip messages that are only system-reminder blocks (no user-visible content)
         if (msg.content.includes('<system-reminder>')) {
@@ -1153,7 +1286,17 @@ export function extractHighlights(messages: ConversationMessage[]): Conversation
       }
       return false;
     })
-    .map((msg, index, arr) => {
+    .map((msg, index, arr): ConversationHighlight => {
+      const marker = localCommands.markers.get(indexOf.get(msg) ?? -1);
+      if (marker) {
+        return {
+          id: msg.id,
+          type: 'system' as const,
+          content: formatLocalCommandMarker(marker),
+          timestamp: msg.timestamp,
+          localCommand: { ...marker },
+        };
+      }
       // System messages pass through directly
       if (msg.type === 'system') {
         return {
@@ -1167,7 +1310,7 @@ export function extractHighlights(messages: ConversationMessage[]): Conversation
       }
 
       const isLastMessage = index === arr.length - 1;
-      const originalIndex = messages.indexOf(msg);
+      const originalIndex = indexOf.get(msg) ?? messages.indexOf(msg);
 
       // Check if this message has pending interactive tools (approval tools or AskUserQuestion)
       const hasPendingInteractiveTools =

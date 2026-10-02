@@ -9,6 +9,9 @@ import {
   processStartMs,
   bornAfter,
   sanitizeIdentity,
+  orderConversationChain,
+  transcriptStartMs,
+  ChainEntry,
 } from './session-identity';
 import * as path from 'path';
 import * as chokidar from 'chokidar';
@@ -28,6 +31,7 @@ import {
   detectCompaction,
   extractTasks,
   detectActiveChoicePrompt,
+  isTrivialHighlights,
 } from './parser';
 import { APPROVAL_TOOLS } from './tool-config';
 import {
@@ -46,7 +50,7 @@ import {
   USER_LINE_LOG_LENGTH,
   RECENT_ACTIVITY_LIMIT,
 } from './constants';
-import { atomicWriteFileSync, registerShutdownCallback } from './utils';
+import { atomicWriteFileSync, registerShutdownCallback, BoundedMap } from './utils';
 import { isReadonlySharedState } from './sandbox';
 
 const execAsync = promisify(exec);
@@ -130,6 +134,8 @@ export class SessionWatcher extends EventEmitter {
   private loggedReadonlySharedState = false;
   // Internal conversation tracking — keyed by JSONL UUID for parse efficiency
   private conversations: Map<string, TrackedConversation> = new Map();
+  /** Transcript path -> first entry time (ms); immutable once known. */
+  private transcriptStartCache = new BoundedMap<string, number>(500);
   // Tmux session maps — the public session model
   // Session IDs exposed to clients are tmux session names, not JSONL UUIDs.
   private tmuxSessionByPath: Map<string, string> = new Map(); // encodedPath -> tmux session name
@@ -219,7 +225,16 @@ export class SessionWatcher extends EventEmitter {
       if (isNewFormat && parsed.history) {
         for (const [session, ids] of Object.entries(parsed.history)) {
           if (Array.isArray(ids)) {
-            this.tmuxConversationHistory.set(session, ids as string[]);
+            // Older files could hold the current mapping anywhere in the list
+            // (a mapping flipped to a side transcript and back): dedupe and
+            // keep the current conversation last. Display order is derived
+            // from the files themselves (getConversationChain).
+            const current = this.tmuxConversationIds.get(session);
+            const clean = (ids as unknown[]).filter(
+              (id, i, arr): id is string => typeof id === 'string' && arr.indexOf(id) === i && id !== current
+            );
+            if (current) clean.push(current);
+            this.tmuxConversationHistory.set(session, clean);
           }
         }
       }
@@ -335,9 +350,9 @@ export class SessionWatcher extends EventEmitter {
       }
     } else {
       // Initial discovery / re-detection: ensure current ID is at the end
-      if (!history.includes(convId)) {
-        history.push(convId);
-      }
+      const at = history.indexOf(convId);
+      if (at !== -1 && at !== history.length - 1) history.splice(at, 1);
+      if (history[history.length - 1] !== convId) history.push(convId);
     }
 
     this.tmuxConversationHistory.set(sessionName, history);
@@ -957,6 +972,15 @@ export class SessionWatcher extends EventEmitter {
         // The session (or its claude) just started: an older transcript in the
         // same directory (e.g. the previous claude writing its exit lines) is
         // not this session's.
+      } else if (
+        sessionsForPath.length === 1 &&
+        this.tmuxConversationIds.has(sessionsForPath[0]) &&
+        isTrivialHighlights(highlights)
+      ) {
+        // A transcript holding only a directly-run command (`/login` writes its
+        // own file while the conversation goes on in the old one): not a new
+        // conversation for an already-mapped session. Claim it only once it
+        // holds a real exchange (e.g. after `/clear` and a prompt).
       } else if (sessionsForPath.length === 1) {
         tmuxName = sessionsForPath[0];
         this.setConversationMapping(tmuxName, convId);
@@ -2244,6 +2268,15 @@ export class SessionWatcher extends EventEmitter {
     return this.isWaitingForInput;
   }
 
+  /** First entry time of a transcript (cached once known). */
+  private transcriptStart(filePath: string): number | null {
+    const cached = this.transcriptStartCache.get(filePath);
+    if (cached !== undefined) return cached;
+    const ms = transcriptStartMs(filePath);
+    if (ms !== null) this.transcriptStartCache.set(filePath, ms);
+    return ms;
+  }
+
   /**
    * Get the conversation file(s) for a session.
    * sessionId is a tmux session name — resolves to the best conversation.
@@ -2259,7 +2292,7 @@ export class SessionWatcher extends EventEmitter {
       return [tracked.path];
     }
 
-    // Resolve each history ID to a file path (oldest first)
+    // Resolve each history ID to a file path
     let encodedPath = this.tmuxPathBySession.get(sessionId);
     if (!encodedPath) {
       // Derive from persisted session snapshot
@@ -2272,28 +2305,21 @@ export class SessionWatcher extends EventEmitter {
     }
     const projectDir = encodedPath ? path.join(this.codeHome, 'projects', encodedPath) : null;
 
-    const chain: string[] = [];
-    const MAX_CHAIN = 20;
-
-    for (const id of history) {
-      if (chain.length >= MAX_CHAIN) break;
-
-      // Check in-memory tracked conversations first
-      const tracked = this.conversations.get(id);
-      if (tracked) {
-        chain.push(tracked.path);
-        continue;
+    const entries: ChainEntry[] = [];
+    const current = this.tmuxConversationIds.get(sessionId);
+    const ids = current && !history.includes(current) ? [...history, current] : history;
+    for (const id of ids) {
+      let filePath: string | undefined = this.conversations.get(id)?.path;
+      if (!filePath && projectDir) {
+        const candidate = path.join(projectDir, `${id}.jsonl`);
+        if (fs.existsSync(candidate)) filePath = candidate;
       }
-
-      // Fall back to disk lookup
-      if (projectDir) {
-        const filePath = path.join(projectDir, `${id}.jsonl`);
-        if (fs.existsSync(filePath)) {
-          chain.push(filePath);
-        }
-      }
+      if (!filePath) continue;
+      entries.push({ id, path: filePath, startMs: this.transcriptStart(filePath) });
     }
 
+    // Oldest first by each file's first entry, the live conversation last.
+    const chain = orderConversationChain(entries, current, 20);
     return chain;
   }
 

@@ -370,6 +370,19 @@ export const MessageBubble = memo(function MessageBubble({ message, onSelectOpti
     return <CompactionMessage content={message.content} />;
   }
 
+  // A slash command the user ran directly in the CLI (e.g. /login): a quiet marker
+  if (isSystem && message.localCommand) {
+    const lc = message.localCommand;
+    return (
+      <div className="msg-row msg-row-system" data-highlight-id={message.id}>
+        <div className={`local-command-marker${lc.isError ? ' local-command-marker-error' : ''}`}>
+          <span className="local-command-name">Ran {lc.name}{lc.args ? ` ${lc.args}` : ''}</span>
+          {lc.output && <span className="local-command-output">{lc.output}</span>}
+        </div>
+      </div>
+    );
+  }
+
   // Render system messages (task notifications) as compact cards
   if (isSystem) {
     const outputFile = message.toolCalls?.[0]?.output;

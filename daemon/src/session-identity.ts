@@ -154,3 +154,96 @@ export function bornAfter(
   const born = stats.birthtimeMs && stats.birthtimeMs > 0 ? stats.birthtimeMs : stats.mtimeMs;
   return born >= startedAt - 1000;
 }
+
+/**
+ * Epoch ms of a transcript's first timestamped entry, read from the head of the
+ * file (at most `maxBytes`), null when there is none. The first entry never
+ * changes once written, so callers may cache a non-null result.
+ */
+export function transcriptStartMs(filePath: string, maxBytes = 1024 * 1024): number | null {
+  let fd: number | undefined;
+  try {
+    fd = fs.openSync(filePath, 'r');
+    const chunk = 64 * 1024;
+    let pending = '';
+    let readTotal = 0;
+    const buf = Buffer.alloc(chunk);
+    while (readTotal < maxBytes) {
+      const n = fs.readSync(fd, buf, 0, chunk, readTotal);
+      if (n <= 0) break;
+      readTotal += n;
+      pending += buf.toString('utf-8', 0, n);
+      const lines = pending.split('\n');
+      pending = lines.pop() ?? '';
+      for (const line of lines) {
+        const ms = entryTimestamp(line);
+        if (ms !== null) return ms;
+      }
+    }
+    return entryTimestamp(pending);
+  } catch {
+    return null;
+  } finally {
+    if (fd !== undefined) {
+      try {
+        fs.closeSync(fd);
+      } catch {
+        // ignore
+      }
+    }
+  }
+}
+
+function entryTimestamp(line: string): number | null {
+  if (!line.includes('"timestamp"')) return null;
+  try {
+    const e = JSON.parse(line) as { timestamp?: unknown };
+    if (typeof e.timestamp !== 'string') return null;
+    const ms = Date.parse(e.timestamp);
+    return Number.isFinite(ms) ? ms : null;
+  } catch {
+    return null;
+  }
+}
+
+export interface ChainEntry {
+  id: string;
+  path: string;
+  /** First entry timestamp (ms), null when the file has none. */
+  startMs: number | null;
+}
+
+/**
+ * Order a session's transcripts for display, oldest first, ending with the one
+ * the session runs now (`currentId`). Ordering comes from each file's first
+ * entry, never from the order the files were discovered (a mapping can flip to
+ * a short-lived side transcript and back, e.g. `/login` writing its own file).
+ * Only files that started before the current one are its predecessors; a file
+ * started later is a side transcript and is left out, so nothing is ever
+ * rendered after the live conversation. Files without entries are left out.
+ * At most `max` files (the newest).
+ */
+export function orderConversationChain(
+  entries: ChainEntry[],
+  currentId: string | undefined,
+  max = 20
+): string[] {
+  const dated = entries.filter((e) => e.startMs !== null || e.id === currentId);
+  if (dated.length === 0) return [];
+  let current = currentId ? dated.find((e) => e.id === currentId) : undefined;
+  if (!current) {
+    current = dated.reduce((a, b) =>
+      (b.startMs ?? -Infinity) >= (a.startMs ?? -Infinity) ? b : a
+    );
+  }
+  const cur = current;
+  const preds = dated
+    .filter(
+      (e) => e !== cur && e.startMs !== null && (cur.startMs === null || e.startMs < cur.startMs)
+    )
+    .sort((a, b) => (a.startMs as number) - (b.startMs as number));
+  const seen = new Set<string>([cur.path]);
+  const uniq = preds.filter((e) => (seen.has(e.path) ? false : (seen.add(e.path), true)));
+  const keep = Math.max(1, max) - 1;
+  return [...(keep > 0 ? uniq.slice(-keep) : []).map((e) => e.path), cur.path];
+}
