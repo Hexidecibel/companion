@@ -267,7 +267,7 @@ export class ReviewService {
       now: () => this.now(),
       displayPath: (a, p) => this.displayPath(a, p),
       isOutsideProject: (a, p) => this.isOutsideProject(a, p),
-      isExcludedPath: (a) => this.isExcludedPath(a),
+      isExcludedPath: (a, p) => this.isExcludedPath(a, p),
       alsoChangedBy: (id, a, since) => this.alsoChangedBy(id, a, since),
     });
   }
@@ -420,7 +420,7 @@ export class ReviewService {
     if (!clients.length) return;
     for (const c of changes) {
       const e = ctx.led.edits.get(c.editId);
-      if (!e || this.isExcludedPath(e.absPath)) continue;
+      if (!e || e.excluded) continue;
       const payload = { sessionId: ctx.sessionId, phase: c.phase, edit: this.reviewEditWithRisks(ctx, e) };
       for (const id of clients) {
         if (!this.deps.sendToClient(id, 'review_live', payload)) this.dropClient(id);
@@ -514,7 +514,10 @@ export class ReviewService {
       let led = this.ledgers.get(sessionId);
       if (led && led.projectPath !== projectPath) led = undefined;
       for (let attempt = 0; attempt < 2; attempt++) {
-        if (!led) led = new SessionLedger(sessionId, projectPath);
+        if (!led) {
+          led = new SessionLedger(sessionId, projectPath);
+          led.excludePath = (a) => this.isExcludedPath(a, projectPath);
+        }
         const subs = await listSubagentFiles(chain);
         led.setChain(chain, subs);
         if (!led.stale) await led.update(LEDGER_SCAN_BUDGET);
@@ -568,7 +571,7 @@ export class ReviewService {
     if (this.baselineTried.has(sessionId) || !this.deps.gitEnabled() || !led.projectPath) return;
     this.baselineTried.add(sessionId);
     if (this.store.has(sessionId, led.projectPath)) return;
-    for (const e of led.edits.values()) if (!e.failed && !this.isExcludedPath(e.absPath)) return;
+    for (const e of led.edits.values()) if (!e.failed && !e.excluded) return;
     void (async () => {
       const repo = await this.repos.resolve(led.projectPath).catch(() => null);
       if (!repo) return;
@@ -617,14 +620,20 @@ export class ReviewService {
   }
 
   /** Scratchpads and the OS temp dir are never reviewed. */
-  isExcludedPath(absPath: string): boolean {
+  /**
+   * Scratch space is never reviewed: Claude Code scratchpads anywhere, and the
+   * temp dirs unless the session's own project lives there.
+   */
+  isExcludedPath(absPath: string, projectPath = ''): boolean {
+    if (/\/scratchpad(\/|$)/.test(absPath)) return true;
+    if (projectPath && !this.isOutsideProject(absPath, projectPath)) return false;
     const dirs = this.deps.excludeDirs ?? [os.tmpdir(), '/tmp', '/var/tmp'];
-    return dirs.some((d) => absPath.startsWith(d + path.sep)) || /\/scratchpad(\/|$)/.test(absPath);
+    return dirs.some((d) => absPath.startsWith(d + path.sep));
   }
 
   /** Completed, non-failed, not excluded. */
   protected countable(e: LedgerEdit): boolean {
-    return !e.pending && !e.failed && !this.isExcludedPath(e.absPath);
+    return !e.pending && !e.failed && !e.excluded;
   }
 
   isUnreviewed(e: LedgerEdit, cp: StoredCheckpoint): boolean {
@@ -1020,7 +1029,7 @@ export class ReviewService {
       for (const t of turnsAll) {
         for (const id of t.editIds) {
           const e = ctx.led.edits.get(id);
-          if (!e || this.isExcludedPath(e.absPath)) continue;
+          if (!e || e.excluded) continue;
           if (scope === 'since_checkpoint' && !req.turnId && !e.pending && !this.isUnreviewed(e, ctx.cp))
             continue;
           all.push(e);
@@ -1149,7 +1158,7 @@ export class ReviewService {
     const missing: string[] = [];
     for (const id of editIds.slice(0, REVIEW_LIMITS.maxGetEdits)) {
       const e = ctx.led.edits.get(id);
-      if (e && !this.isExcludedPath(e.absPath)) edits.push(this.reviewEditWithRisks(ctx, e));
+      if (e && !e.excluded) edits.push(this.reviewEditWithRisks(ctx, e));
       else missing.push(id);
     }
     return { edits, missing };
@@ -1242,7 +1251,7 @@ export class ReviewService {
       let open = false;
       for (const id of t.editIds) {
         const e = led.edits.get(id);
-        if (!e || e.failed || this.isExcludedPath(e.absPath)) continue;
+        if (!e || e.failed || e.excluded) continue;
         if (e.pending) open = true;
         else if (last === null || e.at > last) last = e.at;
       }

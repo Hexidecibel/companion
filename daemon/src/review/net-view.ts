@@ -38,7 +38,7 @@ export interface NetViewHost {
   now(): number;
   displayPath(absPath: string, projectPath: string): string;
   isOutsideProject(absPath: string, projectPath: string): boolean;
-  isExcludedPath(absPath: string): boolean;
+  isExcludedPath(absPath: string, projectPath?: string): boolean;
   /** Other sessions' transcripts that touched the file since `since` (names). */
   alsoChangedBy(sessionId: string, absPath: string, since: number): string[];
 }
@@ -154,7 +154,7 @@ export class NetViewBuilder {
   async build(input: NetViewInput): Promise<NetViewResult> {
     const { projectPath } = input;
     const now = this.host.now();
-    const touched = editsByPath(input.edits.filter((e) => !this.host.isExcludedPath(e.absPath)));
+    const touched = editsByPath(input.edits.filter((e) => !e.excluded));
     const files: ReviewFileChange[] = [];
     const unattributed: ReviewFileChange[] = [];
     const repoOut: ReviewRepo[] = [];
@@ -210,7 +210,7 @@ export class NetViewBuilder {
           seen.add(abs);
           if (oldAbs) seen.add(oldAbs);
           if (!claimed) {
-            if (this.host.isExcludedPath(abs)) continue;
+            if (this.host.isExcludedPath(abs, input.projectPath)) continue;
             if (this.host.alsoChangedBy(input.sessionId, abs, 0).length) continue;
             unclaimed++;
             if (unclaimed > TOO_MANY_UNATTRIBUTED) {

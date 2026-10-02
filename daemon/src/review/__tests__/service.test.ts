@@ -142,3 +142,13 @@ describe('review handlers', () => {
     expect(sent[0].payload.code).toBe('unavailable');
   });
 });
+
+describe('isExcludedPath', () => {
+  const svc = new ReviewService({ watcher: fakeWatcher([]), gitEnabled: () => false, store: new ReviewStore(tmpDir(), 5) });
+  it('excludes scratchpads always, temp dirs only outside the project', () => {
+    expect(svc.isExcludedPath('/tmp/claude-1000/x/scratchpad/a.md', '/tmp/claude-1000/x')).toBe(true);
+    expect(svc.isExcludedPath('/tmp/notes.txt', '/home/u/proj')).toBe(true);
+    expect(svc.isExcludedPath('/tmp/proj/a.ts', '/tmp/proj')).toBe(false);
+    expect(svc.isExcludedPath('/home/u/proj/a.ts', '/home/u/proj')).toBe(false);
+  });
+});

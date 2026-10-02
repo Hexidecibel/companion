@@ -44,6 +44,8 @@ export interface LedgerEdit {
   failed?: boolean;
   /** Edit made by a subagent (agent id). */
   agentId?: string;
+  /** Scratch space (temp dir / scratchpad outside the project): never reviewed. */
+  excluded?: boolean;
 }
 
 export interface LedgerTurn {
@@ -203,6 +205,8 @@ export class SessionLedger {
   private agentToolTurn = new Map<string, string>();
   private pendingChanges: LedgerChange[] = [];
   private needsRebuild = false;
+  /** Set by the owner: paths that are never reviewed (marks edits `excluded`). */
+  excludePath?: (absPath: string) => boolean;
 
   constructor(
     readonly sessionId: string,
@@ -278,6 +282,7 @@ export class SessionLedger {
 
   /** Edits started / completed since the last call (live view). */
   drainChanges(): LedgerChange[] {
+    if (this.pendingChanges.length > 1000) this.pendingChanges = this.pendingChanges.slice(-1000);
     const c = this.pendingChanges;
     this.pendingChanges = [];
     return c;
@@ -428,11 +433,12 @@ export class SessionLedger {
         if (!file) continue;
         const turn = isSub ? this.turnForSubagent(st, at) : this.turnFor(at, st.tail.filePath);
         if (!turn) continue;
+        const absPath = path.resolve(this.projectPath || '/', file);
         const edit: LedgerEdit = {
           id: b.id,
           turnId: turn.id,
           tool: b.name as EditTool,
-          absPath: path.resolve(this.projectPath || '/', file),
+          absPath,
           kind: b.name === 'Write' ? 'create' : 'update',
           at,
           startedAt: at,
@@ -441,6 +447,7 @@ export class SessionLedger {
           hunks: [],
           pending: true,
           ...(isSub ? { agentId: st.agentId } : {}),
+          ...(this.excludePath?.(absPath) ? { excluded: true } : {}),
         };
         this.edits.set(edit.id, edit);
         turn.editIds.push(edit.id);
