@@ -184,6 +184,33 @@ describe('InboxChimeTracker', () => {
     expect(t.handleEvent({ kind: 'inbox', inbox: [item('a', 'finished')] }, 'push')).toBeNull();
   });
 
+  const risky = (id: string, level: 'high' | 'medium' = 'high', heard = false): HeraldInboxItem =>
+    ({ ...item(id, 'finished', heard), review: { level, kinds: ['ci'], paths: ['.github/workflows/deploy.yml'] } });
+
+  it('returns risk for an unseen risky-change item, over finished', () => {
+    const t = new InboxChimeTracker();
+    t.handleEvent({ kind: 'state', state: state([], []) }, 'fetch');
+    expect(t.handleEvent({ kind: 'inbox', inbox: [item('f', 'finished'), risky('r')] }, 'push')).toBe('risk');
+    expect(t.handleEvent({ kind: 'inbox', inbox: [item('f', 'finished'), risky('r')] }, 'push')).toBeNull();
+    expect(t.handleEvent({ kind: 'inbox', inbox: [risky('r2', 'medium'), item('f2', 'finished')] }, 'push')).toBe('risk');
+    expect(t.handleEvent({ kind: 'inbox', inbox: [risky('r3', 'high', true)] }, 'push')).toBeNull();
+  });
+
+  it('blocked wins over risk', () => {
+    const t = new InboxChimeTracker();
+    t.handleEvent({ kind: 'state', state: state([], []) }, 'fetch');
+    expect(t.handleEvent({ kind: 'inbox', inbox: [risky('r'), item('b', 'blocked')] }, 'push')).toBe('blocked');
+    expect(t.handleEvent({ kind: 'inbox', inbox: [item('b2', 'blocked'), risky('r2')] }, 'push')).toBe('blocked');
+  });
+
+  it('risk tones off: review items are silent, other news still tones', () => {
+    const t = new InboxChimeTracker();
+    t.riskTones = false;
+    t.handleEvent({ kind: 'state', state: state([], []) }, 'fetch');
+    expect(t.handleEvent({ kind: 'inbox', inbox: [risky('r')] }, 'push')).toBeNull();
+    expect(t.handleEvent({ kind: 'inbox', inbox: [risky('r2'), item('f', 'finished')] }, 'push')).toBe('finished');
+  });
+
   it('chimes once per new unheard item, blocked beats finished', () => {
     const t = new InboxChimeTracker();
     t.handleEvent({ kind: 'state', state: state([], []) }, 'fetch');

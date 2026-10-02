@@ -409,7 +409,7 @@ export class HeraldSpeechController {
 // Inbox chime detection
 // ---------------------------------------------------------------------------
 
-export type ChimeKind = 'blocked' | 'finished';
+export type ChimeKind = 'blocked' | 'finished' | 'risk';
 
 /** A blocked item still unheard this long after its tone gets a gentle reminder. */
 export const REMINDER_AFTER_MS = 5 * 60_000;
@@ -424,7 +424,9 @@ interface Toned {
 /**
  * Decides when a new inbox item deserves a tone. Snapshots (initial load,
  * reconnect) only seed the seen-set; live `inbox` pushes with unseen, unheard
- * blocked/finished items tone once (blocked wins). Herald never speaks about
+ * blocked/finished items tone once (blocked wins). A risky code change
+ * (`item.review`) gets its own `risk` tone, beaten only by a blocked item; with
+ * risk tones off (`riskTones = false`) review items make no sound at all. Herald never speaks about
  * them on its own: the tone says "something is ready", the user asks for it.
  *
  * Blocked items that were toned and are still unheard are remembered, so
@@ -435,6 +437,8 @@ export class InboxChimeTracker {
   private seen = new Set<string>();
   private seeded = false;
   private toned = new Map<string, Toned>();
+  /** Tone risky-change (Code Review) items. */
+  riskTones = true;
 
   handleEvent(event: HeraldEvent, source: HeraldEventSource, now: number = Date.now()): ChimeKind | null {
     if (event.kind === 'state') {
@@ -456,6 +460,8 @@ export class InboxChimeTracker {
       if (item.priority === 'blocked') {
         kind = 'blocked';
         this.toned.set(item.id, { lastToneAt: now, reminders: 0 });
+      } else if (item.review) {
+        if (this.riskTones && kind !== 'blocked') kind = 'risk';
       } else if (item.priority === 'finished' && kind === null) kind = 'finished';
     }
     return kind;

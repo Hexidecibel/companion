@@ -58,6 +58,26 @@ describe('useHeraldVoice in the Gaming profile (the game is in front)', () => {
     expect(playChime).toHaveBeenCalledWith('blocked');
   });
 
+  it('risky-change items play the risk tone and are never spoken', () => {
+    heraldSetupStore.set('profile', 'gaming');
+    const { emit, engine } = setup();
+    emit({ kind: 'inbox', inbox: [] });
+    hide(true);
+    emit({ kind: 'inbox', inbox: [{ ...item('r'), priority: 'finished', headline: 'Out4 changed a CI workflow: deploy.yml', review: { level: 'high', kinds: ['ci'], paths: ['.github/workflows/deploy.yml'] } }] });
+    expect(playChime).toHaveBeenCalledWith('risk');
+    expect(engine.spoken).toEqual([]);
+  });
+
+  it('the riskTones pref silences the risk tone', () => {
+    heraldSetupStore.set('profile', 'gaming');
+    const { emit, hook } = setup();
+    act(() => { hook.result.current.setRiskTones(false); });
+    vi.mocked(playChime).mockClear();
+    emit({ kind: 'inbox', inbox: [] });
+    emit({ kind: 'inbox', inbox: [{ ...item('r'), priority: 'finished', review: { level: 'high', kinds: ['ci'], paths: ['x'] } }] });
+    expect(playChime).not.toHaveBeenCalled();
+  });
+
   it('outside Gaming a hidden tab stays silent (unchanged)', () => {
     heraldSetupStore.set('profile', 'headphones');
     const { emit } = setup();

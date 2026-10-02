@@ -19,4 +19,15 @@ describe('signature earcon', () => {
   it('every tone is short (well under a second and a half)', () => {
     for (const k of Object.keys(TONES) as Array<keyof typeof TONES>) expect(toneDuration(k)).toBeLessThan(1.5);
   });
+
+  it('risk: two rising notes then a short off-motif third, softer than blocked', () => {
+    const r = TONES.risk;
+    expect(r).toHaveLength(3);
+    expect(r[1].freq).toBeGreaterThan(r[0].freq);
+    expect(r[2].freq).toBeLessThan(r[1].freq);
+    expect(r[2].freq).toBeGreaterThan(r[0].freq);
+    expect(r[2].dur).toBeLessThan(r[1].dur);
+    const peak = (k: 'risk' | 'blocked') => Math.max(...TONES[k].map((n) => n.gain));
+    expect(peak('risk')).toBeLessThan(peak('blocked'));
+  });
 });

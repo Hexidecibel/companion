@@ -38,10 +38,12 @@ interface VoicePrefs {
   ackTick: boolean;
   /** A very soft looping tone while Herald thinks (after 1.5 s with no audio). */
   thinkingTone: boolean;
+  /** A distinct tone when a session makes a risky code change (Code Review). Never spoken. */
+  riskTones: boolean;
 }
 
 const DEFAULT_PREFS: VoicePrefs = {
-  voiceOn: true, chimeOn: true, voiceId: null, rate: RATE_DEFAULT, spokenLength: 'short', remind: true, ackTick: true, thinkingTone: false,
+  voiceOn: true, chimeOn: true, voiceId: null, rate: RATE_DEFAULT, spokenLength: 'short', remind: true, ackTick: true, thinkingTone: false, riskTones: true,
 };
 
 /** Next rate for "slower" / "faster", clamped; null when already at the limit. */
@@ -66,6 +68,7 @@ function loadPrefs(): VoicePrefs {
       remind: typeof p.remind === 'boolean' ? p.remind : DEFAULT_PREFS.remind,
       ackTick: typeof p.ackTick === 'boolean' ? p.ackTick : DEFAULT_PREFS.ackTick,
       thinkingTone: typeof p.thinkingTone === 'boolean' ? p.thinkingTone : DEFAULT_PREFS.thinkingTone,
+      riskTones: typeof p.riskTones === 'boolean' ? p.riskTones : DEFAULT_PREFS.riskTones,
     };
   } catch {
     return DEFAULT_PREFS;
@@ -172,6 +175,9 @@ export interface HeraldVoice {
   /** Soft thinking loop while waiting for the first audio (off by default). */
   thinkingTone: boolean;
   setThinkingTone: (on: boolean) => void;
+  /** Tone for risky code changes (on by default; same gating as the other news tones). */
+  riskTones: boolean;
+  setRiskTones: (on: boolean) => void;
   /** Replies may play in a hidden tab right now (a remote trigger asked recently). */
   backgroundAllowed: () => boolean;
   /**
@@ -358,6 +364,7 @@ export function useHeraldVoice(
   // else: Herald never speaks up on its own).
   useEffect(() => subscribeEvents((event, source) => {
     controller.handleEvent(event, source);
+    chimes.riskTones = prefsRef.current.riskTones;
     const kind = chimes.handleEvent(event, source);
     if (kind && prefsRef.current.chimeOn && announcerRef.current && tonesAudible()) playChime(kind);
     if (source !== 'push') return;
@@ -623,6 +630,10 @@ export function useHeraldVoice(
     if (on) playChime('tick', TICK_VOLUME);
   }, []);
   const setThinkingTone = useCallback((on: boolean) => setPrefs((p) => ({ ...p, thinkingTone: on })), []);
+  const setRiskTones = useCallback((on: boolean) => {
+    setPrefs((p) => ({ ...p, riskTones: on }));
+    if (on && tonesAudible()) playChime('risk');
+  }, []);
   const backgroundAllowed = useCallback(() => Date.now() < backgroundUntil.current, []);
 
   const setVoiceOn = useCallback((on: boolean) => {
@@ -674,6 +685,8 @@ export function useHeraldVoice(
     ackTick: prefs.ackTick,
     setAckTick,
     thinkingTone: prefs.thinkingTone,
+    riskTones: prefs.riskTones,
+    setRiskTones,
     setThinkingTone,
     backgroundAllowed,
     audioLocked,
@@ -697,5 +710,5 @@ export function useHeraldVoice(
     setTonesVolume,
     setTonesFollowVoice,
     volumeCommand,
-  }), [volume, setVolume, setTonesVolume, setTonesFollowVoice, volumeCommand, remoteSpeaking, stopRemote, fleetSuppressed, spokenLog, engine, hybrid, prefs, speaking, voices, voice, setVoiceOn, setChimeOn, setVoiceId, setRate, stop, stopCommand, repeat, goOn, stepRateCb, expectBriefing, say, setSpokenLength, setRemind, setAckTick, setThinkingTone, backgroundAllowed, audioLocked, flash, announcer, testVoice, serverStatus, refreshStatus, allowBackground, selfId, label, renameDevice, claimDevice]);
+  }), [volume, setVolume, setTonesVolume, setTonesFollowVoice, volumeCommand, remoteSpeaking, stopRemote, fleetSuppressed, spokenLog, engine, hybrid, prefs, speaking, voices, voice, setVoiceOn, setChimeOn, setVoiceId, setRate, stop, stopCommand, repeat, goOn, stepRateCb, expectBriefing, say, setSpokenLength, setRemind, setAckTick, setThinkingTone, setRiskTones, backgroundAllowed, audioLocked, flash, announcer, testVoice, serverStatus, refreshStatus, allowBackground, selfId, label, renameDevice, claimDevice]);
 }

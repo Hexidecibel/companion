@@ -1,6 +1,7 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { HeraldTonesVolume } from './HeraldVolume';
 import type { HeraldAction, HeraldInboxItem, HeraldMessage, HeraldSessionRef, HeraldVerbosity, InboxPriority } from '../../types/herald';
+import { requestReviewDrawer } from '../../services/reviewNav';
 import { INTENT_LABELS, VOICE_COMMAND_HELP } from '../../services/voice/voiceCommands';
 import { sortInbox, sortPendingByUrgency } from '../../services/heraldReducer';
 import { useHeraldData, useHeraldSetupCtx, useHeraldUi, useHeraldVoiceCtx, useHeraldVoiceInputCtx } from '../../context/HeraldContext';
@@ -183,15 +184,16 @@ function InboxStrip({ items, unheardCount, canAsk, onAsk, onChip }: {
           key={item.id}
           type="button"
           role="listitem"
-          className={`herald-chip herald-chip--${item.priority}${item.heard ? '' : ' herald-chip--unheard'}`}
+          className={`herald-chip herald-chip--${item.priority}${item.review ? ` herald-chip--review herald-chip--review-${item.review.level}` : ''}${item.heard ? '' : ' herald-chip--unheard'}`}
           onClick={() => onChip(item)}
-          title={`${PRIORITY_LABEL[item.priority]}: ${item.headline}`}
+          title={item.review ? `Risky change, open review: ${item.headline}` : `${PRIORITY_LABEL[item.priority]}: ${item.headline}`}
         >
           <span className="herald-chip__dot" aria-hidden="true" />
           <span className="herald-chip__name">{item.sessionName}</span>
+          {item.review && <span className="herald-chip__review">Review</span>}
           <span className="herald-chip__headline">{item.headline}</span>
           <span className="herald-chip__age">{formatAgo(item.createdAt, now)}</span>
-          <span className="sr-only">{PRIORITY_LABEL[item.priority]}{item.heard ? '' : ', new'}</span>
+          <span className="sr-only">{item.review ? 'Risky change' : PRIORITY_LABEL[item.priority]}{item.heard ? '' : ', new'}</span>
         </button>
       ))}
     </div>
@@ -638,6 +640,12 @@ export function HeraldPanel({ variant, onOpenSession, onClose }: HeraldPanelProp
 
   const onChip = useCallback((item: HeraldInboxItem) => {
     if (!item.heard) h.markHeard([item.id]);
+    if (item.review) {
+      // A risky code change: open that session with its review drawer.
+      requestReviewDrawer(item.serverId, item.sessionId, { scope: 'since_checkpoint', view: 'files' });
+      onOpenSession(item.serverId, item.sessionId);
+      return;
+    }
     if (canTalk && !busy) {
       void send(`Tell me about ${item.sessionName}`);
     } else {

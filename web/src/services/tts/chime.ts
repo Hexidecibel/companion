@@ -54,6 +54,7 @@ interface Note {
 const G5 = 783.99;
 const C6 = 1046.5;
 const E6 = 1318.51;
+const B5 = 987.77;
 
 export const TONES: Record<ToneKind, Note[]> = {
   blocked: [
@@ -66,6 +67,13 @@ export const TONES: Record<ToneKind, Note[]> = {
     { freq: E6, at: 0, dur: 0.3, gain: 0.55 },
     { freq: C6, at: 0.15, dur: 0.3, gain: 0.55 },
     { freq: G5, at: 0.3, dur: 0.7, gain: 0.6 },
+  ],
+  // Two rising notes, then an off-motif short third a semitone under the
+  // resolution: "look at this", softer than blocked, distinct from finished.
+  risk: [
+    { freq: G5, at: 0, dur: 0.2, gain: 0.6 },
+    { freq: C6, at: 0.13, dur: 0.22, gain: 0.62 },
+    { freq: B5, at: 0.3, dur: 0.14, gain: 0.5 },
   ],
   wake: [
     { freq: C6, at: 0, dur: 0.25, gain: 1 },

@@ -1098,3 +1098,18 @@
   .rv-dialog-scrim, .rv-dialog, .rv-live__row { animation: none !important; }
   .rv-live__phase--started { animation: none !important; }
 }
+
+/* ---------- Herald inbox: risky-change chips ---------- */
+
+.herald-chip.herald-chip--review-high { --chip: #ef4444; --chip-rgb: 239, 68, 68; }
+.herald-chip.herald-chip--review-medium { --chip: #f59e0b; --chip-rgb: 245, 158, 11; }
+.herald-chip__review {
+  flex-shrink: 0;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: rgba(var(--chip-rgb), 0.16);
+  color: var(--chip);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
