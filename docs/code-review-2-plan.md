@@ -206,6 +206,10 @@ export interface ReviewSummary {
   live: boolean;
   reviewedThrough: number;
   mode: ReviewMode;
+  /** Unattributed repo changes since the checkpoint; never part of unreviewedFiles, cleared by a mark. */
+  unattributedFiles?: number;
+  /** Server time of this summary; a device that showed it marks through here. */
+  computedAt?: number;
 }
 
 export type ReviewErrorCode =

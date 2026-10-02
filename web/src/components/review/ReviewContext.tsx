@@ -163,6 +163,14 @@ interface ProviderProps {
   children: ReactNode;
 }
 
+interface PendingMark {
+  serverId: string;
+  sessionId: string;
+  through: number;
+  device: string;
+  request: ReviewRequestFn;
+}
+
 export interface ReviewApi {
   openDrawer: (opts?: Partial<Omit<DrawerState, 'open'>>) => void;
   closeDrawer: () => void;
@@ -228,47 +236,67 @@ export function ReviewProvider({ serverId, sessionId, sessionName, sendToSession
   }, [version, editCache]);
 
   // --- mark reviewed, optimistic with a 5 s undo window ---
-  const [pendingMark, setPendingMark] = useState<number | null>(null);
+  // A pending mark carries the session it was made in (and that server's
+  // requester): the provider is reused across session switches, so sending
+  // with the *current* props would mark the wrong session.
+  const [pendingMarkState, setPendingMark] = useState<PendingMark | null>(null);
   const markTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const markThrough = useRef<number | null>(null);
-  const sendMark = useCallback(async (through: number) => {
-    const req: ReviewMarkRequest = { sessionId, through, device };
+  const markPending = useRef<PendingMark | null>(null);
+  const toastRef = useRef(toast);
+  toastRef.current = toast;
+  const sendMark = useCallback(async (m: PendingMark) => {
+    const req: ReviewMarkRequest = { sessionId: m.sessionId, through: m.through, device: m.device };
     try {
-      const res = await request<ReviewMarkResponse>('review_mark_reviewed', req);
-      if (res?.summary) reviewStore.apply(serverId, res.summary);
+      const res = await m.request<ReviewMarkResponse>('review_mark_reviewed', req);
+      if (res?.summary) reviewStore.apply(m.serverId, res.summary);
     } catch (err) {
-      toast({ text: `Could not mark reviewed: ${reviewErrorMessage(err)}`, tone: 'error' });
+      console.warn('[review] mark reviewed failed:', err);
+      toastRef.current({ text: `Could not mark reviewed: ${reviewErrorMessage(err)}`, tone: 'error' });
     } finally {
-      setPendingMark((p) => (p === through ? null : p));
+      setPendingMark((p) => (p === m ? null : p));
     }
-  }, [sessionId, device, request, serverId, toast]);
+  }, []);
   const flushMark = useCallback(() => {
     if (markTimer.current) clearTimeout(markTimer.current);
     markTimer.current = null;
-    const t = markThrough.current;
-    markThrough.current = null;
-    if (t != null) void sendMark(t);
+    const m = markPending.current;
+    markPending.current = null;
+    if (m) void sendMark(m);
   }, [sendMark]);
-  const flushRef = useRef(flushMark);
-  flushRef.current = flushMark;
   // Leaving the session (or unmount) commits a mark still in its undo window.
-  useEffect(() => () => flushRef.current(), [serverId, sessionId]);
+  useEffect(() => () => flushMark(), [serverId, sessionId, flushMark]);
+  // So does the page going away or into the background (timers stall there).
+  useEffect(() => {
+    const onHide = () => { if (markPending.current) flushMark(); };
+    const onVis = () => { if (document.visibilityState === 'hidden') onHide(); };
+    window.addEventListener('pagehide', onHide);
+    document.addEventListener('visibilitychange', onVis);
+    return () => {
+      window.removeEventListener('pagehide', onHide);
+      document.removeEventListener('visibilitychange', onVis);
+    };
+  }, [flushMark]);
 
   const markReviewed = useCallback((through: number) => {
-    if (markTimer.current) flushRef.current();
-    markThrough.current = through;
-    setPendingMark(through);
+    if (markPending.current) flushMark();
+    const m: PendingMark = { serverId, sessionId, through, device, request };
+    markPending.current = m;
+    setPendingMark(m);
     let toastId = 0;
     const undo = () => {
+      if (markPending.current !== m) return; // already sent
       if (markTimer.current) clearTimeout(markTimer.current);
       markTimer.current = null;
-      markThrough.current = null;
-      setPendingMark(null);
+      markPending.current = null;
+      setPendingMark((p) => (p === m ? null : p));
       dismissToast(toastId);
     };
-    markTimer.current = setTimeout(() => flushRef.current(), MARK_UNDO_MS);
+    markTimer.current = setTimeout(flushMark, MARK_UNDO_MS);
     toastId = toast({ text: 'Marked reviewed', tone: 'success', action: { label: 'Undo', run: undo }, ttl: MARK_UNDO_MS });
-  }, [toast, dismissToast]);
+  }, [serverId, sessionId, device, request, flushMark, toast, dismissToast]);
+  const pendingMark = pendingMarkState && pendingMarkState.serverId === serverId && pendingMarkState.sessionId === sessionId
+    ? pendingMarkState.through
+    : null;
 
   const approveTurn = useCallback(async (turnId: string, approved: boolean) => {
     const req: ReviewApproveTurnRequest = { sessionId, turnId, approved, device };
@@ -412,9 +440,24 @@ export function ReviewProvider({ serverId, sessionId, sessionName, sendToSession
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 
+/** Anything to look at: the session's own edits or unattributed repo changes. */
+export function hasUnreviewed(summary: ReviewSummary | null): boolean {
+  if (!summary) return false;
+  return summary.unreviewedFiles > 0 || summary.unreviewedTurns > 0 || (summary.unattributedFiles ?? 0) > 0;
+}
+
 /** Summary as the UI should show it: a mark in its undo window counts as reviewed. */
 export function effectiveUnreviewed(summary: ReviewSummary | null, pendingMark: number | null): boolean {
   if (!summary) return false;
-  if (pendingMark != null && summary.lastChangeAt != null && pendingMark >= summary.lastChangeAt) return false;
-  return summary.unreviewedFiles > 0 || summary.unreviewedTurns > 0;
+  if (pendingMark != null && pendingMark >= (summary.lastChangeAt ?? 0)) return false;
+  return hasUnreviewed(summary);
+}
+
+/**
+ * `through` for a mark made from a summary alone (strip, menus): everything
+ * the summary describes. computedAt is server time, so device clock skew
+ * cannot make the mark fall short; older daemons only send lastChangeAt.
+ */
+export function summaryThrough(summary: ReviewSummary): number {
+  return Math.max(summary.lastChangeAt ?? 0, summary.computedAt ?? 0) || Date.now();
 }

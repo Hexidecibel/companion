@@ -127,6 +127,7 @@ export interface ReviewSummary {
   sessionId: string;
   /** Increases on any change (edits, checkpoint, revert). Clients drop older versions. */
   version: number;
+  /** Files the session's own edits (main chain + its subagents) changed since the checkpoint. */
   unreviewedFiles: number;
   unreviewedTurns: number;
   unreviewedAdditions: number;
@@ -142,6 +143,14 @@ export interface ReviewSummary {
   live: boolean;
   reviewedThrough: number;
   mode: ReviewMode;
+  /**
+   * Repo changes since the checkpoint that no transcript claims (shell commands,
+   * other programs, by hand). Shown separately: never part of unreviewedFiles,
+   * cleared by a mark.
+   */
+  unattributedFiles?: number;
+  /** Server time this summary was computed: a device that showed it marks through here. */
+  computedAt?: number;
 }
 
 export type ReviewErrorCode =
@@ -184,7 +193,7 @@ export interface ReviewGetFileResponse { file: ReviewFileChange; truncated: bool
 export interface ReviewGetEditsRequest { sessionId: string; editIds: string[] }
 export interface ReviewGetEditsResponse { edits: ReviewEdit[]; missing: string[] }
 
-/** review_mark_reviewed: through = newest ReviewEdit.at (or computedAt) the device actually showed. */
+/** review_mark_reviewed: through = newest ReviewEdit.at / computedAt (review_get or summary) the device actually showed. */
 export interface ReviewMarkRequest { sessionId: string; through: number; device?: string }
 /** review_approve_turn */
 export interface ReviewApproveTurnRequest { sessionId: string; turnId: string; approved: boolean; device?: string }

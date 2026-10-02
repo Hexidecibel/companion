@@ -6,7 +6,7 @@
  */
 import { useEffect, useRef, useState } from 'react';
 import type { ReviewGetResponse, ReviewSummary } from '../../types/review';
-import { effectiveUnreviewed, useReviewContext } from './ReviewContext';
+import { effectiveUnreviewed, summaryThrough, useReviewContext } from './ReviewContext';
 import { RiskBadges } from './RiskBadge';
 import { IconCheck, IconChevronRight } from './reviewIcons';
 import { formatStat, plural } from './format';
@@ -31,7 +31,10 @@ export function ChangeStrip() {
   const unreviewed = effectiveUnreviewed(summary, ctx.pendingMark);
   if (!unreviewed && !summary.live && !turnDone) return <StripRail summary={summary} />;
 
-  const level = unreviewed ? summary.riskLevel : null;
+  // Only repo changes no transcript claims (shell, other programs): a quieter state.
+  const own = summary.unreviewedFiles > 0 || summary.unreviewedTurns > 0;
+  const other = summary.unattributedFiles ?? 0;
+  const level = unreviewed && own ? summary.riskLevel : null;
   const stat = formatStat(summary.unreviewedAdditions, summary.unreviewedDeletions);
   const since = summary.reviewedThrough > 0 ? 'since you looked' : 'changed';
   const open = (turnId?: string) => ctx.openDrawer({ scope: 'since_checkpoint', view: 'turns', ...(turnId ? { focusTurnId: turnId } : {}) });
@@ -51,18 +54,27 @@ export function ChangeStrip() {
             <span className="rv-strip__sep">·</span>
             {plural(turnDone.files, 'file')}
           </span>
-        ) : unreviewed ? (
+        ) : unreviewed && own ? (
           <span className="rv-strip__text">
             <span className="rv-strip__delta" aria-hidden="true">{'Δ'}</span>
             {plural(summary.unreviewedFiles, 'file')}<span className="rv-strip__since"> {since}</span>
             <span className="rv-strip__sep">·</span>
             <span className="rv-num rv-add">{stat.add}</span>{' '}
             <span className="rv-num rv-del">{stat.del}</span>
+            {other > 0 && (
+              <span className="rv-strip__other" title="Changed in the repo outside this session's edits (shell commands, other programs)">
+                <span className="rv-strip__sep">·</span>{other} other
+              </span>
+            )}
+          </span>
+        ) : unreviewed ? (
+          <span className="rv-strip__text rv-strip__text--muted" title="Changed in the repo outside this session's edits (shell commands, other programs)">
+            {plural(other, 'other change')} in the repo
           </span>
         ) : (
           <span className="rv-strip__text rv-strip__text--muted">Editing…</span>
         )}
-        {unreviewed && summary.topRisks.length > 0 && (
+        {unreviewed && own && summary.topRisks.length > 0 && (
           <RiskBadges risks={summary.topRisks.map((r) => ({ kind: r.kind, level: r.level, reason: r.reason }))} max={2} compact />
         )}
       </button>
@@ -74,7 +86,7 @@ export function ChangeStrip() {
           <button
             type="button"
             className="rv-strip__mark"
-            onClick={() => summary.lastChangeAt && ctx.markReviewed(summary.lastChangeAt)}
+            onClick={() => ctx.markReviewed(summaryThrough(summary))}
             title="Mark reviewed"
             aria-label="Mark reviewed"
           >

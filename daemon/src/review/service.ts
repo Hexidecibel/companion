@@ -109,8 +109,13 @@ const HOME = os.homedir();
 const LEDGER_SCAN_BUDGET = 64 * 1024 * 1024;
 
 /** Summary identity without its version (broadcast only on real change). */
+/** What the net view diffs against: the checkpoint time + its snapshot trees. */
+function cpBase(cp: StoredCheckpoint): string {
+  return `${cp.reviewedThrough}|${cp.snapshots.map((t) => t.tree).join(',')}`;
+}
+
 function summaryKey(s: ReviewSummary): string {
-  return JSON.stringify({ ...s, version: 0 });
+  return JSON.stringify({ ...s, version: 0, computedAt: 0 });
 }
 
 /** What Code Review needs from Herald (late-bound: Herald is built first). */
@@ -239,7 +244,7 @@ export class ReviewService {
   /** Unattributed changes found at the last scan (turn end with Bash / files view). */
   private unattributedCache = new Map<
     string,
-    { count: number; risks: Array<ReviewRiskFlag & { path: string }>; stamp: string; through: number }
+    { count: number; risks: Array<ReviewRiskFlag & { path: string }>; stamp: string; base: string }
   >();
   /** Turn ids already scanned for Bash-made changes. */
   private scannedTurns = new Map<string, string>();
@@ -337,7 +342,9 @@ export class ReviewService {
     for (const f of list) for (const r of f.risks) risks.push({ ...r, path: f.path });
     const stamp = `${list.length}:${list.map((f) => `${f.path}+${f.additions}-${f.deletions}`).join(',')}`;
     const prev = this.unattributedCache.get(ctx.sessionId);
-    this.unattributedCache.set(ctx.sessionId, { count: list.length, risks, stamp, through: ctx.cp.reviewedThrough });
+    // A scan that started before a mark must not resurrect what the mark cleared.
+    if (cpBase(ctx.cp) !== cpBase(this.store.get(ctx.sessionId, ctx.led.projectPath))) return;
+    this.unattributedCache.set(ctx.sessionId, { count: list.length, risks, stamp, base: cpBase(ctx.cp) });
     if (!prev || prev.stamp !== stamp) {
       this.bump(ctx.sessionId);
       this.onUnattributed(ctx, list);
@@ -721,8 +728,10 @@ export class ReviewService {
         risks.push({ ...f, path: this.displayPath(abs, led.projectPath) });
       }
     }
+    // Unattributed repo changes (shell, other programs, other sessions' tools)
+    // are reported on their own: they never make the session "unreviewed",
+    // so one shared-repo pile cannot pin every session open after a mark.
     const extra = this.extraSummary(ctx);
-    for (const r of extra.risks) risks.push(r);
     const rank = { high: 0, medium: 1, low: 2 } as const;
     risks.sort((a, b) => rank[a.level] - rank[b.level]);
     const last = led.turns[led.turns.length - 1];
@@ -734,7 +743,7 @@ export class ReviewService {
     return {
       sessionId: ctx.sessionId,
       version: this.versionFor(ctx, extra.stamp),
-      unreviewedFiles: unreviewedByFile.size + extra.files,
+      unreviewedFiles: unreviewedByFile.size,
       unreviewedTurns: unreviewedTurns.size,
       unreviewedAdditions: adds,
       unreviewedDeletions: dels,
@@ -746,6 +755,8 @@ export class ReviewService {
       live,
       reviewedThrough: cp.reviewedThrough,
       mode: repo && this.deps.gitEnabled() ? 'git' : 'transcript',
+      ...(extra.files ? { unattributedFiles: extra.files } : {}),
+      computedAt: this.now(),
     };
   }
 
@@ -756,8 +767,8 @@ export class ReviewService {
     stamp: string;
   } {
     const u = this.unattributedCache.get(ctx.sessionId);
-    // A scan from before the checkpoint last moved is stale.
-    if (!u || u.through !== ctx.cp.reviewedThrough) return { files: 0, risks: [], stamp: '' };
+    // A scan against an older checkpoint base is stale.
+    if (!u || u.base !== cpBase(ctx.cp)) return { files: 0, risks: [], stamp: '' };
     return { files: u.count, risks: u.risks, stamp: u.stamp };
   }
 
@@ -1113,7 +1124,7 @@ export class ReviewService {
     turnId?: string,
     focusAbsPath?: string
   ): Promise<Awaited<ReturnType<NetViewBuilder['build']>>> {
-    const key = `${ctx.sessionId}|${scope}|${turnId || ''}|${focusAbsPath || ''}|${ctx.led.version}|${ctx.cp.reviewedThrough}|${ctx.cp.approvedTurnIds.join(',')}`;
+    const key = `${ctx.sessionId}|${scope}|${turnId || ''}|${focusAbsPath || ''}|${ctx.led.version}|${ctx.cp.reviewedThrough}|${ctx.cp.approvedTurnIds.join(',')}|${ctx.cp.snapshots.map((t) => t.tree).join(',')}`;
     const hit = this.filesMemo.get(key);
     if (hit && this.now() - hit.at < 2000) return hit.value;
     const value = this.net.build({
@@ -1173,16 +1184,27 @@ export class ReviewService {
     if (!ctx) throw new ReviewServiceError('unknown_session', `Unknown session ${sessionId}`);
     return this.withLock(`cp:${sessionId}`, async () => {
       const cur = this.store.get(sessionId, ctx.led.projectPath);
+      const clamped = Math.min(through, this.now());
       const next: StoredCheckpoint = {
         ...cur,
-        reviewedThrough: Math.max(cur.reviewedThrough, Math.min(through, this.now())),
+        reviewedThrough: Math.max(cur.reviewedThrough, clamped),
         updatedAt: this.now(),
         updatedBy: device ? String(device).slice(0, 80) : null,
       };
       const moved = next.reviewedThrough !== cur.reviewedThrough;
+      // The device showed everything the transcript claims: the repo as it is
+      // now is what it looked at, so re-base the net view even when the time
+      // did not move (only unattributed changes were left, or an older client
+      // sent lastChangeAt). Otherwise those changes could never be marked.
+      let newest = 0;
+      for (const e of ctx.led.edits.values()) if (this.countable(e) && e.at > newest) newest = e.at;
+      const sawAll = clamped >= newest;
       let cp = compactApprovals(next, this.turnEdgeTimes(ctx.led));
-      if (moved) cp = { ...cp, snapshots: await this.takeSnapshots(ctx, cp) };
-      return this.commitCheckpoint(ctx, cp, moved);
+      if (moved || sawAll) {
+        cp = { ...cp, snapshots: await this.takeSnapshots(ctx, cp) };
+        this.unattributedCache.delete(sessionId);
+      }
+      return this.commitCheckpoint(ctx, cp, moved || sawAll);
     });
   }
 

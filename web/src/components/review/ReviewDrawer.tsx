@@ -5,11 +5,11 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type {
-  ReviewEdit, ReviewFileChange, ReviewGetFileResponse, ReviewHunk, ReviewTurn,
+  ReviewEdit, ReviewFileChange, ReviewGetFileResponse, ReviewGetResponse, ReviewHunk, ReviewTurn,
 } from '../../types/review';
 import { useReview } from '../../hooks/useReview';
 import { isMobileViewport } from '../../utils/platform';
-import { useReviewContext } from './ReviewContext';
+import { hasUnreviewed, useReviewContext } from './ReviewContext';
 import { FileDiff } from './FileDiff';
 import { TurnGroup } from './TurnGroup';
 import { IconCheck, IconClose, IconKeyboard, IconRevert } from './reviewIcons';
@@ -233,14 +233,10 @@ function DrawerInner({ onAsk, onRevertHunk, renderFileExtra, onRevertFile, liveS
     });
   }, [turnsWithEdits, isApproved, focusedTurnId, navFiles, scroller]);
 
-  // Newest change time this device actually displayed.
-  const shownThrough = useMemo(() => {
-    if (!data) return null;
-    let t = 0;
-    for (const e of data.edits) if (!e.pending && e.at > t) t = e.at;
-    if (data.view === 'files' || t === 0) t = Math.max(t, data.summary.lastChangeAt ?? 0, 0) || data.computedAt;
-    return t;
-  }, [data]);
+  // What this device displayed: the response was computed at `computedAt`
+  // (server time), so everything up to then was on screen, except edits
+  // still in flight, which the mark must not swallow.
+  const shownThrough = useMemo(() => (data ? shownThroughOf(data) : null), [data]);
 
   const markAll = useCallback(() => {
     if (shownThrough != null) ctx.markReviewed(shownThrough);
@@ -566,10 +562,13 @@ function DrawerInner({ onAsk, onRevertHunk, renderFileExtra, onRevertFile, liveS
               {unrev && unrev.unreviewedFiles > 0 ? (
                 <>
                   {plural(unrev.unreviewedFiles, 'file')} unreviewed · <span className="rv-add">{st.add}</span> <span className="rv-del">{st.del}</span>
+                  {(unrev.unattributedFiles ?? 0) > 0 && <> · {unrev.unattributedFiles} other</>}
                 </>
+              ) : unrev && (unrev.unattributedFiles ?? 0) > 0 ? (
+                `${plural(unrev.unattributedFiles!, 'other change')} in the repo`
               ) : 'Nothing new since you looked'}
             </span>
-            <button type="button" className="rv-btn rv-btn--primary" onClick={markAll} disabled={!unrev || (unrev.unreviewedFiles === 0 && unrev.unreviewedTurns === 0)}>
+            <button type="button" className="rv-btn rv-btn--primary" onClick={markAll} disabled={!hasUnreviewed(unrev) && !(data && data.unattributed.length > 0)}>
               <IconCheck width={15} height={15} /> Mark all reviewed
             </button>
           </footer>
@@ -577,6 +576,17 @@ function DrawerInner({ onAsk, onRevertHunk, renderFileExtra, onRevertFile, liveS
       </aside>
     </>
   );
+}
+
+/** `through` for "Mark all reviewed" from what a review_get response showed. */
+export function shownThroughOf(data: Pick<ReviewGetResponse, 'edits' | 'computedAt' | 'summary'>): number {
+  let t = Math.max(data.computedAt, data.summary.lastChangeAt ?? 0);
+  let newest = 0;
+  for (const e of data.edits) {
+    if (e.pending) t = Math.min(t, e.at - 1);
+    else if (e.at > newest) newest = e.at;
+  }
+  return Math.max(t, newest);
 }
 
 function Segmented({ value, options, onChange, label }: { value: string; options: Array<[string, string]>; onChange: (v: string) => void; label: string }) {

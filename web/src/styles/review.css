@@ -86,6 +86,7 @@
 .rv-strip__main:focus-visible { outline: 2px solid var(--rv-blue); outline-offset: -2px; }
 .rv-strip__text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
 .rv-strip__text--muted { color: var(--rv-text-2); }
+.rv-strip__other { color: var(--rv-text-2); }
 .rv-strip__delta { color: var(--rv-text-2); margin-right: 6px; font-weight: 600; }
 .rv-strip__sep { color: var(--rv-text-3); margin: 0 6px; }
 .rv-strip__actions { display: flex; align-items: center; gap: 2px; flex-shrink: 0; }
