@@ -17,6 +17,10 @@ export function useCodeReview(
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const mountedRef = useRef(true);
+  // Single request in flight; a refetch asked for meanwhile runs once after it.
+  const inFlightRef = useRef(false);
+  const rerunRef = useRef(false);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const fetchDiff = useCallback(async () => {
     if (!serverId || !sessionId) {
@@ -26,6 +30,12 @@ export function useCodeReview(
 
     const conn = connectionManager.getConnection(serverId);
     if (!conn || !conn.isConnected()) return;
+
+    if (inFlightRef.current) {
+      rerunRef.current = true;
+      return;
+    }
+    inFlightRef.current = true;
 
     try {
       const response = await conn.sendRequest('get_session_diff', { sessionId });
@@ -42,11 +52,18 @@ export function useCodeReview(
         setError(err instanceof Error ? err.message : 'Failed to load code review');
       }
     } finally {
+      inFlightRef.current = false;
       if (mountedRef.current) {
         setLoading(false);
       }
     }
+    if (rerunRef.current && mountedRef.current) {
+      rerunRef.current = false;
+      void fetchDiffRef.current();
+    }
   }, [serverId, sessionId]);
+  const fetchDiffRef = useRef(fetchDiff);
+  fetchDiffRef.current = fetchDiff;
 
   useEffect(() => {
     mountedRef.current = true;
@@ -78,11 +95,22 @@ export function useCodeReview(
       if (msg.sessionId && msg.sessionId !== sessionId) return;
 
       if (msg.type === 'conversation_update') {
-        fetchDiff();
+        // Debounce: a JSONL flush emits many updates; the daemon path is costly.
+        if (debounceRef.current) clearTimeout(debounceRef.current);
+        debounceRef.current = setTimeout(() => {
+          debounceRef.current = null;
+          void fetchDiff();
+        }, 500);
       }
     });
 
-    return unsub;
+    return () => {
+      unsub();
+      if (debounceRef.current) {
+        clearTimeout(debounceRef.current);
+        debounceRef.current = null;
+      }
+    };
   }, [serverId, sessionId, fetchDiff]);
 
   return { fileChanges, loading, error, refresh: fetchDiff };
