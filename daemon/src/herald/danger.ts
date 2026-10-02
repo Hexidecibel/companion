@@ -20,6 +20,8 @@
  */
 
 import type { HeraldActionTier } from './protocol';
+import type { ReviewRiskFlag, ReviewRiskLevel } from '../review/protocol';
+import { redactSecrets } from './knowledge/redact';
 
 export interface ClassifyInput {
   /** The user's most recent utterance to Herald (what they actually said). */
@@ -53,7 +55,7 @@ interface Rule {
 // "prod-db", "deploy_script" and "git/push" all match.
 const B = '(?:^|[^a-z0-9])';
 const E = '(?=$|[^a-z0-9])';
-const w = (alts: string) => new RegExp(`${B}(?:${alts})${E}`, 'i');
+export const w = (alts: string) => new RegExp(`${B}(?:${alts})${E}`, 'i');
 
 const ACTION_RULES: Rule[] = [
   {
@@ -333,4 +335,196 @@ export function classifySpawn(input: {
   ];
   if (input.requestedConfirm) reasons.push('flagged for confirmation by the assistant');
   return { tier: 'hard_confirm', reasons, ruleIds: ['spawn', ...(inner.ruleIds || [])] };
+}
+
+// ---------------------------------------------------------------------------
+// Code Review: changed-file risk + revert tiers
+
+export interface ChangedFileStats {
+  status: 'added' | 'modified' | 'deleted' | 'renamed' | 'mode_changed';
+  additions: number;
+  deletions: number;
+  /** Lines in the file before the change, when known (large_rewrite share). */
+  fileLines?: number;
+  binary?: boolean;
+  /** Old and new git modes differ. */
+  modeChanged?: boolean;
+  newMode?: string;
+  /** Outside the session's project directory. */
+  outsideProject?: boolean;
+  /** Other sessions that also touched the file (display names). */
+  alsoChangedBy?: string[];
+  /** Removed line bodies (dependency detection). */
+  removedLines?: string[];
+}
+
+const RISK_RANK: Record<ReviewRiskLevel, number> = { high: 0, medium: 1, low: 2 };
+
+const LOCKFILES = new Set([
+  'package-lock.json',
+  'npm-shrinkwrap.json',
+  'yarn.lock',
+  'pnpm-lock.yaml',
+  'bun.lockb',
+  'cargo.lock',
+  'poetry.lock',
+  'pipfile.lock',
+  'gemfile.lock',
+  'composer.lock',
+  'go.sum',
+  'uv.lock',
+]);
+const DEP_MANIFESTS = new Set([
+  'package.json',
+  'requirements.txt',
+  'pyproject.toml',
+  'cargo.toml',
+  'go.mod',
+  'gemfile',
+  'composer.json',
+]);
+
+export function isLockfile(relPath: string): boolean {
+  return LOCKFILES.has(relPath.split('/').pop()!.toLowerCase());
+}
+
+const SECURITY_PATH = w('auth|authn|authz|security|crypto|encryption|encrypt|audit[-_]?log');
+const DEP_LINE =
+  /^\s*"?[@\w./-]+"?\s*[:=]\s*"?(?:[\^~<>=]*\s*\d|\*|latest|workspace:|npm:|file:|link:|git\+|github:|https?:)/i;
+
+/**
+ * Deterministic risk flags for one changed file. PURE (no I/O). `relPath` is
+ * project- or repo-relative with '/' separators; `addedLines` are added line
+ * bodies (no '+'), scanned for secrets.
+ */
+export function classifyChangedFile(
+  absPath: string,
+  relPath: string,
+  stats: ChangedFileStats,
+  addedLines?: string[]
+): ReviewRiskFlag[] {
+  const flags: ReviewRiskFlag[] = [];
+  const add = (kind: ReviewRiskFlag['kind'], level: ReviewRiskLevel, reason: string) => {
+    if (!flags.some((f) => f.kind === kind)) flags.push({ kind, level, reason });
+  };
+  const rel = relPath.replace(/\\/g, '/');
+  const lower = rel.toLowerCase();
+  const base = lower.split('/').pop() || lower;
+  const abs = absPath.replace(/\\/g, '/').toLowerCase();
+
+  if (/(^|\/)migrations?\//.test(lower) || /(^|\/)db\/migrate\//.test(lower) || base.endsWith('.sql'))
+    add('migration', 'high', 'database migration');
+  if (/(^|\/)\.github\/workflows\//.test(lower)) add('ci', 'high', 'CI workflow');
+  else if (base === '.gitlab-ci.yml' || /(^|\/)\.circleci\//.test(lower) || base === 'jenkinsfile')
+    add('ci', 'high', 'CI pipeline');
+  else if (/(^|\/)bin\/deploy[^/]*$/.test(lower)) add('ci', 'high', 'deploy script');
+  if (/^\.env(\.|$)/.test(base) || base === '.envrc') add('env', 'high', 'environment file');
+  if (
+    /\.(pem|key|p12|pfx|jks|keystore)$/.test(base) ||
+    /^id_(rsa|dsa|ecdsa|ed25519)(\.pub)?$/.test(base) ||
+    /^credentials/.test(base) ||
+    /^secrets?\./.test(base) ||
+    base === '.netrc' ||
+    base === '.npmrc'
+  )
+    add('secrets', 'high', 'key or credentials file');
+  else if (addedLines && addedLines.some((l) => l.length < 4000 && redactSecrets(l) !== l))
+    add('secrets', 'high', 'adds what looks like a secret');
+  if (
+    /(^|\/)\.claude\/settings[^/]*\.json$/.test(abs) ||
+    /(^|\/)\.claude\/hooks\//.test(abs) ||
+    /(^|\/)\.husky\//.test(lower) ||
+    /(^|\/)\.git\/hooks\//.test(abs)
+  )
+    add('agent_config', 'high', 'agent or git hook config');
+  if (stats.modeChanged)
+    add('permissions', 'high', `file mode changed${stats.newMode ? ` to ${stats.newMode}` : ''}`);
+  else if (/(^|\/)sudoers(\.d\/|$)/.test(abs) || base.endsWith('.service'))
+    add('permissions', 'high', base.endsWith('.service') ? 'system service unit' : 'sudoers');
+  if (SECURITY_PATH.test(lower)) add('security', 'high', 'auth or security code');
+  if (stats.status === 'deleted') {
+    const n = stats.deletions;
+    add(
+      'deleted',
+      n > 100 ? 'high' : 'medium',
+      n > 0 ? `deletes the file (${n} line${n === 1 ? '' : 's'})` : 'deletes the file'
+    );
+  }
+  if (
+    /config\.[a-z0-9]+$/.test(base) ||
+    /^tsconfig[^/]*\.json$/.test(base) ||
+    /(^|\/)(nginx|haproxy)[^/]*$/.test(lower) ||
+    /^dockerfile/.test(base) ||
+    /^(docker-)?compose[^/]*\.ya?ml$/.test(base)
+  )
+    add('config', 'medium', 'build or runtime config');
+  if (DEP_MANIFESTS.has(base)) {
+    const lines = [...(addedLines || []), ...(stats.removedLines || [])];
+    if (lines.some((l) => DEP_LINE.test(l) && !/^\s*"?(version|name)"?\s*[:=]/i.test(l)))
+      add('dependency', 'medium', 'changes dependencies');
+  }
+  const changed = stats.additions + stats.deletions;
+  if (
+    stats.status !== 'deleted' &&
+    stats.status !== 'added' &&
+    (changed > 300 || (stats.fileLines && stats.fileLines >= 20 && changed > 0.6 * stats.fileLines))
+  )
+    add('large_rewrite', 'medium', `rewrites ${changed} lines`);
+  if (isLockfile(rel)) add('lockfile', 'low', 'lockfile');
+  if (stats.binary) add('binary', 'low', 'binary file');
+  if (stats.outsideProject) add('outside_project', 'low', 'outside the project');
+  if (stats.alsoChangedBy && stats.alsoChangedBy.length)
+    add('foreign', 'medium', `also changed by ${stats.alsoChangedBy.slice(0, 2).join(', ')}`);
+  return flags.sort((a, b) => RISK_RANK[a.level] - RISK_RANK[b.level]);
+}
+
+/** Highest level among flags (null = none). */
+export function maxRiskLevel(flags: Array<{ level: ReviewRiskLevel }>): ReviewRiskLevel | null {
+  let best: ReviewRiskLevel | null = null;
+  for (const f of flags) if (best === null || RISK_RANK[f.level] < RISK_RANK[best]) best = f.level;
+  return best;
+}
+
+export interface RevertClassifyInput {
+  effect: 'patch' | 'restore' | 'delete';
+  /** Whole-file revert (to HEAD / checkpoint), not one hunk. */
+  wholeFile: boolean;
+  risks: ReviewRiskFlag[];
+  /** Lines the revert changes on disk (added + removed). */
+  changedLines: number;
+  /** The session is working right now. */
+  sessionWorking: boolean;
+  path: string;
+}
+
+/**
+ * Tier for a Code Review revert. PURE. hard_confirm when it deletes the file,
+ * reverts a whole file, touches a high-risk file, changes more than 200 lines,
+ * or the session is working; otherwise echo (one tap).
+ */
+export function classifyRevert(input: RevertClassifyInput): ClassifyResult {
+  const reasons: string[] = [];
+  const ruleIds: string[] = [];
+  if (input.effect === 'delete') {
+    reasons.push(`deletes ${input.path}`);
+    ruleIds.push('delete');
+  }
+  if (input.wholeFile) {
+    reasons.push('reverts the whole file');
+    ruleIds.push('whole_file');
+  }
+  const high = input.risks.filter((r) => r.level === 'high');
+  if (high.length) {
+    reasons.push(`high-risk file: ${high.map((r) => r.reason).join(', ')}`);
+    ruleIds.push('high_risk');
+  }
+  if (input.changedLines > 200) {
+    reasons.push(`changes ${input.changedLines} lines`);
+    ruleIds.push('large');
+  }
+  if (input.sessionWorking) {
+    reasons.push('the session is working right now');
+    ruleIds.push('working');
+  }
+  return { tier: reasons.length ? 'hard_confirm' : 'echo', reasons, ruleIds };
 }

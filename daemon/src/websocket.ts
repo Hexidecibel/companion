@@ -367,10 +367,17 @@ export class WebSocketHandler {
 
   private createReview(): ReviewService | null {
     try {
-      return new ReviewService({
+      const review = new ReviewService({
         watcher: this.watcher,
         gitEnabled: () => this.config.git !== false,
+        // Review events are GLOBAL with sessionId in the payload: a session-scoped
+        // broadcast only reaches a client's single subscribed pane.
+        broadcast: (type, payload) => this.broadcast(type, payload),
+        sendToClient: (clientId, type, payload) => this.sendToClient(clientId, type, payload),
+        sessionName: (id) => this.sessionNameStore.get(id) || id,
       });
+      review.attach(this.watcher);
+      return review;
     } catch (err) {
       console.error('Review: failed to initialize:', err);
       return null;
