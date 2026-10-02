@@ -4,7 +4,7 @@
  */
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type {
-  ReviewApproveTurnRequest, ReviewHunk, ReviewMarkRequest, ReviewMarkResponse, ReviewScope, ReviewSummary, ReviewTurn, ReviewView,
+  ReviewApproveTurnRequest, ReviewAskResponse, ReviewHunk, ReviewRevertResponse, ReviewRevertTarget, ReviewRevertUndoResponse, ReviewMarkRequest, ReviewMarkResponse, ReviewScope, ReviewSummary, ReviewTurn, ReviewView,
 } from '../../types/review';
 import { useReviewSummary, useReviewSupported } from '../../hooks/useReviewSummary';
 import { reviewErrorMessage, reviewRequester, type ReviewRequestFn } from '../../services/reviewApi';
@@ -14,6 +14,7 @@ import { deviceLabel } from '../../services/heraldDevice';
 import { crmCommentsKey } from '../../services/storageKeys';
 import { takeReviewOpen } from '../../services/reviewNav';
 import { eventBus } from '../../utils/eventBus';
+import { baseName } from '../../utils/diff/patchText';
 
 export const MARK_UNDO_MS = 5000;
 
@@ -73,8 +74,20 @@ export interface ReviewContextValue {
   sendToSession?: (text: string) => void;
   onViewFile?: (path: string) => void;
 
-  /** Hunk / file actions (ask why, revert); absent until the action layer is available. */
+  /** Hunk / file actions (ask why, revert). */
   actions?: ReviewActions;
+  /** Open dialogs (rendered by ReviewShell). */
+  askTarget: AskTarget | null;
+  revertTarget: RevertTargetState | null;
+  closeAsk: () => void;
+  closeRevert: () => void;
+  onAskSent: (res: ReviewAskResponse) => void;
+  onRevertDone: (res: ReviewRevertResponse) => void;
+  undoRevert: (backupId: string) => Promise<void>;
+  /** Bumps when the drawer must refetch regardless of version (reverts). */
+  refreshKey: number;
+  liveOn: boolean;
+  toggleLive: () => void;
 
   toasts: ReviewToast[];
   toast: (t: Omit<ReviewToast, 'id' | 'ttl'> & { ttl?: number }) => number;
@@ -87,9 +100,26 @@ export interface HunkTarget {
   editId?: string;
 }
 
+export interface AskTarget extends HunkTarget {
+  hunk: ReviewHunk;
+  turn?: ReviewTurn;
+}
+
+export interface RevertTargetState {
+  target: ReviewRevertTarget;
+  path: string;
+}
+
+export interface RecentRevert {
+  backupId: string;
+  undoUntil: number;
+  path: string;
+}
+
 export interface ReviewActions {
   ask?: (hunk: ReviewHunk, target: HunkTarget, turn?: ReviewTurn) => void;
   revertHunk?: (hunk: ReviewHunk, target: HunkTarget) => void;
+  revertFile?: (absPath: string, path: string, to: 'head' | 'checkpoint') => void;
   /** Header-right slot for a file (the 10-minute Undo link). */
   fileExtra?: (absPath: string) => ReactNode;
 }
@@ -267,13 +297,115 @@ export function ReviewProvider({ serverId, sessionId, sessionName, sendToSession
     saveComments(sessionId, []);
   }, [sessionId]);
 
+  // --- ask why / revert / live ---
+  const [askTarget, setAskTarget] = useState<AskTarget | null>(null);
+  const [revertTarget, setRevertTarget] = useState<RevertTargetState | null>(null);
+  const [recent, setRecent] = useState<Record<string, RecentRevert>>({});
+  const ownBackups = useRef(new Set<string>());
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [liveOn, setLiveOn] = useState(false);
+  const toggleLive = useCallback(() => setLiveOn((v) => !v), []);
+  const closeAsk = useCallback(() => setAskTarget(null), []);
+  const closeRevert = useCallback(() => setRevertTarget(null), []);
+  useEffect(() => {
+    setAskTarget(null);
+    setRevertTarget(null);
+    setRecent({});
+    setLiveOn(false);
+  }, [serverId, sessionId]);
+
+  const bumpAfterRevert = useCallback(() => {
+    setRefreshKey((k) => k + 1);
+    editCache.clear();
+  }, [editCache]);
+
+  const undoRevert = useCallback(async (backupId: string) => {
+    try {
+      const res = await request<ReviewRevertUndoResponse>('review_revert_undo', { backupId });
+      if (res?.summary) reviewStore.apply(serverId, res.summary);
+      setRecent((r) => {
+        const n = { ...r };
+        for (const [k, v] of Object.entries(n)) if (v.backupId === backupId) delete n[k];
+        return n;
+      });
+      toast({ text: `Revert undone: ${baseName(res.absPath)}`, tone: 'success' });
+      bumpAfterRevert();
+    } catch (err) {
+      toast({ text: `Could not undo: ${reviewErrorMessage(err)}`, tone: 'error' });
+    }
+  }, [request, serverId, toast, bumpAfterRevert]);
+
+  const onRevertDone = useCallback((res: ReviewRevertResponse) => {
+    ownBackups.current.add(res.backupId);
+    const path = revertTarget?.path ?? res.absPath;
+    setRevertTarget(null);
+    setRecent((r) => ({ ...r, [res.absPath]: { backupId: res.backupId, undoUntil: res.undoUntil, path } }));
+    if (res.summary) reviewStore.apply(serverId, res.summary);
+    const verb = res.effect === 'delete' ? 'Deleted' : 'Reverted';
+    toast({ text: `${verb} ${baseName(path)}`, tone: 'success', ttl: 10_000, action: { label: 'Undo', run: () => { void undoRevert(res.backupId); } } });
+    bumpAfterRevert();
+  }, [revertTarget, serverId, toast, undoRevert, bumpAfterRevert]);
+
+  const onAskSent = useCallback((res: ReviewAskResponse) => {
+    setAskTarget(null);
+    toast({ text: res.via === 'herald' ? 'Asked. Herald will bring the answer back.' : 'Asked in the session.', tone: 'success' });
+  }, [toast]);
+
+  // Reverts made on other devices: refresh + say so.
+  useEffect(() => reviewStore.onReverted((srv, ev) => {
+    if (srv !== serverId || ev.sessionId !== sessionId) return;
+    if (ownBackups.current.has(ev.backupId)) return;
+    const where = ev.by ? ` on ${ev.by}` : ' on another device';
+    toast({ text: `${ev.undone ? 'Revert undone' : 'Reverted'}${where}: ${baseName(ev.absPath)}`, tone: 'info', ttl: 6000 });
+    if (ev.undone) setRecent((r) => { const n = { ...r }; delete n[ev.absPath]; return n; });
+    bumpAfterRevert();
+  }), [serverId, sessionId, toast, bumpAfterRevert]);
+
+  // Drop undo links when their window closes.
+  useEffect(() => {
+    const times = Object.values(recent).map((r) => r.undoUntil);
+    if (!times.length) return;
+    const next = Math.min(...times) - Date.now();
+    const t = setTimeout(() => {
+      const now = Date.now();
+      setRecent((r) => Object.fromEntries(Object.entries(r).filter(([, v]) => v.undoUntil > now)));
+    }, Math.max(0, next) + 50);
+    return () => clearTimeout(t);
+  }, [recent]);
+
+  const actions = useMemo<ReviewActions>(() => ({
+    ask: (hunk, target, turn) => setAskTarget({ hunk, ...target, turn }),
+    revertHunk: (hunk, target) => setRevertTarget({
+      target: { kind: 'hunk', absPath: target.absPath, hunkId: hunk.id, ...(target.editId ? { editId: target.editId } : {}), scope: drawerScopeRef.current },
+      path: target.path,
+    }),
+    revertFile: (absPath, path, to) => setRevertTarget({ target: { kind: 'file', absPath, to }, path }),
+    fileExtra: (absPath) => {
+      const r = recent[absPath];
+      if (!r || r.undoUntil <= Date.now()) return null;
+      return (
+        <button
+          type="button"
+          className="rv-undo-link"
+          onClick={(e) => { e.stopPropagation(); void undoRevert(r.backupId); }}
+          title="Undo the revert (available for 10 minutes)"
+        >
+          Undo revert
+        </button>
+      );
+    },
+  }), [recent, undoRevert]);
+  const drawerScopeRef = useRef(drawer.scope);
+  drawerScopeRef.current = drawer.scope;
+
   const value = useMemo<ReviewContextValue>(() => ({
     serverId, sessionId, sessionName: sessionName ?? null, summary, supported, request, device,
     drawer, openDrawer, closeDrawer, setScope, setView,
     markReviewed, pendingMark, approveTurn, editCache,
     comments, addComment, clearComments, sendToSession, onViewFile,
     toasts, toast, dismissToast,
-  }), [serverId, sessionId, sessionName, summary, supported, request, device, drawer, openDrawer, closeDrawer, setScope, setView,
+    actions, askTarget, revertTarget, closeAsk, closeRevert, onAskSent, onRevertDone, undoRevert, refreshKey, liveOn, toggleLive,
+  }), [actions, askTarget, revertTarget, closeAsk, closeRevert, onAskSent, onRevertDone, undoRevert, refreshKey, liveOn, toggleLive, serverId, sessionId, sessionName, summary, supported, request, device, drawer, openDrawer, closeDrawer, setScope, setView,
     markReviewed, pendingMark, approveTurn, editCache, comments, addComment, clearComments, sendToSession, onViewFile,
     toasts, toast, dismissToast]);
 

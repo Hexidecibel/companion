@@ -12,7 +12,7 @@ import { isMobileViewport } from '../../utils/platform';
 import { useReviewContext } from './ReviewContext';
 import { FileDiff } from './FileDiff';
 import { TurnGroup } from './TurnGroup';
-import { IconCheck, IconClose, IconKeyboard } from './reviewIcons';
+import { IconCheck, IconClose, IconKeyboard, IconRevert } from './reviewIcons';
 import { formatAgo, formatStat, plural, TRIVIAL_LABEL } from './format';
 
 const WIDTH_KEY = 'companion_review_drawer_width';
@@ -49,6 +49,7 @@ export interface ReviewDrawerProps {
   onAsk?: (hunk: ReviewHunk, c: { absPath: string; path: string; editId?: string }, turn?: ReviewTurn) => void;
   onRevertHunk?: (hunk: ReviewHunk, c: { absPath: string; path: string; editId?: string }) => void;
   renderFileExtra?: (absPath: string) => React.ReactNode;
+  onRevertFile?: (absPath: string, path: string, to: 'head' | 'checkpoint') => void;
   liveSlot?: React.ReactNode;
   onToggleLive?: () => void;
   liveOn?: boolean;
@@ -62,7 +63,7 @@ export function ReviewDrawer(props: ReviewDrawerProps) {
   return <DrawerInner {...props} />;
 }
 
-function DrawerInner({ onAsk, onRevertHunk, renderFileExtra, liveSlot, onToggleLive, liveOn, refreshKey }: ReviewDrawerProps) {
+function DrawerInner({ onAsk, onRevertHunk, renderFileExtra, onRevertFile, liveSlot, onToggleLive, liveOn, refreshKey }: ReviewDrawerProps) {
   const ctx = useReviewContext()!;
   const { drawer, summary, sessionId, serverId } = ctx;
   const mobile = isMobileViewport();
@@ -375,7 +376,22 @@ function DrawerInner({ onAsk, onRevertHunk, renderFileExtra, liveSlot, onToggleL
         loadHunks={f.hunks ? undefined : loadFile(f)}
         onAsk={onAsk}
         onRevertHunk={onRevertHunk}
-        headerExtra={renderFileExtra?.(f.absPath)}
+        headerExtra={(
+          <>
+            {renderFileExtra?.(f.absPath)}
+            {onRevertFile && f.source === 'git' && !f.binary && (
+              <button
+                type="button"
+                className="rv-icon-btn rv-icon-btn--danger"
+                title={drawer.scope === 'all' ? 'Revert file to the last commit' : 'Revert file to when you last looked'}
+                aria-label="Revert file"
+                onClick={(e) => { e.stopPropagation(); onRevertFile(f.absPath, f.path, drawer.scope === 'all' ? 'head' : 'checkpoint'); }}
+              >
+                <IconRevert width={14} height={14} />
+              </button>
+            )}
+          </>
+        )}
         scrollParent={scroller}
       />
     );
