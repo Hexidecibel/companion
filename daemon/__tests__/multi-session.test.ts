@@ -132,19 +132,19 @@ function createMockWatcher() {
       const tmuxPaths = new Map<string, string>();
       for (const ts of tmuxSessions) {
         if (ts.workingDir) {
-          const encoded = ts.workingDir.replace(/[/_]/g, '-');
+          const encoded = ts.workingDir.replace(/[^a-zA-Z0-9]/g, '-');
           tmuxPaths.set(encoded, ts.name);
         }
       }
 
       filteredSessions = sessions.filter((s: any) => {
-        const encoded = s.projectPath?.replace(/[/_]/g, '-') || '';
+        const encoded = s.projectPath?.replace(/[^a-zA-Z0-9]/g, '-') || '';
         return tmuxPaths.has(encoded);
       });
 
       // Add tmuxSessionName
       filteredSessions = filteredSessions.map((s: any) => {
-        const encoded = s.projectPath?.replace(/[/_]/g, '-') || '';
+        const encoded = s.projectPath?.replace(/[^a-zA-Z0-9]/g, '-') || '';
         return { ...s, tmuxSessionName: tmuxPaths.get(encoded) };
       });
     }

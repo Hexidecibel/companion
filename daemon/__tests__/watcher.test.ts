@@ -4,7 +4,7 @@ import { EventEmitter } from 'events';
 import { exec } from 'child_process';
 
 // Tmux session state for mock
-const tmuxSessions: Map<string, { workingDir: string; tagged: boolean }> = new Map();
+const tmuxSessions: Map<string, { workingDir: string; tagged: boolean; created?: string; panePid?: number }> = new Map();
 
 // Mock child_process with configurable tmux responses.
 // Node's real exec has a custom promisify that returns { stdout, stderr }.
@@ -33,7 +33,9 @@ jest.mock('child_process', () => {
       const match = cmd.match(/-t "([^"]+)"/);
       const name = match?.[1];
       const session = name ? tmuxSessions.get(name) : undefined;
-      if (session) {
+      if (session && cmd.includes('session_created')) {
+        cb(null, `${session.workingDir}\t${session.created ?? ''}\t${session.panePid ?? ''}\n`, '');
+      } else if (session) {
         cb(null, session.workingDir, '');
       } else {
         cb(new Error('no session'), '', '');
@@ -599,6 +601,70 @@ describe('SessionWatcher', () => {
       // Conversations are tracked internally but not exposed without tmux
       const sessions = watcher.getSessions();
       expect(sessions.length).toBe(0);
+    });
+  });
+
+  describe('project paths with dots', () => {
+    it('links a session whose cwd contains a dot to its transcript dir', async () => {
+      const dotDir = '/home/user/.cache/proj_x';
+      addTmuxSession('dot-sess', dotDir);
+      const content = jsonlLine({ type: 'user', message: { content: 'Hello' }, uuid: 'msg-1' });
+      mockFs.readFileSync.mockReturnValue(content);
+
+      await startWatcher(watcher);
+      mockWatcher.emit('add', `${PROJECTS_DIR}/-home-user--cache-proj-x/${FILE_UUID_1}.jsonl`);
+      await jest.advanceTimersByTimeAsync(200);
+
+      const sessions = watcher.getSessions();
+      expect(sessions.map((s) => s.id)).toEqual(['dot-sess']);
+      expect(sessions[0].projectPath).toBe(dotDir);
+    });
+  });
+
+  describe('reused tmux session names', () => {
+    const MAPPINGS = `${CODE_HOME}/companion-session-mappings.json`;
+    function persisted(identity: Record<string, unknown>) {
+      const content = jsonlLine({ type: 'user', message: { content: 'Hello' }, uuid: 'msg-1' });
+      mockFs.readFileSync.mockImplementation(((p: any) =>
+        String(p) === MAPPINGS
+          ? JSON.stringify({
+              mappings: { [TMUX_SESSION_A]: FILE_UUID_1 },
+              history: { [TMUX_SESSION_A]: [FILE_UUID_1] },
+              identity: { [TMUX_SESSION_A]: identity },
+            })
+          : content) as any);
+    }
+    const ids = (w: SessionWatcher) => (w as any).tmuxConversationIds as Map<string, string>;
+    async function restart() {
+      watcher.stop();
+      watcher = new SessionWatcher(CODE_HOME);
+      await startWatcher(watcher);
+    }
+
+    it('keeps the mapping while the same tmux session runs', async () => {
+      persisted({ created: '1700000000', panePid: 4242, encodedPath: '-home-user-project-a', claudePid: null });
+      tmuxSessions.set(TMUX_SESSION_A, { workingDir: '/home/user/project-a', tagged: true, created: '1700000000', panePid: 4242 });
+      await restart();
+      expect(ids(watcher).get(TMUX_SESSION_A)).toBe(FILE_UUID_1);
+    });
+
+    it('drops the stale mapping when a session with the same name was created again', async () => {
+      persisted({ created: '1700000000', panePid: 4242, encodedPath: '-home-user-project-a', claudePid: null });
+      tmuxSessions.set(TMUX_SESSION_A, { workingDir: '/home/user/project-b', tagged: true, created: String(Math.floor(Date.now() / 1000)), panePid: 5151 });
+      await restart();
+      expect(ids(watcher).has(TMUX_SESSION_A)).toBe(false);
+      // Treated as new: no path fallback to an older transcript until its own appears.
+      expect((watcher as any).newlyCreatedSessions.has(TMUX_SESSION_A)).toBe(true);
+    });
+
+    it('markSessionAsNew (app spawn with a reused name) clears the old mapping', async () => {
+      persisted({ created: '1700000000', panePid: 4242, encodedPath: '-home-user-project-a', claudePid: null });
+      tmuxSessions.set(TMUX_SESSION_A, { workingDir: '/home/user/project-a', tagged: true, created: '1700000000', panePid: 4242 });
+      await restart();
+      expect(ids(watcher).get(TMUX_SESSION_A)).toBe(FILE_UUID_1);
+      watcher.markSessionAsNew(TMUX_SESSION_A);
+      expect(ids(watcher).has(TMUX_SESSION_A)).toBe(false);
+      expect((watcher as any).tmuxConversationHistory.has(TMUX_SESSION_A)).toBe(false);
     });
   });
 

@@ -1,4 +1,5 @@
 import { EventEmitter } from 'events';
+import { encodeProjectDir } from './session-identity';
 import { v4 as uuidv4 } from 'uuid';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -145,9 +146,8 @@ export class WorkGroupManager extends EventEmitter {
 
       worker.tmuxSessionName = sessionName;
 
-      // Derive sessionId from worktree path (same encoding as watcher uses)
-      // Encode path the same way Claude CLI does: replace / and _ with -
-      worker.sessionId = wtResult.worktreePath.replace(/[/_]/g, '-');
+      // Derive sessionId from worktree path (Claude Code's project dir encoding)
+      worker.sessionId = encodeProjectDir(wtResult.worktreePath);
 
       // Wait for Claude CLI to start up
       await this.waitForCliReady(sessionName);

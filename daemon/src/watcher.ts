@@ -1,4 +1,13 @@
 import * as fs from 'fs';
+import {
+  PANE_INFO_FORMAT,
+  SessionIdentity,
+  encodeProjectDir,
+  findClaudePid,
+  identityChanged,
+  parsePaneInfo,
+  sanitizeIdentity,
+} from './session-identity';
 import * as path from 'path';
 import * as chokidar from 'chokidar';
 import { EventEmitter } from 'events';
@@ -136,6 +145,9 @@ export class SessionWatcher extends EventEmitter {
   private tmuxProjectPaths: Set<string> = new Set(); // encoded paths of tagged sessions only
   private tmuxFilterEnabled: boolean = true;
   private newlyCreatedSessions: Map<string, number> = new Map(); // session name -> creation timestamp
+  private tmuxSessionIdentity: Map<string, SessionIdentity> = new Map(); // session name -> current identity
+  private mappingIdentity: Map<string, SessionIdentity> = new Map(); // session name -> identity its mapping was made for
+  private decodedPathCache: Map<string, string> = new Map(); // encoded project dir -> decoded path
   private compactedSessions: Set<string> = new Set(); // sessions expecting a new JSONL after compaction
   private detectInFlight: Set<string> = new Set(); // sessions currently being probed by detectConversationForSession
   private debounceTimers: Map<string, NodeJS.Timeout> = new Map();
@@ -192,6 +204,14 @@ export class SessionWatcher extends EventEmitter {
         }
       }
 
+      // Identity each mapping was made for (absent in older files = adopt on next refresh)
+      if (isNewFormat && parsed.identity && typeof parsed.identity === 'object') {
+        for (const [session, raw] of Object.entries(parsed.identity)) {
+          const id = sanitizeIdentity(raw);
+          if (id && this.tmuxConversationIds.has(session)) this.mappingIdentity.set(session, id);
+        }
+      }
+
       // Load history if present
       if (isNewFormat && parsed.history) {
         for (const [session, ids] of Object.entries(parsed.history)) {
@@ -237,7 +257,12 @@ export class SessionWatcher extends EventEmitter {
         }
       }
 
-      atomicWriteFileSync(this.mappingsPath, JSON.stringify({ mappings, history }));
+      const identity: Record<string, SessionIdentity> = {};
+      for (const [session, id] of this.mappingIdentity) {
+        if (this.tmuxConversationIds.has(session)) identity[session] = id;
+      }
+
+      atomicWriteFileSync(this.mappingsPath, JSON.stringify({ mappings, history, identity }));
     } catch {
       // Not critical
     }
@@ -314,6 +339,66 @@ export class SessionWatcher extends EventEmitter {
 
     this.tmuxConversationHistory.set(sessionName, history);
     this.tmuxConversationIds.set(sessionName, convId);
+    const identity = this.tmuxSessionIdentity.get(sessionName);
+    if (identity && (!isChainExtension || !this.mappingIdentity.has(sessionName)))
+      this.mappingIdentity.set(sessionName, { ...identity });
+  }
+
+  /** Forget everything that ties a session name to a transcript. */
+  private dropConversationMapping(sessionName: string): boolean {
+    const had = this.tmuxConversationIds.delete(sessionName);
+    const hadHistory = this.tmuxConversationHistory.delete(sessionName);
+    this.mappingIdentity.delete(sessionName);
+    this.compactedSessions.delete(sessionName);
+    return had || hadHistory;
+  }
+
+  /**
+   * A reused tmux session name (session created again, maybe in another cwd)
+   * or a new claude process in the same session: the old conversation mapping
+   * is stale. Drop it and treat the session as new, so the first transcript
+   * written after the change is claimed instead of the old one.
+   */
+  private reconcileSessionIdentities(): void {
+    let changed = false;
+    for (const [name, cur] of this.tmuxSessionIdentity) {
+      if (!this.tmuxConversationIds.has(name)) continue;
+      const prev = this.mappingIdentity.get(name);
+      if (!prev) {
+        // Older mapping file: adopt what runs now.
+        this.mappingIdentity.set(name, { ...cur });
+        changed = true;
+        continue;
+      }
+      if (identityChanged(prev, cur)) {
+        const sessionNew = !!(prev.created && cur.created && prev.created !== cur.created) ||
+          !!(prev.panePid && cur.panePid && prev.panePid !== cur.panePid);
+        console.log(
+          `Watcher: ${name} is a ${sessionNew ? 'new tmux session with a reused name' : 'new claude process'}; dropping stale mapping -> ${this.tmuxConversationIds.get(name)?.substring(0, 8)}`
+        );
+        this.dropConversationMapping(name);
+        const createdMs = Number(cur.created) * 1000;
+        this.newlyCreatedSessions.set(
+          name,
+          sessionNew && createdMs > 0 ? Math.min(createdMs, Date.now()) : Date.now() - 2000
+        );
+        if (this.activeTmuxSession === name) this.activeConversationId = null;
+        changed = true;
+        continue;
+      }
+      // Fill in what was unknown when the mapping was made (claude started later).
+      const filled: SessionIdentity = {
+        created: prev.created || cur.created,
+        panePid: prev.panePid || cur.panePid,
+        encodedPath: prev.encodedPath || cur.encodedPath,
+        claudePid: prev.claudePid ?? cur.claudePid,
+      };
+      if (filled.created !== prev.created || filled.panePid !== prev.panePid || filled.claudePid !== prev.claudePid) {
+        this.mappingIdentity.set(name, filled);
+        changed = true;
+      }
+    }
+    if (changed) this.persistMappings();
   }
 
   async refreshTmuxPaths(): Promise<void> {
@@ -331,6 +416,7 @@ export class SessionWatcher extends EventEmitter {
       this.tmuxSessionByPath.clear();
       this.tmuxPathBySession.clear();
       this.tmuxSessionWorkingDirs.clear();
+      this.tmuxSessionIdentity.clear();
 
       for (const name of sessionNames) {
         try {
@@ -342,18 +428,25 @@ export class SessionWatcher extends EventEmitter {
             continue; // Skip untagged sessions
           }
 
-          // Get active pane's working directory
-          const { stdout: pwd } = await execAsync(
-            `tmux display-message -t "${name}" -p "#{pane_current_path}" 2>/dev/null`
+          // Active pane's working directory + session identity, in one call
+          const { stdout: paneOut } = await execAsync(
+            `tmux display-message -t "${name}" -p "${PANE_INFO_FORMAT}" 2>/dev/null`
           );
-          const workingDir = pwd.trim();
+          const pane = parsePaneInfo(paneOut);
+          const workingDir = pane.workingDir;
           if (!workingDir) continue;
 
-          const encodedPath = workingDir.replace(/[/_]/g, '-');
+          const encodedPath = encodeProjectDir(workingDir);
           this.tmuxProjectPaths.add(encodedPath);
           this.tmuxSessionByPath.set(encodedPath, name);
           this.tmuxPathBySession.set(name, encodedPath);
           this.tmuxSessionWorkingDirs.set(name, workingDir);
+          this.tmuxSessionIdentity.set(name, {
+            created: pane.created,
+            panePid: pane.panePid,
+            encodedPath,
+            claudePid: await findClaudePid(pane.panePid),
+          });
         } catch {
           // Session may have been killed between list and env check
         }
@@ -387,6 +480,9 @@ export class SessionWatcher extends EventEmitter {
         this.activeConversationId = null;
       }
 
+      // Drop mappings whose session name was reused / claude restarted
+      this.reconcileSessionIdentities();
+
       // Refresh direct session→conversation mappings (PID detection + elimination)
       await this.refreshConversationMappings();
 
@@ -408,6 +504,8 @@ export class SessionWatcher extends EventEmitter {
       this.tmuxSessionWorkingDirs.clear();
       this.tmuxConversationIds.clear();
       this.tmuxConversationHistory.clear();
+      this.tmuxSessionIdentity.clear();
+      this.mappingIdentity.clear();
     }
   }
 
@@ -1105,9 +1203,18 @@ export class SessionWatcher extends EventEmitter {
 
     if (parts.length >= 1) {
       const encoded = parts[0];
+      // Exact: a live session's working directory that encodes to this name
+      for (const dir of this.tmuxSessionWorkingDirs.values()) {
+        if (encodeProjectDir(dir) === encoded) return dir;
+      }
       // Smart decode: try to find which interpretation of dashes is correct
-      // by checking if the path exists on the filesystem
+      // by checking if the path exists on the filesystem (memoized: this runs
+      // on every file change)
+      const hit = this.decodedPathCache.get(encoded);
+      if (hit !== undefined) return hit;
       const decoded = this.smartDecodePath(encoded);
+      if (this.decodedPathCache.size >= 256) this.decodedPathCache.clear();
+      this.decodedPathCache.set(encoded, decoded);
       return decoded;
     }
 
@@ -1115,12 +1222,30 @@ export class SessionWatcher extends EventEmitter {
   }
 
   private smartDecodePath(encoded: string): string {
-    // Remove leading dash
+    // Claude Code turns every non-alphanumeric character into '-', so '/', '.',
+    // '_' and '-' are all ambiguous. Walk the parts, joining with '/' unless a
+    // run joined with '-', '.' or '_' names an existing directory. An empty part
+    // ("--") is a segment that started with a non-alphanumeric, usually '.'
+    // (~/.cache -> "-home-u--cache").
     const withoutLeading = encoded.replace(/^-/, '');
-    const parts = withoutLeading.split('-');
+    const raw = withoutLeading.split('-');
+    const parts: string[] = [];
+    for (let k = 0; k < raw.length; k++) {
+      if (raw[k] === '' && k + 1 < raw.length) {
+        parts.push('.' + raw[k + 1]);
+        k++;
+      } else {
+        parts.push(raw[k]);
+      }
+    }
+    const isDir = (p: string): boolean => {
+      try {
+        return fs.existsSync(p) && fs.statSync(p).isDirectory();
+      } catch {
+        return false;
+      }
+    };
 
-    // Try to find the real path by progressively building it
-    // and checking which segments should be joined with / vs -
     let currentPath = '';
     let i = 0;
 
@@ -1128,24 +1253,24 @@ export class SessionWatcher extends EventEmitter {
       const part = parts[i];
       const testWithSlash = currentPath ? `${currentPath}/${part}` : `/${part}`;
 
-      // Look ahead to see if joining with dash creates a valid path
-      let foundWithDash = false;
-      if (currentPath && i < parts.length) {
-        // Check if path with dash exists
-        for (let j = i; j < parts.length; j++) {
-          const dashJoined = currentPath + '-' + parts.slice(i, j + 1).join('-');
-          if (fs.existsSync(dashJoined) && fs.statSync(dashJoined).isDirectory()) {
-            // Found a valid path with dashes
-            currentPath = dashJoined;
-            i = j + 1;
-            foundWithDash = true;
-            break;
+      // Look ahead: does joining the next parts with '-', '.' or '_' (onto the
+      // current segment) name an existing directory?
+      let foundJoined = false;
+      if (currentPath) {
+        for (let j = parts.length - 1; j >= i && !foundJoined; j--) {
+          for (const sep of ['-', '.', '_']) {
+            const joined = currentPath + sep + parts.slice(i, j + 1).join(sep);
+            if (isDir(joined)) {
+              currentPath = joined;
+              i = j + 1;
+              foundJoined = true;
+              break;
+            }
           }
         }
       }
 
-      if (!foundWithDash) {
-        // Use slash separator
+      if (!foundJoined) {
         currentPath = testWithSlash;
         i++;
       }
@@ -1153,8 +1278,7 @@ export class SessionWatcher extends EventEmitter {
 
     // If the smart decode didn't find a valid path, fall back to simple decode
     if (!fs.existsSync(currentPath)) {
-      // Simple fallback: replace all dashes with slashes
-      return '/' + withoutLeading.replace(/-/g, '/');
+      return '/' + parts.join('/');
     }
 
     return currentPath;
@@ -1207,6 +1331,9 @@ export class SessionWatcher extends EventEmitter {
    * Prevents path-based fallback from returning a stale conversation.
    */
   markSessionAsNew(sessionName: string): void {
+    // A reused name must not keep the previous session's transcript.
+    if (this.dropConversationMapping(sessionName)) this.persistMappings();
+    if (this.activeTmuxSession === sessionName) this.activeConversationId = null;
     this.newlyCreatedSessions.set(sessionName, Date.now());
   }
 
@@ -1265,6 +1392,7 @@ export class SessionWatcher extends EventEmitter {
 
     if (this.tmuxConversationIds.delete(sessionId)) mappingRemoved = true;
     if (this.tmuxConversationHistory.delete(sessionId)) mappingRemoved = true;
+    this.mappingIdentity.delete(sessionId);
     this.newlyCreatedSessions.delete(sessionId);
     this.compactedSessions.delete(sessionId);
 
@@ -1402,6 +1530,7 @@ export class SessionWatcher extends EventEmitter {
       if (!this.tmuxPathBySession.has(name)) {
         this.tmuxConversationIds.delete(name);
         this.tmuxConversationHistory.delete(name);
+        this.mappingIdentity.delete(name);
       }
     }
     for (const [name, convId] of this.tmuxConversationIds) {
