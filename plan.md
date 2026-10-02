@@ -4,6 +4,22 @@ Detailed plans for upcoming work items. Completed items are moved to FEATURES.md
 
 ---
 
+## Item: Code Review 2.0
+**Status:** done (daemon + Herald); web workstream in progress
+
+Authoritative design, protocol contract and tests: `docs/code-review-2-plan.md`.
+
+Daemon shipped in four phases (commits `feat(review): ...`, `feat(herald): review_changes ...`):
+0. Protocol contract (`daemon/src/review/protocol.ts`), bounded GitRunner, `get_session_diff` rebuilt on the ledger + one bounded diff (fixes the N+1 shell fan-out and dropped untracked files).
+1. Ledger, checkpoint store, free summaries, risk classification, `review_summary_list` / `review_get` (turns) / `review_mark_reviewed` / `review_approve_turn`, global `review_summary` events.
+2. Snapshots + net files view, `review_get_file`, `review_get_edits`, renames / binary / modes, unattributed section, subagent attribution.
+3. `review_ask` via Herald `relayAsk`, revert preview / apply / undo (CAS, backups, audit, tiers), `review_watch` / `review_live`.
+4. Herald `review_changes` tool, risk alerts in the inbox (`review` field), fallback lines, `review_polish_summaries`.
+
+Needs a user-approved daemon restart to go live. Known gaps: no on-wire notice when a checkpoint snapshot was gc-pruned (silently falls back to HEAD); turn-end unattributed scans use the net diff (not `git status`).
+
+---
+
 ## Item: Global Concierge — cross-machine fan-out
 **Status:** done
 

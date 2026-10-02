@@ -367,22 +367,20 @@ Real-time utilization gauges using Claude Code OAuth credentials — no admin AP
 - Daemon polls every 3 minutes with 3-minute cache; web auto-refreshes
 - Graceful fallback when OAuth credentials not available
 
-## Code Review Mode
-Consolidated diff view of all files changed by a session, with approve/reject actions.
+## Code Review 2.0
+"What changed since I looked?" across sessions, with risk flags, per-turn summaries, ask-why and safe reverts. Plan: `docs/code-review-2-plan.md`.
 
-- Auto-triggers on session completion with review card in conversation
-- Manual "Review" button in session header for mid-session review
-- Git diff on server for accurate consolidated diffs
-- JSONL Edit/Write fallback for non-git directories
-- Per-file diff stats (insertions/deletions) with expandable diff view
-- "Looks good" to dismiss or "Request changes" to send feedback
-- Opens diffs in existing file viewer with full syntax highlighting
-- Full-screen code review modal with keyboard navigation (j/k, arrows, Enter, Escape)
-- File list panel with diff viewer side-by-side (stacked on mobile)
-- Consolidated entry point: Review button and file changes summary both open the modal
-- Auto-refresh on file changes: listens for `conversation_update` broadcasts to re-fetch diffs when Write/Edit tools complete
-- **Line comments:** right-click any diff line to comment on it — sends formatted message with file path, line number, and quoted code to the CLI session
-- Copy line from context menu
+- **Transcript ledger:** turns and exact per-edit hunks from Claude Code's JSONL (`structuredPatch`), read incrementally from byte offsets (no subprocess per update, works outside git, survives `/clear` chains); subagent edits attributed to the turn that spawned them
+- **"Since you looked" checkpoints** per session (persisted, multi-device, `updatedBy`); mark all reviewed or approve single turns (contiguous approvals fold in); global `review_summary` events at most once a second per session
+- **Free turn summaries** ("Fixed echo guard: 3 files, +42 -18") from the reply, prompt or files; optional Herald-polished gists (`review_polish_summaries`, one batched call, cached, metered)
+- **Net "by file" view** via checkpoint snapshot trees (temp index, never touches the user's index or refs): renames, binary, mode changes, deletions, heat ordering, trivial collapse (whitespace / lockfile / generated), lazy hunks, and an **unattributed** section for Bash-made changes; gitignored and non-git files fall back to per-edit transcript hunks
+- **Risk flags** (pure `classifyChangedFile`): migrations, CI / deploy scripts, env files, secrets (paths and secret-looking added lines), agent / git hook config, permissions, auth / security code, deletions, config, dependency changes, large rewrites, lockfiles, binary, outside project, other sessions touching the same file
+- **Ask why** on any hunk: sends the hunk + turn context to the session (through Herald's ask-and-report when enabled, so the answer comes back in the Herald inbox); refuses while a choice prompt is on screen
+- **Revert** a hunk (works outside git) or a whole file (to HEAD or the checkpoint): preview with the exact patch, echo (tap) vs hold-to-confirm tiers, tokens bound to the connection, CAS write with backup, 10-minute undo, audit log, "[Companion] I reverted ..." note to the session; refused in the sandbox, for staged files, other sessions' changes, binary / > 2 MB files
+- **Live edit stream** (`review_watch` / `review_live`) for the drawer's live feed
+- **Herald:** `review_changes` tool ("what did Out4 change?", grounded, risky first, at most three files named), high-risk changes as quiet inbox news (deduped 30 min, coalesced 20 s, resolved when you mark the session reviewed)
+- **Bounded git everywhere:** one GitRunner (no shell, SIGKILL timeouts, dedupe, concurrency 3, breaker); legacy `get_session_diff` rebuilt on it (no more shell per file; untracked new files no longer dropped)
+- Web client: change strip, review drawer (by turn / by file), inline edit chips, risk badges, revert dialog with undo, live feed and risk tone (see the plan's web workstream)
 
 ## Mobile Session Context Menu
 Long-press or right-click on a mobile session to get a full context menu.
