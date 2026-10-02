@@ -125,3 +125,42 @@ describe('incremental tail', () => {
     expect(led.stale).toBe(true);
   });
 });
+
+describe('subagent attribution', () => {
+  it('attributes sidechain edits to the turn that spawned the agent', async () => {
+    const { listSubagentFiles } = await import('../sources');
+    const dir = tmpDir();
+    const conv = path.join(dir, 'conv1.jsonl');
+    const t0 = Date.parse('2026-09-30T08:00:00Z');
+    fs.writeFileSync(
+      conv,
+      jsonl([
+        prompt('t1', 'dispatch', t0),
+        toolUse('agent-call', 'Agent', { prompt: 'x' }, t0 + 10),
+        prompt('t2', 'next', t0 + 100_000),
+      ])
+    );
+    const subDir = path.join(dir, 'conv1', 'subagents');
+    fs.mkdirSync(subDir, { recursive: true });
+    fs.writeFileSync(path.join(subDir, 'agent-abc.meta.json'), JSON.stringify({ toolUseId: 'agent-call' }));
+    fs.writeFileSync(
+      path.join(subDir, 'agent-abc.jsonl'),
+      jsonl([
+        { ...prompt('sp', 'sub prompt', t0 + 20), isSidechain: true },
+        { ...toolUse('se', 'Edit', { file_path: '/p/x.ts' }, t0 + 200_000), isSidechain: true },
+        { ...toolResult('se', editResult('/p/x.ts', [{ oldStart: 1, oldLines: 1, newStart: 1, newLines: 1, lines: ['-a', '+b'] }]), t0 + 200_001), isSidechain: true },
+      ])
+    );
+    const subs = await listSubagentFiles([conv]);
+    expect(subs).toEqual([{ path: path.join(subDir, 'agent-abc.jsonl'), agentId: 'abc', parentToolUseId: 'agent-call' }]);
+    const led = new SessionLedger('s', '/p');
+    led.setChain([conv], subs);
+    await led.update();
+    expect(led.turns.map((t) => t.id)).toEqual(['t1', 't2']);
+    const e = led.edits.get('se')!;
+    // Time alone would say t2; the meta's toolUseId says t1.
+    expect(e.turnId).toBe('t1');
+    expect(e.agentId).toBe('abc');
+    expect(led.turns[0].editIds).toContain('se');
+  });
+});

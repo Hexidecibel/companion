@@ -31,7 +31,7 @@ describe('get_session_diff compat (ledger + one bounded diff)', () => {
     const runner = new GitRunner();
     const svc = new ReviewService({
       watcher: fakeWatcher([{ id: 's1', projectPath: repo, files: [conv] }]),
-      gitEnabled: () => true,
+      gitEnabled: () => true, excludeDirs: [],
       runner,
     });
     const out = await svc.compatSessionDiff('s1');

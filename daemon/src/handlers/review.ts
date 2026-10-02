@@ -1,6 +1,7 @@
 import { AuthenticatedClient, HandlerContext, MessageHandler } from '../handler-context';
 import { ReviewServiceError } from '../review/service';
 import { GitError } from '../review/git-runner';
+import { REVIEW_LIMITS } from '../review/protocol';
 import type { ReviewErrorCode } from '../review/protocol';
 
 type Obj = Record<string, unknown>;
@@ -72,6 +73,26 @@ export function registerReviewHandlers(ctx: HandlerContext): Record<string, Mess
         view: (p.view as 'turns' | 'files' | undefined) || 'turns',
         ...(str(p.turnId, 200) ? { turnId: str(p.turnId, 200) } : {}),
       });
+    }),
+
+    review_get_file: handle('review_get_file', async (_c, p) => {
+      const absPath = str(p.absPath, 4096);
+      if (!absPath || !absPath.startsWith('/'))
+        throw new ReviewServiceError('bad_request', 'absPath must be an absolute path');
+      return ctx.review!.getFile({
+        sessionId: sessionIdOf(p),
+        absPath,
+        scope: scopeOf(p),
+        ...(str(p.turnId, 200) ? { turnId: str(p.turnId, 200) } : {}),
+      });
+    }),
+
+    review_get_edits: handle('review_get_edits', async (_c, p) => {
+      if (!Array.isArray(p.editIds) || p.editIds.some((x) => typeof x !== 'string'))
+        throw new ReviewServiceError('bad_request', 'editIds must be an array of strings');
+      if (p.editIds.length > REVIEW_LIMITS.maxGetEdits)
+        throw new ReviewServiceError('bad_request', `at most ${REVIEW_LIMITS.maxGetEdits} editIds`);
+      return ctx.review!.getEdits(sessionIdOf(p), p.editIds as string[]);
     }),
 
     review_mark_reviewed: handle('review_mark_reviewed', async (_c, p) => {

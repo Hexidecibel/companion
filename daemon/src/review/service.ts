@@ -20,8 +20,14 @@ import { summarizeTurn } from './summarize';
 import { addedLines, removedLines, toReviewHunk } from './analyze';
 import { classifyChangedFile, maxRiskLevel } from '../herald/danger';
 import { REVIEW_LIMITS } from './protocol';
+import { NetViewBuilder } from './net-view';
+import { snapshotTree } from './snapshot';
 import type {
   ReviewEdit,
+  ReviewFileChange,
+  ReviewGetEditsResponse,
+  ReviewGetFileRequest,
+  ReviewGetFileResponse,
   ReviewGetRequest,
   ReviewGetResponse,
   ReviewMarkResponse,
@@ -52,6 +58,8 @@ export interface ReviewServiceDeps {
   /** The session is working right now (defaults to !isWaitingForInput for live sessions). */
   isWorking?: (sessionId: string) => boolean;
   now?: () => number;
+  /** Never reviewed (scratch space). Default: os.tmpdir(), /tmp, /var/tmp. */
+  excludeDirs?: string[];
   /** Event debounce / summary throttle (tests shorten them). */
   debounceMs?: number;
   throttleMs?: number;
@@ -108,6 +116,18 @@ export class ReviewService {
   private lastBroadcastAt = new Map<string, number>();
   private debounceMs: number;
   private throttleMs: number;
+  readonly net: NetViewBuilder;
+  /** Sessions whose baseline snapshot was already attempted. */
+  private baselineTried = new Set<string>();
+  /** Unattributed changes found at the last scan (turn end with Bash / files view). */
+  private unattributedCache = new Map<
+    string,
+    { count: number; risks: Array<ReviewRiskFlag & { path: string }>; stamp: string; through: number }
+  >();
+  /** Turn ids already scanned for Bash-made changes. */
+  private scannedTurns = new Map<string, string>();
+  /** Short memo of files views (recompute at most every 2 s). */
+  private filesMemo = new Map<string, { at: number; value: Promise<Awaited<ReturnType<NetViewBuilder['build']>>> }>();
 
   constructor(deps: ReviewServiceDeps) {
     this.deps = deps;
@@ -118,6 +138,16 @@ export class ReviewService {
     this.debounceMs = deps.debounceMs ?? 300;
     this.throttleMs = deps.throttleMs ?? 1000;
     this.ready = this.store.loaded ? Promise.resolve() : this.store.load().catch(() => undefined);
+    this.net = new NetViewBuilder({
+      runner: this.runner,
+      repos: this.repos,
+      gitEnabled: () => this.deps.gitEnabled(),
+      now: () => this.now(),
+      displayPath: (a, p) => this.displayPath(a, p),
+      isOutsideProject: (a, p) => this.isOutsideProject(a, p),
+      isExcludedPath: (a) => this.isExcludedPath(a),
+      alsoChangedBy: (id, a, since) => this.alsoChangedBy(id, a, since),
+    });
   }
 
   /** Resolves once persisted checkpoints are loaded. */
@@ -149,13 +179,52 @@ export class ReviewService {
   }
 
   /** Re-read a session and broadcast its summary when it changed. */
-  async refresh(sessionId: string, _statusChange = false): Promise<ReviewSummary | null> {
+  async refresh(sessionId: string, statusChange = false): Promise<ReviewSummary | null> {
     const ctx = await this.context(sessionId);
     if (!ctx) return null;
     this.onLedgerChanges(ctx);
     const summary = this.summaryFor(ctx);
     this.scheduleBroadcast(summary);
+    if (statusChange && !ctx.working) this.maybeScanTurnEnd(ctx);
     return summary;
+  }
+
+  /**
+   * A turn that ran Bash just ended: one bounded net diff per repo to find
+   * changes no transcript claims (rm, sed -i, generators). Once per turn.
+   */
+  private maybeScanTurnEnd(ctx: SessionContext): void {
+    const last = ctx.led.turns[ctx.led.turns.length - 1];
+    if (!last || !last.usedBash || !this.deps.gitEnabled()) return;
+    if (this.scannedTurns.get(ctx.sessionId) === last.id) return;
+    this.scannedTurns.set(ctx.sessionId, last.id);
+    void this.scanUnattributed(ctx).catch((err) =>
+      console.error(`Review: turn-end scan of ${ctx.sessionId} failed:`, err instanceof Error ? err.message : err)
+    );
+  }
+
+  private async scanUnattributed(ctx: SessionContext): Promise<void> {
+    const fv = await this.filesView(ctx, 'since_checkpoint');
+    this.noteUnattributed(ctx, fv.unattributed);
+    const fresh = await this.context(ctx.sessionId);
+    if (fresh) this.scheduleBroadcast(this.summaryFor(fresh));
+  }
+
+  private noteUnattributed(ctx: SessionContext, list: ReviewFileChange[]): void {
+    const risks: Array<ReviewRiskFlag & { path: string }> = [];
+    for (const f of list) for (const r of f.risks) risks.push({ ...r, path: f.path });
+    const stamp = `${list.length}:${list.map((f) => `${f.path}+${f.additions}-${f.deletions}`).join(',')}`;
+    const prev = this.unattributedCache.get(ctx.sessionId);
+    this.unattributedCache.set(ctx.sessionId, { count: list.length, risks, stamp, through: ctx.cp.reviewedThrough });
+    if (!prev || prev.stamp !== stamp) {
+      this.bump(ctx.sessionId);
+      this.onUnattributed(ctx, list);
+    }
+  }
+
+  /** Hook: risk alerts for Bash-made changes (phase 4). */
+  protected onUnattributed(_ctx: SessionContext, _list: ReviewFileChange[]): void {
+    /* overridden */
   }
 
   /** Live edit stream hook (review_live), overridden in later phases. */
@@ -268,8 +337,25 @@ export class ReviewService {
   }
 
   /** Hook for baselines (phase 2). */
-  protected onContext(_sessionId: string, _led: SessionLedger, _cp: StoredCheckpoint): void {
-    /* overridden */
+  protected onContext(sessionId: string, led: SessionLedger, _cp: StoredCheckpoint): void {
+    // Baseline: the first time a session is seen before it changed anything,
+    // snapshot its project so "everything" can be diffed against it later.
+    if (this.baselineTried.has(sessionId) || !this.deps.gitEnabled() || !led.projectPath) return;
+    this.baselineTried.add(sessionId);
+    if (this.store.has(sessionId, led.projectPath)) return;
+    for (const e of led.edits.values()) if (!e.failed && !this.isExcludedPath(e.absPath)) return;
+    void (async () => {
+      const repo = await this.repos.resolve(led.projectPath).catch(() => null);
+      if (!repo) return;
+      const tree = await snapshotTree(this.runner, repo);
+      await this.withLock(`cp:${sessionId}`, async () => {
+        const cur = this.store.get(sessionId, led.projectPath);
+        if (cur.baseline?.length) return;
+        this.store.put(sessionId, { ...cur, baseline: [{ repoRoot: repo.root, tree }] });
+      });
+    })().catch((err) =>
+      console.error(`Review: baseline for ${sessionId} failed:`, err instanceof Error ? err.message : err)
+    );
   }
 
   /** Summary version: bumps whenever the ledger or checkpoint changed. */
@@ -307,13 +393,8 @@ export class ReviewService {
 
   /** Scratchpads and the OS temp dir are never reviewed. */
   isExcludedPath(absPath: string): boolean {
-    const tmp = os.tmpdir();
-    return (
-      absPath.startsWith(tmp + path.sep) ||
-      absPath.startsWith('/tmp/') ||
-      absPath.startsWith('/var/tmp/') ||
-      /\/scratchpad(\/|$)/.test(absPath)
-    );
+    const dirs = this.deps.excludeDirs ?? [os.tmpdir(), '/tmp', '/var/tmp'];
+    return dirs.some((d) => absPath.startsWith(d + path.sep)) || /\/scratchpad(\/|$)/.test(absPath);
   }
 
   /** Completed, non-failed, not excluded. */
@@ -435,12 +516,15 @@ export class ReviewService {
   }
 
   /** Unattributed (Bash-made) changes folded into the summary (phase 2). */
-  protected extraSummary(_ctx: SessionContext): {
+  protected extraSummary(ctx: SessionContext): {
     files: number;
     risks: Array<ReviewRiskFlag & { path: string }>;
     stamp: string;
   } {
-    return { files: 0, risks: [], stamp: '' };
+    const u = this.unattributedCache.get(ctx.sessionId);
+    // A scan from before the checkpoint last moved is stale.
+    if (!u || u.through !== ctx.cp.reviewedThrough) return { files: 0, risks: [], stamp: '' };
+    return { files: u.count, risks: u.risks, stamp: u.stamp };
   }
 
   async summary(sessionId: string): Promise<ReviewSummary | null> {
@@ -616,7 +700,7 @@ export class ReviewService {
         kept.push(re);
       }
       edits = kept.reverse();
-      repos = await this.reposFor(ctx, []);
+      repos = await this.reposFor(ctx, Array.from(new Set(edits.map((e) => e.absPath))));
     } else {
       const fv = await this.filesView(ctx, scope, req.turnId);
       files = fv.files;
@@ -641,34 +725,87 @@ export class ReviewService {
     };
   }
 
-  /** Repos for the session's project (+ touched dirs); phase 2 fills the files view. */
-  protected async reposFor(ctx: SessionContext, _absPaths: string[]): Promise<ReviewGetResponse['repos']> {
-    if (!this.deps.gitEnabled() || !ctx.led.projectPath) return [];
-    const r = await this.repos.resolve(ctx.led.projectPath).catch(() => null);
-    if (!r) return [];
-    return [
-      {
-        root: r.root,
-        worktree: r.worktree,
-        branch: r.branch,
-        head: r.head,
-        ...(this.runner.isDegraded(r.root) ? { degraded: 'timeout' as const } : {}),
-      },
-    ];
+  /** Repos for the session's project + touched dirs (<= 4). */
+  protected async reposFor(ctx: SessionContext, absPaths: string[]): Promise<ReviewGetResponse['repos']> {
+    const { repos } = await this.net.sessionRepos(ctx.led.projectPath, absPaths);
+    return repos.map((r) => ({
+      root: r.root,
+      worktree: r.worktree,
+      branch: r.branch,
+      head: r.head,
+      ...(this.runner.isDegraded(r.root) ? { degraded: 'timeout' as const } : {}),
+    }));
   }
 
-  /** Net "by file" view (phase 2). */
+  /** In-scope countable edits, oldest first. */
+  protected scopeEdits(ctx: SessionContext, scope: 'since_checkpoint' | 'all', turnId?: string): LedgerEdit[] {
+    const out: LedgerEdit[] = [];
+    for (const e of ctx.led.edits.values()) {
+      if (!this.countable(e)) continue;
+      if (turnId) {
+        if (e.turnId !== turnId) continue;
+      } else if (scope === 'since_checkpoint' && !this.isUnreviewed(e, ctx.cp)) continue;
+      out.push(e);
+    }
+    return out.sort((a, b) => a.at - b.at);
+  }
+
+  /** Net "by file" view (git where possible, transcript otherwise). */
   protected async filesView(
-    _ctx: SessionContext,
-    _scope: 'since_checkpoint' | 'all',
-    _turnId?: string
-  ): Promise<{
-    files: ReviewGetResponse['files'];
-    unattributed: ReviewGetResponse['unattributed'];
-    repos: ReviewGetResponse['repos'];
-    omittedFiles?: number;
-  }> {
-    return { files: [], unattributed: [], repos: [] };
+    ctx: SessionContext,
+    scope: 'since_checkpoint' | 'all',
+    turnId?: string,
+    focusAbsPath?: string
+  ): Promise<Awaited<ReturnType<NetViewBuilder['build']>>> {
+    const key = `${ctx.sessionId}|${scope}|${turnId || ''}|${focusAbsPath || ''}|${ctx.led.version}|${ctx.cp.reviewedThrough}|${ctx.cp.approvedTurnIds.join(',')}`;
+    const hit = this.filesMemo.get(key);
+    if (hit && this.now() - hit.at < 2000) return hit.value;
+    const value = this.net.build({
+      sessionId: ctx.sessionId,
+      projectPath: ctx.led.projectPath,
+      scope,
+      cp: ctx.cp,
+      edits: this.scopeEdits(ctx, scope, turnId),
+      isUnreviewed: (e) => this.isUnreviewed(e, ctx.cp),
+      ...(focusAbsPath ? { focusAbsPath } : {}),
+    });
+    this.filesMemo.set(key, { at: this.now(), value });
+    if (this.filesMemo.size > 64) {
+      const k = this.filesMemo.keys().next().value;
+      if (k !== undefined) this.filesMemo.delete(k);
+    }
+    value.catch(() => this.filesMemo.delete(key));
+    const out = await value;
+    if (scope === 'since_checkpoint' && !turnId && !focusAbsPath) this.noteUnattributed(ctx, out.unattributed);
+    return out;
+  }
+
+  /** review_get_file: one file with all its hunks (capped at maxFileHunkLines). */
+  async getFile(req: ReviewGetFileRequest): Promise<ReviewGetFileResponse> {
+    const ctx = await this.context(req.sessionId);
+    if (!ctx) throw new ReviewServiceError('unknown_session', `Unknown session ${req.sessionId}`);
+    const abs = path.resolve(req.absPath);
+    const scope = req.scope === 'all' ? 'all' : 'since_checkpoint';
+    if (req.turnId && !ctx.led.getTurn(req.turnId))
+      throw new ReviewServiceError('not_found', `Unknown turn ${req.turnId}`);
+    const fv = await this.filesView(ctx, scope, req.turnId, abs);
+    const file = fv.files.find((f) => f.absPath === abs) || fv.unattributed.find((f) => f.absPath === abs);
+    if (!file) throw new ReviewServiceError('not_found', `No changes to ${req.absPath} in scope`);
+    return { file, truncated: !!fv.focusTruncated };
+  }
+
+  /** review_get_edits: edits by tool_use id (inline chips). */
+  async getEdits(sessionId: string, editIds: string[]): Promise<ReviewGetEditsResponse> {
+    const ctx = await this.context(sessionId);
+    if (!ctx) throw new ReviewServiceError('unknown_session', `Unknown session ${sessionId}`);
+    const edits: ReviewEdit[] = [];
+    const missing: string[] = [];
+    for (const id of editIds.slice(0, REVIEW_LIMITS.maxGetEdits)) {
+      const e = ctx.led.edits.get(id);
+      if (e && !this.isExcludedPath(e.absPath)) edits.push(this.reviewEditWithRisks(ctx, e));
+      else missing.push(id);
+    }
+    return { edits, missing };
   }
 
   // ------------------------------------------------------------------ checkpoint
@@ -729,9 +866,18 @@ export class ReviewService {
     /* overridden */
   }
 
-  /** Working-tree snapshot trees for the session's repos (phase 2). */
-  protected async takeSnapshots(_ctx: SessionContext, cp: StoredCheckpoint): Promise<StoredCheckpoint['snapshots']> {
-    return cp.snapshots;
+  /** Working-tree snapshot trees for the session's repos (git only). */
+  protected async takeSnapshots(ctx: SessionContext, cp: StoredCheckpoint): Promise<StoredCheckpoint['snapshots']> {
+    if (!this.deps.gitEnabled()) return cp.snapshots;
+    const touched = new Set<string>();
+    for (const e of ctx.led.edits.values()) if (this.countable(e)) touched.add(e.absPath);
+    try {
+      const snaps = await this.net.snapshots(ctx.led.projectPath, Array.from(touched));
+      return snaps.length ? snaps : [];
+    } catch (err) {
+      console.error('Review: snapshot failed:', err instanceof Error ? err.message : err);
+      return [];
+    }
   }
 
   /** Per turn (oldest first): last countable edit time. */
