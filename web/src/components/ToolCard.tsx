@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { ToolCall } from '../types';
 import { MarkdownRenderer } from './MarkdownRenderer';
 import { copyToClipboard } from '../utils/clipboard';
+import { EditChip, EDIT_CHIP_TOOLS } from './review/EditChip';
 
 interface ToolCardProps {
   tool: ToolCall;
@@ -185,6 +186,7 @@ export function ToolCard({ tool, forceExpanded }: ToolCardProps) {
           {STATUS_LABELS[tool.status]}
         </span>
       </div>
+      {EDIT_CHIP_TOOLS.has(tool.name) && <EditChip toolId={tool.id} />}
       {expanded && (
         <div className="tool-card-body" onClick={(e) => e.stopPropagation()}>
           {hasEditDiff ? (

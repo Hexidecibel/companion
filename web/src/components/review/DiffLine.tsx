@@ -33,6 +33,7 @@ export const DiffLine = memo(function DiffLine({ line, segments, hasComments, on
       >
         <span className="rv-gutter__old">{line.oldNo ?? ''}</span>
         <span className="rv-gutter__new">{line.newNo ?? ''}</span>
+        <span className="rv-gutter__one">{line.newNo ?? line.oldNo ?? ''}</span>
       </button>
       <span className="rv-sign" aria-hidden="true">{SIGN[line.kind]}</span>
       <span className={`rv-code${line.kind === 'meta' ? ' rv-code--meta' : ''}`}>{body}{(segments ? segments.length === 0 : line.text === '') ? '\u200b' : null}</span>

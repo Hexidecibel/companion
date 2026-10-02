@@ -4,7 +4,7 @@
  */
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type {
-  ReviewApproveTurnRequest, ReviewMarkRequest, ReviewMarkResponse, ReviewScope, ReviewSummary, ReviewView,
+  ReviewApproveTurnRequest, ReviewHunk, ReviewMarkRequest, ReviewMarkResponse, ReviewScope, ReviewSummary, ReviewTurn, ReviewView,
 } from '../../types/review';
 import { useReviewSummary, useReviewSupported } from '../../hooks/useReviewSummary';
 import { reviewErrorMessage, reviewRequester, type ReviewRequestFn } from '../../services/reviewApi';
@@ -73,9 +73,25 @@ export interface ReviewContextValue {
   sendToSession?: (text: string) => void;
   onViewFile?: (path: string) => void;
 
+  /** Hunk / file actions (ask why, revert); absent until the action layer is available. */
+  actions?: ReviewActions;
+
   toasts: ReviewToast[];
   toast: (t: Omit<ReviewToast, 'id' | 'ttl'> & { ttl?: number }) => number;
   dismissToast: (id: number) => void;
+}
+
+export interface HunkTarget {
+  absPath: string;
+  path: string;
+  editId?: string;
+}
+
+export interface ReviewActions {
+  ask?: (hunk: ReviewHunk, target: HunkTarget, turn?: ReviewTurn) => void;
+  revertHunk?: (hunk: ReviewHunk, target: HunkTarget) => void;
+  /** Header-right slot for a file (the 10-minute Undo link). */
+  fileExtra?: (absPath: string) => ReactNode;
 }
 
 const Ctx = createContext<ReviewContextValue | null>(null);

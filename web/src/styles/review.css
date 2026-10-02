@@ -550,8 +550,9 @@
   font-family: var(--rv-mono);
   font-size: 12.5px;
 }
-.rv-file__dir { color: var(--rv-text-3); }
-.rv-file__base { color: var(--rv-text); font-weight: 600; }
+.rv-file__path { display: flex; min-width: 0; }
+.rv-file__dir { color: var(--rv-text-3); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex-shrink: 1; }
+.rv-file__base { color: var(--rv-text); font-weight: 600; flex-shrink: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
 .rv-file__spacer { flex: 1; min-width: 4px; }
 .rv-file__stat { font-size: 12px; white-space: nowrap; flex-shrink: 0; }
 .rv-file__meta {
@@ -650,7 +651,8 @@
 .rv-line--add .rv-gutter { background: rgba(16, 185, 129, 0.07); color: #3f7f68; }
 .rv-line--del .rv-gutter { background: rgba(239, 68, 68, 0.07); color: #8a4a4a; }
 .rv-gutter:hover { color: var(--rv-text-2); }
-.rv-gutter__old, .rv-gutter__new { width: 41px; padding-right: 6px; text-align: right; font-variant-numeric: tabular-nums; }
+.rv-gutter__one { display: none; }
+.rv-gutter__old, .rv-gutter__new, .rv-gutter__one { width: 41px; padding-right: 6px; text-align: right; font-variant-numeric: tabular-nums; }
 .rv-sign { width: 16px; flex-shrink: 0; text-align: center; color: var(--rv-text-3); user-select: none; }
 .rv-line--add .rv-sign { color: #34d399; }
 .rv-line--del .rv-sign { color: #f87171; }
@@ -869,11 +871,12 @@
   .rv-strip { font-size: 12px; }
   .rv-strip .rv-risks .rv-risk:nth-child(n+2) { display: none; }
   .rv-drawer__body { padding: 8px 8px 24px; }
-  .rv-gutter { width: 58px; }
-  .rv-gutter__old { display: none; }
-  .rv-gutter__new { width: 58px; }
-  .rv-gap { padding-left: 74px; }
-  .rv-comment { margin-left: 66px; }
+  .rv-gutter__old, .rv-gutter__new { display: none; }
+  .rv-gutter__one { display: block; width: 40px; }
+  .rv-gutter { width: 40px; }
+  .rv-turn__body { padding: 0 4px 6px; }
+  .rv-gap { padding-left: 56px; }
+  .rv-comment { margin-left: 46px; }
   .rv-composer { margin-left: 8px; flex-wrap: wrap; }
   .rv-approve__label { display: none; }
   .rv-approve { padding: 0 7px; width: 32px; height: 32px; justify-content: center; }
@@ -892,3 +895,32 @@
   .rv-skeleton__line, .rv-skeleton__block, .rv-shimmer, .rv-spinner { animation: none !important; }
   .rv-turn, .rv-turn__head, .rv-btn, .rv-approve { transition: none !important; }
 }
+
+/* ---------- Inline edit chips (under Edit / Write tool cards) ---------- */
+
+.rv-chip-slot { height: 0; }
+.rv-editchip-wrap { margin: 6px 0 0; cursor: default; }
+.rv-editchip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  height: 24px;
+  padding: 0 9px 0 6px;
+  border-radius: 7px;
+  border: 1px solid var(--rv-border);
+  background: var(--rv-card);
+  color: var(--rv-text);
+  font-family: var(--rv-mono);
+  font-size: 11.5px;
+  cursor: pointer;
+  transition: border-color 120ms ease, background 120ms ease;
+}
+.rv-editchip:hover { border-color: #4b5563; background: #263244; }
+.rv-editchip--open { border-color: rgba(59, 130, 246, 0.55); }
+.rv-editchip--high { border-color: rgba(239, 68, 68, 0.45); }
+.rv-editchip svg { color: var(--rv-text-3); flex-shrink: 0; }
+.rv-editchip__name { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rv-editchip .rv-risk-dot { margin-left: 0; }
+.rv-editchip__body { margin-top: 6px; }
+.rv-editchip__body .rv-file { margin-top: 0; background: var(--rv-card); }
