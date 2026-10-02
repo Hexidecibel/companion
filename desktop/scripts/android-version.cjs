@@ -66,7 +66,10 @@ if (process.argv.includes('--print')) {
   process.exit(0);
 }
 
+// versionName follows the desktop build (scripts/desktop-version.cjs): 1.0.<commits>,
+// so the in-app "Update available (1.0.N)" pill reads like the desktop one.
 const overlay = {
+  version: `1.0.${versionCode - BASE_OFFSET}`,
   bundle: {
     android: {
       versionCode,
@@ -76,4 +79,4 @@ const overlay = {
 
 const outPath = path.join(__dirname, '..', 'src-tauri', 'android-version.conf.json');
 fs.writeFileSync(outPath, JSON.stringify(overlay, null, 2) + '\n');
-console.log(`android-version: versionCode=${versionCode} -> ${path.relative(process.cwd(), outPath)}`);
+console.log(`android-version: versionCode=${versionCode} versionName=${overlay.version} -> ${path.relative(process.cwd(), outPath)}`);

@@ -4,11 +4,12 @@ import * as os from 'os';
 import * as path from 'path';
 
 /**
- * Desktop auto-update feed: GET /updates/<channel>/<file>, served read-only
- * from ~/.companion/updates (COMPANION_UPDATES_DIR overrides), which
+ * Desktop + Android update feed: GET /updates/<channel>/<file>, served
+ * read-only from ~/.companion/updates (COMPANION_UPDATES_DIR overrides), which
  * `bin/companion publish-update` fills. The desktop app's updater fetches
- * <channel>/latest.json, then the signed bundle it names. Bundles are verified
- * by the app (minisign), so this route needs no auth.
+ * <channel>/latest.json, then the signed bundle it names (verified by the app,
+ * minisign). The Android app fetches <channel>/android.json, then the APK it
+ * names (sha256 + signing certificate checked on the device). No auth needed.
  *
  * Hardening: GET/HEAD only, every path segment must be a plain file name
  * (no dot-files, no "..", no separators), the real path must stay inside the
@@ -26,6 +27,7 @@ export function updatesDir(): string {
 function contentType(file: string): string {
   if (file.endsWith('.json')) return 'application/json; charset=utf-8';
   if (file.endsWith('.sig') || file.endsWith('.txt')) return 'text/plain; charset=utf-8';
+  if (file.endsWith('.apk')) return 'application/vnd.android.package-archive';
   return 'application/octet-stream';
 }
 

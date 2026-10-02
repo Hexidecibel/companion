@@ -14,7 +14,7 @@
 #   bin/companion herald-provider   Set herald.provider in the live config (idempotent)
 #   bin/companion herald-set        Set one herald.* setting (budget, cache, trigger trust)
 #   bin/companion trigger-token     Herald remote-trigger tokens: create | rotate | revoke | list | migrate | show-path
-#   bin/companion publish-update    Put a desktop build on the auto-update feed (--run <id|latest> | --from <dir>)
+#   bin/companion publish-update    Put a desktop build or Android APK on the update feed (--run <id|latest> | --from <dir> | --apk <file>)
 #   bin/companion help         Show all commands
 #
 # See README.md for full documentation.

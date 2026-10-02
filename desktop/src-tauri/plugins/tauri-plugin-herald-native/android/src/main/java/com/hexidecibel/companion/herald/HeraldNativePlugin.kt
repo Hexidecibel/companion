@@ -32,6 +32,19 @@ class ActiveArgs {
 }
 
 @InvokeArg
+class FeedArgs {
+    var url: String = ""
+}
+
+@InvokeArg
+class InstallUpdateArgs {
+    var url: String = ""
+    var sha256: String = ""
+    var versionCode: Long = 0
+    var onProgress: Channel? = null
+}
+
+@InvokeArg
 class CaptureArgs {
     /** Platform echo cancellation (VOICE_COMMUNICATION + AcousticEchoCanceler). */
     var aec: Boolean = false
@@ -57,6 +70,7 @@ class CaptureArgs {
  */
 @TauriPlugin(permissions = [Permission(strings = [Manifest.permission.RECORD_AUDIO], alias = "microphone")])
 class HeraldNativePlugin(private val activity: Activity) : Plugin(activity) {
+    private val updater = ApkUpdater(activity)
     private val audio = HeraldAudio(activity.applicationContext) { route -> trigger("audioRoute", route) }
     private var session: MediaSession? = null
     private var focusRequest: AudioFocusRequest? = null
@@ -77,6 +91,95 @@ class HeraldNativePlugin(private val activity: Activity) : Plugin(activity) {
     override fun onDestroy() {
         audio.dispose()
         super.onDestroy()
+    }
+
+    // ---- sideload updater (ApkUpdater) ----
+
+    /** Installed versionCode / versionName / signing certs + "Install unknown apps" state. */
+    @Command
+    fun appUpdateInfo(invoke: Invoke) {
+        try {
+            val info = updater.installedInfo()
+            val out = JSObject()
+            out.put("packageName", activity.packageName)
+            out.put("versionCode", updater.installedCode())
+            out.put("versionName", info.versionName ?: "")
+            out.put("canInstall", updater.canInstall())
+            out.put("sdk", Build.VERSION.SDK_INT)
+            invoke.resolve(out)
+        } catch (e: Exception) {
+            invoke.reject(e.message ?: "update info failed")
+        }
+    }
+
+    /** GET the feed entry (android.json) natively; resolves { body }. */
+    @Command
+    fun appUpdateFetchFeed(invoke: Invoke) {
+        val args = invoke.parseArgs(FeedArgs::class.java)
+        Thread {
+            try {
+                val out = JSObject()
+                out.put("body", updater.fetchFeed(args.url))
+                invoke.resolve(out)
+            } catch (e: ApkUpdater.UpdateError) {
+                invoke.reject("${e.code}: ${e.message}", e.code)
+            } catch (e: Exception) {
+                invoke.reject("feed_failed: ${e.message}", "feed_failed")
+            }
+        }.start()
+    }
+
+    /**
+     * Download + verify (sha256, package, versionCode, same signing certificate),
+     * then open the system installer. Rejects with code install_permission when
+     * "Install unknown apps" is off (the verified file is kept for the retry),
+     * verify_failed / download_failed / bad_url otherwise.
+     */
+    @Command
+    fun appUpdateInstall(invoke: Invoke) {
+        val args = invoke.parseArgs(InstallUpdateArgs::class.java)
+        Thread {
+            try {
+                val apk = updater.downloadVerified(args.url, args.sha256, args.versionCode) { got, total ->
+                    val p = JSObject()
+                    p.put("received", got)
+                    p.put("total", total)
+                    args.onProgress?.send(p)
+                }
+                activity.runOnUiThread {
+                    try {
+                        updater.launchInstaller(apk)
+                        val out = JSObject()
+                        out.put("state", "installer_opened")
+                        invoke.resolve(out)
+                    } catch (e: ApkUpdater.UpdateError) {
+                        invoke.reject("${e.code}: ${e.message}", e.code)
+                    } catch (e: Exception) {
+                        Log.e(TAG, "installer", e)
+                        invoke.reject("install_failed: ${e.message}", "install_failed")
+                    }
+                }
+            } catch (e: ApkUpdater.UpdateError) {
+                Log.w(TAG, "update: ${e.code}: ${e.message}")
+                invoke.reject("${e.code}: ${e.message}", e.code)
+            } catch (e: Exception) {
+                Log.e(TAG, "update", e)
+                invoke.reject("download_failed: ${e.message}", "download_failed")
+            }
+        }.start()
+    }
+
+    /** Deep-link to "Install unknown apps" for Companion. */
+    @Command
+    fun appUpdateOpenSettings(invoke: Invoke) {
+        activity.runOnUiThread {
+            try {
+                updater.openInstallSettings()
+                invoke.resolve()
+            } catch (e: Exception) {
+                invoke.reject(e.message ?: "settings failed")
+            }
+        }
     }
 
     /** Current output / input ports (see HeraldAudio.route). */

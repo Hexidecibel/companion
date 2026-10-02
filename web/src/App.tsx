@@ -6,6 +6,7 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 import { StatusPage } from './components/StatusPage';
 import { Dashboard } from './components/Dashboard';
 import { UpdateBanner } from './components/UpdateBanner';
+import { AndroidUpdateBanner } from './components/AndroidUpdateBanner';
 import { CommandPalette, CommandAction } from './components/CommandPalette';
 import { eventBus } from './utils/eventBus';
 
@@ -191,6 +192,7 @@ export function App() {
             )}
 
             <UpdateBanner />
+            <AndroidUpdateBanner />
 
             {showCommandPalette && (
               <CommandPalette

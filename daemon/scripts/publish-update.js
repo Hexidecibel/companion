@@ -5,6 +5,7 @@
  *
  *   bin/companion publish-update --run <id|latest> [options]   # from a GitHub Actions run
  *   bin/companion publish-update --from <dir>      [options]   # from local files
+ *   bin/companion publish-update --apk <file.apk>  [options]   # a signed Android APK
  *
  * Input files (CI's "updater-*" artifacts), searched recursively:
  *   Companion_<version>_darwin-aarch64.app.tar.gz      + .sig
@@ -18,6 +19,14 @@
  * url + signature) and copies the bundles next to it. Bundles land first, then
  * the manifest is swapped in with an atomic rename. Older bundles beyond
  * --keep versions are pruned.
+ *
+ * Android (--apk): the APK must be signed (apksigner verify), for package
+ * com.hexidecibel.companion, with a versionCode strictly higher than the one
+ * in <channel>/android.json (older or equal is always refused) and, once the
+ * feed pins signing certificates, signed by the same certificate. Writes
+ * Companion_<versionName>_android-<versionCode>.apk + android.json
+ * (versionCode, versionName, url, sha256, size, certSha256). Uses aapt2 and
+ * apksigner from $ANDROID_HOME (or ~/Android/Sdk) build-tools.
  *
  * Options:
  *   --channel <name>   default "stable"
@@ -73,6 +82,9 @@ function parseArgs(argv) {
       case '--from':
         opts.from = val();
         break;
+      case '--apk':
+        opts.apk = val();
+        break;
       case '--channel':
         opts.channel = val();
         break;
@@ -100,7 +112,7 @@ function parseArgs(argv) {
           fs
             .readFileSync(__filename, 'utf8')
             .split('\n')
-            .slice(2, 30)
+            .slice(2, 40)
             .map((l) => l.replace(/^ \* ?/, ''))
             .join('\n')
         );
@@ -110,7 +122,8 @@ function parseArgs(argv) {
         die(`unknown option ${a} (see --help)`);
     }
   }
-  if (!opts.run === !opts.from) die('give exactly one of --run <id|latest> or --from <dir>');
+  if ([opts.run, opts.from, opts.apk].filter(Boolean).length !== 1)
+    die('give exactly one of --run <id|latest>, --from <dir> or --apk <file>');
   if (!/^[a-z0-9][a-z0-9-]{0,31}$/.test(opts.channel))
     die('channel must be lowercase letters, digits, hyphens');
   return opts;
@@ -224,8 +237,89 @@ function cmpVersion(a, b) {
   return 0;
 }
 
+// --- Android APK ----------------------------------------------------------
+
+function androidTool(name) {
+  const sdk = process.env.ANDROID_HOME || process.env.ANDROID_SDK_ROOT || path.join(os.homedir(), 'Android', 'Sdk');
+  const bt = path.join(sdk, 'build-tools');
+  const versions = fs.existsSync(bt)
+    ? fs
+        .readdirSync(bt)
+        .filter((v) => fs.existsSync(path.join(bt, v, name)))
+        .sort((a, b) => cmpVersion(a.replace(/[^\d.]/g, ''), b.replace(/[^\d.]/g, '')))
+    : [];
+  if (!versions.length) die(`${name} not found under ${bt} (set ANDROID_HOME)`);
+  return path.join(bt, versions[versions.length - 1], name);
+}
+
+function publishApk(opts) {
+  const af = require('./android-feed');
+  const apk = path.resolve(opts.apk);
+  if (!fs.existsSync(apk)) die(`no such file: ${apk}`);
+  const run = (tool, args) => {
+    try {
+      return execFileSync(androidTool(tool), args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    } catch (e) {
+      die(`${tool} ${args[0]} failed: ${(e.stderr || e.message || '').toString().trim().split('\n')[0]}`);
+    }
+  };
+  const info = af.parseBadging(run('aapt2', ['dump', 'badging', apk]));
+  const certSha256 = af.parseCertDigests(run('apksigner', ['verify', '--print-certs', apk]));
+  const data = fs.readFileSync(apk);
+  const sha256 = crypto.createHash('sha256').update(data).digest('hex');
+
+  const channelDir = path.join(opts.dir, opts.channel);
+  const manifestPath = path.join(channelDir, af.MANIFEST);
+  let current = null;
+  if (fs.existsSync(manifestPath)) {
+    try {
+      current = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+    } catch (e) {
+      die(`cannot read ${manifestPath}: ${e.message}`);
+    }
+  }
+  try {
+    af.checkPublishable(current, { ...info, certSha256 });
+  } catch (e) {
+    die(e.message);
+  }
+  const entry = af.buildEntry({
+    info,
+    sha256,
+    size: data.length,
+    certSha256,
+    baseUrl: opts.baseUrl,
+    channel: opts.channel,
+    notes: opts.notes,
+    now: Date.now(),
+  });
+  console.log(
+    `Verified APK ${info.versionName} (versionCode ${info.versionCode}), sha256 ${sha256.slice(0, 12)}…, cert ${certSha256[0].slice(0, 12)}…`
+  );
+  if (opts.dryRun) {
+    console.log(JSON.stringify(entry, null, 2));
+    return;
+  }
+  fs.mkdirSync(channelDir, { recursive: true });
+  const name = af.apkFileName(info.versionName, info.versionCode);
+  const tmpSuffix = `.tmp-${process.pid}`;
+  const dest = path.join(channelDir, name);
+  fs.copyFileSync(apk, dest + tmpSuffix);
+  fs.chmodSync(dest + tmpSuffix, 0o644);
+  fs.renameSync(dest + tmpSuffix, dest);
+  fs.writeFileSync(manifestPath + tmpSuffix, JSON.stringify(entry, null, 2) + '\n', { mode: 0o644 });
+  fs.renameSync(manifestPath + tmpSuffix, manifestPath);
+  for (const n of af.apksToPrune(fs.readdirSync(channelDir), opts.keep, info.versionCode)) {
+    fs.rmSync(path.join(channelDir, n), { force: true });
+    console.log(`Pruned ${n}`);
+  }
+  console.log(`Published Android ${info.versionName} (${info.versionCode}) to ${manifestPath}`);
+  console.log(`Feed URL: ${opts.baseUrl}/${opts.channel}/${af.MANIFEST}`);
+}
+
 function main() {
   const opts = parseArgs(process.argv.slice(2));
+  if (opts.apk) return publishApk(opts);
   const src = opts.from ? path.resolve(opts.from) : downloadRun(opts.run);
   if (!fs.existsSync(src)) die(`no such dir: ${src}`);
 

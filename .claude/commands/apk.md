@@ -28,7 +28,15 @@ desktop/src-tauri/gen/android/app/build/outputs/apk/universal/release/app-univer
 apksigner sign --ks desktop/debug.keystore --ks-pass pass:android --key-pass pass:android --out /tmp/companion-tauri.apk desktop/src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release-unsigned.apk
 ```
 
-3. Install to connected device via ADB:
+3. Publish it to the in-app update feed (Android sideload updater; refuses a
+   versionCode older than or equal to the published one, or a different signing cert):
+```bash
+bin/companion publish-update --apk /tmp/companion-tauri.apk
+```
+Installed apps check `https://dev.cush.rocks/updates/stable/android.json` on launch and
+every 6 hours and offer "Update available (1.0.N)".
+
+4. Install to connected device via ADB:
 ```bash
 adb install -r /tmp/companion-tauri.apk
 ```

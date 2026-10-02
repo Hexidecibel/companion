@@ -9080,6 +9080,26 @@ html {
   cursor: pointer;
 }
 
+.update-banner--android {
+  top: calc(var(--safe-top, env(safe-area-inset-top, 0px)) + 8px);
+  bottom: auto;
+  left: 12px;
+  right: 12px;
+  max-width: 480px;
+  margin: 0 auto;
+}
+
+.update-banner--android .update-banner-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.update-banner-action--secondary {
+  background: transparent;
+  border: 1px solid var(--border-color);
+  color: var(--text-primary);
+}
+
 .update-banner-action:disabled {
   opacity: 0.6;
   cursor: default;

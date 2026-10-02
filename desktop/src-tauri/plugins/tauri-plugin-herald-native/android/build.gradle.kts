@@ -29,4 +29,7 @@ android {
 
 dependencies {
     implementation(project(":tauri-android"))
+    // FileProvider for the sideload updater (ApkUpdater).
+    implementation("androidx.core:core-ktx:1.9.0")
+    testImplementation("junit:junit:4.13.2")
 }

@@ -6,6 +6,8 @@
 # 2. Copy google-services.json
 # 3. Add usesCleartextTraffic for dev builds
 # 4. Declare the microphone permissions Herald voice needs
+# 5. Sideload updater: REQUEST_INSTALL_PACKAGES + a FileProvider that can share
+#    the verified APK in cache/updates with the system installer
 #
 # Usage: cd desktop && bash scripts/setup-android.sh
 
@@ -152,6 +154,39 @@ for PERM in RECORD_AUDIO MODIFY_AUDIO_SETTINGS; do
     echo "$PERM permission already in manifest"
   fi
 done
+
+# 12. Sideload updater (tauri-plugin-herald-native ApkUpdater.kt): permission to
+#     open the system installer (the user still confirms every install), and a
+#     FileProvider at ${applicationId}.fileprovider whose paths cover
+#     cache/updates/ (where the verified APK is stored).
+if ! grep -q "android.permission.REQUEST_INSTALL_PACKAGES" "$MANIFEST"; then
+  echo "Adding REQUEST_INSTALL_PACKAGES permission to AndroidManifest.xml..."
+  sed -i '/<uses-permission android:name="android.permission.INTERNET"/a\    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />' "$MANIFEST"
+else
+  echo "REQUEST_INSTALL_PACKAGES permission already in manifest"
+fi
+if ! grep -q "androidx.core.content.FileProvider" "$MANIFEST"; then
+  echo "Adding FileProvider to AndroidManifest.xml..."
+  sed -i 's|</application>|        <provider\n          android:name="androidx.core.content.FileProvider"\n          android:authorities="${applicationId}.fileprovider"\n          android:exported="false"\n          android:grantUriPermissions="true">\n          <meta-data\n            android:name="android.support.FILE_PROVIDER_PATHS"\n            android:resource="@xml/file_paths" />\n        </provider>\n    </application>|' "$MANIFEST"
+else
+  echo "FileProvider already in manifest"
+fi
+FILE_PATHS="$RES_DIR/xml/file_paths.xml"
+if [ ! -f "$FILE_PATHS" ]; then
+  echo "Creating res/xml/file_paths.xml..."
+  mkdir -p "$RES_DIR/xml"
+  cat > "$FILE_PATHS" <<'XML'
+<?xml version="1.0" encoding="utf-8"?>
+<paths xmlns:android="http://schemas.android.com/apk/res/android">
+  <cache-path name="apk_updates" path="updates/" />
+</paths>
+XML
+elif ! grep -q 'name="apk_updates"' "$FILE_PATHS"; then
+  echo "Adding apk_updates cache path to file_paths.xml..."
+  sed -i 's|</paths>|  <cache-path name="apk_updates" path="updates/" />\n</paths>|' "$FILE_PATHS"
+else
+  echo "apk_updates cache path already in file_paths.xml"
+fi
 
 echo ""
 echo "=== Android FCM setup complete ==="

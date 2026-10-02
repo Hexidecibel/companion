@@ -34,6 +34,8 @@ beforeAll(async () => {
   fs.mkdirSync(path.join(feed, 'stable'), { recursive: true });
   fs.writeFileSync(path.join(feed, 'stable', 'latest.json'), '{"version":"1.0.5"}');
   fs.writeFileSync(path.join(feed, 'stable', 'Companion_1.0.5_aarch64.app.tar.gz'), 'BUNDLE');
+  fs.writeFileSync(path.join(feed, 'stable', 'android.json'), '{"versionCode":1000500}');
+  fs.writeFileSync(path.join(feed, 'stable', 'Companion_1.0.500_android-1000500.apk'), 'APK');
   fs.writeFileSync(path.join(feed, 'stable', '.hidden'), 'x');
   fs.writeFileSync(path.join(root, 'secret.txt'), 'SECRET');
   fs.symlinkSync(path.join(root, 'secret.txt'), path.join(feed, 'stable', 'escape.txt'));
@@ -65,6 +67,17 @@ describe('update feed', () => {
     expect(b.body).toBe('BUNDLE');
     expect(b.headers['content-type']).toBe('application/octet-stream');
     expect(b.headers['cache-control']).toMatch(/max-age/);
+  });
+
+  it('serves the Android entry uncached and the APK with its MIME type', async () => {
+    const m = await get('/updates/stable/android.json');
+    expect(m.status).toBe(200);
+    expect(JSON.parse(m.body).versionCode).toBe(1000500);
+    expect(m.headers['cache-control']).toBe('no-cache');
+    const a = await get('/updates/stable/Companion_1.0.500_android-1000500.apk');
+    expect(a.status).toBe(200);
+    expect(a.body).toBe('APK');
+    expect(a.headers['content-type']).toBe('application/vnd.android.package-archive');
   });
 
   it('revalidates with ETag and supports HEAD', async () => {

@@ -4,4 +4,6 @@
          for these at runtime, then grants RESOURCE_AUDIO_CAPTURE). -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+    <!-- Sideload updater: hand a verified APK to the system installer (the user confirms). -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 </manifest>
