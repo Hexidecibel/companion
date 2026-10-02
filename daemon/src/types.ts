@@ -405,6 +405,7 @@ export interface TaskItem {
 }
 
 // Code review types (file changes extracted from session)
+/** @deprecated Legacy get_session_diff shape; use the review protocol (ReviewEdit / ReviewFileChange). */
 export interface FileChange {
   path: string;
   action: 'write' | 'edit';
@@ -448,3 +449,5 @@ export interface WorkGroup {
   mergeCommit?: string;
   error?: string;
 }
+
+export * from './review/protocol';

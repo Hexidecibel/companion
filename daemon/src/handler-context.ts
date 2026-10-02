@@ -13,6 +13,7 @@ import { RateLimiter } from './rate-limiter';
 import type { HeraldService } from './herald/service';
 import type { HeraldVoiceService } from './herald/voice/service';
 import type { HeraldTriggerService } from './herald/trigger';
+import type { ReviewService } from './review/service';
 import { DaemonConfig, OriginCredential, TmuxSessionConfig, WebSocketResponse } from './types';
 
 export interface AuthenticatedClient {
@@ -71,10 +72,13 @@ export interface HandlerContext {
   herald: HeraldService | null;
   heraldVoice: HeraldVoiceService | null;
   heraldTrigger: HeraldTriggerService | null;
+  review: ReviewService | null;
 
   // Helper methods from WebSocketServer
   send: (ws: WebSocket, response: WebSocketResponse) => void;
   broadcast: (type: string, payload: unknown, sessionId?: string) => void;
+  /** Push to one full-scope client; false when it is gone. */
+  sendToClient: (clientId: string, type: string, payload: unknown) => boolean;
   requireRemoteCapability: (
     client: AuthenticatedClient,
     action: 'exec' | 'dispatch' | 'write'

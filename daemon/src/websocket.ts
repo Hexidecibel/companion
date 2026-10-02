@@ -47,6 +47,7 @@ import { deriveSelfInfo } from './herald/self-info';
 import { HeraldVoiceService } from './herald/voice/service';
 import { VoiceServiceClient } from './herald/voice/client';
 import { HeraldTriggerService } from './herald/trigger';
+import { ReviewService } from './review/service';
 
 // File for persisting tmux session configs
 const TMUX_CONFIGS_FILE = path.join(os.homedir(), '.companion', 'tmux-sessions.json');
@@ -88,6 +89,7 @@ export class WebSocketHandler {
   private herald: HeraldService | null = null;
   private heraldVoice: HeraldVoiceService | null = null;
   private heraldTrigger: HeraldTriggerService;
+  private review: ReviewService | null = null;
   private deadConnectionInterval: ReturnType<typeof setInterval>;
   private static readonly PONG_TIMEOUT_MS = 90_000;
   private static readonly DEAD_CHECK_INTERVAL_MS = 60_000;
@@ -147,6 +149,8 @@ export class WebSocketHandler {
       audit: (entry) => this.auditLog.append(entry),
       trust: resolveHeraldConfig(this.config.herald).trigger,
     });
+
+    this.review = this.createReview();
 
     // Register all handler modules
     this.handlers = registerAllHandlers(this.createHandlerContext());
@@ -270,9 +274,11 @@ export class WebSocketHandler {
       herald: this.herald,
       heraldVoice: this.heraldVoice,
       heraldTrigger: this.heraldTrigger,
+      review: this.review,
 
       send: (ws, response) => this.send(ws, response),
       broadcast: (type, payload, sessionId) => this.broadcast(type, payload, sessionId),
+      sendToClient: (clientId, type, payload) => this.sendToClient(clientId, type, payload),
       requireRemoteCapability: (client, action) => this.requireRemoteCapability(client, action),
 
       clients: this.clients,
@@ -353,6 +359,20 @@ export class WebSocketHandler {
       });
     } catch (err) {
       console.error('Herald: failed to initialize:', err);
+      return null;
+    }
+  }
+
+  // --- Code Review ---
+
+  private createReview(): ReviewService | null {
+    try {
+      return new ReviewService({
+        watcher: this.watcher,
+        gitEnabled: () => this.config.git !== false,
+      });
+    } catch (err) {
+      console.error('Review: failed to initialize:', err);
       return null;
     }
   }
@@ -888,5 +908,6 @@ export class WebSocketHandler {
     this.usageMonitor.stop();
     this.herald?.shutdown();
     this.heraldVoice?.shutdown();
+    this.review?.shutdown();
   }
 }

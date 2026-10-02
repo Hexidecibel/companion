@@ -16,6 +16,8 @@ export interface HeraldInboxItem {
   heard: boolean;
   /** Answer to something the user asked a session ("Out4 answered your question: ..."). */
   answer?: boolean;
+  /** A risky code change (Code Review): toned like news, never spoken unasked. */
+  review?: { level: 'high' | 'medium'; kinds: string[]; paths: string[] };
 }
 /**
  * How a message reached Herald: `voice` = push-to-talk, talking over Herald or
