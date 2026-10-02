@@ -870,6 +870,9 @@
 @media (max-width: 768px) {
   .rv-strip { font-size: 12px; }
   .rv-strip__since { display: none; }
+  /* Phones: file-header risk chips shrink to their dot (reason stays in the tooltip). */
+  .rv-file__head .rv-risk:not(.rv-risk--more) { font-size: 0; gap: 0; padding: 0 5px; }
+  .rv-file__head .rv-risk--more { display: none; }
   .rv-strip .rv-risks .rv-risk:nth-child(n+2) { display: none; }
   .rv-drawer__body { padding: 8px 8px 24px; }
   .rv-gutter__old, .rv-gutter__new { display: none; }
