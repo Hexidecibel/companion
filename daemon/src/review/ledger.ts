@@ -196,7 +196,7 @@ export class SessionLedger {
   /** Bumped on every change. */
   version = 0;
   skippedLines = 0;
-  /** Bytes scanned (cap for the initial build). */
+  /** Bytes scanned over the ledger's lifetime (stats only; budgets are per update). */
   scannedBytes = 0;
   private files = new Map<string, FileState>();
   private fileOrder: string[] = [];
@@ -252,18 +252,29 @@ export class SessionLedger {
     }
   }
 
-  /** Read new lines from every tracked file. Returns true when anything changed. */
+  /**
+   * Read new lines from every tracked file, at most `budget` bytes in this
+   * call (main chain first). Whatever is left over is read by the next call:
+   * the budget bounds one pass, it is NOT a lifetime cap (a lifetime cap froze
+   * big sessions: once ~64 MB of transcripts had been read, every later
+   * update read 1 byte, so new edits were never attributed).
+   * Returns true when anything changed.
+   */
   async update(budget = 64 * 1024 * 1024): Promise<boolean> {
     const before = this.version;
+    let left = budget;
     for (const f of this.fileOrder) {
+      if (left <= 0) break;
       const st = this.files.get(f)!;
       const startOffset = st.tail.offset;
-      const r = await st.tail.read(Math.max(0, budget - this.scannedBytes) || 1);
+      const r = await st.tail.read(left);
       if (r.reset && startOffset > 0) {
         this.needsRebuild = true;
         return true;
       }
-      this.scannedBytes += st.tail.offset - startOffset;
+      const read = st.tail.offset - startOffset;
+      left -= read;
+      this.scannedBytes += read;
       this.skippedLines += r.skipped;
       for (const line of r.lines) {
         let entry: unknown;

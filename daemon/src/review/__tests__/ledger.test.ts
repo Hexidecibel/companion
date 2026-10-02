@@ -164,3 +164,34 @@ describe('subagent attribution', () => {
     expect(led.turns[0].editIds).toContain('se');
   });
 });
+
+describe('scan budget', () => {
+  it('bounds one update, not the ledger lifetime: big sessions keep picking up new edits', async () => {
+    // Regression: the budget used to be a lifetime cap. A session whose
+    // transcripts (main + subagents) passed it read 1 byte per update from
+    // then on, so new edits were never attributed and the summary froze.
+    const dir = tmpDir();
+    const conv = path.join(dir, 'big.jsonl');
+    const t0 = Date.parse('2026-09-30T08:00:00Z');
+    const filler = 'x'.repeat(2000);
+    const lines: unknown[] = [prompt('t1', 'start', t0)];
+    for (let i = 0; i < 40; i++) lines.push({ ...prompt(`f${i}`, filler, t0 + 1 + i), isMeta: true });
+    fs.writeFileSync(conv, jsonl(lines));
+    const led = new SessionLedger('s', '/p');
+    led.setChain([conv], []);
+    const budget = 30_000; // < file size: the first pass is partial
+    await led.update(budget);
+    expect(led.scannedBytes).toBeLessThanOrEqual(budget);
+    for (let i = 0; i < 5 && led.scannedBytes < fs.statSync(conv).size; i++) await led.update(budget);
+    expect(led.scannedBytes).toBe(fs.statSync(conv).size);
+
+    const t = t0 + 60_000;
+    fs.appendFileSync(conv, jsonl([
+      prompt('t2', 'more', t),
+      toolUse('late', 'Edit', { file_path: '/p/late.ts' }, t + 1),
+      toolResult('late', editResult('/p/late.ts', [{ oldStart: 1, oldLines: 1, newStart: 1, newLines: 1, lines: ['-a', '+b'] }]), t + 2),
+    ]));
+    await led.update(budget);
+    expect(led.edits.get('late')).toMatchObject({ turnId: 't2', additions: 1 });
+  });
+});
