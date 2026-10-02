@@ -119,3 +119,38 @@ export async function findClaudePid(panePid: number, procRoot = '/proc'): Promis
   }
   return null;
 }
+
+/**
+ * When a process started (epoch ms) from /proc (Linux), null when unknown.
+ * starttime (field 22 of /proc/<pid>/stat) is in clock ticks after boot (USER_HZ = 100).
+ */
+export async function processStartMs(pid: number, procRoot = '/proc'): Promise<number | null> {
+  if (!pid) return null;
+  try {
+    const [stat, sys] = await Promise.all([
+      fs.promises.readFile(path.join(procRoot, String(pid), 'stat'), 'utf-8'),
+      fs.promises.readFile(path.join(procRoot, 'stat'), 'utf-8'),
+    ]);
+    // comm (field 2) may contain spaces/parens: split after the last ')'.
+    const rest = stat.slice(stat.lastIndexOf(')') + 2).split(' ');
+    const ticks = Number(rest[19]);
+    const btime = Number(/^btime\s+(\d+)/m.exec(sys)?.[1]);
+    if (!Number.isFinite(ticks) || !Number.isFinite(btime) || btime <= 0) return null;
+    return btime * 1000 + Math.round((ticks / 100) * 1000);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * A transcript may be claimed by a session that (re)started at `startedAt` only
+ * if the file was created after it. birthtime 0 (filesystem without it) falls
+ * back to the modification time.
+ */
+export function bornAfter(
+  stats: { birthtimeMs?: number; mtimeMs: number },
+  startedAt: number
+): boolean {
+  const born = stats.birthtimeMs && stats.birthtimeMs > 0 ? stats.birthtimeMs : stats.mtimeMs;
+  return born >= startedAt - 1000;
+}

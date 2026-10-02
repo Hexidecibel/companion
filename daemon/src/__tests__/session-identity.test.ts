@@ -2,6 +2,8 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import {
+  bornAfter,
+  processStartMs,
   encodeProjectDir,
   findClaudePid,
   identityChanged,
@@ -113,5 +115,34 @@ describe('findClaudePid (fake /proc)', () => {
     expect(await findClaudePid(10, path.join(root, 'nope'))).toBeNull();
     expect(await findClaudePid(0, root)).toBeNull();
     fs.rmSync(root, { recursive: true, force: true });
+  });
+});
+
+describe('bornAfter / processStartMs', () => {
+  it('a transcript created before the session started is not claimable', () => {
+    expect(bornAfter({ birthtimeMs: 5_000, mtimeMs: 99_000 }, 50_000)).toBe(false);
+    expect(bornAfter({ birthtimeMs: 60_000, mtimeMs: 60_000 }, 50_000)).toBe(true);
+    // No birthtime on this filesystem: fall back to mtime.
+    expect(bornAfter({ birthtimeMs: 0, mtimeMs: 60_000 }, 50_000)).toBe(true);
+  });
+
+  it('reads a process start time from /proc', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'fakeproc-'));
+    fs.mkdirSync(path.join(root, '42'));
+    // comm with spaces and parens; starttime (field 22) = 250 ticks = 2.5 s after boot
+    const fields = Array.from({ length: 40 }, () => '0');
+    fields[18] = '250'; // fields start at field 4
+    fs.writeFileSync(path.join(root, '42', 'stat'), `42 (my (odd) proc) S ${fields.join(' ')}`);
+    fs.writeFileSync(path.join(root, 'stat'), 'cpu 1 2 3\nbtime 1700000000\n');
+    expect(await processStartMs(42, root)).toBe(1700000000 * 1000 + 2500);
+    expect(await processStartMs(43, root)).toBeNull();
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  it('matches the real /proc for this process (Linux)', async () => {
+    if (!fs.existsSync('/proc/self/stat')) return;
+    const t = await processStartMs(process.pid);
+    expect(t).not.toBeNull();
+    expect(Math.abs(Date.now() - process.uptime() * 1000 - (t as number))).toBeLessThan(5000);
   });
 });

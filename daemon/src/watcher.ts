@@ -6,6 +6,8 @@ import {
   findClaudePid,
   identityChanged,
   parsePaneInfo,
+  processStartMs,
+  bornAfter,
   sanitizeIdentity,
 } from './session-identity';
 import * as path from 'path';
@@ -148,6 +150,7 @@ export class SessionWatcher extends EventEmitter {
   private tmuxSessionIdentity: Map<string, SessionIdentity> = new Map(); // session name -> current identity
   private mappingIdentity: Map<string, SessionIdentity> = new Map(); // session name -> identity its mapping was made for
   private decodedPathCache: Map<string, string> = new Map(); // encoded project dir -> decoded path
+  private claudeStartMs: Map<string, number> = new Map(); // session name -> current claude process start (ms)
   private compactedSessions: Set<string> = new Set(); // sessions expecting a new JSONL after compaction
   private detectInFlight: Set<string> = new Set(); // sessions currently being probed by detectConversationForSession
   private debounceTimers: Map<string, NodeJS.Timeout> = new Map();
@@ -344,6 +347,15 @@ export class SessionWatcher extends EventEmitter {
       this.mappingIdentity.set(sessionName, { ...identity });
   }
 
+  /** Created after `startedAt` (birthtime, else mtime); unknown -> true. */
+  private fileBornAfter(filePath: string, startedAt: number): boolean {
+    try {
+      return bornAfter(fs.statSync(filePath), startedAt);
+    } catch {
+      return true;
+    }
+  }
+
   /** Forget everything that ties a session name to a transcript. */
   private dropConversationMapping(sessionName: string): boolean {
     const had = this.tmuxConversationIds.delete(sessionName);
@@ -378,10 +390,8 @@ export class SessionWatcher extends EventEmitter {
         );
         this.dropConversationMapping(name);
         const createdMs = Number(cur.created) * 1000;
-        this.newlyCreatedSessions.set(
-          name,
-          sessionNew && createdMs > 0 ? Math.min(createdMs, Date.now()) : Date.now() - 2000
-        );
+        const startedMs = sessionNew ? createdMs : this.claudeStartMs.get(name) || 0;
+        this.newlyCreatedSessions.set(name, startedMs > 0 ? Math.min(startedMs, Date.now()) : Date.now() - 5000);
         if (this.activeTmuxSession === name) this.activeConversationId = null;
         changed = true;
         continue;
@@ -441,12 +451,17 @@ export class SessionWatcher extends EventEmitter {
           this.tmuxSessionByPath.set(encodedPath, name);
           this.tmuxPathBySession.set(name, encodedPath);
           this.tmuxSessionWorkingDirs.set(name, workingDir);
+          const claudePid = await findClaudePid(pane.panePid);
           this.tmuxSessionIdentity.set(name, {
             created: pane.created,
             panePid: pane.panePid,
             encodedPath,
-            claudePid: await findClaudePid(pane.panePid),
+            claudePid,
           });
+          if (claudePid) {
+            const started = await processStartMs(claudePid);
+            if (started) this.claudeStartMs.set(name, started);
+          }
         } catch {
           // Session may have been killed between list and env check
         }
@@ -937,7 +952,12 @@ export class SessionWatcher extends EventEmitter {
       for (const [name, ePath] of this.tmuxPathBySession) {
         if (ePath === encodedDir) sessionsForPath.push(name);
       }
-      if (sessionsForPath.length === 1) {
+      const startedAt = sessionsForPath.length === 1 ? this.newlyCreatedSessions.get(sessionsForPath[0]) : undefined;
+      if (sessionsForPath.length === 1 && startedAt !== undefined && !bornAfter(stats, startedAt)) {
+        // The session (or its claude) just started: an older transcript in the
+        // same directory (e.g. the previous claude writing its exit lines) is
+        // not this session's.
+      } else if (sessionsForPath.length === 1) {
         tmuxName = sessionsForPath[0];
         this.setConversationMapping(tmuxName, convId);
       } else if (sessionsForPath.length > 1) {
@@ -1552,7 +1572,11 @@ export class SessionWatcher extends EventEmitter {
       if (!ePath) continue;
       // Find a conversation for this path that was modified after session creation
       for (const [id, conv] of this.conversations) {
-        if (this.getEncodedDirName(conv.path) === ePath && conv.lastModified > createdAt) {
+        if (
+          this.getEncodedDirName(conv.path) === ePath &&
+          conv.lastModified > createdAt &&
+          this.fileBornAfter(conv.path, createdAt)
+        ) {
           // This conversation appeared after the session was created — it's likely ours
           // Only claim it if no other session already has it
           const alreadyMapped = Array.from(this.tmuxConversationIds.values()).includes(id);
