@@ -21,9 +21,25 @@ import { addedLines, removedLines, toReviewHunk } from './analyze';
 import { classifyChangedFile, maxRiskLevel } from '../herald/danger';
 import { REVIEW_LIMITS } from './protocol';
 import { NetViewBuilder } from './net-view';
-import { snapshotTree } from './snapshot';
+import { objectsExist, snapshotTree } from './snapshot';
+import { RevertManager, RevertError, BackupMeta } from './revert';
+import { reviewStateDir } from './store';
+import { isDeniedPath } from '../herald/knowledge/redact';
+import { isSandbox } from '../sandbox';
+import type { AuditEntry, AuditOrigin } from '../audit-log';
+import type { ParsedHunk } from './diff-parse';
 import type {
+  ReviewAskRequest,
+  ReviewAskResponse,
   ReviewEdit,
+  ReviewRevertBlockCode,
+  ReviewRevertPreviewRequest,
+  ReviewRevertPreviewResponse,
+  ReviewRevertRequest,
+  ReviewRevertResponse,
+  ReviewRevertUndoResponse,
+  ReviewRevertedEvent,
+  ReviewWatchResponse,
   ReviewFileChange,
   ReviewGetEditsResponse,
   ReviewGetFileRequest,
@@ -58,6 +74,16 @@ export interface ReviewServiceDeps {
   /** The session is working right now (defaults to !isWaitingForInput for live sessions). */
   isWorking?: (sessionId: string) => boolean;
   now?: () => number;
+  /** Audit log sink (revert / undo / ask). */
+  audit?: (entry: AuditEntry) => void;
+  /** Type text straight into a session (ask-why without Herald, revert notes). */
+  sendDirect?: (sessionId: string, text: string) => Promise<boolean>;
+  /** A choice prompt is on the session's screen (throws when unreadable). */
+  hasLiveChoice?: (sessionId: string) => Promise<boolean>;
+  /** Extra writable roots (config.allowedPaths). */
+  allowedPaths?: () => string[];
+  /** Revert backups (default ~/.companion/review/backups). */
+  backupDir?: string;
   /** Never reviewed (scratch space). Default: os.tmpdir(), /tmp, /var/tmp. */
   excludeDirs?: string[];
   /** Event debounce / summary throttle (tests shorten them). */
@@ -77,6 +103,23 @@ export interface SessionContext {
 const MAX_LEDGERS = 24;
 const HOME = os.homedir();
 const LEDGER_SCAN_BUDGET = 64 * 1024 * 1024;
+
+/** Summary identity without its version (broadcast only on real change). */
+function summaryKey(s: ReviewSummary): string {
+  return JSON.stringify({ ...s, version: 0 });
+}
+
+/** What Code Review needs from Herald (late-bound: Herald is built first). */
+export interface ReviewHeraldLink {
+  readonly featureEnabled: boolean;
+  relayAsk(r: {
+    sessionId: string;
+    sessionName: string;
+    prompt: string;
+    userText: string;
+    clientId?: string;
+  }): Promise<{ askId: string }>;
+}
 
 export class ReviewServiceError extends Error {
   constructor(
@@ -117,6 +160,10 @@ export class ReviewService {
   private debounceMs: number;
   private throttleMs: number;
   readonly net: NetViewBuilder;
+  readonly reverts: RevertManager;
+  private herald: ReviewHeraldLink | null = null;
+  /** review_watch: connection -> sessions it watches live. */
+  private watchers = new Map<string, Set<string>>();
   /** Sessions whose baseline snapshot was already attempted. */
   private baselineTried = new Set<string>();
   /** Unattributed changes found at the last scan (turn end with Bash / files view). */
@@ -138,6 +185,11 @@ export class ReviewService {
     this.debounceMs = deps.debounceMs ?? 300;
     this.throttleMs = deps.throttleMs ?? 1000;
     this.ready = this.store.loaded ? Promise.resolve() : this.store.load().catch(() => undefined);
+    this.reverts = new RevertManager({
+      runner: this.runner,
+      backupDir: deps.backupDir || path.join(reviewStateDir(), 'backups'),
+      now: this.now,
+    });
     this.net = new NetViewBuilder({
       runner: this.runner,
       repos: this.repos,
@@ -227,15 +279,57 @@ export class ReviewService {
     /* overridden */
   }
 
-  /** Live edit stream hook (review_live), overridden in later phases. */
+  /** Live edit stream (review_live) to connections watching this session. */
   protected onLedgerChanges(ctx: SessionContext): void {
+    const changes = ctx.led.drainChanges();
+    if (!changes.length || !this.deps.sendToClient) return;
+    const clients: string[] = [];
+    for (const [clientId, set] of this.watchers) if (set.has(ctx.sessionId)) clients.push(clientId);
+    if (!clients.length) return;
+    for (const c of changes) {
+      const e = ctx.led.edits.get(c.editId);
+      if (!e || this.isExcludedPath(e.absPath)) continue;
+      const payload = { sessionId: ctx.sessionId, phase: c.phase, edit: this.reviewEditWithRisks(ctx, e) };
+      for (const id of clients) {
+        if (!this.deps.sendToClient(id, 'review_live', payload)) this.dropClient(id);
+      }
+    }
+  }
+
+  setHerald(h: ReviewHeraldLink | null): void {
+    this.herald = h;
+  }
+
+  // ------------------------------------------------------------------ live
+
+  async watch(clientId: string, sessionId: string, live: boolean): Promise<ReviewWatchResponse> {
+    const ctx = await this.context(sessionId);
+    if (!ctx) throw new ReviewServiceError('unknown_session', `Unknown session ${sessionId}`);
     ctx.led.drainChanges();
+    const set = this.watchers.get(clientId) || new Set<string>();
+    if (live) {
+      if (set.size >= 8 && !set.has(sessionId)) throw new ReviewServiceError('busy', 'Watching too many sessions');
+      set.add(sessionId);
+      this.watchers.set(clientId, set);
+    } else {
+      set.delete(sessionId);
+      if (set.size === 0) this.watchers.delete(clientId);
+    }
+    return { watching: live, summary: this.summaryFor(ctx) };
+  }
+
+  /** Connection closed: forget its live watches and revert tokens. */
+  dropClient(clientId: string): void {
+    this.watchers.delete(clientId);
+  }
+
+  watcherCount(): number {
+    return this.watchers.size;
   }
 
   private scheduleBroadcast(summary: ReviewSummary): void {
     if (!this.deps.broadcast) return;
-    const { version: _v, ...rest } = summary;
-    const key = JSON.stringify(rest);
+    const key = summaryKey(summary);
     if (this.lastSent.get(summary.sessionId) === key) return;
     const id = summary.sessionId;
     const send = () => {
@@ -243,8 +337,7 @@ export class ReviewService {
       const fresh = this.lastPending.get(id);
       if (!fresh) return;
       this.lastPending.delete(id);
-      const { version: _v2, ...r2 } = fresh;
-      this.lastSent.set(id, JSON.stringify(r2));
+      this.lastSent.set(id, summaryKey(fresh));
       this.lastBroadcastAt.set(id, this.now());
       this.deps.broadcast?.('review_summary', { summary: fresh });
     };
@@ -894,6 +987,338 @@ export class ReviewService {
         else if (last === null || e.at > last) last = e.at;
       }
       return { id: t.id, lastEditAt: last, ...(open ? { open: true } : {}) };
+    });
+  }
+
+  // ------------------------------------------------------------------ hunks
+
+  /**
+   * Find a hunk by id: `<editId>#<n>` (transcript) or a git id from the files
+   * view (`g...`). Returns the hunk, its file's edits and the owning edit.
+   */
+  async findHunk(
+    ctx: SessionContext,
+    absPath: string,
+    hunkId: string,
+    editId: string | undefined,
+    scope: 'since_checkpoint' | 'all'
+  ): Promise<{ hunk: ParsedHunk; edit: LedgerEdit | null; isCreate: boolean; file: ReviewFileChange | null } | null> {
+    const m = hunkId.match(/^(.+)#(\d+)$/);
+    if (m) {
+      const e = ctx.led.edits.get(editId || m[1]);
+      if (!e || e.absPath !== absPath || e.failed || e.pending) return null;
+      const h = e.hunks[parseInt(m[2], 10)];
+      if (!h) return null;
+      const isCreate = e.kind === 'create' && h.oldLines === 0 && h.oldStart === 0;
+      return { hunk: h, edit: e, isCreate, file: null };
+    }
+    if (!hunkId.startsWith('g')) return null;
+    for (const sc of scope === 'all' ? (['all'] as const) : (['since_checkpoint', 'all'] as const)) {
+      const fv = await this.filesView(ctx, sc, undefined, absPath);
+      const file = fv.files.find((f) => f.absPath === absPath) || fv.unattributed.find((f) => f.absPath === absPath);
+      const h = file?.hunks?.find((x) => x.id === hunkId);
+      if (file && h) {
+        if (h.clipped) return null;
+        const edit = file.turnIds.length
+          ? Array.from(ctx.led.edits.values()).find((e) => e.absPath === absPath && file.turnIds.includes(e.turnId)) || null
+          : null;
+        return {
+          hunk: { oldStart: h.oldStart, oldLines: h.oldLines, newStart: h.newStart, newLines: h.newLines, lines: h.lines },
+          edit,
+          isCreate: file.status === 'added' && (file.hunks?.length ?? 0) === 1 && h.oldLines === 0,
+          file,
+        };
+      }
+    }
+    return null;
+  }
+
+  // ------------------------------------------------------------------ ask why
+
+  /** The text sent to the session for "Ask why". */
+  buildAskText(input: {
+    path: string;
+    hunk: ParsedHunk;
+    turnIndex: number | null;
+    gist: string | null;
+    question?: string;
+  }): string {
+    const h = input.hunk;
+    const start = h.newLines > 0 ? h.newStart : h.oldStart;
+    const end = start + Math.max((h.newLines > 0 ? h.newLines : h.oldLines) - 1, 0);
+    const where = `${input.path}:${start}-${end}`;
+    const turn = input.turnIndex !== null ? ` (turn ${input.turnIndex}: "${(input.gist || '').replace(/"/g, "'")}")` : '';
+    const body = h.lines.slice(0, 40).map((l) => (l.length > 300 ? l.slice(0, 300) : l));
+    const fence = body.some((l) => l.includes('```')) ? '~~~~' : '```';
+    let text = `Why did you make this change? (from Companion review)\n${where}${turn}\n${fence}diff\n${body.join('\n')}${h.lines.length > 40 ? '\n…' : ''}\n${fence}`;
+    const q = (input.question || '').trim().slice(0, REVIEW_LIMITS.maxQuestionChars);
+    if (q) text += `\n${q}`;
+    return text;
+  }
+
+  async ask(req: ReviewAskRequest, clientId?: string): Promise<ReviewAskResponse> {
+    const ctx = await this.context(req.sessionId);
+    if (!ctx) throw new ReviewServiceError('unknown_session', `Unknown session ${req.sessionId}`);
+    if (ctx.session.inactive) throw new ReviewServiceError('unavailable', 'The session is not running');
+    const abs = path.resolve(req.absPath);
+    const found = await this.findHunk(ctx, abs, req.hunkId, req.editId, 'all');
+    if (!found) throw new ReviewServiceError('not_found', 'That change is no longer available');
+    const turn = found.edit ? ctx.led.getTurn(found.edit.turnId) : undefined;
+    const lastTurn = ctx.led.turns[ctx.led.turns.length - 1];
+    const gist = turn ? this.buildTurn(ctx, turn, turn === lastTurn).gist : null;
+    const sentText = this.buildAskText({
+      path: this.displayPath(abs, ctx.led.projectPath),
+      hunk: found.hunk,
+      turnIndex: turn ? turn.index : null,
+      gist,
+      question: req.question,
+    });
+    const question = (req.question || '').trim().slice(0, REVIEW_LIMITS.maxQuestionChars);
+    const herald = this.herald;
+    if (herald && herald.featureEnabled) {
+      let r: { askId: string };
+      try {
+        r = await herald.relayAsk({
+          sessionId: req.sessionId,
+          sessionName: this.sessionName(req.sessionId),
+          prompt: sentText,
+          userText: question || `Why did ${this.sessionName(req.sessionId)} change ${path.basename(abs)}?`,
+          clientId,
+        });
+      } catch (err) {
+        const code = (err as { code?: string }).code;
+        if (code === 'session_waiting' || code === 'herald_unavailable' || code === 'unavailable')
+          throw new ReviewServiceError(code, (err as Error).message);
+        throw err;
+      }
+      this.auditAsk(req, 'herald', clientId);
+      return { via: 'herald', askId: r.askId, sentText };
+    }
+    if (!this.deps.sendDirect) throw new ReviewServiceError('herald_unavailable', 'No way to reach the session');
+    if (this.deps.hasLiveChoice) {
+      let waiting: boolean;
+      try {
+        waiting = await this.deps.hasLiveChoice(req.sessionId);
+      } catch {
+        throw new ReviewServiceError('unavailable', "Could not read the session's screen");
+      }
+      if (waiting) throw new ReviewServiceError('session_waiting', 'The session is waiting on a choice; answer it first');
+    }
+    const ok = await this.deps.sendDirect(req.sessionId, sentText);
+    if (!ok) throw new ReviewServiceError('unavailable', 'Could not send to the session');
+    this.auditAsk(req, 'direct', clientId);
+    return { via: 'direct', askId: null, sentText };
+  }
+
+  private origin(clientId?: string): AuditOrigin {
+    return { addr: 'daemon', clientId: clientId || 'review', isLocal: true, tls: false, origin: null };
+  }
+
+  private auditAsk(req: ReviewAskRequest, via: string, clientId?: string): void {
+    this.deps.audit?.({
+      ts: this.now(),
+      origin: this.origin(clientId),
+      action: 'review_ask',
+      payload: { session: req.sessionId, path: req.absPath, hunkId: req.hunkId, via },
+      result: { ok: true },
+      durationMs: 0,
+    });
+  }
+
+  // ------------------------------------------------------------------ revert
+
+  /** Allowed to write here: under the project, home or config.allowedPaths; never denied paths. */
+  isWritable(absPath: string, projectPath: string): boolean {
+    if (isDeniedPath(absPath)) return false;
+    const roots = [projectPath, os.homedir(), ...(this.deps.allowedPaths?.() || [])].filter(Boolean);
+    return roots.some((r) => {
+      const rel = path.relative(path.resolve(r), absPath);
+      return rel !== '' && !rel.startsWith('..') && !path.isAbsolute(rel);
+    });
+  }
+
+  /** Pending edit on the path, or one that completed in the last 5 s while working. */
+  private editingNow(ctx: SessionContext, absPath: string): boolean {
+    const now = this.now();
+    for (const e of ctx.led.edits.values()) {
+      if (e.absPath !== absPath) continue;
+      if (e.pending) return true;
+      if (ctx.working && now - e.at < 5000) return true;
+    }
+    return false;
+  }
+
+  async revertPreview(req: ReviewRevertPreviewRequest, clientId: string): Promise<ReviewRevertPreviewResponse> {
+    const ctx = await this.context(req.sessionId);
+    if (!ctx) throw new ReviewServiceError('unknown_session', `Unknown session ${req.sessionId}`);
+    const t = req.target;
+    if (!t || (t.kind !== 'hunk' && t.kind !== 'file') || typeof t.absPath !== 'string' || !path.isAbsolute(t.absPath))
+      throw new ReviewServiceError('bad_request', 'target must be a hunk or file with an absolute path');
+    if (t.kind === 'file' && t.to !== 'head' && t.to !== 'checkpoint')
+      throw new ReviewServiceError('bad_request', "file target needs to: 'head' | 'checkpoint'");
+    const abs = path.resolve(t.absPath);
+    const display = this.displayPath(abs, ctx.led.projectPath);
+    const base = {
+      clientId,
+      sessionId: req.sessionId,
+      target: t,
+      absPath: abs,
+      path: display,
+      repo: null as RepoInfo | null,
+      risks: [] as ReviewRiskFlag[],
+      sessionWorking: ctx.working,
+    };
+    const block = (code: ReviewRevertBlockCode, message: string) =>
+      this.reverts.preview({ ...base, blocked: { code, message } });
+    if (isSandbox()) return block('sandbox', 'reverts are disabled in the sandbox');
+    if (!this.isWritable(abs, ctx.led.projectPath)) return block('outside_allowed', 'that path is outside the allowed folders');
+    if (!this.deps.gitEnabled()) return block('git_disabled', 'git integration is disabled on this server');
+    if (this.editingNow(ctx, abs)) return block('session_editing', `${this.sessionName(req.sessionId)} is editing this file right now`);
+    const repo = await this.repos.resolve(path.dirname(abs)).catch(() => null);
+    base.repo = repo;
+    const fileEdits = Array.from(ctx.led.edits.values()).filter((e) => e.absPath === abs && this.countable(e));
+    base.risks = fileEdits.length ? this.transcriptRisks(ctx, abs, fileEdits, 0) : [];
+
+    if (t.kind === 'hunk') {
+      const found = await this.findHunk(ctx, abs, t.hunkId, t.editId, t.scope === 'all' ? 'all' : 'since_checkpoint');
+      if (!found) return block('conflict', 'that change is no longer available');
+      if (found.file) base.risks = found.file.risks;
+      return this.reverts.preview({ ...base, hunk: found.hunk, hunkIsCreate: found.isCreate });
+    }
+    if (!repo) return block('not_in_repo', 'the file is not in a git repository');
+    const rel = path.relative(repo.root, abs);
+    const staged = await this.runner.run({
+      cwd: repo.root,
+      repoKey: repo.root,
+      kind: 'status',
+      args: ['diff', '--cached', '--name-only', '-z'],
+    });
+    if (staged.code === 0 && staged.stdout.split('\0').includes(rel))
+      return block('staged_changes', 'the file has staged changes; unstage or commit them first');
+    const others = this.alsoChangedBy(req.sessionId, abs, 0);
+    if (others.length) return block('foreign_changes', `${others[0]} also changed this file`);
+    let checkpointTree: string | null = null;
+    if (t.to === 'checkpoint') {
+      checkpointTree = ctx.cp.reviewedThrough > 0 ? ctx.cp.snapshots.find((x) => x.repoRoot === repo.root)?.tree || null : null;
+      if (checkpointTree) {
+        const ok = await objectsExist(this.runner, repo, [checkpointTree]).catch(() => new Set<string>());
+        if (!ok.has(checkpointTree)) checkpointTree = null;
+      }
+    }
+    return this.reverts.preview({ ...base, checkpointTree });
+  }
+
+  async revert(req: ReviewRevertRequest, clientId: string): Promise<ReviewRevertResponse> {
+    if (typeof req.token !== 'string' || (req.confirm !== 'tap' && req.confirm !== 'hold'))
+      throw new ReviewServiceError('bad_request', 'token and confirm are required');
+    const started = this.now();
+    const device = typeof req.device === 'string' ? req.device.slice(0, 80) : null;
+    let tokenInfo: ReturnType<RevertManager['peek']> | null = null;
+    try {
+      tokenInfo = this.reverts.peek(req.token, clientId, req.confirm);
+      const out = await this.reverts.apply(req.token, clientId, req.confirm, device, (t) => {
+        const led = this.peekLedger(t.sessionId);
+        const session = this.findSession(t.sessionId);
+        if (led && session) {
+          const ctx = { sessionId: t.sessionId, session, led, cp: this.store.get(t.sessionId, led.projectPath), working: this.isWorking(session) };
+          if (this.editingNow(ctx, t.absPath)) throw new RevertError('blocked', 'session_editing: the session is editing this file right now');
+        }
+      });
+      this.auditRevert('review_revert', clientId, req, tokenInfo, out.meta, true, started);
+      this.afterRevert(out.meta, false, device);
+      if (req.notifySession !== false && this.deps.sendDirect) {
+        const what = out.token.kind === 'hunk' ? 'a change' : 'the file';
+        void this.deps
+          .sendDirect(out.meta.sessionId, `[Companion] I reverted ${what} in ${out.meta.path}; re-read it before editing.`)
+          .catch(() => undefined);
+      }
+      const summary = await this.summary(out.meta.sessionId);
+      return {
+        backupId: out.meta.backupId,
+        absPath: out.meta.absPath,
+        effect: out.meta.effect,
+        undoUntil: out.meta.at + REVIEW_LIMITS.undoWindowMs,
+        summary: summary!,
+      };
+    } catch (err) {
+      if (tokenInfo) this.auditRevert('review_revert', clientId, req, tokenInfo, null, false, started, err);
+      if (err instanceof RevertError) throw new ReviewServiceError(err.code, err.message);
+      throw err;
+    }
+  }
+
+  async revertUndo(backupId: string, clientId: string): Promise<ReviewRevertUndoResponse> {
+    if (typeof backupId !== 'string') throw new ReviewServiceError('bad_request', 'backupId is required');
+    const started = this.now();
+    try {
+      const meta = await this.reverts.undo(backupId);
+      this.deps.audit?.({
+        ts: this.now(),
+        origin: this.origin(clientId),
+        action: 'review_revert_undo',
+        payload: { session: meta.sessionId, path: meta.absPath, backupId },
+        result: { ok: true },
+        durationMs: this.now() - started,
+      });
+      this.afterRevert(meta, true, null);
+      const summary = await this.summary(meta.sessionId);
+      return { absPath: meta.absPath, summary: summary! };
+    } catch (err) {
+      this.deps.audit?.({
+        ts: this.now(),
+        origin: this.origin(clientId),
+        action: 'review_revert_undo',
+        payload: { backupId },
+        result: { ok: false, error: err instanceof Error ? err.message : String(err) },
+        durationMs: this.now() - started,
+      });
+      if (err instanceof RevertError) throw new ReviewServiceError(err.code, err.message);
+      throw err;
+    }
+  }
+
+  private afterRevert(meta: BackupMeta, undone: boolean, by: string | null): void {
+    this.bump(meta.sessionId);
+    this.filesMemo.clear();
+    const ev: ReviewRevertedEvent = {
+      sessionId: meta.sessionId,
+      absPath: meta.absPath,
+      effect: meta.effect,
+      backupId: meta.backupId,
+      by: undone ? by : meta.by,
+      undone,
+      at: this.now(),
+    };
+    this.deps.broadcast?.('review_reverted', ev);
+    void this.refresh(meta.sessionId).catch(() => undefined);
+  }
+
+  private auditRevert(
+    action: string,
+    clientId: string,
+    req: ReviewRevertRequest,
+    t: ReturnType<RevertManager['peek']>,
+    meta: BackupMeta | null,
+    ok: boolean,
+    started: number,
+    err?: unknown
+  ): void {
+    this.deps.audit?.({
+      ts: this.now(),
+      origin: this.origin(clientId),
+      action,
+      payload: {
+        session: t.sessionId,
+        path: t.absPath,
+        target: t.target,
+        tier: t.tier,
+        reasons: t.reasons,
+        confirm: req.confirm,
+        device: req.device ?? null,
+        backupId: meta?.backupId ?? null,
+      },
+      result: ok ? { ok: true, effect: meta?.effect } : { ok: false, error: err instanceof Error ? err.message : String(err) },
+      durationMs: this.now() - started,
     });
   }
 

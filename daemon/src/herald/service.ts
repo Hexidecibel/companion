@@ -118,6 +118,17 @@ export class HeraldRequestError extends Error {
   }
 }
 
+/** Code Review relay failure; `code` is a ReviewErrorCode. */
+export class HeraldRelayError extends Error {
+  constructor(
+    readonly code: 'herald_unavailable' | 'session_waiting' | 'unavailable',
+    message: string
+  ) {
+    super(message);
+    this.name = 'HeraldRelayError';
+  }
+}
+
 export interface HeraldServiceDeps {
   config: ResolvedHeraldConfig;
   provider: LlmProvider | null;
@@ -1567,6 +1578,61 @@ export class HeraldService {
       console.error('Herald: audit append failed:', err);
     }
     return out;
+  }
+
+  /**
+   * Code Review "Ask why": type a question into a session and report its answer
+   * back like any other ask (inbox `answer` item, finished tone). Re-validates
+   * the pane first: a choice prompt on screen would swallow the text.
+   */
+  async relayAsk(r: {
+    sessionId: string;
+    sessionName: string;
+    prompt: string;
+    userText: string;
+    clientId?: string;
+  }): Promise<{ askId: string }> {
+    if (!this.cfg.featureEnabled || this.disposed)
+      throw new HeraldRelayError('herald_unavailable', 'Herald is not running');
+    const src = this.getSource('local');
+    if (!src) throw new HeraldRelayError('herald_unavailable', 'No local sessions');
+    let choice;
+    try {
+      choice = await src.getLiveChoice(r.sessionId);
+    } catch {
+      throw new HeraldRelayError('unavailable', "Could not read the session's screen");
+    }
+    if (choice)
+      throw new HeraldRelayError(
+        'session_waiting',
+        `${r.sessionName} is waiting on a choice; answer it first`
+      );
+    const askId = `review-${randomUUID()}`;
+    const sentAt = this.now();
+    const ok = await src.sendText(r.sessionId, r.prompt, askId);
+    if (!ok) throw new HeraldRelayError('unavailable', `Could not send to ${r.sessionName}`);
+    this.openAsk({
+      actionId: askId,
+      serverId: 'local',
+      sessionId: r.sessionId,
+      sessionName: r.sessionName,
+      userText: r.userText,
+      prompt: r.prompt,
+      sentAt,
+    });
+    try {
+      this.auditFn({
+        ts: this.now(),
+        origin: { ...SERVER_ORIGIN, clientId: r.clientId || 'review' },
+        action: 'herald_review_ask',
+        payload: { session: r.sessionId, askId, text: clip(r.prompt, 500) },
+        result: { ok: true },
+        durationMs: Math.max(0, this.now() - sentAt),
+      });
+    } catch (err) {
+      console.error('Herald: audit append failed:', err);
+    }
+    return { askId };
   }
 
   /** Remember a send that expects a reply (ask-and-report). */

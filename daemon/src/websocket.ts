@@ -151,6 +151,7 @@ export class WebSocketHandler {
     });
 
     this.review = this.createReview();
+    if (this.review && this.herald) this.review.setHerald(this.herald);
 
     // Register all handler modules
     this.handlers = registerAllHandlers(this.createHandlerContext());
@@ -304,20 +305,7 @@ export class WebSocketHandler {
   private createHerald(): HeraldService | null {
     try {
       const cfg = resolveHeraldConfig(this.config.herald);
-      const source = new LocalSessionSource({
-        watcher: this.watcher,
-        injector: this.injector,
-        sessionNames: this.sessionNameStore,
-        onSent: (tmuxName, text, tag) => {
-          // Same bookkeeping as send_input: optimistic chat echo + escalation ack.
-          if (text) {
-            const pending = this.pendingSentMessages.get(tmuxName) || [];
-            pending.push({ clientMessageId: tag, content: text, sentAt: Date.now() });
-            this.pendingSentMessages.set(tmuxName, pending);
-          }
-          this.escalation.acknowledgeSession(tmuxName);
-        },
-      });
+      const source = this.makeLocalSource();
       return new HeraldService({
         config: cfg,
         provider: createProvider(cfg),
@@ -363,10 +351,29 @@ export class WebSocketHandler {
     }
   }
 
+  /** A session source over this daemon's tmux sessions (Herald + Code Review). */
+  private makeLocalSource(): LocalSessionSource {
+    return new LocalSessionSource({
+      watcher: this.watcher,
+      injector: this.injector,
+      sessionNames: this.sessionNameStore,
+      onSent: (tmuxName, text, tag) => {
+        // Same bookkeeping as send_input: optimistic chat echo + escalation ack.
+        if (text) {
+          const pending = this.pendingSentMessages.get(tmuxName) || [];
+          pending.push({ clientMessageId: tag, content: text, sentAt: Date.now() });
+          this.pendingSentMessages.set(tmuxName, pending);
+        }
+        this.escalation.acknowledgeSession(tmuxName);
+      },
+    });
+  }
+
   // --- Code Review ---
 
   private createReview(): ReviewService | null {
     try {
+      const source = this.makeLocalSource();
       const review = new ReviewService({
         watcher: this.watcher,
         gitEnabled: () => this.config.git !== false,
@@ -375,6 +382,10 @@ export class WebSocketHandler {
         broadcast: (type, payload) => this.broadcast(type, payload),
         sendToClient: (clientId, type, payload) => this.sendToClient(clientId, type, payload),
         sessionName: (id) => this.sessionNameStore.get(id) || id,
+        audit: (entry) => this.auditLog.append(entry),
+        sendDirect: (id, text) => source.sendText(id, text, `review-${Date.now()}`),
+        hasLiveChoice: async (id) => (await source.getLiveChoice(id)) !== null,
+        allowedPaths: () => this.config.allowedPaths || [],
       });
       review.attach(this.watcher);
       return review;
@@ -518,6 +529,7 @@ export class WebSocketHandler {
       clearInterval(serverPingInterval);
       this.clients.delete(clientId);
       this.heraldVoice?.clientGone(clientId);
+      this.review?.dropClient(clientId);
       console.log(
         `WebSocket: Client disconnected (${clientId}) code=${code} reason=${reason?.toString() || 'none'}`
       );
@@ -528,6 +540,7 @@ export class WebSocketHandler {
       console.error(`WebSocket: Client error (${clientId}):`, err);
       this.clients.delete(clientId);
       this.heraldVoice?.clientGone(clientId);
+      this.review?.dropClient(clientId);
     });
 
     this.send(ws, {

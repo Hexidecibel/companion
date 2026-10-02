@@ -2,7 +2,7 @@ import { AuthenticatedClient, HandlerContext, MessageHandler } from '../handler-
 import { ReviewServiceError } from '../review/service';
 import { GitError } from '../review/git-runner';
 import { REVIEW_LIMITS } from '../review/protocol';
-import type { ReviewErrorCode } from '../review/protocol';
+import type { ReviewErrorCode, ReviewRevertTarget } from '../review/protocol';
 
 type Obj = Record<string, unknown>;
 const obj = (p: unknown): Obj => (p && typeof p === 'object' && !Array.isArray(p) ? (p as Obj) : {});
@@ -47,6 +47,10 @@ export function registerReviewHandlers(ctx: HandlerContext): Record<string, Mess
         fail(client, type, code, err instanceof Error ? err.message : String(err), requestId);
       }
     };
+
+  /** Per-origin credentials must hold the remote capability for mutations. */
+  const gate = (client: AuthenticatedClient, action: 'write' | 'dispatch'): string | null =>
+    client.originCredential ? ctx.requireRemoteCapability(client, action) : null;
 
   const sessionIdOf = (p: Obj): string => {
     const id = str(p.sessionId, 200);
@@ -93,6 +97,67 @@ export function registerReviewHandlers(ctx: HandlerContext): Record<string, Mess
       if (p.editIds.length > REVIEW_LIMITS.maxGetEdits)
         throw new ReviewServiceError('bad_request', `at most ${REVIEW_LIMITS.maxGetEdits} editIds`);
       return ctx.review!.getEdits(sessionIdOf(p), p.editIds as string[]);
+    }),
+
+    review_watch: handle('review_watch', async (client, p) => {
+      if (typeof p.live !== 'boolean') throw new ReviewServiceError('bad_request', 'live must be a boolean');
+      return ctx.review!.watch(client.id, sessionIdOf(p), p.live);
+    }),
+
+    review_ask: handle('review_ask', async (client, p) => {
+      const absPath = str(p.absPath, 4096);
+      const hunkId = str(p.hunkId, 300);
+      if (!absPath || !absPath.startsWith('/') || !hunkId)
+        throw new ReviewServiceError('bad_request', 'absPath and hunkId are required');
+      if (p.question !== undefined && (typeof p.question !== 'string' || p.question.length > REVIEW_LIMITS.maxQuestionChars))
+        throw new ReviewServiceError('bad_request', `question must be at most ${REVIEW_LIMITS.maxQuestionChars} characters`);
+      const denied = gate(client, 'dispatch');
+      if (denied) throw new ReviewServiceError('blocked', denied);
+      return ctx.review!.ask(
+        {
+          sessionId: sessionIdOf(p),
+          absPath,
+          hunkId,
+          ...(str(p.editId, 200) ? { editId: str(p.editId, 200) } : {}),
+          ...(typeof p.question === 'string' ? { question: p.question } : {}),
+        },
+        client.id
+      );
+    }),
+
+    review_revert_preview: handle('review_revert_preview', async (client, p) => {
+      const denied = gate(client, 'write');
+      if (denied) throw new ReviewServiceError('blocked', denied);
+      const target = obj(p.target);
+      return ctx.review!.revertPreview(
+        { sessionId: sessionIdOf(p), target: target as unknown as ReviewRevertTarget },
+        client.id
+      );
+    }),
+
+    review_revert: handle('review_revert', async (client, p) => {
+      const denied = gate(client, 'write');
+      if (denied) throw new ReviewServiceError('blocked', denied);
+      const token = str(p.token, 100);
+      if (!token || (p.confirm !== 'tap' && p.confirm !== 'hold'))
+        throw new ReviewServiceError('bad_request', "token and confirm ('tap' | 'hold') are required");
+      return ctx.review!.revert(
+        {
+          token,
+          confirm: p.confirm,
+          ...(typeof p.notifySession === 'boolean' ? { notifySession: p.notifySession } : {}),
+          ...(str(p.device, 80) ? { device: str(p.device, 80) } : {}),
+        },
+        client.id
+      );
+    }),
+
+    review_revert_undo: handle('review_revert_undo', async (client, p) => {
+      const denied = gate(client, 'write');
+      if (denied) throw new ReviewServiceError('blocked', denied);
+      const backupId = str(p.backupId, 64);
+      if (!backupId) throw new ReviewServiceError('bad_request', 'backupId is required');
+      return ctx.review!.revertUndo(backupId, client.id);
     }),
 
     review_mark_reviewed: handle('review_mark_reviewed', async (_c, p) => {
