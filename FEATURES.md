@@ -10,13 +10,15 @@ High-level features of the Companion daemon, web client, and desktop/mobile apps
 - Mobile-optimized layout with full-screen session list, bottom toolbar, safe area insets
 - Desktop layout with sidebar + session view side-by-side
 - **Desktop auto-update** (Tauri updater): checks the daemon's own feed (`/updates/stable/latest.json`, no GitHub Releases) at startup and every 6 hours, downloads + verifies (minisign) in the background, then offers "Restart to update" in the app and tray; optional install-on-quit (Settings > Desktop). Versions are `1.0.<git commit count>`. Publish with `bin/companion publish-update --run <id|latest>`
+- **Android in-app updates** (sideload): the app checks `/updates/stable/android.json` on launch and every 6 hours and shows "Update available (1.0.N)"; one tap downloads the APK, verifies its SHA-256 and that it is signed by the same certificate as the installed app, then opens the system installer (the user confirms; deep-links to "Install unknown apps" when needed). Publish with `bin/companion publish-update --apk <signed.apk>` (refuses an older or equal versionCode)
 - macOS builds signed with Developer ID, notarized and stapled in CI when the `APPLE_DEVID_CERT_*` secrets exist (ad-hoc fallback otherwise); `bin/desktop-signing` manages the certificate and updater keys
 
 ## Real-Time Monitoring
 - Live WebSocket updates from CLI coding sessions
 - Multi-server, multi-session support
 - Multiple concurrent sessions per project directory with automatic disambiguation (terminal content matching, PID detection, process of elimination)
-- Session mapping persistence across daemon restarts (`~/.claude/companion-session-mappings.json`)
+- Session mapping persistence across daemon restarts (`~/.claude/companion-session-mappings.json`); each mapping remembers the session identity (tmux creation time, pane pid, claude pid), so a reused tmux name or a restarted claude gets a fresh transcript instead of the old one
+- Project paths with dots, underscores or spaces (`~/.cache/...`) link to their transcripts (Claude Code's project dir encoding: every non-alphanumeric becomes `-`)
 - Event-driven compaction re-mapping when context compaction creates new JSONL files
 - ExitPlanMode and AskUserQuestion detected as "waiting for input" (triggers status banner, push notifications)
 - Pending multiple-choice AskUserQuestion prompts render as tappable options in the Chat view — these are buffered by Claude Code and never hit the session JSONL until answered, so the live tmux pane is scraped and surfaced as a synthetic live highlight
@@ -371,7 +373,7 @@ Real-time utilization gauges using Claude Code OAuth credentials — no admin AP
 "What changed since I looked?" across sessions, with risk flags, per-turn summaries, ask-why and safe reverts. Plan: `docs/code-review-2-plan.md`.
 
 - **Transcript ledger:** turns and exact per-edit hunks from Claude Code's JSONL (`structuredPatch`), read incrementally from byte offsets (no subprocess per update, works outside git, survives `/clear` chains); subagent edits attributed to the turn that spawned them
-- **"Since you looked" checkpoints** per session (persisted, multi-device, `updatedBy`); mark all reviewed or approve single turns (contiguous approvals fold in); global `review_summary` events at most once a second per session
+- **"Since you looked" checkpoints** per session (persisted, multi-device, `updatedBy`); mark all reviewed or approve single turns (approvals stay reversible; mark all reviewed folds them in); global `review_summary` events at most once a second per session
 - **Free turn summaries** ("Fixed echo guard: 3 files, +42 -18") from the reply, prompt or files; optional Herald-polished gists (`review_polish_summaries`, one batched call, cached, metered)
 - **Net "by file" view** via checkpoint snapshot trees (temp index, never touches the user's index or refs): renames, binary, mode changes, deletions, heat ordering, trivial collapse (whitespace / lockfile / generated), lazy hunks, and an **unattributed** section for Bash-made changes; gitignored and non-git files fall back to per-edit transcript hunks
 - **Risk flags** (pure `classifyChangedFile`): migrations, CI / deploy scripts, env files, secrets (paths and secret-looking added lines), agent / git hook config, permissions, auth / security code, deletions, config, dependency changes, large rewrites, lockfiles, binary, outside project, other sessions touching the same file
@@ -380,7 +382,7 @@ Real-time utilization gauges using Claude Code OAuth credentials — no admin AP
 - **Live edit stream** (`review_watch` / `review_live`) for the drawer's live feed
 - **Herald:** `review_changes` tool ("what did Out4 change?", grounded, risky first, at most three files named), high-risk changes as quiet inbox news (deduped 30 min, coalesced 20 s, resolved when you mark the session reviewed)
 - **Bounded git everywhere:** one GitRunner (no shell, SIGKILL timeouts, dedupe, concurrency 3, breaker); legacy `get_session_diff` rebuilt on it (no more shell per file; untracked new files no longer dropped)
-- Web client: change strip, review drawer (by turn / by file), inline edit chips, risk badges, revert dialog with undo, live feed and risk tone (see the plan's web workstream)
+- Web client: change strip, review drawer (by turn / by file), inline edit chips (with tool cards hidden: a "3 files changed · +12 −3" row under the assistant message, expandable to per-file chips and hunks), risk badges, revert dialog with undo, live feed and risk tone (see the plan's web workstream)
 
 ## Mobile Session Context Menu
 Long-press or right-click on a mobile session to get a full context menu.
