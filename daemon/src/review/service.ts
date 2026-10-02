@@ -16,7 +16,8 @@ import { SessionLedger, LedgerEdit, LedgerTurn } from './ledger';
 import { listSubagentFiles } from './sources';
 import { parseUnifiedDiff, renderPatch } from './diff-parse';
 import { ReviewStore, StoredCheckpoint, compactApprovals, toWire } from './store';
-import { summarizeTurn } from './summarize';
+import { clipWords, summarizeTurn } from './summarize';
+import { fnv1a, formatAgo } from '../herald/text';
 import { addedLines, removedLines, toReviewHunk } from './analyze';
 import { classifyChangedFile, maxRiskLevel } from '../herald/danger';
 import { REVIEW_LIMITS } from './protocol';
@@ -47,6 +48,7 @@ import type {
   ReviewGetRequest,
   ReviewGetResponse,
   ReviewMarkResponse,
+  ReviewPolishResponse,
   ReviewRiskFlag,
   ReviewRiskLevel,
   ReviewSummary,
@@ -84,6 +86,8 @@ export interface ReviewServiceDeps {
   allowedPaths?: () => string[];
   /** Revert backups (default ~/.companion/review/backups). */
   backupDir?: string;
+  /** Risk-alert coalesce window (default 20 s). */
+  alertWindowMs?: number;
   /** Never reviewed (scratch space). Default: os.tmpdir(), /tmp, /var/tmp. */
   excludeDirs?: string[];
   /** Event debounce / summary throttle (tests shorten them). */
@@ -119,6 +123,68 @@ export interface ReviewHeraldLink {
     userText: string;
     clientId?: string;
   }): Promise<{ askId: string }>;
+  addReviewAlert?(a: {
+    key: string;
+    sessionId: string;
+    sessionName: string;
+    headline: string;
+    level: 'high' | 'medium';
+    kinds: string[];
+    paths: string[];
+  }): void;
+  resolveReviewAlerts?(sessionId: string): void;
+  polishGists?(
+    items: Array<{ id: string; prompt: string; reply: string; files: string[]; gist: string }>
+  ): Promise<Map<string, string>>;
+}
+
+interface AlertItem {
+  path: string;
+  kind: ReviewRiskFlag['kind'];
+  reason: string;
+}
+
+const KIND_NOUN: Partial<Record<ReviewRiskFlag['kind'], string>> = {
+  migration: 'a database migration',
+  ci: 'a CI workflow',
+  env: 'an environment file',
+  secrets: 'a key or credentials file',
+  agent_config: 'agent or git hook config',
+  permissions: 'file permissions',
+  security: 'auth or security code',
+  deleted: 'a file',
+};
+const KIND_ORDER: ReviewRiskFlag['kind'][] = [
+  'secrets', 'env', 'migration', 'ci', 'agent_config', 'permissions', 'security', 'deleted',
+];
+
+/** Deterministic risk-alert headline ("Out4 changed a CI workflow: deploy.yml"). PURE. */
+export function alertHeadline(name: string, items: AlertItem[]): string {
+  const rank = (k: ReviewRiskFlag['kind']) => {
+    const i = KIND_ORDER.indexOf(k);
+    return i === -1 ? 99 : i;
+  };
+  const sorted = items.slice().sort((a, b) => rank(a.kind) - rank(b.kind));
+  const paths = Array.from(new Set(sorted.map((i) => i.path)));
+  // Deleted paths, the riskiest first (a deleted migration outranks a deleted helper).
+  const pathRank = (p: string) => Math.min(...sorted.filter((i) => i.path === p && i.kind !== 'deleted').map((i) => rank(i.kind)), 98);
+  const deleted = Array.from(new Set(sorted.filter((i) => i.kind === 'deleted').map((i) => i.path))).sort(
+    (a, b) => pathRank(a) - pathRank(b)
+  );
+  if (deleted.length && deleted.length === paths.length) {
+    const n = deleted.length;
+    return n === 1
+      ? `${name} deleted ${path.basename(deleted[0])}`
+      : `${name} deleted ${n} files including ${deleted[0]}`;
+  }
+  if (paths.length === 1) {
+    const first = sorted[0];
+    const base = path.basename(first.path);
+    if (first.kind === 'secrets' && /^adds/.test(first.reason)) return `${name} added what looks like a secret to ${base}`;
+    if (first.kind === 'ci' && first.reason === 'deploy script') return `${name} changed the deploy script: ${base}`;
+    return `${name} changed ${KIND_NOUN[first.kind] || first.reason}: ${base}`;
+  }
+  return `${name} made ${paths.length} risky changes including ${paths[0]}`;
 }
 
 export class ReviewServiceError extends Error {
@@ -164,6 +230,10 @@ export class ReviewService {
   private herald: ReviewHeraldLink | null = null;
   /** review_watch: connection -> sessions it watches live. */
   private watchers = new Map<string, Set<string>>();
+  /** Risk alerts: last time each session|path|kind alerted (30 min dedupe). */
+  private alertSeen = new Map<string, number>();
+  /** Risk alerts waiting out the coalesce window, per session. */
+  private alertPending = new Map<string, { items: AlertItem[]; timer: NodeJS.Timeout }>();
   /** Sessions whose baseline snapshot was already attempted. */
   private baselineTried = new Set<string>();
   /** Unattributed changes found at the last scan (turn end with Bash / files view). */
@@ -274,15 +344,77 @@ export class ReviewService {
     }
   }
 
-  /** Hook: risk alerts for Bash-made changes (phase 4). */
-  protected onUnattributed(_ctx: SessionContext, _list: ReviewFileChange[]): void {
-    /* overridden */
+  /** Bash-made changes with high risk raise alerts too. */
+  protected onUnattributed(ctx: SessionContext, list: ReviewFileChange[]): void {
+    const alerts: AlertItem[] = [];
+    for (const f of list)
+      for (const r of f.risks) if (r.level === 'high') alerts.push({ path: f.path, kind: r.kind, reason: r.reason });
+    if (alerts.length) this.considerAlerts(ctx.sessionId, alerts);
   }
 
-  /** Live edit stream (review_live) to connections watching this session. */
+  /**
+   * High-risk changes -> one Herald inbox item per session per coalesce window
+   * (20 s), each session|path|kind at most once per 30 minutes.
+   */
+  private considerAlerts(sessionId: string, items: AlertItem[]): void {
+    if (!this.herald?.addReviewAlert) return;
+    const now = this.now();
+    const fresh: AlertItem[] = [];
+    for (const it of items) {
+      const k = `${sessionId}|${it.path}|${it.kind}`;
+      const last = this.alertSeen.get(k);
+      if (last !== undefined && now - last < 30 * 60 * 1000) continue;
+      this.alertSeen.set(k, now);
+      fresh.push(it);
+    }
+    if (this.alertSeen.size > 5000) {
+      for (const [k, at] of this.alertSeen) if (now - at > 30 * 60 * 1000) this.alertSeen.delete(k);
+    }
+    if (!fresh.length) return;
+    const pending = this.alertPending.get(sessionId);
+    if (pending) {
+      pending.items.push(...fresh);
+      return;
+    }
+    const timer = setTimeout(() => this.flushAlerts(sessionId), this.deps.alertWindowMs ?? 20_000);
+    timer.unref?.();
+    this.alertPending.set(sessionId, { items: fresh, timer });
+  }
+
+  private flushAlerts(sessionId: string): void {
+    const pending = this.alertPending.get(sessionId);
+    this.alertPending.delete(sessionId);
+    if (!pending || !pending.items.length || this.disposed) return;
+    const name = this.sessionName(sessionId);
+    const kinds = Array.from(new Set(pending.items.map((i) => i.kind)));
+    const paths = Array.from(new Set(pending.items.map((i) => i.path)));
+    this.herald?.addReviewAlert?.({
+      key: `${sessionId}|${paths.slice().sort().join(',')}|${kinds.slice().sort().join(',')}`,
+      sessionId,
+      sessionName: name,
+      headline: alertHeadline(name, pending.items),
+      level: 'high',
+      kinds,
+      paths,
+    });
+  }
+
+  /** Live edit stream (review_live) + risk alerts for edits that just landed. */
   protected onLedgerChanges(ctx: SessionContext): void {
     const changes = ctx.led.drainChanges();
-    if (!changes.length || !this.deps.sendToClient) return;
+    if (!changes.length) return;
+    const recent = this.now() - 10 * 60 * 1000;
+    const alerts: AlertItem[] = [];
+    for (const c of changes) {
+      if (c.phase !== 'completed') continue;
+      const e = ctx.led.edits.get(c.editId);
+      if (!e || !this.countable(e) || e.at < recent || !this.isUnreviewed(e, ctx.cp)) continue;
+      const display = this.displayPath(e.absPath, ctx.led.projectPath);
+      for (const f of this.transcriptRisks(ctx, e.absPath, [e], ctx.cp.reviewedThrough))
+        if (f.level === 'high') alerts.push({ path: display, kind: f.kind, reason: f.reason });
+    }
+    if (alerts.length) this.considerAlerts(ctx.sessionId, alerts);
+    if (!this.deps.sendToClient) return;
     const clients: string[] = [];
     for (const [clientId, set] of this.watchers) if (set.has(ctx.sessionId)) clients.push(clientId);
     if (!clients.length) return;
@@ -725,9 +857,131 @@ export class ReviewService {
     };
   }
 
-  /** Cached LLM gist for a turn (phase 4). */
-  protected polishedGist(_t: LedgerTurn, _freeGist: string): string | null {
-    return null;
+  private polishKey(t: LedgerTurn): string {
+    return `${t.id}:${fnv1a(`${t.prompt}\u0001${t.lastAssistantText}`)}`;
+  }
+
+  /** Cached LLM gist for a turn (review_polish_summaries), if any. */
+  protected polishedGist(t: LedgerTurn, _freeGist: string): string | null {
+    return this.store.getPolish(this.polishKey(t))?.gist ?? null;
+  }
+
+  /**
+   * review_polish_summaries: one batched Herald call for the uncached turns
+   * (<= 20), cached by turn id + text hash. Finished turns only.
+   */
+  async polish(sessionId: string, turnIds: string[]): Promise<ReviewPolishResponse> {
+    const ctx = await this.context(sessionId);
+    if (!ctx) throw new ReviewServiceError('unknown_session', `Unknown session ${sessionId}`);
+    const last = ctx.led.turns[ctx.led.turns.length - 1];
+    const wanted = turnIds
+      .slice(0, 20)
+      .map((id) => ctx.led.getTurn(id))
+      .filter((t): t is LedgerTurn => !!t);
+    const todo = wanted.filter(
+      (t) => !this.store.getPolish(this.polishKey(t)) && this.turnEndedAt(t, ctx, t === last) !== null
+    );
+    if (todo.length) {
+      if (!this.herald?.featureEnabled || !this.herald.polishGists)
+        throw new ReviewServiceError('herald_unavailable', 'Summaries need Herald');
+      let gists: Map<string, string>;
+      try {
+        gists = await this.herald.polishGists(
+          todo.map((t) => {
+            const turn = this.buildTurn(ctx, t, t === last);
+            const files = Array.from(
+              new Set(t.editIds.map((id) => ctx.led.edits.get(id)).filter((e): e is LedgerEdit => !!e && this.countable(e)).map((e) => path.basename(e.absPath)))
+            );
+            return { id: t.id, prompt: t.prompt, reply: t.lastAssistantText, files, gist: turn.gist };
+          })
+        );
+      } catch (err) {
+        const code = (err as { code?: string }).code;
+        if (code === 'herald_unavailable') throw new ReviewServiceError(code, (err as Error).message);
+        throw err;
+      }
+      for (const t of todo) {
+        const g = gists.get(t.id);
+        if (g) this.store.putPolish(this.polishKey(t), clipWords(g));
+      }
+      this.bump(sessionId);
+      this.scheduleBroadcast(this.summaryFor(ctx));
+    }
+    return {
+      turns: wanted.map((t) => {
+        const turn = this.buildTurn(ctx, t, t === last);
+        return { id: t.id, gist: turn.gist, summary: turn.summary };
+      }),
+    };
+  }
+
+  // ------------------------------------------------------------------ herald digest
+
+  /** Grounded data for Herald's review_changes tool. */
+  async digest(sessionId: string, scope: 'since_last_look' | 'last_turn' | 'all'): Promise<object | null> {
+    const ctx = await this.context(sessionId);
+    if (!ctx) return null;
+    const now = this.now();
+    const sc = scope === 'all' ? 'all' : 'since_checkpoint';
+    let turnId: string | undefined;
+    if (scope === 'last_turn') {
+      for (let i = ctx.led.turns.length - 1; i >= 0 && !turnId; i--) {
+        const t = ctx.led.turns[i];
+        if (t.editIds.some((id) => { const e = ctx.led.edits.get(id); return !!e && this.countable(e); })) turnId = t.id;
+      }
+    }
+    const lastTurn = ctx.led.turns[ctx.led.turns.length - 1];
+    const turnsL = scope === 'last_turn' && !turnId ? [] : this.turnsInScope(ctx, sc, turnId);
+    const turns = turnsL.slice(-8).map((t) => {
+      const rt = this.buildTurn(ctx, t, t === lastTurn);
+      return {
+        n: rt.index,
+        summary: rt.summary,
+        ago: rt.endedAt === null ? 'in progress' : `${formatAgo(now - rt.endedAt)} ago`,
+        risk: rt.riskLevel,
+      };
+    });
+    let files: Array<{ path: string; plus: number; minus: number; status: string; risks: string[] }> = [];
+    let more = 0;
+    let unattributed = 0;
+    if (turnsL.length) {
+      const fv = await this.filesView(ctx, sc, turnId);
+      const rank = (f: ReviewFileChange) => {
+        const l = maxRiskLevel(f.risks);
+        return l === 'high' ? 0 : l === 'medium' ? 1 : 2;
+      };
+      const sorted = fv.files.slice().sort((a, b) => rank(a) - rank(b) || b.heat - a.heat);
+      files = sorted.slice(0, 12).map((f) => ({
+        path: f.path,
+        plus: f.additions,
+        minus: f.deletions,
+        status: f.status,
+        risks: f.risks.map((r) => r.reason),
+      }));
+      more = Math.max(0, sorted.length - 12) + (fv.omittedFiles || 0);
+      unattributed = scope === 'last_turn' ? 0 : fv.unattributed.length;
+    }
+    const sum = this.summaryFor(ctx);
+    const notes: string[] = [];
+    if (!turns.length) notes.push(scope === 'since_last_look' ? 'Nothing new since the user last looked.' : 'No code changes in this scope.');
+    if (more) notes.push(`${more} more changed file${more === 1 ? ' is' : 's are'} not listed.`);
+    if (unattributed)
+      notes.push(`${unattributed} other file${unattributed === 1 ? '' : 's'} changed outside the session's edit tools (shell commands or other programs).`);
+    return {
+      session: this.sessionName(sessionId),
+      scope,
+      mode: sum.mode,
+      unreviewed: {
+        files: sum.unreviewedFiles,
+        turns: sum.unreviewedTurns,
+        additions: sum.unreviewedAdditions,
+        deletions: sum.unreviewedDeletions,
+      },
+      turns,
+      files,
+      last_looked_ago: ctx.cp.reviewedThrough > 0 ? `${formatAgo(now - ctx.cp.updatedAt)} ago` : 'never',
+      note: notes.join(' ') || undefined,
+    };
   }
 
   /** Turns in scope, oldest first. */
@@ -954,9 +1208,15 @@ export class ReviewService {
     return { checkpoint: toWire(fresh.cp), summary };
   }
 
-  /** Hook: resolve Herald review alerts etc. (phase 4). */
-  protected onCheckpointMoved(_ctx: SessionContext, _moved: boolean): void {
-    /* overridden */
+  /** The user looked: their Herald risk alerts for the session are resolved. */
+  protected onCheckpointMoved(ctx: SessionContext, moved: boolean): void {
+    if (!moved) return;
+    const pending = this.alertPending.get(ctx.sessionId);
+    if (pending) {
+      clearTimeout(pending.timer);
+      this.alertPending.delete(ctx.sessionId);
+    }
+    this.herald?.resolveReviewAlerts?.(ctx.sessionId);
   }
 
   /** Working-tree snapshot trees for the session's repos (git only). */
@@ -1446,6 +1706,8 @@ export class ReviewService {
     this.disposed = true;
     for (const t of this.debounceTimers.values()) clearTimeout(t);
     for (const t of this.throttleTimers.values()) clearTimeout(t);
+    for (const p of this.alertPending.values()) clearTimeout(p.timer);
+    this.alertPending.clear();
     this.debounceTimers.clear();
     this.throttleTimers.clear();
     this.store.flushSyncOnShutdown();

@@ -151,7 +151,11 @@ export class WebSocketHandler {
     });
 
     this.review = this.createReview();
-    if (this.review && this.herald) this.review.setHerald(this.herald);
+    if (this.review && this.herald) {
+      const review = this.review;
+      review.setHerald(this.herald);
+      this.herald.setReview({ digest: (id, scope) => review.digest(id, scope) });
+    }
 
     // Register all handler modules
     this.handlers = registerAllHandlers(this.createHandlerContext());

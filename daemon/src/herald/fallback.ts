@@ -157,7 +157,13 @@ export function statusSummary(snaps: SessionSnapshot[]): string {
 /** Spoken briefing from inbox items (already filtered + sorted). */
 export function briefSummary(items: HeraldInboxItem[]): string {
   if (items.length === 0) return 'Nothing new.';
-  return listOut(items.map((i) => firstSentence(i.headline, 160) || i.headline));
+  return listOut(items.map(briefLine));
+}
+
+/** One briefing line; review alerts get a templated lead-in. */
+export function briefLine(i: HeraldInboxItem): string {
+  const head = firstSentence(i.headline, 160) || i.headline;
+  return i.review ? `Heads up: ${head}` : head;
 }
 
 export interface FallbackInput {

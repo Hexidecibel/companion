@@ -293,6 +293,23 @@ TOOL_SPECS.push({
   },
 });
 
+export const REVIEW_SCOPES = ['since_last_look', 'last_turn', 'all'] as const;
+
+TOOL_SPECS.push({
+  name: 'review_changes',
+  description:
+    "What a session changed in code: its recent turns as one-line summaries, files with +/- line counts, risk flags (CI, migrations, secrets, deletions, config...) and how much the user has not reviewed yet. Use for 'what did Out4 change?', 'anything risky in X?', 'did X touch the deploy script?'. Report counts and at most three file names, risky ones first. Never mention changes that are not listed.",
+  parameters: {
+    type: 'object',
+    properties: {
+      session: SESSION_PROP,
+      scope: { type: 'string', enum: [...REVIEW_SCOPES] },
+    },
+    required: ['session'],
+    additionalProperties: false,
+  },
+});
+
 /** Tools that create an action: never executed in an iteration with malformed calls. */
 export const ACTION_TOOLS = new Set([
   'propose_input',
@@ -412,6 +429,8 @@ function example(name: string): string {
       return '{"level": "brief"}';
     case 'propose_spawn_session':
       return '{"project_or_dir": "companion", "first_prompt": "run the tests and tell me what fails"}';
+    case 'review_changes':
+      return '{"session": "Out4", "scope": "since_last_look"}';
     default:
       return '{"session": "companion"}';
   }
@@ -451,6 +470,10 @@ export interface ToolEnv {
   showSession?: (s: SessionSnapshot, deviceId?: string) => HeraldShowResult;
   /** The device the user's words name ("my PC"), from the device that asked. */
   resolveDevice?: (phrase: string) => DeviceAliasResult;
+  /** Code Review digests. Absent = review_changes reports unavailable. */
+  review?: {
+    digest(sessionId: string, scope: (typeof REVIEW_SCOPES)[number]): Promise<object | null>;
+  };
 }
 
 export interface ToolOutcome {
@@ -709,6 +732,25 @@ export async function executeTool(
           level,
           instruction: 'Saved. Confirm in a few words, e.g. "Okay, I\'ll keep it short."',
         });
+      }
+
+      case 'review_changes': {
+        const scope = (args.scope === undefined ? 'since_last_look' : String(args.scope)) as
+          | (typeof REVIEW_SCOPES)[number]
+          | string;
+        if (!(REVIEW_SCOPES as readonly string[]).includes(scope))
+          return err(`scope must be one of: ${REVIEW_SCOPES.join(', ')}.`);
+        if (!env.review) return err('Code review is not available on this server.');
+        const r = await resolveFresh(env, String(args.session), state);
+        if (!r.ok) return err(r.error);
+        const s = r.session;
+        if (s.serverId !== 'local')
+          return err(
+            `I can only review code changes for sessions on this machine for now; ${s.sessionName} is on another server.`
+          );
+        const digest = await env.review.digest(s.sessionId, scope as (typeof REVIEW_SCOPES)[number]);
+        if (!digest) return err(`No code changes are known for ${s.sessionName}.`);
+        return safeOk(digest);
       }
 
       case 'show_session': {

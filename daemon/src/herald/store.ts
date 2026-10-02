@@ -39,6 +39,8 @@ export interface PersistedHeraldState {
   asks?: AskLink[];
   /** Ask answers in the inbox (so "brief me" still has them after a restart). */
   answers?: HeraldInboxItem[];
+  /** Code Review risk alerts in the inbox (resolved by marking the session reviewed). */
+  reviews?: HeraldInboxItem[];
 }
 
 export const VERBOSITY_LEVELS: readonly HeraldVerbosity[] = ['auto', 'brief', 'normal', 'detailed'];
@@ -166,6 +168,43 @@ function sanitizeAnswer(raw: unknown): HeraldInboxItem | null {
   };
 }
 
+const MAX_PERSISTED_REVIEWS = 20;
+
+function sanitizeReviewItem(raw: unknown): HeraldInboxItem | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const i = raw as Record<string, unknown>;
+  const r = i.review as Record<string, unknown> | undefined;
+  if (
+    !isStr(i.id) ||
+    !isStr(i.serverId) ||
+    !isStr(i.sessionId) ||
+    !isStr(i.sessionName) ||
+    !isStr(i.headline) ||
+    !isNum(i.createdAt) ||
+    !r ||
+    typeof r !== 'object' ||
+    (r.level !== 'high' && r.level !== 'medium') ||
+    !Array.isArray(r.kinds) ||
+    !Array.isArray(r.paths)
+  )
+    return null;
+  return {
+    id: i.id,
+    serverId: i.serverId,
+    sessionId: i.sessionId,
+    sessionName: i.sessionName,
+    priority: 'finished',
+    headline: i.headline.slice(0, 200),
+    createdAt: i.createdAt,
+    heard: i.heard === true,
+    review: {
+      level: r.level,
+      kinds: r.kinds.filter(isStr).slice(0, 8).map((k) => k.slice(0, 40)),
+      paths: r.paths.filter(isStr).slice(0, 8).map((p) => p.slice(0, 300)),
+    },
+  };
+}
+
 /** Validate + bound a parsed state object. Pending actions become expired. */
 export function sanitizeState(raw: unknown, now: number): PersistedHeraldState {
   if (!raw || typeof raw !== 'object') throw new Error('state is not an object');
@@ -209,13 +248,21 @@ export function sanitizeState(raw: unknown, now: number): PersistedHeraldState {
 function withAsks(
   r: Record<string, unknown>,
   now: number
-): Pick<PersistedHeraldState, 'asks' | 'answers'> {
+): Pick<PersistedHeraldState, 'asks' | 'answers' | 'reviews'> {
   const asks = sanitizeAsks(r.asks, now);
+  const reviews = (Array.isArray(r.reviews) ? r.reviews : [])
+    .map(sanitizeReviewItem)
+    .filter((a): a is HeraldInboxItem => a !== null)
+    .slice(-MAX_PERSISTED_REVIEWS);
   const answers = (Array.isArray(r.answers) ? r.answers : [])
     .map(sanitizeAnswer)
     .filter((a): a is HeraldInboxItem => a !== null)
     .slice(-MAX_PERSISTED_ANSWERS);
-  return { ...(asks.length ? { asks } : {}), ...(answers.length ? { answers } : {}) };
+  return {
+    ...(asks.length ? { asks } : {}),
+    ...(answers.length ? { answers } : {}),
+    ...(reviews.length ? { reviews } : {}),
+  };
 }
 
 function withPronunciations(raw: unknown): Pick<PersistedHeraldState, 'pronunciations'> {

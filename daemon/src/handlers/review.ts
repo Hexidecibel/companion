@@ -160,6 +160,12 @@ export function registerReviewHandlers(ctx: HandlerContext): Record<string, Mess
       return ctx.review!.revertUndo(backupId, client.id);
     }),
 
+    review_polish_summaries: handle('review_polish_summaries', async (_c, p) => {
+      if (!Array.isArray(p.turnIds) || p.turnIds.some((x) => typeof x !== 'string') || p.turnIds.length > 20)
+        throw new ReviewServiceError('bad_request', 'turnIds must be at most 20 strings');
+      return ctx.review!.polish(sessionIdOf(p), p.turnIds as string[]);
+    }),
+
     review_mark_reviewed: handle('review_mark_reviewed', async (_c, p) => {
       if (typeof p.through !== 'number')
         throw new ReviewServiceError('bad_request', 'through (ms) is required');

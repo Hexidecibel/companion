@@ -12,6 +12,9 @@
  *              back to a question the user asked it through Herald. Replaces the
  *              generic finished / question note for that turn (no double
  *              notification), survives the session working again, expires by TTL.
+ *   review   — (a finished item with `review`) a risky code change (Code Review).
+ *              Survives the session working again; removed when the user marks
+ *              the session reviewed, or by TTL.
  */
 
 import type { HeraldInboxItem, InboxPriority } from './protocol';
@@ -133,7 +136,7 @@ export class InboxTracker {
         // stays: it is what the user asked for; an answer that ended in a
         // question has been answered).
         for (const [id, item] of this.items) {
-          if (`${item.serverId}:${item.sessionId}` !== sk) continue;
+          if (`${item.serverId}:${item.sessionId}` !== sk || item.review) continue;
           if (item.answer ? item.priority === 'blocked' : item.priority === 'finished')
             this.items.delete(id);
         }
@@ -154,6 +157,7 @@ export class InboxTracker {
             if (
               item.priority === 'finished' &&
               !item.answer &&
+              !item.review &&
               `${item.serverId}:${item.sessionId}` === sk
             )
               this.items.delete(oid);
@@ -240,6 +244,70 @@ export class InboxTracker {
     this.items.set(id, item);
     this.prune(a.createdAt);
     return { ...item };
+  }
+
+  /**
+   * A risky code change (Code Review). Keyed by the alert's dedupe key, so a
+   * coalesced update of the same alert replaces it in place.
+   */
+  addReviewAlert(a: {
+    key: string;
+    serverId: string;
+    sessionId: string;
+    sessionName: string;
+    headline: string;
+    level: 'high' | 'medium';
+    kinds: string[];
+    paths: string[];
+    createdAt: number;
+  }): HeraldInboxItem {
+    const id = `${a.serverId}:${a.sessionId}:rv${fnv1a(a.key)}`;
+    this.seenKeys.add(id);
+    const item: HeraldInboxItem = {
+      id,
+      serverId: a.serverId,
+      sessionId: a.sessionId,
+      sessionName: a.sessionName,
+      priority: 'finished',
+      headline: clip(oneLine(a.headline), 200),
+      createdAt: a.createdAt,
+      heard: this.heard.has(id),
+      review: {
+        level: a.level,
+        kinds: a.kinds.slice(0, 8).map((k) => clip(k, 40)),
+        paths: a.paths.slice(0, 8).map((p) => clip(p, 300)),
+      },
+    };
+    this.items.set(id, item);
+    this.prune(a.createdAt);
+    return { ...item };
+  }
+
+  /** The user reviewed the session: its risk alerts are done. */
+  resolveReviewAlerts(sessionKey: string): boolean {
+    let changed = false;
+    for (const [id, item] of this.items) {
+      if (item.review && `${item.serverId}:${item.sessionId}` === sessionKey) {
+        this.items.delete(id);
+        changed = true;
+      }
+    }
+    return changed;
+  }
+
+  /** Review alerts restored after a restart. */
+  restoreReviewAlerts(items: HeraldInboxItem[], now: number): void {
+    for (const i of items) {
+      if (!i.review || now - i.createdAt > FINISHED_TTL_MS) continue;
+      this.seenKeys.add(i.id);
+      this.items.set(i.id, { ...i, heard: i.heard || this.heard.has(i.id) });
+    }
+    this.prune(now);
+  }
+
+  /** Review alert items (persisted). */
+  reviewAlerts(): HeraldInboxItem[] {
+    return this.list().filter((i) => i.review);
   }
 
   /** Answers restored after a restart (unheard ones are still news). */

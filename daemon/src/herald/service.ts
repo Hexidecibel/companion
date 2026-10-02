@@ -129,6 +129,27 @@ export class HeraldRelayError extends Error {
   }
 }
 
+/** What Herald needs from Code Review (late-bound: Review is built after Herald). */
+export interface HeraldReviewLink {
+  /** Grounded digest for the review_changes tool (null = unknown session). */
+  digest(sessionId: string, scope: 'since_last_look' | 'last_turn' | 'all'): Promise<object | null>;
+}
+
+/** One turn to polish (Code Review review_polish_summaries). */
+export interface PolishItem {
+  id: string;
+  prompt: string;
+  reply: string;
+  files: string[];
+  gist: string;
+}
+
+const POLISH_SYSTEM =
+  'You write one-line gists of what a coding session did in a turn, like a terse commit subject. ' +
+  'Past tense verb first ("Fixed the echo guard", "Added retry to uploads"), at most 60 characters, no trailing period, ' +
+  'no file paths unless essential, never invent anything not in the input. ' +
+  'Reply with JSON only: [{"id": "...", "gist": "..."}] in the same order as the input.';
+
 export interface HeraldServiceDeps {
   config: ResolvedHeraldConfig;
   provider: LlmProvider | null;
@@ -274,6 +295,7 @@ export class HeraldService {
   /** Last time the user spoke to Herald (answers are spoken during a voice exchange). */
   private lastVoiceAt = 0;
   private speakingSuppressesFn: ((clientId: string) => boolean) | undefined;
+  private review: HeraldReviewLink | null = null;
 
   constructor(deps: HeraldServiceDeps) {
     this.cfg = deps.config;
@@ -380,6 +402,7 @@ export class HeraldService {
     this.actions.loadPersisted(persisted.actions);
     this.asks.load(persisted.asks ?? []);
     this.inbox.restoreAnswers(persisted.answers ?? [], this.now());
+    this.inbox.restoreReviewAlerts(persisted.reviews ?? [], this.now());
     this.toolbox?.loadOpened(persisted.cushOpened);
     this.verbosity = persisted.verbosity ?? 'auto';
     this.pronunciations = persisted.pronunciations ?? [];
@@ -507,6 +530,7 @@ export class HeraldService {
       ...(this.pronunciations.length ? { pronunciations: this.pronunciations } : {}),
       asks: this.asks.list(),
       answers: this.inbox.answers(),
+      ...(this.inbox.reviewAlerts().length ? { reviews: this.inbox.reviewAlerts() } : {}),
       usage: this.usage.toPersisted(),
     };
   }
@@ -1146,6 +1170,7 @@ export class HeraldService {
         verbositySet = level;
       },
       showSession: (s, deviceId) => this.showResolved(s, deviceId),
+      ...(this.review ? { review: this.review } : {}),
       resolveDevice: (phrase) => this.resolveDeviceWords(phrase, turn.origin?.clientId ?? null),
     };
     let verbositySet: HeraldVerbosity | null = null;
@@ -1301,6 +1326,7 @@ export class HeraldService {
       .filter(
         (i) =>
           i.answer ||
+          !!i.review ||
           !(i.priority === 'finished' && live.get(`${i.serverId}:${i.sessionId}`) === 'working')
       )
       // Answers to the user's own questions first, then blocked, finished.
@@ -1316,7 +1342,7 @@ export class HeraldService {
     const now = this.now();
     return items.map(
       (i) =>
-        `[${i.answer ? 'answer' : i.priority}] ${clip(oneLine(i.headline), i.answer ? 320 : 200)} (${i.sessionName}, ${formatAgo(now - i.createdAt)} ago)`
+        `[${i.answer ? 'answer' : i.review ? 'risky change' : i.priority}] ${clip(oneLine(i.headline), i.answer ? 320 : 200)} (${i.sessionName}, ${formatAgo(now - i.createdAt)} ago)`
     );
   }
 
@@ -1633,6 +1659,107 @@ export class HeraldService {
       console.error('Herald: audit append failed:', err);
     }
     return { askId };
+  }
+
+  // ---------------------------------------------------------------- code review
+
+  setReview(link: HeraldReviewLink | null): void {
+    this.review = link;
+  }
+
+  /**
+   * A risky code change (high only, deduped + coalesced by Code Review): an inbox
+   * item toned like news, never spoken unasked. Updates in place by key.
+   */
+  addReviewAlert(a: {
+    key: string;
+    sessionId: string;
+    sessionName: string;
+    headline: string;
+    level: 'high' | 'medium';
+    kinds: string[];
+    paths: string[];
+  }): void {
+    if (!this.started || this.disposed) return;
+    this.inbox.addReviewAlert({ ...a, serverId: 'local', createdAt: this.now() });
+    this.emit({ kind: 'inbox', inbox: this.inbox.list() });
+    this.persist();
+  }
+
+  /** The user marked the session reviewed: its risk alerts are resolved. */
+  resolveReviewAlerts(sessionId: string): void {
+    if (!this.started || this.disposed) return;
+    if (this.inbox.resolveReviewAlerts(`local:${sessionId}`)) {
+      this.emit({ kind: 'inbox', inbox: this.inbox.list() });
+      this.persist();
+    }
+  }
+
+  /**
+   * Code Review "polish summaries": one batched brain call (<= 20 turns, no
+   * tools), metered like any other Herald request. Returns id -> gist for the
+   * turns the model answered sensibly; the caller caches them.
+   */
+  async polishGists(items: PolishItem[]): Promise<Map<string, string>> {
+    const out = new Map<string, string>();
+    const provider = this.provider;
+    if (!this.cfg.featureEnabled || !provider || this.disposed)
+      throw new HeraldRelayError('herald_unavailable', 'Herald brain is not available');
+    if (this.skipBrainReason())
+      throw new HeraldRelayError('herald_unavailable', 'Herald brain is offline right now');
+    const batch = items.slice(0, 20);
+    if (!batch.length) return out;
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 20_000);
+    timer.unref?.();
+    try {
+      const res = await provider.chat({
+        system: POLISH_SYSTEM,
+        messages: [
+          {
+            role: 'user',
+            text: JSON.stringify(
+              batch.map((b) => ({
+                id: b.id,
+                request: clip(oneLine(b.prompt), 300),
+                reply: clip(oneLine(b.reply), 600),
+                files: b.files.slice(0, 6),
+                draft: b.gist,
+              }))
+            ),
+          },
+        ],
+        tools: [],
+        toolChoice: 'none',
+        maxTokens: 60 + 40 * batch.length,
+        signal: ctrl.signal,
+        onText: () => {},
+      });
+      this.onUsage(res.usage || {});
+      const m = (res.text || '').match(/\[[\s\S]*\]/);
+      if (!m) return out;
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(m[0]);
+      } catch {
+        return out;
+      }
+      if (!Array.isArray(parsed)) return out;
+      const ids = new Set(batch.map((b) => b.id));
+      for (const r of parsed) {
+        if (!r || typeof r !== 'object') continue;
+        const { id, gist } = r as { id?: unknown; gist?: unknown };
+        if (typeof id !== 'string' || !ids.has(id) || typeof gist !== 'string') continue;
+        const g = oneLine(gist).replace(/[.\s]+$/, '');
+        if (g.length >= 3 && g.length <= 80) out.set(id, g);
+      }
+      return out;
+    } catch (err) {
+      if (err instanceof HeraldRelayError) throw err;
+      throw new HeraldRelayError('herald_unavailable', `Herald brain failed: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   /** Remember a send that expects a reply (ask-and-report). */
