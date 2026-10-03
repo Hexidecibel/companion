@@ -38,6 +38,9 @@ ${bold('COMMANDS')}
   token               Generate a new authentication token
   logs                Show recent daemon logs
   enable-remote       Configure remote_capabilities (exec / dispatch / write)
+  pair                Watch pairing requests and approve / deny them
+  pair --qr           Print a one-time pairing QR (10 min, single use)
+  devices             List paired devices (devices revoke|rename <id|name>)
   help                Show this help message
 
 ${bold('OPTIONS')}
@@ -639,6 +642,18 @@ export async function dispatchCli(args: string[]): Promise<boolean> {
     case 'logs':
       cmdLogs();
       return true;
+
+    case 'pair': {
+      const { cmdPair } = await import('./pairing/cli');
+      await cmdPair(args.slice(1));
+      return true;
+    }
+
+    case 'devices': {
+      const { cmdDevices } = await import('./pairing/cli');
+      await cmdDevices(args.slice(1));
+      return true;
+    }
 
     case 'enable-remote': {
       const { cmdEnableRemote } = await import('./remote-setup');

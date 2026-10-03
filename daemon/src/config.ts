@@ -213,6 +213,10 @@ export function loadConfig(): DaemonConfig {
         anthropicAdminApiKey: parsed.anthropic_admin_api_key,
         concierge_dir: parsed.concierge_dir,
         herald: parseHeraldConfigBlock(parsed.herald),
+        name: typeof parsed.name === 'string' ? parsed.name : undefined,
+        pairing: typeof parsed.pairing === 'boolean' ? parsed.pairing : undefined,
+        pairingAllowPublic:
+          typeof parsed.pairing_allow_public === 'boolean' ? parsed.pairing_allow_public : undefined,
       };
     } catch (err) {
       console.error(`Error loading config from ${configPath}:`, err);
@@ -309,6 +313,11 @@ export function saveConfig(config: DaemonConfig): void {
   // Preserve the herald block across rewrites (e.g. token rotation).
   if (config.herald) {
     fileConfig.herald = config.herald;
+  }
+  if (config.name) fileConfig.name = config.name;
+  if (config.pairing !== undefined) fileConfig.pairing = config.pairing;
+  if (config.pairingAllowPublic !== undefined) {
+    fileConfig.pairing_allow_public = config.pairingAllowPublic;
   }
 
   if (config.listeners.length === 1) {

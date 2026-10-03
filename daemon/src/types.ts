@@ -52,6 +52,12 @@ export interface DaemonConfig {
   concierge_dir?: string;
   // Herald conversational front layer (raw snake_case block; see herald/config.ts).
   herald?: HeraldConfigBlock;
+  // Display name (mDNS, pairing). Default: "Companion on <hostname>".
+  name?: string;
+  // Device pairing (pairing/manager.ts). Default on; code pairing only from
+  // loopback / LAN / tailnet unless pairingAllowPublic.
+  pairing?: boolean;
+  pairingAllowPublic?: boolean;
 }
 
 export interface FeedbackOption {
@@ -187,6 +193,10 @@ export interface WebSocketResponse {
   isLocal?: boolean; // Whether connection is from localhost (sent in auth response)
   gitEnabled?: boolean; // Whether git integration is enabled (sent in auth response)
   scope?: 'full' | 'trigger'; // Auth response: 'trigger' = the Herald trigger token (triggers only)
+  authKind?: 'device' | 'legacy'; // Auth response: paired-device token or the legacy listener token
+  deviceId?: string; // Auth response (device tokens): the paired device id
+  daemonId?: string; // Auth response: the daemon's stable public id
+  daemonName?: string; // Auth response: the daemon's display name
 }
 
 export interface RegisteredDevice {

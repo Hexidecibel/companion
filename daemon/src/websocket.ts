@@ -48,6 +48,12 @@ import { HeraldVoiceService } from './herald/voice/service';
 import { VoiceServiceClient } from './herald/voice/client';
 import { HeraldTriggerService } from './herald/trigger';
 import { ReviewService } from './review/service';
+import { DeviceRegistry, isDeviceToken } from './pairing/registry';
+import { PairingManager, PairResult, PendingPairing } from './pairing/manager';
+import { DaemonIdentity, ephemeralIdentity } from './pairing/identity';
+import { registerPairingHandlers } from './handlers/pairing';
+import { classifyTriggerOrigin } from './herald/trigger';
+import { resolveTriggerConfig } from './herald/config';
 
 // File for persisting tmux session configs
 const TMUX_CONFIGS_FILE = path.join(os.homedir(), '.companion', 'tmux-sessions.json');
@@ -90,6 +96,19 @@ export class WebSocketHandler {
   private heraldVoice: HeraldVoiceService | null = null;
   private heraldTrigger: HeraldTriggerService;
   private review: ReviewService | null = null;
+  private identity: DaemonIdentity;
+  private devices: DeviceRegistry;
+  private pairing: PairingManager;
+  private pairingSweep: ReturnType<typeof setInterval>;
+  /** Unauthenticated message types: the pairing handshake, nothing else. */
+  private static readonly PAIR_UNAUTH_TYPES = new Set([
+    'pair_hello',
+    'pair_request',
+    'pair_confirm',
+    'pair_redeem_qr',
+  ]);
+  /** Socket close code sent to a revoked device. */
+  static readonly CLOSE_DEVICE_REVOKED = 4401;
   private deadConnectionInterval: ReturnType<typeof setInterval>;
   private static readonly PONG_TIMEOUT_MS = 90_000;
   private static readonly DEAD_CHECK_INTERVAL_MS = 60_000;
@@ -157,8 +176,67 @@ export class WebSocketHandler {
       this.herald.setReview({ digest: (id, scope) => review.digest(id, scope) });
     }
 
+    // Device pairing (registry is read lazily: nothing touches devices.json until used)
+    this.identity = ephemeralIdentity(config.name);
+    this.devices = new DeviceRegistry();
+    this.pairing = new PairingManager({
+      registry: this.devices,
+      daemon: () => ({ id: this.identity.id, name: this.identity.name }),
+      enabled: () => this.config.pairing !== false,
+      allowPublic: () => this.config.pairingAllowPublic === true,
+      deliver: (clientId, result) => this.deliverPairResult(clientId, result),
+      onChange: (pending) => this.broadcastPairPending(pending),
+      audit: (action, info, ok) =>
+        this.auditLog.append({
+          ts: Date.now(),
+          origin: {
+            addr: String(info.addr ?? ''),
+            clientId: String(info.clientId ?? ''),
+            isLocal: false,
+            tls: false,
+            origin: null,
+          },
+          action,
+          payload: Object.fromEntries(
+            Object.entries(info).filter(([k]) => k !== 'addr' && k !== 'clientId')
+          ),
+          result: { ok },
+          durationMs: 0,
+        }),
+    });
+    this.pairingSweep = setInterval(() => this.pairing.sweep(), 5_000);
+    this.pairingSweep.unref?.();
+
     // Register all handler modules
     this.handlers = registerAllHandlers(this.createHandlerContext());
+    for (const [type, h] of Object.entries(
+      registerPairingHandlers({
+        pairing: this.pairing,
+        devices: this.devices,
+        identity: () => this.identity,
+        send: (ws, r) => this.send(ws, r),
+        disconnectDevice: (id) => this.disconnectDevice(id),
+        listenerTls: (c) =>
+          Boolean(this.config.listeners.find((l) => l.port === c.listenerPort)?.tls),
+        audit: (action, c, info, ok) =>
+          this.auditLog.append({
+            ts: Date.now(),
+            origin: {
+              addr: c.remoteAddress || '',
+              clientId: c.id,
+              isLocal: c.isLocal,
+              tls: false,
+              origin: c.origin,
+            },
+            action,
+            payload: info,
+            result: { ok },
+            durationMs: 0,
+          }),
+      })
+    )) {
+      this.handlers.set(type, h);
+    }
 
     // Create a WebSocketServer for each listener
     for (const { server, listener } of servers) {
@@ -495,6 +573,7 @@ export class WebSocketHandler {
       isLocal,
       lastPongTime: Date.now(),
       origin: null,
+      remoteAddress,
     };
     const xff = req.headers?.['x-forwarded-for'];
     if (xff) client.forwardedFor = Array.isArray(xff) ? xff.join(', ') : xff;
@@ -532,6 +611,7 @@ export class WebSocketHandler {
     ws.on('close', (code, reason) => {
       clearInterval(serverPingInterval);
       this.clients.delete(clientId);
+      this.pairing.clientGone(clientId);
       this.heraldVoice?.clientGone(clientId);
       this.review?.dropClient(clientId);
       console.log(
@@ -543,6 +623,7 @@ export class WebSocketHandler {
       clearInterval(serverPingInterval);
       console.error(`WebSocket: Client error (${clientId}):`, err);
       this.clients.delete(clientId);
+      this.pairing.clientGone(clientId);
       this.heraldVoice?.clientGone(clientId);
       this.review?.dropClient(clientId);
     });
@@ -583,6 +664,51 @@ export class WebSocketHandler {
       const listener = this.config.listeners.find((l) => l.port === client.listenerPort);
       const origins = listener?.remoteCapabilities?.origins;
 
+      // --- Paired-device token (cdt1.<id>.<secret>) ---
+      if (isDeviceToken(token)) {
+        const device = this.devices.verify(token);
+        const allowedOrigins = listener?.remoteCapabilities?.allowedOrigins;
+        const originOk =
+          !Array.isArray(allowedOrigins) ||
+          allowedOrigins.length === 0 ||
+          (!!providedOrigin && allowedOrigins.includes(providedOrigin));
+        if (!device || !originOk) {
+          this.send(client.ws, {
+            type: 'authenticated',
+            success: false,
+            error: device ? 'origin_not_allowed' : 'device_revoked',
+            requestId,
+          });
+          console.log(
+            `WebSocket: Client rejected (${client.id}) - ${device ? 'origin not allowed' : 'unknown or revoked device token'}`
+          );
+          return;
+        }
+        client.authenticated = true;
+        client.scope = 'full';
+        client.authKind = 'device';
+        client.pairedDeviceId = device.id;
+        client.deviceCapabilities = device.capabilities;
+        client.deviceId = authPayload.deviceId;
+        client.origin = providedOrigin;
+        this.devices.touch(device.id);
+        this.send(client.ws, {
+          type: 'authenticated',
+          success: true,
+          isLocal: client.isLocal,
+          gitEnabled: this.config.git,
+          authKind: 'device',
+          deviceId: device.id,
+          daemonId: this.identity.id,
+          daemonName: this.identity.name,
+          requestId,
+        });
+        console.log(
+          `WebSocket: Client authenticated (${client.id}) as device "${device.name}" (${device.id})`
+        );
+        return;
+      }
+
       // --- Per-origin credential path (only when origins[] is configured) ---
       if (Array.isArray(origins) && origins.length > 0) {
         const matched = origins.find(
@@ -594,6 +720,7 @@ export class WebSocketHandler {
           client.deviceId = authPayload.deviceId;
           client.origin = providedOrigin;
           client.originCredential = matched;
+          client.authKind = 'origin';
 
           this.send(client.ws, {
             type: 'authenticated',
@@ -619,6 +746,7 @@ export class WebSocketHandler {
       if (triggerCred) {
         client.authenticated = true;
         client.scope = 'trigger';
+        client.authKind = 'trigger';
         client.triggerCredential = triggerCred;
         client.origin = providedOrigin;
         this.send(client.ws, {
@@ -653,6 +781,7 @@ export class WebSocketHandler {
 
         client.authenticated = true;
         client.scope = 'full';
+        client.authKind = 'legacy';
         client.deviceId = authPayload.deviceId;
         client.origin = providedOrigin;
 
@@ -661,6 +790,9 @@ export class WebSocketHandler {
           success: true,
           isLocal: client.isLocal,
           gitEnabled: this.config.git,
+          authKind: 'legacy',
+          daemonId: this.identity.id,
+          daemonName: this.identity.name,
           requestId,
         });
         console.log(
@@ -674,6 +806,12 @@ export class WebSocketHandler {
           requestId,
         });
       }
+      return;
+    }
+
+    // The pairing handshake is the only thing an unauthenticated socket may do.
+    if (WebSocketHandler.PAIR_UNAUTH_TYPES.has(type)) {
+      this.handleUnauthPairing(client, type, payload, requestId);
       return;
     }
 
@@ -706,6 +844,7 @@ export class WebSocketHandler {
       if (client.deviceId) {
         this.push.updateDeviceLastSeen(client.deviceId);
       }
+      if (client.pairedDeviceId) this.devices.touch(client.pairedDeviceId);
       this.send(client.ws, {
         type: 'pong',
         success: true,
@@ -808,6 +947,151 @@ export class WebSocketHandler {
     }
   }
 
+  // --- Pairing ---
+
+  /** index.ts hands over the persisted identity (tests keep an ephemeral one). */
+  setIdentity(identity: DaemonIdentity): void {
+    this.identity = identity;
+  }
+
+  getIdentity(): DaemonIdentity {
+    return this.identity;
+  }
+
+  private pairingNetwork(client: AuthenticatedClient) {
+    return classifyTriggerOrigin({
+      peer: client.remoteAddress || '',
+      forwardedFor: client.forwardedFor,
+      trustedProxies: resolveTriggerConfig(this.config.herald).trustedProxies,
+    });
+  }
+
+  private handleUnauthPairing(
+    client: AuthenticatedClient,
+    type: string,
+    payload: unknown,
+    requestId?: string
+  ): void {
+    const p = (payload && typeof payload === 'object' ? payload : {}) as Record<string, unknown>;
+    const origin = this.pairingNetwork(client);
+    const answer = (
+      r:
+        | { ok: true; payload: unknown }
+        | { ok: false; code: string; error: string; retryAfterMs?: number; attemptsLeft?: number }
+    ) =>
+      this.send(client.ws, {
+        type,
+        success: r.ok,
+        payload: r.ok
+          ? r.payload
+          : { code: r.code, retryAfterMs: r.retryAfterMs, attemptsLeft: r.attemptsLeft },
+        ...(r.ok ? {} : { error: r.error }),
+        requestId,
+      });
+
+    switch (type) {
+      case 'pair_hello':
+        answer({
+          ok: true,
+          payload: {
+            daemonId: this.identity.id,
+            name: this.identity.name,
+            version: this.identity.version,
+            pairing: this.config.pairing !== false,
+            codePairing:
+              this.config.pairing !== false &&
+              (origin.network !== 'public' || this.config.pairingAllowPublic === true),
+          },
+        });
+        return;
+      case 'pair_request': {
+        const r = this.pairing.request({
+          clientId: client.id,
+          addr: origin.client,
+          network: origin.network,
+          deviceName: p.deviceName,
+          platform: p.platform,
+          publicNonce: p.publicNonce,
+        });
+        answer(
+          r.ok
+            ? {
+                ok: true,
+                payload: {
+                  pairingId: r.pairingId,
+                  expiresAt: r.expiresAt,
+                  daemonId: this.identity.id,
+                  daemonName: this.identity.name,
+                },
+              }
+            : r
+        );
+        return;
+      }
+      case 'pair_confirm': {
+        const r = this.pairing.confirm({
+          clientId: client.id,
+          addr: origin.client,
+          pairingId: p.pairingId,
+          code: p.code,
+        });
+        answer(r.ok ? { ok: true, payload: r.result } : r);
+        return;
+      }
+      case 'pair_redeem_qr': {
+        const r = this.pairing.redeemQr({
+          clientId: client.id,
+          addr: origin.client,
+          otp: p.otp,
+          deviceName: p.deviceName,
+          platform: p.platform,
+        });
+        answer(r.ok ? { ok: true, payload: r.result } : r);
+        return;
+      }
+    }
+  }
+
+  /** A pairing request was decided elsewhere: tell the waiting requester. */
+  private deliverPairResult(clientId: string, result: PairResult): void {
+    const c = this.clients.get(clientId);
+    if (!c || c.ws.readyState !== WebSocket.OPEN) return;
+    this.send(c.ws, { type: 'pair_result', success: true, payload: result });
+  }
+
+  /** The pending list goes to every signed-in (full scope) client, subscribed or not. */
+  private broadcastPairPending(pending: PendingPairing[]): void {
+    const msg = JSON.stringify({ type: 'pair_pending', success: true, payload: { pending } });
+    for (const c of this.clients.values()) {
+      if (!c.authenticated || c.scope === 'trigger' || c.ws.readyState !== WebSocket.OPEN) continue;
+      c.ws.send(msg);
+    }
+  }
+
+  /** Revoked: close the device's sockets now. Returns how many were closed. */
+  private disconnectDevice(deviceId: string): number {
+    let n = 0;
+    for (const [id, c] of this.clients) {
+      if (c.pairedDeviceId !== deviceId) continue;
+      n++;
+      this.send(c.ws, {
+        type: 'token_invalidated',
+        success: true,
+        payload: { reason: 'device_revoked' },
+      });
+      c.authenticated = false;
+      c.subscribed = false;
+      try {
+        c.ws.close(WebSocketHandler.CLOSE_DEVICE_REVOKED, 'device_revoked');
+      } catch {
+        c.ws.terminate();
+      }
+      this.clients.delete(id);
+      this.pairing.clientGone(id);
+    }
+    return n;
+  }
+
   // --- Shared helpers ---
 
   private requireRemoteCapability(
@@ -831,6 +1115,10 @@ export class WebSocketHandler {
     // listener allows it. An absent per-origin cap leaves the listener decision intact.
     const originCaps = client.originCredential?.capabilities;
     if (originCaps && originCaps[action] === false) {
+      return 'capability_disabled';
+    }
+    // Same narrowing for a paired device's own capabilities.
+    if (client.deviceCapabilities && client.deviceCapabilities[action] === false) {
       return 'capability_disabled';
     }
 
@@ -928,6 +1216,8 @@ export class WebSocketHandler {
 
   shutdown(): void {
     clearInterval(this.deadConnectionInterval);
+    clearInterval(this.pairingSweep);
+    this.devices.shutdown();
     this.escalation.destroy();
     this.usageMonitor.stop();
     this.herald?.shutdown();

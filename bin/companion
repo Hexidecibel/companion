@@ -14,6 +14,8 @@
 #   bin/companion herald-provider   Set herald.provider in the live config (idempotent)
 #   bin/companion herald-set        Set one herald.* setting (budget, cache, trigger trust)
 #   bin/companion trigger-token     Herald remote-trigger tokens: create | rotate | revoke | list | migrate | show-path
+#   bin/companion pair [--qr]       Approve / deny new devices pairing with this daemon, or print a one-time pairing QR
+#   bin/companion devices           Paired devices: list | revoke <id|name> | rename <id|name> <new name>
 #   bin/companion publish-update    Put a desktop build or Android APK on the update feed (--run <id|latest> | --from <dir> | --apk <file>)
 #   bin/companion help         Show all commands
 #

@@ -4,6 +4,7 @@ import { SessionWatcher } from './watcher';
 import { SubAgentWatcher } from './subagent-watcher';
 import { InputInjector } from './input-injector';
 import { MdnsAdvertiser } from './mdns';
+import { loadDaemonIdentity } from './pairing/identity';
 import { PushNotificationService } from './push';
 import { isSandbox } from './sandbox';
 import { NotificationStore } from './notification-store';
@@ -181,12 +182,22 @@ async function main(): Promise<void> {
     workGroupManager
   );
   httpRoutes.heraldTrigger = (req, res) => wsHandler.handleHeraldTriggerHttp(req, res);
+  const identity = loadDaemonIdentity(config.name);
+  wsHandler.setIdentity(identity);
+  console.log(`Identity: "${identity.name}" id=${identity.id} v${identity.version}`);
 
   // Start mDNS advertisement (advertise first listener)
   let mdns: MdnsAdvertiser | null = null;
   if (config.mdnsEnabled && config.listeners.length > 0) {
     const primaryListener = config.listeners[0];
-    mdns = new MdnsAdvertiser(primaryListener.port, primaryListener.tls || false);
+    mdns = new MdnsAdvertiser({
+      port: primaryListener.port,
+      tls: primaryListener.tls || false,
+      id: identity.id,
+      name: identity.name,
+      version: identity.version,
+      pairing: config.pairing !== false,
+    });
     mdns.start();
   }
 

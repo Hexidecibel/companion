@@ -39,6 +39,14 @@ export interface AuthenticatedClient {
   // Set when the client authenticated against a per-origin credential
   // (remoteCapabilities.origins[]). Used to narrow capabilities per origin.
   originCredential?: OriginCredential;
+  /** TCP peer address of the upgrade request. */
+  remoteAddress?: string;
+  /** Which credential authenticated this socket. */
+  authKind?: 'device' | 'legacy' | 'origin' | 'trigger';
+  /** authKind 'device': the paired device (devices.json id). */
+  pairedDeviceId?: string;
+  /** authKind 'device': per-device narrowing of remote exec / dispatch / write. */
+  deviceCapabilities?: { exec?: boolean; dispatch?: boolean; write?: boolean };
 }
 
 export interface ClientError {
