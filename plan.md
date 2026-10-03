@@ -1868,3 +1868,175 @@ layer richer "what is this work for" context.
   heard/acknowledged watermark per device vs per user?
 - **Notification interplay with existing escalation** (browser → push): does a spoken announcement
   suppress/delay push, and what happens when no voice endpoint is connected?
+
+---
+
+## Item: Packaging for friends & devs
+**Status:** in-progress (Phase 1 built 2026-10-03; Phases 2-3 planned)
+
+Goal: a friend or another developer goes from "never heard of it" to "phone shows my Claude
+sessions" without typing a token, without a Firebase project, and without the user's personal
+cush-tools / Infisical setup. Order: (1) discovery + pairing, (2) Docker compose, (3) push relay,
+secrets cleanup, first-run wizard.
+
+### Phase 1: Discovery + pairing (built)
+
+**Daemon identity.** `~/.companion/daemon-id.json` holds a stable random id (16 bytes hex, created
+on first start, 0600). Display name = config `name`, else `Companion on <hostname>`.
+
+**mDNS.** `_companion._tcp`, instance name = display name, unchanged `mdns_enabled` switch. TXT:
+`id` (daemon id), `name`, `version` (daemon package version), `pairing` (`1`/`0`), `tls` (`1`/`0`),
+`port`, `proto=1`. Never a token, code, OTP or path. A unit test asserts the TXT holds no listener
+token and only those keys.
+
+**Device registry.** `~/.companion/devices.json` (0600, atomic temp+rename, dir 0700):
+`{version:1, devices:[{id, name, platform, createdAt, lastSeenAt, salt, tokenHash, via, capabilities?}]}`.
+Token = `cdt1.<deviceId>.<43 chars base64url = 256 random bits>`; stored as
+`sha256(salt || secret)` with a 16-byte per-token salt, compared with `timingSafeEqual` (a dummy
+compare runs for unknown ids). scrypt buys nothing for 256-bit random secrets and would cost CPU on
+every reconnect. `lastSeenAt` writes are coalesced (at most one disk write per minute). Revoke
+deletes the entry (the audit log keeps the history). Trigger tokens stay a separate registry
+(`herald-trigger-tokens.json`, triggers only); the two share the hashing / constant-time helpers,
+not the file, so a trigger credential can never become a full one.
+
+**Pairing protocol.** Unauthenticated sockets may send exactly `pair_hello`, `pair_request`,
+`pair_confirm`, `pair_redeem_qr`; everything else still answers "Not authenticated".
+- `pair_hello` -> `{daemonId, name, version, pairing, tls}` (no secrets; lets a browser show what it
+  is pairing with).
+- `pair_request {deviceName, platform, publicNonce}` -> `{pairingId, expiresAt}`. The daemon makes a
+  6-digit code (`crypto.randomInt`), 2-minute expiry, bound to the requesting socket (a dropped
+  socket cancels the request). The code goes to: the journal (`Pairing: "Chris's iPad" (ios) wants
+  to pair - code 123456`), `bin/companion pair`, and a `pair_pending` broadcast to authenticated
+  clients (name, platform, code, address, expiry).
+- `pair_confirm {pairingId, code}` (same socket) -> `pair_result {status:'approved', token,
+  deviceId, daemonId, daemonName, publicNonce}`; the token is sent once and never stored in clear.
+- `pair_approve {pairingId}` / `pair_deny {pairingId}` from an authenticated client (or the CLI)
+  push the same `pair_result` (approved / denied) to the waiting requester.
+- QR: `pair_qr_create` (authenticated, or `bin/companion pair --qr`) -> one-time secret (32 bytes,
+  10-minute expiry, single use, at most 5 outstanding) as
+  `companion://pair?host=..&port=..&tls=0|1&id=<daemonId>&name=..&otp=..`. `pair_redeem_qr {otp,
+  deviceName, platform}` issues a device token without the code step. The web shows the QR as a
+  daemon-rendered PNG data URL (no QR library in the web bundle).
+- Limits: 5 wrong codes per pairingId then locked; 10 pending globally; 3 pending and 10 requests
+  per 10 min per IP; per-IP exponential backoff after wrong codes / bad OTPs (2^n s, cap 5 min,
+  forgotten after 15 quiet minutes); 50 wrong codes daemon-wide in 10 min suspends code pairing for
+  10 min. Every request / confirm / approve / deny / QR create+redeem / revoke / rename / upgrade is
+  audit-logged (never the code, OTP or token).
+- Network trust: `pairing: false` disables it. Code pairing (`pair_request`) is accepted only from
+  loopback, RFC 1918, link-local, CGNAT/tailnet 100.64/10 and IPv6 ULA/link-local, unless
+  `pairing_allow_public: true`. Behind a reverse proxy the X-Forwarded-For client is used (only when
+  the peer itself is trusted), so the public HAProxy route counts as public. QR redemption works from
+  anywhere: the OTP is a 256-bit secret the user handed over on purpose.
+
+**Auth.** `authenticate` accepts a device token (scope full, `authKind:'device'`) or the listener
+token (`authKind:'legacy'`, unchanged, documented as legacy). The response carries `authKind`,
+`deviceId`, `daemonId`. Device `capabilities` narrow remote exec/dispatch/write like per-origin
+credentials. Revoke closes that device's sockets immediately (`token_invalidated {reason:
+'device_revoked'}`, close 4401); the client stops reconnecting.
+
+**Management.** WS (authenticated, full scope): `devices_list` (+ `currentDeviceId`),
+`device_revoke`, `device_rename`, `pair_pending_list`, `device_upgrade {deviceName, platform}`
+(legacy-token client gets its own device token silently). CLI: `bin/companion pair [--qr]
+[--approve ID|--deny ID]` (watches and prompts y/n/skip), `bin/companion devices
+list|revoke|rename`; both talk to the running daemon over loopback with the listener token, and fall
+back to editing devices.json when the daemon is down.
+
+**Herald.** Not in Phase 1 (the stuck-session work owns the inbox right now). Follow-up: a
+`pair_request` inbox item with a tone for the active device only; approval stays on-screen, never
+by voice.
+
+**Clients.**
+- Discovery via `plugin:herald-native|discover_daemons {timeoutMs}` -> snapshot list `{name, host,
+  port, txt}`: Android NsdManager (serialized resolves), iOS NWBrowser + NWConnection to resolve the
+  endpoint (`NSLocalNetworkUsageDescription` + `NSBonjourServices=_companion._tcp` via
+  `setup-ios.sh`), desktop `mdns-sd` crate. Browser: none.
+- Add server: "Nearby" (name, host, version, Paired badge by daemon id), "Scan QR" (web camera +
+  jsQR, works in the WebViews; camera permission added) / "Paste a companion:// link", "Pair by
+  address" (code flow; prefilled with the page's own host in a browser), "Enter token manually"
+  (the old form, Advanced).
+- Pairing screen: "Enter the 6-digit code shown on your server, or approve this device from another
+  one you're signed in on", waits live for approval, stores the device token on the server entry.
+- `companion://` deep links: Android intent filter (setup-android.sh) + plugin `onNewIntent`; iOS /
+  macOS `CFBundleURLTypes` + `RunEvent::Opened`. Linux/Windows desktop: paste the link.
+- Approval prompt on every signed-in client (name, platform, code, Approve / Deny).
+- Settings -> Devices per server: last seen, This device, rename, revoke, "Show pairing QR",
+  "Upgrade to a device token" for legacy-token entries.
+
+**Threat model.**
+- *LAN attacker spamming pair requests*: per-IP and global caps, prompts are deduped and expire in 2
+  minutes; requests never auto-approve; pairing can be turned off; public networks refused by
+  default.
+- *Code guessing*: 6 digits, 5 tries per request, 3 concurrent per IP, exponential backoff, global
+  suspension; the code only appears where the user already is (journal, CLI, signed-in apps), so a
+  guesser has ~5e-6 odds per request and gets throttled long before 1e6 tries.
+- *Replayed QR*: single-use, 10-minute expiry, stored hashed; a leaked old QR is dead. A QR that
+  leaks while fresh pairs one device the user can see in Devices and revoke.
+- *Revocation*: deletes the hash, closes live sockets at once, refused on reconnect.
+- *Token storage on device*: the existing localStorage + tauri-plugin-store (app-private storage on
+  Android/iOS). Keystore/Keychain wrapping is a follow-up (needs a native secure-store command);
+  device tokens are per-device and revocable, which bounds the damage.
+- *TXT leakage*: TXT holds id, name, version, pairing/tls flags and port only (test-enforced); the
+  daemon id is not a credential.
+- *Legacy token*: unchanged and still all-powerful; the app offers the one-tap upgrade, and once all
+  devices are paired the user can rotate it.
+
+### Phase 2: Docker compose
+- Image `ghcr.io/hexidecibel/companion` (multi-arch amd64 + arm64 via buildx in release.yml),
+  `node:20-bookworm-slim` + tmux, git, ripgrep, curl, tini; non-root user `companion` (uid 1000,
+  overridable with build args to match the host). Daemon + web dist baked in; no Claude Code.
+- `docker-compose.yml`:
+  - `companion`: ports `9877:9877`; volumes `./data/claude:/home/companion/.claude` (Claude Code
+    auth + transcripts), `${PROJECTS_DIR:-./projects}:/home/companion/projects`,
+    `./data/companion:/home/companion/.companion` (config, devices.json, audit, state),
+    `./data/npm-global:/home/companion/.npm-global` (Claude Code install survives image upgrades);
+    healthcheck `curl -fs http://localhost:9877/health` (new unauthenticated endpoint: `{ok,
+    version}`); `restart: unless-stopped`; `init: true`. tmux runs inside the container (the daemon
+    starts the server on demand); `network_mode: host` documented as optional for mDNS (bridge
+    networks do not carry multicast).
+  - `herald-voice` (profile `voice`): the `voice/` service image, model cache volume, GPU block
+    commented; daemon gets `herald.voice_url=http://herald-voice:8790` through env.
+  - `tailscale` (profile `tailnet`): `tailscale/tailscale` with `TS_AUTHKEY`, `TS_SERVE_CONFIG`
+    serving `https://companion.<tailnet>.ts.net` -> `companion:9877`; companion uses
+    `network_mode: service:tailscale` in that profile so it is reachable on the tailnet only.
+- Setup step: `docker compose run --rm companion setup-claude` installs Claude Code
+  (`npm i -g @anthropic-ai/claude-code` into the npm-global volume) and runs `claude /login`
+  interactively; the daemon prints "Claude Code not installed / not logged in" on /health and in the
+  app until done.
+- Config from env (`COMPANION_PORT`, `COMPANION_NAME`, `COMPANION_PAIRING_ALLOW_PUBLIC`, ...) layered
+  over the config file; first start generates the legacy token and prints the pairing QR.
+
+### Phase 3: Push relay, secrets, wizard
+**Push relay** (`relay/`, small Node service on hexinas behind HAProxy, `push.cush.rocks`):
+- Holds the one Firebase service account. Daemons never get FCM credentials.
+- Registration: daemon generates an Ed25519 key pair on first use, `POST /v1/daemons` with its
+  public key -> relay id. Devices register their FCM/APNs token with their daemon (as today); the
+  daemon sends `POST /v1/push {deviceToken, title, body, data}` signed with its key (timestamp +
+  nonce, 60 s skew).
+- Abuse limits: per daemon 60 pushes/hour, 500/day; per device token 30/hour; at most 20 device
+  tokens per daemon; registration rate-limited per IP (5/day); unknown or revoked keys refused; an
+  admin can ban a daemon id.
+- Privacy: payload carries the session name and at most a 100-character preview; daemon setting
+  `push_preview: false` sends only "Session needs input"; the relay logs counts, not bodies, and
+  keeps no payloads. PRIVACY.md updated.
+- Self-hosters keep `fcm_credentials_path` (direct FCM wins over the relay).
+
+**Secrets.** Daemon reads secrets from env first (`ANTHROPIC_API_KEY`, `COMPANION_HERALD_*`), then
+`~/.companion/secrets.env` (0600, `KEY=value`), then config. `install-secrets` keeps cush-tools as an
+optional backend only when `.cush-secrets` and the inject tool exist; otherwise it prompts and writes
+secrets.env. Nothing in the repo assumes cush-tools or Infisical.
+
+**First-run wizard (later).** Web route `/web/setup` on a fresh daemon (no devices yet, loopback or
+LAN): name the daemon, check Claude Code login, choose pairing policy, optional Herald key, show the
+pairing QR; ends with "Open the app on your phone". `bin/companion setup` prints the same QR.
+
+**Distribution.** Android: the existing sideload updater feed (`publish-update --apk`) on
+`dev.cush.rocks`; friends install the first APK from a link, updates arrive in-app. Desktop: the
+existing signed updater feed (`publish-update --run`). iOS: TestFlight external testers. Phase 3
+adds a per-friend-safe public download page listing the current APK / desktop builds.
+
+### Tests Needed (Phase 1)
+- Registry persistence, mode 0600, hashing, constant-time verify, rename / revoke.
+- Pairing state machine: expiry, lockout, rate limits, approve/deny/confirm races, single-use QR OTP.
+- Auth with device token, legacy token, revoked token; revoke closes live sockets.
+- mDNS TXT has no secrets.
+- Web: discovery list, code entry, approval prompt, Devices settings, deep-link parsing.
