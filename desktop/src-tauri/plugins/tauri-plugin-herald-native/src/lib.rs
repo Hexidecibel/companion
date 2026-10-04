@@ -30,19 +30,40 @@
 //!   the system installer (the user confirms). Error codes: install_permission,
 //!   verify_failed, download_failed, bad_url.
 //! * `app_update_open_settings` - "Install unknown apps" for this app.
+//!
+//! Pairing:
+//! * `discover_daemons { timeoutMs }` - browse `_companion._tcp` for that long;
+//!   `{ daemons: [{ name, host, addresses, port, txt }] }`. Android NsdManager,
+//!   iOS NWBrowser, desktop mdns-sd (discover.rs).
+//! * `take_pending_link` - the `companion://` link that launched the app
+//!   (`{ url }`, once). Later links arrive live: Android as the plugin event
+//!   `deepLink { url }`, iOS / macOS as the app event `companion-deep-link`.
+use std::sync::Mutex;
+
 use tauri::{
     plugin::{Builder, TauriPlugin},
     Runtime,
 };
 
+pub mod discover;
 #[cfg(mobile)]
 mod mobile;
 #[cfg(desktop)]
 pub mod route;
 
+/// The deep link that arrived before the page listened (iOS / macOS).
+#[derive(Default)]
+pub struct PendingLink(pub Mutex<Option<String>>);
+
+pub const DEEP_LINK_EVENT: &str = "companion-deep-link";
+
 pub fn init<R: Runtime>() -> TauriPlugin<R> {
     Builder::new("herald-native")
         .setup(|app, api| {
+            {
+                use tauri::Manager;
+                app.manage(PendingLink::default());
+            }
             #[cfg(mobile)]
             {
                 use tauri::Manager;
@@ -65,12 +86,69 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
             commands::app_update_fetch_feed,
             commands::app_update_install,
             commands::app_update_open_settings,
+            commands::discover_daemons,
+            commands::take_pending_link,
         ])
+        .on_event(|_app, _event| {
+            // iOS / macOS: companion:// links (Android: HeraldNativePlugin.kt).
+            #[cfg(any(target_os = "macos", target_os = "ios"))]
+            if let tauri::RunEvent::Opened { urls } = _event {
+                use tauri::{Emitter, Manager};
+                for url in urls.iter().filter(|u| u.scheme() == "companion") {
+                    if let Some(p) = _app.try_state::<PendingLink>() {
+                        *p.0.lock().unwrap() = Some(url.to_string());
+                    }
+                    let _ = _app.emit(DEEP_LINK_EVENT, url.to_string());
+                }
+            }
+        })
         .build()
 }
 
 mod commands {
     use tauri::{command, ipc::Channel, AppHandle, Runtime};
+
+    /// Browse mDNS for Companion daemons for `timeout_ms`.
+    #[command]
+    pub async fn discover_daemons<R: Runtime>(
+        app: AppHandle<R>,
+        timeout_ms: Option<u64>,
+    ) -> Result<serde_json::Value, String> {
+        let timeout = timeout_ms.unwrap_or(3000).clamp(500, 10_000);
+        #[cfg(mobile)]
+        {
+            use tauri::Manager;
+            app.state::<super::mobile::HeraldNative<R>>()
+                .run("discoverDaemons", serde_json::json!({ "timeoutMs": timeout }))
+        }
+        #[cfg(desktop)]
+        {
+            let _ = app;
+            let daemons = tauri::async_runtime::spawn_blocking(move || super::discover::browse(timeout))
+                .await
+                .map_err(|e| e.to_string())??;
+            Ok(serde_json::json!({ "daemons": daemons }))
+        }
+    }
+
+    /// The `companion://` link that launched the app, once.
+    #[command]
+    pub async fn take_pending_link<R: Runtime>(app: AppHandle<R>) -> Result<serde_json::Value, String> {
+        #[cfg(target_os = "android")]
+        {
+            use tauri::Manager;
+            app.state::<super::mobile::HeraldNative<R>>()
+                .run("takePendingLink", serde_json::json!({}))
+        }
+        #[cfg(not(target_os = "android"))]
+        {
+            use tauri::Manager;
+            let url = app
+                .try_state::<super::PendingLink>()
+                .and_then(|p| p.0.lock().ok().and_then(|mut g| g.take()));
+            Ok(serde_json::json!({ "url": url }))
+        }
+    }
 
     /// The current audio route (see route.rs / the mobile plugins); null when unknown.
     #[command]

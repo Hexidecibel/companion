@@ -1,5 +1,5 @@
 [default]
-description = "Herald native voice glue (earbud media button, audio focus, audio route, native capture) and the Android sideload updater"
+description = "Herald native voice glue (earbud media button, audio focus, audio route, native capture), the Android sideload updater, and pairing (mDNS discovery, companion:// links)"
 permissions = [
   "allow-set-media-session",
   "allow-set-audio-focus",
@@ -11,4 +11,6 @@ permissions = [
   "allow-app-update-fetch-feed",
   "allow-app-update-install",
   "allow-app-update-open-settings",
+  "allow-discover-daemons",
+  "allow-take-pending-link",
 ]

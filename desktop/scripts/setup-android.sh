@@ -188,6 +188,15 @@ else
   echo "apk_updates cache path already in file_paths.xml"
 fi
 
+# 13. Pairing: companion://pair links open the app (HeraldNativePlugin.kt reads
+#     them; MainActivity is singleTask, so a link while running is onNewIntent).
+if ! grep -q 'android:scheme="companion"' "$MANIFEST"; then
+  echo "Adding companion://pair intent filter to MainActivity..."
+  sed -i '0,/<\/intent-filter>/s||</intent-filter>\n            <intent-filter>\n                <action android:name="android.intent.action.VIEW" />\n                <category android:name="android.intent.category.DEFAULT" />\n                <category android:name="android.intent.category.BROWSABLE" />\n                <data android:scheme="companion" android:host="pair" />\n            </intent-filter>|' "$MANIFEST"
+else
+  echo "companion:// intent filter already in manifest"
+fi
+
 echo ""
 echo "=== Android FCM setup complete ==="
 echo ""

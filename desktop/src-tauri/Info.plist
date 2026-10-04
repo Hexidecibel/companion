@@ -5,5 +5,22 @@
 <dict>
   <key>NSMicrophoneUsageDescription</key>
   <string>Companion uses the microphone when you talk to Herald, your voice assistant.</string>
+  <key>NSLocalNetworkUsageDescription</key>
+  <string>Companion looks for Companion servers on your network so you can pair without typing an address.</string>
+  <key>NSBonjourServices</key>
+  <array>
+    <string>_companion._tcp</string>
+  </array>
+  <key>CFBundleURLTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleURLName</key>
+      <string>com.hexidecibel.companion.pair</string>
+      <key>CFBundleURLSchemes</key>
+      <array>
+        <string>companion</string>
+      </array>
+    </dict>
+  </array>
 </dict>
 </plist>

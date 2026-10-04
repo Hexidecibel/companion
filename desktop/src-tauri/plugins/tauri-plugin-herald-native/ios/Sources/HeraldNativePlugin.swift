@@ -9,6 +9,10 @@ class ActiveArgs: Decodable {
   let active: Bool
 }
 
+class DiscoverArgs: Decodable {
+  let timeoutMs: Int?
+}
+
 class PreferArgs: Decodable {
   let on: Bool
 }
@@ -153,6 +157,25 @@ class HeraldNativePlugin: Plugin {
       inputs: route.inputs.map(port),
       availableInputs: (session.availableInputs ?? []).map(port)
     )
+  }
+
+  // ---- pairing ----
+
+  private var browsers: [AnyObject] = []
+
+  /// Bonjour browse for Companion daemons; resolves { daemons: [...] }.
+  @objc public func discoverDaemons(_ invoke: Invoke) throws {
+    let args = try invoke.parseArgs(DiscoverArgs.self)
+    guard #available(iOS 13.0, macOS 10.15, *) else {
+      invoke.reject("Nearby discovery needs iOS 13")
+      return
+    }
+    let b = DaemonBrowser()
+    browsers.append(b)
+    b.browse(timeoutMs: args.timeoutMs ?? 3000) { [weak self] found in
+      invoke.resolve(DiscoverResult(daemons: found))
+      DispatchQueue.main.async { self?.browsers.removeAll { $0 === b } }
+    }
   }
 
   @objc public func getAudioRoute(_ invoke: Invoke) throws {

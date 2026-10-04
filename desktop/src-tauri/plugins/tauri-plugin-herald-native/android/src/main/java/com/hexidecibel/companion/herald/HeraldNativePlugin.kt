@@ -32,6 +32,11 @@ class ActiveArgs {
 }
 
 @InvokeArg
+class DiscoverArgs {
+    var timeoutMs: Long = 3000
+}
+
+@InvokeArg
 class FeedArgs {
     var url: String = ""
 }
@@ -72,6 +77,9 @@ class CaptureArgs {
 class HeraldNativePlugin(private val activity: Activity) : Plugin(activity) {
     private val updater = ApkUpdater(activity)
     private val audio = HeraldAudio(activity.applicationContext) { route -> trigger("audioRoute", route) }
+    private val nsdBrowser = NsdBrowser(activity)
+    /** A companion:// link that arrived before the page listened (cold start). */
+    private var pendingLink: String? = null
     private var session: MediaSession? = null
     private var focusRequest: AudioFocusRequest? = null
     private val focusListener = AudioManager.OnAudioFocusChangeListener { }
@@ -86,6 +94,52 @@ class HeraldNativePlugin(private val activity: Activity) : Plugin(activity) {
         webView.settings.mediaPlaybackRequiresUserGesture = false
         // Route changes (earbuds, headset, USB) go to the page as `audioRoute` events.
         audio.listen()
+        // Cold start from a companion:// link: keep it until the page asks.
+        PairingText.companionLink(activity.intent?.dataString)?.let { pendingLink = it }
+    }
+
+    // ---- pairing ----
+
+    /** singleTask: a companion:// link while running arrives here; the page listens for `deepLink`. */
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        val url = PairingText.companionLink(intent.dataString) ?: return
+        val out = JSObject()
+        out.put("url", url)
+        trigger("deepLink", out)
+    }
+
+    @Command
+    fun takePendingLink(invoke: Invoke) {
+        val out = JSObject()
+        pendingLink?.let { out.put("url", it) }
+        pendingLink = null
+        invoke.resolve(out)
+    }
+
+    /** Browse mDNS for Companion daemons; resolves { daemons: [{ name, host, addresses, port, txt }] }. */
+    @Command
+    fun discoverDaemons(invoke: Invoke) {
+        val args = invoke.parseArgs(DiscoverArgs::class.java)
+        activity.runOnUiThread {
+            nsdBrowser.browse(args.timeoutMs) { found ->
+                val list = org.json.JSONArray()
+                for (d in found) {
+                    val o = JSObject()
+                    o.put("name", d.name)
+                    o.put("host", d.host)
+                    o.put("addresses", org.json.JSONArray(d.addresses))
+                    o.put("port", d.port)
+                    val t = JSObject()
+                    d.txt.forEach { (k, v) -> t.put(k, v) }
+                    o.put("txt", t)
+                    list.put(o)
+                }
+                val out = JSObject()
+                out.put("daemons", list)
+                invoke.resolve(out)
+            }
+        }
     }
 
     override fun onDestroy() {

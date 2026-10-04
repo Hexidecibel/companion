@@ -8,6 +8,8 @@
 #    (swiftCompatibility56, swiftCompatibilityConcurrency,
 #    swiftCompatibilityPacks) when linking libapp.a.
 # 3. Add NSMicrophoneUsageDescription (Herald voice input)
+# 4. Pairing: NSLocalNetworkUsageDescription, NSBonjourServices, NSCameraUsageDescription,
+#    and the companion:// URL scheme
 #
 # Usage: cd desktop && bash scripts/setup-ios.sh
 
@@ -110,6 +112,33 @@ else
     /usr/libexec/PlistBuddy -c "Add :NSMicrophoneUsageDescription string $MIC_TEXT" "$PLIST" 2>/dev/null || \
       /usr/libexec/PlistBuddy -c "Set :NSMicrophoneUsageDescription $MIC_TEXT" "$PLIST"
   done
+fi
+
+# 4. Pairing: Bonjour discovery of Companion servers (iOS asks for local network
+#    access the first time; without these keys NWBrowser finds nothing), the
+#    camera for scanning pairing QR codes, and companion:// links.
+LAN_TEXT="Companion looks for Companion servers on your network so you can pair without typing an address."
+CAM_TEXT="Companion uses the camera to scan a pairing QR code."
+if [ ${#IOS_PLISTS[@]} -gt 0 ] && [ -x /usr/libexec/PlistBuddy ]; then
+  for PLIST in "${IOS_PLISTS[@]}"; do
+    echo "Adding pairing keys (local network, Bonjour, camera, companion://) to $PLIST"
+    PB=/usr/libexec/PlistBuddy
+    $PB -c "Add :NSLocalNetworkUsageDescription string $LAN_TEXT" "$PLIST" 2>/dev/null || \
+      $PB -c "Set :NSLocalNetworkUsageDescription $LAN_TEXT" "$PLIST"
+    $PB -c "Add :NSCameraUsageDescription string $CAM_TEXT" "$PLIST" 2>/dev/null || \
+      $PB -c "Set :NSCameraUsageDescription $CAM_TEXT" "$PLIST"
+    $PB -c "Delete :NSBonjourServices" "$PLIST" 2>/dev/null || true
+    $PB -c "Add :NSBonjourServices array" "$PLIST"
+    $PB -c "Add :NSBonjourServices:0 string _companion._tcp" "$PLIST"
+    $PB -c "Delete :CFBundleURLTypes" "$PLIST" 2>/dev/null || true
+    $PB -c "Add :CFBundleURLTypes array" "$PLIST"
+    $PB -c "Add :CFBundleURLTypes:0 dict" "$PLIST"
+    $PB -c "Add :CFBundleURLTypes:0:CFBundleURLName string com.hexidecibel.companion.pair" "$PLIST"
+    $PB -c "Add :CFBundleURLTypes:0:CFBundleURLSchemes array" "$PLIST"
+    $PB -c "Add :CFBundleURLTypes:0:CFBundleURLSchemes:0 string companion" "$PLIST"
+  done
+else
+  echo "WARNING: skipping pairing Info.plist keys (no *_iOS/Info.plist or PlistBuddy)"
 fi
 
 echo ""

@@ -9,6 +9,8 @@ const COMMANDS: &[&str] = &[
     "app_update_fetch_feed",
     "app_update_install",
     "app_update_open_settings",
+    "discover_daemons",
+    "take_pending_link",
 ];
 
 fn main() {
