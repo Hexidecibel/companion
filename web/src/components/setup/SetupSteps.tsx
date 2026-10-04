@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Server } from '../../types';
 import type {
   AppDownloads,
+  ClaudeInstallResult,
   DirListing,
   HeraldProviderChoice,
   PrereqCheck,
@@ -41,6 +42,20 @@ export interface StepCtx {
 }
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
+
+/** Compose commands shown when the server runs in the Docker image (mirrors daemon/src/container.ts). */
+export const DOCKER = {
+  setupClaude: 'docker compose run --rm companion setup-claude',
+  claude: 'docker compose exec companion claude',
+  logs: 'docker compose logs companion',
+  pairCode: 'bin/docker pair-code',
+  restart: 'docker compose restart companion',
+  voiceUp: 'docker compose --profile voice up -d',
+  tailscaleUp: 'docker compose --profile tailscale up -d',
+} as const;
+
+/** The server's container facts (null on a host install or before status loads). */
+const dockerOf = (ctx: StepCtx) => ctx.status?.container ?? null;
 
 /** A setup request on this wizard's server; stable while the server stays the same. */
 function useApi(serverId: string | null) {
@@ -170,12 +185,21 @@ export function PairStep({ ctx }: { ctx: StepCtx }) {
             <button type="button" className={`sw-choice${hello.localAutoPair ? '' : ' sw-choice--primary'}`} onClick={() => setView('code')}>
               <span className="sw-choice__title">Pair with a code</span>
               <span className="sw-choice__desc">
-                A 6-digit code appears in the server's terminal or log (and in <code>companion pair</code>).
+                {hello.container ? (
+                  <>A 6-digit code appears in the server's log: run <code>{DOCKER.logs}</code> (or <code>{DOCKER.pairCode}</code>) where you started Companion.</>
+                ) : (
+                  <>A 6-digit code appears in the server's terminal or log (and in <code>companion pair</code>).</>
+                )}
               </span>
             </button>
           )}
           {hello && !hello.codePairing && !hello.localAutoPair && (
             <Notice tone="warn">This server does not pair by code from here. Use a pairing QR made on the server: <code>companion pair --qr</code>.</Notice>
+          )}
+          {hello?.container && !hello.localAutoPair && (
+            <Notice tone="info">
+              Companion runs in Docker here. Docker's port mapping hides that this browser is on the same machine, so the first device pairs with a code too.
+            </Notice>
           )}
           {!hello && !helloError && <div className="sw-loading"><Spinner /> Contacting {target.host}...</div>}
           {helloError && <Notice tone="error">Could not reach the server at {target.host}:{target.port}: {helloError}</Notice>}
@@ -423,7 +447,13 @@ export function MachineStep({ ctx }: { ctx: StepCtx }) {
           </ul>
         </>
       )}
-      <ServiceInstall ctx={ctx} target="daemon" />
+      {dockerOf(ctx) ? (
+        <Notice tone="info">
+          Running in Docker: tmux, git and Node are part of the image, and Docker starts Companion again after a reboot (<code>restart: unless-stopped</code>). Nothing to install here.
+        </Notice>
+      ) : (
+        <ServiceInstall ctx={ctx} target="daemon" />
+      )}
     </div>
   );
 }
@@ -442,6 +472,7 @@ export function ClaudeStep({ ctx }: { ctx: StepCtx }) {
     return () => clearInterval(t);
   }, [checks, installed?.status, login?.status, run]);
   if (ctx.setupError || !ctx.status) return <ServerOnly ctx={ctx} />;
+  const docker = dockerOf(ctx);
   return (
     <div className="sw-stack">
       <p className="sw-lead">Companion watches Claude Code sessions. Claude Code itself runs on this server, signed in with your Claude account (or an API key).</p>
@@ -454,19 +485,67 @@ export function ClaudeStep({ ctx }: { ctx: StepCtx }) {
         )}
         {!checks && <div className="sw-loading"><Spinner /> Looking for Claude Code...</div>}
       </ul>
-      {installed?.status !== 'ok' && (
+      {installed?.status !== 'ok' && checks && docker && <DockerClaudeInstall ctx={ctx} onInstalled={() => void run()} />}
+      {installed?.status !== 'ok' && !docker && (
         <div className="sw-panel">
           <div className="sw-panel__title">Install Claude Code</div>
           <CopyCommand command="npm install -g @anthropic-ai/claude-code" label="On the server" />
           <p className="sw-muted">Needs Node 18 or newer. This page notices the install by itself.</p>
         </div>
       )}
-      {installed?.status === 'ok' && login?.status !== 'ok' && (
+      {installed?.status === 'ok' && login?.status !== 'ok' && docker && (
+        <div className="sw-panel">
+          <div className="sw-panel__title">Sign in to Claude Code</div>
+          <CopyCommand command={DOCKER.claude} label="1. In a terminal on the Docker host, in the Companion folder" />
+          <p className="sw-muted">2. Type <code>/login</code>, open the link it shows, sign in, and paste the code back. Then exit with <code>/exit</code>. The login is kept in a volume, so you do this once.</p>
+        </div>
+      )}
+      {installed?.status === 'ok' && login?.status !== 'ok' && !docker && (
         <Notice tone="info">
           You sign in once, inside a Claude Code session. The next steps start one for you: run <code>/login</code> there and finish in the browser.
         </Notice>
       )}
       {installed?.status === 'ok' && login?.status === 'ok' && <Notice tone="ok">Claude Code is installed and signed in.</Notice>}
+    </div>
+  );
+}
+
+/** Docker: install Claude Code into the container's volume from here, or with the compose command. */
+function DockerClaudeInstall({ ctx, onInstalled }: { ctx: StepCtx; onInstalled: () => void }) {
+  const api = useApi(ctx.serverId);
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<ClaudeInstallResult | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const install = async () => {
+    setBusy(true);
+    setErr(null);
+    try {
+      const r = await api<ClaudeInstallResult>('setup_install_claude', { confirm: true }, 320_000);
+      setResult(r);
+      if (r.ok) onInstalled();
+    } catch (e) {
+      setErr(errText(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="sw-panel">
+      <div className="sw-panel__title">Install Claude Code</div>
+      <p className="sw-muted">Claude Code is not part of the Companion image. It installs into a volume, so it survives container upgrades and keeps updating itself.</p>
+      <div>
+        <button type="button" className="sw-btn sw-btn--primary" onClick={() => void install()} disabled={busy}>
+          {busy ? 'Installing (about a minute)...' : 'Install Claude Code'}
+        </button>
+      </div>
+      <CopyCommand command={DOCKER.setupClaude} label="Or in a terminal on the Docker host, in the Companion folder" />
+      {result && (
+        <Notice tone={result.ok ? 'ok' : 'error'}>
+          {result.ok ? `Installed: ${result.version}` : 'The install did not finish. Try the command above in a terminal.'}
+          {!result.ok && result.output && <pre className="sw-output">{result.output}</pre>}
+        </Notice>
+      )}
+      {err && <Notice tone="error">{err}</Notice>}
     </div>
   );
 }
@@ -546,9 +625,19 @@ export function ProjectsStep({ ctx }: { ctx: StepCtx }) {
   if (ctx.setupError || !ctx.status) return <ServerOnly ctx={ctx} />;
   const home = ctx.status.home;
   const rel = (p: string) => (p.startsWith(home) ? '~' + p.slice(home.length) : p);
+  const docker = dockerOf(ctx);
   return (
     <div className="sw-stack">
       <p className="sw-lead">Pick the folders where your code lives. New sessions (from the app or Herald) can only start inside them.</p>
+      {docker && (
+        <Notice tone={docker.projectsDir ? 'info' : 'warn'}>
+          {docker.projectsDir ? (
+            <>Running in Docker: your code is the folder mounted at <code>{rel(docker.projectsDir)}</code> (<code>COMPANION_PROJECTS</code> in <code>.env</code>). Pick it, or folders inside it.</>
+          ) : (
+            <>Running in Docker without a projects folder. Set <code>COMPANION_PROJECTS=/path/to/your/code</code> in <code>.env</code>, then <code>docker compose up -d</code>.</>
+          )}
+        </Notice>
+      )}
       <div className="sw-roots">
         {roots.length === 0 && <span className="sw-muted">No folders yet. Choose one below.</span>}
         {roots.map((r) => (
@@ -625,7 +714,9 @@ export function SessionStep({ ctx }: { ctx: StepCtx }) {
       <div className="sw-stack">
         <p className="sw-lead">Start a Claude Code session in one of your projects. It runs in tmux on the server, so it keeps going when you close the app.</p>
         {roots.length === 0 ? (
-          <Notice tone="warn">Choose a projects folder first (previous step), or browse your home folder below.</Notice>
+          <Notice tone="warn">
+            Choose a projects folder first (previous step), or browse {dockerOf(ctx) ? 'the projects folder' : 'your home folder'} below.
+          </Notice>
         ) : null}
         <DirBrowser ctx={ctx} start={roots[0]} pickLabel="Use this folder" onPick={setDir} />
         {dir && (
@@ -701,23 +792,40 @@ export function DevicesStep({ ctx }: { ctx: StepCtx }) {
   const [downloads, setDownloads] = useState<AppDownloads | null>(null);
   useEffect(() => {
     if (!ctx.serverId || ctx.setupError) return;
-    api<AppDownloads>('setup_downloads').then(setDownloads).catch(() => setDownloads({ channel: 'stable', downloads: [] }));
+    api<AppDownloads>('setup_downloads').then(setDownloads).catch(() => setDownloads({ channel: 'stable', downloads: [], source: 'none', feedUrl: null }));
   }, [ctx.serverId, ctx.setupError, api]);
   if (!ctx.serverId || !ctx.server) return <ServerOnly ctx={ctx} />;
   const base = serverHttpBase(ctx.server);
+  const docker = dockerOf(ctx);
   const list = (downloads?.downloads ?? []).slice().sort((a, b) => PLATFORM_ORDER.indexOf(a.platform) - PLATFORM_ORDER.indexOf(b.platform));
   return (
     <div className="sw-stack">
-      <p className="sw-lead">Pair your phone and other computers. On the same Wi-Fi, the app finds this server under Nearby; anywhere else, scan a pairing QR.</p>
+      <p className="sw-lead">
+        {docker && !docker.hostNetwork
+          ? 'Pair your phone and other computers with a pairing QR, or by address and code. (Nearby discovery does not cross Docker\'s network; see docs/docker.md for host networking.)'
+          : 'Pair your phone and other computers. On the same Wi-Fi, the app finds this server under Nearby; anywhere else, scan a pairing QR.'}
+      </p>
       <div className="sw-devices">
         <DevicesCard serverId={ctx.serverId} serverName={ctx.server.name} />
       </div>
       <div className="sw-panel">
         <div className="sw-panel__title">Get the apps</div>
-        <p className="sw-muted">Installers come from this server's update feed; installed apps update themselves from it.</p>
+        <p className="sw-muted">
+          {downloads?.source === 'remote'
+            ? 'This server has no builds of its own, so these come from the public Companion feed. Installed apps update themselves from it.'
+            : "Installers come from this server's update feed; installed apps update themselves."}
+        </p>
         {downloads === null && <div className="sw-loading"><Spinner /> Reading the update feed...</div>}
         {downloads && list.length === 0 && (
-          <div className="sw-muted">No app builds are published on this server yet. You can always use this web app, or ask whoever runs your builds for the installers.</div>
+          <div className="sw-muted">
+            No app builds are published on this server yet{downloads.feedUrl ? ', and the public feed did not answer' : ''}. You can always use this web app
+            {downloads.feedUrl ? (
+              <>, or try the public feed later: <code>{downloads.feedUrl}</code></>
+            ) : (
+              ', or ask whoever runs your builds for the installers'
+            )}
+            .
+          </div>
         )}
         {list.length > 0 && (
           <ul className="sw-downloads">
@@ -831,7 +939,7 @@ export function HeraldStep({ ctx }: { ctx: StepCtx }) {
       setMsg({
         tone: 'ok',
         text: next.restartNeeded
-          ? 'Saved. Turning Herald on or off applies after the daemon restarts (bin/companion restart, when convenient).'
+          ? `Saved. Turning Herald on or off applies after the daemon restarts (${dockerOf(ctx) ? DOCKER.restart : 'bin/companion restart'}, when convenient).`
           : provider === 'off'
             ? 'Saved. Herald stays off.'
             : 'Saved. Herald picked up the new brain without a restart.',
@@ -908,13 +1016,18 @@ export function HeraldStep({ ctx }: { ctx: StepCtx }) {
             <p className="sw-muted">Spoken replies, voice input and the wake word run locally on the server (about 1 GB of models). Text chat works without it.</p>
             {voice.checks?.[0]?.status === 'ok' ? (
               <Notice tone="ok">{voice.checks[0].detail}</Notice>
+            ) : dockerOf(ctx) ? (
+              <>
+                <CopyCommand command={DOCKER.voiceUp} label="Start the voice container (downloads the models on first start)" />
+                <p className="sw-muted">It answers here once its models are ready; this can take a few minutes the first time.</p>
+              </>
             ) : (
               <>
                 <CopyCommand command="bin/herald-voice install" label="1. Download the models (once)" />
                 <CopyCommand command="bin/herald-voice install-unit" label="2. Run it as a service" />
               </>
             )}
-            <ServiceInstall ctx={ctx} target="voice" />
+            {!dockerOf(ctx) && <ServiceInstall ctx={ctx} target="voice" />}
           </div>
         </>
       )}
@@ -944,6 +1057,8 @@ export function RemoteStep({ ctx }: { ctx: StepCtx }) {
     api<RemoteAccessInfo>('setup_remote').then(setInfo).catch((e) => setErr(errText(e)));
   }, [ctx.serverId, ctx.setupError, api]);
   if (ctx.setupError || !ctx.status) return <ServerOnly ctx={ctx} />;
+  const docker = dockerOf(ctx);
+  if (docker) return <DockerRemote ctx={ctx} info={info} err={err} />;
   return (
     <div className="sw-stack">
       <p className="sw-lead">At home, devices reach this server directly. To use Companion away from home, the safest option is a private network like Tailscale.</p>
@@ -982,6 +1097,47 @@ export function RemoteStep({ ctx }: { ctx: StepCtx }) {
   );
 }
 
+function DockerRemote({ ctx, info, err }: { ctx: StepCtx; info: RemoteAccessInfo | null; err: string | null }) {
+  const docker = dockerOf(ctx);
+  const here = ctx.server ? `${serverHttpBase(ctx.server)}/web/` : null;
+  return (
+    <div className="sw-stack">
+      <p className="sw-lead">At home, devices reach this server directly. To use Companion away from home, the Tailscale sidecar gives it a private HTTPS address on your tailnet.</p>
+      {err && <Notice tone="error">{err}</Notice>}
+      {!info && !err && <div className="sw-loading"><Spinner /> Asking the Tailscale sidecar...</div>}
+      {info?.tailscale.up && info.tailscale.url && (
+        <div className="sw-panel">
+          <div className="sw-panel__head">
+            <span className="sw-panel__title">Tailscale sidecar is connected</span>
+            <span className="sw-pill sw-pill--ok">Ready</span>
+          </div>
+          <p className="sw-muted">Any device signed in to the same tailnet can use this address (HTTPS, so the microphone works in browsers too):</p>
+          <CopyCommand command={info.tailscale.url} />
+        </div>
+      )}
+      {info && !info.tailscale.up && (
+        <div className="sw-panel">
+          <div className="sw-panel__title">{docker?.tailscaleSidecar && info.tailscale.installed ? 'The sidecar is running but not connected' : 'Add the Tailscale sidecar (optional)'}</div>
+          <ol className="sw-steps">
+            <li>Create an auth key in the Tailscale admin console (Settings, Keys).</li>
+            <li>Put it in <code>.env</code> as <code>TS_AUTHKEY=tskey-auth-...</code></li>
+            <li>Start it:</li>
+          </ol>
+          <CopyCommand command={DOCKER.tailscaleUp} />
+          <p className="sw-muted">Turn on MagicDNS and HTTPS certificates for your tailnet once (DNS page of the admin console). Details: docs/docker.md.</p>
+        </div>
+      )}
+      {here && (
+        <div className="sw-panel">
+          <div className="sw-panel__title">On your network</div>
+          <p className="sw-muted">Devices at home use the address this one is using now (or this machine's LAN address with the same port):</p>
+          <CopyCommand command={here} />
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ------------------------------------------------------------------ done
 
 export function DoneStep({ ctx, flow }: { ctx: StepCtx; flow: string[] }) {
@@ -1003,7 +1159,7 @@ export function DoneStep({ ctx, flow }: { ctx: StepCtx; flow: string[] }) {
       {ctx.status?.restartNeeded && (
         <Notice tone="warn">
           Some settings apply after the daemon restarts. Nothing was restarted for you; when it suits you, run:
-          <CopyCommand command="bin/companion restart" />
+          <CopyCommand command={dockerOf(ctx) ? DOCKER.restart : 'bin/companion restart'} />
         </Notice>
       )}
       <div className="sw-panel">

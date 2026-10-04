@@ -38,6 +38,8 @@ export interface DaemonHello {
   setupMode?: boolean;
   /** This connection may pair without a code (a browser on the server itself, first device). */
   localAutoPair?: boolean;
+  /** Setup mode only: the daemon runs in Docker (the code is in `docker compose logs`). */
+  container?: boolean;
 }
 
 export interface PairOutcome {
