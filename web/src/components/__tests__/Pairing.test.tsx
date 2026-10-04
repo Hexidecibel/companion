@@ -97,6 +97,20 @@ describe('AddServerFlow', () => {
     expect(screen.getAllByText('Paired')).toHaveLength(1);
   });
 
+  it('tapping a nearby daemon checks it answers, then starts code pairing', async () => {
+    setNativeEnv('android');
+    invoke.mockImplementation(async (cmd: string) =>
+      cmd === 'plugin:herald-native|discover_daemons'
+        ? { daemons: [{ name: 'Laptop', host: 'lap.local', addresses: ['10.0.0.3'], port: 9877, txt: { id: 'b'.repeat(32), name: 'Laptop', pairing: '1', ip: '10.0.0.3' } }] }
+        : null,
+    );
+    render(<AddServerFlow onClose={() => {}} />);
+    fireEvent.click(await screen.findByText('Laptop'));
+    expect(await screen.findByText(/Enter the 6-digit code shown on your server/)).toBeTruthy();
+    expect(FakeDaemonSocket.instances.some((w) => w.url === 'ws://10.0.0.3:9877' && w.sent.some((m) => m.type === 'pair_hello'))).toBe(true);
+    expect(FakeDaemonSocket.last.sent.some((m) => m.type === 'pair_request')).toBe(true);
+  });
+
   it('browser: no nearby section; pair by address with the code, then saves the device token', async () => {
     render(<AddServerFlow onClose={() => {}} />);
     expect(screen.queryByText('Nearby')).toBeNull();

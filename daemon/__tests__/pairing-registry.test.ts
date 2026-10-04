@@ -7,7 +7,7 @@ import {
   cleanDeviceName,
   parseDeviceToken,
 } from '../src/pairing/registry';
-import { buildMdnsTxt, MDNS_TXT_KEYS } from '../src/mdns';
+import { buildMdnsTxt, lanAddresses, MDNS_TXT_KEYS } from '../src/mdns';
 import { loadOrCreateDaemonId } from '../src/pairing/identity';
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pairing-registry-'));
@@ -141,7 +141,9 @@ describe('mDNS TXT', () => {
       version: '1.0.0',
       pairing: true,
     });
-    expect(Object.keys(txt).sort()).toEqual([...MDNS_TXT_KEYS].sort());
+    expect(Object.keys(txt).every((k) => (MDNS_TXT_KEYS as readonly string[]).includes(k))).toBe(
+      true
+    );
     expect(txt).toEqual({
       id: 'a'.repeat(32),
       name: 'Companion on box',
@@ -152,6 +154,35 @@ describe('mDNS TXT', () => {
       proto: '1',
     });
     expect(JSON.stringify(txt)).not.toContain(token);
+    const withIp = buildMdnsTxt({
+      port: 9877,
+      tls: true,
+      id: 'a'.repeat(32),
+      name: 'x',
+      version: '1',
+      pairing: false,
+      addresses: ['192.168.1.48', '10.0.0.2', '172.16.0.4', '192.168.9.9'],
+    });
+    expect(withIp.ip).toBe('192.168.1.48,10.0.0.2,172.16.0.4');
+    expect(withIp.pairing).toBe('0');
     expect(JSON.stringify(txt)).not.toMatch(/token|otp|code|secret/i);
+  });
+});
+
+describe('lanAddresses', () => {
+  const v4 = (address: string) => ({ address, family: 'IPv4', internal: false }) as any;
+  it('skips container / VPN interfaces, link-local and the tailnet; LAN first', () => {
+    expect(
+      lanAddresses({
+        lo: [{ address: '127.0.0.1', family: 'IPv4', internal: true } as any],
+        docker0: [v4('172.17.0.1')],
+        'br-1234': [v4('192.168.16.1')],
+        tailscale0: [v4('100.101.1.2')],
+        wg0: [v4('10.200.0.1')],
+        eth1: [v4('10.0.0.5')],
+        eth0: [v4('192.168.1.48'), { address: 'fe80::1', family: 'IPv6', internal: false } as any],
+        wlan0: [v4('169.254.3.3')],
+      })
+    ).toEqual(['192.168.1.48', '10.0.0.5']);
   });
 });

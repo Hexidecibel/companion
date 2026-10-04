@@ -167,9 +167,45 @@ describe('discovery', () => {
       null,
     ]);
     expect(list).toEqual([
-      { key: id, name: 'Box', host: '192.168.1.5', port: 9877, tls: false, daemonId: id, pairing: true },
-      { key: 'old.local:9877', name: 'Old daemon', host: 'old.local', port: 9877, tls: true, version: '1.0', pairing: false },
+      { key: id, name: 'Box', host: '192.168.1.5', candidates: ['192.168.1.5', 'box.local'], port: 9877, tls: false, daemonId: id, version: '1.2.0', pairing: true },
+      { key: 'old.local:9877', name: 'Old daemon', host: 'old.local', candidates: ['old.local'], port: 9877, tls: true, version: '1.0', pairing: false },
     ]);
+  });
+
+  it('tries the daemon LAN hint first and bridges last', () => {
+    const [d] = normalizeDiscovered([
+      {
+        name: 'Hexinas',
+        host: 'hexinas.local.',
+        addresses: ['10.200.0.1', '172.19.0.1', '192.168.16.1', '192.168.1.48', 'fd00::5'],
+        port: 9877,
+        txt: { ip: '192.168.1.48', pairing: '1' },
+      },
+    ]);
+    expect(d.host).toBe('192.168.1.48');
+    expect(d.candidates).toEqual(['192.168.1.48', '192.168.16.1', '10.200.0.1', '172.19.0.1', 'hexinas.local', 'fd00::5']);
+  });
+
+  it('pickReachable returns the first candidate that answers', async () => {
+    const { pickReachable } = await import('../discovery');
+    class Dead {
+      onopen: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      onclose: (() => void) | null = null;
+      onmessage: ((e: { data: string }) => void) | null = null;
+      constructor() {
+        setTimeout(() => this.onerror?.(), 0);
+      }
+      send() {}
+      close() {}
+    }
+    const Mixed = function (this: unknown, url: string) {
+      return url.includes('10.0.0.9') ? new FakeDaemonSocket(url) : new Dead();
+    } as unknown as typeof WebSocket;
+    const t = await pickReachable({ candidates: ['10.0.0.1', '10.0.0.9'], port: 9877, tls: false }, { WS: Mixed, timeoutMs: 1000 });
+    expect(t).toEqual({ host: '10.0.0.9', port: 9877, tls: false });
+    const none = await pickReachable({ candidates: ['10.0.0.1'], port: 9877, tls: false }, { WS: Mixed, timeoutMs: 1000 });
+    expect(none).toBeNull();
   });
 
   it('asks the native plugin in the apps, returns null in a browser', async () => {
@@ -179,7 +215,7 @@ describe('discovery', () => {
     setNativeEnv('android');
     invoke.mockResolvedValue({ daemons: [{ name: 'X', host: '10.0.0.7', port: 9877, txt: { pairing: '1' } }] });
     expect(await discoverDaemons(100)).toEqual([
-      { key: '10.0.0.7:9877', name: 'X', host: '10.0.0.7', port: 9877, tls: false, pairing: true },
+      { key: '10.0.0.7:9877', name: 'X', host: '10.0.0.7', candidates: ['10.0.0.7'], port: 9877, tls: false, pairing: true },
     ]);
     expect(invoke).toHaveBeenCalledWith('plugin:herald-native|discover_daemons', { timeoutMs: 100 });
   });

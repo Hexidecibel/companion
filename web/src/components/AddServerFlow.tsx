@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useServers } from '../hooks/useServers';
-import { discoverDaemons, DiscoveredDaemon } from '../services/discovery';
+import { discoverDaemons, DiscoveredDaemon, pickReachable } from '../services/discovery';
 import {
   guessDeviceName,
   PairingClient,
@@ -116,6 +116,8 @@ function HomeView(props: {
   const { native, pairedIds, onPair, onLink, onManual } = props;
   const [nearby, setNearby] = useState<DiscoveredDaemon[] | null>(null);
   const [scanning, setScanning] = useState(false);
+  const [reaching, setReaching] = useState<string | null>(null);
+  const [nearbyError, setNearbyError] = useState<string | null>(null);
   const [scanQr, setScanQr] = useState(false);
   const [paste, setPaste] = useState('');
   const [pasteError, setPasteError] = useState<string | null>(null);
@@ -136,6 +138,22 @@ function HomeView(props: {
   useEffect(() => {
     if (native) void scan();
   }, [native, scan]);
+
+  const choose = async (d: DiscoveredDaemon) => {
+    setNearbyError(null);
+    setReaching(d.key);
+    try {
+      const t = await pickReachable(d);
+      if (!t) {
+        setNearbyError(`Could not reach ${d.name}. Try Pair by address with its IP.`);
+        return;
+      }
+      if (d.pairing) onPair(t, d.name);
+      else onManual({ name: d.name, host: t.host, port: t.port, tls: t.tls });
+    } finally {
+      setReaching(null);
+    }
+  };
 
   const submitPaste = () => {
     const link = parsePairLink(paste);
@@ -183,25 +201,26 @@ function HomeView(props: {
                   <li key={d.key}>
                     <button
                       className="pairing-nearby-item"
-                      onClick={() =>
-                        d.pairing
-                          ? onPair({ host: d.host, port: d.port, tls: d.tls }, d.name)
-                          : onManual({ name: d.name, host: d.host, port: d.port, tls: d.tls })
-                      }
+                      disabled={reaching !== null}
+                      onClick={() => void choose(d)}
                     >
                       <span className="pairing-nearby-name">{d.name}</span>
                       <span className="pairing-nearby-meta">
                         {d.host}:{d.port}
                         {d.version ? ` - v${d.version}` : ''}
                       </span>
-                      {paired && <span className="pairing-badge">Paired</span>}
-                      {!d.pairing && <span className="pairing-badge pairing-badge-muted">Token</span>}
+                      {reaching === d.key && <span className="pairing-badge pairing-badge-muted">Connecting...</span>}
+                      {reaching !== d.key && paired && <span className="pairing-badge">Paired</span>}
+                      {reaching !== d.key && !paired && !d.pairing && (
+                        <span className="pairing-badge pairing-badge-muted">Token</span>
+                      )}
                     </button>
                   </li>
                 );
               })}
             </ul>
           )}
+          {nearbyError && <div className="pairing-error">{nearbyError}</div>}
         </section>
       )}
 

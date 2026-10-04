@@ -3,7 +3,7 @@ import { loadConfig, displayFirstRunWelcome } from './config';
 import { SessionWatcher } from './watcher';
 import { SubAgentWatcher } from './subagent-watcher';
 import { InputInjector } from './input-injector';
-import { MdnsAdvertiser } from './mdns';
+import { lanAddresses, MdnsAdvertiser } from './mdns';
 import { loadDaemonIdentity } from './pairing/identity';
 import { PushNotificationService } from './push';
 import { isSandbox } from './sandbox';
@@ -197,6 +197,7 @@ async function main(): Promise<void> {
       name: identity.name,
       version: identity.version,
       pairing: config.pairing !== false,
+      addresses: lanAddresses(),
     });
     mdns.start();
   }
