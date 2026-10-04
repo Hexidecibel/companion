@@ -78,11 +78,11 @@ jobs:
           docker buildx build --load --platform linux/amd64 -t companion:ci \
             --build-arg COMPANION_VERSION=${{ steps.v.outputs.version }} \
             --cache-from type=gha,scope=companion .
-          docker run -d --name c -p 127.0.0.1:9877:9877 companion:ci
+          docker run -d --name companion-smoke -p 127.0.0.1:9877:9877 companion:ci
           for i in $(seq 1 30); do curl -fsS http://127.0.0.1:9877/health && break; sleep 2; done
           curl -fsS http://127.0.0.1:9877/health | grep -q '"ok":true'
-          docker logs c | grep -q 'Welcome to Companion (Docker)'
-          docker rm -f c
+          docker logs companion-smoke | grep -q 'Welcome to Companion (Docker)'
+          docker rm -f companion-smoke
 
   publish:
     name: Publish ${{ matrix.image.name }} to GHCR
