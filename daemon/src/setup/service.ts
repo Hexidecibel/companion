@@ -131,11 +131,13 @@ export class SetupService {
     let outcome: ReturnType<typeof applySettingsPatch> | undefined;
     try {
       // Validate against a scratch copy first so a bad field never writes.
-      applySettingsPatch(JSON.parse(JSON.stringify(readRawConfig(this.configPath()))), patch, this.home);
-      const raw = updateConfigFile((r) => {
-        outcome = applySettingsPatch(r, patch, this.home);
-      }, this.configPath());
-      this.applyLive(raw);
+      outcome = applySettingsPatch(JSON.parse(JSON.stringify(readRawConfig(this.configPath()))), patch, this.home);
+      if (outcome.configChanged) {
+        const raw = updateConfigFile((r) => {
+          outcome = applySettingsPatch(r, patch, this.home);
+        }, this.configPath());
+        this.applyLive(raw);
+      }
     } catch (err) {
       if (err instanceof SettingsError) throw new SetupError('bad_request', err.message);
       throw err;

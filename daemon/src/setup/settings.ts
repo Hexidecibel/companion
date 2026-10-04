@@ -60,6 +60,8 @@ export function cleanServerName(v: unknown): string {
 }
 
 export interface PatchOutcome {
+  /** At least one config key is written (false: e.g. only the notifications choice). */
+  configChanged: boolean;
   restartNeeded: boolean;
   heraldChanged: boolean;
   notifications?: NotificationsChoice;
@@ -76,7 +78,7 @@ export function applySettingsPatch(
 ): PatchOutcome {
   const patch = obj(patchIn) as SetupSettingsPatch;
   const ops: Array<() => void> = [];
-  const out: PatchOutcome = { restartNeeded: false, heraldChanged: false };
+  const out: PatchOutcome = { configChanged: false, restartNeeded: false, heraldChanged: false };
 
   if (patch.name !== undefined) {
     const name = cleanServerName(patch.name);
@@ -186,5 +188,6 @@ export function applySettingsPatch(
     out.notifications = patch.notifications;
   }
   for (const op of ops) op();
+  out.configChanged = ops.length > 0;
   return out;
 }

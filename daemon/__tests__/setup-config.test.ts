@@ -180,3 +180,15 @@ describe('config writes preserve existing keys', () => {
 });
 
 afterAll(() => fs.rmSync(dir, { recursive: true, force: true }));
+
+describe('no-op settings writes', () => {
+  it('a notifications-only patch changes no config key', () => {
+    const raw: Record<string, unknown> = { name: 'x' };
+    expect(applySettingsPatch(raw, { notifications: 'off' }, os.homedir())).toMatchObject({
+      configChanged: false,
+      notifications: 'off',
+    });
+    expect(raw).toEqual({ name: 'x' });
+    expect(applySettingsPatch(raw, { pairing: 'lan' }, os.homedir()).configChanged).toBe(true);
+  });
+});
