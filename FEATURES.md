@@ -23,6 +23,9 @@ High-level features of the Companion daemon, web client, and desktop/mobile apps
 - mDNS TXT carries only id, name, version, pairing/tls flags, port and LAN IPs (never secrets)
 
 ## Real-Time Monitoring
+- **Stuck-session detection** ("Out4 looks stuck"): deterministic, no LLM, only while a session is WORKING. Flags the same failing test / compiler error / error output recurring (5 times in 30 min, numbers, paths and timestamps normalised; `| tail` exit codes do not hide failures), the same tool call with the same result again and again with no edit in between (5 in 15 min; polling commands exempt), an edit undone and redone on the same spot (4 moves in 30 min), no edit or new text for 30 min, and a tool call hanging with an unchanged screen (Bash 20 min). Builds, installs, test suites and subagents are exempt up to 90 min; a prompt on screen is the inbox's job. Findings clear on their own when the session recovers, finishes, or the user writes to it
+- Stuck UI: amber "Stuck?" badge in the sidebar and mobile list; a dismissible banner in the session with the summary, expandable evidence (redacted), Ask what's wrong, Interrupt (Herald's cancellable countdown), Snooze 30m and Not stuck (quiet for the rest of that turn). Settings > Notifications: on/off, no-progress minutes, per-signal thresholds under Advanced; quiet hours keep it silent
+- Herald knows: a stuck item in the inbox with its own soft tone on the active device (never spoken unasked; Gaming plays the tone only), "brief me" says "Out4 looks stuck: same test failing 6 times.", "is anything stuck?" / "what's Out4 stuck on?" (`stuck_sessions`), "ignore that for 30 minutes" (`snooze_stuck`), and ask / interrupt / show through the usual guarded actions
 - Live WebSocket updates from CLI coding sessions
 - Multi-server, multi-session support
 - Multiple concurrent sessions per project directory with automatic disambiguation (terminal content matching, PID detection, process of elimination)

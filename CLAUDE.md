@@ -151,6 +151,15 @@ Diagnostics and logs: Help > Diagnostics (or say "diagnostics"; `components/hera
 
 Ports used by Herald's sandbox and voice work (not yet in `/mnt/hexinas/apps/INFRASTRUCTURE.md`; add them there): **9887** herald sandbox (user's), **9888** herald probe sandbox, **9889** herald voice service (127.0.0.1 only), **9890** Tailscale serve HTTPS front for 9887 (tailnet only).
 
+### Stuck-session detection (daemon)
+Code in `daemon/src/stuck/` (`signals.ts` pure analysis, `normalize.ts` failure keys / pane reading, `detector.ts` state + guarded captures, `store.ts` settings), handlers in `daemon/src/handlers/stuck.ts`, plan in `plan.md`.
+- **Protocol:** `daemon/src/stuck/protocol.ts` is mirrored byte-for-byte by `web/src/types/stuck.ts` (mirror test). Requests `stuck_list` / `stuck_snooze` / `stuck_dismiss` / `stuck_ask` / `stuck_interrupt` / `stuck_get_settings` / `stuck_set_settings`; GLOBAL event `stuck_update` (full visible list).
+- **Deterministic and cheap:** analysis walks the current turn of the parsed transcript (`ToolCall.isError` comes from `tool_result.is_error`; `status` stays `completed`, an `error` status would fire error-detected escalations). Only while working; findings clear on idle / waiting / a new prompt / recovery.
+- **Pane captures** (time-based signals only: no_progress, stalled_tool) go through `StuckDetector.capture`: in-flight dedupe per session, our own timeout on top of `defaultCapturePane`'s SIGKILL, liveness against the watcher's live list (no subprocess), at most 2 per tick, >= 2 min apart per session. Never add another capture path.
+- **Herald:** one `stuck` inbox item per session (key = session + turn: tones once per turn, own `stuck` tone, never spoken), `[looks stuck]` briefing lines, tools `stuck_sessions` / `snooze_stuck`, banner actions through `relayAsk` and `HeraldService.proposeInterrupt` (echo tier). Quiet hours (escalation config) keep items off the inbox.
+- **Settings:** `~/.companion/stuck/settings.json` (`COMPANION_STUCK_STATE_DIR`); snoozes and "not stuck" are memory only.
+- **Live test:** the probe with `TMUX_TMPDIR=<short private dir>` and `TMUX` unset sees only an isolated tmux server (socket path must stay under 108 chars); Claude Code blocks `sleep N && cmd`, so make the failing test itself slow.
+
 ### Code Review 2.0 (daemon)
 Authoritative plan: `docs/code-review-2-plan.md`. Code lives in `daemon/src/review/`, handlers in `daemon/src/handlers/review.ts`.
 - **Protocol:** `daemon/src/review/protocol.ts` is mirrored byte-for-byte by `web/src/types/review.ts` (web mirror test enforces it). Change both or neither; only add optional fields.

@@ -4,6 +4,31 @@ Detailed plans for upcoming work items. Completed items are moved to FEATURES.md
 
 ---
 
+## Item: Stuck-session detection ("Out4 looks stuck")
+**Status:** done (live-verified on the probe; production needs a daemon restart)
+
+Deterministic, no-LLM detection of sessions that are WORKING but going nowhere, with very low false positives.
+
+### Signals (daemon `daemon/src/stuck/`, pure analysis over the parsed transcript of the current turn)
+1. **repeated_failure**: the same failure signature (failing test names, compiler errors, error lines; numbers/paths/timestamps/hex normalised) >= 5 times in 30 min, spanning >= 2 min, with no later passing run of the same command.
+2. **loop**: the same tool + normalised input + same normalised output >= 5 times in 15 min with no successful edit in between (polling tools / `sleep` / `watch` exempt).
+3. **oscillation**: edits on the same file flipping between the same two states (A->B->A->B->A, 4 moves) in 30 min (Edit/MultiEdit old/new pairs, Write content hashes).
+4. **no_progress**: working >= 30 min with no successful edit and no new assistant text; exempt while a Bash call is pending with a changing pane, or a known long command (build/install/test) or a subagent is pending, up to 90 min.
+5. **stalled_tool**: one pending tool call older than its kind's cap (Bash 20 min, others 10 min; Task/Agent exempt) and the pane unchanged across two captures >= 4 min apart; a choice/approval prompt on screen = blocked (the inbox owns it).
+
+### Design
+- `StuckDetector` fed by watcher `conversation-update` / `status-change` (debounced 1 s per session) + a 60 s tick for time-based signals; bounded state (LRU sessions, capped findings / snoozes / dismissals).
+- Pane captures only through a guarded probe: per-session in-flight dedupe, 2 s timeout + SIGKILL (`defaultCapturePane`), liveness check against the watcher's live session list, at most 2 captures per tick, >= 2 min between captures of one session.
+- Findings `{id, sessionId, sessionName, kind, severity, signature, summary, headline, evidence (redacted), firstSeen, lastSeen, count, turnId}`; dedupe per session+kind+signature; auto-clear when the session goes idle/waiting, the user sends a prompt (new turn), the failure stops recurring (a later run of the same command no longer shows it, or nothing for 15 min), an oscillating file moves on to a third state, or an edit lands (loop / no_progress).
+- Snooze per session+kind (default 30 min), "Not stuck" suppresses the signature for the rest of the turn.
+- Protocol `daemon/src/stuck/protocol.ts` <-> `web/src/types/stuck.ts` byte-identical (mirror test). WS: `stuck_list`, `stuck_snooze`, `stuck_dismiss`, `stuck_ask`, `stuck_interrupt`, `stuck_get_settings`, `stuck_set_settings`; global event `stuck_update`.
+- Settings persisted in `~/.companion/stuck/settings.json` (`COMPANION_STUCK_STATE_DIR`), quiet hours (escalation config) keep findings off the Herald inbox.
+- Herald: inbox item with `stuck` field (own `stuck` tone, active device only, never spoken unasked; Gaming = tone only), brief-me line "Out4 looks stuck: same test failing 6 times.", brain tools `stuck_sessions` + `snooze_stuck`, actions via ask-a-session (`relayAsk`), `propose_interrupt` (echo tier) and show.
+- Web: amber "Stuck?" badge (sidebar + mobile list), dismissible SessionView banner (summary, expandable evidence, Ask what's wrong / Interrupt / Snooze 30m / Not stuck), settings card in Notification Settings (toggle, no-progress minutes, Advanced thresholds).
+- Parser: `ToolCall.isError` (optional) from `tool_result.is_error`; `status` unchanged (an `error` status would start firing error-detected escalations).
+
+---
+
 ## Item: Code Review 2.0
 **Status:** done (daemon + Herald); web workstream in progress
 
