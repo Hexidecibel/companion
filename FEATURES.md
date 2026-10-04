@@ -13,6 +13,15 @@ High-level features of the Companion daemon, web client, and desktop/mobile apps
 - **Android in-app updates** (sideload): the app checks `/updates/stable/android.json` on launch and every 6 hours and shows "Update available (1.0.N)"; one tap downloads the APK, verifies its SHA-256 and that it is signed by the same certificate as the installed app, then opens the system installer (the user confirms; deep-links to "Install unknown apps" when needed). Publish with `bin/companion publish-update --apk <signed.apk>` (refuses an older or equal versionCode)
 - macOS builds signed with Developer ID, notarized and stapled in CI when the `APPLE_DEVID_CERT_*` secrets exist (ad-hoc fallback otherwise); `bin/desktop-signing` manages the certificate and updater keys
 
+## Pairing & Devices
+- **Pair instead of typing a token**: Add server lists nearby daemons (mDNS `_companion._tcp`; Android NSD, iOS NWBrowser, desktop mdns-sd) with a Paired badge; pick one, then enter the 6-digit code the server shows (journal, `bin/companion pair`, signed-in apps) or approve the device from one already signed in. "Enter token manually" stays as Advanced
+- **Pairing QR / link** for remote setups: `bin/companion pair --qr` or Settings > Devices > Show pairing QR makes `companion://pair?...` (one device, single use, 10 minutes); the apps scan it or open it as a deep link (Android, iOS, macOS)
+- **Per-device tokens** in `~/.companion/devices.json` (0600, salted SHA-256, constant-time verify); Settings > Devices and `bin/companion devices list|revoke|rename` show last seen, This device, rename, revoke. Revoking signs the device out at once
+- "Approve new device?" prompt (name, platform, code) on every signed-in client; never by voice
+- Limits: 5 wrong codes per request, 10 pending, per-IP throttle with backoff, daemon-wide suspension after 50 wrong codes; code pairing only from LAN / tailnet / localhost unless `pairing_allow_public`; `pairing: false` turns it off; every step audit-logged
+- The legacy config token still works; Settings > Devices offers a one-tap "Upgrade to a device token"
+- mDNS TXT carries only id, name, version, pairing/tls flags, port and LAN IPs (never secrets)
+
 ## Real-Time Monitoring
 - Live WebSocket updates from CLI coding sessions
 - Multi-server, multi-session support

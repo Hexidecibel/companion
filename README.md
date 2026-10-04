@@ -63,8 +63,17 @@ bin/companion autostart enable
 
 1. Open the web client at `http://<your-server>:9877/web`
 2. Or download the Android APK / iOS IPA / desktop app from [Releases](https://github.com/Hexidecibel/companion/releases)
-3. Add your server's IP and the authentication token shown during setup
+3. **Add server**: the apps list nearby servers (mDNS). Pick yours (or type its address) and either
+   enter the 6-digit code the server shows (daemon log, `bin/companion pair`, or the app on a device
+   you already signed in on) or approve the new device from that other device. For a remote setup,
+   run `bin/companion pair --qr` (or Settings > Devices > Show pairing QR) and scan it: one device,
+   single use, 10 minutes.
 4. Create a new tmux session or adopt an existing one
+
+Each device gets its own token; see and revoke them in Settings > Devices or with
+`bin/companion devices list|revoke|rename`. The single `token` from the config file still works
+(legacy, all-powerful): "Enter token manually" in Add server, and Settings > Devices offers
+"Upgrade to a device token" for apps still using it.
 
 ## Configuration
 
@@ -73,7 +82,10 @@ Config file: `~/.companion/config.json` (created by `bin/companion setup`)
 | Option | Default | Description |
 |--------|---------|-------------|
 | `port` | 9877 | WebSocket server port |
-| `token` | (generated) | Authentication token |
+| `token` | (generated) | Legacy server token (prefer paired device tokens) |
+| `name` | "Companion on <hostname>" | Display name (mDNS, pairing) |
+| `pairing` | true | Allow new devices to pair (code, approval, QR) |
+| `pairing_allow_public` | false | Allow code pairing from outside LAN / tailnet / localhost |
 | `tls` | true | Enable TLS encryption |
 | `tmux_session` | "claude" | Default tmux session name |
 | `code_home` | "~/.claude" | CLI config directory |
@@ -92,6 +104,8 @@ bin/companion restart             # Restart via service manager
 bin/companion status              # Show running state, PID, sessions
 bin/companion logs                # Platform-aware log viewer
 bin/companion config              # View/set config values
+bin/companion pair [--qr]         # Approve / deny devices pairing, or print a pairing QR
+bin/companion devices             # Paired devices: list | revoke | rename
 ```
 
 ## Uninstalling

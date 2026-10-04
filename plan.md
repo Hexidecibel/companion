@@ -1886,8 +1886,10 @@ on first start, 0600). Display name = config `name`, else `Companion on <hostnam
 
 **mDNS.** `_companion._tcp`, instance name = display name, unchanged `mdns_enabled` switch. TXT:
 `id` (daemon id), `name`, `version` (daemon package version), `pairing` (`1`/`0`), `tls` (`1`/`0`),
-`port`, `proto=1`. Never a token, code, OTP or path. A unit test asserts the TXT holds no listener
-token and only those keys.
+`port`, `proto=1`, `ip` (up to 3 LAN IPv4s from physical interfaces: hosts with docker / VPN bridges
+advertise dozens of addresses, so the app tries the hint first and uses the first address that
+answers `pair_hello`). Never a token, code, OTP or path. A unit test asserts the TXT holds no
+listener token and only those keys.
 
 **Device registry.** `~/.companion/devices.json` (0600, atomic temp+rename, dir 0700):
 `{version:1, devices:[{id, name, platform, createdAt, lastSeenAt, salt, tokenHash, via, capabilities?}]}`.
