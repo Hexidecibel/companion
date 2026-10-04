@@ -1,0 +1,39 @@
+#!/bin/bash
+# e2e-setup-wizard — reproducible end-to-end run of the first-run setup wizard.
+#
+#   bin/e2e-setup-wizard [OUT_DIR]      (default OUT_DIR: ./e2e-shots)
+#
+# Builds the web app into a temp dir (web/dist is never touched), starts a FRESH
+# sandbox daemon (empty HOME, no config, private tmux server, stub `claude`) on
+# E2E_PORT (default 9573, never 9877/9878), drives the wizard in headless Chrome
+# (web/e2e/setup-wizard.cjs), then stops the daemon, kills its tmux server and
+# deletes its dir. Env: PLAYWRIGHT_CORE (path to playwright-core), CHROME,
+# E2E_PORT, KEEP=1 (leave the sandbox running for inspection).
+set -euo pipefail
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+OUT="$(realpath -m "${1:-./e2e-shots}")"
+PORT="${E2E_PORT:-9573}"
+WORK="$(mktemp -d -t companion-e2e-XXXXXX)"
+trap 'rm -rf "$WORK"' EXIT
+[ -s "$HOME/.nvm/nvm.sh" ] && . "$HOME/.nvm/nvm.sh" >/dev/null
+(cd "$ROOT/daemon" && npm run build >/dev/null)
+(cd "$ROOT/web" && npx vite build --outDir "$WORK/web" --emptyOutDir >/dev/null 2>&1)
+# A read-only copy of the update-feed manifests (no installers), for "Get the apps".
+mkdir -p "$WORK/feed/stable"
+cp "$HOME/.companion/updates/stable/"{latest,android}.json "$WORK/feed/stable/" 2>/dev/null || true
+export HERALD_SANDBOX_PORT="$PORT"
+SANDBOX="$HOME/.cache/companion-herald-sandbox-wizard"
+"$ROOT/bin/herald-sandbox" --instance wizard clean >/dev/null 2>&1 || true
+HERALD_SANDBOX_UPDATES_DIR="$WORK/feed" COMPANION_WEB_DIR="$WORK/web" \
+  "$ROOT/bin/herald-sandbox" --instance wizard --fresh --stub-claude start
+mkdir -p "$SANDBOX/home/src/demo-app" "$SANDBOX/home/src/website" "$SANDBOX/home/notes"
+rm -rf "$OUT"
+rc=0
+PORT="$PORT" OUT="$OUT" FRESH_HOME="$SANDBOX/home" DAEMON_LOG="$SANDBOX/daemon.log" \
+  LAN_HOST="$(hostname -I 2>/dev/null | awk '{print $1}')" \
+  timeout 400 node "$ROOT/web/e2e/setup-wizard.cjs" || rc=$?
+sock="$SANDBOX/tmux/tmux-$(id -u)/default"
+[ -S "$sock" ] && { echo "Private tmux sessions:"; TMUX= tmux -S "$sock" ls || true; }
+[ "${KEEP:-0}" = 1 ] || "$ROOT/bin/herald-sandbox" --instance wizard clean
+echo "Screenshots: $OUT"
+exit $rc

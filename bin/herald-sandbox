@@ -9,6 +9,7 @@
 #   bin/herald-sandbox status    PID, port owner, and whether Herald's brain is configured
 #   bin/herald-sandbox logs [N]  Tail the sandbox daemon log (key-shaped strings redacted)
 #   bin/herald-sandbox env       Print the sandbox URL/port and config path (token not printed)
+#   bin/herald-sandbox clean     Fresh instances: stop, kill the private tmux server, delete the dir
 #   bin/herald-sandbox trigger-token create|rotate|revoke|list|migrate|show-path [name]
 #                                Herald remote-trigger token for THIS instance (in its own HOME;
 #                                never printed). POST /herald/trigger on its port with it.
@@ -28,6 +29,17 @@
 # A non-default instance gets its own dir ($SANDBOX_DIR-<name>) and starts with a
 # fresh Herald conversation every time (its state.json is cleared on start).
 # Port: HERALD_SANDBOX_PORT, else 9888 for "probe"; other instances must set it.
+#
+# Fresh (true first run, for the setup wizard):
+#   HERALD_SANDBOX_PORT=9561 bin/herald-sandbox --instance wizard --fresh start [--stub-claude]
+#   bin/herald-sandbox --instance wizard clean    # stop, kill its tmux server, delete its dir
+# --fresh wipes the instance dir and starts the daemon with an EMPTY HOME and no
+# config, so it takes the real first-run path (setup mode). No live config is
+# copied and no secrets are injected. Its tmux server is private (TMUX_TMPDIR in
+# the instance dir), so sessions it starts never show up in your tmux. Herald's
+# voice URL points at a closed port. --stub-claude puts a fake `claude` first on
+# its PATH (prints a login prompt; never signs in or touches the network).
+# HERALD_SANDBOX_UPDATES_DIR: serve that update feed (read-only) instead of none.
 #
 # Isolation guarantees:
 #   - Own port (HERALD_SANDBOX_PORT, default 9887) and a single listener, so it
@@ -61,11 +73,15 @@ ENTRY="$ROOT/daemon/dist/index.js"
 LIVE_CONFIG="${COMPANION_CONFIG:-$HOME/.companion/config.json}"
 
 INSTANCE="default"
+FRESH=false
+STUB_CLAUDE=false
 ARGS=()
 while [ $# -gt 0 ]; do
   case "$1" in
     --instance) INSTANCE="${2:-}"; shift 2 ;;
     --instance=*) INSTANCE="${1#--instance=}"; shift ;;
+    --fresh) FRESH=true; shift ;;
+    --stub-claude) STUB_CLAUDE=true; shift ;;
     *) ARGS+=("$1"); shift ;;
   esac
 done
@@ -147,7 +163,116 @@ write_config() {
   '
 }
 
+FRESH_MARK="$SANDBOX_DIR/.fresh"
+TMUX_DIR="$SANDBOX_DIR/tmux"
+
+write_stub_claude() {
+  mkdir -p "$SANDBOX_DIR/bin"
+  cat > "$SANDBOX_DIR/bin/claude" <<'STUB'
+#!/bin/bash
+# Stub Claude Code for setup-wizard tests: never signs in, never touches the network.
+if [ "${1:-}" = "--version" ]; then echo "0.0.0 (Claude Code stub)"; exit 0; fi
+echo "Welcome to Claude Code (stub)"
+echo ""
+echo "Select login method:"
+echo "  1. Claude account with subscription"
+echo "  2. Anthropic Console account"
+while IFS= read -r line; do echo "stub received: $line"; done
+STUB
+  chmod 755 "$SANDBOX_DIR/bin/claude"
+}
+
+cmd_start_fresh() {
+  ensure_node
+  [ "$INSTANCE" != "default" ] || { echo "ERROR: --fresh needs a separate --instance (never the default sandbox)"; exit 2; }
+  if pid="$(running_pid)"; then
+    echo "Sandbox ($INSTANCE) already running (PID $pid) on port $PORT"
+    return 0
+  fi
+  case " $PRODUCTION_PORTS " in *" $PORT "*) echo "ERROR: refusing to use a production port ($PORT)"; exit 1 ;; esac
+  local owner
+  owner="$(port_owner "$PORT")"
+  [ -z "$owner" ] || { echo "ERROR: port $PORT is already in use (pid $owner)"; exit 1; }
+  [ -f "$ENTRY" ] || { echo "ERROR: $ENTRY missing. Build first: (cd $ROOT/daemon && npm run build)"; exit 1; }
+  # Wipe: a TRUE first run every time.
+  case "$SANDBOX_DIR" in */companion-herald-sandbox-*) rm -rf "$SANDBOX_DIR" ;; *) echo "ERROR: unexpected sandbox dir $SANDBOX_DIR"; exit 1 ;; esac
+  mkdir -p "$SANDBOX_HOME" "$TMUX_DIR"
+  chmod 700 "$SANDBOX_DIR" "$SANDBOX_HOME" "$TMUX_DIR"
+  touch "$FRESH_MARK"
+  local path_prefix=""
+  if $STUB_CLAUDE; then write_stub_claude; path_prefix="$SANDBOX_DIR/bin:"; fi
+  : > "$LOG_FILE"
+  chmod 600 "$LOG_FILE"
+  (
+    cd "$ROOT/daemon"
+    export HOME="$SANDBOX_HOME"
+    unset COMPANION_CONFIG CONFIG_PATH COMPANION_HERALD_STATE_DIR COMPANION_HERALD_TRIGGER_TOKEN_FILE
+    unset COMPANION_DEVICES_FILE COMPANION_DAEMON_ID_FILE COMPANION_SECRETS_FILE COMPANION_SETUP_STATE_FILE
+    unset ANTHROPIC_API_KEY HERALD_LLM_API_KEY TMUX TMUX_PANE HERALD_SPAWN_ROOTS HERALD_PROJECTS_ROOT
+    export TMUX_TMPDIR="$TMUX_DIR"
+    export COMPANION_PORT="$PORT"
+    export COMPANION_MDNS=0
+    export COMPANION_SANDBOX=1
+    export COMPANION_READONLY_SHARED_STATE=1
+    export HERALD_VOICE_URL="http://127.0.0.1:9"
+    export NODE_ENV=production
+    export PATH="$path_prefix$PATH"
+    if [ -n "${HERALD_SANDBOX_UPDATES_DIR:-}" ]; then export COMPANION_UPDATES_DIR="$HERALD_SANDBOX_UPDATES_DIR"; else unset COMPANION_UPDATES_DIR; fi
+    exec setsid node "$ENTRY" >> "$LOG_FILE" 2>&1 < /dev/null
+  ) &
+  local pid=$!
+  echo "$pid" > "$PID_FILE"
+  local i
+  for i in $(seq 1 30); do
+    if ! kill -0 "$pid" 2>/dev/null; then
+      echo "ERROR: fresh daemon exited during startup. Last log lines:"
+      tail -20 "$LOG_FILE" | redact
+      rm -f "$PID_FILE"
+      exit 1
+    fi
+    [ "$(port_owner "$PORT")" = "$pid" ] && break
+    sleep 0.5
+  done
+  if [ "$(port_owner "$PORT")" != "$pid" ]; then
+    echo "ERROR: fresh daemon did not bind port $PORT in time; stopping it."
+    cmd_stop
+    exit 1
+  fi
+  echo "Fresh sandbox ($INSTANCE) started (PID $pid) on port $PORT: first-run setup mode"
+  echo "  HOME:   $SANDBOX_HOME (empty at start)"
+  echo "  tmux:   private server under $TMUX_DIR"
+  echo "  Log:    $LOG_FILE"
+  echo "  Wizard: http://localhost:$PORT/web/"
+}
+
+kill_private_tmux() {
+  # Address the private server by its socket file only: with TMUX_TMPDIR alone, a
+  # missing dir would make tmux fall back to the user's real server.
+  local sock="$TMUX_DIR/tmux-$(id -u)/default"
+  [ -S "$sock" ] || return 0
+  TMUX= tmux -S "$sock" kill-server 2>/dev/null || true
+}
+
+cmd_clean() {
+  cmd_stop || true
+  kill_private_tmux
+  case "$SANDBOX_DIR" in
+    */companion-herald-sandbox-*)
+      if [ -f "$FRESH_MARK" ]; then
+        # Panes may still be exiting after kill-server: retry briefly.
+        local i
+        for i in 1 2 3 4 5; do
+          rm -rf "$SANDBOX_DIR" 2>/dev/null && break
+          sleep 0.5
+        done
+        [ -e "$SANDBOX_DIR" ] && echo "WARNING: could not remove $SANDBOX_DIR" || echo "Removed $SANDBOX_DIR"
+      fi ;;
+  esac
+  return 0
+}
+
 cmd_start() {
+  if $FRESH; then cmd_start_fresh; return; fi
   ensure_node
   if pid="$(running_pid)"; then
     echo "Sandbox ($INSTANCE) already running (PID $pid) on port $PORT"
@@ -348,7 +473,8 @@ cmd_env() {
 
 case "${1:-}" in
   start) cmd_start ;;
-  stop) cmd_stop ;;
+  stop) cmd_stop; [ -f "$FRESH_MARK" ] && kill_private_tmux ;;
+  clean) cmd_clean ;;
   status) cmd_status ;;
   logs) tail -n "${2:-80}" "$LOG_FILE" | redact ;;
   env) cmd_env ;;
@@ -359,7 +485,7 @@ case "${1:-}" in
     HOME="$SANDBOX_HOME" COMPANION_HERALD_TRIGGER_TOKEN_FILE="$SANDBOX_HOME/.companion/herald-trigger.token" \
       exec "$ROOT/bin/companion" trigger-token "$@" ;;
   *)
-    sed -n '2,31p' "$0" | sed 's/^# \{0,1\}//'
+    awk 'NR>1 && /^set -euo/ {exit} NR>1 {sub(/^# ?/, ""); print}' "$0"
     exit 2
     ;;
 esac

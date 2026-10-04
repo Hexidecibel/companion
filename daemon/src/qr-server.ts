@@ -61,6 +61,11 @@ function getContentType(filePath: string): string {
  * Find the web directory (handles both dev and installed paths)
  */
 function findWebDir(): string | null {
+  // Explicit override (containers, isolated test instances).
+  const override = process.env.COMPANION_WEB_DIR;
+  if (override && fs.existsSync(path.join(override, 'index.html'))) {
+    return path.resolve(override);
+  }
   // Try built Vite output first (web/dist/), then fall back to source web/
   const bases = [
     path.join(__dirname, '../../web'), // From dist/ in monorepo (sibling web/) — preferred
