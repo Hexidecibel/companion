@@ -28,7 +28,7 @@ type View =
   | { kind: 'manual'; prefill?: { name?: string; host: string; port: number; tls: boolean } }
   | { kind: 'done'; name: string };
 
-function detectedTarget(): PairTarget | null {
+export function detectedTarget(): PairTarget | null {
   if (typeof window === 'undefined' || nativePlatform() !== 'browser') return null;
   const { hostname, port, protocol } = window.location;
   if (!hostname) return null;
@@ -287,7 +287,7 @@ function HomeView(props: {
 
 // ------------------------------------------------------------------ code flow
 
-function CodePairing(props: {
+export function CodePairing(props: {
   target: PairTarget;
   label: string;
   deviceName: string;

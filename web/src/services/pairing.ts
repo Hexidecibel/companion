@@ -34,6 +34,10 @@ export interface DaemonHello {
   version: string;
   pairing: boolean;
   codePairing: boolean;
+  /** Present only on a fresh daemon (first-run setup), to trusted networks. */
+  setupMode?: boolean;
+  /** This connection may pair without a code (a browser on the server itself, first device). */
+  localAutoPair?: boolean;
 }
 
 export interface PairOutcome {
@@ -336,6 +340,24 @@ export class PairingClient {
       const r = await this.request('pair_redeem_qr', { otp: link.otp, deviceName, platform });
       if (r.success) this.applyResult(r.payload);
       else this.set({ phase: 'error', error: friendlyPairError(r.payload?.code, r.error) });
+    } catch (err) {
+      this.set({ phase: 'error', error: (err as Error).message });
+    }
+    this.close();
+    return this.state;
+  }
+
+  /** First-run only: pair a browser on the server itself without a code (setup_pair_local). */
+  async pairLocal(deviceName: string, platform: PairPlatform = pairingPlatform()): Promise<PairState> {
+    this.set({ phase: 'connecting' });
+    try {
+      const r = await this.request('setup_pair_local', { deviceName, platform });
+      if (r.success) {
+        this.pairingId = 'local';
+        this.applyResult({ ...r.payload, pairingId: 'local' });
+      } else {
+        this.set({ phase: 'error', error: r.error || 'Automatic pairing is not available here' });
+      }
     } catch (err) {
       this.set({ phase: 'error', error: (err as Error).message });
     }

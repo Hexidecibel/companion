@@ -122,6 +122,8 @@ export function ConnectionProvider({ children }: { children: ReactNode }) {
     const updated = getServers();
     setServers(updated);
     connectionManager.connectServer(server);
+    // A rename alone changes no connection state: refresh the snapshot names now.
+    setSnapshots(connectionManager.getSnapshots());
   }, []);
 
   const deleteServer = useCallback((id: string) => {

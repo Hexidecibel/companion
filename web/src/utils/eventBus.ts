@@ -10,6 +10,8 @@ type EventMap = {
   'companion-in-app-notification': { title: string; body?: string; tag?: string };
   /** Open the Code Review drawer for a session (consumed via reviewNav). */
   'review-open': { serverId: string; sessionId: string };
+  /** Open the setup wizard (Settings > Setup); no serverId = the first-run device flow. */
+  'open-setup': { serverId?: string };
 };
 
 type Handler<T> = T extends void ? () => void : (data: T) => void;

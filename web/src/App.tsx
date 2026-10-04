@@ -9,6 +9,7 @@ import { UpdateBanner } from './components/UpdateBanner';
 import { AndroidUpdateBanner } from './components/AndroidUpdateBanner';
 import { CommandPalette, CommandAction } from './components/CommandPalette';
 import { PairingHost } from './components/PairingHost';
+import { SetupHost } from './components/setup/SetupHost';
 import { eventBus } from './utils/eventBus';
 
 const SettingsScreen = lazy(() => import('./components/SettingsScreen').then(m => ({ default: m.SettingsScreen })));
@@ -195,6 +196,7 @@ export function App() {
             <UpdateBanner />
             <AndroidUpdateBanner />
             <PairingHost />
+            <SetupHost />
 
             {showCommandPalette && (
               <CommandPalette

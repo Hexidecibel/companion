@@ -301,6 +301,34 @@ export function SettingsScreen({ onBack }: SettingsScreenProps) {
           )}
         </section>
 
+        {/* Setup wizard (re-runnable) */}
+        <section className="settings-section">
+          <h3 className="settings-section-title">Setup</h3>
+          {connectedServers.length === 0 ? (
+            <div className="settings-card settings-card-row">
+              <div className="settings-card-detail">Set up a new server, or connect to one to run its setup again.</div>
+              <button className="settings-action-btn" onClick={() => eventBus.emit('open-setup', {})}>
+                Start
+              </button>
+            </div>
+          ) : (
+            connectedServers.map((snap) => (
+              <div key={snap.serverId} className="settings-card settings-card-row">
+                <div className="settings-card-row-info">
+                  <span className="status-dot status-dot-green" />
+                  <span className="settings-card-label">{snap.serverName}</span>
+                </div>
+                <button
+                  className="settings-action-btn"
+                  onClick={() => eventBus.emit('open-setup', { serverId: snap.serverId })}
+                >
+                  Run setup
+                </button>
+              </div>
+            ))
+          )}
+        </section>
+
         {/* Devices (pairing) */}
         <section className="settings-section">
           <h3 className="settings-section-title">Devices</h3>
