@@ -14,6 +14,7 @@ import type { HeraldService } from './herald/service';
 import type { HeraldVoiceService } from './herald/voice/service';
 import type { HeraldTriggerService } from './herald/trigger';
 import type { ReviewService } from './review/service';
+import type { StuckDetector } from './stuck/detector';
 import { DaemonConfig, OriginCredential, TmuxSessionConfig, WebSocketResponse } from './types';
 
 export interface AuthenticatedClient {
@@ -81,6 +82,7 @@ export interface HandlerContext {
   heraldVoice: HeraldVoiceService | null;
   heraldTrigger: HeraldTriggerService | null;
   review: ReviewService | null;
+  stuck: StuckDetector | null;
 
   // Helper methods from WebSocketServer
   send: (ws: WebSocket, response: WebSocketResponse) => void;

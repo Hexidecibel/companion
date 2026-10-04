@@ -160,8 +160,9 @@ export function briefSummary(items: HeraldInboxItem[]): string {
   return listOut(items.map(briefLine));
 }
 
-/** One briefing line; review alerts get a templated lead-in. */
+/** One briefing line; review alerts get a templated lead-in, stuck items say so as they are. */
 export function briefLine(i: HeraldInboxItem): string {
+  if (i.stuck) return oneLine(i.headline);
   const head = firstSentence(i.headline, 160) || i.headline;
   return i.review ? `Heads up: ${head}` : head;
 }

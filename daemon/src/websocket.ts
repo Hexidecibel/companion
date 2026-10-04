@@ -48,6 +48,7 @@ import { HeraldVoiceService } from './herald/voice/service';
 import { VoiceServiceClient } from './herald/voice/client';
 import { HeraldTriggerService } from './herald/trigger';
 import { ReviewService } from './review/service';
+import { StuckDetector } from './stuck/detector';
 import { DeviceRegistry, isDeviceToken } from './pairing/registry';
 import { PairingManager, PairResult, PendingPairing } from './pairing/manager';
 import { DaemonIdentity, ephemeralIdentity } from './pairing/identity';
@@ -96,6 +97,7 @@ export class WebSocketHandler {
   private heraldVoice: HeraldVoiceService | null = null;
   private heraldTrigger: HeraldTriggerService;
   private review: ReviewService | null = null;
+  private stuck: StuckDetector | null = null;
   private identity: DaemonIdentity;
   private devices: DeviceRegistry;
   private pairing: PairingManager;
@@ -174,6 +176,16 @@ export class WebSocketHandler {
       const review = this.review;
       review.setHerald(this.herald);
       this.herald.setReview({ digest: (id, scope) => review.digest(id, scope) });
+    }
+
+    this.stuck = this.createStuck();
+    if (this.stuck && this.herald) {
+      const stuck = this.stuck;
+      stuck.setHerald(this.herald);
+      this.herald.setStuck({
+        list: (id) => stuck.list(id),
+        snooze: (id, kind, minutes) => stuck.snooze(id, kind, minutes),
+      });
     }
 
     // Device pairing (registry is read lazily: nothing touches devices.json until used)
@@ -358,6 +370,7 @@ export class WebSocketHandler {
       heraldVoice: this.heraldVoice,
       heraldTrigger: this.heraldTrigger,
       review: this.review,
+      stuck: this.stuck,
 
       send: (ws, response) => this.send(ws, response),
       broadcast: (type, payload, sessionId) => this.broadcast(type, payload, sessionId),
@@ -473,6 +486,30 @@ export class WebSocketHandler {
       return review;
     } catch (err) {
       console.error('Review: failed to initialize:', err);
+      return null;
+    }
+  }
+
+  // --- Stuck-session detection ---
+
+  private createStuck(): StuckDetector | null {
+    try {
+      const source = this.makeLocalSource();
+      const stuck = new StuckDetector({
+        watcher: this.watcher,
+        sessionName: (id) => this.sessionNameStore.get(id) || id,
+        // GLOBAL: every client keeps the whole list (sidebar badges).
+        broadcast: (type, payload) => this.broadcast(type, payload),
+        // Guarded inside the detector: dedupe, liveness, per-tick cap, timeout.
+        capturePane: (id) => defaultCapturePane(id),
+        quietHours: () => this.push.getStore().getEscalation().quietHours,
+        sendDirect: (id, text) => source.sendText(id, text, `stuck-${Date.now()}`),
+        audit: (entry) => this.auditLog.append(entry),
+      });
+      stuck.attach(this.watcher);
+      return stuck;
+    } catch (err) {
+      console.error('Stuck: failed to initialize:', err);
       return null;
     }
   }
@@ -1223,5 +1260,6 @@ export class WebSocketHandler {
     this.herald?.shutdown();
     this.heraldVoice?.shutdown();
     this.review?.shutdown();
+    this.stuck?.shutdown();
   }
 }

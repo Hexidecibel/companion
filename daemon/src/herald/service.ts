@@ -71,6 +71,8 @@ import type {
   HeraldShowVia,
 } from './protocol';
 import type { LlmUsage } from './llm/provider';
+import type { StuckFinding, StuckKind } from '../stuck/protocol';
+import { classifyInterrupt } from './danger';
 
 export const MAX_USER_TEXT = 4000;
 /** A voice message is checked against Herald's replies started this recently. */
@@ -133,6 +135,25 @@ export class HeraldRelayError extends Error {
 export interface HeraldReviewLink {
   /** Grounded digest for the review_changes tool (null = unknown session). */
   digest(sessionId: string, scope: 'since_last_look' | 'last_turn' | 'all'): Promise<object | null>;
+}
+
+/** What Herald needs from stuck detection (late-bound: the detector is built after Herald). */
+export interface HeraldStuckLink {
+  list(sessionId?: string): StuckFinding[];
+  snooze(sessionId: string, kind: StuckKind | undefined, minutes: number): number;
+}
+
+/** One stuck session for the inbox (from StuckDetector.alerts()). */
+export interface HeraldStuckAlert {
+  key: string;
+  sessionId: string;
+  sessionName: string;
+  headline: string;
+  summary: string;
+  kind: StuckKind;
+  kinds: StuckKind[];
+  findingId: string;
+  count: number;
 }
 
 /** One turn to polish (Code Review review_polish_summaries). */
@@ -296,6 +317,9 @@ export class HeraldService {
   private lastVoiceAt = 0;
   private speakingSuppressesFn: ((clientId: string) => boolean) | undefined;
   private review: HeraldReviewLink | null = null;
+  private stuck: HeraldStuckLink | null = null;
+  /** Latest stuck list from the detector (re-applied when the inbox is rebuilt at start). */
+  private stuckAlerts: HeraldStuckAlert[] = [];
 
   constructor(deps: HeraldServiceDeps) {
     this.cfg = deps.config;
@@ -403,6 +427,7 @@ export class HeraldService {
     this.asks.load(persisted.asks ?? []);
     this.inbox.restoreAnswers(persisted.answers ?? [], this.now());
     this.inbox.restoreReviewAlerts(persisted.reviews ?? [], this.now());
+    if (this.stuckAlerts.length) this.inbox.setStuckAlerts(this.stuckAlerts.map((a) => ({ ...a, serverId: 'local' })), this.now());
     this.toolbox?.loadOpened(persisted.cushOpened);
     this.verbosity = persisted.verbosity ?? 'auto';
     this.pronunciations = persisted.pronunciations ?? [];
@@ -1171,6 +1196,7 @@ export class HeraldService {
       },
       showSession: (s, deviceId) => this.showResolved(s, deviceId),
       ...(this.review ? { review: this.review } : {}),
+      ...(this.stuck ? { stuck: this.stuck } : {}),
       resolveDevice: (phrase) => this.resolveDeviceWords(phrase, turn.origin?.clientId ?? null),
     };
     let verbositySet: HeraldVerbosity | null = null;
@@ -1327,13 +1353,15 @@ export class HeraldService {
         (i) =>
           i.answer ||
           !!i.review ||
+          !!i.stuck ||
           !(i.priority === 'finished' && live.get(`${i.serverId}:${i.sessionId}`) === 'working')
       )
-      // Answers to the user's own questions first, then blocked, finished.
+      // Answers to the user's own questions first, then blocked, stuck, finished.
       .sort(
         (a, b) =>
           Number(!!b.answer) - Number(!!a.answer) ||
           INBOX_RANK[a.priority] - INBOX_RANK[b.priority] ||
+          Number(!!b.stuck) - Number(!!a.stuck) ||
           b.createdAt - a.createdAt
       );
   }
@@ -1342,7 +1370,7 @@ export class HeraldService {
     const now = this.now();
     return items.map(
       (i) =>
-        `[${i.answer ? 'answer' : i.review ? 'risky change' : i.priority}] ${clip(oneLine(i.headline), i.answer ? 320 : 200)} (${i.sessionName}, ${formatAgo(now - i.createdAt)} ago)`
+        `[${i.answer ? 'answer' : i.review ? 'risky change' : i.stuck ? 'looks stuck' : i.priority}] ${clip(oneLine(i.headline), i.answer ? 320 : 200)} (${i.sessionName}, ${formatAgo(now - i.createdAt)} ago)`
     );
   }
 
@@ -1684,6 +1712,55 @@ export class HeraldService {
     this.inbox.addReviewAlert({ ...a, serverId: 'local', createdAt: this.now() });
     this.emit({ kind: 'inbox', inbox: this.inbox.list() });
     this.persist();
+  }
+
+  // ---------------------------------------------------------------- stuck sessions
+
+  setStuck(link: HeraldStuckLink | null): void {
+    this.stuck = link;
+  }
+
+  /**
+   * The detector's current stuck list (quiet hours / snoozes already applied):
+   * one inbox item per session, toned like news (its own `stuck` tone on the
+   * active device), never spoken unasked.
+   */
+  syncStuckAlerts(alerts: HeraldStuckAlert[]): void {
+    this.stuckAlerts = alerts.map((a) => ({ ...a, kinds: [...a.kinds] }));
+    if (!this.started || this.disposed) return;
+    if (this.inbox.setStuckAlerts(this.stuckAlerts.map((a) => ({ ...a, serverId: 'local' })), this.now()))
+      this.emit({ kind: 'inbox', inbox: this.inbox.list() });
+  }
+
+  /**
+   * "Interrupt it" from a stuck banner: the same echo-tier interrupt card the
+   * brain's propose_interrupt makes (short countdown, cancellable; Ctrl+C is
+   * re-checked against the session's state at send).
+   */
+  proposeInterrupt(r: { sessionId: string; sessionName: string; clientId?: string }): {
+    actionId: string;
+    autoSendAt: number | null;
+  } {
+    if (!this.cfg.featureEnabled || this.disposed || !this.started)
+      throw new HeraldRelayError('herald_unavailable', 'Herald is not running');
+    for (const a of this.actions.list()) {
+      // A second pending interrupt would be a double Ctrl+C (exits Claude).
+      if (a.status === 'pending' && a.kind === 'interrupt' && a.serverId === 'local' && a.sessionId === r.sessionId)
+        return { actionId: a.id, autoSendAt: a.autoSendAt ?? null };
+    }
+    const verdict = classifyInterrupt({});
+    const action = this.actions.create({
+      tier: verdict.tier,
+      reasons: verdict.reasons,
+      kind: 'interrupt',
+      serverId: 'local',
+      sessionId: r.sessionId,
+      sessionName: r.sessionName,
+      payload: 'Ctrl+C',
+      readback: `Interrupting ${r.sessionName}`,
+      meta: { userText: `Interrupt ${r.sessionName} (looks stuck)`, ruleIds: verdict.ruleIds },
+    });
+    return { actionId: action.id, autoSendAt: action.autoSendAt ?? null };
   }
 
   /** The user marked the session reviewed: its risk alerts are resolved. */

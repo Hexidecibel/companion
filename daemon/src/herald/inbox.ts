@@ -15,6 +15,10 @@
  *   review   — (a finished item with `review`) a risky code change (Code Review).
  *              Survives the session working again; removed when the user marks
  *              the session reviewed, or by TTL.
+ *   stuck    — (a finished item with `stuck`) a WORKING session that looks stuck
+ *              (stuck detection). Survives the session working (that is the
+ *              point); replaced wholesale by the detector's current list, so it
+ *              disappears as soon as the session recovers, is snoozed or idle.
  */
 
 import type { HeraldInboxItem, InboxPriority } from './protocol';
@@ -136,7 +140,7 @@ export class InboxTracker {
         // stays: it is what the user asked for; an answer that ended in a
         // question has been answered).
         for (const [id, item] of this.items) {
-          if (`${item.serverId}:${item.sessionId}` !== sk || item.review) continue;
+          if (`${item.serverId}:${item.sessionId}` !== sk || item.review || item.stuck) continue;
           if (item.answer ? item.priority === 'blocked' : item.priority === 'finished')
             this.items.delete(id);
         }
@@ -158,6 +162,7 @@ export class InboxTracker {
               item.priority === 'finished' &&
               !item.answer &&
               !item.review &&
+              !item.stuck &&
               `${item.serverId}:${item.sessionId}` === sk
             )
               this.items.delete(oid);
@@ -281,6 +286,57 @@ export class InboxTracker {
     this.items.set(id, item);
     this.prune(a.createdAt);
     return { ...item };
+  }
+
+  /**
+   * Stuck sessions (stuck detection): the detector's whole current list. One
+   * item per session, keyed by session + turn, so an update (a higher count, a
+   * different signal) changes it in place and tones at most once per turn.
+   * Returns true when the visible inbox changed.
+   */
+  setStuckAlerts(
+    alerts: Array<{
+      key: string;
+      serverId: string;
+      sessionId: string;
+      sessionName: string;
+      headline: string;
+      summary: string;
+      kind: string;
+      kinds: string[];
+      findingId: string;
+      count: number;
+    }>,
+    now: number
+  ): boolean {
+    const before = JSON.stringify(this.list().filter((i) => i.stuck));
+    const keep = new Set<string>();
+    for (const a of alerts.slice(0, 20)) {
+      const id = `${a.serverId}:${a.sessionId}:st${fnv1a(a.key)}`;
+      keep.add(id);
+      const prev = this.items.get(id);
+      this.seenKeys.add(id);
+      this.items.set(id, {
+        id,
+        serverId: a.serverId,
+        sessionId: a.sessionId,
+        sessionName: a.sessionName,
+        priority: 'finished',
+        headline: clip(oneLine(a.headline), 200),
+        createdAt: prev?.createdAt ?? now,
+        heard: prev?.heard ?? this.heard.has(id),
+        stuck: {
+          kind: clip(a.kind, 40),
+          kinds: a.kinds.slice(0, 5).map((k) => clip(k, 40)),
+          findingId: clip(a.findingId, 600),
+          summary: clip(oneLine(a.summary), 240),
+          count: Math.max(0, Math.round(a.count) || 0),
+        },
+      });
+    }
+    for (const [id, item] of this.items) if (item.stuck && !keep.has(id)) this.items.delete(id);
+    this.prune(now);
+    return JSON.stringify(this.list().filter((i) => i.stuck)) !== before;
   }
 
   /** The user reviewed the session: its risk alerts are done. */

@@ -123,6 +123,8 @@ export interface ToolCall {
   status: 'pending' | 'running' | 'completed' | 'error';
   startedAt?: number;
   completedAt?: number;
+  /** The tool_result was flagged is_error (non-zero exit, tool error). Status stays 'completed'. */
+  isError?: boolean;
 }
 
 export interface ConversationHighlight {

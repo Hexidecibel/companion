@@ -23,6 +23,7 @@ import type { HeraldToolbox } from './knowledge/toolbox';
 import { cushCommandLine, cushReadback, CUSH_OPS, publicUrl } from './knowledge/cush';
 import { MAX_QUERY_CHARS } from './knowledge/sources';
 import { redactSecrets } from './knowledge/redact';
+import type { StuckFinding, StuckKind } from '../stuck/protocol';
 import { resolveSession, normalizeRef } from './resolve';
 import { clip, clipTail, firstSentence, formatAgo, oneLine, plainToolAction } from './text';
 
@@ -310,6 +311,35 @@ TOOL_SPECS.push({
   },
 });
 
+TOOL_SPECS.push({
+  name: 'stuck_sessions',
+  description:
+    "Which working sessions look stuck, and on what: the same test or error failing again and again, the same command repeated with no change, an edit undone and redone, no progress for a long time, or a command hanging. Use for 'is anything stuck?', 'what's Out4 stuck on?'. Omit session for all. Say it plainly in one sentence per session; never add causes it does not list.",
+  parameters: {
+    type: 'object',
+    properties: {
+      session: { ...SESSION_PROP, description: 'Only this session (optional).' },
+    },
+    required: [],
+    additionalProperties: false,
+  },
+});
+
+TOOL_SPECS.push({
+  name: 'snooze_stuck',
+  description:
+    "Stop flagging a session as stuck for a while, when the user says to ignore it ('ignore that for 30 minutes', 'it's fine, leave Out4 alone'). minutes 0 lifts a snooze. Nothing is sent to the session.",
+  parameters: {
+    type: 'object',
+    properties: {
+      session: SESSION_PROP,
+      minutes: { type: 'integer', description: 'How long, in minutes (default 30, at most 1440).' },
+    },
+    required: ['session'],
+    additionalProperties: false,
+  },
+});
+
 /** Tools that create an action: never executed in an iteration with malformed calls. */
 export const ACTION_TOOLS = new Set([
   'propose_input',
@@ -431,6 +461,10 @@ function example(name: string): string {
       return '{"project_or_dir": "companion", "first_prompt": "run the tests and tell me what fails"}';
     case 'review_changes':
       return '{"session": "Out4", "scope": "since_last_look"}';
+    case 'stuck_sessions':
+      return '{"session": "Out4"}';
+    case 'snooze_stuck':
+      return '{"session": "Out4", "minutes": 30}';
     default:
       return '{"session": "companion"}';
   }
@@ -470,6 +504,11 @@ export interface ToolEnv {
   showSession?: (s: SessionSnapshot, deviceId?: string) => HeraldShowResult;
   /** The device the user's words name ("my PC"), from the device that asked. */
   resolveDevice?: (phrase: string) => DeviceAliasResult;
+  /** Stuck detection. Absent = stuck_sessions / snooze_stuck report unavailable. */
+  stuck?: {
+    list(sessionId?: string): StuckFinding[];
+    snooze(sessionId: string, kind: StuckKind | undefined, minutes: number): number;
+  };
   /** Code Review digests. Absent = review_changes reports unavailable. */
   review?: {
     digest(sessionId: string, scope: (typeof REVIEW_SCOPES)[number]): Promise<object | null>;
@@ -751,6 +790,65 @@ export async function executeTool(
         const digest = await env.review.digest(s.sessionId, scope as (typeof REVIEW_SCOPES)[number]);
         if (!digest) return err(`No code changes are known for ${s.sessionName}.`);
         return safeOk(digest);
+      }
+
+      case 'stuck_sessions': {
+        if (!env.stuck) return err('Stuck detection is not available on this server.');
+        let only: SessionSnapshot | null = null;
+        if (typeof args.session === 'string' && args.session.trim()) {
+          const r = await resolveFresh(env, args.session, state);
+          if (!r.ok) return err(r.error);
+          only = r.session;
+          if (only.serverId !== 'local')
+            return err(`I can only tell for sessions on this machine for now; ${only.sessionName} is on another server.`);
+        }
+        const now = env.now();
+        const findings = env.stuck.list(only?.sessionId);
+        const bySession = new Map<string, StuckFinding[]>();
+        for (const f of findings) bySession.set(f.sessionId, [...(bySession.get(f.sessionId) || []), f]);
+        for (const list of bySession.values()) {
+          const f = list[0];
+          state.sessionRefs.set(`local:${f.sessionId}`, { serverId: 'local', sessionId: f.sessionId, sessionName: f.sessionName });
+        }
+        const stuck = Array.from(bySession.values()).map((list) => ({
+          session: list[0].sessionName,
+          signals: list.slice(0, 3).map((f) => ({
+            what: f.summary,
+            since: `${formatAgo(now - f.firstSeen)} ago`,
+            evidence: f.evidence.slice(0, 2),
+          })),
+        }));
+        if (!stuck.length)
+          return safeOk({
+            stuck: [],
+            instruction: only
+              ? `${only.sessionName} does not look stuck. Say so in a few words${only.status === 'working' ? '; it is still working' : ''}.`
+              : 'Nothing looks stuck. Say so in a few words.',
+          });
+        return safeOk({
+          stuck,
+          instruction:
+            'One plain sentence per session from "what" (e.g. "Out4 looks stuck: the same test failed 6 times in 18 minutes."). Then offer, in a few words, to ask it what is going on, interrupt it, show it, or ignore it for a while. Never act without the user asking: asking = propose_input with a short question, interrupting = propose_interrupt, showing = show_session, ignoring = snooze_stuck.',
+        });
+      }
+
+      case 'snooze_stuck': {
+        if (!env.stuck) return err('Stuck detection is not available on this server.');
+        const r = await resolveFresh(env, String(args.session), state);
+        if (!r.ok) return err(r.error);
+        const s = r.session;
+        if (s.serverId !== 'local')
+          return err(`I can only do that for sessions on this machine for now; ${s.sessionName} is on another server.`);
+        const minutes = typeof args.minutes === 'number' ? Math.max(0, Math.min(1440, args.minutes)) : 30;
+        const until = env.stuck.snooze(s.sessionId, undefined, minutes);
+        return ok({
+          ok: true,
+          session: s.sessionName,
+          snoozed_minutes: until ? minutes : 0,
+          instruction: until
+            ? `Done. Confirm in a few words, e.g. "Okay, I'll leave ${s.sessionName} alone for ${minutes} minutes."`
+            : `Done: ${s.sessionName} can be flagged as stuck again. Confirm in a few words.`,
+        });
       }
 
       case 'show_session': {

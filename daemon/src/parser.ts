@@ -30,6 +30,7 @@ interface ContentBlock {
   name?: string;
   input?: unknown;
   content?: string | Array<{ type: string; text?: string }>; // For tool_result blocks
+  is_error?: boolean; // tool_result: the tool failed (non-zero exit, tool error)
 }
 
 interface JsonlEntry {
@@ -217,6 +218,7 @@ export function parseConversationFile(
   const toolResults = new Map<string, string>();
   const toolStartTimes = new Map<string, number>();
   const toolCompleteTimes = new Map<string, number>();
+  const toolErrors = new Set<string>();
 
   for (const line of lines) {
     try {
@@ -233,6 +235,7 @@ export function parseConversationFile(
           // Track tool_result completion times and outputs
           if (block.type === 'tool_result' && block.tool_use_id) {
             toolCompleteTimes.set(block.tool_use_id, timestamp);
+            if (block.is_error === true) toolErrors.add(block.tool_use_id);
 
             // Extract output content - can be string or array of content blocks
             let output = '';
@@ -260,7 +263,7 @@ export function parseConversationFile(
       const entry: JsonlEntry = JSON.parse(lines[i]);
 
       if (entry.type === 'user' || entry.type === 'assistant') {
-        const message = parseEntry(entry, toolResults, toolStartTimes, toolCompleteTimes);
+        const message = parseEntry(entry, toolResults, toolStartTimes, toolCompleteTimes, toolErrors);
         if (message) {
           messages.unshift(message); // Add to beginning to maintain order
         }
@@ -889,7 +892,8 @@ function parseEntry(
   entry: JsonlEntry,
   toolResults: Map<string, string>,
   toolStartTimes: Map<string, number>,
-  toolCompleteTimes: Map<string, number>
+  toolCompleteTimes: Map<string, number>,
+  toolErrors?: Set<string>
 ): ConversationMessage | null {
   const message = entry.message;
   if (!message) return null;
@@ -929,6 +933,7 @@ function parseEntry(
           status: isPending ? 'pending' : 'completed',
           startedAt,
           completedAt,
+          ...(toolErrors?.has(toolId) ? { isError: true } : {}),
         });
 
         // Extract options from AskUserQuestion tool (only if still pending)
