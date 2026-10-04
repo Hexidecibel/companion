@@ -406,4 +406,44 @@ describe('ServerConnection', () => {
     const conn = new ServerConnection(makeServer());
     await expect(conn.send({ type: 'ping' })).rejects.toThrow('not connected');
   });
+
+  describe('device tokens', () => {
+    it('records the auth kind and daemon id from the auth response', async () => {
+      const conn = new ServerConnection(makeServer({ token: 'cdt1.x.y' }));
+      const ws = await connectAndAuth(conn);
+      await completeAuth(ws, { authKind: 'device', deviceId: 'dev1', daemonId: 'd'.repeat(32) });
+      expect(conn.authKind).toBe('device');
+      expect(conn.pairedDeviceId).toBe('dev1');
+      expect(conn.daemonId).toBe('d'.repeat(32));
+    });
+
+    it('a revoked device stops reconnecting until its token changes', async () => {
+      const conn = new ServerConnection(makeServer({ token: 'cdt1.x.y' }));
+      const ws = await connectAndAuth(conn);
+      const authMsg = JSON.parse(ws.sentMessages[0]);
+      ws.simulateMessage({ type: 'authenticated', success: false, error: 'device_revoked', requestId: authMsg.requestId });
+      await flushMicrotasks();
+      await flushMicrotasks();
+      expect(conn.isRevoked).toBe(true);
+      expect(conn.getState().status).toBe('error');
+      expect(conn.getState().error).toMatch(/signed out/);
+      const before = lastCreatedWs;
+      await vi.advanceTimersByTimeAsync(120_000);
+      expect(lastCreatedWs).toBe(before); // no new socket
+      conn.connect();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(lastCreatedWs).toBe(before);
+      // A new token (re-paired) clears it.
+      conn.updateServerConfig(makeServer({ token: 'cdt1.new.token' }));
+      expect(conn.isRevoked).toBe(false);
+    });
+
+    it('token_invalidated with device_revoked marks the connection revoked', async () => {
+      const conn = new ServerConnection(makeServer({ token: 'cdt1.x.y' }));
+      const ws = await connectAndAuth(conn);
+      await completeAuth(ws, { authKind: 'device' });
+      ws.simulateMessage({ type: 'token_invalidated', success: true, payload: { reason: 'device_revoked' } });
+      expect(conn.isRevoked).toBe(true);
+    });
+  });
 });

@@ -25,6 +25,12 @@ export class ServerConnection {
   private server: Server;
   private _isLocal = false;
   private _gitEnabled = true;
+  /** From the auth response: which credential this server accepted. */
+  private _authKind: 'device' | 'legacy' | null = null;
+  private _pairedDeviceId: string | null = null;
+  private _daemonId: string | null = null;
+  /** The daemon revoked this device: stop reconnecting until the token changes. */
+  private revoked = false;
   private connectionState: ConnectionState = {
     status: 'disconnected',
     reconnectAttempts: 0,
@@ -63,7 +69,7 @@ export class ServerConnection {
   }
 
   connect(): void {
-    if (this.server.enabled === false) {
+    if (this.server.enabled === false || this.revoked) {
       return;
     }
 
@@ -142,6 +148,10 @@ export class ServerConnection {
       if (response.success) {
         this._isLocal = !!(response as unknown as { isLocal?: boolean }).isLocal;
         this._gitEnabled = (response as unknown as { gitEnabled?: boolean }).gitEnabled !== false;
+        const auth = response as unknown as { authKind?: string; deviceId?: string; daemonId?: string };
+        this._authKind = auth.authKind === 'device' ? 'device' : auth.authKind === 'legacy' ? 'legacy' : null;
+        this._pairedDeviceId = typeof auth.deviceId === 'string' ? auth.deviceId : null;
+        this._daemonId = typeof auth.daemonId === 'string' ? auth.daemonId : null;
 
         // Subscribe to broadcasts so we receive real-time status_change events
         const subscribePayload = this.lastSessionId ? { sessionId: this.lastSessionId } : undefined;
@@ -181,9 +191,12 @@ export class ServerConnection {
         }
         this.hasConnectedBefore = true;
       } else {
+        if (response.error === 'device_revoked') this.revoked = true;
         this.updateState({
           status: 'error',
-          error: 'Authentication failed: ' + (response.error || 'Invalid token'),
+          error: this.revoked
+            ? 'This device was signed out of the server. Pair it again.'
+            : 'Authentication failed: ' + (response.error || 'Invalid token'),
         });
         this.ws?.close();
       }
@@ -201,6 +214,13 @@ export class ServerConnection {
         this.missedPongs = 0;
         this.lastPongAt = Date.now();
         return;
+      }
+
+      if (
+        message.type === 'token_invalidated' &&
+        (message.payload as { reason?: string } | undefined)?.reason === 'device_revoked'
+      ) {
+        this.revoked = true;
       }
 
       if (message.requestId && this.pendingRequests.has(message.requestId)) {
@@ -241,7 +261,12 @@ export class ServerConnection {
     });
     this.pendingRequests.clear();
 
-    if (this.server.enabled !== false && this.connectionState.reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+    if (this.revoked) {
+      this.updateState({
+        status: 'error',
+        error: 'This device was signed out of the server. Pair it again.',
+      });
+    } else if (this.server.enabled !== false && this.connectionState.reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
       const attempts = this.connectionState.reconnectAttempts + 1;
       const baseDelay = Math.min(
         INITIAL_RECONNECT_DELAY * Math.pow(2, attempts - 1),
@@ -506,6 +531,23 @@ export class ServerConnection {
     return this._gitEnabled;
   }
 
+  /** 'device' (paired token), 'legacy' (server token), null before auth / older daemons. */
+  get authKind(): 'device' | 'legacy' | null {
+    return this._authKind;
+  }
+
+  get pairedDeviceId(): string | null {
+    return this._pairedDeviceId;
+  }
+
+  get daemonId(): string | null {
+    return this._daemonId;
+  }
+
+  get isRevoked(): boolean {
+    return this.revoked;
+  }
+
   updateServerConfig(server: Server): void {
     const wasConnected = this.isConnected();
     const configChanged =
@@ -514,6 +556,7 @@ export class ServerConnection {
       this.server.token !== server.token ||
       this.server.useTls !== server.useTls;
 
+    if (this.server.token !== server.token) this.revoked = false;
     this.server = server;
 
     if (server.enabled === false) {

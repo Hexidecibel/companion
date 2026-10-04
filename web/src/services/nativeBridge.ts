@@ -241,3 +241,43 @@ export async function setAudioFocus(active: boolean): Promise<void> {
   if (!isNativeMobile()) return;
   await call('plugin:herald-native|set_audio_focus', { active });
 }
+
+// ---------------------------------------------------------------- pairing
+
+/**
+ * Browse mDNS for `_companion._tcp` for about `timeoutMs` (all native apps).
+ * Raw services `{name, host, addresses, port, txt}`; null in a browser or when
+ * the native side lacks the command (older app).
+ */
+export async function discoverDaemonsNative(timeoutMs: number): Promise<unknown[] | null> {
+  if (nativePlatform() === 'browser') return null;
+  const r = await call<{ daemons?: unknown[] }>('plugin:herald-native|discover_daemons', { timeoutMs });
+  return r && Array.isArray(r.daemons) ? r.daemons : null;
+}
+
+export const DEEP_LINK_EVENT = 'companion-deep-link';
+
+/** A `companion://` link that launched / reopened the app (native only). */
+export async function listenDeepLinks(cb: (url: string) => void): Promise<() => void> {
+  const platform = nativePlatform();
+  if (platform === 'browser') return () => {};
+  const offs: Array<() => void> = [];
+  try {
+    if (platform === 'android') {
+      const { addPluginListener } = await import('@tauri-apps/api/core');
+      const l = await addPluginListener(PLUGIN, 'deepLink', (p: { url?: unknown }) => {
+        if (typeof p?.url === 'string') cb(p.url);
+      });
+      offs.push(() => { void l.unregister().catch(() => {}); });
+    } else {
+      const { listen } = await import('@tauri-apps/api/event');
+      offs.push(await listen<string>(DEEP_LINK_EVENT, (e) => { if (typeof e.payload === 'string') cb(e.payload); }));
+    }
+  } catch (err) {
+    console.warn('[herald-native] deep link listen failed', err);
+  }
+  // The link that cold-started the app arrived before this listener.
+  const pending = await call<{ url?: string | null }>('plugin:herald-native|take_pending_link');
+  if (pending && typeof pending.url === 'string' && pending.url) cb(pending.url);
+  return () => offs.forEach((f) => f());
+}

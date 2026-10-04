@@ -9,6 +9,12 @@ export interface Server {
   sshUser?: string;
   parallelWorkersEnabled?: boolean;
   certFingerprint?: string;
+  /** The daemon's stable public id (pairing / mDNS), when known. */
+  daemonId?: string;
+  /** This device's id on that daemon (paired-device token). */
+  deviceId?: string;
+  /** 'device' = per-device token from pairing; 'legacy' / absent = the server token. */
+  authKind?: 'device' | 'legacy';
 }
 
 export interface ConnectionState {

@@ -1,0 +1,109 @@
+/* Pairing: add-server flow, approval prompt, Devices settings. */
+.pairing-modal { max-width: 460px; }
+.pairing-body { display: flex; flex-direction: column; gap: 14px; }
+.pairing-section {
+  display: flex; flex-direction: column; gap: 8px;
+  padding: 12px; border: 1px solid var(--border-color); border-radius: 10px;
+  background: var(--bg-primary);
+}
+.pairing-section-head {
+  display: flex; justify-content: space-between; align-items: center;
+  font-size: 13px; font-weight: 600; color: var(--text-secondary);
+  text-transform: uppercase; letter-spacing: 0.04em;
+}
+.pairing-muted { color: var(--text-secondary); font-size: 13px; line-height: 1.4; }
+.pairing-muted code, .pairing-code code { color: var(--accent-blue-light); }
+.pairing-error { color: var(--accent-red); font-size: 13px; }
+.pairing-link-btn {
+  background: none; border: none; color: var(--accent-blue-light); cursor: pointer;
+  font-size: 13px; padding: 4px 0; text-align: left;
+}
+.pairing-link-btn:disabled { color: var(--text-muted); cursor: default; }
+.pairing-advanced { align-self: flex-start; }
+.pairing-modal .btn-secondary, .devices-card .btn-secondary {
+  background: var(--bg-tertiary); color: var(--text-primary); border: 1px solid var(--border-color);
+  border-radius: 8px; padding: 10px 14px; font-size: 14px; cursor: pointer;
+}
+.pairing-modal .btn-secondary:disabled { opacity: 0.5; cursor: default; }
+.pairing-wide-btn { width: 100%; }
+.pairing-paste, .pairing-address { display: flex; gap: 8px; }
+.pairing-paste input, .pairing-address input {
+  flex: 1; min-width: 0; padding: 10px 12px; border-radius: 8px;
+  border: 1px solid var(--border-color); background: var(--bg-secondary); color: var(--text-primary);
+  font-size: 14px;
+}
+.pairing-address input[type="number"] { flex: 0 0 90px; }
+.pairing-check { display: flex; gap: 8px; align-items: center; font-size: 14px; color: var(--text-secondary); }
+.pairing-nearby { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.pairing-nearby-item {
+  width: 100%; display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; text-align: left;
+  padding: 10px 12px; border-radius: 8px; border: 1px solid var(--border-color);
+  background: var(--bg-secondary); color: var(--text-primary); cursor: pointer;
+}
+.pairing-nearby-item:hover { border-color: var(--accent-blue); }
+.pairing-nearby-name { font-weight: 600; }
+.pairing-nearby-meta { grid-column: 1; color: var(--text-secondary); font-size: 12px; }
+.pairing-badge {
+  grid-column: 2; grid-row: 1 / span 2; align-self: center;
+  font-size: 11px; padding: 2px 8px; border-radius: 999px;
+  background: rgba(34, 197, 94, 0.15); color: var(--accent-green);
+}
+.pairing-badge-muted { background: var(--bg-tertiary); color: var(--text-secondary); }
+.pairing-code { display: flex; flex-direction: column; gap: 12px; }
+.pairing-target { font-size: 15px; }
+.pairing-instructions { margin: 0; font-size: 15px; line-height: 1.45; }
+.pairing-code-input {
+  font-size: 28px; letter-spacing: 0.3em; text-align: center; font-family: monospace;
+  padding: 12px; border-radius: 10px; border: 1px solid var(--border-color);
+  background: var(--bg-primary); color: var(--text-primary);
+}
+.pairing-code-input:focus { outline: none; border-color: var(--accent-blue); }
+.pairing-waiting { display: flex; align-items: center; gap: 8px; color: var(--text-secondary); font-size: 13px; }
+.pairing-spinner {
+  width: 12px; height: 12px; border-radius: 50%;
+  border: 2px solid var(--border-color); border-top-color: var(--accent-blue);
+  animation: pairing-spin 0.9s linear infinite;
+}
+@keyframes pairing-spin { to { transform: rotate(360deg); } }
+.pairing-done { display: flex; flex-direction: column; gap: 12px; text-align: center; padding: 12px 0; }
+.pairing-done-title { font-size: 18px; font-weight: 600; color: var(--accent-green); }
+
+/* Approval prompt */
+.pair-approve-overlay {
+  position: fixed; inset: 0; z-index: 2000; display: flex; align-items: center; justify-content: center;
+  background: rgba(0, 0, 0, 0.55); padding: 16px;
+}
+.pair-approve-card {
+  width: 100%; max-width: 380px; background: var(--bg-secondary); border: 1px solid var(--border-color);
+  border-radius: 14px; padding: 20px; display: flex; flex-direction: column; gap: 12px; box-shadow: var(--shadow-lg);
+}
+.pair-approve-title { font-size: 17px; font-weight: 600; }
+.pair-approve-code {
+  font-family: monospace; font-size: 30px; letter-spacing: 0.25em; text-align: center;
+  padding: 10px; border-radius: 10px; background: var(--bg-primary); color: var(--accent-amber);
+}
+.pair-approve-actions { display: flex; gap: 8px; }
+.pair-approve-actions button { flex: 1; padding: 10px; border-radius: 8px; font-size: 15px; cursor: pointer; border: 1px solid var(--border-color); }
+.pair-approve-approve { background: var(--accent-green); color: var(--color-white); border-color: transparent !important; }
+.pair-approve-deny { background: var(--bg-tertiary); color: var(--text-primary); }
+.pair-approve-later { background: none; color: var(--text-secondary); }
+
+/* Settings > Devices */
+.devices-card { display: flex; flex-direction: column; gap: 10px; }
+.devices-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.devices-row {
+  display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 8px;
+  background: var(--bg-primary); border: 1px solid var(--border-color);
+}
+.devices-row-info { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.devices-row-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.devices-row-meta { font-size: 12px; color: var(--text-secondary); }
+.devices-this { font-size: 11px; color: var(--accent-blue-light); margin-left: 6px; font-weight: 500; }
+.devices-row input {
+  flex: 1; min-width: 0; padding: 6px 8px; border-radius: 6px; border: 1px solid var(--border-color);
+  background: var(--bg-secondary); color: var(--text-primary);
+}
+.devices-qr { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+.devices-qr img { width: 220px; height: 220px; border-radius: 10px; background: #fff; padding: 8px; }
+.devices-qr-link { font-size: 11px; word-break: break-all; color: var(--text-secondary); user-select: all; }
+.devices-actions { display: flex; flex-wrap: wrap; gap: 8px; }

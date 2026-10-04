@@ -1,13 +1,32 @@
 import React, { useState, useEffect } from 'react';
 import { Server } from '../types';
 import { useServers } from '../hooks/useServers';
+import { AddServerFlow } from './AddServerFlow';
 
 interface ServerFormProps {
   serverId?: string;
   onClose: () => void;
 }
 
+/**
+ * Edit an existing server (token form), or add one: the pairing flow
+ * (AddServerFlow) leads, with the token form kept as "Enter token manually".
+ */
 export function ServerForm({ serverId, onClose }: ServerFormProps) {
+  if (!serverId) return <AddServerFlow onClose={onClose} />;
+  return <ManualServerForm serverId={serverId} onClose={onClose} />;
+}
+
+interface ManualServerFormProps {
+  serverId?: string;
+  onClose: () => void;
+  /** Add mode: prefill from a discovered daemon or the pairing flow. */
+  prefill?: { name?: string; host: string; port: number; tls: boolean };
+  /** Add mode inside the pairing flow: back to it instead of closing. */
+  onBack?: () => void;
+}
+
+export function ManualServerForm({ serverId, onClose, prefill, onBack }: ManualServerFormProps) {
   const { getServer, addServer, updateServer } = useServers();
   const existing = serverId ? getServer(serverId) : undefined;
 
@@ -17,11 +36,11 @@ export function ServerForm({ serverId, onClose }: ServerFormProps) {
   const detectedPort = window.location.port || (window.location.protocol === 'https:' ? '443' : '80');
   const detectedTls = window.location.protocol === 'https:';
 
-  const [name, setName] = useState('');
-  const [host, setHost] = useState(existing ? '' : detectedHost);
-  const [port, setPort] = useState(existing ? '9877' : detectedPort);
+  const [name, setName] = useState(prefill?.name ?? '');
+  const [host, setHost] = useState(existing ? '' : prefill?.host ?? detectedHost);
+  const [port, setPort] = useState(existing ? '9877' : String(prefill?.port ?? detectedPort));
   const [token, setToken] = useState('');
-  const [useTls, setUseTls] = useState(existing ? false : detectedTls);
+  const [useTls, setUseTls] = useState(existing ? false : prefill?.tls ?? detectedTls);
   const [enabled, setEnabled] = useState(true);
   const [sshUser, setSshUser] = useState('');
 
@@ -41,6 +60,7 @@ export function ServerForm({ serverId, onClose }: ServerFormProps) {
     e.preventDefault();
 
     const server: Server = {
+      ...(existing || {}),
       id: existing?.id || (crypto.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`),
       name: name.trim() || host,
       host: host.trim(),
@@ -49,6 +69,8 @@ export function ServerForm({ serverId, onClose }: ServerFormProps) {
       useTls,
       enabled,
       sshUser: sshUser.trim() || undefined,
+      // A hand-typed token is the server token (re-pair to get a device token).
+      ...(existing && token.trim() === existing.token ? {} : { authKind: 'legacy' as const, deviceId: undefined }),
     };
 
     if (existing) {
@@ -64,7 +86,10 @@ export function ServerForm({ serverId, onClose }: ServerFormProps) {
     <div className="modal-overlay" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div className="modal-content server-form-modal">
         <div className="modal-header">
-          <h3>{existing ? 'Edit Server' : 'Add Server'}</h3>
+          {onBack && !existing && (
+            <button className="icon-btn small" onClick={onBack} title="Back">&larr;</button>
+          )}
+          <h3>{existing ? 'Edit Server' : 'Enter token manually'}</h3>
           <button className="modal-close" onClick={onClose}>&times;</button>
         </div>
 

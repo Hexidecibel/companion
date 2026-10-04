@@ -5,6 +5,7 @@ import { connectionManager } from '../services/ConnectionManager';
 import { getFontScale, saveFontScale } from '../services/storage';
 import { clearStore } from '../services/persistentStorage';
 import { NotificationSettingsModal } from './NotificationSettingsModal';
+import { DevicesCard } from './DevicesSettings';
 import { SkillBrowser } from './SkillBrowser';
 import { isTauriDesktop } from '../utils/platform';
 import { useAppUpdater, AppUpdateStatus } from '../hooks/useAppUpdater';
@@ -296,6 +297,22 @@ export function SettingsScreen({ onBack }: SettingsScreenProps) {
                   Configure
                 </button>
               </div>
+            ))
+          )}
+        </section>
+
+        {/* Devices (pairing) */}
+        <section className="settings-section">
+          <h3 className="settings-section-title">Devices</h3>
+          {connectedServers.length === 0 ? (
+            <div className="settings-card">
+              <div className="settings-card-detail">
+                No connected servers. Connect to a server to see its paired devices.
+              </div>
+            </div>
+          ) : (
+            connectedServers.map((snap) => (
+              <DevicesCard key={snap.serverId} serverId={snap.serverId} serverName={snap.serverName} />
             ))
           )}
         </section>

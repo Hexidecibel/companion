@@ -9,11 +9,15 @@ export interface QRConfig {
 }
 
 interface QRScannerModalProps {
-  onScan: (config: QRConfig) => void;
+  /** Legacy JSON QR ({host, port, token, tls}). */
+  onScan?: (config: QRConfig) => void;
+  /** Any QR text (e.g. a companion:// pairing link); return true when it was accepted. */
+  onText?: (text: string) => boolean;
   onClose: () => void;
+  hint?: string;
 }
 
-export function QRScannerModal({ onScan, onClose }: QRScannerModalProps) {
+export function QRScannerModal({ onScan, onText, onClose, hint }: QRScannerModalProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [error, setError] = useState<string | null>(null);
@@ -70,7 +74,12 @@ export function QRScannerModal({ onScan, onClose }: QRScannerModalProps) {
       const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
       const code = jsQR(imageData.data, imageData.width, imageData.height);
 
-      if (code) {
+      if (code && onText) {
+        if (onText(code.data)) {
+          stopStream();
+          return;
+        }
+      } else if (code && onScan) {
         try {
           const config = JSON.parse(code.data) as QRConfig;
           if (config.host && config.port) {
@@ -93,7 +102,7 @@ export function QRScannerModal({ onScan, onClose }: QRScannerModalProps) {
       cancelAnimationFrame(animationId);
       stopStream();
     };
-  }, [scanning, onScan, stopStream]);
+  }, [scanning, onScan, onText, stopStream]);
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
@@ -119,7 +128,7 @@ export function QRScannerModal({ onScan, onClose }: QRScannerModalProps) {
                 <div className="qr-scanner-frame" />
               </div>
               <p className="qr-scanner-hint">
-                Point the camera at the QR code on your server
+                {hint || 'Point the camera at the QR code on your server'}
               </p>
             </>
           )}
