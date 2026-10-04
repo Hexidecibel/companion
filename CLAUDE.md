@@ -278,6 +278,10 @@ apksigner sign --ks desktop/debug.keystore --ks-pass pass:android --key-pass pas
   desktop/src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release-unsigned.apk
 ```
 
+## Docker
+
+`Dockerfile` (daemon + web, no Claude Code), `docker-compose.yml` (+ `docker-compose.host.yml` for mDNS; profiles `voice`, `tailscale`), `docker/` (entrypoint, PUID/PGID remap, setup-claude, root-exec wrappers), `voice/Dockerfile`. Ops through `bin/docker` (up, down, logs, pair-code, setup-claude, status, update, build, backup, restore); E2E with `bin/e2e-docker` (own compose project, throwaway volumes, never 9877/9878). The daemon detects the image via `COMPANION_CONTAINER=docker` (`daemon/src/container.ts`) and the wizard swaps in compose guidance. `GET /health` answers `{ok, version, setupComplete}` unauthenticated. CI: `.github/workflows/docker.yml` (build on PR/push; GHCR publish only via manual `workflow_dispatch` with `publish`). Guide: `docs/docker.md`.
+
 ## Conversation Parser
 
 The JSONL conversation parser has been extracted into a standalone package at `/home/hexi/local/src/claude-conversation-parser/`. The daemon still has its own copy in `daemon/src/parser.ts` (not yet wired to the package). When making parser changes, consider syncing to the standalone package.

@@ -1897,7 +1897,7 @@ layer richer "what is this work for" context.
 ---
 
 ## Item: Packaging for friends & devs
-**Status:** in-progress (Phase 1 built 2026-10-03; Phase 3 secrets + first-run wizard built 2026-10-03; Docker and push relay planned)
+**Status:** in-progress (Phase 1 built 2026-10-03; Phase 3 secrets + first-run wizard built 2026-10-03; Phase 2 Docker built 2026-10-03; push relay planned)
 
 Goal: a friend or another developer goes from "never heard of it" to "phone shows my Claude
 sessions" without typing a token, without a Firebase project, and without the user's personal
@@ -2007,7 +2007,18 @@ by voice.
 - *Legacy token*: unchanged and still all-powerful; the app offers the one-tap upgrade, and once all
   devices are paired the user can rotate it.
 
-### Phase 2: Docker compose
+### Phase 2: Docker compose (built 2026-10-03)
+As built (differs from the sketch below where noted): named volumes `claude` / `companion` / `local`
+(Claude Code via Anthropic's native installer into `~/.local`, `CLAUDE_CONFIG_DIR=~/.claude`), projects
+bind mount at `~/projects`, runtime `PUID`/`PGID` remap (root entrypoint + setpriv, tini PID 1), root-exec
+wrappers for `claude`/`tmux`/`companion`, `/health` = `{ok, version, setupComplete}`, profiles `voice`
+and `tailscale` (sidecar in userspace mode on the compose network, `tailscale serve` -> `companion:9877`;
+the daemon reads its state over the shared LocalAPI socket), `docker-compose.host.yml` for mDNS,
+`COMPANION_MDNS` now overrides the config on every start, `COMPANION_APP_FEED_URL` fallback for
+"Get the apps". Ops: `bin/docker`, `bin/e2e-docker`; CI `.github/workflows/docker.yml`. Guide:
+docs/docker.md.
+
+Original sketch:
 - Image `ghcr.io/hexidecibel/companion` (multi-arch amd64 + arm64 via buildx in release.yml),
   `node:20-bookworm-slim` + tmux, git, ripgrep, curl, tini; non-root user `companion` (uid 1000,
   overridable with build args to match the host). Daemon + web dist baked in; no Claude Code.

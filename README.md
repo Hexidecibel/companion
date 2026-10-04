@@ -35,6 +35,20 @@ All native apps share a single web codebase — one React + Vite + TypeScript pr
                        native platforms     │
 ```
 
+## Quick start (Docker)
+
+The easiest way to run your own server. You need Docker with Compose v2 (Linux, or Docker Desktop on Mac/Windows).
+
+```bash
+git clone https://github.com/hexidecibel/companion.git && cd companion
+cp .env.example .env        # set COMPANION_PROJECTS=/path/to/your/code (and PUID/PGID = id -u / id -g)
+docker compose up -d        # pulls ghcr.io/hexidecibel/companion
+```
+
+Open `http://localhost:9877/web/`, choose **Pair with a code**, and type the code from `bin/docker pair-code` (or `docker compose logs companion`). The setup wizard does the rest. In the **Claude Code** step it can install Claude Code into the container for you. You can also run `docker compose run --rm companion setup-claude`. Then sign in once with `docker compose exec companion claude`, then `/login`.
+
+Optional extras: Herald's local voice (`docker compose --profile voice up -d`), a private HTTPS address on your tailnet (`--profile tailscale`), and host networking so phones find the server under Nearby (Linux). All of it is in [docs/docker.md](docs/docker.md).
+
 ## Quick Start
 
 ### 1. Setup
@@ -119,6 +133,7 @@ rm -rf ~/.companion               # Remove config
 
 | Doc | Description |
 |-----|-------------|
+| [Docker](docs/docker.md) | Run Companion with Docker Compose: first run, volumes, upgrades, backups, Tailscale, voice |
 | [Features](FEATURES.md) | Full feature catalog |
 | [Session Controls](docs/SESSION-CONTROLS.md) | Conversation viewer, file viewer, terminal, keyboard shortcuts |
 | [Notifications](docs/NOTIFICATIONS.md) | Push notifications, escalation, quiet hours |
