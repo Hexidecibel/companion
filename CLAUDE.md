@@ -65,7 +65,9 @@ bin/companion enable-remote
 }
 ```
 
-Config path is resolved from `COMPANION_CONFIG` (preferred), falling back to `CONFIG_PATH` (legacy alias), then `~/.companion/config.json`. `remote_capabilities` may be set at the root of a legacy flat config, or per-listener in the `listeners: [...]` array form.
+Config path is resolved from `COMPANION_CONFIG` (preferred), falling back to `CONFIG_PATH` (legacy alias), then `~/.companion/config.json`.
+
+**First run / setup mode:** with no config file the daemon writes one with `setup_complete: false` and serves the setup wizard (web app) until it is finished; an existing config without that key is never in setup mode. Secrets can live in `~/.companion/secrets.env` (0600; the wizard writes the Anthropic key there; the environment always wins). Setup code: `daemon/src/setup/` (protocol mirrored to `web/src/types/setup.ts`), web: `web/src/components/setup/`. End-to-end test of a true first run: `bin/e2e-setup-wizard [out-dir]` (needs `PLAYWRIGHT_CORE`; uses `bin/herald-sandbox --fresh` on port 9573 with a private tmux server). `remote_capabilities` may be set at the root of a legacy flat config, or per-listener in the `listeners: [...]` array form.
 
 ### Herald (conversational front layer) and daemon secrets
 

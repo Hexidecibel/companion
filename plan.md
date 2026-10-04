@@ -1897,7 +1897,7 @@ layer richer "what is this work for" context.
 ---
 
 ## Item: Packaging for friends & devs
-**Status:** in-progress (Phase 1 built 2026-10-03; Phases 2-3 planned)
+**Status:** in-progress (Phase 1 built 2026-10-03; Phase 3 secrets + first-run wizard built 2026-10-03; Docker and push relay planned)
 
 Goal: a friend or another developer goes from "never heard of it" to "phone shows my Claude
 sessions" without typing a token, without a Firebase project, and without the user's personal
@@ -2052,9 +2052,34 @@ by voice.
 optional backend only when `.cush-secrets` and the inject tool exist; otherwise it prompts and writes
 secrets.env. Nothing in the repo assumes cush-tools or Infisical.
 
-**First-run wizard (later).** Web route `/web/setup` on a fresh daemon (no devices yet, loopback or
-LAN): name the daemon, check Claude Code login, choose pairing policy, optional Herald key, show the
-pairing QR; ends with "Open the app on your phone". `bin/companion setup` prints the same QR.
+**First-run wizard (built 2026-10-03).** Setup mode = config `setup_complete: false` (written only
+when the daemon generates a fresh config; an absent key is an existing install, never setup mode).
+The wizard lives in the normal web app (`/web/`): it opens on a device with no saved servers and from
+Settings > Setup.
+- Bootstrap: `setup_pair_local` (unauthenticated) pairs a loopback browser with no code, only in setup
+  mode with zero devices, loopback TCP peer, no X-Forwarded-For / Forwarded / X-Real-IP /
+  X-Forwarded-Host, loopback Host header, and an Origin (when present) equal to that Host. Everything
+  else uses code pairing / QR. `pair_hello` adds `setupMode` / `localAutoPair` only in setup mode and
+  only to trusted networks.
+- Setup API (`setup_status`, `_checks`, `_update`, `_list_dirs`, `_set_secret`, `_mark_step`,
+  `_complete`, `_start_session`, `_session_progress`, `_session_hello`, `_services`,
+  `_install_service`, `_remote`, `_downloads`): authKind device or legacy, full scope, network
+  local / lan / tailnet (setup/gate.ts). Contract: daemon/src/setup/protocol.ts mirrored to
+  web/src/types/setup.ts.
+- Checks run through execFile (no shell) with timeouts, SIGKILL and in-flight dedup; Claude login =
+  existence of `~/.claude/.credentials.json` (macOS: Keychain item presence, never `-w`).
+- Wizard step marks live in `~/.companion/setup-state.json`; settings go to the config through
+  `updateConfigFile` (other keys preserved); secrets to `secrets.env`.
+- E2E: `bin/e2e-setup-wizard` (fresh sandbox, private tmux, stub claude, headless Chrome).
+
+**Docker phase leftovers for the wizard.** Prereq checks assume a host install: in the image, the
+service step should hide (the container is the service), "Starts on boot" becomes the compose
+`restart:` policy, the Claude Code install command becomes `docker compose run --rm companion
+setup-claude`, and tmux / node / git are always present. Loopback auto-pair does not work through
+Docker's port mapping (the peer is the bridge gateway, not 127.0.0.1): first pairing in a container
+uses the code from `docker compose logs` (or `docker compose exec companion companion pair`).
+`COMPANION_PORT` / `COMPANION_NAME` / `COMPANION_MDNS` / `COMPANION_WEB_DIR` / `COMPANION_SECRETS_FILE`
+already exist for the compose file; `/health` and the bridge-network mDNS note are still to do.
 
 **Distribution.** Android: the existing sideload updater feed (`publish-update --apk`) on
 `dev.cush.rocks`; friends install the first APK from a link, updates arrive in-app. Desktop: the
