@@ -1,0 +1,23 @@
+# Host networking (Linux only), so phones find Companion under "Nearby" (mDNS
+# does not cross Docker's bridge network). Use it with:
+#
+#   COMPOSE_FILE=docker-compose.yml:docker-compose.host.yml   (in .env)
+#
+# The daemon then listens on the host directly, on COMPANION_PORT (read on the
+# FIRST start only; later the port lives in the companion volume's config).
+# Docker Desktop (Mac/Windows) does not support this: pair with the QR code or
+# by address instead. The tailscale profile does not combine with it: install
+# Tailscale on the host instead.
+services:
+  companion:
+    network_mode: host
+    ports: !reset []
+    environment:
+      COMPANION_NETWORK: host
+      COMPANION_MDNS: "1"
+      COMPANION_PORT: ${COMPANION_PORT:-9877}
+      HERALD_VOICE_URL: http://127.0.0.1:${HERALD_VOICE_PORT:-9889}
+
+  herald-voice:
+    ports:
+      - "127.0.0.1:${HERALD_VOICE_PORT:-9889}:9889"

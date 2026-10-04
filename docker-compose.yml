@@ -1,0 +1,91 @@
+# Companion with Docker Compose. Quick start:
+#
+#   cp .env.example .env      # set COMPANION_PROJECTS to your code folder
+#   docker compose up -d
+#   open http://localhost:9877/web/ and follow the setup wizard
+#
+# Optional extras (profiles): voice (Herald's local voice service) and
+# tailscale (a private HTTPS address on your tailnet). Host networking for
+# Nearby discovery: docker-compose.host.yml. Full guide: docs/docker.md.
+
+name: ${COMPOSE_PROJECT_NAME:-companion}
+
+services:
+  companion:
+    image: ${COMPANION_IMAGE:-ghcr.io/hexidecibel/companion:latest}
+    # Build it yourself instead of pulling: bin/docker build (or docker compose build).
+    build:
+      context: .
+      args:
+        COMPANION_VERSION: ${COMPANION_VERSION:-dev}
+    restart: unless-stopped
+    init: false # tini is the image's PID 1
+    ports:
+      - "${COMPANION_BIND:-0.0.0.0}:${COMPANION_PORT:-9877}:9877"
+    environment:
+      PUID: ${PUID:-1000}
+      PGID: ${PGID:-1000}
+      TZ: ${TZ:-UTC}
+      COMPANION_NAME: ${COMPANION_NAME:-}
+      # Multicast does not leave a bridge network: discovery needs docker-compose.host.yml.
+      COMPANION_MDNS: "0"
+      COMPANION_PUBLISHED_PORT: ${COMPANION_PORT:-9877}
+      COMPANION_APP_FEED_URL: ${COMPANION_APP_FEED_URL:-https://dev.cush.rocks/updates/stable/}
+      COMPANION_TAILSCALE_SOCKET: /var/run/tailscale/tailscaled.sock
+      HERALD_VOICE_URL: http://herald-voice:9889
+    env_file:
+      # Optional secrets (ANTHROPIC_API_KEY, ...). The wizard can also save them
+      # to the companion volume (~/.companion/secrets.env).
+      - path: ./secrets.env
+        required: false
+    volumes:
+      - claude:/home/companion/.claude         # Claude Code login + transcripts
+      - companion:/home/companion/.companion   # config, paired devices, secrets, state
+      - local:/home/companion/.local           # the Claude Code install (setup-claude)
+      - ${COMPANION_PROJECTS:-./projects}:/home/companion/projects
+      - tailscale-sock:/var/run/tailscale:ro   # the tailscale profile's socket (status only)
+      # Optional, for git push over SSH from sessions (read-only):
+      # - ~/.ssh:/home/companion/.ssh:ro
+      # - ~/.gitconfig:/home/companion/.gitconfig:ro
+
+  # Herald's local voice service: docker compose --profile voice up -d
+  herald-voice:
+    profiles: [voice]
+    image: ${COMPANION_VOICE_IMAGE:-ghcr.io/hexidecibel/companion-voice:latest}
+    build:
+      context: ./voice
+    restart: unless-stopped
+    environment:
+      HERALD_TTS_THREADS: ${HERALD_TTS_THREADS:-6}
+      HERALD_STT_THREADS: ${HERALD_STT_THREADS:-4}
+      HERALD_STT_MODEL: ${HERALD_STT_MODEL:-base.en}
+    volumes:
+      - voice-models:/models
+    # No ports: only the companion container talks to it (it has no auth of its own).
+
+  # Private HTTPS on your tailnet: put TS_AUTHKEY in .env, then
+  # docker compose --profile tailscale up -d  ->  https://<TS_HOSTNAME>.<tailnet>.ts.net/web/
+  tailscale:
+    profiles: [tailscale]
+    image: tailscale/tailscale:stable
+    hostname: ${TS_HOSTNAME:-companion}
+    restart: unless-stopped
+    environment:
+      TS_AUTHKEY: ${TS_AUTHKEY:-}
+      TS_STATE_DIR: /var/lib/tailscale
+      TS_SOCKET: /var/run/tailscale/tailscaled.sock
+      TS_USERSPACE: "true"
+      TS_SERVE_CONFIG: /config/serve.json
+      TS_EXTRA_ARGS: ${TS_EXTRA_ARGS:-}
+    volumes:
+      - tailscale-state:/var/lib/tailscale
+      - tailscale-sock:/var/run/tailscale
+      - ./docker/tailscale-serve.json:/config/serve.json:ro
+
+volumes:
+  claude:
+  companion:
+  local:
+  voice-models:
+  tailscale-state:
+  tailscale-sock:

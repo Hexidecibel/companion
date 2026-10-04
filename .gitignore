@@ -67,3 +67,8 @@ __pycache__/
 
 # Herald trigger scripts: local config holding the trigger token
 triggers/windows/herald-trigger.ini
+
+# Docker: local env/secrets and the default projects folder
+!.env.example
+secrets.env
+/projects/

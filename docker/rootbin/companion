@@ -1,0 +1,16 @@
+#!/bin/bash
+# `docker compose exec companion claude|tmux|companion` arrives as root: re-run
+# as the companion user, then find the real program (never this wrapper).
+name="$(basename "$0")"
+if [ "$(id -u)" = "0" ]; then exec /app/docker/as-companion "$0" "$@"; fi
+PATH="$(printf '%s' "$PATH" | tr ':' '\n' | grep -vx '/app/docker/rootbin' | paste -sd:)"
+if ! real="$(command -v "$name")"; then
+  if [ "$name" = "claude" ]; then
+    echo "Claude Code is not installed in this container yet. Install it with:" >&2
+    echo "  docker compose run --rm companion setup-claude" >&2
+  else
+    echo "$name: not found" >&2
+  fi
+  exit 127
+fi
+exec "$real" "$@"

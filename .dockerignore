@@ -1,0 +1,26 @@
+# Only daemon/, web/ and docker/ go into the image build.
+**/node_modules
+**/dist
+**/dist-desktop
+**/coverage
+**/.vite
+**/*.log
+.git
+.github
+.claude
+.env
+.env.*
+secrets.env
+app
+desktop
+concierge
+triggers
+mcp
+docs
+voice
+data
+projects
+*.md
+!web/**/*.md
+daemon/__tests__
+web/e2e

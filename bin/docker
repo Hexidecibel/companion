@@ -1,0 +1,178 @@
+#!/bin/bash
+# bin/docker - run Companion with Docker Compose (plain docker / compose underneath).
+#
+# Usage: bin/docker <command> [args]
+#   up              Pull (or build, if there is no image to pull) and start in the background
+#   down            Stop and remove the containers (volumes are kept)
+#   restart         Restart the companion container
+#   logs [svc]      Follow the logs (default: companion)
+#   pair-code       Show the latest pairing code from the logs
+#   setup-claude    Install / upgrade Claude Code into the container's volume
+#   claude [args]   Run Claude Code in the container (first time: type /login)
+#   shell           A shell in the container, as the companion user
+#   status          Containers, health and the /health answer
+#   update          Pull the newest image (or rebuild) and recreate
+#   build [--multi] [--push] [--tag TAG]
+#                   Build the image locally (single arch); --multi builds
+#                   linux/amd64 + linux/arm64 with buildx when the builder can
+#   backup [DIR]    Archive the state volumes (claude, companion, local) to DIR (default ./backups)
+#   restore FILE    Restore volumes from a backup archive (stops the stack first)
+#
+# Environment: everything in .env (see .env.example). COMPOSE_PROJECT_NAME
+# picks the project (default "companion"); COMPANION_ENV_FILE points at
+# another env file (tests).
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT"
+
+compose() {
+  local args=()
+  if [ -n "${COMPANION_ENV_FILE:-}" ]; then args+=(--env-file "$COMPANION_ENV_FILE"); fi
+  docker compose "${args[@]}" "$@"
+}
+
+need_docker() {
+  command -v docker >/dev/null || { echo "docker is not installed (https://docs.docker.com/get-docker/)"; exit 1; }
+  docker compose version >/dev/null 2>&1 || { echo "docker compose v2 is needed (docker compose version)"; exit 1; }
+}
+
+version() {
+  if git -C "$ROOT" rev-parse --git-dir >/dev/null 2>&1; then
+    echo "1.0.$(git -C "$ROOT" rev-list --count HEAD)"
+  else
+    echo "dev"
+  fi
+}
+
+env_value() {
+  # Value of KEY from the environment, else from the env file (no eval).
+  local key="$1" file="${COMPANION_ENV_FILE:-$ROOT/.env}"
+  if [ -n "${!key:-}" ]; then echo "${!key}"; return; fi
+  [ -f "$file" ] && sed -n "s/^${key}=//p" "$file" | tail -1 | sed 's/^"\(.*\)"$/\1/'
+}
+
+cmd_up() {
+  [ -f "${COMPANION_ENV_FILE:-.env}" ] || echo "Note: no .env yet; using defaults (cp .env.example .env to change them)."
+  # Pull what is published; anything that could not be pulled is built locally.
+  compose pull --quiet --ignore-pull-failures 2>/dev/null || true
+  COMPANION_VERSION="$(version)" compose up -d "$@"
+  local port; port="$(env_value COMPANION_PORT)"; port="${port:-9877}"
+  echo
+  echo "Companion is starting: http://localhost:${port}/web/"
+  echo "First device: choose 'Pair with a code', then run: bin/docker pair-code"
+}
+
+cmd_status() {
+  compose ps
+  local port; port="$(env_value COMPANION_PORT)"; port="${port:-9877}"
+  echo
+  printf '/health: '
+  curl -fsS -m 3 "http://127.0.0.1:${port}/health" 2>/dev/null || echo "not answering on port ${port}"
+  echo
+}
+
+cmd_pair_code() {
+  local line
+  line="$(compose logs --no-color --no-log-prefix --since 10m companion 2>/dev/null | grep -E 'wants to pair - code [0-9]{6}' | tail -1 || true)"
+  if [ -z "$line" ]; then
+    echo "No pairing request in the last 10 minutes."
+    echo "In the web page, choose 'Pair with a code', then run this again."
+    exit 1
+  fi
+  local code; code="$(sed -E 's/.*wants to pair - code ([0-9]{6}).*/\1/' <<<"$line")"
+  echo "$line"
+  echo
+  echo "  Pairing code: ${code:0:3} ${code:3:3}   (valid for 2 minutes)"
+}
+
+cmd_build() {
+  local multi=0 push=0 tag=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --multi) multi=1 ;;
+      --push) push=1 ;;
+      --tag) tag="$2"; shift ;;
+      *) echo "Unknown build option: $1"; exit 2 ;;
+    esac
+    shift
+  done
+  local v; v="$(version)"
+  tag="${tag:-$(env_value COMPANION_IMAGE)}"
+  tag="${tag:-ghcr.io/hexidecibel/companion:latest}"
+  if [ "$multi" = 1 ]; then
+    local platforms
+    platforms="$(docker buildx inspect 2>/dev/null | sed -n 's/^Platforms: *//p' | head -1)"
+    if [[ "$platforms" == *linux/arm64* && "$platforms" == *linux/amd64* ]] && \
+       docker buildx inspect 2>/dev/null | grep -q 'Driver: *docker-container'; then
+      local out=(--load)
+      [ "$push" = 1 ] && out=(--push)
+      [ "$push" = 1 ] || { echo "Multi-arch images cannot be --load'ed; checking that both build (cache only)."; out=(); }
+      docker buildx build --platform linux/amd64,linux/arm64 --build-arg "COMPANION_VERSION=$v" -t "$tag" "${out[@]}" .
+      return
+    fi
+    echo "This buildx builder cannot build linux/arm64 (needs a docker-container builder with QEMU);"
+    echo "building for this machine only. CI builds both architectures."
+  fi
+  [ "$push" = 1 ] && { echo "--push needs --multi (use CI: .github/workflows/docker.yml)"; exit 2; }
+  echo "Building $tag (version $v) for this machine..."
+  docker build --build-arg "COMPANION_VERSION=$v" -t "$tag" .
+}
+
+project_name() {
+  local p; p="$(env_value COMPOSE_PROJECT_NAME)"
+  echo "${p:-companion}"
+}
+
+cmd_backup() {
+  local dir="${1:-$ROOT/backups}" project
+  project="$(project_name)"
+  mkdir -p "$dir"
+  local file="companion-backup-$(date +%Y%m%d-%H%M%S).tar.gz"
+  docker run --rm \
+    -v "${project}_claude:/v/claude:ro" -v "${project}_companion:/v/companion:ro" -v "${project}_local:/v/local:ro" \
+    -v "$(cd "$dir" && pwd):/out" busybox:stable tar czf "/out/$file" -C /v .
+  echo "Backup: $dir/$file"
+}
+
+cmd_restore() {
+  local file="${1:?usage: bin/docker restore FILE}" project
+  [ -f "$file" ] || { echo "No such file: $file"; exit 1; }
+  project="$(project_name)"
+  compose --profile '*' down
+  local abs; abs="$(cd "$(dirname "$file")" && pwd)/$(basename "$file")"
+  docker run --rm \
+    -v "${project}_claude:/v/claude" -v "${project}_companion:/v/companion" -v "${project}_local:/v/local" \
+    -v "$abs:/in.tar.gz:ro" busybox:stable tar xzf /in.tar.gz -C /v
+  echo "Restored from $file. Start again with: bin/docker up"
+}
+
+need_docker
+cmd="${1:-help}"
+[ $# -gt 0 ] && shift
+case "$cmd" in
+  up) cmd_up "$@" ;;
+  down) compose --profile '*' down "$@" ;;
+  restart) compose restart companion ;;
+  logs) compose logs -f --tail=200 "${@:-companion}" ;;
+  pair-code) cmd_pair_code ;;
+  setup-claude) compose run --rm companion setup-claude "$@" ;;
+  claude) compose exec companion claude "$@" ;;
+  shell) compose exec -u companion companion bash -l ;;
+  status) cmd_status ;;
+  update)
+    # Published image: pull it. Self-built (COMPANION_IMAGE not on a registry): rebuild.
+    if compose pull companion 2>/dev/null; then
+      compose pull --quiet --ignore-pull-failures 2>/dev/null || true
+    else
+      echo "Could not pull the companion image; rebuilding from this checkout (git pull first for the newest code)."
+      COMPANION_VERSION="$(version)" compose build --pull
+    fi
+    COMPANION_VERSION="$(version)" compose up -d
+    ;;
+  build) cmd_build "$@" ;;
+  backup) cmd_backup "$@" ;;
+  restore) cmd_restore "$@" ;;
+  help|-h|--help) sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//' ;;
+  *) echo "Unknown command: $cmd (bin/docker help)"; exit 2 ;;
+esac

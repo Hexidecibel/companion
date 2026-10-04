@@ -1,0 +1,13 @@
+#!/bin/bash
+# Run a command as the companion user, with its HOME, PATH and Claude config
+# dir (root drops privileges with setpriv; the user just execs).
+H=/home/companion
+export HOME="$H" USER=companion LOGNAME=companion SHELL=/bin/bash
+export CLAUDE_CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$H/.claude}"
+export PATH="$H/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+[ $# -gt 0 ] || set -- bash -l
+cd "$H" 2>/dev/null || true
+if [ "$(id -u)" = "0" ]; then
+  exec setpriv --reuid=companion --regid=companion --init-groups -- "$@"
+fi
+exec "$@"
