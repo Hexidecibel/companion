@@ -5,6 +5,7 @@ import * as os from 'os';
 import QRCode from 'qrcode';
 import { DaemonConfig } from './types';
 import { handleUpdatesRequest } from './update-feed';
+import { handleHealthRequest } from './health';
 
 export interface QRConfig {
   host: string;
@@ -130,6 +131,11 @@ export function createQRRequestHandler(
 
     const fullUrl = req.url || '/';
     const [urlPath] = fullUrl.split('?');
+
+    // Liveness for healthchecks: { ok, version, setupComplete } only.
+    if (handleHealthRequest(req, res, urlPath, config)) {
+      return;
+    }
 
     // Herald remote trigger (hotkeys on other machines). Own credential and limits.
     if (urlPath === '/herald/trigger') {

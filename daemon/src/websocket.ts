@@ -58,6 +58,7 @@ import { resolveTriggerConfig } from './herald/config';
 import { daemonDisplayName } from './pairing/identity';
 import { isSetupMode } from './config';
 import { localAutoPairAllowed } from './setup/gate';
+import { containerInfo } from './container';
 import { SetupService } from './setup/service';
 import { SetupStateStore } from './setup/state';
 import { CheckRunner, execRunner, realCheckEnv } from './setup/checks';
@@ -461,13 +462,15 @@ export class WebSocketHandler {
           codeHome: this.config.codeHome,
           voiceUrl: resolveVoiceUrl(this.config.herald),
           daemonPorts: this.config.listeners.map((l) => l.port),
+          container: containerInfo(),
         })
       ),
       run: execRunner,
       state: new SetupStateStore(),
       feedDir: () => updatesDir(),
       lanAddresses: () => lanAddresses(),
-      servicePaths: () => defaultServicePaths(),
+      servicePaths: () => ({ ...defaultServicePaths(), container: containerInfo() }),
+      container: containerInfo(),
       reloadHerald: () => this.reloadHerald(),
       spawnSession: async (dir) => {
         const r = await createClaudeSession(spawnDeps, { workingDir: dir });
@@ -1154,7 +1157,12 @@ export class WebSocketHandler {
               (origin.network !== 'public' || this.config.pairingAllowPublic === true),
             // Only on a fresh daemon, and only to trusted networks.
             ...(isSetupMode(this.config) && origin.network !== 'public' && origin.network !== 'home'
-              ? { setupMode: true, localAutoPair: this.localAutoPair(client) }
+              ? {
+                  setupMode: true,
+                  localAutoPair: this.localAutoPair(client),
+                  // Docker: the first code is in `docker compose logs`, not a terminal.
+                  ...(containerInfo() ? { container: true } : {}),
+                }
               : {}),
           },
         });

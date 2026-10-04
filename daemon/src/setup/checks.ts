@@ -11,10 +11,12 @@
  */
 import { execFile } from 'child_process';
 import * as fs from 'fs';
+import * as http from 'http';
 import * as net from 'net';
 import * as os from 'os';
 import * as path from 'path';
 import type { CheckStatus, PrereqCheck, PrereqId } from './protocol';
+import { ContainerInfo, DOCKER_COMMANDS } from '../container';
 
 export interface RunResult {
   ok: boolean;
@@ -71,13 +73,21 @@ export interface CheckEnv {
   exists: (p: string) => boolean;
   /** Running under systemd (INVOCATION_ID) / launchd (XPC_SERVICE_NAME). */
   supervisor: () => 'systemd' | 'launchd' | null;
+  /** Running in the Docker image (null / absent on a host install). */
+  container?: ContainerInfo | null;
+  /** Tailscale state; default: the `tailscale` CLI (a container asks the sidecar's socket). */
+  tailscale?: () => Promise<TailscaleStatus>;
 }
 
 export const TIMEOUTS = { version: 4000, tailscale: 4000, keychain: 3000 };
 const GiB = 1024 ** 3;
 export const VOICE_PORT = 9889;
 
-const firstLine = (s: string) => (s || '').split(/\r?\n/).find((l) => l.trim())?.trim() ?? '';
+const firstLine = (s: string) =>
+  (s || '')
+    .split(/\r?\n/)
+    .find((l) => l.trim())
+    ?.trim() ?? '';
 
 function versionOf(s: string): string {
   const m = /(\d+\.\d+(?:\.\d+)?[a-z]?)/.exec(s);
@@ -136,7 +146,10 @@ async function checkBinary(
 ): Promise<{ check: PrereqCheck; found: boolean }> {
   const r = await env.run(cmd, args, TIMEOUTS.version);
   if (r.ok) {
-    return { check: check(id, label, 'ok', `${label} ${versionOf(r.stdout)}`, optional), found: true };
+    return {
+      check: check(id, label, 'ok', `${label} ${versionOf(r.stdout)}`, optional),
+      found: true,
+    };
   }
   if (r.timedOut) {
     return {
@@ -160,9 +173,12 @@ async function checkBinary(
 
 async function checkClaudeLogin(env: CheckEnv, installed: boolean): Promise<PrereqCheck> {
   const label = 'Claude Code login';
-  const fix = 'Start a session, run claude, then type /login and follow the browser prompt.';
+  const fix = env.container
+    ? 'Open Claude Code in the container, type /login and follow the browser prompt.'
+    : 'Start a session, run claude, then type /login and follow the browser prompt.';
+  const cmd = env.container ? DOCKER_COMMANDS.claude : 'claude';
   if (!installed) {
-    return check('claude_login', label, 'warn', 'Install Claude Code first', false, fix, 'claude');
+    return check('claude_login', label, 'warn', 'Install Claude Code first', false, fix, cmd);
   }
   // Presence only: the credential file is never opened.
   const credFile = path.join(env.codeHome, '.credentials.json');
@@ -175,10 +191,10 @@ async function checkClaudeLogin(env: CheckEnv, installed: boolean): Promise<Prer
     );
     if (r.ok) return check('claude_login', label, 'ok', 'Signed in (Keychain)', false);
   }
-  return check('claude_login', label, 'warn', 'Not signed in yet', false, fix, 'claude');
+  return check('claude_login', label, 'warn', 'Not signed in yet', false, fix, cmd);
 }
 
-interface TailscaleStatus {
+export interface TailscaleStatus {
   installed: boolean;
   up: boolean;
   dnsName: string | null;
@@ -197,9 +213,90 @@ export async function tailscaleStatus(run: Runner): Promise<TailscaleStatus> {
   }
 }
 
+/**
+ * The Tailscale sidecar's state through its LocalAPI unix socket (read-only
+ * GET /localapi/v0/status; only BackendState and Self.DNSName are read). No
+ * tailscale binary is needed in the image. Missing socket: not running.
+ */
+export function tailscaleStatusViaSocket(
+  socketPath: string,
+  timeoutMs = TIMEOUTS.tailscale
+): Promise<TailscaleStatus> {
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = (r: TailscaleStatus) => {
+      if (!done) {
+        done = true;
+        resolve(r);
+      }
+    };
+    if (!fs.existsSync(socketPath)) return finish({ installed: false, up: false, dnsName: null });
+    const req = http.request(
+      {
+        socketPath,
+        path: '/localapi/v0/status',
+        method: 'GET',
+        headers: { Host: 'local-tailscaled.sock' },
+        timeout: timeoutMs,
+      },
+      (res) => {
+        let body = '';
+        res.setEncoding('utf8');
+        res.on('data', (c: string) => {
+          body += c;
+          if (body.length > MAX_OUTPUT * 4) req.destroy();
+        });
+        res.on('end', () => {
+          try {
+            const j = JSON.parse(body) as { BackendState?: string; Self?: { DNSName?: string } };
+            const dns = (j.Self?.DNSName || '').replace(/\.$/, '') || null;
+            finish({ installed: true, up: j.BackendState === 'Running', dnsName: dns });
+          } catch {
+            finish({ installed: true, up: false, dnsName: null });
+          }
+        });
+      }
+    );
+    req.on('timeout', () => req.destroy());
+    req.on('error', () => finish({ installed: true, up: false, dnsName: null }));
+    req.end();
+  });
+}
+
 async function checkTailscale(env: CheckEnv): Promise<PrereqCheck> {
-  const t = await tailscaleStatus(env.run);
+  const t = await (env.tailscale ? env.tailscale() : tailscaleStatus(env.run));
   const label = 'Tailscale (optional)';
+  if (env.container) {
+    if (!env.container.tailscaleSocket || !t.installed) {
+      return check(
+        'tailscale',
+        label,
+        'warn',
+        'Sidecar not running: reach this server from outside your network with it',
+        true,
+        'Optional. Put TS_AUTHKEY in .env, then start the tailscale profile.',
+        DOCKER_COMMANDS.tailscaleUp
+      );
+    }
+    if (!t.up) {
+      return check(
+        'tailscale',
+        label,
+        'warn',
+        'Sidecar running, not connected yet',
+        true,
+        'Check TS_AUTHKEY in .env and the sidecar log.',
+        'docker compose logs tailscale'
+      );
+    }
+    return check(
+      'tailscale',
+      label,
+      'ok',
+      t.dnsName ? `Sidecar connected as ${t.dnsName}` : 'Sidecar connected',
+      true
+    );
+  }
   if (!t.installed) {
     return check(
       'tailscale',
@@ -208,13 +305,31 @@ async function checkTailscale(env: CheckEnv): Promise<PrereqCheck> {
       'Not installed: reach this server from outside your network with it',
       true,
       'Optional. Install Tailscale to use Companion away from home.',
-      install(env, 'curl -fsSL https://tailscale.com/install.sh | sh', 'brew install --cask tailscale')
+      install(
+        env,
+        'curl -fsSL https://tailscale.com/install.sh | sh',
+        'brew install --cask tailscale'
+      )
     );
   }
   if (!t.up) {
-    return check('tailscale', label, 'warn', 'Installed, not connected', true, 'Connect it.', 'sudo tailscale up');
+    return check(
+      'tailscale',
+      label,
+      'warn',
+      'Installed, not connected',
+      true,
+      'Connect it.',
+      'sudo tailscale up'
+    );
   }
-  return check('tailscale', label, 'ok', t.dnsName ? `Connected as ${t.dnsName}` : 'Connected', true);
+  return check(
+    'tailscale',
+    label,
+    'ok',
+    t.dnsName ? `Connected as ${t.dnsName}` : 'Connected',
+    true
+  );
 }
 
 async function checkVoice(env: CheckEnv): Promise<PrereqCheck> {
@@ -222,6 +337,17 @@ async function checkVoice(env: CheckEnv): Promise<PrereqCheck> {
   if (!env.voiceUrl) return check('herald_voice', label, 'warn', 'Turned off in the config', true);
   const ok = await env.voiceHealthy().catch(() => false);
   if (ok) return check('herald_voice', label, 'ok', `Answering at ${env.voiceUrl}`, true);
+  if (env.container) {
+    return check(
+      'herald_voice',
+      label,
+      'warn',
+      'Voice service not running (only needed for spoken Herald)',
+      true,
+      'Start the voice profile (it downloads about 600 MB of models on first start).',
+      DOCKER_COMMANDS.voiceUp
+    );
+  }
   return check(
     'herald_voice',
     label,
@@ -251,6 +377,8 @@ async function checkDisk(env: CheckEnv): Promise<PrereqCheck> {
 
 async function checkService(env: CheckEnv): Promise<PrereqCheck> {
   const label = 'Starts on boot';
+  if (env.container)
+    return check('service', label, 'ok', 'Docker restarts it (restart: unless-stopped)', true);
   const sup = env.supervisor();
   if (sup) return check('service', label, 'ok', `Running under ${sup}`, true);
   const unit =
@@ -260,7 +388,8 @@ async function checkService(env: CheckEnv): Promise<PrereqCheck> {
   if (env.platform !== 'linux' && env.platform !== 'darwin') {
     return check('service', label, 'warn', 'No service manager support on this OS', true);
   }
-  if (env.exists(unit)) return check('service', label, 'ok', `Installed (${path.basename(unit)})`, true);
+  if (env.exists(unit))
+    return check('service', label, 'ok', `Installed (${path.basename(unit)})`, true);
   return check(
     'service',
     label,
@@ -275,10 +404,22 @@ async function checkService(env: CheckEnv): Promise<PrereqCheck> {
 async function checkPorts(env: CheckEnv): Promise<PrereqCheck> {
   const label = 'Ports';
   const own = env.daemonPorts.join(', ');
+  // The voice service is its own container: no port of ours to share.
+  if (env.container) {
+    return check('port', label, 'ok', `Daemon on ${own} inside the container`, true);
+  }
   const voiceUp = env.voiceUrl ? await env.voiceHealthy().catch(() => false) : false;
-  if (voiceUp) return check('port', label, 'ok', `Daemon on ${own}; voice port in use by the voice service`, true);
+  if (voiceUp)
+    return check(
+      'port',
+      label,
+      'ok',
+      `Daemon on ${own}; voice port in use by the voice service`,
+      true
+    );
   const free = await env.portFree(VOICE_PORT).catch(() => true);
-  if (free) return check('port', label, 'ok', `Daemon on ${own}; ${VOICE_PORT} free for voice`, true);
+  if (free)
+    return check('port', label, 'ok', `Daemon on ${own}; ${VOICE_PORT} free for voice`, true);
   return check(
     'port',
     label,
@@ -286,7 +427,9 @@ async function checkPorts(env: CheckEnv): Promise<PrereqCheck> {
     `Port ${VOICE_PORT} (voice) is used by another program`,
     true,
     'Stop that program, or set HERALD_VOICE_PORT and herald.voice_url to another port.',
-    env.platform === 'darwin' ? `lsof -iTCP:${VOICE_PORT} -sTCP:LISTEN` : `ss -ltnp 'sport = :${VOICE_PORT}'`
+    env.platform === 'darwin'
+      ? `lsof -iTCP:${VOICE_PORT} -sTCP:LISTEN`
+      : `ss -ltnp 'sport = :${VOICE_PORT}'`
   );
 }
 
@@ -304,8 +447,12 @@ export async function runChecks(env: CheckEnv, only?: PrereqId[]): Promise<Prere
           'tmux',
           ['-V'],
           'fail',
-          'Companion runs Claude Code inside tmux. Install it.',
-          install(env, 'sudo apt install -y tmux', 'brew install tmux')
+          env.container
+            ? 'tmux is part of the image: pull or rebuild it.'
+            : 'Companion runs Claude Code inside tmux. Install it.',
+          env.container
+            ? 'bin/docker update'
+            : install(env, 'sudo apt install -y tmux', 'brew install tmux')
         ).then((r) => r.check)
       : Promise.resolve(null)
   );
@@ -318,8 +465,12 @@ export async function runChecks(env: CheckEnv, only?: PrereqId[]): Promise<Prere
           'git',
           ['--version'],
           'warn',
-          'Used for code review and worktrees. Install it.',
-          install(env, 'sudo apt install -y git', 'xcode-select --install')
+          env.container
+            ? 'git is part of the image: pull or rebuild it.'
+            : 'Used for code review and worktrees. Install it.',
+          env.container
+            ? 'bin/docker update'
+            : install(env, 'sudo apt install -y git', 'xcode-select --install')
         ).then((r) => r.check)
       : Promise.resolve(null)
   );
@@ -332,8 +483,10 @@ export async function runChecks(env: CheckEnv, only?: PrereqId[]): Promise<Prere
         'claude',
         ['--version'],
         'fail',
-        'Install Claude Code (needs Node 18+).',
-        'npm install -g @anthropic-ai/claude-code'
+        env.container
+          ? 'Install Claude Code into the container (a volume keeps it across upgrades).'
+          : 'Install Claude Code (needs Node 18+).',
+        env.container ? DOCKER_COMMANDS.setupClaude : 'npm install -g @anthropic-ai/claude-code'
       ).then(async (r) => {
         const out: PrereqCheck[] = [];
         if (want('claude_installed')) out.push(r.check);
@@ -379,8 +532,9 @@ export class CheckRunner {
 // ------------------------------------------------------------ real environment
 
 export function freeBytesAt(dir: string): Promise<number | null> {
-  const statfs = (fs.promises as unknown as { statfs?: (p: string) => Promise<{ bavail: number; bsize: number }> })
-    .statfs;
+  const statfs = (
+    fs.promises as unknown as { statfs?: (p: string) => Promise<{ bavail: number; bsize: number }> }
+  ).statfs;
   if (!statfs) return Promise.resolve(null);
   return statfs(dir)
     .then((s) => Number(s.bavail) * Number(s.bsize))
@@ -408,7 +562,9 @@ export async function httpHealthy(url: string, timeoutMs = 1500): Promise<boolea
   }
 }
 
-export function defaultSupervisor(env: NodeJS.ProcessEnv = process.env): 'systemd' | 'launchd' | null {
+export function defaultSupervisor(
+  env: NodeJS.ProcessEnv = process.env
+): 'systemd' | 'launchd' | null {
   if (env.INVOCATION_ID) return 'systemd';
   if (env.XPC_SERVICE_NAME && env.XPC_SERVICE_NAME.includes('companion')) return 'launchd';
   return null;
@@ -419,9 +575,14 @@ export function realCheckEnv(opts: {
   voiceUrl: string | null;
   daemonPorts: number[];
   run?: Runner;
+  container?: ContainerInfo | null;
 }): CheckEnv {
   const home = os.homedir();
+  const container = opts.container ?? null;
+  const sock = container?.tailscaleSocket;
   return {
+    container,
+    ...(sock ? { tailscale: () => tailscaleStatusViaSocket(sock) } : {}),
     run: opts.run || execRunner,
     platform: process.platform,
     home,

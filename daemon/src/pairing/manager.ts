@@ -17,6 +17,7 @@
  */
 import * as crypto from 'crypto';
 import { safeEqual, sha256Hex, WindowLimiter } from '../herald/trigger';
+import { containerInfo, pairingCodeBanner } from '../container';
 import {
   cleanDeviceName,
   DeviceInfo,
@@ -364,6 +365,9 @@ export class PairingManager {
     this.log(
       `Pairing: "${rec.deviceName}" (${rec.platform}, ${rec.addr}) wants to pair - code ${rec.code} (expires in 2 min; approve in the app or with: companion pair)`
     );
+    // In a container the log IS the console people look at: make the code stand out.
+    if (containerInfo())
+      for (const line of pairingCodeBanner(rec.code, rec.deviceName)) this.log(line);
     audit(true, { pairingId: rec.pairingId, deviceName: rec.deviceName, platform: rec.platform });
     this.changed();
     return { ok: true, pairingId: rec.pairingId, expiresAt: rec.expiresAt };

@@ -123,6 +123,26 @@ export interface SetupStatus {
   restartNeeded: boolean;
   /** The secrets file path shown to the user (never its contents). */
   secretsFile: string;
+  /** Running in the Docker image (compose replaces services, apt and npm -g); null on a host install. */
+  container: ContainerSetupInfo | null;
+}
+
+export interface ContainerSetupInfo {
+  runtime: 'docker';
+  /** The projects bind mount: the folder picker starts here and stays inside it. */
+  projectsDir: string | null;
+  /** network_mode: host (Nearby discovery works); false on the default bridge network. */
+  hostNetwork: boolean;
+  /** The Tailscale sidecar's socket is mounted (the tailscale compose profile). */
+  tailscaleSidecar: boolean;
+}
+
+export interface ClaudeInstallResult {
+  ok: boolean;
+  /** Last lines of the installer output. */
+  output: string;
+  /** `claude --version` after the install (null when it still does not run). */
+  version: string | null;
 }
 
 export interface DirEntry {
@@ -211,6 +231,10 @@ export interface AppDownload {
 export interface AppDownloads {
   channel: string;
   downloads: AppDownload[];
+  /** local: this server's own feed. remote: the public feed (COMPANION_APP_FEED_URL). none: neither has builds. */
+  source: 'local' | 'remote' | 'none';
+  /** The public feed the apps update from (null when turned off). */
+  feedUrl: string | null;
 }
 
 export type SetupErrorCode =

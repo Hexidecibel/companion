@@ -10,6 +10,8 @@ import type { DaemonConfig } from '../types';
 import { isSetupMode, readRawConfig, resolveConfigPath, updateConfigFile } from '../config';
 import type {
   AppDownloads,
+  ClaudeInstallResult,
+  ContainerSetupInfo,
   DirListing,
   PrereqCheck,
   PrereqId,
@@ -27,7 +29,18 @@ import type {
 import { SETUP_STEPS } from './protocol';
 import { CheckRunner, Runner } from './checks';
 import { DirError, listDirs, resolveInHome } from './dirs';
-import { appDownloads, remoteAccessInfo, ServicePaths, servicePlan, serviceStatus, sessionHint } from './info';
+import {
+  appDownloadsWithFallback,
+  appFeedUrl,
+  JsonFetcher,
+  remoteAccessInfo,
+  ServicePaths,
+  servicePlan,
+  serviceStatus,
+  sessionHint,
+} from './info';
+import { tailscaleStatusViaSocket } from './checks';
+import { ContainerInfo, DOCKER_COMMANDS } from '../container';
 import {
   SECRET_ENV_KEYS,
   secretStatuses,
@@ -73,11 +86,16 @@ export interface SetupServiceDeps {
   secretsFromFile: Set<string>;
   env?: NodeJS.ProcessEnv;
   log?: (line: string) => void;
+  /** Running in the Docker image (null / absent on a host install). */
+  container?: ContainerInfo | null;
+  /** Reads the public app feed's manifests (tests inject a fake). */
+  fetchManifest?: JsonFetcher;
 }
 
 export class SetupService {
   private restartNeeded = false;
   private installing = new Set<ServiceTarget>();
+  private installingClaude = false;
   /** Sessions the wizard started (progress/send only work on these). */
   private started = new Set<string>();
 
@@ -95,6 +113,24 @@ export class SetupService {
   private configPath(): string {
     return (this.d.configPath || resolveConfigPath)();
   }
+  private get container(): ContainerInfo | null {
+    return this.d.container ?? null;
+  }
+  /** Folders the wizard may pick: the projects mount in a container, else $HOME. */
+  private get pickRoot(): string {
+    return this.container?.projectsDir || this.home;
+  }
+
+  private containerStatus(): ContainerSetupInfo | null {
+    const c = this.container;
+    if (!c) return null;
+    return {
+      runtime: c.runtime,
+      projectsDir: c.projectsDir,
+      hostNetwork: c.hostNetwork,
+      tailscaleSidecar: !!c.tailscaleSocket,
+    };
+  }
 
   setupMode(): boolean {
     return isSetupMode(this.d.config);
@@ -109,7 +145,8 @@ export class SetupService {
       daemonId: id.id,
       serverName: id.name,
       hostname: os.hostname(),
-      platform: process.platform === 'linux' ? 'linux' : process.platform === 'darwin' ? 'darwin' : 'other',
+      platform:
+        process.platform === 'linux' ? 'linux' : process.platform === 'darwin' ? 'darwin' : 'other',
       version: id.version,
       home: this.home,
       steps: { ...st.steps },
@@ -118,11 +155,14 @@ export class SetupService {
       deviceCount: this.d.deviceCount(),
       restartNeeded: this.restartNeeded,
       secretsFile: secretsFilePath(this.env),
+      container: this.containerStatus(),
     };
   }
 
   checks(only?: unknown): Promise<PrereqCheck[]> {
-    const ids = Array.isArray(only) ? (only.filter((x) => typeof x === 'string') as PrereqId[]) : undefined;
+    const ids = Array.isArray(only)
+      ? (only.filter((x) => typeof x === 'string') as PrereqId[])
+      : undefined;
     return this.d.checks.run(ids);
   }
 
@@ -131,10 +171,14 @@ export class SetupService {
     let outcome: ReturnType<typeof applySettingsPatch> | undefined;
     try {
       // Validate against a scratch copy first so a bad field never writes.
-      outcome = applySettingsPatch(JSON.parse(JSON.stringify(readRawConfig(this.configPath()))), patch, this.home);
+      outcome = applySettingsPatch(
+        JSON.parse(JSON.stringify(readRawConfig(this.configPath()))),
+        patch,
+        this.pickRoot
+      );
       if (outcome.configChanged) {
         const raw = updateConfigFile((r) => {
-          outcome = applySettingsPatch(r, patch, this.home);
+          outcome = applySettingsPatch(r, patch, this.pickRoot);
         }, this.configPath());
         this.applyLive(raw);
       }
@@ -160,13 +204,14 @@ export class SetupService {
     }
     if (Array.isArray(raw.project_roots)) c.projectRoots = raw.project_roots as string[];
     if (typeof raw.pairing === 'boolean') c.pairing = raw.pairing;
-    if (typeof raw.pairing_allow_public === 'boolean') c.pairingAllowPublic = raw.pairing_allow_public;
+    if (typeof raw.pairing_allow_public === 'boolean')
+      c.pairingAllowPublic = raw.pairing_allow_public;
     c.herald = parseHeraldConfigBlock(raw.herald);
   }
 
   listDirs(p: { path?: unknown; showHidden?: unknown }): DirListing {
     try {
-      return listDirs(p.path, this.home, { showHidden: p.showHidden === true });
+      return listDirs(p.path, this.pickRoot, { showHidden: p.showHidden === true });
     } catch (err) {
       if (err instanceof DirError) throw new SetupError(err.code, err.message);
       throw err;
@@ -191,7 +236,9 @@ export class SetupService {
     else this.env[envKey] = v;
     this.d.secretsFromFile.add(envKey);
     v = null;
-    this.log(`Setup: ${envKey} ${value === null ? 'removed from' : 'saved to'} ${secretsFilePath(this.env)}`);
+    this.log(
+      `Setup: ${envKey} ${value === null ? 'removed from' : 'saved to'} ${secretsFilePath(this.env)}`
+    );
     const r = this.d.reloadHerald();
     if (r === 'restart') this.restartNeeded = true;
     return this.status();
@@ -225,7 +272,7 @@ export class SetupService {
   async startSession(dirIn: unknown): Promise<SessionProgress> {
     let dir: string;
     try {
-      dir = resolveInHome(dirIn, this.home);
+      dir = resolveInHome(dirIn, this.pickRoot);
     } catch (err) {
       if (err instanceof DirError) throw new SetupError(err.code, err.message);
       throw err;
@@ -235,7 +282,8 @@ export class SetupService {
       throw new SetupError('forbidden', 'Pick a folder inside one of your project folders');
     }
     const r = await this.d.spawnSession(dir);
-    if (!r.ok || !r.sessionName) throw new SetupError('unavailable', r.error || 'Could not start the session');
+    if (!r.ok || !r.sessionName)
+      throw new SetupError('unavailable', r.error || 'Could not start the session');
     this.started.add(r.sessionName);
     this.log(`Setup: started first session "${r.sessionName}" in ${dir}`);
     return this.sessionProgress(r.sessionName);
@@ -255,7 +303,7 @@ export class SetupService {
       conversationDetected: conversation,
       hint: h.hint,
       guidance: h.guidance,
-      attachCommand: `tmux attach -t ${name}`,
+      attachCommand: this.container ? DOCKER_COMMANDS.tmuxAttach(name) : `tmux attach -t ${name}`,
     };
   }
 
@@ -264,7 +312,10 @@ export class SetupService {
     if (typeof name !== 'string' || !this.started.has(name)) {
       throw new SetupError('not_found', 'Not a session started by the wizard');
     }
-    const t = typeof text === 'string' && text.trim() ? text.trim().slice(0, 500) : 'Hello! Say hi back in one short line.';
+    const t =
+      typeof text === 'string' && text.trim()
+        ? text.trim().slice(0, 500)
+        : 'Hello! Say hi back in one short line.';
     const ok = await this.d.sendToSession(name, t);
     if (!ok) throw new SetupError('unavailable', 'Could not type into the session');
     return this.sessionProgress(name);
@@ -276,7 +327,8 @@ export class SetupService {
 
   /** Runs only on an explicit click (confirm: true). Never restarts the running daemon. */
   async installService(target: unknown, confirm: unknown): Promise<ServiceInstallResult> {
-    if (target !== 'daemon' && target !== 'voice') throw new SetupError('bad_request', 'Unknown service');
+    if (target !== 'daemon' && target !== 'voice')
+      throw new SetupError('bad_request', 'Unknown service');
     if (confirm !== true) throw new SetupError('bad_request', 'Confirm the install first');
     const plan = servicePlan(target, this.d.servicePaths());
     if (plan.info.installed) {
@@ -305,10 +357,52 @@ export class SetupService {
 
   remote(): Promise<RemoteAccessInfo> {
     const l = this.d.config.listeners[0];
-    return remoteAccessInfo({ run: this.d.run, port: l.port, tls: !!l.tls, lan: this.d.lanAddresses() });
+    const sock = this.container?.tailscaleSocket;
+    return remoteAccessInfo({
+      run: this.d.run,
+      port: l.port,
+      tls: !!l.tls,
+      lan: this.d.lanAddresses(),
+      container: this.container,
+      ...(sock ? { tailscale: () => tailscaleStatusViaSocket(sock) } : {}),
+    });
   }
 
-  downloads(): AppDownloads {
-    return appDownloads(this.d.feedDir());
+  downloads(): Promise<AppDownloads> {
+    return appDownloadsWithFallback(this.d.feedDir(), appFeedUrl(this.env), this.d.fetchManifest);
+  }
+
+  /**
+   * Container only, on an explicit click (confirm: true): install or upgrade
+   * Claude Code into the persistent volume with the image's setup-claude
+   * script (COMPANION_SETUP_CLAUDE). Never logs in.
+   */
+  async installClaude(confirm: unknown): Promise<ClaudeInstallResult> {
+    if (!this.container)
+      throw new SetupError('unavailable', 'Only the Docker image installs Claude Code from here');
+    if (confirm !== true) throw new SetupError('bad_request', 'Confirm the install first');
+    const script = (this.env.COMPANION_SETUP_CLAUDE || '').trim();
+    if (!script || !script.startsWith('/')) {
+      throw new SetupError(
+        'unavailable',
+        `Run it from a terminal instead: ${DOCKER_COMMANDS.setupClaude}`
+      );
+    }
+    if (this.installingClaude) throw new SetupError('busy', 'Already installing');
+    this.installingClaude = true;
+    try {
+      this.log('Setup: installing Claude Code into the container volume');
+      const r = await this.d.run(script, ['--quiet'], 300_000);
+      const v = await this.d.run('claude', ['--version'], 10_000);
+      const version = v.ok ? v.stdout.trim().split('\n')[0].slice(0, 80) : null;
+      this.log(`Setup: Claude Code install ${r.ok && version ? `ok (${version})` : 'failed'}`);
+      return {
+        ok: r.ok && !!version,
+        output: r.stdout.split('\n').slice(-15).join('\n').slice(-2000),
+        version,
+      };
+    } finally {
+      this.installingClaude = false;
+    }
   }
 }

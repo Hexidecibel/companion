@@ -5,6 +5,7 @@ import * as crypto from 'crypto';
 import { DaemonConfig, ListenerConfig, RemoteCapabilitiesConfig } from './types';
 import { atomicWriteFileSync } from './utils';
 import { parseHeraldConfigBlock } from './herald/config';
+import { containerInfo, DOCKER_COMMANDS } from './container';
 
 const HOME_DIR = process.env.HOME || '/root';
 const CONFIG_DIR = path.join(HOME_DIR, '.companion');
@@ -19,9 +20,7 @@ const CONFIG_DIR = path.join(HOME_DIR, '.companion');
  */
 export function resolveConfigPath(): string {
   return (
-    process.env.COMPANION_CONFIG ||
-    process.env.CONFIG_PATH ||
-    path.join(CONFIG_DIR, 'config.json')
+    process.env.COMPANION_CONFIG || process.env.CONFIG_PATH || path.join(CONFIG_DIR, 'config.json')
   );
 }
 
@@ -62,14 +61,19 @@ function parseRemoteCapabilities(raw: any): RemoteCapabilitiesConfig | undefined
   }
   if (Array.isArray(raw.origins)) {
     result.origins = raw.origins
-      .filter((o: any) => o && typeof o === 'object' && typeof o.origin === 'string' && typeof o.token === 'string')
+      .filter(
+        (o: any) =>
+          o && typeof o === 'object' && typeof o.origin === 'string' && typeof o.token === 'string'
+      )
       .map((o: any) => {
         const cred: any = { origin: o.origin, token: o.token };
         if (typeof o.label === 'string') cred.label = o.label;
         if (o.capabilities && typeof o.capabilities === 'object') {
           cred.capabilities = {
             ...(typeof o.capabilities.exec === 'boolean' ? { exec: o.capabilities.exec } : {}),
-            ...(typeof o.capabilities.dispatch === 'boolean' ? { dispatch: o.capabilities.dispatch } : {}),
+            ...(typeof o.capabilities.dispatch === 'boolean'
+              ? { dispatch: o.capabilities.dispatch }
+              : {}),
             ...(typeof o.capabilities.write === 'boolean' ? { write: o.capabilities.write } : {}),
           };
         }
@@ -107,8 +111,13 @@ export async function displayFirstRunWelcome(
   configPath: string
 ): Promise<void> {
   const listener = config.listeners[0];
-  const localIP = getLocalIP();
   const scheme = listener.tls ? 'https' : 'http';
+  const container = containerInfo();
+  if (container && !container.hostNetwork) {
+    displayContainerWelcome(scheme, container.publishedPort ?? listener.port, configPath);
+    return;
+  }
+  const localIP = getLocalIP();
   const local = `${scheme}://localhost:${listener.port}/web/`;
   const lan = localIP !== 'localhost' ? `${scheme}://${localIP}:${listener.port}/web/` : null;
   const link = (u: string) => `\x1b]8;;${u}\x07${u}\x1b]8;;\x07`;
@@ -129,6 +138,29 @@ export async function displayFirstRunWelcome(
   console.log('');
   console.log(`  Config: ${configPath}`);
   console.log('='.repeat(56));
+  console.log('');
+}
+
+/** Docker (bridge network): the browser on the host is NOT loopback here, so every device pairs by code. */
+function displayContainerWelcome(scheme: string, port: number, configPath: string): void {
+  console.log('');
+  console.log('='.repeat(64));
+  console.log('  Welcome to Companion (Docker)');
+  console.log('='.repeat(64));
+  console.log('');
+  console.log('  Finish setting up in your browser:');
+  console.log('');
+  console.log(`    ${scheme}://localhost:${port}/web/   (or this machine's address)`);
+  console.log('');
+  console.log('  Choose "Pair with a code": the 6-digit code is printed right here');
+  console.log(`  in the log. Show it with:  ${DOCKER_COMMANDS.pairCode}`);
+  console.log(`                        or:  ${DOCKER_COMMANDS.logs}`);
+  console.log('');
+  console.log('  Claude Code is not part of the image. Install it once with:');
+  console.log(`    ${DOCKER_COMMANDS.setupClaude}`);
+  console.log('');
+  console.log(`  Config: ${configPath}`);
+  console.log('='.repeat(64));
   console.log('');
 }
 
@@ -215,7 +247,9 @@ export function loadConfig(): DaemonConfig {
         name: typeof parsed.name === 'string' ? parsed.name : undefined,
         pairing: typeof parsed.pairing === 'boolean' ? parsed.pairing : undefined,
         pairingAllowPublic:
-          typeof parsed.pairing_allow_public === 'boolean' ? parsed.pairing_allow_public : undefined,
+          typeof parsed.pairing_allow_public === 'boolean'
+            ? parsed.pairing_allow_public
+            : undefined,
         setupComplete:
           typeof parsed.setup_complete === 'boolean' ? parsed.setup_complete : undefined,
         projectRoots: Array.isArray(parsed.project_roots)
@@ -247,6 +281,11 @@ export function loadConfig(): DaemonConfig {
     ...Object.fromEntries(Object.entries(fileConfig).filter(([_, v]) => v !== undefined)),
     listeners: [], // Will be set below
   } as DaemonConfig;
+
+  // COMPANION_MDNS, when set, wins on every start (containers switch between a
+  // bridge network, where multicast cannot leave, and host networking).
+  const mdnsEnv = envFlag('COMPANION_MDNS');
+  if (mdnsEnv !== undefined) config.mdnsEnabled = mdnsEnv;
 
   // Build listeners array
   if (parsedListeners && parsedListeners.length > 0) {

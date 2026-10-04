@@ -69,5 +69,6 @@ export function registerSetupHandlers(d: SetupHandlerDeps): Record<string, Messa
     }),
     setup_remote: handle('setup_remote', () => s.remote()),
     setup_downloads: handle('setup_downloads', () => s.downloads()),
+    setup_install_claude: handle('setup_install_claude', (_c, p) => s.installClaude(p.confirm), { audit: true }),
   };
 }
