@@ -409,7 +409,16 @@ export class HeraldSpeechController {
 // Inbox chime detection
 // ---------------------------------------------------------------------------
 
-export type ChimeKind = 'blocked' | 'finished' | 'risk';
+export type ChimeKind = 'blocked' | 'finished' | 'risk' | 'stuck';
+
+/**
+ * Whether an inbox tone may play on this device: tones on, this device is the
+ * announcer (one device at a time), and the page is visible or the Gaming
+ * profile is on (Gaming = tones only, nothing spoken).
+ */
+export function inboxToneAllowed(o: { chimeOn: boolean; announcer: boolean; visible: boolean; gaming: boolean }): boolean {
+  return o.chimeOn && o.announcer && (o.visible || o.gaming);
+}
 
 /** A blocked item still unheard this long after its tone gets a gentle reminder. */
 export const REMINDER_AFTER_MS = 5 * 60_000;
@@ -426,7 +435,8 @@ interface Toned {
  * reconnect) only seed the seen-set; live `inbox` pushes with unseen, unheard
  * blocked/finished items tone once (blocked wins). A risky code change
  * (`item.review`) gets its own `risk` tone, beaten only by a blocked item; with
- * risk tones off (`riskTones = false`) review items make no sound at all. Herald never speaks about
+ * risk tones off (`riskTones = false`) review items make no sound at all. A session that looks
+ * stuck (`item.stuck`) gets the subtle `stuck` tone, beaten by blocked and risk. Herald never speaks about
  * them on its own: the tone says "something is ready", the user asks for it.
  *
  * Blocked items that were toned and are still unheard are remembered, so
@@ -462,6 +472,8 @@ export class InboxChimeTracker {
         this.toned.set(item.id, { lastToneAt: now, reminders: 0 });
       } else if (item.review) {
         if (this.riskTones && kind !== 'blocked') kind = 'risk';
+      } else if (item.stuck) {
+        if (kind === null || kind === 'finished') kind = 'stuck';
       } else if (item.priority === 'finished' && kind === null) kind = 'finished';
     }
     return kind;

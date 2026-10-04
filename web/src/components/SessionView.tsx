@@ -31,6 +31,7 @@ import { SkillBrowser } from './SkillBrowser';
 import { useBookmarks } from '../hooks/useBookmarks';
 import { BookmarkList } from './BookmarkList';
 import { FetchErrorBanner } from './FetchErrorBanner';
+import { StuckBanner } from './stuck/StuckBanner';
 import { ComponentErrorBoundary } from './ComponentErrorBoundary';
 import { ScrollDebugPanel } from './ScrollDebugPanel';
 import { SettingsModal } from './SettingsModal';
@@ -846,6 +847,8 @@ export function SessionView({
                 </div>
               );
             })()}
+
+            {serverId && sessionId && <StuckBanner serverId={serverId} sessionId={sessionId} />}
 
             <TaskList tasks={tasks} loading={tasksLoading} />
 

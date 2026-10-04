@@ -184,16 +184,17 @@ function InboxStrip({ items, unheardCount, canAsk, onAsk, onChip }: {
           key={item.id}
           type="button"
           role="listitem"
-          className={`herald-chip herald-chip--${item.priority}${item.review ? ` herald-chip--review herald-chip--review-${item.review.level}` : ''}${item.heard ? '' : ' herald-chip--unheard'}`}
+          className={`herald-chip herald-chip--${item.priority}${item.review ? ` herald-chip--review herald-chip--review-${item.review.level}` : ''}${item.stuck ? ' herald-chip--stuck' : ''}${item.heard ? '' : ' herald-chip--unheard'}`}
           onClick={() => onChip(item)}
-          title={item.review ? `Risky change, open review: ${item.headline}` : `${PRIORITY_LABEL[item.priority]}: ${item.headline}`}
+          title={item.review ? `Risky change, open review: ${item.headline}` : item.stuck ? `Looks stuck, open it: ${item.stuck.summary}` : `${PRIORITY_LABEL[item.priority]}: ${item.headline}`}
         >
           <span className="herald-chip__dot" aria-hidden="true" />
           <span className="herald-chip__name">{item.sessionName}</span>
           {item.review && <span className="herald-chip__review">Review</span>}
+          {item.stuck && <span className="herald-chip__stuck">Stuck?</span>}
           <span className="herald-chip__headline">{item.headline}</span>
           <span className="herald-chip__age">{formatAgo(item.createdAt, now)}</span>
-          <span className="sr-only">{item.review ? 'Risky change' : PRIORITY_LABEL[item.priority]}{item.heard ? '' : ', new'}</span>
+          <span className="sr-only">{item.review ? 'Risky change' : item.stuck ? 'Looks stuck' : PRIORITY_LABEL[item.priority]}{item.heard ? '' : ', new'}</span>
         </button>
       ))}
     </div>
@@ -643,6 +644,11 @@ export function HeraldPanel({ variant, onOpenSession, onClose }: HeraldPanelProp
     if (item.review) {
       // A risky code change: open that session with its review drawer.
       requestReviewDrawer(item.serverId, item.sessionId, { scope: 'since_checkpoint', view: 'files' });
+      onOpenSession(item.serverId, item.sessionId);
+      return;
+    }
+    if (item.stuck) {
+      // A stuck session: open it; its banner has the evidence and the actions.
       onOpenSession(item.serverId, item.sessionId);
       return;
     }

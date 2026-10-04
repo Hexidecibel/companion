@@ -31,6 +31,8 @@ export function unlockChime(): void {
  *   blocked  - the motif, a touch louder, with the top note struck twice
  *              (more insistent: something is waiting on you)
  *   finished - the motif descending and softer (settled: something is done)
+ *   stuck    - a soft C-G-C turn, the quietest news tone ("hm, have a look"):
+ *              a session that looks stuck; never louder than finished
  *   wake     - a quick bright two-note "I'm listening"
  *   ok       - one soft note (a voice command was taken)
  *   error    - a low falling pair, off the motif (could not do that: e.g. the
@@ -74,6 +76,12 @@ export const TONES: Record<ToneKind, Note[]> = {
     { freq: G5, at: 0, dur: 0.2, gain: 0.6 },
     { freq: C6, at: 0.13, dur: 0.22, gain: 0.62 },
     { freq: B5, at: 0.3, dur: 0.14, gain: 0.5 },
+  ],
+  // Back and forth on the motif's outer notes, soft: "this one is going in circles".
+  stuck: [
+    { freq: C6, at: 0, dur: 0.16, gain: 0.42 },
+    { freq: G5, at: 0.14, dur: 0.16, gain: 0.38 },
+    { freq: C6, at: 0.28, dur: 0.34, gain: 0.42 },
   ],
   wake: [
     { freq: C6, at: 0, dur: 0.25, gain: 1 },

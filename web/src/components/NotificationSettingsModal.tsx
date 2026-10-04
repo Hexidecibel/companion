@@ -5,6 +5,7 @@ import { useNotificationHistory } from '../hooks/useNotificationHistory';
 import { useNotifications } from '../hooks/useNotifications';
 import { useServers } from '../hooks/useServers';
 import { useConnections } from '../hooks/useConnections';
+import { StuckSettingsCard } from './stuck/StuckSettingsCard';
 
 type Tab = 'escalation' | 'devices' | 'history';
 
@@ -126,6 +127,9 @@ export function NotificationSettingsModal({ serverId, onClose }: NotificationSet
                   </div>
                 </div>
               )}
+              <div className="notif-section">
+                <StuckSettingsCard serverId={serverId} />
+              </div>
               <EscalationTab
                 {...escalation}
                 browserNotifications={notifications}

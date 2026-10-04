@@ -8,7 +8,7 @@ import { getWebSpeechEngine } from '../services/tts/webSpeechEngine';
 import { HybridTtsEngine } from '../services/tts/hybridTtsEngine';
 import { NEURAL_PREFIX, TtsRequestError, WebAudioSink, decodePcm16, type TtsRequester } from '../services/tts/serverTtsEngine';
 import { ECHO_PROBE_LINE, setBrowserVoice, setEchoProbeSource } from '../services/voice/audioEnvironment';
-import { BRIEFING_SPOKEN_LIMIT, HeraldSpeechController, InboxChimeTracker, type SpokenLength } from '../services/tts/heraldSpeech';
+import { BRIEFING_SPOKEN_LIMIT, HeraldSpeechController, InboxChimeTracker, inboxToneAllowed, type SpokenLength } from '../services/tts/heraldSpeech';
 import { TICK_VOLUME, chimeSupported, playChime, unlockChime } from '../services/tts/chime';
 import { pickVoice } from '../services/tts/voices';
 import { deviceKey, deviceLabel, devicePlatform, saveCustomLabel } from '../services/heraldDevice';
@@ -366,7 +366,8 @@ export function useHeraldVoice(
     controller.handleEvent(event, source);
     chimes.riskTones = prefsRef.current.riskTones;
     const kind = chimes.handleEvent(event, source);
-    if (kind && prefsRef.current.chimeOn && announcerRef.current && tonesAudible()) playChime(kind);
+    if (kind && inboxToneAllowed({ chimeOn: prefsRef.current.chimeOn, announcer: announcerRef.current, visible: pageVisible(), gaming: isGamingMode() }))
+      playChime(kind);
     if (source !== 'push') return;
     if (event.kind === 'speaking') {
       fleet.handle(event.speaking, selfIdRef.current);

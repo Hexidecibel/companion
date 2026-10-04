@@ -18,6 +18,12 @@ export interface HeraldInboxItem {
   answer?: boolean;
   /** A risky code change (Code Review): toned like news, never spoken unasked. */
   review?: { level: 'high' | 'medium'; kinds: string[]; paths: string[] };
+  /**
+   * A session that looks stuck (stuck detection): toned with its own subtle
+   * "attention" tone on the active device, never spoken unasked. Updates in
+   * place while the session's turn lasts; gone when it recovers.
+   */
+  stuck?: { kind: string; kinds: string[]; findingId: string; summary: string; count: number };
 }
 /**
  * How a message reached Herald: `voice` = push-to-talk, talking over Herald or

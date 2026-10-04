@@ -9,6 +9,7 @@ import './styles/global.css';
 import './styles/herald.css';
 import './styles/herald-setup.css';
 import './styles/review.css';
+import './styles/stuck.css';
 import { isOverlayWindow } from './services/overlayBridge';
 import { HeraldOverlayApp } from './components/herald/HeraldOverlayApp';
 import { heraldSetupStore } from './services/heraldSetup/setupStore';

@@ -76,6 +76,8 @@ export interface ToolCall {
   status: 'pending' | 'running' | 'completed' | 'error';
   startedAt?: number;
   completedAt?: number;
+  /** The tool_result was flagged is_error (non-zero exit, tool error). Status stays 'completed'. */
+  isError?: boolean;
 }
 
 export interface ConversationHighlight {
@@ -370,3 +372,4 @@ export interface AuditLogResponse {
 
 // Code Review 2.0 protocol (mirror of daemon/src/review/protocol.ts).
 export * from './review';
+export * from './stuck';
