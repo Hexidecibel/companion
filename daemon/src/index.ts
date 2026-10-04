@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-import { loadConfig, displayFirstRunWelcome } from './config';
+import { loadConfig, displayFirstRunWelcome, isSetupMode, resolveConfigPath } from './config';
+import { loadSecretsEnv, secretsFilePath } from './setup/secrets';
 import { SessionWatcher } from './watcher';
 import { SubAgentWatcher } from './subagent-watcher';
 import { InputInjector } from './input-injector';
@@ -49,13 +50,19 @@ async function main(): Promise<void> {
   console.log('Companion Daemon v0.0.1');
   console.log('==============================');
 
+  // Secrets from ~/.companion/secrets.env (0600) for keys the environment does
+  // not already set. Names only are logged, never values.
+  const secretKeys = loadSecretsEnv();
+  if (secretKeys.length > 0) {
+    console.log(`Secrets: loaded ${secretKeys.join(', ')} from ${secretsFilePath()}`);
+  }
+
   // Load configuration
   const config = loadConfig();
 
-  // Display welcome message with QR code on first run
-  const configAny = config as typeof config & { _isFirstRun?: boolean; _configPath?: string };
-  if (configAny._isFirstRun && configAny._configPath) {
-    await displayFirstRunWelcome(config, configAny._configPath);
+  // Setup mode (fresh install): say where the wizard is, on every start until done.
+  if (isSetupMode(config)) {
+    await displayFirstRunWelcome(config, resolveConfigPath());
   }
 
   const listenerPorts = config.listeners.map((l) => l.port).join(', ');
@@ -182,6 +189,7 @@ async function main(): Promise<void> {
     workGroupManager
   );
   httpRoutes.heraldTrigger = (req, res) => wsHandler.handleHeraldTriggerHttp(req, res);
+  wsHandler.setSecretsLoaded(secretKeys);
   const identity = loadDaemonIdentity(config.name);
   wsHandler.setIdentity(identity);
   console.log(`Identity: "${identity.name}" id=${identity.id} v${identity.version}`);

@@ -173,6 +173,8 @@ const POLISH_SYSTEM =
 
 export interface HeraldServiceDeps {
   config: ResolvedHeraldConfig;
+  /** Config project_roots (setup wizard): where propose_spawn_session may start sessions. */
+  projectRoots?: string[];
   provider: LlmProvider | null;
   sources: SessionSource[];
   store: HeraldStore;
@@ -380,7 +382,10 @@ export class HeraldService {
     });
     if (deps.spawner) {
       const paths = resolveKnowledgePaths(deps.codeHome);
-      this.spawnEnv = { roots: spawnRoots(paths.projectsRoot), userHome: paths.userHome };
+      this.spawnEnv = {
+        roots: spawnRoots(paths.projectsRoot, process.env, deps.projectRoots ?? []),
+        userHome: paths.userHome,
+      };
       this.spawnRunner = new SpawnRunner({
         spawner: deps.spawner,
         sendPrompt: async (id, text) => {
@@ -412,6 +417,31 @@ export class HeraldService {
 
   get featureEnabled(): boolean {
     return this.cfg.featureEnabled;
+  }
+
+  /**
+   * Swap the brain (provider, model, key) without a restart: the setup wizard
+   * saved a new provider or API key. Only the brain fields change; turning the
+   * feature on or off still needs a restart (the caller checks).
+   */
+  reloadBrain(cfg: ResolvedHeraldConfig, provider: LlmProvider | null): void {
+    this.cfg = {
+      ...this.cfg,
+      provider: cfg.provider,
+      model: cfg.model,
+      apiKey: cfg.apiKey,
+      baseUrl: cfg.baseUrl,
+      brainConfigured: cfg.brainConfigured,
+      disabledReason: cfg.disabledReason,
+      pricing: cfg.pricing,
+    };
+    this.provider = provider;
+    this.outage = null;
+    const brain = this.enabled
+      ? `${this.cfg.provider} model=${this.cfg.model}`
+      : `brain disabled (${this.cfg.disabledReason})`;
+    console.log(`Herald: brain reloaded — ${brain}`);
+    if (this.started && !this.disposed) this.emit({ kind: 'state', state: this.getState() });
   }
 
   // ---------------------------------------------------------------- lifecycle

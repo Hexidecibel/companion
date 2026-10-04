@@ -2,7 +2,6 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import * as crypto from 'crypto';
-import QRCode from 'qrcode';
 import { DaemonConfig, ListenerConfig, RemoteCapabilitiesConfig } from './types';
 import { atomicWriteFileSync } from './utils';
 import { parseHeraldConfigBlock } from './herald/config';
@@ -99,7 +98,9 @@ function getLocalIP(): string {
 }
 
 /**
- * Display welcome message with QR code for first-run setup
+ * First-run welcome: where to open the setup wizard. No token is printed: the
+ * first device pairs with a code that appears in this log (or is paired
+ * automatically from a browser on this machine).
  */
 export async function displayFirstRunWelcome(
   config: DaemonConfig,
@@ -107,47 +108,45 @@ export async function displayFirstRunWelcome(
 ): Promise<void> {
   const listener = config.listeners[0];
   const localIP = getLocalIP();
-
-  const qrData = JSON.stringify({
-    host: localIP,
-    port: listener.port,
-    token: listener.token,
-    tls: listener.tls || false,
-  });
-
-  let qrString = '';
-  try {
-    qrString = await QRCode.toString(qrData, { type: 'terminal', small: true });
-  } catch {
-    // QR generation failed, skip it
-  }
+  const scheme = listener.tls ? 'https' : 'http';
+  const local = `${scheme}://localhost:${listener.port}/web/`;
+  const lan = localIP !== 'localhost' ? `${scheme}://${localIP}:${listener.port}/web/` : null;
+  const link = (u: string) => `\x1b]8;;${u}\x07${u}\x1b]8;;\x07`;
 
   console.log('');
-  console.log('═'.repeat(50));
-  console.log('  Welcome to Companion!');
-  console.log('═'.repeat(50));
+  console.log('='.repeat(56));
+  console.log('  Welcome to Companion');
+  console.log('='.repeat(56));
   console.log('');
-
-  if (qrString) {
-    console.log('  Scan this QR code with the Companion app:');
-    console.log('');
-    console.log(qrString);
-  }
-
-  console.log('  Your authentication token:');
+  console.log('  Finish setting up in your browser:');
   console.log('');
-  console.log(`    ${listener.token}`);
+  console.log(`    On this machine:   ${link(local)}`);
+  if (lan) console.log(`    From your network: ${link(lan)}`);
   console.log('');
-  const serverUrl = `http://${localIP}:${listener.port}`;
-  // OSC 8 hyperlink escape sequence for clickable terminal links
-  const clickableUrl = `\x1b]8;;${serverUrl}\x07${serverUrl}\x1b]8;;\x07`;
-  console.log(`  Server: ${clickableUrl}`);
+  console.log('  A browser on this machine pairs automatically. From another');
+  console.log('  device, a 6-digit pairing code will appear here in the log');
+  console.log('  (and in: companion pair).');
   console.log('');
   console.log(`  Config: ${configPath}`);
-  console.log('  Edit this file to change settings.');
+  console.log('='.repeat(56));
   console.log('');
-  console.log('═'.repeat(50));
-  console.log('');
+}
+
+/** Pre-pairing installs (no setup_complete key) are complete; a new config starts with false. */
+export function isSetupMode(config: Pick<DaemonConfig, 'setupComplete'>): boolean {
+  return config.setupComplete === false;
+}
+
+function envPort(): number | undefined {
+  const n = Number(process.env.COMPANION_PORT);
+  return Number.isInteger(n) && n > 0 && n < 65536 ? n : undefined;
+}
+
+function envFlag(name: string): boolean | undefined {
+  const v = (process.env[name] || '').trim().toLowerCase();
+  if (v === '1' || v === 'true' || v === 'yes' || v === 'on') return true;
+  if (v === '0' || v === 'false' || v === 'no' || v === 'off') return false;
+  return undefined;
 }
 
 // Safe tools that can be auto-approved without user confirmation
@@ -217,18 +216,28 @@ export function loadConfig(): DaemonConfig {
         pairing: typeof parsed.pairing === 'boolean' ? parsed.pairing : undefined,
         pairingAllowPublic:
           typeof parsed.pairing_allow_public === 'boolean' ? parsed.pairing_allow_public : undefined,
+        setupComplete:
+          typeof parsed.setup_complete === 'boolean' ? parsed.setup_complete : undefined,
+        projectRoots: Array.isArray(parsed.project_roots)
+          ? parsed.project_roots.filter((r: unknown): r is string => typeof r === 'string')
+          : undefined,
       };
     } catch (err) {
       console.error(`Error loading config from ${configPath}:`, err);
     }
   } else {
     // First run - generate config with random token
+    // First run: setup mode. The legacy listener token still exists (every
+    // listener needs one) but is never shown; devices pair instead.
     isFirstRun = true;
     const newToken = generateToken();
     fileConfig = {
-      port: DEFAULT_CONFIG.port,
+      port: envPort() ?? DEFAULT_CONFIG.port,
       token: newToken,
       tls: DEFAULT_CONFIG.tls,
+      name: (process.env.COMPANION_NAME || '').trim().slice(0, 60) || os.hostname(),
+      mdnsEnabled: envFlag('COMPANION_MDNS') ?? DEFAULT_CONFIG.mdnsEnabled,
+      setupComplete: false,
     };
   }
 
@@ -260,9 +269,7 @@ export function loadConfig(): DaemonConfig {
   // First run: save generated config (welcome message displayed separately)
   if (isFirstRun && config.listeners.length > 0) {
     // Ensure config directory exists
-    if (!fs.existsSync(CONFIG_DIR)) {
-      fs.mkdirSync(CONFIG_DIR, { recursive: true });
-    }
+    fs.mkdirSync(path.dirname(configPath), { recursive: true, mode: 0o700 });
     saveConfig(config);
     // Mark for welcome display
     (config as DaemonConfig & { _isFirstRun?: boolean; _configPath?: string })._isFirstRun = true;
@@ -295,11 +302,42 @@ export function loadConfig(): DaemonConfig {
   return config;
 }
 
+/** The config file as raw JSON (snake_case), or {} when missing / unreadable. */
+export function readRawConfig(configPath: string = resolveConfigPath()): Record<string, unknown> {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Change the config file in place: every key the mutator does not touch is
+ * kept (including keys this daemon version does not know). Atomic
+ * (temp + rename), keeps the file's mode, new files are 0600.
+ */
+export function updateConfigFile(
+  mutate: (raw: Record<string, unknown>) => void,
+  configPath: string = resolveConfigPath()
+): Record<string, unknown> {
+  const exists = fs.existsSync(configPath);
+  if (exists) {
+    // A file we cannot parse must not be replaced by a partial one.
+    JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+  }
+  const raw = readRawConfig(configPath);
+  mutate(raw);
+  const mode = exists ? fs.statSync(configPath).mode & 0o777 : 0o600;
+  fs.mkdirSync(path.dirname(configPath), { recursive: true, mode: 0o700 });
+  atomicWriteFileSync(configPath, JSON.stringify(raw, null, 2) + '\n', { mode });
+  return raw;
+}
+
 export function saveConfig(config: DaemonConfig): void {
   const configPath = resolveConfigPath();
 
-  // Convert to snake_case for file
-  // Use new listeners format if we have multiple listeners
+  // Managed keys are (re)written; every other key in the file is preserved.
   const fileConfig: Record<string, unknown> = {
     tmux_session: config.tmuxSession,
     code_home: config.codeHome,
@@ -319,7 +357,10 @@ export function saveConfig(config: DaemonConfig): void {
   if (config.pairingAllowPublic !== undefined) {
     fileConfig.pairing_allow_public = config.pairingAllowPublic;
   }
+  if (config.setupComplete !== undefined) fileConfig.setup_complete = config.setupComplete;
+  if (config.projectRoots) fileConfig.project_roots = config.projectRoots;
 
+  const legacyKeys = ['port', 'token', 'tls', 'cert_path', 'key_path', 'remote_capabilities'];
   if (config.listeners.length === 1) {
     // Single listener: use legacy format for backward compatibility
     const listener = config.listeners[0];
@@ -343,5 +384,13 @@ export function saveConfig(config: DaemonConfig): void {
     }));
   }
 
-  atomicWriteFileSync(configPath, JSON.stringify(fileConfig, null, 2));
+  updateConfigFile((raw) => {
+    // Drop the other listener shape so the file never holds both.
+    if (config.listeners.length === 1) delete raw.listeners;
+    else for (const k of legacyKeys) delete raw[k];
+    for (const [k, v] of Object.entries(fileConfig)) {
+      if (v === undefined) delete raw[k];
+      else raw[k] = v;
+    }
+  }, configPath);
 }

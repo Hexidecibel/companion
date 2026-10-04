@@ -48,6 +48,8 @@ export interface AuthenticatedClient {
   pairedDeviceId?: string;
   /** authKind 'device': per-device narrowing of remote exec / dispatch / write. */
   deviceCapabilities?: { exec?: boolean; dispatch?: boolean; write?: boolean };
+  /** Upgrade-request facts for the setup gate (loopback auto-pair). */
+  upgrade?: { peer: string; proxied: boolean; host?: string; origin?: string };
 }
 
 export interface ClientError {

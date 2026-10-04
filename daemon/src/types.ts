@@ -58,6 +58,10 @@ export interface DaemonConfig {
   // loopback / LAN / tailnet unless pairingAllowPublic.
   pairing?: boolean;
   pairingAllowPublic?: boolean;
+  // First-run wizard (setup/). false = setup mode; absent = an existing install (complete).
+  setupComplete?: boolean;
+  // Folders new sessions may start in (absolute; set by the setup wizard).
+  projectRoots?: string[];
 }
 
 export interface FeedbackOption {

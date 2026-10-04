@@ -17,14 +17,22 @@ import type { SessionSnapshot } from './session-source';
 const SAFE_PATH = /^[A-Za-z0-9 ._+@,/~-]+$/;
 const MAX_PROMPT = 2000;
 
-export function spawnRoots(projectsRoot: string, env = process.env): string[] {
+export function spawnRoots(
+  projectsRoot: string,
+  env = process.env,
+  /** project_roots from the config (setup wizard); used when HERALD_SPAWN_ROOTS is unset. */
+  configured: string[] = []
+): string[] {
   const raw = env.HERALD_SPAWN_ROOTS;
+  const fromConfig = configured.filter((r) => r && path.isAbsolute(r));
   const list = raw
     ? raw
         .split(':')
         .map((r) => r.trim())
         .filter((r) => r && path.isAbsolute(r))
-    : [projectsRoot];
+    : fromConfig.length > 0
+      ? fromConfig
+      : [projectsRoot];
   const out: string[] = [];
   for (const r of list) {
     try {

@@ -311,13 +311,11 @@ function cmdConfig(args: string[]): void {
 }
 
 async function cmdSetup(): Promise<void> {
-  const { displayFirstRunWelcome } = await import('./config');
+  const { displayFirstRunWelcome, isSetupMode } = await import('./config');
 
-  // loadConfig auto-creates ~/.companion/config.json with a generated token on first run
+  // loadConfig creates ~/.companion/config.json in setup mode on first run.
   const config = loadConfig();
   const configPath = resolveConfigPath();
-
-  await displayFirstRunWelcome(config, configPath);
 
   // Check for tmux
   try {
@@ -330,10 +328,27 @@ async function cmdSetup(): Promise<void> {
     console.log('');
   }
 
-  console.log(dim('Next steps:'));
-  console.log(dim('  companion start              Start the daemon'));
-  console.log(dim('  companion autostart enable   Install as a system service'));
-  console.log('');
+  const running = getDaemonPid() !== null || (await isPortListening(config.listeners[0].port));
+  if (!isSetupMode(config)) {
+    console.log(green('Companion is already set up.'));
+    console.log(dim(`  Config: ${configPath}`));
+    console.log(dim('  Re-run the wizard from the app: Settings, Setup.'));
+    console.log(dim('  Pair another device:            companion pair (or companion pair --qr)'));
+    console.log('');
+    return;
+  }
+
+  await displayFirstRunWelcome(config, configPath);
+  if (!running) {
+    console.log(dim('Next: start the daemon, then open the address above.'));
+    console.log(dim('  companion start'));
+    console.log('');
+    return;
+  }
+  // The daemon is up: watch for pairing requests and show their codes here.
+  console.log(dim('Waiting for a device to pair (Ctrl-C to stop)...'));
+  const { cmdPair } = await import('./pairing/cli');
+  await cmdPair([]);
 }
 
 function cmdAutostart(args: string[]): void {
@@ -341,7 +356,7 @@ function cmdAutostart(args: string[]): void {
   const platform = os.platform();
 
   if (subcommand === 'enable') {
-    cmdAutostartEnable(platform);
+    cmdAutostartEnable(platform, args.includes('--no-start'));
   } else if (subcommand === 'disable') {
     cmdAutostartDisable(platform);
   } else {
@@ -350,7 +365,12 @@ function cmdAutostart(args: string[]): void {
   }
 }
 
-function cmdAutostartEnable(platform: string): void {
+/**
+ * Install the user service. `noStart`: enable it for the next login / boot
+ * but leave the running daemon alone (the setup wizard uses this; it never
+ * restarts a running daemon).
+ */
+function cmdAutostartEnable(platform: string, noStart = false): void {
   // Find the daemon entry point (resolve from __dirname which is daemon/dist/)
   const daemonEntry = path.resolve(__dirname, 'index.js');
   const nodePath = process.execPath;
@@ -385,6 +405,13 @@ function cmdAutostartEnable(platform: string): void {
     fs.mkdirSync(plistDir, { recursive: true });
     fs.writeFileSync(plistPath, plist);
 
+    if (noStart) {
+      console.log(green('Autostart installed (launchd); it starts at your next login.'));
+      console.log(dim(`  Plist: ${plistPath}`));
+      console.log(dim('  The running daemon was not restarted.'));
+      return;
+    }
+
     try {
       execSync(`launchctl load "${plistPath}"`, { stdio: 'inherit' });
       console.log(green('Autostart enabled (launchd)'));
@@ -400,13 +427,17 @@ function cmdAutostartEnable(platform: string): void {
     const serviceDir = path.join(HOME_DIR, '.config', 'systemd', 'user');
     const servicePath = path.join(serviceDir, 'companion.service');
 
+    const envLines = ['COMPANION_CONFIG', 'CONFIG_PATH']
+      .filter((k) => process.env[k])
+      .map((k) => `Environment=${k}=${process.env[k]}\n`)
+      .join('');
     const unit = `[Unit]
 Description=Companion Daemon
 After=network.target
 
 [Service]
 Type=simple
-ExecStart=${nodePath} ${daemonEntry}
+${envLines}ExecStart=${nodePath} ${daemonEntry}
 Restart=on-failure
 RestartSec=5
 
@@ -416,6 +447,21 @@ WantedBy=default.target
 
     fs.mkdirSync(serviceDir, { recursive: true });
     fs.writeFileSync(servicePath, unit);
+
+    if (noStart) {
+      try {
+        execSync('systemctl --user daemon-reload', { stdio: 'inherit' });
+        execSync('systemctl --user enable companion', { stdio: 'inherit' });
+        console.log(green('Autostart enabled (systemd user service); it starts at the next login / boot.'));
+        console.log(dim(`  Unit: ${servicePath}`));
+        console.log(dim('  The running daemon was not restarted.'));
+      } catch {
+        console.error(red('Failed to enable systemd service'));
+        console.log(dim(`Unit file written to: ${servicePath}`));
+        process.exitCode = 1;
+      }
+      return;
+    }
 
     try {
       execSync('systemctl --user daemon-reload', { stdio: 'inherit' });

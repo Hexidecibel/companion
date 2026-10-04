@@ -7,7 +7,7 @@
 # Usage:
 #   bin/companion              Start the daemon (background)
 #   bin/companion start -f     Start in foreground (for debugging)
-#   bin/companion setup        First-time setup (creates config, prints connection info)
+#   bin/companion setup        First-time setup (creates config, prints the wizard URL, shows pairing codes)
 #   bin/companion stop         Stop a running daemon
 #   bin/companion status       Show daemon status
 #   bin/companion install-secrets   Materialize daemon secrets (Herald key) + systemd drop-in
@@ -562,6 +562,24 @@ if [ -f "$SECRETS_ENV" ]; then
   # shellcheck disable=SC1090
   . "$SECRETS_ENV"
   set +a
+fi
+
+# Plain secrets file written by the setup wizard (no cush-tools needed). Never
+# overrides a key the environment already has; values are never echoed. The
+# daemon also reads it itself, so systemd / launchd starts get it too.
+PLAIN_SECRETS="${COMPANION_SECRETS_FILE:-$CONFIG_DIR/secrets.env}"
+if [ -f "$PLAIN_SECRETS" ] && [ "$PLAIN_SECRETS" != "$SECRETS_ENV" ]; then
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in ''|'#'*) continue ;; esac
+    line="${line#export }"
+    key="${line%%=*}"
+    val="${line#*=}"
+    case "$key" in ANTHROPIC_API_KEY|HERALD_LLM_API_KEY) ;; *) continue ;; esac
+    [ -n "${!key:-}" ] && continue
+    val="${val%\"}"; val="${val#\"}"; val="${val%\'}"; val="${val#\'}"
+    export "$key=$val"
+  done < "$PLAIN_SECRETS"
+  unset line key val
 fi
 
 # --- Always ensure daemon is built ---

@@ -49,12 +49,25 @@ import { VoiceServiceClient } from './herald/voice/client';
 import { HeraldTriggerService } from './herald/trigger';
 import { ReviewService } from './review/service';
 import { StuckDetector } from './stuck/detector';
-import { DeviceRegistry, isDeviceToken } from './pairing/registry';
+import { DeviceRegistry, isDeviceToken, normalizePlatform } from './pairing/registry';
 import { PairingManager, PairResult, PendingPairing } from './pairing/manager';
 import { DaemonIdentity, ephemeralIdentity } from './pairing/identity';
 import { registerPairingHandlers } from './handlers/pairing';
 import { classifyTriggerOrigin } from './herald/trigger';
 import { resolveTriggerConfig } from './herald/config';
+import { daemonDisplayName } from './pairing/identity';
+import { isSetupMode } from './config';
+import { localAutoPairAllowed } from './setup/gate';
+import { SetupService } from './setup/service';
+import { SetupStateStore } from './setup/state';
+import { CheckRunner, execRunner, realCheckEnv } from './setup/checks';
+import { defaultServicePaths } from './setup/info';
+import { registerSetupHandlers } from './handlers/setup';
+import { updatesDir } from './update-feed';
+import { lanAddresses } from './mdns';
+import { resolveVoiceUrl } from './herald/config';
+
+const normalizePlatformSafe = (p: unknown) => normalizePlatform(p);
 
 // File for persisting tmux session configs
 const TMUX_CONFIGS_FILE = path.join(os.homedir(), '.companion', 'tmux-sessions.json');
@@ -102,12 +115,16 @@ export class WebSocketHandler {
   private devices: DeviceRegistry;
   private pairing: PairingManager;
   private pairingSweep: ReturnType<typeof setInterval>;
+  private setup: SetupService;
+  /** Env keys that came from ~/.companion/secrets.env (index.ts fills it at startup). */
+  private secretsFromFile = new Set<string>();
   /** Unauthenticated message types: the pairing handshake, nothing else. */
   private static readonly PAIR_UNAUTH_TYPES = new Set([
     'pair_hello',
     'pair_request',
     'pair_confirm',
     'pair_redeem_qr',
+    'setup_pair_local',
   ]);
   /** Socket close code sent to a revoked device. */
   static readonly CLOSE_DEVICE_REVOKED = 4401;
@@ -230,6 +247,33 @@ export class WebSocketHandler {
         disconnectDevice: (id) => this.disconnectDevice(id),
         listenerTls: (c) =>
           Boolean(this.config.listeners.find((l) => l.port === c.listenerPort)?.tls),
+        audit: (action, c, info, ok) =>
+          this.auditLog.append({
+            ts: Date.now(),
+            origin: {
+              addr: c.remoteAddress || '',
+              clientId: c.id,
+              isLocal: c.isLocal,
+              tls: false,
+              origin: c.origin,
+            },
+            action,
+            payload: info,
+            result: { ok },
+            durationMs: 0,
+          }),
+      })
+    )) {
+      this.handlers.set(type, h);
+    }
+
+    // First-run setup wizard (setup/). Gated per request (setup/gate.ts).
+    this.setup = this.createSetup();
+    for (const [type, h] of Object.entries(
+      registerSetupHandlers({
+        setup: this.setup,
+        send: (ws, r) => this.send(ws, r),
+        network: (c) => this.pairingNetwork(c).network,
         audit: (action, c, info, ok) =>
           this.auditLog.append({
             ts: Date.now(),
@@ -395,6 +439,67 @@ export class WebSocketHandler {
     };
   }
 
+  // --- Setup wizard ---
+
+  private createSetup(): SetupService {
+    const spawnDeps = {
+      tmux: this.tmux,
+      storeTmuxSessionConfig: (n: string, d: string, c?: boolean) => this.storeTmuxSessionConfig(n, d, c),
+      sessionNameStore: this.sessionNameStore,
+      watcher: this.watcher,
+      broadcast: (type: string, payload: unknown) => this.broadcast(type, payload),
+    };
+    return new SetupService({
+      config: this.config,
+      identity: () => this.identity,
+      rename: (name) => {
+        this.identity = { ...this.identity, name: daemonDisplayName(name) };
+      },
+      deviceCount: () => this.devices.list().length,
+      checks: new CheckRunner(() =>
+        realCheckEnv({
+          codeHome: this.config.codeHome,
+          voiceUrl: resolveVoiceUrl(this.config.herald),
+          daemonPorts: this.config.listeners.map((l) => l.port),
+        })
+      ),
+      run: execRunner,
+      state: new SetupStateStore(),
+      feedDir: () => updatesDir(),
+      lanAddresses: () => lanAddresses(),
+      servicePaths: () => defaultServicePaths(),
+      reloadHerald: () => this.reloadHerald(),
+      spawnSession: async (dir) => {
+        const r = await createClaudeSession(spawnDeps, { workingDir: dir });
+        return { ok: r.success, sessionName: r.sessionName, error: r.error };
+      },
+      sessionExists: (name) => this.injector.checkSessionExists(name),
+      capturePane: (name) => defaultCapturePane(name),
+      conversationFor: (name) => this.watcher.getConversationIdsForSession(name).length > 0,
+      sendToSession: (name, text) => this.injector.sendInput(text, name),
+      secretsFromFile: this.secretsFromFile,
+    });
+  }
+
+  /** index.ts: which env keys were loaded from secrets.env (names only). */
+  setSecretsLoaded(keys: string[]): void {
+    for (const k of keys) this.secretsFromFile.add(k);
+  }
+
+  /** Swap Herald's brain after a provider / key change; 'restart' when only a restart can. */
+  private reloadHerald(): 'live' | 'restart' | 'unavailable' {
+    if (!this.herald) return 'restart';
+    try {
+      const cfg = resolveHeraldConfig(this.config.herald);
+      if (cfg.featureEnabled !== this.herald.featureEnabled) return 'restart';
+      this.herald.reloadBrain(cfg, createProvider(cfg));
+      return 'live';
+    } catch (err) {
+      console.error('Herald: brain reload failed:', err instanceof Error ? err.message : 'error');
+      return 'restart';
+    }
+  }
+
   // --- Herald ---
 
   private createHerald(): HeraldService | null {
@@ -403,6 +508,7 @@ export class WebSocketHandler {
       const source = this.makeLocalSource();
       return new HeraldService({
         config: cfg,
+        projectRoots: this.config.projectRoots,
         provider: createProvider(cfg),
         sources: [source],
         store: new HeraldStore(cfg.stateDir),
@@ -614,6 +720,14 @@ export class WebSocketHandler {
     };
     const xff = req.headers?.['x-forwarded-for'];
     if (xff) client.forwardedFor = Array.isArray(xff) ? xff.join(', ') : xff;
+    const h = req.headers || {};
+    const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v);
+    client.upgrade = {
+      peer: remoteAddress,
+      proxied: !!(h['x-forwarded-for'] || h['forwarded'] || h['x-real-ip'] || h['x-forwarded-host']),
+      host: one(h.host),
+      origin: one(h.origin),
+    };
 
     this.clients.set(clientId, client);
     console.log(`WebSocket: Client connected (${clientId})`);
@@ -1038,9 +1152,64 @@ export class WebSocketHandler {
             codePairing:
               this.config.pairing !== false &&
               (origin.network !== 'public' || this.config.pairingAllowPublic === true),
+            // Only on a fresh daemon, and only to trusted networks.
+            ...(isSetupMode(this.config) && origin.network !== 'public' && origin.network !== 'home'
+              ? { setupMode: true, localAutoPair: this.localAutoPair(client) }
+              : {}),
           },
         });
         return;
+      case 'setup_pair_local': {
+        if (!this.localAutoPair(client)) {
+          this.auditLog.append({
+            ts: Date.now(),
+            origin: { addr: origin.client, clientId: client.id, isLocal: client.isLocal, tls: false, origin: null },
+            action: 'setup_pair_local',
+            payload: { reason: 'not_allowed' },
+            result: { ok: false },
+            durationMs: 0,
+          });
+          answer({
+            ok: false,
+            code: 'not_allowed',
+            error: 'Automatic pairing only works from a browser on the server itself, before any device is paired',
+          });
+          return;
+        }
+        let issued: ReturnType<DeviceRegistry['create']>;
+        try {
+          issued = this.devices.create({
+            name: typeof p.deviceName === 'string' ? p.deviceName : 'This computer',
+            platform: normalizePlatformSafe(p.platform),
+            via: 'setup_local',
+          });
+        } catch {
+          answer({ ok: false, code: 'registry_error', error: 'Could not save the device' });
+          return;
+        }
+        console.log(`Pairing: "${issued.device.name}" paired automatically from this machine (first-run setup)`);
+        this.auditLog.append({
+          ts: Date.now(),
+          origin: { addr: origin.client, clientId: client.id, isLocal: client.isLocal, tls: false, origin: null },
+          action: 'setup_pair_local',
+          payload: { deviceId: issued.device.id, deviceName: issued.device.name },
+          result: { ok: true },
+          durationMs: 0,
+        });
+        answer({
+          ok: true,
+          payload: {
+            status: 'approved',
+            pairingId: 'local',
+            token: issued.token,
+            deviceId: issued.device.id,
+            deviceName: issued.device.name,
+            daemonId: this.identity.id,
+            daemonName: this.identity.name,
+          },
+        });
+        return;
+      }
       case 'pair_request': {
         const r = this.pairing.request({
           clientId: client.id,
@@ -1087,6 +1256,16 @@ export class WebSocketHandler {
         return;
       }
     }
+  }
+
+  /** First-run, loopback-only pairing without a code (setup/gate.ts). */
+  private localAutoPair(client: AuthenticatedClient): boolean {
+    return localAutoPairAllowed({
+      setupMode: isSetupMode(this.config),
+      deviceCount: this.devices.list().length,
+      pairingEnabled: this.config.pairing !== false,
+      upgrade: client.upgrade ?? { peer: client.remoteAddress || '', proxied: !!client.forwardedFor },
+    });
   }
 
   /** A pairing request was decided elsewhere: tell the waiting requester. */
