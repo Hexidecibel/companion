@@ -1,0 +1,130 @@
+name: Docker
+
+# Builds the Companion image (and the optional voice image) for linux/amd64 +
+# linux/arm64 on pull requests and branch pushes: build only, nothing is pushed.
+# Publishing to GHCR is a separate, manual run (Actions > Docker > Run workflow,
+# "publish" checked); it never runs on its own and never creates git tags.
+
+on:
+  pull_request:
+    paths:
+      - 'Dockerfile'
+      - '.dockerignore'
+      - 'docker/**'
+      - 'docker-compose*.yml'
+      - 'daemon/**'
+      - 'web/**'
+      - 'voice/**'
+      - '.github/workflows/docker.yml'
+  push:
+    branches: ['**']
+    paths:
+      - 'Dockerfile'
+      - '.dockerignore'
+      - 'docker/**'
+      - 'docker-compose*.yml'
+      - 'daemon/**'
+      - 'web/**'
+      - 'voice/**'
+      - '.github/workflows/docker.yml'
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: 'Push the images to ghcr.io (latest + 1.0.<commit count>)'
+        required: true
+        default: false
+        type: boolean
+
+concurrency:
+  group: docker-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build ${{ matrix.image.name }} (amd64 + arm64)
+    if: github.event_name != 'workflow_dispatch' || !inputs.publish
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        image:
+          - { name: companion, context: ., file: Dockerfile }
+          - { name: companion-voice, context: voice, file: voice/Dockerfile }
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Version
+        id: v
+        run: echo "version=1.0.$(git rev-list --count HEAD)" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - name: Build (no push)
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.image.context }}
+          file: ${{ matrix.image.file }}
+          platforms: linux/amd64,linux/arm64
+          push: false
+          build-args: COMPANION_VERSION=${{ steps.v.outputs.version }}
+          cache-from: type=gha,scope=${{ matrix.image.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image.name }}
+      - name: Smoke test (amd64)
+        if: matrix.image.name == 'companion'
+        run: |
+          docker buildx build --load --platform linux/amd64 -t companion:ci \
+            --build-arg COMPANION_VERSION=${{ steps.v.outputs.version }} \
+            --cache-from type=gha,scope=companion .
+          docker run -d --name c -p 127.0.0.1:9877:9877 companion:ci
+          for i in $(seq 1 30); do curl -fsS http://127.0.0.1:9877/health && break; sleep 2; done
+          curl -fsS http://127.0.0.1:9877/health | grep -q '"ok":true'
+          docker logs c | grep -q 'Welcome to Companion (Docker)'
+          docker rm -f c
+
+  publish:
+    name: Publish ${{ matrix.image.name }} to GHCR
+    if: github.event_name == 'workflow_dispatch' && inputs.publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        image:
+          - { name: companion, context: ., file: Dockerfile }
+          - { name: companion-voice, context: voice, file: voice/Dockerfile }
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Version
+        id: v
+        run: echo "version=1.0.$(git rev-list --count HEAD)" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.image.context }}
+          file: ${{ matrix.image.file }}
+          platforms: linux/amd64,linux/arm64
+          push: true
+          build-args: COMPANION_VERSION=${{ steps.v.outputs.version }}
+          tags: |
+            ghcr.io/hexidecibel/${{ matrix.image.name }}:latest
+            ghcr.io/hexidecibel/${{ matrix.image.name }}:${{ steps.v.outputs.version }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.version=${{ steps.v.outputs.version }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha,scope=${{ matrix.image.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image.name }}
