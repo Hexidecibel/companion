@@ -311,3 +311,27 @@ export const VOICE_COMMAND_HELP: Array<{ say: string; does: string }> = [
   { say: '"Show me" · "show me Out4" · "pull it up on my phone"', does: 'Open the session Herald is talking about' },
   { say: '"Diagnostics"', does: 'Open Help > Diagnostics (mic, wake word, hands-free, devices)' },
 ];
+
+const QUIET_TONES_PHRASES = new Set([
+  'quiet for an hour', 'quiet for one hour', 'quiet for 1 hour', 'be quiet for an hour', 'quiet for a while',
+  'stop the tones', 'stop tones', 'stop the chimes', 'stop chimes', 'no more tones', 'no tones',
+  'mute tones', 'mute the tones', 'silence the tones', 'silence tones', 'quiet the tones',
+  'tones off', 'turn off the tones', 'turn off tones', 'turn the tones off',
+]);
+const RESUME_TONES_PHRASES = new Set([
+  'tones on', 'tones back on', 'turn on the tones', 'turn on tones', 'turn the tones on', 'resume tones',
+  'resume the tones', 'unmute tones', 'unmute the tones',
+]);
+
+/**
+ * QUIET TONES: "quiet for an hour", "stop the tones" (whole utterance) hush
+ * Herald's tones on this device for an hour; "tones back on" resumes them.
+ * Checked before the STOP table ("quiet" alone still stops speech).
+ */
+export function matchQuietTonesCommand(text: string): 'quiet' | 'resume' | null {
+  if (!text || text.length > 60) return null;
+  const kept = stripAddress(normalizeUtterance(text)).replace(/\b(please|okay|ok|now|just)\b/g, ' ').replace(/\s+/g, ' ').trim();
+  if (QUIET_TONES_PHRASES.has(kept)) return 'quiet';
+  if (RESUME_TONES_PHRASES.has(kept)) return 'resume';
+  return null;
+}

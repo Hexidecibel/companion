@@ -16,6 +16,7 @@
  */
 import type { AudioEnvironment } from '../voice/audioEnvironment';
 import type { NativePlatform } from '../../utils/platform';
+import { DEFAULT_TONE_KINDS, type ToneKind } from '../tts/tonePolicy';
 
 export type ProfileId = 'headphones' | 'desk' | 'gaming' | 'phone';
 
@@ -51,7 +52,7 @@ export const PROFILES: Record<ProfileId, ProfileInfo> = {
     id: 'gaming',
     name: 'Gaming',
     tagline: 'Headset and Discord. Tones only, one button to talk.',
-    bullets: ['Tones for news, nothing spoken unasked', 'Hotkey or mouse button to talk', 'Hands-free off (Discord hears your mic)', 'Short spoken replies', 'Herald at 80% volume'],
+    bullets: ['Tones only when something needs you, nothing spoken unasked', 'Hotkey or mouse button to talk', 'Hands-free off (Discord hears your mic)', 'Short spoken replies', 'Herald at 80% volume'],
   },
   phone: {
     id: 'phone',
@@ -104,8 +105,13 @@ export interface ProfileSettings {
   voice: {
     voiceOn: boolean;
     chimeOn: boolean;
-    /** Replay the tone for an unheard block. */
+    /** Replay the tone for an unheard block (opt-in: off in every profile). */
     remind: boolean;
+    /**
+     * Which inbox kinds chime (tonePolicy.ts). Applied only while the user has
+     * not chosen kinds themselves. Every profile: "needs you" only.
+     */
+    toneKinds: Record<ToneKind, boolean>;
     spokenLength: 'short' | 'full';
     /** Herald's own volume on this device (0..1.5). Gaming: 80 % (under the game and Discord). */
     volume: number;
@@ -151,7 +157,7 @@ export const GAMING_VOLUME = 0.8;
 
 export function profileSettings(id: ProfileId, ctx: ProfileContext): ProfileSettings {
   const base: ProfileSettings = {
-    voice: { voiceOn: true, chimeOn: true, remind: true, spokenLength: 'short', volume: 1 },
+    voice: { voiceOn: true, chimeOn: true, remind: false, spokenLength: 'short', volume: 1, toneKinds: { ...DEFAULT_TONE_KINDS } },
     input: { interrupt: false, sensitivity: 'normal', reviewBeforeSend: false, spaceToTalk: true, handsFree: 'keep', followUp: false },
     native: { globalShortcuts: true, earbudButton: true, duckOthers: true },
     gamingMode: false,
@@ -208,6 +214,8 @@ export interface ProfileTargets {
     setChimeOn: (on: boolean) => void;
     setRemind: (on: boolean) => void;
     setSpokenLength: (v: 'short' | 'full') => void;
+    /** Which inbox kinds chime (absent: left alone). The store keeps a user's own choice. */
+    setToneKinds?: (kinds: Record<ToneKind, boolean>) => void;
     /** Absent: the profile leaves the volume alone (re-applied for an echo check, not picked). */
     setVolume?: (v: number) => void;
   };
@@ -249,6 +257,7 @@ export function applyProfileSettings(s: ProfileSettings, t: ProfileTargets): voi
   if (c.voiceOn !== s.voice.voiceOn) t.voice.setVoiceOn(s.voice.voiceOn);
   if (c.chimeOn !== s.voice.chimeOn) t.voice.setChimeOn(s.voice.chimeOn);
   if (c.remind !== s.voice.remind) t.voice.setRemind(s.voice.remind);
+  t.voice.setToneKinds?.(s.voice.toneKinds);
   if (c.spokenLength !== s.voice.spokenLength) t.voice.setSpokenLength(s.voice.spokenLength);
   if (t.voice.setVolume && (c.volume === undefined || Math.abs(c.volume - s.voice.volume) > 0.001)) t.voice.setVolume(s.voice.volume);
   // Interrupt is always made explicit, so it no longer follows the old headphone guess.

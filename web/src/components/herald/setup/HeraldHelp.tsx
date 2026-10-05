@@ -123,6 +123,24 @@ export function HeraldHelp({ onClose }: { onClose: () => void }) {
           </p>
         </Section>
 
+        <Section title="Tones">
+          <p className="hh-p">
+            By default only things that need you make a sound: a question or approval waiting, or a new device that wants to
+            pair. Finished turns, risky changes, stuck sessions and turns that ended with an error still appear in the inbox,
+            silently; turn tones on for each under <strong>Tones for</strong> in the menu.
+          </p>
+          <p className="hh-p">
+            No tone plays for the session you are looking at, or within a minute of using the app. At most one tone every two
+            minutes (adjustable): anything else that arrives meanwhile is folded into the next one, and nothing is replayed
+            when you come back. Reminders for an unheard question are off unless you turn them on (one, after 10 minutes).
+          </p>
+          <p className="hh-p">
+            Need a break? The bell in the header, saying “quiet for an hour” or “stop the tones”, or the tray item on desktop
+            silences tones for an hour (“tones back on” resumes). A session's menu can mute its tones on this device. The
+            Gaming profile chimes only for what needs you.
+          </p>
+        </Section>
+
         <Section title="Cards">
           <p className="hh-p">
             When you ask Herald to tell a session something, a card shows exactly what will be sent. Safe ones send after a short

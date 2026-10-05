@@ -3,6 +3,7 @@ import { HeraldTonesVolume } from './HeraldVolume';
 import type { HeraldAction, HeraldInboxItem, HeraldMessage, HeraldSessionRef, HeraldVerbosity, InboxPriority } from '../../types/herald';
 import { requestReviewDrawer } from '../../services/reviewNav';
 import { requestPairApproval } from '../../services/pairing';
+import { MIN_GAP_CHOICES_MS, QUIET_HOUR_MS, TONE_KINDS, TONE_KIND_LABEL } from '../../services/tts/tonePolicy';
 import { INTENT_LABELS, VOICE_COMMAND_HELP } from '../../services/voice/voiceCommands';
 import { sortInbox, sortPendingByUrgency } from '../../services/heraldReducer';
 import { useHeraldData, useHeraldSetupCtx, useHeraldUi, useHeraldVoiceCtx, useHeraldVoiceInputCtx } from '../../context/HeraldContext';
@@ -24,7 +25,7 @@ import type { HeraldUsageSummary } from '../../types/herald';
 import { AudioLockedNotice, HeraldVoiceExtras } from './HeraldVoiceExtras';
 import { HeraldActionCard, HeraldPendingMarker, HeraldResolvedLine } from './HeraldActionCard';
 import { HeraldComposer } from './HeraldComposer';
-import { IconBack, IconBell, IconBrief, IconClose, IconDown, IconMore, IconPlay, IconRefresh, IconSpeaker, IconSpeakerOff, IconStop, IconTrash, IconX } from './heraldIcons';
+import { IconBack, IconBell, IconBellOff, IconBrief, IconClose, IconDown, IconMore, IconPlay, IconRefresh, IconSpeaker, IconSpeakerOff, IconStop, IconTrash, IconX } from './heraldIcons';
 
 type OpenSession = (serverId: string, sessionId: string) => void;
 
@@ -301,6 +302,7 @@ function VoiceSettings({ voice }: { voice: HeraldVoice }) {
         </button>
       )}
       {voice.chimeSupported && voice.chimeOn && <HeraldTonesVolume voice={voice} />}
+      {voice.chimeSupported && voice.chimeOn && <ToneKindSettings voice={voice} />}
       {voice.chimeSupported && voice.chimeOn && (
         <button
           type="button"
@@ -308,9 +310,9 @@ function VoiceSettings({ voice }: { voice: HeraldVoice }) {
           aria-checked={voice.remind}
           className="herald-menu__item herald-menu__item--sub"
           onClick={() => voice.setRemind(!voice.remind)}
-          title="Replay the tone once or twice if something blocked on you goes unheard for 5 minutes"
+          title="Replay the tone once if something that needs you goes unheard for 10 minutes"
         >
-          Remind me if a block goes unheard
+          Remind me once if it goes unheard
           <span className={`herald-switch${voice.remind ? ' herald-switch--on' : ''}`} aria-hidden="true" />
         </button>
       )}
@@ -318,6 +320,69 @@ function VoiceSettings({ voice }: { voice: HeraldVoice }) {
         <div className="herald-voice-set__engine">Tones are playing on the active device (see Devices).</div>
       )}
     </div>
+  );
+}
+
+/** "Tones for": which inbox kinds chime on this device, and how often at most. */
+function ToneKindSettings({ voice }: { voice: HeraldVoice }) {
+  return (
+    <div className="herald-tone-kinds" role="group" aria-label="Tones for">
+      <div className="herald-tone-kinds__label">Tones for</div>
+      {TONE_KINDS.map((k) => (
+        <button
+          key={k}
+          type="button"
+          role="menuitemcheckbox"
+          aria-checked={voice.tones.kinds[k]}
+          className="herald-menu__item herald-menu__item--sub"
+          onClick={() => voice.setToneKind(k, !voice.tones.kinds[k])}
+        >
+          {TONE_KIND_LABEL[k]}
+          <span className={`herald-switch${voice.tones.kinds[k] ? ' herald-switch--on' : ''}`} aria-hidden="true" />
+        </button>
+      ))}
+      <label className="herald-menu__item herald-menu__item--sub herald-tone-kinds__gap">
+        At most one tone every
+        <select
+          value={voice.tones.minGapMs}
+          onChange={(e) => voice.setToneGap(Number(e.target.value))}
+          aria-label="At most one tone every"
+        >
+          {MIN_GAP_CHOICES_MS.map((ms) => (
+            <option key={ms} value={ms}>{ms / 60_000} min</option>
+          ))}
+          {!MIN_GAP_CHOICES_MS.includes(voice.tones.minGapMs) && (
+            <option value={voice.tones.minGapMs}>{Math.round(voice.tones.minGapMs / 1000)} s</option>
+          )}
+        </select>
+      </label>
+    </div>
+  );
+}
+
+/** One tap: no tones for an hour on this device (tap again to resume). */
+export function QuietTonesButton({ voice }: { voice: Pick<HeraldVoice, 'tones' | 'quietTones'> }) {
+  const [, setTick] = useState(0);
+  const until = voice.tones.quietUntil;
+  const quiet = until > Date.now();
+  // Re-render when the quiet hour ends.
+  useEffect(() => {
+    if (!quiet) return;
+    const t = setTimeout(() => setTick((n) => n + 1), Math.max(1000, until - Date.now() + 500));
+    return () => clearTimeout(t);
+  }, [quiet, until]);
+  const at = quiet ? new Date(until).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : '';
+  return (
+    <button
+      type="button"
+      className={`herald-icon-btn herald-quiet${quiet ? ' herald-quiet--on' : ''}`}
+      onClick={() => voice.quietTones(quiet ? 0 : QUIET_HOUR_MS)}
+      aria-pressed={quiet}
+      aria-label={quiet ? `Tones quiet until ${at}, tap to resume` : 'Quiet tones for 1 hour'}
+      title={quiet ? `Tones quiet until ${at} (click to resume)` : 'Quiet tones for 1 hour (or say "quiet for an hour")'}
+    >
+      {quiet ? <IconBellOff size={17} /> : <IconBell size={17} />}
+    </button>
   );
 }
 
@@ -795,6 +860,7 @@ export function HeraldPanel({ variant, onOpenSession, onClose }: HeraldPanelProp
               </select>
             </label>
           )}
+          {voice.chimeSupported && voice.chimeOn && <QuietTonesButton voice={voice} />}
           {voice.supported && (
             <button
               type="button"

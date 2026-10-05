@@ -268,6 +268,8 @@ export interface NativeHeraldHost {
   };
   tonesOn: boolean;
   setTonesOn: (on: boolean) => void;
+  /** Tones quiet for an hour on this device (tray "Quiet for 1 hour"). */
+  quietTones?: () => void;
   /** Herald is speaking right now on this device (mobile audio focus). */
   speaking: boolean;
   /** Herald is speaking here or on another device. */
@@ -318,6 +320,7 @@ export function nativeHandlers(host: () => NativeHeraldHost): NativeHeraldHandle
       const h = host();
       h.setTonesOn(!h.tonesOn);
     },
+    quietHour: () => host().quietTones?.(),
     volume: (cmd) => host().volumeCommand?.(cmd),
     // Saved as the "Show floating orb" setting of the current profile.
     orb: (on) => setOverlayEnabled(on),

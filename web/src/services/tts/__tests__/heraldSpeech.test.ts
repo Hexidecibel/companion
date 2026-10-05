@@ -363,16 +363,16 @@ describe('InboxChimeTracker reminders', () => {
     id, serverId: 's', sessionId: id, sessionName: id, priority, headline: 'h', createdAt: 1, heard,
   });
 
-  it('a toned blocked item still unheard gets at most two reminders, 5 minutes apart', () => {
+  it('a toned blocked item still unheard gets one reminder, 10 minutes later', () => {
     const t = new InboxChimeTracker();
     t.handleEvent({ kind: 'state', state: state([], []) }, 'fetch', 0);
     expect(t.handleEvent({ kind: 'inbox', inbox: [item('a', 'blocked')] }, 'push', 1000)).toBe('blocked');
+    expect(REMINDER_AFTER_MS).toBe(10 * 60_000);
     expect(t.dueReminder(1000 + REMINDER_AFTER_MS - 1)).toBeNull();
     expect(t.dueReminder(1000 + REMINDER_AFTER_MS)).toBe('blocked');
     expect(t.dueReminder(1000 + REMINDER_AFTER_MS + 1000)).toBeNull();
-    expect(t.dueReminder(1000 + 2 * REMINDER_AFTER_MS)).toBe('blocked');
-    expect(t.dueReminder(1000 + 10 * REMINDER_AFTER_MS)).toBeNull();
-    expect(MAX_REMINDERS).toBe(2);
+    expect(t.dueReminder(1000 + 2 * REMINDER_AFTER_MS)).toBeNull();
+    expect(MAX_REMINDERS).toBe(1);
   });
 
   it('hearing the item (briefing, tap) or it leaving the inbox cancels its reminders', () => {

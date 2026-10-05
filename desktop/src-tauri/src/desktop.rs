@@ -146,6 +146,7 @@ pub fn setup_desktop(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Err
     let tones_item = CheckMenuItemBuilder::with_id("herald-mute-tones", "Mute tones")
         .checked(false)
         .build(app)?;
+    let quiet_item = MenuItemBuilder::with_id("herald-quiet-hour", "Quiet tones for 1 hour").build(app)?;
     // Herald's own volume (the web layer owns the value; checks mirror it).
     let mut volume_menu = SubmenuBuilder::new(app, "Herald volume")
         .item(&MenuItemBuilder::with_id("herald-vol-up", "Louder").build(app)?)
@@ -172,6 +173,7 @@ pub fn setup_desktop(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Err
             &stop_item,
             &volume_menu,
             &tones_item,
+            &quiet_item,
             &orb_item,
             &PredefinedMenuItem::separator(app)?,
             &show_item,
@@ -213,6 +215,7 @@ pub fn setup_desktop(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Err
             "herald-brief" => herald::emit(app, "brief"),
             "herald-toggle" => herald::emit(app, "toggle"),
             "herald-mute-tones" => herald::emit(app, "mute_tones"),
+            "herald-quiet-hour" => herald::emit(app, "quiet_hour"),
             "herald-stop" => herald::emit(app, "stop"),
             herald::TRAY_ORB_ID => herald::toggle_orb_from_tray(app),
             "herald-vol-up" => herald::emit(app, "volume_up"),

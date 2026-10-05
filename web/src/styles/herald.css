@@ -1583,6 +1583,13 @@
 
 .herald-voice-toggle { color: var(--h-text-3); }
 .herald-voice-toggle--on { color: var(--h-text-2); }
+/* Quiet tones for an hour (header) */
+.herald-quiet--on { color: #f59e0b; }
+/* "Tones for" in the voice settings */
+.herald-tone-kinds { display: flex; flex-direction: column; }
+.herald-tone-kinds__label { padding: 6px 12px 2px 28px; font-size: 11px; font-weight: 600; letter-spacing: 0.03em; text-transform: uppercase; color: var(--h-text-3, #9ca3af); }
+.herald-tone-kinds__gap { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.herald-tone-kinds__gap select { background: transparent; color: inherit; border: 1px solid var(--h-border, #374151); border-radius: 6px; padding: 2px 4px; font: inherit; }
 .herald-voice-toggle--live { color: #5eead4; }
 .herald-voice-toggle--live:hover { color: #99f6e4; }
 

@@ -19,10 +19,10 @@ import { nativePlatform, type NativePlatform } from '../utils/platform';
 
 export type NativeHeraldAction =
   | 'talk_down' | 'talk_up' | 'toggle' | 'brief' | 'mute_tones' | 'stop'
-  | 'volume_up' | 'volume_down' | 'volume_set' | 'orb';
+  | 'volume_up' | 'volume_down' | 'volume_set' | 'orb' | 'quiet_hour';
 
 const ACTIONS: ReadonlySet<string> = new Set<NativeHeraldAction>([
-  'talk_down', 'talk_up', 'toggle', 'brief', 'mute_tones', 'stop', 'volume_up', 'volume_down', 'volume_set', 'orb',
+  'talk_down', 'talk_up', 'toggle', 'brief', 'mute_tones', 'stop', 'volume_up', 'volume_down', 'volume_set', 'orb', 'quiet_hour',
 ]);
 
 export interface NativeHeraldHandlers {
@@ -42,6 +42,8 @@ export interface NativeHeraldHandlers {
   volume: (cmd: { kind: 'step'; dir: 1 | -1 } | { kind: 'set'; value: number }) => void;
   /** Tray "Hide floating orb" / "Show floating orb" (value 0 / 1). Optional for older hosts. */
   orb?: (on: boolean) => void;
+  /** Tray "Quiet for 1 hour": no tones on this device for an hour. Optional for older hosts. */
+  quietHour?: () => void;
 }
 
 /** Validate a native payload and run its handler. False when it was not ours. */
@@ -65,6 +67,9 @@ export function dispatchNativeEvent(payload: unknown, h: NativeHeraldHandlers): 
     case 'orb':
       if (typeof value !== 'number') return false;
       h.orb?.(value > 0);
+      break;
+    case 'quiet_hour':
+      h.quietHour?.();
       break;
   }
   return true;

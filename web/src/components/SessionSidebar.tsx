@@ -1,3 +1,4 @@
+import { sessionToneKey, toneStore } from '../services/tts/tonePolicy';
 import { eventBus } from '../utils/eventBus';
 import { useState, useMemo, useEffect, useCallback, lazy, Suspense } from 'react';
 import { ServerSummary, ActiveSession, SessionSummary, WorkGroup, WorkerSession } from '../types';
@@ -434,6 +435,13 @@ export function SessionSidebar({
         onClick: () => onToggleMute(serverId, sessionId),
       });
     }
+    // Herald's inbox tones for this session, on this device only.
+    const toneKey = sessionToneKey(serverId, sessionId);
+    const tonesMuted = toneStore.isSessionMuted(toneKey);
+    items.push({
+      label: tonesMuted ? 'Unmute Herald tones' : 'Mute Herald tones',
+      onClick: () => toneStore.setSessionMuted(toneKey, !tonesMuted),
+    });
 
     if (tmuxSessionName) {
       if (items.length > 0) items.push(null);

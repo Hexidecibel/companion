@@ -12,6 +12,7 @@
  *   toggle - speaking: stop; listening: cancel; otherwise listen
  *   claim  - this device was just made the active one (the daemon did it): acknowledge
  */
+import { noteInteraction } from '../tts/tonePolicy';
 import type { HeraldTriggerAction } from '../../types/herald';
 
 export type TriggerTone = 'wake' | 'ok' | 'error';
@@ -50,6 +51,8 @@ export type TriggerOutcome =
   | 'failed';
 
 export async function runHeraldTrigger(action: HeraldTriggerAction, a: TriggerActions): Promise<TriggerOutcome> {
+  // A trigger is the user at work: tones hush for a minute (tonePolicy.ts).
+  noteInteraction();
   switch (action) {
     case 'stop': {
       const spoke = a.speaking();

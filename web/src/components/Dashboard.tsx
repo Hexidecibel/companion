@@ -24,6 +24,7 @@ import { resolveHeraldServerId } from '../services/heraldNav';
 import { connectionManager } from '../services/ConnectionManager';
 import { useHeraldUi } from '../context/HeraldContext';
 import { HeraldPanel } from './herald/HeraldPanel';
+import { setViewedSessions } from '../services/tts/tonePolicy';
 
 interface DashboardProps {
   onSettings?: () => void;
@@ -57,6 +58,12 @@ export function Dashboard({ onSettings }: DashboardProps) {
   const { isParallelWorkersEnabled } = useServers();
   const herald = useHeraldUi();
   const heraldScreenOpen = isMobile && herald.screenOpen;
+
+  // Herald tones skip the sessions on screen (tonePolicy.ts).
+  useEffect(() => {
+    setViewedSessions([activeSession, secondarySession].filter((x): x is ActiveSession => !!x));
+  }, [activeSession, secondarySession]);
+  useEffect(() => () => setViewedSessions([]), []);
 
   // Use work groups for the active server (only if enabled and git is available)
   const gitEnabled = activeSession

@@ -420,10 +420,10 @@ export function inboxToneAllowed(o: { chimeOn: boolean; announcer: boolean; visi
   return o.chimeOn && o.announcer && (o.visible || o.gaming);
 }
 
-/** A blocked item still unheard this long after its tone gets a gentle reminder. */
-export const REMINDER_AFTER_MS = 5 * 60_000;
+/** A blocked item still unheard this long after its tone gets a gentle reminder (reminders are opt-in). */
+export const REMINDER_AFTER_MS = 10 * 60_000;
 /** At most this many reminders per item. */
-export const MAX_REMINDERS = 2;
+export const MAX_REMINDERS = 1;
 
 interface Toned {
   lastToneAt: number;
@@ -449,8 +449,14 @@ export class InboxChimeTracker {
   private toned = new Map<string, Toned>();
   /** Tone risky-change (Code Review) items. */
   riskTones = true;
+  /**
+   * The new, unheard items the last handleEvent found (live pushes only), for
+   * the tone policy (tonePolicy.ts), which decides whether they make a sound.
+   */
+  lastNew: HeraldInboxItem[] = [];
 
   handleEvent(event: HeraldEvent, source: HeraldEventSource, now: number = Date.now()): ChimeKind | null {
+    this.lastNew = [];
     if (event.kind === 'state') {
       this.seed(event.state.inbox);
       this.prune(event.state.inbox);
@@ -467,6 +473,7 @@ export class InboxChimeTracker {
       if (this.seen.has(item.id)) continue;
       this.seen.add(item.id);
       if (item.heard) continue;
+      this.lastNew.push(item);
       if (item.priority === 'blocked') {
         kind = 'blocked';
         this.toned.set(item.id, { lastToneAt: now, reminders: 0 });

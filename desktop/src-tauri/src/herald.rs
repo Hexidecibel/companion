@@ -6,7 +6,7 @@
 //! remote-trigger `toggle` / `brief` logic, tones), so nothing is duplicated.
 //!
 //! Actions: `talk_down`, `talk_up` (hold-to-talk), `toggle`, `brief`, `stop`,
-//! `mute_tones`, and from the tray `volume_up`, `volume_down`, `volume_set`
+//! `mute_tones`, `quiet_hour`, and from the tray `volume_up`, `volume_down`, `volume_set`
 //! (with a `value`, 0..1.5).
 //!
 //! A shortcut is registered one of two ways. Exclusive (the global-shortcut

@@ -1,3 +1,4 @@
+import { toneStore } from '../services/tts/tonePolicy';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { HeraldVoice } from './useHeraldVoice';
 import type { HeraldVoiceInput } from './useHeraldVoiceInput';
@@ -96,6 +97,7 @@ export function useHeraldSetup(host: SetupHost): HeraldSetupControl {
         setVoiceOn: voice.setVoiceOn,
         setChimeOn: voice.setChimeOn,
         setRemind: voice.setRemind,
+        setToneKinds: (kinds) => toneStore.applyProfileKinds(kinds),
         setSpokenLength: voice.setSpokenLength,
         ...(withVolume && voice.setVolume ? { setVolume: voice.setVolume } : {}),
       },

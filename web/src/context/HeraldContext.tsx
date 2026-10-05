@@ -9,6 +9,8 @@ import { DEFAULT_DISPLAY_NAME, derivePresence, type HeraldPresence } from '../se
 import { isMobileViewport } from '../utils/platform';
 import { eventBus } from '../utils/eventBus';
 import { routeVoiceTranscript } from '../services/voice/voiceCommandRouter';
+import { matchQuietTonesCommand } from '../services/voice/voiceCommands';
+import { QUIET_HOUR_MS, noteInteraction } from '../services/tts/tonePolicy';
 import { detectVoiceConfirm, isPendingConfirmPhrase, runVoiceConfirm } from '../services/voice/confirmPhrase';
 import { runUndo } from '../services/voice/voiceUndo';
 import { matchDiagnosticsCommand, matchShowCommand, stripWakeWord, type ShowCommand } from '../services/voice/voiceCommands';
@@ -354,6 +356,17 @@ export function HeraldProvider({ children }: { children: ReactNode }) {
 
   const onVoiceTranscript = useCallback((text: string): string | null => {
     const v = voiceRef.current;
+    // Talking to Herald is using the app: tones hush for a minute.
+    noteInteraction();
+    // "Quiet for an hour" / "stop the tones" / "tones back on".
+    const quiet = matchQuietTonesCommand(text);
+    if (quiet) {
+      followUp.cancel();
+      cues.turnDone();
+      v.quietTones(quiet === 'quiet' ? QUIET_HOUR_MS : 0);
+      if (v.chimeOn) playChime('ok', 0.035);
+      return null;
+    }
     // Red card by voice ("confirm deploy"; the hub verifies) or a bare "yes" at
     // one (answered with the phrase, never a confirm). See confirmPhrase.ts.
     const vc = detectVoiceConfirm(text, heraldRef.current.state?.actions);
@@ -640,6 +653,7 @@ export function HeraldProvider({ children }: { children: ReactNode }) {
     input: voiceInput,
     tonesOn: voice.chimeOn,
     setTonesOn: voice.setChimeOn,
+    quietTones: () => voiceRef.current.quietTones(QUIET_HOUR_MS),
     speaking: voice.supported && voice.speaking,
     speakingAnywhere: (voice.supported && voice.speaking) || !!voice.remoteSpeaking,
     // Hold-to-talk pressed while Herald talks (here or on another device): quiet now.

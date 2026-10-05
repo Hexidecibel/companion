@@ -12,6 +12,7 @@ import type { TtsEngine, TtsEvent, TtsVoice } from '../../services/tts/types';
 import type { HeraldEvent, HeraldInboxItem } from '../../types/herald';
 import { playChime } from '../../services/tts/chime';
 import { heraldSetupStore } from '../../services/heraldSetup/setupStore';
+import { resetInteraction, toneStore } from '../../services/tts/tonePolicy';
 
 class MockEngine implements TtsEngine {
   readonly id = 'mock';
@@ -45,6 +46,8 @@ describe('useHeraldVoice in the Gaming profile (the game is in front)', () => {
   beforeEach(() => {
     localStorage.clear();
     heraldSetupStore.reset();
+    toneStore.reset();
+    resetInteraction();
     vi.mocked(playChime).mockClear();
   });
   afterEach(() => hide(false));
@@ -58,11 +61,16 @@ describe('useHeraldVoice in the Gaming profile (the game is in front)', () => {
     expect(playChime).toHaveBeenCalledWith('blocked');
   });
 
-  it('risky-change items play the risk tone and are never spoken', () => {
+  it('risky-change items are silent by default; turned on, they play the risk tone and are never spoken', () => {
     heraldSetupStore.set('profile', 'gaming');
-    const { emit, engine } = setup();
+    const { emit, engine, hook } = setup();
     emit({ kind: 'inbox', inbox: [] });
     hide(true);
+    emit({ kind: 'inbox', inbox: [{ ...item('r0'), priority: 'finished', review: { level: 'high', kinds: ['ci'], paths: ['x'] } }] });
+    expect(playChime).not.toHaveBeenCalled();
+    act(() => { hook.result.current.setToneKind('risk', true); });
+    hide(true);
+    vi.mocked(playChime).mockClear();
     emit({ kind: 'inbox', inbox: [{ ...item('r'), priority: 'finished', headline: 'Out4 changed a CI workflow: deploy.yml', review: { level: 'high', kinds: ['ci'], paths: ['.github/workflows/deploy.yml'] } }] });
     expect(playChime).toHaveBeenCalledWith('risk');
     expect(engine.spoken).toEqual([]);

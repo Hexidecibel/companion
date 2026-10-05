@@ -77,17 +77,6 @@ export function VoiceTurnSettings({ input, voice }: { input: HeraldVoiceInput; v
         Thinking tone
         <Switch on={voice.thinkingTone} />
       </button>
-      <button
-        type="button"
-        role="menuitemcheckbox"
-        aria-checked={voice.riskTones}
-        className="herald-menu__item"
-        onClick={() => voice.setRiskTones(!voice.riskTones)}
-        title="A distinct tone when a session changes something risky (CI, migrations, secrets, deletions). Never spoken."
-      >
-        Risky change tone
-        <Switch on={voice.riskTones} />
-      </button>
     </div>
   );
 }

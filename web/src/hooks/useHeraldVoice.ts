@@ -1,14 +1,18 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { registerDiagnostics } from '../services/diagnostics';
 import type { HeraldEventListener } from './useHerald';
 import type { TtsEngine, TtsVoice } from '../services/tts/types';
-import type { HeraldPresenceResult, HeraldTtsResult, HeraldVoiceEvent, HeraldVoiceStatus } from '../types/herald';
+import type { HeraldInboxItem, HeraldPresenceResult, HeraldTtsResult, HeraldVoiceEvent, HeraldVoiceStatus } from '../types/herald';
 import type { HeraldTransport } from '../services/heraldTransport';
 import { getWebSpeechEngine } from '../services/tts/webSpeechEngine';
 import { HybridTtsEngine } from '../services/tts/hybridTtsEngine';
 import { NEURAL_PREFIX, TtsRequestError, WebAudioSink, decodePcm16, type TtsRequester } from '../services/tts/serverTtsEngine';
 import { ECHO_PROBE_LINE, setBrowserVoice, setEchoProbeSource } from '../services/voice/audioEnvironment';
-import { BRIEFING_SPOKEN_LIMIT, HeraldSpeechController, InboxChimeTracker, inboxToneAllowed, type SpokenLength } from '../services/tts/heraldSpeech';
+import { BRIEFING_SPOKEN_LIMIT, HeraldSpeechController, InboxChimeTracker, type SpokenLength } from '../services/tts/heraldSpeech';
+import {
+  QUIET_HOUR_MS, TONE_PREFS_KEY, ToneGate, ToneTabLock, chimeFor, itemMuted, lastInteraction, noteInteraction, sameSession,
+  toneStore, viewedSessions, type ToneContext, type ToneKind, type TonePrefs,
+} from '../services/tts/tonePolicy';
 import { TICK_VOLUME, chimeSupported, playChime, unlockChime } from '../services/tts/chime';
 import { pickVoice } from '../services/tts/voices';
 import { deviceKey, deviceLabel, devicePlatform, saveCustomLabel } from '../services/heraldDevice';
@@ -32,18 +36,22 @@ interface VoicePrefs {
   rate: number;
   /** Speak the first sentence or two (short) or the whole reply (full). */
   spokenLength: SpokenLength;
-  /** Replay the tone for a blocked item nobody has heard after 5 minutes (twice at most). */
+  /** Replay the tone once for a blocked item nobody has heard after 10 minutes (off by default). */
   remind: boolean;
   /** A tiny tick the moment a voice turn ends ("heard you"). */
   ackTick: boolean;
   /** A very soft looping tone while Herald thinks (after 1.5 s with no audio). */
   thinkingTone: boolean;
-  /** A distinct tone when a session makes a risky code change (Code Review). Never spoken. */
+  /** Legacy (now toneStore.kinds.risk); kept so older saved prefs parse. */
   riskTones: boolean;
+  /** Tone policy version the saved prefs follow (2: reminders opt-in, see tonePolicy.ts). */
+  toneVersion?: number;
 }
 
+const TONE_VERSION = 2;
+
 const DEFAULT_PREFS: VoicePrefs = {
-  voiceOn: true, chimeOn: true, voiceId: null, rate: RATE_DEFAULT, spokenLength: 'short', remind: true, ackTick: true, thinkingTone: false, riskTones: true,
+  voiceOn: true, chimeOn: true, voiceId: null, rate: RATE_DEFAULT, spokenLength: 'short', remind: false, ackTick: true, thinkingTone: false, riskTones: false, toneVersion: TONE_VERSION,
 };
 
 /** Next rate for "slower" / "faster", clamped; null when already at the limit. */
@@ -65,10 +73,13 @@ function loadPrefs(): VoicePrefs {
         ? Math.min(RATE_MAX, Math.max(RATE_MIN, p.rate))
         : DEFAULT_PREFS.rate,
       spokenLength: p.spokenLength === 'full' ? 'full' : 'short',
-      remind: typeof p.remind === 'boolean' ? p.remind : DEFAULT_PREFS.remind,
+      // Reminders became opt-in (tone policy v2): older saved prefs carry the old
+      // default (on), not a choice, so they get the new default.
+      remind: p.toneVersion === TONE_VERSION && typeof p.remind === 'boolean' ? p.remind : DEFAULT_PREFS.remind,
       ackTick: typeof p.ackTick === 'boolean' ? p.ackTick : DEFAULT_PREFS.ackTick,
       thinkingTone: typeof p.thinkingTone === 'boolean' ? p.thinkingTone : DEFAULT_PREFS.thinkingTone,
       riskTones: typeof p.riskTones === 'boolean' ? p.riskTones : DEFAULT_PREFS.riskTones,
+      toneVersion: TONE_VERSION,
     };
   } catch {
     return DEFAULT_PREFS;
@@ -99,7 +110,8 @@ function tonesAudible(): boolean {
 const TTS_REQUEST_TIMEOUT = 25000;
 /** Report "the user is here" at most this often. */
 const PRESENCE_THROTTLE_MS = 20_000;
-const REMINDER_CHECK_MS = 20_000;
+/** Tone housekeeping: folded tones, reminders, the tab lease. */
+const TONE_TICK_MS = 5_000;
 const FLASH_MS = 1800;
 const STATUS_REFRESH_MS = 60_000;
 const STATUS_RETRY_MS = 10_000;
@@ -175,9 +187,15 @@ export interface HeraldVoice {
   /** Soft thinking loop while waiting for the first audio (off by default). */
   thinkingTone: boolean;
   setThinkingTone: (on: boolean) => void;
-  /** Tone for risky code changes (on by default; same gating as the other news tones). */
+  /** Tone for risky code changes (toneStore kind `risk`; off by default). */
   riskTones: boolean;
   setRiskTones: (on: boolean) => void;
+  /** Tone policy settings on this device (kinds, minimum gap, quiet, muted sessions). */
+  tones: TonePrefs;
+  setToneKind: (kind: ToneKind, on: boolean) => void;
+  setToneGap: (ms: number) => void;
+  /** Quiet for `ms` (QUIET_HOUR_MS by default); 0 resumes tones. */
+  quietTones: (ms?: number) => void;
   /** Replies may play in a hidden tab right now (a remote trigger asked recently). */
   backgroundAllowed: () => boolean;
   /**
@@ -351,6 +369,29 @@ export function useHeraldVoice(
   const announcerRef = useRef(announcer);
   announcerRef.current = announcer;
   const chimes = useMemo(() => new InboxChimeTracker(), []);
+  const gate = useMemo(() => new ToneGate(), []);
+  const tabLock = useMemo(() => new ToneTabLock(), []);
+  const tones = useSyncExternalStore(toneStore.subscribe, () => toneStore.get());
+  /** The inbox as last seen (folded tones are re-checked against it). */
+  const inboxRef = useRef<HeraldInboxItem[]>([]);
+  const hostIdRef = useRef(hostId);
+  hostIdRef.current = hostId;
+  const toneCtx = useCallback((): ToneContext => {
+    const now = Date.now();
+    const prefs = toneStore.get();
+    const host = hostIdRef.current;
+    return {
+      now,
+      prefs,
+      chimeOn: prefsRef.current.chimeOn,
+      announcer: announcerRef.current,
+      tabLeader: tabLock.isLeader(now),
+      audible: tonesAudible(),
+      lastInteractionAt: lastInteraction(),
+      viewing: (item) => pageVisible() && viewedSessions().some((v) => sameSession(item, v, host)),
+      muted: (item) => itemMuted(item, prefs, host),
+    };
+  }, [tabLock]);
 
   useEffect(() => { savePrefs(prefs); }, [prefs]);
 
@@ -364,10 +405,18 @@ export function useHeraldVoice(
   // else: Herald never speaks up on its own).
   useEffect(() => subscribeEvents((event, source) => {
     controller.handleEvent(event, source);
-    chimes.riskTones = prefsRef.current.riskTones;
-    const kind = chimes.handleEvent(event, source);
-    if (kind && inboxToneAllowed({ chimeOn: prefsRef.current.chimeOn, announcer: announcerRef.current, visible: pageVisible(), gaming: isGamingMode() }))
-      playChime(kind);
+    chimes.handleEvent(event, source);
+    if (event.kind === 'state') {
+      inboxRef.current = event.state.inbox;
+      // A (re)connect snapshot: whatever was held is old news now.
+      gate.clearBacklog();
+    } else if (event.kind === 'inbox') {
+      inboxRef.current = event.inbox;
+    }
+    if (chimes.lastNew.length) {
+      const v = gate.offer(chimes.lastNew, toneCtx());
+      if (v.play) playChime(v.play);
+    }
     if (source !== 'push') return;
     if (event.kind === 'speaking') {
       fleet.handle(event.speaking, selfIdRef.current);
@@ -376,25 +425,61 @@ export function useHeraldVoice(
       controller.stop({ muteTurn: true });
       showFlashRef.current(event.by ? `Stopped from ${event.by}` : 'Stopped');
     }
-  }), [subscribeEvents, controller, chimes, fleet]);
+  }), [subscribeEvents, controller, chimes, fleet, gate, toneCtx]);
 
-  // Gentle reminder: a blocked item nobody has heard gets its tone again.
+  // Tone housekeeping: items folded into the rate window play as ONE tone when
+  // it ends; an opted-in reminder for an unheard block; the tab lease.
   useEffect(() => {
     const t = setInterval(() => {
-      const p = prefsRef.current;
-      if (!p.remind || !p.chimeOn || !announcerRef.current || !tonesAudible()) return;
-      const kind = chimes.dueReminder();
-      if (kind) playChime(kind);
-    }, REMINDER_CHECK_MS);
+      const ctx = toneCtx();
+      const folded = gate.tick(inboxRef.current, ctx);
+      if (folded.play) {
+        playChime(folded.play);
+        return;
+      }
+      if (!prefsRef.current.remind) return;
+      if (!chimes.dueReminder()) return;
+      const r = gate.remind(ctx);
+      if (r.play) playChime(r.play);
+    }, TONE_TICK_MS);
     return () => clearInterval(t);
-  }, [chimes]);
+  }, [chimes, gate, toneCtx]);
+
+  // You are here: keys, taps and clicks hush tones for a minute; coming back to
+  // the tab drops anything held (no backlog) and takes this device's tone lease.
+  useEffect(() => {
+    const onUse = () => {
+      noteInteraction();
+      tabLock.claim();
+    };
+    const onVis = () => {
+      if (!pageVisible()) return;
+      gate.clearBacklog();
+      tabLock.claim();
+    };
+    window.addEventListener('pointerdown', onUse, true);
+    window.addEventListener('keydown', onUse, true);
+    document.addEventListener('visibilitychange', onVis);
+    const onStorage = (e: StorageEvent) => { if (e.key === TONE_PREFS_KEY) toneStore.reload(); };
+    window.addEventListener('storage', onStorage);
+    if (pageVisible()) tabLock.claim();
+    return () => {
+      window.removeEventListener('pointerdown', onUse, true);
+      window.removeEventListener('keydown', onUse, true);
+      document.removeEventListener('visibilitychange', onVis);
+      window.removeEventListener('storage', onStorage);
+      tabLock.release();
+    };
+  }, [gate, tabLock]);
 
   // New host: everything we knew is about a different conversation.
   useEffect(() => {
     controller.reset();
     chimes.reset();
+    gate.reset();
+    inboxRef.current = [];
     fleet.reset();
-  }, [hostId, controller, chimes, fleet]);
+  }, [hostId, controller, chimes, fleet, gate]);
 
   // Leaving the tab (or locking the phone) silences immediately.
   useEffect(() => {
@@ -632,8 +717,20 @@ export function useHeraldVoice(
   }, []);
   const setThinkingTone = useCallback((on: boolean) => setPrefs((p) => ({ ...p, thinkingTone: on })), []);
   const setRiskTones = useCallback((on: boolean) => {
-    setPrefs((p) => ({ ...p, riskTones: on }));
+    toneStore.setKind('risk', on);
     if (on && tonesAudible()) playChime('risk');
+  }, []);
+  const setToneKind = useCallback((kind: ToneKind, on: boolean) => {
+    toneStore.setKind(kind, on);
+    if (on && tonesAudible()) {
+      const sample = chimeFor([kind]);
+      if (sample) playChime(sample);
+    }
+  }, []);
+  const setToneGap = useCallback((ms: number) => toneStore.setMinGap(ms), []);
+  const quietTones = useCallback((ms: number = QUIET_HOUR_MS) => {
+    toneStore.quietFor(ms);
+    showFlashRef.current(ms > 0 ? 'Tones quiet for 1 hour' : 'Tones back on');
   }, []);
   const backgroundAllowed = useCallback(() => Date.now() < backgroundUntil.current, []);
 
@@ -686,8 +783,12 @@ export function useHeraldVoice(
     ackTick: prefs.ackTick,
     setAckTick,
     thinkingTone: prefs.thinkingTone,
-    riskTones: prefs.riskTones,
+    riskTones: tones.kinds.risk,
     setRiskTones,
+    tones,
+    setToneKind,
+    setToneGap,
+    quietTones,
     setThinkingTone,
     backgroundAllowed,
     audioLocked,
@@ -711,5 +812,5 @@ export function useHeraldVoice(
     setTonesVolume,
     setTonesFollowVoice,
     volumeCommand,
-  }), [volume, setVolume, setTonesVolume, setTonesFollowVoice, volumeCommand, remoteSpeaking, stopRemote, fleetSuppressed, spokenLog, engine, hybrid, prefs, speaking, voices, voice, setVoiceOn, setChimeOn, setVoiceId, setRate, stop, stopCommand, repeat, goOn, stepRateCb, expectBriefing, say, setSpokenLength, setRemind, setAckTick, setThinkingTone, setRiskTones, backgroundAllowed, audioLocked, flash, announcer, testVoice, serverStatus, refreshStatus, allowBackground, selfId, label, renameDevice, claimDevice]);
+  }), [volume, setVolume, setTonesVolume, setTonesFollowVoice, volumeCommand, remoteSpeaking, stopRemote, fleetSuppressed, spokenLog, engine, hybrid, prefs, speaking, voices, voice, setVoiceOn, setChimeOn, setVoiceId, setRate, stop, stopCommand, repeat, goOn, stepRateCb, expectBriefing, say, setSpokenLength, setRemind, setAckTick, setThinkingTone, setRiskTones, tones, setToneKind, setToneGap, quietTones, backgroundAllowed, audioLocked, flash, announcer, testVoice, serverStatus, refreshStatus, allowBackground, selfId, label, renameDevice, claimDevice]);
 }

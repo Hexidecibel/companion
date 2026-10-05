@@ -52,6 +52,9 @@ export const IconStop = (p: IconProps) => (
 export const IconBell = (p: IconProps) => (
   <Svg {...p}><path d="M18 8a6 6 0 00-12 0c0 7-3 9-3 9h18s-3-2-3-9" /><path d="M13.7 21a2 2 0 01-3.4 0" /></Svg>
 );
+export const IconBellOff = (p: IconProps) => (
+  <Svg {...p}><path d="M18 8a6 6 0 00-9.3-5" /><path d="M6 8c0 7-3 9-3 9h14" /><path d="M18 13.5c.3 2.1 1 3.5 1 3.5" /><path d="M13.7 21a2 2 0 01-3.4 0" /><path d="M3 3l18 18" /></Svg>
+);
 export const IconPlay = (p: IconProps) => <Svg {...p}><path d="M7 5l12 7-12 7V5z" /></Svg>;
 export const IconMic = (p: IconProps) => (
   <Svg {...p}><rect x="9" y="3" width="6" height="11" rx="3" /><path d="M5 11a7 7 0 0 0 14 0" /><path d="M12 18v3" /></Svg>
