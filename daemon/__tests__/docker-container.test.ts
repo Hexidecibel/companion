@@ -17,6 +17,7 @@ process.env.COMPANION_SETUP_STATE_FILE = path.join(dir, 'setup-state.json');
 
 import { detectContainer, pairingCodeBanner, ContainerInfo, DOCKER_COMMANDS } from '../src/container';
 import { handleHealthRequest, healthPayload } from '../src/health';
+import { appVersion } from '../src/version';
 import { createQRRequestHandler } from '../src/qr-server';
 import { CheckEnv, RunResult, Runner, runChecks, tailscaleStatusViaSocket } from '../src/setup/checks';
 import {
@@ -97,15 +98,20 @@ describe('GET /health', () => {
   });
 
   it('answers ok, version and setupComplete only', () => {
-    expect(healthPayload({ setupComplete: false }, { COMPANION_VERSION: '1.0.521' })).toEqual({
+    expect(healthPayload({ setupComplete: false })).toEqual({
       ok: true,
-      version: '1.0.521',
+      version: appVersion(),
       setupComplete: false,
     });
-    // An existing install (no key) is complete; a junk version falls back to the package's.
-    const p = healthPayload({}, { COMPANION_VERSION: 'bad version; rm -rf' });
+    // An existing install (no key) is complete.
+    const p = healthPayload({});
     expect(p.setupComplete).toBe(true);
     expect(p.version).toMatch(/^\d+\.\d+\.\d+/);
+  });
+
+  it('a runtime COMPANION_VERSION no longer overrides the build version', () => {
+    process.env.COMPANION_VERSION = '9.9.9';
+    expect(healthPayload({}).version).toBe(appVersion());
   });
 
   async function serve(handler: http.RequestListener): Promise<{ port: number; close: () => Promise<void> }> {
@@ -127,7 +133,6 @@ describe('GET /health', () => {
 
   it('the daemon HTTP handler serves it unauthenticated, with no secrets', async () => {
     jest.spyOn(console, 'log').mockImplementation(() => {});
-    process.env.COMPANION_VERSION = '1.0.999';
     const config = {
       listeners: [{ port: 1, token: 'listener-secret-token', tls: false }],
       setupComplete: false,
@@ -138,7 +143,7 @@ describe('GET /health', () => {
       const r = await get(s.port, '/health');
       expect(r.status).toBe(200);
       expect(r.type).toContain('application/json');
-      expect(JSON.parse(r.body)).toEqual({ ok: true, version: '1.0.999', setupComplete: false });
+      expect(JSON.parse(r.body)).toEqual({ ok: true, version: appVersion(), setupComplete: false });
       expect(r.body).not.toContain('listener-secret-token');
       expect(r.body).not.toContain('Secret Name');
       // Completing setup shows up live (same config object).

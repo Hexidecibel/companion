@@ -2,8 +2,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { execSync, spawn, spawnSync } from 'child_process';
 import { HandlerContext, MessageHandler, AuthenticatedClient } from '../handler-context';
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const daemonPackage = require('../../package.json');
+import { appVersion } from '../version';
 
 interface CapabilitiesResponse {
   daemonVersion: string;
@@ -149,7 +148,7 @@ export function registerRemoteHandlers(
       const masterEnabled = Boolean(caps?.enabled);
 
       const payload: CapabilitiesResponse = {
-        daemonVersion: String(daemonPackage.version || '0.0.0'),
+        daemonVersion: appVersion(),
         protocolVersion: 1,
         remoteCapabilities: {
           enabled: masterEnabled,

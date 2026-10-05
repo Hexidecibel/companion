@@ -16,15 +16,11 @@ export interface HealthPayload {
   setupComplete: boolean;
 }
 
-/** The image build version (COMPANION_VERSION, e.g. 1.0.521) wins over the package version. */
-export function healthPayload(
-  config: Pick<DaemonConfig, 'setupComplete'>,
-  env: NodeJS.ProcessEnv = process.env
-): HealthPayload {
-  const v = (env.COMPANION_VERSION || '').trim();
+/** The version is the build's (version.ts), the same on host installs and in the image. */
+export function healthPayload(config: Pick<DaemonConfig, 'setupComplete'>): HealthPayload {
   return {
     ok: true,
-    version: /^[0-9A-Za-z.+-]{1,40}$/.test(v) ? v : daemonVersion(),
+    version: daemonVersion(),
     setupComplete: !isSetupMode(config),
   };
 }

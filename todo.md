@@ -12,6 +12,10 @@ Quick capture for ideas and tasks. Run `/plan` to process into detailed plans.
 - TestFlight beta -- submit iOS build for beta testing before public release
 
 ## Upcoming
+- Packaging follow-ups -- (1) "Get the apps" should link a proper signed/notarized macOS .dmg for friends, not the updater .app.tar.gz; (2) include Concierge in the Docker image; (3) /health reports version 1.0.0 on host installs vs 1.0.<n> in the image -- unify version source; (4) live-test with a friend: host-network mode (Nearby discovery), Tailscale sidecar joining a real tailnet, interactive /login in the container. See plan.md 'Packaging for friends & devs'
+- Error notifications -- parser now records ToolCall.isError but status never becomes 'error', so error_detected escalation/push never fires; decide whether to enable
+- Stuck detection / pairing follow-ups -- Herald 'new device wants to pair' announcement; store device tokens in Android Keystore / iOS Keychain
+- Developer ID cert expires 2027-02-01 -- renew + re-run bin/desktop-signing import-devid before then
 - Custom "Herald" wake word -- train an openWakeWord model overnight on this box from synthetic Kokoro/Piper "Herald"/"Hey Herald" clips + negatives (bin/ script), load via HERALD_WAKE_MODELS, add spellings to WAKE_NAMES; keep "hey jarvis" as fallback. See plan.md 'Voice Front Layer' [planned]
 - Global triggers & native desktop Herald -- remote trigger API (brief/listen/stop/repeat routed to the active device; AutoHotkey, Raycast, curl), Tauri global shortcuts + tray orb, earbud media-button brief on mobile. See plan.md 'Voice Front Layer' [planned]
 - Herald go-live (Phase 1 text-only is merged to main, not live) -- needs sign-off for: `bin/companion install-secrets`, `bin/companion herald-provider anthropic`, build daemon + web in the main repo, daemon restart; then `/apk` for the native app UI. Sandbox demo: `bin/herald-sandbox` (port 9887) [in-progress]

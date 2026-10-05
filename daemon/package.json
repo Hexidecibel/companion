@@ -30,7 +30,7 @@
   "scripts": {
     "prepack": "rm -rf web && mkdir -p web && cp -r ../web/dist web/dist",
     "postinstall": "node scripts/postinstall.js",
-    "build": "tsc && mkdir -p dist/skills && cp src/skills/catalog.json dist/skills/catalog.json",
+    "build": "tsc && node scripts/write-version.js && mkdir -p dist/skills && cp src/skills/catalog.json dist/skills/catalog.json",
     "start": "node dist/index.js",
     "dev": "ts-node src/index.ts",
     "pkg": "pkg dist/index.js --targets node18-linux-x64 --output daemon-linux-x64",

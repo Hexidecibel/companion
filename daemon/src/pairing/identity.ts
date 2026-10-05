@@ -11,6 +11,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { atomicWriteFileSync } from '../utils';
+import { appVersion } from '../version';
 
 export interface DaemonIdentity {
   id: string;
@@ -33,19 +34,9 @@ export function daemonDisplayName(configured?: string): string {
   return n || `Companion on ${os.hostname()}`;
 }
 
+/** The app version (version.ts: 1.0.<git commit count> from the build). */
 export function daemonVersion(): string {
-  for (const p of [
-    path.join(__dirname, '..', '..', 'package.json'),
-    path.join(__dirname, '..', 'package.json'),
-  ]) {
-    try {
-      const v = JSON.parse(fs.readFileSync(p, 'utf8')).version;
-      if (typeof v === 'string') return v;
-    } catch {
-      /* next */
-    }
-  }
-  return '0.0.0';
+  return appVersion();
 }
 
 /** Read the id, creating it when missing or malformed. */

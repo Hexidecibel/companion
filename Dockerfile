@@ -23,7 +23,11 @@ COPY web/ web/
 RUN cd web && npm run build
 
 COPY daemon/ daemon/
-RUN cd daemon && npm run build \
+# The app version (1.0.<git commit count>): the build context has no .git, so
+# bin/docker and CI pass it in; `npm run build` writes it to dist/version.json,
+# the one version source for /health, mDNS and the CLI (daemon/src/version.ts).
+ARG COMPANION_VERSION=dev
+RUN cd daemon && COMPANION_VERSION="$COMPANION_VERSION" npm run build \
  && npm prune --omit=dev --no-audit --no-fund \
  && rm -rf src __tests__ coverage
 
@@ -68,7 +72,6 @@ RUN chmod 755 /app/docker/*.sh /app/docker/as-companion /app/docker/rootbin/* \
 ENV PATH=/app/docker/rootbin:/home/companion/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
     LANG=C.UTF-8 \
     COMPANION_CONTAINER=docker \
-    COMPANION_VERSION=${COMPANION_VERSION} \
     COMPANION_WEB_DIR=/app/web/dist \
     COMPANION_PROJECTS_DIR=/home/companion/projects \
     COMPANION_SETUP_CLAUDE=/app/docker/setup-claude.sh \

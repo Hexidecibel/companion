@@ -6,6 +6,7 @@ import * as net from 'net';
 import { execSync } from 'child_process';
 import { loadConfig, saveConfig, resolveConfigPath } from './config';
 import { DaemonConfig } from './types';
+import { appVersion } from './version';
 
 const HOME_DIR = process.env.HOME || os.homedir();
 const CONFIG_DIR = path.join(HOME_DIR, '.companion');
@@ -69,12 +70,7 @@ ${bold('EXAMPLES')}
 }
 
 function getVersion(): string {
-  try {
-    const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf-8'));
-    return pkg.version || '0.0.1';
-  } catch {
-    return '0.0.1';
-  }
+  return appVersion();
 }
 
 function getDaemonPid(): number | null {
