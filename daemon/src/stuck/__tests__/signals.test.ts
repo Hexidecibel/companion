@@ -382,11 +382,11 @@ describe('digest', () => {
     expect(digest(t2).phase).toBe('idle');
   });
 
-  it('marks is_error tool results and keeps status completed (parser)', () => {
+  it('marks is_error tool results with status error (parser)', () => {
     const t = new Transcript().prompt('go').bash('false', 'Exit code 1', { isError: true });
     const msgs = t.messages();
     const tc = msgs.flatMap((m) => m.toolCalls || [])[0];
     expect(tc.isError).toBe(true);
-    expect(tc.status).toBe('completed');
+    expect(tc.status).toBe('error');
   });
 });

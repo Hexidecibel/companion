@@ -117,6 +117,8 @@ export interface ConversationMessage {
   multiSelect?: boolean;
   isCompaction?: boolean;
   skillName?: string; // User message is an expanded skill invocation (e.g., "todo", "apk")
+  /** Assistant entries: the API stop_reason the CLI recorded (end_turn, tool_use, ...). */
+  stopReason?: string;
 }
 
 export interface ToolCall {
@@ -127,7 +129,7 @@ export interface ToolCall {
   status: 'pending' | 'running' | 'completed' | 'error';
   startedAt?: number;
   completedAt?: number;
-  /** The tool_result was flagged is_error (non-zero exit, tool error). Status stays 'completed'. */
+  /** The tool_result was flagged is_error (non-zero exit, tool error). Status is then 'error'. */
   isError?: boolean;
 }
 

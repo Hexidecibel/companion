@@ -77,7 +77,7 @@ function createMockPush(): PushNotificationService & {
     getTitleForEvent: (eventType: NotificationEventType) => {
       const map: Record<NotificationEventType, string> = {
         waiting_for_input: 'Waiting for input',
-        error_detected: 'Error detected',
+        error_detected: 'Ended with an error',
         session_completed: 'Session completed',
         worker_waiting: 'Worker needs input',
         worker_error: 'Worker error',
@@ -478,6 +478,58 @@ describe('EscalationService', () => {
       expect(result.shouldBroadcast).toBe(false);
 
       service.destroy();
+    });
+  });
+
+  describe('error_detected (turn ended on an error)', () => {
+    const errorEvent = (o: Partial<EscalationEvent> = {}) =>
+      makeEvent({ eventType: 'error_detected', content: 'Bash: FAIL auth.test.ts', ...o });
+
+    it('broadcasts and pushes after the push delay with the tool + line preview', () => {
+      const store = createMockStore({ pushDelaySeconds: 30 });
+      const push = createMockPush();
+      const service = new EscalationService(store, push);
+      expect(service.handleEvent(errorEvent()).shouldBroadcast).toBe(true);
+      jest.advanceTimersByTime(29_000);
+      expect(push.consolidatedCalls).toHaveLength(0);
+      jest.advanceTimersByTime(2_000);
+      expect(push.consolidatedCalls).toEqual([
+        { title: 'Ended with an error', body: 'test-session: Bash: FAIL auth.test.ts' },
+      ]);
+      service.destroy();
+    });
+
+    it('is rate limited per session (shared with the other event types)', () => {
+      const store = createMockStore({ rateLimitSeconds: 60 });
+      const push = createMockPush();
+      const service = new EscalationService(store, push);
+      expect(service.handleEvent(errorEvent()).shouldBroadcast).toBe(true);
+      expect(service.handleEvent(errorEvent()).shouldBroadcast).toBe(false);
+      expect(service.handleEvent(makeEvent()).shouldBroadcast).toBe(false); // waiting_for_input right after
+      expect(service.handleEvent(errorEvent({ sessionId: 'other' })).shouldBroadcast).toBe(true);
+      jest.advanceTimersByTime(61_000);
+      expect(service.handleEvent(errorEvent()).shouldBroadcast).toBe(true);
+      service.destroy();
+    });
+
+    it('does nothing when the error type is toggled off, or the session is muted', () => {
+      const store = createMockStore({
+        events: { ...DEFAULT_ESCALATION_CONFIG.events, error_detected: false },
+        pushDelaySeconds: 0,
+      });
+      const push = createMockPush();
+      const service = new EscalationService(store, push);
+      expect(service.handleEvent(errorEvent()).shouldBroadcast).toBe(false);
+      expect(push.consolidatedCalls).toHaveLength(0);
+      expect(store.addHistoryEntry).not.toHaveBeenCalled();
+      service.destroy();
+
+      const store2 = createMockStore({ pushDelaySeconds: 0 });
+      store2.setSessionMuted('session-1', true);
+      const service2 = new EscalationService(store2, push);
+      expect(service2.handleEvent(errorEvent()).shouldBroadcast).toBe(false);
+      expect(push.consolidatedCalls).toHaveLength(0);
+      service2.destroy();
     });
   });
 

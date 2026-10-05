@@ -39,6 +39,7 @@ interface JsonlEntry {
   message?: {
     role?: string;
     content?: string | ContentBlock[];
+    stop_reason?: string | null;
   };
   timestamp?: string;
   parentUuid?: string;
@@ -930,7 +931,7 @@ function parseEntry(
           name: block.name,
           input: (block.input as Record<string, unknown>) || {},
           output: output,
-          status: isPending ? 'pending' : 'completed',
+          status: isPending ? 'pending' : toolErrors?.has(toolId) ? 'error' : 'completed',
           startedAt,
           completedAt,
           ...(toolErrors?.has(toolId) ? { isError: true } : {}),
@@ -1066,6 +1067,9 @@ function parseEntry(
     questions,
     isWaitingForChoice,
     multiSelect: multiSelect || undefined,
+    ...(entry.type === 'assistant' && typeof message.stop_reason === 'string'
+      ? { stopReason: message.stop_reason }
+      : {}),
   };
 }
 
@@ -1472,7 +1476,10 @@ export function detectIdle(messages: ConversationMessage[]): boolean {
     }
 
     // All tools completed, no question pattern = idle (finished task)
-    if (!lastMessage.toolCalls || lastMessage.toolCalls.every((tc) => tc.status === 'completed')) {
+    if (
+      !lastMessage.toolCalls ||
+      lastMessage.toolCalls.every((tc) => tc.status === 'completed' || tc.status === 'error')
+    ) {
       return !detectWaitingForInput(messages);
     }
   }

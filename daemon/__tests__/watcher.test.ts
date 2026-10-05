@@ -446,6 +446,91 @@ describe('SessionWatcher', () => {
     });
   });
 
+  describe('error-detected (turn ended on an unresolved error)', () => {
+    const J = (o: unknown) => JSON.stringify(o);
+    const prompt = J({ type: 'user', uuid: 'u1', message: { role: 'user', content: 'run the tests' } });
+    const call = (id: string, command: string) =>
+      J({
+        type: 'assistant',
+        uuid: `a-${id}`,
+        message: { role: 'assistant', stop_reason: 'tool_use', content: [{ type: 'tool_use', id, name: 'Bash', input: { command } }] },
+      });
+    const result = (id: string, content: string, isError: boolean) =>
+      J({
+        type: 'user',
+        uuid: `r-${id}`,
+        message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: id, is_error: isError, content }] },
+      });
+    const final = (text: string) =>
+      J({ type: 'assistant', uuid: 'a-final', message: { role: 'assistant', stop_reason: 'end_turn', content: [{ type: 'text', text }] } });
+
+    async function feed(content: string) {
+      mockFs.readFileSync.mockReturnValue(content);
+      mockWatcher.emit('change', FILE_A1);
+      await jest.advanceTimersByTimeAsync(200);
+    }
+
+    it('emits once when the turn ends on an error, with a redacted tool + line preview', async () => {
+      addTmuxSession(TMUX_SESSION_A, '/home/user/project-a');
+      await startWatcher(watcher);
+      const spy = jest.fn();
+      watcher.on('error-detected', spy);
+
+      await feed(prompt);
+      await feed(jsonlContent(prompt, call('t1', 'npm test')));
+      await feed(jsonlContent(prompt, call('t1', 'npm test'), result('t1', 'Exit code 1\nFAIL auth.test.ts', true)));
+      expect(spy).not.toHaveBeenCalled(); // mid-turn: Claude is still going
+      const ended = jsonlContent(
+        prompt,
+        call('t1', 'npm test'),
+        result('t1', 'Exit code 1\nFAIL auth.test.ts', true),
+        final('The auth test still fails.')
+      );
+      await feed(ended);
+      expect(spy).toHaveBeenCalledTimes(1);
+      expect(spy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sessionId: TMUX_SESSION_A,
+          content: 'Bash: FAIL auth.test.ts',
+          tool: 'Bash',
+          line: 'FAIL auth.test.ts',
+        })
+      );
+      // The same ended turn re-read (another write, a poll) does not re-notify.
+      await feed(ended + '\n');
+      expect(spy).toHaveBeenCalledTimes(1);
+    });
+
+    it('stays silent for an error Claude recovered from', async () => {
+      addTmuxSession(TMUX_SESSION_A, '/home/user/project-a');
+      await startWatcher(watcher);
+      const spy = jest.fn();
+      watcher.on('error-detected', spy);
+
+      await feed(prompt);
+      await feed(
+        jsonlContent(
+          prompt,
+          call('t1', 'npm test'),
+          result('t1', 'Exit code 1\nFAIL auth.test.ts', true),
+          call('t2', 'npm test'),
+          result('t2', 'PASS auth.test.ts', false),
+          final('Fixed: the auth tests pass now.')
+        )
+      );
+      expect(spy).not.toHaveBeenCalled();
+    });
+
+    it('does not replay an old errored turn the first time a file is seen', async () => {
+      addTmuxSession(TMUX_SESSION_A, '/home/user/project-a');
+      await startWatcher(watcher);
+      const spy = jest.fn();
+      watcher.on('error-detected', spy);
+      await feed(jsonlContent(prompt, call('t1', 'make'), result('t1', 'Exit code 2\nmake: *** error', true), final('The build failed.')));
+      expect(spy).not.toHaveBeenCalled();
+    });
+  });
+
   // ========================================
   // Conversation chain (single file per session)
   // ========================================

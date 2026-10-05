@@ -120,7 +120,7 @@ export class PushNotificationService {
       case 'waiting_for_input':
         return 'Waiting for input';
       case 'error_detected':
-        return 'Error detected';
+        return 'Ended with an error';
       case 'session_completed':
         return 'Session completed';
       case 'worker_waiting':

@@ -34,6 +34,7 @@ import {
   isTrivialHighlights,
 } from './parser';
 import { APPROVAL_TOOLS } from './tool-config';
+import { detectTurnEndError } from './turn-error';
 import {
   TMUX_PATH_REFRESH_INTERVAL_MS,
   CHOKIDAR_STABILITY_THRESHOLD_MS,
@@ -116,7 +117,8 @@ interface TrackedConversation {
   cachedMessages: ConversationMessage[] | null;
   cachedTaskSummary?: TaskSummary;
   lastEmittedPendingTools: string; // JSON key of last emitted pending tools to deduplicate
-  lastErrorCount: number; // Track error count for dedup
+  /** tool_use id of the unresolved error the last ended turn finished on (dedupe for error-detected). */
+  lastTurnErrorId: string | null;
 }
 
 export interface FileChangeOptions {
@@ -1052,20 +1054,14 @@ export class SessionWatcher extends EventEmitter {
       // Silent fail - tasks are optional
     }
 
-    // Detect error tool results for error-detected event
-    let errorCount = 0;
-    for (const msg of messages) {
-      if (msg.toolCalls) {
-        for (const tc of msg.toolCalls) {
-          if (tc.status === 'error') errorCount++;
-        }
-      }
-    }
+    // A turn that ENDED (idle / waiting) on an unresolved tool error (see
+    // turn-error.ts). Harmless errors Claude recovered from never count.
+    const turnError = conversationWaiting ? detectTurnEndError(messages) : null;
 
     // Detect running state: has messages and last message is from assistant with no waiting
     const currentIsRunning = messages.length > 0 && !conversationWaiting;
     const prevWasRunning = prevTracked?.isRunning ?? false;
-    const prevErrorCount = prevTracked?.lastErrorCount ?? 0;
+    const prevTurnErrorId = prevTracked?.lastTurnErrorId ?? null;
 
     // Track this conversation with cached parse result (keyed by UUID internally)
     const tracked: TrackedConversation = {
@@ -1079,7 +1075,7 @@ export class SessionWatcher extends EventEmitter {
       cachedMessages: messages,
       cachedTaskSummary,
       lastEmittedPendingTools: prevTracked?.lastEmittedPendingTools || '',
-      lastErrorCount: errorCount,
+      lastTurnErrorId: turnError?.toolId ?? null,
     };
     this.conversations.set(convId, tracked);
 
@@ -1102,17 +1098,16 @@ export class SessionWatcher extends EventEmitter {
     // Use tmux session name as the external session ID for all events
     const sessionId = tmuxName;
 
-    // Emit error-detected when new errors appear
-    if (errorCount > prevErrorCount) {
-      const lastErrorTool = messages
-        .flatMap((m) => m.toolCalls || [])
-        .filter((tc) => tc.status === 'error')
-        .pop();
+    // Emit error-detected once per turn that ended on an unresolved error. Not on
+    // the first sight of a file (a daemon restart must not replay old turns).
+    if (turnError && prevTracked && turnError.toolId !== prevTurnErrorId) {
       this.emit('error-detected', {
         sessionId,
         projectPath,
         sessionName,
-        content: lastErrorTool?.output || 'Tool error detected',
+        content: turnError.preview,
+        tool: turnError.tool,
+        line: turnError.line,
       });
     }
 
