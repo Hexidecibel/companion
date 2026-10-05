@@ -17,6 +17,20 @@ class PreferArgs: Decodable {
   let on: Bool
 }
 
+class SecureKeyArgs: Decodable {
+  let key: String
+}
+
+class SecureSetArgs: Decodable {
+  let key: String
+  let value: String
+}
+
+/// `{ value }`; absent when there is none.
+struct SecureValue: Encodable {
+  let value: String?
+}
+
 /// Matches NativePort / NativeAudioRoute in web/src/services/voice/audioDevices.ts.
 struct RoutePort: Encodable {
   let type: String
@@ -175,6 +189,37 @@ class HeraldNativePlugin: Plugin {
     b.browse(timeoutMs: args.timeoutMs ?? 3000) { [weak self] found in
       invoke.resolve(DiscoverResult(daemons: found))
       DispatchQueue.main.async { self?.browsers.removeAll { $0 === b } }
+    }
+  }
+
+  // ---- secure storage (paired-device tokens; SecureStore.swift) ----
+
+  @objc public func secureGet(_ invoke: Invoke) throws {
+    let args = try invoke.parseArgs(SecureKeyArgs.self)
+    do {
+      invoke.resolve(SecureValue(value: try SecureStore.get(args.key)))
+    } catch {
+      invoke.reject("secure_get failed: \(error)")
+    }
+  }
+
+  @objc public func secureSet(_ invoke: Invoke) throws {
+    let args = try invoke.parseArgs(SecureSetArgs.self)
+    do {
+      try SecureStore.set(args.key, args.value)
+      invoke.resolve()
+    } catch {
+      invoke.reject("secure_set failed: \(error)")
+    }
+  }
+
+  @objc public func secureDelete(_ invoke: Invoke) throws {
+    let args = try invoke.parseArgs(SecureKeyArgs.self)
+    do {
+      try SecureStore.delete(args.key)
+      invoke.resolve()
+    } catch {
+      invoke.reject("secure_delete failed: \(error)")
     }
   }
 

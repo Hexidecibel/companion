@@ -38,6 +38,14 @@
 //! * `take_pending_link` - the `companion://` link that launched the app
 //!   (`{ url }`, once). Later links arrive live: Android as the plugin event
 //!   `deepLink { url }`, iOS / macOS as the app event `companion-deep-link`.
+//!
+//! Secure storage (paired-device tokens; mobile only, desktop rejects so the
+//! web layer keeps its own storage):
+//! * `secure_get { key }` - `{ value }` (absent when none / unreadable).
+//! * `secure_set { key, value }` / `secure_delete { key }`.
+//!   Android: AES-256-GCM under an Android Keystore key, ciphertext in private
+//!   SharedPreferences (SecureStore.kt). iOS: Keychain generic passwords,
+//!   kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly (SecureStore.swift).
 use std::sync::Mutex;
 
 use tauri::{
@@ -88,6 +96,9 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
             commands::app_update_open_settings,
             commands::discover_daemons,
             commands::take_pending_link,
+            commands::secure_get,
+            commands::secure_set,
+            commands::secure_delete,
         ])
         .on_event(|_app, _event| {
             // iOS / macOS: companion:// links (Android: HeraldNativePlugin.kt).
@@ -147,6 +158,59 @@ mod commands {
                 .try_state::<super::PendingLink>()
                 .and_then(|p| p.0.lock().ok().and_then(|mut g| g.take()));
             Ok(serde_json::json!({ "url": url }))
+        }
+    }
+
+    #[allow(dead_code)]
+    const MOBILE_ONLY: &str = "secure storage is only used on Android and iOS";
+
+    /// Mobile: a secret from the Keystore / Keychain (`{ value }`, absent when none).
+    #[command]
+    pub async fn secure_get<R: Runtime>(app: AppHandle<R>, key: String) -> Result<serde_json::Value, String> {
+        #[cfg(mobile)]
+        {
+            use tauri::Manager;
+            app.state::<super::mobile::HeraldNative<R>>()
+                .run("secureGet", serde_json::json!({ "key": key }))
+        }
+        #[cfg(not(mobile))]
+        {
+            let _ = (app, key);
+            Err(MOBILE_ONLY.into())
+        }
+    }
+
+    /// Mobile: store a secret in the Keystore / Keychain.
+    #[command]
+    pub async fn secure_set<R: Runtime>(app: AppHandle<R>, key: String, value: String) -> Result<(), String> {
+        #[cfg(mobile)]
+        {
+            use tauri::Manager;
+            app.state::<super::mobile::HeraldNative<R>>()
+                .run("secureSet", serde_json::json!({ "key": key, "value": value }))
+                .map(|_| ())
+        }
+        #[cfg(not(mobile))]
+        {
+            let _ = (app, key, value);
+            Err(MOBILE_ONLY.into())
+        }
+    }
+
+    /// Mobile: remove a secret.
+    #[command]
+    pub async fn secure_delete<R: Runtime>(app: AppHandle<R>, key: String) -> Result<(), String> {
+        #[cfg(mobile)]
+        {
+            use tauri::Manager;
+            app.state::<super::mobile::HeraldNative<R>>()
+                .run("secureDelete", serde_json::json!({ "key": key }))
+                .map(|_| ())
+        }
+        #[cfg(not(mobile))]
+        {
+            let _ = (app, key);
+            Err(MOBILE_ONLY.into())
         }
     }
 

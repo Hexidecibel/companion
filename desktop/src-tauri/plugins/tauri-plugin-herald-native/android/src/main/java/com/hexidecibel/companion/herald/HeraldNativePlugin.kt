@@ -50,6 +50,17 @@ class InstallUpdateArgs {
 }
 
 @InvokeArg
+class SecureKeyArgs {
+    var key: String = ""
+}
+
+@InvokeArg
+class SecureSetArgs {
+    var key: String = ""
+    var value: String = ""
+}
+
+@InvokeArg
 class CaptureArgs {
     /** Platform echo cancellation (VOICE_COMMUNICATION + AcousticEchoCanceler). */
     var aec: Boolean = false
@@ -145,6 +156,51 @@ class HeraldNativePlugin(private val activity: Activity) : Plugin(activity) {
     override fun onDestroy() {
         audio.dispose()
         super.onDestroy()
+    }
+
+    // ---- secure storage (paired-device tokens; SecureStore.kt) ----
+
+    private val secure by lazy { SecureStore.forContext(activity) }
+
+    /** Resolves { value } (absent when there is none or it cannot be read). */
+    @Command
+    fun secureGet(invoke: Invoke) {
+        val args = invoke.parseArgs(SecureKeyArgs::class.java)
+        Thread {
+            try {
+                val out = JSObject()
+                secure.get(args.key)?.let { out.put("value", it) }
+                invoke.resolve(out)
+            } catch (e: Exception) {
+                invoke.reject("secure_get failed: ${e.message}")
+            }
+        }.start()
+    }
+
+    @Command
+    fun secureSet(invoke: Invoke) {
+        val args = invoke.parseArgs(SecureSetArgs::class.java)
+        Thread {
+            try {
+                secure.set(args.key, args.value)
+                invoke.resolve(JSObject())
+            } catch (e: Exception) {
+                invoke.reject("secure_set failed: ${e.message}")
+            }
+        }.start()
+    }
+
+    @Command
+    fun secureDelete(invoke: Invoke) {
+        val args = invoke.parseArgs(SecureKeyArgs::class.java)
+        Thread {
+            try {
+                secure.delete(args.key)
+                invoke.resolve(JSObject())
+            } catch (e: Exception) {
+                invoke.reject("secure_delete failed: ${e.message}")
+            }
+        }.start()
     }
 
     // ---- sideload updater (ApkUpdater) ----

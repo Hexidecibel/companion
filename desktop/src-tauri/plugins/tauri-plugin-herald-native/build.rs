@@ -11,6 +11,9 @@ const COMMANDS: &[&str] = &[
     "app_update_open_settings",
     "discover_daemons",
     "take_pending_link",
+    "secure_get",
+    "secure_set",
+    "secure_delete",
 ];
 
 fn main() {
