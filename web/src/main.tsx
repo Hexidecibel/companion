@@ -3,6 +3,7 @@ import ReactDOM from 'react-dom/client';
 import { App } from './App';
 import { applyFontScale } from './services/storage';
 import { initStorage } from './services/persistentStorage';
+import { initSecureTokens } from './services/secureTokens';
 import { applySafeAreaInsets, initKeyboardHeightListener, installExternalLinkHandler } from './utils/platform';
 import './styles/variables.css';
 import './styles/global.css';
@@ -29,7 +30,9 @@ function startApp(): void {
 
   // Initialize persistent storage (restores Tauri store to localStorage),
   // then apply settings and render.
-  initStorage().then(() => {
+  // Then the mobile apps read the device tokens from the Keystore / Keychain
+  // (and move any left in app storage there): secureTokens.ts.
+  initStorage().then(() => initSecureTokens()).then(() => {
     applyFontScale();
     // Herald setup (profile, floating orb) was read before the restore.
     heraldSetupStore.reload();

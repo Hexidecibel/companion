@@ -1999,9 +1999,21 @@ by voice.
 - *Replayed QR*: single-use, 10-minute expiry, stored hashed; a leaked old QR is dead. A QR that
   leaks while fresh pairs one device the user can see in Devices and revoke.
 - *Revocation*: deletes the hash, closes live sockets at once, refused on reconnect.
-- *Token storage on device*: the existing localStorage + tauri-plugin-store (app-private storage on
-  Android/iOS). Keystore/Keychain wrapping is a follow-up (needs a native secure-store command);
-  device tokens are per-device and revocable, which bounds the damage.
+- *Token storage on device* (built 2026-10-05): on Android and iOS the device tokens live in the
+  platform's secure storage through `plugin:herald-native|secure_get / secure_set / secure_delete`
+  (`web/src/services/secureTokens.ts`). Android: AES-256-GCM under a non-exportable Android Keystore
+  key (`companion_secure_v1`, hardware-backed where available), ciphertext in private
+  SharedPreferences, the entry name bound as associated data (`SecureStore.kt`). iOS: Keychain
+  generic passwords, `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`, so not synced to iCloud and
+  not restored onto another device (`SecureStore.swift`). The server list in app storage
+  (localStorage + tauri-plugin-store) keeps `token: ''` + `tokenStore: 'secure'`; tokens are read
+  into memory once at startup. Migration on first launch: write, read back, and only then drop the
+  plaintext copy; any failure (an older native build, a Keystore error) keeps the plaintext copy
+  and retries next launch. Desktop and browser keep app storage (desktop: per-user app data;
+  browser: the origin's localStorage). Residual risk: a rooted / jailbroken device or malware
+  running as the app can still ask the Keystore / Keychain for the token while the app is
+  installed; an Android backup restored onto another device cannot decrypt (the key stays behind)
+  and asks to pair again. Device tokens stay per-device and revocable, which bounds the damage.
 - *TXT leakage*: TXT holds id, name, version, pairing/tls flags and port only (test-enforced); the
   daemon id is not a credential.
 - *Legacy token*: unchanged and still all-powerful; the app offers the one-tap upgrade, and once all

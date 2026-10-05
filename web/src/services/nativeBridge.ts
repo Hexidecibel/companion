@@ -286,3 +286,40 @@ export async function listenDeepLinks(cb: (url: string) => void): Promise<() => 
   if (pending && typeof pending.url === 'string' && pending.url) cb(pending.url);
   return () => offs.forEach((f) => f());
 }
+
+// ---------------------------------------------------------------- secure storage
+
+/** A small secret store (the paired-device tokens). */
+export interface SecureStoreBackend {
+  get(key: string): Promise<string | null>;
+  set(key: string, value: string): Promise<void>;
+  delete(key: string): Promise<void>;
+}
+
+async function invokeStrict<T>(cmd: string, args: Record<string, unknown>): Promise<T> {
+  const { invoke } = await import('@tauri-apps/api/core');
+  return invoke<T>(cmd, args);
+}
+
+/**
+ * Android Keystore / iOS Keychain through the herald-native plugin (mobile
+ * apps only; null on desktop and in a browser, which keep app storage).
+ * Unlike the other bridge calls these REJECT on failure (an older native
+ * build without the commands, a Keystore error): the caller must not drop a
+ * plaintext copy it could not move.
+ */
+export function nativeSecureStore(platform: NativePlatform = nativePlatform()): SecureStoreBackend | null {
+  if (platform !== 'android' && platform !== 'ios') return null;
+  return {
+    async get(key) {
+      const r = await invokeStrict<{ value?: string | null } | null>('plugin:herald-native|secure_get', { key });
+      return r && typeof r.value === 'string' ? r.value : null;
+    },
+    async set(key, value) {
+      await invokeStrict('plugin:herald-native|secure_set', { key, value });
+    },
+    async delete(key) {
+      await invokeStrict('plugin:herald-native|secure_delete', { key });
+    },
+  };
+}

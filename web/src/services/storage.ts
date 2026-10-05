@@ -1,12 +1,16 @@
 import { Server } from '../types';
 import { syncToStore } from './persistentStorage';
 import { SERVERS_KEY, FONT_SCALE_KEY } from './storageKeys';
+import { afterServersSaved, persistableServers, revealTokens } from './secureTokens';
 
+// Mobile apps keep the tokens in the Keystore / Keychain (secureTokens.ts):
+// the stored list then carries a marker instead, and the real tokens are
+// filled back in here from memory.
 export function getServers(): Server[] {
   try {
     const json = localStorage.getItem(SERVERS_KEY);
     if (json) {
-      return JSON.parse(json);
+      return revealTokens(JSON.parse(json));
     }
   } catch (error) {
     console.error('Error loading servers:', error);
@@ -16,9 +20,10 @@ export function getServers(): Server[] {
 
 export function saveServers(servers: Server[]): void {
   try {
-    const json = JSON.stringify(servers);
+    const json = JSON.stringify(persistableServers(servers));
     localStorage.setItem(SERVERS_KEY, json);
     syncToStore(SERVERS_KEY, json);
+    void afterServersSaved(servers);
   } catch (error) {
     console.error('Error saving servers:', error);
   }
