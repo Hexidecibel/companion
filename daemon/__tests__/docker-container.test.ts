@@ -323,10 +323,14 @@ describe('setup info in a container', () => {
       ['android', null],
       ['linux', null],
     ]);
-    expect(calls).toEqual(['https://feed.example/stable/android.json', 'https://feed.example/stable/latest.json']);
+    expect(calls).toEqual([
+      'https://feed.example/stable/android.json',
+      'https://feed.example/stable/latest.json',
+      'https://feed.example/stable/installers.json',
+    ]);
     t += 60_000;
     await appDownloadsWithFallback(empty, 'https://feed.example/stable/', fetcher, () => t);
-    expect(calls).toHaveLength(2); // cached
+    expect(calls).toHaveLength(3); // cached
     // Off: no network at all.
     const off = await appDownloadsWithFallback(empty, null, fetcher, () => t);
     expect(off).toMatchObject({ source: 'none', feedUrl: null, downloads: [] });
@@ -336,7 +340,7 @@ describe('setup info in a container', () => {
     fs.writeFileSync(path.join(local, 'android.json'), JSON.stringify({ versionName: '2.0.0', url: 'https://x/stable/A.apk' }));
     const l = await appDownloadsWithFallback(path.dirname(local), 'https://feed.example/stable/', fetcher, () => t);
     expect(l.source).toBe('local');
-    expect(calls).toHaveLength(2);
+    expect(calls).toHaveLength(3);
   });
 
   it('downloads: an unreachable public feed is "none", not an error', async () => {

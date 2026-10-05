@@ -53,13 +53,63 @@ export async function remoteAccessInfo(opts: {
 
 // ------------------------------------------------------------ app downloads
 
-const DESKTOP_PLATFORMS: Array<{ key: string; platform: AppDownload['platform']; label: string }> =
-  [
-    { key: 'darwin-aarch64', platform: 'macos', label: 'macOS (Apple silicon)' },
-    { key: 'darwin-x86_64', platform: 'macos', label: 'macOS (Intel)' },
-    { key: 'linux-x86_64', platform: 'linux', label: 'Linux (AppImage)' },
-    { key: 'windows-x86_64', platform: 'windows', label: 'Windows' },
-  ];
+/** Updater bundles from latest.json: only used when installers.json has nothing for that platform. */
+const DESKTOP_PLATFORMS: Array<{
+  key: string;
+  platform: AppDownload['platform'];
+  label: string;
+  kind: AppDownload['kind'];
+}> = [
+  {
+    key: 'darwin-aarch64',
+    platform: 'macos',
+    label: 'macOS (Apple silicon, app archive)',
+    kind: 'updater',
+  },
+  { key: 'darwin-x86_64', platform: 'macos', label: 'macOS (Intel, app archive)', kind: 'updater' },
+  { key: 'linux-x86_64', platform: 'linux', label: 'Linux (AppImage)', kind: 'appimage' },
+  { key: 'windows-x86_64', platform: 'windows', label: 'Windows (installer)', kind: 'nsis' },
+];
+
+/** installers.json keys (publish-update), in display order. */
+const INSTALLERS: Array<{
+  key: string;
+  /** latest.json platform this installer replaces in the list. */
+  replaces: string;
+  platform: AppDownload['platform'];
+  label: string;
+  kind: AppDownload['kind'];
+}> = [
+  {
+    key: 'darwin-aarch64-dmg',
+    replaces: 'darwin-aarch64',
+    platform: 'macos',
+    label: 'macOS (Apple silicon, .dmg)',
+    kind: 'dmg',
+  },
+  {
+    key: 'darwin-x86_64-dmg',
+    replaces: 'darwin-x86_64',
+    platform: 'macos',
+    label: 'macOS (Intel, .dmg)',
+    kind: 'dmg',
+  },
+  {
+    key: 'windows-x86_64-nsis',
+    replaces: 'windows-x86_64',
+    platform: 'windows',
+    label: 'Windows (installer)',
+    kind: 'nsis',
+  },
+  {
+    key: 'linux-x86_64-appimage',
+    replaces: 'linux-x86_64',
+    platform: 'linux',
+    label: 'Linux (AppImage)',
+    kind: 'appimage',
+  },
+  { key: 'linux-x86_64-deb', replaces: '', platform: 'linux', label: 'Linux (.deb)', kind: 'deb' },
+];
 
 function readJson(file: string): Record<string, unknown> | null {
   try {
@@ -91,10 +141,20 @@ function localPathFor(url: string, channelDir: string, channel: string): string 
   return fs.existsSync(path.join(channelDir, base)) ? `/updates/${channel}/${base}` : null;
 }
 
-/** Links from parsed manifests; `local` maps a URL to its copy on this server (or null). */
+function sizeOf(v: unknown): number | null {
+  return typeof v === 'number' && Number.isSafeInteger(v) && v > 0 ? v : null;
+}
+
+/**
+ * Links from parsed manifests; `local` maps a URL to its copy on this server
+ * (or null). installers.json (first-install files: dmg, NSIS, AppImage, deb)
+ * wins; latest.json's updater bundles fill in platforms it does not cover
+ * (older feeds).
+ */
 function downloadsFrom(
   android: Record<string, unknown> | null,
   latest: Record<string, unknown> | null,
+  installers: Record<string, unknown> | null,
   local: (url: string) => string | null
 ): AppDownload[] {
   const out: AppDownload[] = [];
@@ -106,6 +166,27 @@ function downloadsFrom(
       version: String(android.versionName || ''),
       url: aUrl,
       localPath: local(aUrl),
+      kind: 'apk',
+      size: sizeOf(android.size),
+    });
+  }
+  const covered = new Set<string>();
+  const inst =
+    installers && installers.installers && typeof installers.installers === 'object'
+      ? (installers.installers as Record<string, { url?: unknown; size?: unknown }>)
+      : {};
+  for (const i of INSTALLERS) {
+    const u = httpUrl(inst[i.key]?.url);
+    if (!u) continue;
+    if (i.replaces) covered.add(i.replaces);
+    out.push({
+      platform: i.platform,
+      label: i.label,
+      version: String(installers?.version || ''),
+      url: u,
+      localPath: local(u),
+      kind: i.kind,
+      size: sizeOf(inst[i.key]?.size),
     });
   }
   const platforms =
@@ -113,6 +194,7 @@ function downloadsFrom(
       ? (latest.platforms as Record<string, { url?: unknown }>)
       : {};
   for (const p of DESKTOP_PLATFORMS) {
+    if (covered.has(p.key)) continue;
     const u = httpUrl(platforms[p.key]?.url);
     if (!u) continue;
     out.push({
@@ -121,12 +203,14 @@ function downloadsFrom(
       version: String(latest?.version || ''),
       url: u,
       localPath: local(u),
+      kind: p.kind,
+      size: null,
     });
   }
   return out;
 }
 
-/** Installer links from the local feed manifests (latest.json, android.json). Never writes. */
+/** Installer links from the local feed manifests (installers.json, latest.json, android.json). Never writes. */
 export function appDownloads(
   feedDir: string,
   channel = 'stable',
@@ -136,6 +220,7 @@ export function appDownloads(
   const downloads = downloadsFrom(
     readJson(path.join(dir, 'android.json')),
     readJson(path.join(dir, 'latest.json')),
+    readJson(path.join(dir, 'installers.json')),
     (u) => localPathFor(u, dir, channel)
   );
   return { channel, downloads, source: downloads.length ? 'local' : 'none', feedUrl };
@@ -208,11 +293,12 @@ export async function appDownloadsWithFallback(
       feedUrl,
     };
   }
-  const [android, latest] = await Promise.all([
+  const [android, latest, installers] = await Promise.all([
     fetcher(feedUrl + 'android.json'),
     fetcher(feedUrl + 'latest.json'),
+    fetcher(feedUrl + 'installers.json'),
   ]);
-  const downloads = downloadsFrom(android, latest, () => null);
+  const downloads = downloadsFrom(android, latest, installers, () => null);
   remoteCache = { key: feedUrl, at: now(), value: downloads };
   return { channel, downloads, source: downloads.length ? 'remote' : 'none', feedUrl };
 }

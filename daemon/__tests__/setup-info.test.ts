@@ -46,6 +46,54 @@ describe('setup info helpers', () => {
     fs.rmSync(feed, { recursive: true, force: true });
   });
 
+  it('downloads: installers.json (dmg, NSIS, AppImage, deb) replaces the updater bundles', () => {
+    const feed = fs.mkdtempSync(path.join(os.tmpdir(), 'setup-feed-'));
+    const st = path.join(feed, 'stable');
+    fs.mkdirSync(st);
+    const u = (f: string) => `https://x.example/updates/stable/${f}`;
+    fs.writeFileSync(
+      path.join(st, 'latest.json'),
+      JSON.stringify({
+        version: '1.0.527',
+        platforms: {
+          'darwin-aarch64': { url: u('Companion_1.0.527_darwin-aarch64.app.tar.gz'), signature: 's' },
+          'darwin-x86_64': { url: u('Companion_1.0.527_darwin-x86_64.app.tar.gz'), signature: 's' },
+          'linux-x86_64': { url: u('Companion_1.0.527_linux-x86_64.AppImage'), signature: 's' },
+          'windows-x86_64': { url: u('Companion_1.0.527_windows-x86_64-setup.exe'), signature: 's' },
+        },
+      })
+    );
+    fs.writeFileSync(
+      path.join(st, 'installers.json'),
+      JSON.stringify({
+        version: '1.0.527',
+        installers: {
+          'darwin-aarch64-dmg': { kind: 'dmg', url: u('Companion_1.0.527_darwin-aarch64.dmg'), size: 13303823 },
+          'windows-x86_64-nsis': { kind: 'nsis', url: u('Companion_1.0.527_windows-x86_64-setup.exe') },
+          'linux-x86_64-appimage': { kind: 'appimage', url: u('Companion_1.0.527_linux-x86_64.AppImage') },
+          'linux-x86_64-deb': { kind: 'deb', url: 'file:///etc/passwd' },
+        },
+      })
+    );
+    fs.writeFileSync(path.join(st, 'Companion_1.0.527_darwin-aarch64.dmg'), 'dmg');
+    const d = appDownloads(feed).downloads;
+    expect(d.map((x) => [x.platform, x.kind, x.label])).toEqual([
+      ['macos', 'dmg', 'macOS (Apple silicon, .dmg)'],
+      ['windows', 'nsis', 'Windows (installer)'],
+      ['linux', 'appimage', 'Linux (AppImage)'],
+      // Intel Macs: no dmg published, so the update archive is still offered.
+      ['macos', 'updater', 'macOS (Intel, app archive)'],
+    ]);
+    expect(d[0]).toMatchObject({
+      version: '1.0.527',
+      size: 13303823,
+      localPath: '/updates/stable/Companion_1.0.527_darwin-aarch64.dmg',
+    });
+    // The darwin-aarch64 .app.tar.gz is never listed once a dmg exists.
+    expect(d.some((x) => x.url.endsWith('darwin-aarch64.app.tar.gz'))).toBe(false);
+    fs.rmSync(feed, { recursive: true, force: true });
+  });
+
   it('service plan: daemon install never starts it (--no-start); voice blocked until models exist', () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'setup-svc-'));
     const p = {

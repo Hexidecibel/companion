@@ -226,6 +226,14 @@ export interface AppDownload {
   url: string;
   /** Same file through this server ("/updates/stable/..."), when it is in the local feed. */
   localPath: string | null;
+  /**
+   * What the file is: apk, dmg (signed + notarized), nsis (Windows setup.exe),
+   * appimage, deb, or updater (a macOS .app.tar.gz update bundle, only from
+   * feeds without installers.json). Absent from older daemons.
+   */
+  kind?: 'apk' | 'dmg' | 'nsis' | 'appimage' | 'deb' | 'updater';
+  /** Bytes, when the manifest says. */
+  size?: number | null;
 }
 
 export interface AppDownloads {

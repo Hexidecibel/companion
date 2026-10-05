@@ -9,7 +9,8 @@ import * as path from 'path';
  * `bin/companion publish-update` fills. The desktop app's updater fetches
  * <channel>/latest.json, then the signed bundle it names (verified by the app,
  * minisign). The Android app fetches <channel>/android.json, then the APK it
- * names (sha256 + signing certificate checked on the device). No auth needed.
+ * names (sha256 + signing certificate checked on the device). First installs
+ * use <channel>/installers.json (dmg, NSIS setup.exe, AppImage, deb). No auth needed.
  *
  * Hardening: GET/HEAD only, every path segment must be a plain file name
  * (no dot-files, no "..", no separators), the real path must stay inside the
@@ -28,6 +29,8 @@ function contentType(file: string): string {
   if (file.endsWith('.json')) return 'application/json; charset=utf-8';
   if (file.endsWith('.sig') || file.endsWith('.txt')) return 'text/plain; charset=utf-8';
   if (file.endsWith('.apk')) return 'application/vnd.android.package-archive';
+  if (file.endsWith('.dmg')) return 'application/x-apple-diskimage';
+  if (file.endsWith('.deb')) return 'application/vnd.debian.binary-package';
   return 'application/octet-stream';
 }
 

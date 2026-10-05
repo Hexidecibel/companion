@@ -14,11 +14,17 @@
  * All must carry the same version. Each signature is verified against the
  * pubkey in desktop/src-tauri/tauri.conf.json before anything is published, so
  * a wrong key can never strand installed apps.
+ * First-install installers (CI's "desktop-macos" / "desktop-linux" artifacts,
+ * optional): Companion_<version>_aarch64.dmg (signed + notarized by CI) and
+ * Companion_<version>_amd64.deb, same version as the bundles.
  *
- * Writes <dir>/<channel>/latest.json (version, notes, pub_date, platforms with
- * url + signature) and copies the bundles next to it. Bundles land first, then
- * the manifest is swapped in with an atomic rename. Older bundles beyond
- * --keep versions are pruned.
+ * Writes <dir>/<channel>/latest.json (Tauri updater format: version, notes,
+ * pub_date, platforms with url + signature) and installers.json (version,
+ * pub_date, installers: {"darwin-aarch64-dmg", "windows-x86_64-nsis",
+ * "linux-x86_64-appimage", "linux-x86_64-deb"} -> {kind, file, url, sha256,
+ * size}; the NSIS setup.exe and the AppImage are the updater's own files), and
+ * copies the files next to them. Files land first, then the manifests are
+ * swapped in with atomic renames. Older versions beyond --keep are pruned.
  *
  * Android (--apk): the APK must be signed (apksigner verify), for package
  * com.hexidecibel.companion, with a versionCode strictly higher than the one
@@ -47,6 +53,9 @@ const { execFileSync } = require('node:child_process');
 const ROOT = path.resolve(__dirname, '..', '..');
 const TAURI_CONF = path.join(ROOT, 'desktop', 'src-tauri', 'tauri.conf.json');
 const ARTIFACTS = ['updater-macos', 'updater-windows', 'updater-linux'];
+// First-install installers (dmg, deb); optional. The NSIS exe and the AppImage
+// come from the updater artifacts (identical files).
+const INSTALLER_ARTIFACTS = ['desktop-macos', 'desktop-linux'];
 
 const BUNDLE =
   /^Companion_(\d+\.\d+\.\d+)_([a-z]+)-([a-z0-9_]+)(\.app\.tar\.gz|-setup\.exe|\.AppImage)$/;
@@ -112,7 +121,7 @@ function parseArgs(argv) {
           fs
             .readFileSync(__filename, 'utf8')
             .split('\n')
-            .slice(2, 40)
+            .slice(2, 46)
             .map((l) => l.replace(/^ \* ?/, ''))
             .join('\n')
         );
@@ -172,8 +181,9 @@ function downloadRun(run) {
     '-q',
     '.artifacts[].name',
   ]).split('\n');
-  const wanted = ARTIFACTS.filter((n) => available.includes(n));
-  if (wanted.length === 0) die(`run ${id} has no updater artifacts (${ARTIFACTS.join(', ')})`);
+  const updaters = ARTIFACTS.filter((n) => available.includes(n));
+  if (updaters.length === 0) die(`run ${id} has no updater artifacts (${ARTIFACTS.join(', ')})`);
+  const wanted = [...updaters, ...INSTALLER_ARTIFACTS.filter((n) => available.includes(n))];
   console.log(`Downloading ${wanted.join(', ')} from run ${id}`);
   execFileSync('gh', ['run', 'download', id, '-D', dest, ...wanted.flatMap((n) => ['-n', n])], {
     cwd: ROOT,
@@ -317,7 +327,13 @@ function publishApk(opts) {
   console.log(`Feed URL: ${opts.baseUrl}/${opts.channel}/${af.MANIFEST}`);
 }
 
+function fileDigest(file) {
+  const data = fs.readFileSync(file);
+  return { sha256: crypto.createHash('sha256').update(data).digest('hex'), size: data.length };
+}
+
 function main() {
+  const inst = require('./installers-feed');
   const opts = parseArgs(process.argv.slice(2));
   if (opts.apk) return publishApk(opts);
   const src = opts.from ? path.resolve(opts.from) : downloadRun(opts.run);
@@ -341,6 +357,9 @@ function main() {
       file,
       name: path.basename(file),
       version,
+      os: os_,
+      arch,
+      ext,
       keys: PLATFORM_KEYS[ext](os_, arch),
       signature,
     });
@@ -349,6 +368,33 @@ function main() {
   const versions = [...new Set(bundles.map((b) => b.version))];
   if (versions.length > 1) die(`bundles disagree on version: ${versions.join(', ')}`);
   const version = versions[0];
+
+  // Installers: the dmg / deb from the desktop-* artifacts, plus the updater's
+  // NSIS setup.exe and AppImage (the same files a first install needs).
+  const installerFiles = [];
+  for (const file of walk(src)) {
+    const c = inst.classifyInstaller(path.basename(file));
+    if (!c) continue;
+    if (c.version !== version) die(`${path.basename(file)} is ${c.version}, the bundles are ${version}`);
+    installerFiles.push({ ...c, file, ...fileDigest(file) });
+  }
+  const installerEntries = [...installerFiles];
+  for (const b of bundles) {
+    const kind = inst.bundleInstallerKind(b.ext);
+    if (kind) installerEntries.push({ version, os: b.os, arch: b.arch, kind, name: b.name, ...fileDigest(b.file) });
+  }
+  let installersManifest;
+  try {
+    installersManifest = inst.buildInstallersManifest({
+      version,
+      entries: installerEntries,
+      baseUrl: opts.baseUrl,
+      channel: opts.channel,
+      now: Date.now(),
+    });
+  } catch (e) {
+    die(e.message);
+  }
 
   const channelDir = path.join(opts.dir, opts.channel);
   const manifestPath = path.join(channelDir, 'latest.json');
@@ -382,14 +428,18 @@ function main() {
   console.log(
     `Verified ${bundles.length} bundle(s) for ${version}: ${bundles.map((b) => b.keys[0]).join(', ')}`
   );
+  console.log(
+    `Installers: ${Object.keys(installersManifest.installers).join(', ') || 'none'}`
+  );
   if (opts.dryRun) {
     console.log(JSON.stringify(manifest, null, 2));
+    console.log(JSON.stringify(installersManifest, null, 2));
     return;
   }
 
   fs.mkdirSync(channelDir, { recursive: true });
   const tmpSuffix = `.tmp-${process.pid}`;
-  for (const b of bundles) {
+  for (const b of [...bundles, ...installerFiles]) {
     const dest = path.join(channelDir, b.name);
     fs.copyFileSync(b.file, dest + tmpSuffix);
     fs.chmodSync(dest + tmpSuffix, 0o644);
@@ -399,11 +449,17 @@ function main() {
     mode: 0o644,
   });
   fs.renameSync(manifestPath + tmpSuffix, manifestPath);
+  const installersPath = path.join(channelDir, inst.MANIFEST);
+  fs.writeFileSync(installersPath + tmpSuffix, JSON.stringify(installersManifest, null, 2) + '\n', {
+    mode: 0o644,
+  });
+  fs.renameSync(installersPath + tmpSuffix, installersPath);
 
   // Prune bundles of versions beyond --keep (never the one just published).
   const byVersion = new Map();
   for (const name of fs.readdirSync(channelDir)) {
-    const m = name.replace(/\.sig$/, '').match(BUNDLE);
+    const base = name.replace(/\.sig$/, '');
+    const m = base.match(BUNDLE) || base.match(inst.INSTALLER_NAME);
     if (!m) continue;
     if (!byVersion.has(m[1])) byVersion.set(m[1], []);
     byVersion.get(m[1]).push(name);
@@ -418,6 +474,7 @@ function main() {
 
   console.log(`Published ${version} to ${manifestPath}`);
   console.log(`Feed URL: ${opts.baseUrl}/${opts.channel}/latest.json`);
+  console.log(`Installers: ${opts.baseUrl}/${opts.channel}/${inst.MANIFEST}`);
   if (opts.run) fs.rmSync(src, { recursive: true, force: true });
 }
 

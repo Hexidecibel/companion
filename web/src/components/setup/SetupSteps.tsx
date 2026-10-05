@@ -785,7 +785,12 @@ export function SessionStep({ ctx }: { ctx: StepCtx }) {
 
 // ------------------------------------------------------------------ devices
 
-const PLATFORM_ORDER = ['android', 'macos', 'windows', 'linux'];
+const PLATFORM_ORDER = ['macos', 'windows', 'android', 'linux'];
+
+function formatSize(bytes?: number | null): string {
+  if (!bytes) return '';
+  return bytes >= 1024 * 1024 ? `${Math.round(bytes / (1024 * 1024))} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`;
+}
 
 export function DevicesStep({ ctx }: { ctx: StepCtx }) {
   const api = useApi(ctx.serverId);
@@ -833,11 +838,20 @@ export function DevicesStep({ ctx }: { ctx: StepCtx }) {
               <li key={`${d.platform}-${d.label}`}>
                 <a className="sw-download" href={d.localPath ? `${base}${d.localPath}` : d.url} target="_blank" rel="noreferrer noopener">
                   <span className="sw-download__name">{d.label}</span>
-                  <span className="sw-download__ver">v{d.version}</span>
+                  <span className="sw-download__ver">
+                    v{d.version}
+                    {d.size ? ` · ${formatSize(d.size)}` : ''}
+                  </span>
                 </a>
               </li>
             ))}
           </ul>
+        )}
+        {list.some((d) => d.kind === 'updater') && (
+          <p className="sw-muted">The macOS download is an update archive: unpack it and move Companion to Applications.</p>
+        )}
+        {list.some((d) => d.kind === 'apk') && (
+          <p className="sw-muted">Android: allow installs from your browser when asked. The app then updates itself.</p>
         )}
       </div>
     </div>
