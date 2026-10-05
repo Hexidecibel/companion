@@ -24,6 +24,19 @@ export interface HeraldInboxItem {
    * place while the session's turn lasts; gone when it recovers.
    */
   stuck?: { kind: string; kinds: string[]; findingId: string; summary: string; count: number };
+  /**
+   * The session's turn ended on an unresolved tool error: the tool and its
+   * first error line (redacted). A finished-toned item, never spoken unasked;
+   * it replaces the plain "finished" note for that turn.
+   */
+  error?: { tool: string; line: string };
+  /**
+   * A new device wants to pair with this daemon: a blocked-toned item on the
+   * active device, never spoken unasked, approved ON SCREEN ONLY (never by
+   * voice). `code` is for the screen: the brain only sees a placeholder. Gone
+   * on approve, deny or expiry.
+   */
+  pairing?: { pairingId: string; deviceName: string; platform: string; code: string; expiresAt: number };
 }
 /**
  * How a message reached Herald: `voice` = push-to-talk, talking over Herald or

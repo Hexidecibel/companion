@@ -48,6 +48,7 @@ import { AddServerFlow } from '../AddServerFlow';
 import { PairApprovalPrompt } from '../PairingHost';
 import { DevicesCard } from '../DevicesSettings';
 import { FakeDaemonSocket } from '../../test/fakePairingDaemon';
+import { requestPairApproval } from '../../services/pairing';
 import { setNativeEnv } from '../../test/nativeEnv';
 
 const pending = (over: Partial<Record<string, unknown>> = {}) => ({
@@ -188,6 +189,17 @@ describe('PairApprovalPrompt', () => {
     act(() => handlers.forEach((h) => h({ type: 'pair_pending', payload: { pending: [pending({ pairingId: 'p2' })] } })));
     fireEvent.click(await screen.findByText('Deny'));
     await waitFor(() => expect(sendRequest).toHaveBeenCalledWith('pair_deny', { pairingId: 'p2' }));
+  });
+
+  it('a Herald "wants to pair" chip brings a dismissed request back on screen', async () => {
+    sendRequest.mockImplementation(async (type: string) =>
+      type === 'pair_pending_list' ? { success: true, payload: { pending: [pending({ pairingId: 'p3' })] } } : { success: true },
+    );
+    render(<PairApprovalPrompt />);
+    fireEvent.click(await screen.findByText('Not now'));
+    expect(screen.queryByText('Approve new device?')).toBeNull();
+    act(() => requestPairApproval('p3'));
+    expect(await screen.findByText('Approve new device?')).toBeTruthy();
   });
 
   it('ignores expired requests', async () => {

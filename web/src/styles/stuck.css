@@ -176,6 +176,21 @@
   letter-spacing: 0.02em;
 }
 
+/* Herald inbox chips: a turn that ended on an error, a device that wants to pair */
+.herald-chip.herald-chip--error { --chip: #ef4444; --chip-rgb: 239, 68, 68; }
+.herald-chip.herald-chip--pairing { --chip: #3b82f6; --chip-rgb: 59, 130, 246; }
+.herald-chip__error,
+.herald-chip__pairing {
+  flex-shrink: 0;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+.herald-chip__error { background: rgba(239, 68, 68, 0.16); color: #fca5a5; }
+.herald-chip__pairing { background: rgba(59, 130, 246, 0.16); color: #93c5fd; }
+
 @media (max-width: 768px) {
   .stuck-banner { margin: 6px 8px 2px; }
   .stuck-banner__actions { margin-left: 0; }

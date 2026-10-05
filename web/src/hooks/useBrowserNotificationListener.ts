@@ -46,7 +46,7 @@ export function useBrowserNotificationListener(): void {
         if (!browserNotifications.isEventEnabled('error_detected')) return;
         const payload = msg.payload as { content?: string; sessionName?: string; sessionId?: string } | undefined;
         if (isMuted(serverId, payload?.sessionId)) return;
-        browserNotifications.show('Error detected', {
+        browserNotifications.show('Ended with an error', {
           body: `${serverPrefix}${payload?.content?.substring(0, 100) || 'An error was detected in a session'}`,
           tag: `error-${serverId}-${payload?.sessionId || 'unknown'}`,
         });

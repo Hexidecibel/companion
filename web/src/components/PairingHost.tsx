@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { connectionManager } from '../services/ConnectionManager';
 import type { ServerConnection } from '../services/ServerConnection';
 import { listenDeepLinks } from '../services/nativeBridge';
-import { PairLink, parsePairLink, PendingPairing } from '../services/pairing';
+import { PAIR_APPROVAL_EVENT, PairLink, parsePairLink, PendingPairing } from '../services/pairing';
 import { AddServerFlow } from './AddServerFlow';
 import '../styles/pairing.css';
 
@@ -112,6 +112,22 @@ export function PairApprovalPrompt() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [, setTick] = useState(0);
+
+  // A Herald "wants to pair" chip: show that request again even after "Not now".
+  useEffect(() => {
+    const on = (e: Event) => {
+      const id = (e as CustomEvent<{ pairingId?: string }>).detail?.pairingId;
+      if (!id) return;
+      setDismissed((d) => {
+        if (!d.has(id)) return d;
+        const next = new Set(d);
+        next.delete(id);
+        return next;
+      });
+    };
+    window.addEventListener(PAIR_APPROVAL_EVENT, on);
+    return () => window.removeEventListener(PAIR_APPROVAL_EVENT, on);
+  }, []);
 
   const items = Object.entries(byServer).flatMap(([serverId, v]) =>
     v.pending.map((p) => ({ serverId, serverName: v.serverName, p })),

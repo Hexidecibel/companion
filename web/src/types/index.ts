@@ -76,7 +76,7 @@ export interface ToolCall {
   status: 'pending' | 'running' | 'completed' | 'error';
   startedAt?: number;
   completedAt?: number;
-  /** The tool_result was flagged is_error (non-zero exit, tool error). Status stays 'completed'. */
+  /** The tool_result was flagged is_error (non-zero exit, tool error). Status is then 'error'. */
   isError?: boolean;
 }
 

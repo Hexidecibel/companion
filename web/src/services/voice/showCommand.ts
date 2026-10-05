@@ -148,7 +148,8 @@ export function localShowTarget(state: {
     if (r) return { ...r };
     break;
   }
-  const unheard = (state.inbox ?? []).filter((i) => !i.heard).sort((a, b) => b.createdAt - a.createdAt);
+  // A pairing request is not a session: nothing to show.
+  const unheard = (state.inbox ?? []).filter((i) => !i.heard && !i.pairing).sort((a, b) => b.createdAt - a.createdAt);
   if (unheard[0]) return { serverId: unheard[0].serverId, sessionId: unheard[0].sessionId, sessionName: unheard[0].sessionName };
   return null;
 }

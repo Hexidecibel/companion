@@ -2,6 +2,7 @@ import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useStat
 import { HeraldTonesVolume } from './HeraldVolume';
 import type { HeraldAction, HeraldInboxItem, HeraldMessage, HeraldSessionRef, HeraldVerbosity, InboxPriority } from '../../types/herald';
 import { requestReviewDrawer } from '../../services/reviewNav';
+import { requestPairApproval } from '../../services/pairing';
 import { INTENT_LABELS, VOICE_COMMAND_HELP } from '../../services/voice/voiceCommands';
 import { sortInbox, sortPendingByUrgency } from '../../services/heraldReducer';
 import { useHeraldData, useHeraldSetupCtx, useHeraldUi, useHeraldVoiceCtx, useHeraldVoiceInputCtx } from '../../context/HeraldContext';
@@ -184,17 +185,19 @@ function InboxStrip({ items, unheardCount, canAsk, onAsk, onChip }: {
           key={item.id}
           type="button"
           role="listitem"
-          className={`herald-chip herald-chip--${item.priority}${item.review ? ` herald-chip--review herald-chip--review-${item.review.level}` : ''}${item.stuck ? ' herald-chip--stuck' : ''}${item.heard ? '' : ' herald-chip--unheard'}`}
+          className={`herald-chip herald-chip--${item.priority}${item.review ? ` herald-chip--review herald-chip--review-${item.review.level}` : ''}${item.stuck ? ' herald-chip--stuck' : ''}${item.error ? ' herald-chip--error' : ''}${item.pairing ? ' herald-chip--pairing' : ''}${item.heard ? '' : ' herald-chip--unheard'}`}
           onClick={() => onChip(item)}
-          title={item.review ? `Risky change, open review: ${item.headline}` : item.stuck ? `Looks stuck, open it: ${item.stuck.summary}` : `${PRIORITY_LABEL[item.priority]}: ${item.headline}`}
+          title={item.review ? `Risky change, open review: ${item.headline}` : item.stuck ? `Looks stuck, open it: ${item.stuck.summary}` : item.pairing ? `New device, approve or deny it on screen: ${item.headline}` : item.error ? `Ended with an error, open it: ${item.headline}` : `${PRIORITY_LABEL[item.priority]}: ${item.headline}`}
         >
           <span className="herald-chip__dot" aria-hidden="true" />
           <span className="herald-chip__name">{item.sessionName}</span>
           {item.review && <span className="herald-chip__review">Review</span>}
           {item.stuck && <span className="herald-chip__stuck">Stuck?</span>}
+          {item.error && <span className="herald-chip__error">Error</span>}
+          {item.pairing && <span className="herald-chip__pairing">Pair</span>}
           <span className="herald-chip__headline">{item.headline}</span>
           <span className="herald-chip__age">{formatAgo(item.createdAt, now)}</span>
-          <span className="sr-only">{item.review ? 'Risky change' : item.stuck ? 'Looks stuck' : PRIORITY_LABEL[item.priority]}{item.heard ? '' : ', new'}</span>
+          <span className="sr-only">{item.review ? 'Risky change' : item.stuck ? 'Looks stuck' : item.error ? 'Ended with an error' : item.pairing ? 'Pairing request' : PRIORITY_LABEL[item.priority]}{item.heard ? '' : ', new'}</span>
         </button>
       ))}
     </div>
@@ -647,9 +650,14 @@ export function HeraldPanel({ variant, onOpenSession, onClose }: HeraldPanelProp
       onOpenSession(item.serverId, item.sessionId);
       return;
     }
-    if (item.stuck) {
-      // A stuck session: open it; its banner has the evidence and the actions.
+    if (item.stuck || item.error) {
+      // A stuck session / a turn that ended on an error: open it (the evidence is there).
       onOpenSession(item.serverId, item.sessionId);
+      return;
+    }
+    if (item.pairing) {
+      // Pairing is decided on screen only: bring back the approval prompt.
+      requestPairApproval(item.pairing.pairingId);
       return;
     }
     if (canTalk && !busy) {

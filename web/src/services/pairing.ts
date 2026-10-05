@@ -405,3 +405,18 @@ export function serverFromPairing(
     authKind: 'device',
   };
 }
+
+/** Window event asking the "Approve new device?" prompt to show a request again. */
+export const PAIR_APPROVAL_EVENT = 'companion:pair-approval';
+
+/**
+ * Bring back the on-screen approval prompt for a request (a Herald inbox chip):
+ * pairing is approved on screen only, never by voice.
+ */
+export function requestPairApproval(pairingId: string): void {
+  try {
+    window.dispatchEvent(new CustomEvent(PAIR_APPROVAL_EVENT, { detail: { pairingId } }));
+  } catch {
+    // no window (tests / SSR)
+  }
+}

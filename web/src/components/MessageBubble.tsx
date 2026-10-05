@@ -540,8 +540,8 @@ export const MessageBubble = memo(function MessageBubble({ message, onSelectOpti
                 <div key={tool.id} className="plan-card">
                   <div className="plan-card-header">
                     <span className="plan-card-icon">Plan Ready</span>
-                    <span className={`tool-card-status ${tool.status === 'completed' ? 'tool-status-completed' : 'tool-status-pending'}`}>
-                      {tool.status === 'completed' ? 'Approved' : 'Pending'}
+                    <span className={`tool-card-status ${tool.status === 'completed' ? 'tool-status-completed' : tool.status === 'error' ? 'tool-status-error' : 'tool-status-pending'}`}>
+                      {tool.status === 'completed' ? 'Approved' : tool.status === 'error' ? 'Not approved' : 'Pending'}
                     </span>
                   </div>
                   {planPath && onViewFile ? (
