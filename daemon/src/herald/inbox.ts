@@ -19,6 +19,14 @@
  *              (stuck detection). Survives the session working (that is the
  *              point); replaced wholesale by the detector's current list, so it
  *              disappears as soon as the session recovers, is snoozed or idle.
+ *   error    — (a finished item with `error`) the session's turn ended on an
+ *              unresolved tool error (turn-error.ts). Replaces the plain
+ *              "finished" note for that turn; same lifetime as one.
+ *   pairing  — (a blocked item with `pairing`) a new device wants to pair with
+ *              this daemon. Not a session: replaced wholesale by the pairing
+ *              manager's pending list, so it goes on approve, deny or expiry.
+ *              Its headline carries the code for the screen; the brain only
+ *              ever gets `brainHeadline` (a placeholder instead of the code).
  */
 
 import type { HeraldInboxItem, InboxPriority } from './protocol';
@@ -30,6 +38,49 @@ const MAX_ITEMS = 50;
 const FINISHED_TTL_MS = 12 * 60 * 60 * 1000;
 const MAX_HEARD = 1000;
 const PRIORITY_RANK: Record<InboxPriority, number> = { blocked: 0, finished: 1, progress: 2 };
+/** What the brain (and anything spoken) gets instead of a pairing code. */
+export const PAIRING_CODE_PLACEHOLDER = '[code on screen]';
+
+/**
+ * The headline as the brain / a spoken briefing may see it: a pairing item
+ * never carries its code there (the code is for the screen only).
+ */
+export function brainHeadline(i: HeraldInboxItem): string {
+  if (i.pairing)
+    return `${i.pairing.deviceName} wants to pair, code ${PAIRING_CODE_PLACEHOLDER}. Approve or deny it on screen; pairing is never approved by voice.`;
+  return i.headline;
+}
+
+const DECIDE = /\b(approve|approved|accept|allow|let\s+(?:it|them|\w+)\s+in|deny|reject|decline|refuse)\b/i;
+const PAIR_WORD = /\bpair(?:ing|ed)?\b/i;
+const DEVICE_WORD = /\b(device|ipad|iphone|phone|tablet|laptop|computer|desktop|mac|macbook|pc|android|pixel|browser)\b/i;
+
+/**
+ * A request to approve / deny a pairing through Herald. Pairing is decided on
+ * screen only, so such a message gets a fixed reply instead of a brain turn.
+ * Matches a decision word plus "pair", or plus a waiting device's name / a
+ * device word while a request is waiting. Null when it is not about pairing.
+ */
+export function pairingDecisionReply(text: string, waiting: HeraldInboxItem[]): string | null {
+  const t = oneLine(text);
+  if (!DECIDE.test(t)) return null;
+  const pending = waiting.filter((i) => i.pairing);
+  const named = pending.find((i) => t.toLowerCase().includes(i.pairing!.deviceName.toLowerCase()));
+  const aboutPairing = PAIR_WORD.test(t) || !!named || (pending.length > 0 && DEVICE_WORD.test(t));
+  if (!aboutPairing) return null;
+  const which = named ?? pending[0];
+  if (!which)
+    return 'No device is waiting to pair. Pairing is approved on screen only: start it from the new device, then approve it on this screen.';
+  return `I can't approve pairing by voice. ${which.pairing!.deviceName} is waiting: approve or deny it on screen, in the "Approve new device?" prompt or under Settings, Devices.`;
+}
+
+export interface PendingPairingInfo {
+  pairingId: string;
+  deviceName: string;
+  platform: string;
+  code: string;
+  expiresAt: number;
+}
 
 interface PrevState {
   status: SessionSnapshot['status'];
@@ -168,13 +219,19 @@ export class InboxTracker {
               this.items.delete(oid);
           }
           const gist = s.lastTurnGist ? firstSentence(s.lastTurnGist, 120) : '';
-          this.add(
-            id,
-            s,
-            'finished',
-            gist ? `${s.sessionName} finished: ${gist}` : `${s.sessionName} finished.`,
-            now
-          );
+          if (s.turnError) {
+            const err = { tool: clip(oneLine(s.turnError.tool), 40), line: clip(oneLine(s.turnError.line), 160) };
+            this.add(id, s, 'finished', `${s.sessionName} ended with an error: ${err.tool}: ${err.line}`, now);
+            this.items.get(id)!.error = err;
+          } else {
+            this.add(
+              id,
+              s,
+              'finished',
+              gist ? `${s.sessionName} finished: ${gist}` : `${s.sessionName} finished.`,
+              now
+            );
+          }
         }
       }
 
@@ -183,6 +240,7 @@ export class InboxTracker {
 
     // Sessions that vanished can no longer be blocked.
     for (const [id, item] of this.items) {
+      if (item.pairing) continue; // not a session
       const sk = `${item.serverId}:${item.sessionId}`;
       if (!present.has(sk)) {
         if (item.priority === 'blocked') this.items.delete(id);
@@ -337,6 +395,43 @@ export class InboxTracker {
     for (const [id, item] of this.items) if (item.stuck && !keep.has(id)) this.items.delete(id);
     this.prune(now);
     return JSON.stringify(this.list().filter((i) => i.stuck)) !== before;
+  }
+
+  /**
+   * Pairing requests waiting for approval (the pairing manager's whole pending
+   * list): one blocked item each, removed as soon as a request is approved,
+   * denied or expires. Returns true when the visible inbox changed.
+   */
+  setPairingRequests(pending: PendingPairingInfo[], now: number): boolean {
+    const before = JSON.stringify(this.list().filter((i) => i.pairing));
+    const keep = new Set<string>();
+    for (const p of pending.slice(0, 10)) {
+      if (p.expiresAt <= now) continue;
+      const id = `local:pair:${p.pairingId}`;
+      keep.add(id);
+      const prev = this.items.get(id);
+      const deviceName = clip(oneLine(p.deviceName), 60) || 'A new device';
+      this.seenKeys.add(id);
+      this.items.set(id, {
+        id,
+        serverId: 'local',
+        sessionId: `pair:${p.pairingId}`,
+        sessionName: deviceName,
+        priority: 'blocked',
+        headline: `${deviceName} wants to pair, code ${p.code}`,
+        createdAt: prev?.createdAt ?? now,
+        heard: prev?.heard ?? this.heard.has(id),
+        pairing: {
+          pairingId: p.pairingId,
+          deviceName,
+          platform: clip(p.platform, 20),
+          code: p.code,
+          expiresAt: p.expiresAt,
+        },
+      });
+    }
+    for (const [id, item] of this.items) if (item.pairing && !keep.has(id)) this.items.delete(id);
+    return JSON.stringify(this.list().filter((i) => i.pairing)) !== before;
   }
 
   /** The user reviewed the session: its risk alerts are done. */

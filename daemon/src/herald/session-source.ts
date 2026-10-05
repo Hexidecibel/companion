@@ -15,6 +15,7 @@ import {
   parseLocalCommandPart,
 } from '../parser';
 import type { ConversationMessage } from '../types';
+import { detectTurnEndError } from '../turn-error';
 import { BoundedMap } from '../utils';
 import { fnv1a, oneLine, clip, trailingQuestion } from './text';
 
@@ -59,6 +60,11 @@ export interface SessionSnapshot {
   lastTurnKey: string | null;
   /** Deterministic one-line gist of the last assistant turn (for headlines). */
   lastTurnGist: string | null;
+  /**
+   * The finished turn ended on an unresolved tool error (turn-error.ts): the
+   * tool and its first error line (redacted). Absent / null otherwise.
+   */
+  turnError?: { tool: string; line: string } | null;
 }
 
 export interface TranscriptTurn {
@@ -287,6 +293,7 @@ interface DerivedTurnInfo {
   pendingQuestion: string | null;
   lastTurnKey: string | null;
   lastTurnGist: string | null;
+  turnError: { tool: string; line: string } | null;
 }
 
 export class LocalSessionSource implements SessionSource {
@@ -323,6 +330,7 @@ export class LocalSessionSource implements SessionSource {
       pendingQuestion: null,
       lastTurnKey: null,
       lastTurnGist: null,
+      turnError: null,
     };
     try {
       const messages = this.messagesFor(sessionId);
@@ -345,12 +353,14 @@ export class LocalSessionSource implements SessionSource {
         }
       }
       const lastIsAssistant = last?.type === 'assistant';
+      const te = detectTurnEndError(messages);
       info = {
         pendingApproval,
         pendingQuestion:
           lastIsAssistant && lastAssistant ? trailingQuestion(lastAssistant.content) : null,
         lastTurnKey: lastAssistant ? `${lastAssistant.id}:${lastAssistant.timestamp}` : null,
         lastTurnGist: lastAssistant ? lastAssistant.content : null,
+        turnError: te ? { tool: te.tool, line: te.line } : null,
       };
     } catch (err) {
       console.error(`Herald: failed to derive turn info for "${sessionId}":`, err);
@@ -431,6 +441,7 @@ export class LocalSessionSource implements SessionSource {
           status === 'waiting' && !pendingChoice && !pendingApproval ? pendingQuestion : null,
         lastTurnKey: derived?.lastTurnKey || null,
         lastTurnGist: derived?.lastTurnGist || null,
+        turnError: status === 'idle' ? derived?.turnError || null : null,
       });
     }
     return out;

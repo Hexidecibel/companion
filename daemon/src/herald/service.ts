@@ -22,7 +22,7 @@ import type {
 } from './protocol';
 import { ResolvedHeraldConfig } from './config';
 import { ActionManager } from './actions';
-import { InboxTracker } from './inbox';
+import { InboxTracker, brainHeadline, pairingDecisionReply, type PendingPairingInfo } from './inbox';
 import {
   HeraldStore,
   isVerbosity,
@@ -322,6 +322,8 @@ export class HeraldService {
   private stuck: HeraldStuckLink | null = null;
   /** Latest stuck list from the detector (re-applied when the inbox is rebuilt at start). */
   private stuckAlerts: HeraldStuckAlert[] = [];
+  /** Pairing requests waiting for approval (inbox items; approved on screen only). */
+  private pairingRequests: PendingPairingInfo[] = [];
 
   constructor(deps: HeraldServiceDeps) {
     this.cfg = deps.config;
@@ -458,6 +460,7 @@ export class HeraldService {
     this.inbox.restoreAnswers(persisted.answers ?? [], this.now());
     this.inbox.restoreReviewAlerts(persisted.reviews ?? [], this.now());
     if (this.stuckAlerts.length) this.inbox.setStuckAlerts(this.stuckAlerts.map((a) => ({ ...a, serverId: 'local' })), this.now());
+    if (this.pairingRequests.length) this.inbox.setPairingRequests(this.pairingRequests, this.now());
     this.toolbox?.loadOpened(persisted.cushOpened);
     this.verbosity = persisted.verbosity ?? 'auto';
     this.pronunciations = persisted.pronunciations ?? [];
@@ -1121,6 +1124,15 @@ export class HeraldService {
       return { messageId: userMsg.id };
     }
 
+    // "Approve the iPad": pairing is decided on screen only, never by voice or
+    // through the brain (which never even sees the code). Fixed reply.
+    const pairReply = intent ? null : pairingDecisionReply(text, this.inbox.list());
+    if (pairReply) {
+      const userMsg = this.postMessage('user', text);
+      this.postMessage('herald', pairReply, reply);
+      return { messageId: userMsg.id };
+    }
+
     // "Brief me": only what the user has not been told yet. Nothing new is
     // answered deterministically, without a brain turn.
     let briefing: HeraldInboxItem[] | undefined;
@@ -1392,6 +1404,7 @@ export class HeraldService {
           Number(!!b.answer) - Number(!!a.answer) ||
           INBOX_RANK[a.priority] - INBOX_RANK[b.priority] ||
           Number(!!b.stuck) - Number(!!a.stuck) ||
+          Number(!!b.error) - Number(!!a.error) ||
           b.createdAt - a.createdAt
       );
   }
@@ -1400,7 +1413,7 @@ export class HeraldService {
     const now = this.now();
     return items.map(
       (i) =>
-        `[${i.answer ? 'answer' : i.review ? 'risky change' : i.stuck ? 'looks stuck' : i.priority}] ${clip(oneLine(i.headline), i.answer ? 320 : 200)} (${i.sessionName}, ${formatAgo(now - i.createdAt)} ago)`
+        `[${i.answer ? 'answer' : i.review ? 'risky change' : i.stuck ? 'looks stuck' : i.error ? 'ended with an error' : i.pairing ? 'pairing request' : i.priority}] ${clip(oneLine(brainHeadline(i)), i.answer ? 320 : 200)} (${i.sessionName}, ${formatAgo(now - i.createdAt)} ago)`
     );
   }
 
@@ -1446,7 +1459,7 @@ export class HeraldService {
     const texts: string[] = [];
     for (let i = this.messages.length - 1, n = 0; i >= 0 && n < 30; i--, n++) texts.push(this.messages[i].text);
     for (const s of live) texts.push(s.lastTurnGist ?? '', s.currentActivity ?? '', s.pendingQuestion ?? '');
-    for (const item of this.inbox.list()) texts.push(item.headline);
+    for (const item of this.inbox.list()) texts.push(brainHeadline(item));
     return texts;
   }
 
@@ -1541,7 +1554,9 @@ export class HeraldService {
       parts.push('Not yet told to the user:');
       for (const i of unheardItems.slice(0, SNAPSHOT_MAX_UNHEARD)) {
         parts.push(
-          `- [${i.priority}] ${clip(oneLine(i.headline), 200)} (${formatAgo(now - i.createdAt)} ago; ${i.sessionName} is ${statusOf(i)} now)`
+          i.pairing
+            ? `- [pairing request] ${clip(oneLine(brainHeadline(i)), 200)} (${formatAgo(now - i.createdAt)} ago)`
+            : `- [${i.error ? 'ended with an error' : i.priority}] ${clip(oneLine(i.headline), 200)} (${formatAgo(now - i.createdAt)} ago; ${i.sessionName} is ${statusOf(i)} now)`
         );
       }
       if (unheardItems.length > SNAPSHOT_MAX_UNHEARD)
@@ -1742,6 +1757,21 @@ export class HeraldService {
     this.inbox.addReviewAlert({ ...a, serverId: 'local', createdAt: this.now() });
     this.emit({ kind: 'inbox', inbox: this.inbox.list() });
     this.persist();
+  }
+
+  // ---------------------------------------------------------------- pairing requests
+
+  /**
+   * The pairing manager's pending list changed: one blocked inbox item per
+   * request (toned on the active device, never spoken unasked), gone on
+   * approve, deny or expiry. Pairing is approved on screen only; the brain
+   * never sees the code (brainHeadline).
+   */
+  syncPairingRequests(pending: PendingPairingInfo[]): void {
+    this.pairingRequests = pending.map((p) => ({ ...p }));
+    if (!this.started || this.disposed) return;
+    if (this.inbox.setPairingRequests(this.pairingRequests, this.now()))
+      this.emit({ kind: 'inbox', inbox: this.inbox.list() });
   }
 
   // ---------------------------------------------------------------- stuck sessions

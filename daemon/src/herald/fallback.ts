@@ -15,6 +15,7 @@
  */
 
 import type { HeraldBrainDownReason, HeraldInboxItem } from './protocol';
+import { brainHeadline } from './inbox';
 import type { SessionSnapshot } from './session-source';
 import { LlmError, LlmErrorCode } from './llm/provider';
 import { clip, firstSentence, oneLine, plainToolAction } from './text';
@@ -162,6 +163,7 @@ export function briefSummary(items: HeraldInboxItem[]): string {
 
 /** One briefing line; review alerts get a templated lead-in, stuck items say so as they are. */
 export function briefLine(i: HeraldInboxItem): string {
+  if (i.pairing) return oneLine(brainHeadline(i));
   if (i.stuck) return oneLine(i.headline);
   const head = firstSentence(i.headline, 160) || i.headline;
   return i.review ? `Heads up: ${head}` : head;

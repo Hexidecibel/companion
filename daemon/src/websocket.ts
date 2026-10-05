@@ -215,7 +215,19 @@ export class WebSocketHandler {
       enabled: () => this.config.pairing !== false,
       allowPublic: () => this.config.pairingAllowPublic === true,
       deliver: (clientId, result) => this.deliverPairResult(clientId, result),
-      onChange: (pending) => this.broadcastPairPending(pending),
+      onChange: (pending) => {
+        this.broadcastPairPending(pending);
+        // Herald: a "wants to pair" inbox item per request (approved on screen only).
+        this.herald?.syncPairingRequests(
+          pending.map((p) => ({
+            pairingId: p.pairingId,
+            deviceName: p.deviceName,
+            platform: p.platform,
+            code: p.code,
+            expiresAt: p.expiresAt,
+          }))
+        );
+      },
       audit: (action, info, ok) =>
         this.auditLog.append({
           ts: Date.now(),
@@ -338,7 +350,8 @@ export class WebSocketHandler {
 
     const handleEscalationEvent = (
       eventType: NotificationEventType,
-      data: { sessionId: string; sessionName: string; content: string }
+      data: { sessionId: string; sessionName: string; content: string },
+      opts: { gated?: boolean } = {}
     ) => {
       const event: EscalationEvent = {
         eventType,
@@ -350,10 +363,14 @@ export class WebSocketHandler {
       if (result.shouldBroadcast) {
         console.log(`Escalation: ${eventType} broadcast for session "${data.sessionName}"`);
       }
-      this.broadcast(eventType, data);
+      // Gated events reach clients (browser notifications) only when escalation
+      // let them through: the type toggle, mute and rate limit apply there too.
+      if (!opts.gated || result.shouldBroadcast) this.broadcast(eventType, data);
     };
 
-    this.watcher.on('error-detected', (data) => handleEscalationEvent('error_detected', data));
+    this.watcher.on('error-detected', (data) =>
+      handleEscalationEvent('error_detected', data, { gated: true })
+    );
     this.watcher.on('session-completed', (data) =>
       handleEscalationEvent('session_completed', data)
     );

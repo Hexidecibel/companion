@@ -95,7 +95,10 @@ export function latestShowRef(
     break;
   }
   // 3. Newest unheard inbox item.
-  const unheard = ctx.inbox.filter((i) => !i.heard).sort((a, b) => b.createdAt - a.createdAt);
+  // (A pairing request is not a session: nothing to show.)
+  const unheard = ctx.inbox
+    .filter((i) => !i.heard && !i.pairing)
+    .sort((a, b) => b.createdAt - a.createdAt);
   if (unheard[0]) {
     const i = unheard[0];
     return {
