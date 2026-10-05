@@ -38,6 +38,8 @@ High-level features of the Companion daemon, web client, and desktop/mobile apps
 - Limits: 5 wrong codes per request, 10 pending, per-IP throttle with backoff, daemon-wide suspension after 50 wrong codes; code pairing only from LAN / tailnet / localhost unless `pairing_allow_public`; `pairing: false` turns it off; every step audit-logged
 - The legacy config token still works; Settings > Devices offers a one-tap "Upgrade to a device token"
 - mDNS TXT carries only id, name, version, pairing/tls flags, port and LAN IPs (never secrets)
+- **Herald announces pair requests**: "Chris's iPad wants to pair, code 123456" in the inbox (needs-you tone on the active device, never spoken unasked), gone on approve, deny or expiry; the chip brings the approval prompt back. Approved on screen only: "approve the iPad" gets "approve it on screen", and the brain only ever sees `[code on screen]`
+- **Device tokens in the Keystore / Keychain on mobile**: Android AES-256-GCM under an Android Keystore key, iOS Keychain (`AfterFirstUnlockThisDeviceOnly`); existing tokens migrate on first launch (write, verify, then drop the plaintext copy; any failure keeps it). Desktop and browser unchanged
 
 ## Real-Time Monitoring
 - **Stuck-session detection** ("Out4 looks stuck"): deterministic, no LLM, only while a session is WORKING. Flags the same failing test / compiler error / error output recurring (5 times in 30 min, numbers, paths and timestamps normalised; `| tail` exit codes do not hide failures), the same tool call with the same result again and again with no edit in between (5 in 15 min; polling commands exempt), an edit undone and redone on the same spot (4 moves in 30 min), no edit or new text for 30 min, and a tool call hanging with an unchanged screen (Bash 20 min). Builds, installs, test suites and subagents are exempt up to 90 min; a prompt on screen is the inbox's job. Findings clear on their own when the session recovers, finishes, or the user writes to it
@@ -150,6 +152,7 @@ High-level features of the Companion daemon, web client, and desktop/mobile apps
 - Per-server notification preferences
 - Per-session mute synced between web and mobile via daemon
 - Rate limiting to prevent notification storms
+- **Error notifications only when a turn ENDS on an unresolved error** (`daemon/src/turn-error.ts`): the last errored tool call since the user's prompt, not resolved by a later success of the same kind (Edit/Write family as one, Bash by program + subcommand) and not followed by a final word that moved on; rejected tools and interrupts never count. Grep misses, Edit mismatches that get fixed and red-then-green TDD stay silent. Once per turn, preview "Bash: FAIL auth.test.ts" (first error line, secrets redacted); type toggle, mute, rate limit and push delay apply to browser and push alike ("Ended with an error"). Failed tools now carry status `error` (red "Error" on tool cards, "Not approved" on a rejected plan)
 
 ## Tmux Session Management
 - Create/list/switch tmux sessions from app
@@ -591,6 +594,12 @@ Follow-up fixes layered on the Mobile UX round above: walks back the activity-ro
 - **Compact top-row mobile header** — buttons now stay in a single top row (Back · Terminal · Plan · Bookmarks · Tools ▾ · gear); Files/Search/Skills/Review collapsed into a "Tools" dropdown. The `SessionActionBar` (which had moved buttons into the activity/processing row) was removed and the activity row is conditional again. `HeaderOverflowMenu.tsx` gained an optional `label` prop to render as "Tools ▾"; `web/src/components/SessionActionBar.tsx` deleted
 - **Doubled header inset fixed** — `.dashboard` already applies `var(--safe-top)`, and `.session-header-mobile` was applying it again, creating an excessive top band. Inset now applied once plus a 6px gap (`global.css` mobile media queries)
 - **Autolink URLs inside emphasis** — `MarkdownRenderer.tsx` previously stored bold/italic inner text as a raw string and never re-parsed it, so URLs inside `**…**` / `*…*` never became links. Bold/italic now carry children and recurse, so URLs (plus code/file links and nested emphasis) inside emphasis render as the accent link pill, enabling long-press → Open Link / Copy link
+
+## Herald — calmer tones, error and pairing news (2026-10-05)
+- Tones only for what needs you by default (a question / approval waiting, a pair request); finished, risky changes, stuck and errors stay silent in the inbox unless enabled under "Tones for"
+- No tone for the session on screen or within a minute of using the app; at most one tone per 2 minutes (adjustable), later arrivals folded into it; no backlog when coming back or reconnecting
+- Reminders opt-in (one after 10 minutes); "Quiet for 1 hour" from the header bell, by voice ("quiet for an hour", "stop the tones", "tones back on") or the desktop tray; per-session "Mute Herald tones" in the session menu; one device and one tab play tones
+- Inbox: "Out4 ended with an error: Bash: FAIL auth.test.ts" (replaces that turn's finished note; "[ended with an error]" in brief me) and pair requests
 
 ## Herald — "Hey Jarvis" in the desktop apps, Diagnostics, macOS shortcuts (2026-10-01)
 - Fixed: hands-free in the Mac / Windows apps heard "Hey Jarvis" but never answered. With several servers the Herald hub connects after another one; the wake-word events stayed subscribed to the old connection, so every woken utterance was discarded. Subscriptions now follow the hub; a VAD misfire after the wake word still transcribes
