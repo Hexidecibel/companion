@@ -52,5 +52,13 @@ rc=0
 PORT="$PORT" OUT="$OUT" INSTALL_CLAUDE="${INSTALL_CLAUDE:-1}" \
   LOGS_CMD="docker compose --env-file $WORK/e2e.env logs --no-color companion" \
   timeout 600 node "$ROOT/web/e2e/docker-wizard.cjs" || rc=$?
+# Concierge prerequisites inside the container (claude from the wizard's
+# install, the seeded concierge dir, the baked-in MCP).
+if [ "${INSTALL_CLAUDE:-1}" = 1 ]; then
+  "$ROOT/bin/docker" concierge check || rc=1
+else
+  "$ROOT/bin/docker" exec test -f /home/companion/.companion/concierge/.mcp.json.template || rc=1
+  "$ROOT/bin/docker" exec node -e 'require("/app/mcp/node_modules/@modelcontextprotocol/sdk/package.json")' || rc=1
+fi
 echo "Screenshots: $OUT"
 exit $rc

@@ -1,4 +1,4 @@
-# Only daemon/, web/ and docker/ go into the image build.
+# Only daemon/, web/, mcp/, concierge/, docker/ and bin/concierge go into the image build.
 **/node_modules
 **/dist
 **/dist-desktop
@@ -13,14 +13,14 @@
 secrets.env
 app
 desktop
-concierge
+concierge/.mcp.json
 triggers
-mcp
 docs
 voice
 data
 projects
 *.md
 !web/**/*.md
+!concierge/CLAUDE.md
 daemon/__tests__
 web/e2e

@@ -14,6 +14,8 @@ WORKDIR /src
 
 COPY web/package.json web/package-lock.json web/
 RUN --mount=type=cache,target=/root/.npm cd web && npm ci --no-audit --no-fund
+COPY mcp/package.json mcp/package-lock.json mcp/
+RUN --mount=type=cache,target=/root/.npm cd mcp && npm ci --no-audit --no-fund
 COPY daemon/package.json daemon/package-lock.json daemon/
 # --ignore-scripts: the postinstall writes a host config (not wanted in an image)
 RUN --mount=type=cache,target=/root/.npm cd daemon && npm ci --ignore-scripts --no-audit --no-fund
@@ -30,6 +32,10 @@ ARG COMPANION_VERSION=dev
 RUN cd daemon && COMPANION_VERSION="$COMPANION_VERSION" npm run build \
  && npm prune --omit=dev --no-audit --no-fund \
  && rm -rf src __tests__ coverage
+
+# The companion-remote MCP server the concierge session uses for routing.
+COPY mcp/ mcp/
+RUN cd mcp && npm run build && npm prune --omit=dev --no-audit --no-fund && rm -rf src
 
 # ---------------------------------------------------------------- runtime
 FROM node:${NODE_VERSION}-bookworm-slim
@@ -61,11 +67,19 @@ COPY --from=build /src/daemon/dist /app/daemon/dist
 COPY --from=build /src/daemon/node_modules /app/daemon/node_modules
 COPY --from=build /src/daemon/package.json /app/daemon/package.json
 COPY --from=build /src/web/dist /app/web/dist
+COPY --from=build /src/mcp/dist /app/mcp/dist
+COPY --from=build /src/mcp/node_modules /app/mcp/node_modules
+COPY --from=build /src/mcp/package.json /app/mcp/package.json
+# Concierge: the template dir (start-daemon.sh seeds a writable copy into the
+# ~/.companion volume) and its launcher (`docker compose exec companion concierge`).
+COPY concierge/ /app/concierge/
+COPY bin/concierge /app/bin/concierge
 COPY docker/ /app/docker/
 COPY docker/tmux.conf /etc/tmux.conf
-RUN chmod 755 /app/docker/*.sh /app/docker/as-companion /app/docker/rootbin/* \
+RUN chmod 755 /app/docker/*.sh /app/docker/as-companion /app/docker/rootbin/* /app/bin/concierge \
  && printf '#!/bin/sh\nexec node /app/daemon/dist/index.js "$@"\n' > /usr/local/bin/companion \
- && chmod 755 /usr/local/bin/companion
+ && printf '#!/bin/sh\nexec /app/bin/concierge "$@"\n' > /usr/local/bin/concierge \
+ && chmod 755 /usr/local/bin/companion /usr/local/bin/concierge
 
 # rootbin wrappers (claude, tmux, companion) hand `docker compose exec` (root)
 # over to the companion user; the daemon itself never has rootbin on PATH.
@@ -75,6 +89,8 @@ ENV PATH=/app/docker/rootbin:/home/companion/.local/bin:/usr/local/sbin:/usr/loc
     COMPANION_WEB_DIR=/app/web/dist \
     COMPANION_PROJECTS_DIR=/home/companion/projects \
     COMPANION_SETUP_CLAUDE=/app/docker/setup-claude.sh \
+    COMPANION_CONCIERGE_DIR=/home/companion/.companion/concierge \
+    COMPANION_MCP_ENTRY=/app/mcp/dist/index.js \
     CLAUDE_CONFIG_DIR=/home/companion/.claude \
     COMPANION_SKIP_POSTINSTALL=1 \
     NODE_ENV=production

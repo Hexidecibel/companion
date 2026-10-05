@@ -17,6 +17,19 @@ if ! tmux has-session -t "=$SESSION" 2>/dev/null; then
 fi
 tmux set-environment -g COMPANION_APP 1
 
+# Concierge: a writable copy of /app/concierge in the ~/.companion volume (the
+# daemon renders .mcp.json into it). The template and routing rules follow the
+# image; projects.json is yours (seeded once, pointing into the projects mount).
+CDIR="${COMPANION_CONCIERGE_DIR:-}"
+if [ -n "$CDIR" ] && [ -d /app/concierge ]; then
+  mkdir -p "$CDIR"
+  cp -f /app/concierge/.mcp.json.template /app/concierge/CLAUDE.md "$CDIR/"
+  if [ ! -e "$CDIR/projects.json" ]; then
+    sed "s#/home/hexi/local/src/#${COMPANION_PROJECTS_DIR:-$HOME/projects}/#g" \
+      /app/concierge/projects.json > "$CDIR/projects.json"
+  fi
+fi
+
 if [ -x "$HOME/.local/bin/claude" ]; then
   echo "Claude Code: $("$HOME/.local/bin/claude" --version 2>/dev/null | head -1 || echo 'installed')"
 else

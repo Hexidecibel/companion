@@ -82,6 +82,13 @@ jobs:
           for i in $(seq 1 30); do curl -fsS http://127.0.0.1:9877/health && break; sleep 2; done
           curl -fsS http://127.0.0.1:9877/health | grep -q '"ok":true'
           docker logs companion-smoke | grep -q 'Welcome to Companion (Docker)'
+          # /health reports the build version (one version source).
+          curl -fsS http://127.0.0.1:9877/health | grep -q '"version":"${{ steps.v.outputs.version }}"'
+          # Concierge: seeded dir, baked-in MCP, launcher present (claude is installed later by the user).
+          docker exec -u companion companion-smoke test -f /home/companion/.companion/concierge/.mcp.json.template
+          docker exec -u companion companion-smoke test -f /app/mcp/dist/index.js
+          docker exec -u companion companion-smoke sh -c 'command -v concierge'
+          docker exec -u companion companion-smoke /app/docker/as-companion concierge check 2>&1 | grep -q 'Claude Code is not installed'
           docker rm -f companion-smoke
 
   publish:

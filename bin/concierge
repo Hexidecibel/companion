@@ -19,7 +19,7 @@
 #     (tmux NAMES don't matter; routing resolves by working directory.)
 #  2. Edit concierge/projects.json — set each project's `cwd` to its real root.
 #  3. Make sure the local daemon has the `dispatch` capability enabled
-#     (bin/companion enable-remote --dispatch ...). This script checks it.
+#     (bin/companion enable-remote --enable dispatch ...). This script checks it.
 #  This script auto-seeds a `local` loopback entry in ~/.companion/mcp-servers.json
 #  and renders concierge/.mcp.json from the template.
 #
@@ -33,15 +33,18 @@
 #     bin/concierge --attach   launch and attach this terminal to it
 #     bin/concierge --restart  kill an existing concierge session and relaunch
 #     bin/concierge status     show whether the concierge session is running
+#     bin/concierge check      check the prerequisites only (claude, dir, MCP)
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(dirname "$SCRIPT_DIR")"
-CONCIERGE_DIR="$ROOT/concierge"
+# The Docker image sets COMPANION_CONCIERGE_DIR (a writable copy in the
+# ~/.companion volume) and COMPANION_MCP_ENTRY (the baked-in MCP build).
+CONCIERGE_DIR="${COMPANION_CONCIERGE_DIR:-$ROOT/concierge}"
 MCP_DIR="$ROOT/mcp"
-MCP_ENTRY="$MCP_DIR/dist/index.js"
-CONFIG="$HOME/.companion/config.json"
+MCP_ENTRY="${COMPANION_MCP_ENTRY:-$MCP_DIR/dist/index.js}"
+CONFIG="${COMPANION_CONFIG:-$HOME/.companion/config.json}"
 MCP_SERVERS="$HOME/.companion/mcp-servers.json"
 TMUX_SESSION="concierge"
 
@@ -54,11 +57,35 @@ command -v node >/dev/null 2>&1 || { err "node is not installed."; exit 1; }
 
 CLAUDE_BIN="$(command -v claude || true)"
 if [ -z "$CLAUDE_BIN" ]; then
-  err "the 'claude' CLI is not on PATH. Install it or add it to PATH."
+  if [ -n "${COMPANION_CONTAINER:-}" ]; then
+    err "Claude Code is not installed in this container yet: docker compose run --rm companion setup-claude"
+  else
+    err "the 'claude' CLI is not on PATH. Install it or add it to PATH."
+  fi
+  exit 1
+fi
+if [ ! -f "$CONCIERGE_DIR/.mcp.json.template" ]; then
+  err "no concierge directory at $CONCIERGE_DIR (missing .mcp.json.template)."
   exit 1
 fi
 
 # --- status subcommand ---
+if [ "${1:-}" = "check" ]; then
+  # Prerequisites only (the Docker smoke test): no session is started.
+  [ -f "$MCP_ENTRY" ] || { err "MCP entry missing: $MCP_ENTRY"; exit 1; }
+  # The MCP server answers an MCP initialize over stdio (throwaway config/origin files).
+  tmpd="$(mktemp -d)"
+  init='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"concierge-check","version":"0"}}}'
+  out="$(printf '%s\n' "$init" | COMPANION_MCP_CONFIG="$tmpd/none.json" COMPANION_MCP_ORIGIN_FILE="$tmpd/origin" \
+    timeout 15 node "$MCP_ENTRY" 2>/dev/null || true)"
+  rm -rf "$tmpd"
+  case "$out" in
+    *'"serverInfo"'*) ;;
+    *) err "the companion-remote MCP at $MCP_ENTRY did not answer an initialize request."; exit 1 ;;
+  esac
+  echo "concierge: ready (dir $CONCIERGE_DIR, claude $CLAUDE_BIN, mcp $MCP_ENTRY)"
+  exit 0
+fi
 if [ "${1:-}" = "status" ]; then
   if tmux has-session -t "$TMUX_SESSION" 2>/dev/null; then
     echo "concierge session is RUNNING (tmux: $TMUX_SESSION)"
@@ -82,6 +109,10 @@ for arg in "$@"; do
 done
 
 # --- build the MCP server if missing ---
+if [ ! -f "$MCP_ENTRY" ] && [ -n "${COMPANION_MCP_ENTRY:-}" ]; then
+  err "the companion-remote MCP is missing at $MCP_ENTRY."
+  exit 1
+fi
 if [ ! -f "$MCP_ENTRY" ]; then
   echo "Building companion-remote MCP server (one-time)..."
   ( cd "$MCP_DIR" && npm install && npm run build ) \
@@ -157,7 +188,12 @@ SEED_OUT="$(seed_local_server)" || {
 if echo "$SEED_OUT" | grep -q DISPATCH_DISABLED; then
   echo "WARNING: the local daemon does NOT have the 'dispatch' capability enabled."
   echo "         The concierge needs it to send_input to project sessions."
-  echo "         Enable with: bin/companion enable-remote --dispatch (plus your other caps)"
+  if [ -n "${COMPANION_CONTAINER:-}" ]; then
+    echo "         Enable with: docker compose exec companion companion enable-remote --enable dispatch"
+    echo "         then: bin/docker restart"
+  else
+    echo "         Enable with: bin/companion enable-remote --enable dispatch (plus your other caps)"
+  fi
   echo ""
 fi
 

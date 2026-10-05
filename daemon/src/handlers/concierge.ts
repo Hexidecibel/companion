@@ -60,13 +60,19 @@ function getOrigin(client: AuthenticatedClient, listenerTls: boolean) {
 /**
  * Locate the concierge directory (containing .mcp.json.template). Resolution order:
  *   1. config.concierge_dir if set
- *   2. walk up from __dirname looking for <dir>/concierge/.mcp.json.template
- *   3. fall back to /home/hexi/local/src/companion/concierge
- * Logs which path was chosen.
+ *   2. COMPANION_CONCIERGE_DIR (the Docker image: a writable copy in the
+ *      ~/.companion volume, seeded from /app/concierge by start-daemon.sh)
+ *   3. walk up from the daemon's install dir looking for <dir>/concierge/.mcp.json.template
+ * Returns null when none has the template.
  */
-function resolveConciergeDir(ctx: HandlerContext): string {
-  const configured = ctx.config.concierge_dir;
-  if (configured && fs.existsSync(path.join(configured, '.mcp.json.template'))) {
+export function resolveConciergeDir(
+  configured: string | undefined,
+  env: NodeJS.ProcessEnv = process.env,
+  startDir: string = __dirname,
+  exists: (p: string) => boolean = fs.existsSync
+): string | null {
+  const hasTemplate = (d: string) => exists(path.join(d, '.mcp.json.template'));
+  if (configured && hasTemplate(configured)) {
     console.log(`[concierge] using configured concierge_dir: ${configured}`);
     return configured;
   }
@@ -75,27 +81,34 @@ function resolveConciergeDir(ctx: HandlerContext): string {
       `[concierge] config.concierge_dir=${configured} has no .mcp.json.template; falling back to discovery`
     );
   }
+  const fromEnv = (env.COMPANION_CONCIERGE_DIR || '').trim();
+  if (fromEnv && path.isAbsolute(fromEnv) && hasTemplate(fromEnv)) {
+    console.log(`[concierge] using COMPANION_CONCIERGE_DIR: ${fromEnv}`);
+    return fromEnv;
+  }
 
-  let dir = __dirname;
+  let dir = startDir;
   for (let i = 0; i < 12; i++) {
-    const candidate = path.join(dir, 'concierge', '.mcp.json.template');
-    if (fs.existsSync(candidate)) {
-      const resolved = path.join(dir, 'concierge');
-      console.log(`[concierge] discovered concierge dir by walking up: ${resolved}`);
-      return resolved;
+    const candidate = path.join(dir, 'concierge');
+    if (hasTemplate(candidate)) {
+      console.log(`[concierge] discovered concierge dir by walking up: ${candidate}`);
+      return candidate;
     }
     const parent = path.dirname(dir);
     if (parent === dir) break;
     dir = parent;
   }
-
-  const fallback = '/home/hexi/local/src/companion/concierge';
-  console.warn(`[concierge] using hardcoded fallback concierge dir: ${fallback}`);
-  return fallback;
+  return null;
 }
 
-/** Resolve the path to the built MCP entry (mcp/dist/index.js) relative to the concierge dir's repo root. */
-function resolveMcpEntry(conciergeDir: string): string {
+/**
+ * The built companion-remote MCP entry: COMPANION_MCP_ENTRY (the image ships
+ * it at /app/mcp/dist/index.js), else <repo>/mcp/dist/index.js next to the
+ * concierge dir.
+ */
+export function resolveMcpEntry(conciergeDir: string, env: NodeJS.ProcessEnv = process.env): string {
+  const fromEnv = (env.COMPANION_MCP_ENTRY || '').trim();
+  if (fromEnv && path.isAbsolute(fromEnv)) return fromEnv;
   const repoRoot = path.dirname(conciergeDir);
   return path.join(repoRoot, 'mcp', 'dist', 'index.js');
 }
@@ -129,7 +142,7 @@ function syncMcpServers(ctx: HandlerContext, pushed: PushedServer[]): { written:
     fs.mkdirSync(dir, { recursive: true });
   }
 
-  let mcp: { version: number; servers: PushedServer[] } = { version: 1, servers: [] };
+  const mcp: { version: number; servers: PushedServer[] } = { version: 1, servers: [] };
   try {
     const raw = JSON.parse(fs.readFileSync(mcpPath, 'utf-8'));
     if (raw && typeof raw === 'object') {
@@ -291,7 +304,13 @@ export function registerConciergeHandlers(ctx: HandlerContext): Record<string, M
         return;
       }
 
-      const conciergeDir = resolveConciergeDir(ctx);
+      const conciergeDir = resolveConciergeDir(ctx.config.concierge_dir);
+      if (!conciergeDir) {
+        sendError('concierge_not_found', {
+          detail: 'No concierge directory (set concierge_dir or COMPANION_CONCIERGE_DIR)',
+        });
+        return;
+      }
 
       // 1. Sync the MCP config first if a server list was pushed.
       if (servers) {
@@ -319,8 +338,14 @@ export function registerConciergeHandlers(ctx: HandlerContext): Record<string, M
         }
 
         // Render the project-scoped .mcp.json so the concierge gets the routing tools.
+        const mcpEntry = resolveMcpEntry(conciergeDir);
+        if (!fs.existsSync(mcpEntry)) {
+          sendError('mcp_not_found', {
+            detail: `companion-remote MCP is not built: ${mcpEntry} (cd mcp && npm install && npm run build)`,
+          });
+          return;
+        }
         try {
-          const mcpEntry = resolveMcpEntry(conciergeDir);
           renderConciergeMcpJson(conciergeDir, mcpEntry);
         } catch (err) {
           sendError('mcp_render_failed', { detail: String((err as Error).message || err) });

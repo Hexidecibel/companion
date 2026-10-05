@@ -9,6 +9,8 @@
 #   pair-code       Show the latest pairing code from the logs
 #   setup-claude    Install / upgrade Claude Code into the container's volume
 #   claude [args]   Run Claude Code in the container (first time: type /login)
+#   concierge [args] The concierge session (needs the dispatch capability; `check` tests the prerequisites)
+#   exec CMD [args] Run a command in the container, as the companion user
 #   shell           A shell in the container, as the companion user
 #   status          Containers, health and the /health answer
 #   update          Pull the newest image (or rebuild) and recreate
@@ -158,6 +160,10 @@ case "$cmd" in
   pair-code) cmd_pair_code ;;
   setup-claude) compose run --rm companion setup-claude "$@" ;;
   claude) compose exec companion claude "$@" ;;
+  concierge|exec)
+    tty=(); [ -t 0 ] && [ -t 1 ] || tty=(-T)
+    if [ "$cmd" = concierge ]; then set -- concierge "$@"; fi
+    compose exec "${tty[@]}" -u companion companion /app/docker/as-companion "$@" ;;
   shell) compose exec -u companion companion bash -l ;;
   status) cmd_status ;;
   update)
@@ -173,6 +179,6 @@ case "$cmd" in
   build) cmd_build "$@" ;;
   backup) cmd_backup "$@" ;;
   restore) cmd_restore "$@" ;;
-  help|-h|--help) sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//' ;;
+  help|-h|--help) sed -n '2,26p' "$0" | sed 's/^# \{0,1\}//' ;;
   *) echo "Unknown command: $cmd (bin/docker help)"; exit 2 ;;
 esac

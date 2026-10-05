@@ -56,6 +56,8 @@ This pulls `ghcr.io/hexidecibel/companion:latest`, which is built for amd64 and 
 | `bin/docker pair-code` | The latest pairing code |
 | `bin/docker status` | Containers, health and `/health` |
 | `bin/docker claude` | Claude Code inside the container |
+| `bin/docker concierge [check]` | Start the concierge session, or check its prerequisites |
+| `bin/docker exec CMD` | Run a command in the container, as the companion user |
 | `bin/docker shell` | A shell inside the container, as the companion user |
 | `bin/docker setup-claude` | Install or upgrade Claude Code |
 | `bin/docker update` | Pull the newest image and recreate |
@@ -155,6 +157,18 @@ docker compose --profile voice up -d
 
 The image is about 750 MB. The first start downloads about 500 MB of models into the `voice-models` volume. It runs at nice 10 with the same thread caps as a host install (`HERALD_TTS_THREADS=6`, `HERALD_STT_THREADS=4`; change them in `.env`). Only the companion container talks to it: no port is published, and it has no auth of its own. The wizard's Herald step shows when it answers.
 
+## Concierge (optional)
+
+The concierge is a Claude session that routes your requests to your other project sessions, on this server or on other Companion servers. It is in the image: the companion-remote MCP server is at `/app/mcp`, and its folder is a copy in the `companion` volume (`/home/companion/.companion/concierge`). It needs Claude Code installed and signed in (above) and the **dispatch** capability, which is off by default:
+
+```bash
+docker compose exec companion companion enable-remote --enable dispatch
+bin/docker restart
+bin/docker concierge check      # claude, the concierge folder and the MCP server
+```
+
+Then open it from the app (the concierge button on the dashboard) or run `bin/docker concierge`. Edit `projects.json` in that folder (`bin/docker shell`) so each project's `cwd` points at its folder under `/home/companion/projects`. The routing rules (`CLAUDE.md`) follow the image on every start. The first time, Claude asks you to trust the folder and accept bypass-permissions mode: `docker compose exec companion tmux attach -t concierge`, accept, then detach with Ctrl-b d.
+
 ## Troubleshooting
 
 **Files in my projects belong to the wrong user / permission denied.** Set `PUID`/`PGID` in `.env` to `id -u`/`id -g` and run `docker compose up -d`. On start the container re-owns its own volumes when the ids change. Your projects folder is never re-owned. `PUID=0` (root) is refused because Claude Code will not run sessions in bypass-permissions mode as root.
@@ -171,6 +185,6 @@ The image is about 750 MB. The first start downloads about 500 MB of models into
 
 **The phone does not find the server under Nearby.** That is expected on the default bridge network. Use the QR code, or use host networking (above) on Linux.
 
-**Health.** `curl http://localhost:9877/health` answers `{"ok":true,"version":"1.0.NNN","setupComplete":true}`. Docker's healthcheck uses the same endpoint (`docker compose ps` shows `healthy`).
+**Health.** `curl http://localhost:9877/health` answers `{"ok":true,"version":"1.0.NNN","setupComplete":true}`. The version is the image's build number, the same `1.0.<commits>` scheme as the apps and host installs. Docker's healthcheck uses the same endpoint (`docker compose ps` shows `healthy`).
 
-**What is not in the image.** The concierge session (the owner's multi-server MCP setup) and the native app builds. Native apps come from the public feed.
+**What is not in the image.** Claude Code itself (it installs into the `local` volume) and the native app builds. Native apps come from the public feed.
