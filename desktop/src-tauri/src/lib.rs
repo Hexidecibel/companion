@@ -1,5 +1,6 @@
 #[cfg(desktop)]
 mod desktop;
+mod external_links;
 #[cfg(desktop)]
 mod herald;
 #[cfg(desktop)]
@@ -44,47 +45,9 @@ pub fn run() {
         .plugin(tauri_plugin_herald_native::init())
         .plugin(tauri_plugin_store::Builder::default().build());
 
-    // On mobile, intercept external link navigation and open in system browser
-    #[cfg(mobile)]
-    {
-        builder = builder.plugin(
-            tauri::plugin::Builder::<tauri::Wry, ()>::new("external-links")
-                .on_navigation(|webview, url| {
-                    use tauri::Manager;
-
-                    let scheme = url.scheme();
-
-                    // Allow internal URLs
-                    if scheme == "tauri" || scheme == "asset" {
-                        return true;
-                    }
-
-                    if scheme == "http" || scheme == "https" {
-                        if let Some(host) = url.host_str() {
-                            // Allow local/dev URLs
-                            if host == "localhost"
-                                || host == "tauri.localhost"
-                                || host == "0.0.0.0"
-                                || host == "127.0.0.1"
-                            {
-                                return true;
-                            }
-                        }
-                        // Open in system browser on a background thread to avoid ANR
-                        let handle = webview.app_handle().clone();
-                        let url_string = url.as_str().to_string();
-                        std::thread::spawn(move || {
-                            use tauri_plugin_opener::OpenerExt;
-                            let _ = handle.opener().open_url(&url_string, None::<&str>);
-                        });
-                        return false;
-                    }
-
-                    true
-                })
-                .build(),
-        );
-    }
+    // Links never navigate a Companion webview away from the app: anything
+    // that is not our own origin opens in the system browser instead.
+    builder = builder.plugin(external_links::plugin());
 
     // Desktop-only plugins
     #[cfg(desktop)]
@@ -139,6 +102,13 @@ pub fn run() {
             #[cfg(desktop)]
             if let tauri::RunEvent::ExitRequested { .. } = _event {
                 updater::on_exit(_app);
+            }
+            // macOS: a click on the Dock icon brings the main window back
+            // (Cmd+W only hides it). `has_visible_windows` is no help: the
+            // floating orb counts as a visible window.
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Reopen { .. } = _event {
+                desktop::show_main_window(_app);
             }
         });
 }

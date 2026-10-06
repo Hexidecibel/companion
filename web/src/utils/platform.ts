@@ -180,35 +180,3 @@ export function initKeyboardHeightListener(): void {
   vv.addEventListener('resize', () => handler.handleResize(vv.height));
   // Do NOT set --app-height on init — let CSS 100dvh handle the default
 }
-
-/**
- * Install a global click interceptor for external links on Tauri.
- *
- * Links with target="_blank" trigger a new-window request which the Rust
- * navigation interceptor doesn't catch. Instead, we intercept clicks on
- * external <a> tags, prevent the default behavior, and do a same-window
- * navigation via window.location.href. The Rust interceptor catches the
- * same-window navigation, opens it in the system browser, and blocks it
- * so the webview stays on the app.
- */
-export function installExternalLinkHandler(): void {
-  if (!isTauri()) return;
-
-  document.addEventListener('click', (e) => {
-    const link = (e.target as HTMLElement).closest('a');
-    if (!link) return;
-
-    const href = link.getAttribute('href');
-    if (!href) return;
-
-    // Only intercept external URLs
-    if (!href.startsWith('http://') && !href.startsWith('https://')) return;
-
-    e.preventDefault();
-    e.stopPropagation();
-
-    // Trigger same-window navigation — Rust interceptor catches external URLs,
-    // opens them in the system browser, and blocks the navigation
-    window.location.href = href;
-  }, true);
-}

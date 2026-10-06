@@ -595,6 +595,10 @@ Follow-up fixes layered on the Mobile UX round above: walks back the activity-ro
 - **Doubled header inset fixed** — `.dashboard` already applies `var(--safe-top)`, and `.session-header-mobile` was applying it again, creating an excessive top band. Inset now applied once plus a 6px gap (`global.css` mobile media queries)
 - **Autolink URLs inside emphasis** — `MarkdownRenderer.tsx` previously stored bold/italic inner text as a raw string and never re-parsed it, so URLs inside `**…**` / `*…*` never became links. Bold/italic now carry children and recurse, so URLs (plus code/file links and nested emphasis) inside emphasis render as the accent link pill, enabling long-press → Open Link / Copy link
 
+## Desktop — links open in the browser, window comes back (2026-10-06)
+- Links in conversations (and "Report issue") open in the system browser on every platform; a native navigation guard keeps every Companion webview on the app, so a link can no longer strand the window on another site
+- The main window can always be brought back after closing or minimising it: Dock icon click (macOS), Window > "Show Companion", the tray item and a left-click on the tray icon
+
 ## Herald — calmer tones, error and pairing news (2026-10-05)
 - Tones only for what needs you by default (a question / approval waiting, a pair request); finished, risky changes, stuck and errors stay silent in the inbox unless enabled under "Tones for"
 - No tone for the session on screen or within a minute of using the app; at most one tone per 2 minutes (adjustable), later arrivals folded into it; no backlog when coming back or reconnecting

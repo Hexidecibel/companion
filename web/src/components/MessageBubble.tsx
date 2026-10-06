@@ -6,27 +6,12 @@ import { MarkdownRenderer, extractFilePaths } from './MarkdownRenderer';
 import { ContextMenu, ContextMenuEntry } from './ContextMenu';
 import { QuestionBlock, MultiQuestionFlow, ChoiceData, normalizeOptions } from './QuestionBlock';
 import { useFileExistence } from '../hooks/useFileExistence';
-import { isTauri, isTouchDevice } from '../utils/platform';
+import { isTouchDevice } from '../utils/platform';
 import { URL_RE, ensureProtocol, formatLinkDomain as formatLinkDomainShared, extractUrls, cleanUrl } from '../utils/urls';
 import { copyToClipboard } from '../utils/clipboard';
+import { openExternal } from '../utils/externalLinks';
 
 export type { ChoiceData } from './QuestionBlock';
-
-/**
- * Open external URL.
- * On Tauri, triggers a same-window navigation so the Rust-side interceptor
- * catches it, opens in the system browser, and blocks the navigation.
- * On regular browsers, uses window.open with target="_blank".
- */
-function openExternalUrl(url: string): void {
-  if (isTauri()) {
-    // Trigger same-window navigation — Rust interceptor catches external URLs,
-    // opens them in the system browser, and blocks the navigation
-    window.location.href = url;
-  } else {
-    window.open(url, '_blank');
-  }
-}
 
 const ARTIFACT_THRESHOLD = 100; // lines
 
@@ -311,7 +296,7 @@ export const MessageBubble = memo(function MessageBubble({ message, onSelectOpti
     if (ctx.type === 'link' && ctx.href) {
       items.push({
         label: 'Open Link',
-        onClick: () => openExternalUrl(ctx.href!),
+        onClick: () => void openExternal(ctx.href!),
       });
       items.push({
         label: 'Copy link',

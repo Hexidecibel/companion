@@ -30,12 +30,28 @@ pub fn set_autostart_enabled(app: tauri::AppHandle, enabled: bool) -> Result<(),
     }
 }
 
+/// Show and focus the main window: the one way back after it was closed
+/// (closing only hides it, see `on_desktop_window_event`), minimised or left
+/// behind other apps. Tray, app menu, Dock icon, the orb and Herald's
+/// bring-to-front all come through here.
+pub fn show_main_window(app: &tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        crate::external_links::restore_if_stranded(&window);
+        let _ = window.show();
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+    }
+}
+
+/// Window > Show Companion (the tray's own item is "show").
+const MENU_SHOW_ID: &str = "show-main";
+
 fn toggle_window(window: &WebviewWindow) {
-    if window.is_visible().unwrap_or(false) {
+    // A minimised window still reports visible: bring it back, never hide it.
+    if window.is_visible().unwrap_or(false) && !window.is_minimized().unwrap_or(false) {
         let _ = window.hide();
     } else {
-        let _ = window.show();
-        let _ = window.set_focus();
+        show_main_window(window.app_handle());
     }
 }
 
@@ -108,6 +124,8 @@ pub fn setup_desktop(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Err
         .build()?;
 
     let window_menu = SubmenuBuilder::new(app, "Window")
+        .item(&MenuItemBuilder::with_id(MENU_SHOW_ID, "Show Companion").build(app)?)
+        .separator()
         .minimize()
         .item(
             &MenuItemBuilder::with_id("fullscreen", "Toggle Full Screen")
@@ -131,6 +149,7 @@ pub fn setup_desktop(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Err
             | "zoom-reset" | "fullscreen" => {
                 let _ = app_handle.emit("menu-event", id);
             }
+            MENU_SHOW_ID => show_main_window(&app_handle),
             updater::MENU_CHECK_ID => updater::spawn_check(&app_handle),
             _ => {}
         }
@@ -225,13 +244,7 @@ pub fn setup_desktop(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Err
                     herald::emit_value(app, "volume_set", v);
                 }
             }
-            "show" => {
-                if let Some(window) = app.get_webview_window("main") {
-                    let _ = window.show();
-                    let _ = window.unminimize();
-                    let _ = window.set_focus();
-                }
-            }
+            "show" => show_main_window(app),
             updater::TRAY_INSTALL_ID => {
                 if let Err(e) = updater::install_and_restart(app) {
                     eprintln!("[updater] {e}");
@@ -266,7 +279,9 @@ pub fn setup_desktop_plugins(builder: tauri::Builder<tauri::Wry>) -> tauri::Buil
 }
 
 pub fn on_desktop_window_event(window: &tauri::Window, event: &WindowEvent) {
-    // Hide window on close instead of quitting (tray keeps running)
+    // Hide window on close instead of quitting (tray keeps running). The
+    // webview stays alive (Herald hands-free, tones); `show_main_window`
+    // brings it back.
     if let WindowEvent::CloseRequested { api, .. } = event {
         let _ = window.hide();
         api.prevent_close();

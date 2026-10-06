@@ -1,4 +1,5 @@
 import { Component, ErrorInfo, ReactNode } from 'react';
+import { openExternal } from '../utils/externalLinks';
 
 const GITHUB_REPO = 'Hexidecibel/companion';
 const APP_VERSION = '0.1.0';
@@ -86,7 +87,7 @@ ${componentStack}
 
   private openGitHubIssue() {
     const url = this.buildGitHubIssueUrl();
-    window.open(url, '_blank', 'noopener,noreferrer');
+    void openExternal(url);
   }
 
   private retry() {

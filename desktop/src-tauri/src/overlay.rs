@@ -434,11 +434,7 @@ pub fn herald_overlay_action(app: AppHandle, action: String) {
 }
 
 fn bring_main_to_front(app: &AppHandle) {
-    if let Some(w) = app.get_webview_window("main") {
-        let _ = w.show();
-        let _ = w.unminimize();
-        let _ = w.set_focus();
-    }
+    crate::desktop::show_main_window(app);
 }
 
 /// "Hey Jarvis" or a trigger: show and focus the Companion window (the web
