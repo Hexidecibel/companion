@@ -38,6 +38,11 @@ export interface HeraldConfigBlock {
   voice_enabled?: boolean;
   /** Optional monthly API budget in USD: 80% warns once, 100% switches to the fallback brain. */
   monthly_budget_usd?: number;
+  /**
+   * Model for the session babysitter's decisions only (provider=anthropic;
+   * default claude-sonnet-5-5). Herald's conversation stays on `model`.
+   */
+  babysit_model?: string;
   /** Prompt caching of the stable prefix (tools + system). Default true. */
   prompt_cache?: boolean;
   /** Cache lifetime: "5m" (default, writes 1.25x) or "1h" (writes 2x; pays off with 5-60 min gaps). */
@@ -97,6 +102,11 @@ export interface ResolvedHeraldConfig {
   pricing?: Record<string, PricingRates>;
   /** Remote-trigger trust settings. */
   trigger?: ResolvedTriggerConfig;
+  /**
+   * Model for babysitter decisions (anthropic provider only; undefined = the
+   * main model, which is what every other provider uses).
+   */
+  babysitModel?: string;
 }
 
 export interface ResolvedTriggerConfig {
@@ -107,6 +117,8 @@ export interface ResolvedTriggerConfig {
 
 export const DEFAULT_DISPLAY_NAME = 'Herald';
 export const DEFAULT_ANTHROPIC_MODEL = 'claude-haiku-4-5';
+/** The babysitter decides with a stronger model than the chat (rate in usage.ts DEFAULT_PRICING). */
+export const DEFAULT_BABYSIT_MODEL = 'claude-sonnet-5-5';
 export const DEFAULT_ECHO_DELAY_MS = 5000;
 export const MIN_ECHO_DELAY_MS = 1500;
 export const MAX_ECHO_DELAY_MS = 60_000;
@@ -135,6 +147,8 @@ export function parseHeraldConfigBlock(raw: unknown): HeraldConfigBlock | undefi
   }
   if (typeof r.base_url === 'string' && r.base_url.trim()) out.base_url = r.base_url.trim();
   if (typeof r.model === 'string' && r.model.trim()) out.model = r.model.trim();
+  if (typeof r.babysit_model === 'string' && r.babysit_model.trim())
+    out.babysit_model = r.babysit_model.trim().slice(0, 120);
   if (typeof r.echo_delay_ms === 'number') out.echo_delay_ms = r.echo_delay_ms;
   if (typeof r.timeout_ms === 'number') out.timeout_ms = r.timeout_ms;
   if (typeof r.max_tokens === 'number') out.max_tokens = r.max_tokens;
@@ -278,6 +292,7 @@ export function resolveHeraldConfig(
     ...(b.prompt_cache === false ? {} : { promptCache: { ttl: b.cache_ttl || '5m' } }),
     pricing: resolvePricing(b.model || (provider === 'anthropic' ? DEFAULT_ANTHROPIC_MODEL : ''), b.pricing),
     trigger: resolveTriggerConfig(b),
+    ...(provider === 'anthropic' ? { babysitModel: b.babysit_model || DEFAULT_BABYSIT_MODEL } : {}),
   };
 
   if (!featureEnabled) {

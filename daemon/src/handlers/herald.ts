@@ -1,5 +1,7 @@
 import { AuthenticatedClient, HandlerContext, MessageHandler } from '../handler-context';
 import { HeraldRequestError } from '../herald/service';
+import { BabysitError } from '../herald/babysit/manager';
+import type { HeraldBabysitErrorCode } from '../herald/protocol';
 import { VoiceError } from '../herald/voice/service';
 import type { AuditOrigin } from '../audit-log';
 import type { TriggerSource } from '../herald/trigger';
@@ -145,7 +147,48 @@ export function registerHeraldHandlers(ctx: HandlerContext): Record<string, Mess
       }
     })();
 
+  /**
+   * Babysit requests: failures carry `payload.code` (HeraldBabysitErrorCode).
+   * A brief makes Herald type into a session, so narrowed credentials need the
+   * dispatch capability (like stuck_ask / stuck_interrupt).
+   */
+  const babysitReply = (
+    client: AuthenticatedClient,
+    type: string,
+    requestId: string | undefined,
+    run: () => unknown | Promise<unknown>
+  ) =>
+    (async () => {
+      const fail = (code: HeraldBabysitErrorCode, error: string) =>
+        ctx.send(client.ws, { type, success: false, error, payload: { code }, requestId });
+      if (!ctx.herald) return fail('unavailable', 'Herald is not available on this daemon');
+      const denied = client.originCredential ? ctx.requireRemoteCapability(client, 'dispatch') : null;
+      if (denied) return fail('forbidden', denied);
+      try {
+        const payload = await run();
+        ctx.send(client.ws, { type, success: true, payload, requestId });
+      } catch (err) {
+        if (err instanceof BabysitError) return fail(err.code, err.message);
+        console.error(`Herald: ${type} failed:`, err);
+        fail('unavailable', `Internal error handling ${type}`);
+      }
+    })();
+
   return {
+    /** Start babysitting a session, or edit its brief. See HeraldBabysitSetRequest. */
+    herald_babysit_set(client, payload, requestId) {
+      return babysitReply(client, 'herald_babysit_set', requestId, () =>
+        ctx.herald!.setBabysit(payload, auditOrigin(ctx, client))
+      );
+    },
+
+    /** Stop one brief, or all of them. See HeraldBabysitStopRequest. */
+    herald_babysit_stop(client, payload, requestId) {
+      return babysitReply(client, 'herald_babysit_stop', requestId, () =>
+        ctx.herald!.stopBabysit(payload, auditOrigin(ctx, client))
+      );
+    },
+
     herald_get_state(client, _payload, requestId) {
       return reply(client, 'herald_get_state', requestId, () => ctx.herald!.getState());
     },

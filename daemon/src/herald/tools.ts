@@ -8,7 +8,13 @@
 
 import type { LlmToolSpec } from './llm/provider';
 import type { PendingChoice, SessionSnapshot, SessionSource } from './session-source';
-import type { HeraldAction, HeraldSessionRef, HeraldShowResult } from './protocol';
+import {
+  HERALD_BABYSIT_LIMITS,
+  type HeraldAction,
+  type HeraldBabysit,
+  type HeraldSessionRef,
+  type HeraldShowResult,
+} from './protocol';
 import { deviceNotFoundLine, type DeviceAliasResult } from './device-alias';
 import type { ActionManager } from './actions';
 import {
@@ -340,8 +346,75 @@ TOOL_SPECS.push({
   },
 });
 
+/**
+ * Session babysitter. Static specs (the prompt prefix stays cacheable): live
+ * brief state reaches the brain through the fleet snapshot and babysit_status.
+ */
+export const BABYSIT_TOOL_SPECS: LlmToolSpec[] = [
+  {
+    name: 'propose_babysit',
+    description:
+      'Propose babysitting one session: a standing brief under which you answer its simple questions yourself ("want me to continue?", and choices the brief clearly settles), bring every real judgment call to the user with a suggested answer, and never answer permission prompts or anything risky. ' +
+      'Only when the user asks for it ("babysit Out4 until it is production ready", "keep Docs going, prefer the simple fix"). It never starts without the user confirming on the card or saying the confirm phrase. ' +
+      "Put the user's goal and leanings in their own words; add nothing they did not say.",
+    parameters: {
+      type: 'object',
+      properties: {
+        session: SESSION_PROP,
+        goal: {
+          type: 'string',
+          description: 'What the session should get done, in the user\'s words.',
+          maxLength: HERALD_BABYSIT_LIMITS.maxGoalChars,
+        },
+        direction: {
+          type: 'string',
+          description:
+            'Which way to lean when it offers a choice, if the user said ("prefer the smaller change", "keep the existing API").',
+          maxLength: HERALD_BABYSIT_LIMITS.maxDirectionChars,
+        },
+        never: {
+          type: 'string',
+          description:
+            'Things the user said you must never decide ("anything about pricing", "the database schema").',
+          maxLength: HERALD_BABYSIT_LIMITS.maxNeverChars,
+        },
+        minutes: {
+          type: 'integer',
+          description: 'Time limit in minutes if the user gave one (default 120, at most 480).',
+        },
+        max_answers: {
+          type: 'integer',
+          description: 'How many answers you may send if the user gave a number (default 20, at most 50).',
+        },
+      },
+      required: ['session', 'goal'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'stop_babysit',
+    description:
+      'Stop babysitting a session at once ("stop babysitting Out4", "I\'ll take Docs from here"). Omit session to stop every brief. Nothing is sent to the session.',
+    parameters: {
+      type: 'object',
+      properties: { session: { ...SESSION_PROP, description: 'Only this session (optional).' } },
+      required: [],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'babysit_status',
+    description:
+      'What you are babysitting: each brief with its goal, answers sent, questions brought to the user, time left and the last few things you answered. Use for "what are you babysitting?", "what did you tell Out4?".',
+    parameters: { type: 'object', properties: {}, additionalProperties: false },
+  },
+];
+
+TOOL_SPECS.push(...BABYSIT_TOOL_SPECS);
+
 /** Tools that create an action: never executed in an iteration with malformed calls. */
 export const ACTION_TOOLS = new Set([
+  'propose_babysit',
   'propose_input',
   'propose_cush_command',
   'propose_interrupt',
@@ -442,7 +515,10 @@ export function validateToolCall(name: string, rawArgs: string): ValidationResul
 function example(name: string): string {
   switch (name) {
     case 'list_sessions':
+    case 'babysit_status':
       return '{}';
+    case 'propose_babysit':
+      return '{"session": "Out4", "goal": "get the release build passing"}';
     case 'propose_input':
       return '{"session": "companion", "option": "2"}';
     case 'cush_status':
@@ -508,6 +584,12 @@ export interface ToolEnv {
   stuck?: {
     list(sessionId?: string): StuckFinding[];
     snooze(sessionId: string, kind: StuckKind | undefined, minutes: number): number;
+  };
+  /** Session babysitter. Absent = the babysit tools report unavailable. */
+  babysit?: {
+    list(): HeraldBabysit[];
+    /** Stop one session's brief (`serverId:sessionId`), or all (null). Returns what stopped. */
+    stop(sessionKey: string | null): HeraldBabysit[];
   };
   /** Code Review digests. Absent = review_changes reports unavailable. */
   review?: {
@@ -756,6 +838,71 @@ export async function executeTool(
 
       case 'propose_interrupt':
         return await proposeInterrupt(args, env, state);
+
+      case 'propose_babysit':
+        return await proposeBabysit(args, env, state);
+
+      case 'stop_babysit': {
+        if (!env.babysit) return err('Babysitting is not available on this server.');
+        let key: string | null = null;
+        let name = '';
+        if (typeof args.session === 'string' && args.session.trim()) {
+          const r = await resolveFresh(env, args.session, state);
+          if (!r.ok) return err(r.error);
+          key = sessionKey(r.session);
+          name = r.session.sessionName;
+        }
+        const stopped = env.babysit.stop(key);
+        if (!stopped.length)
+          return ok({
+            stopped: [],
+            instruction: name
+              ? `You were not babysitting ${name}. Say so in a few words.`
+              : 'You were not babysitting anything. Say so in a few words.',
+          });
+        return ok({
+          stopped: stopped.map((b) => ({ session: b.sessionName, answers_sent: b.answersUsed })),
+          instruction:
+            'Stopped: you answer nothing more for these sessions. Confirm in a few words, e.g. "Okay, Out4 is yours again."',
+        });
+      }
+
+      case 'babysit_status': {
+        if (!env.babysit) return err('Babysitting is not available on this server.');
+        const now = env.now();
+        const list = env.babysit.list();
+        for (const b of list)
+          state.sessionRefs.set(sessionKey(b), {
+            serverId: b.serverId,
+            sessionId: b.sessionId,
+            sessionName: b.sessionName,
+          });
+        const view = (b: HeraldBabysit) => ({
+          session: b.sessionName,
+          goal: clip(oneLine(b.goal), 200),
+          direction: b.direction ? clip(oneLine(b.direction), 200) : undefined,
+          never_decide: b.never ? clip(oneLine(b.never), 200) : undefined,
+          answers_sent: `${b.answersUsed} of ${b.maxAnswers}`,
+          brought_to_user: b.escalations,
+          time_left: b.status === 'active' ? formatAgo(Math.max(0, b.expiresAt - now)) : undefined,
+          ended: b.status === 'ended' ? b.endReason : undefined,
+          suggests_only: b.autoSend === false || undefined,
+          recent: b.log.slice(-4).map((e) => ({
+            what: e.kind === 'answered' ? 'you answered' : e.kind === 'user' ? 'the user answered' : e.kind === 'done' ? 'goal reported done' : 'brought to the user',
+            asked: clip(oneLine(e.question), 160),
+            answer: e.answer ? clip(oneLine(e.answer), 120) : undefined,
+            ago: formatAgo(now - e.at),
+          })),
+        });
+        const active = list.filter((b) => b.status === 'active');
+        return safeOk({
+          babysitting: active.map(view),
+          recently_ended: list.filter((b) => b.status === 'ended').map(view),
+          instruction: active.length
+            ? 'One short sentence per session: what it is working toward and how many answers you have sent. Mention an answer only if asked.'
+            : 'You are not babysitting anything right now. Say so in a few words.',
+        });
+      }
 
       case 'propose_spawn_session':
         return await proposeSpawn(args, env, state);
@@ -1083,6 +1230,100 @@ function batchPhrases(state: TurnToolState): Record<string, string> | undefined 
   const held = state.proposals.filter((p) => p.tier === 'hard_confirm' && p.confirmPhrase);
   if (!held.length) return undefined;
   return Object.fromEntries(held.map((p) => [p.sessionName, p.confirmPhrase as string]));
+}
+
+async function proposeBabysit(
+  args: Record<string, unknown>,
+  env: ToolEnv,
+  state: TurnToolState
+): Promise<ToolOutcome> {
+  if (!env.babysit) return err('Babysitting is not available on this server.');
+  if (state.proposals.length >= MAX_PROPOSALS_PER_TURN) {
+    return err(
+      `At most ${MAX_PROPOSALS_PER_TURN} actions per request. Ask the user to handle the rest one at a time.`
+    );
+  }
+  const r = await resolveFresh(env, String(args.session), state);
+  if (!r.ok) return err(r.error);
+  const s = r.session;
+  if (s.inactive) return err(`${s.sessionName} is closed; there is nothing to babysit.`);
+  const key = sessionKey(s);
+  if (state.proposals.some((p) => p.sessionKey === key)) {
+    return err(
+      `You already proposed an action for ${s.sessionName} in this request. One action per session per request.`
+    );
+  }
+  const L = HERALD_BABYSIT_LIMITS;
+  const text = (v: unknown) => (typeof v === 'string' ? oneLine(v) : '');
+  const goal = text(args.goal);
+  if (goal.length < L.minGoalChars)
+    return err('The goal is missing. Ask the user what the session should get done.');
+  const direction = text(args.direction);
+  const never = text(args.never);
+  const int = (v: unknown, def: number, min: number, max: number) =>
+    typeof v === 'number' && Number.isFinite(v) ? Math.min(max, Math.max(min, Math.round(v))) : def;
+  const minutes = int(args.minutes, L.defaultMinutes, L.minMinutes, L.maxMinutes);
+  const maxAnswers = int(args.max_answers, L.defaultMaxAnswers, 1, L.maxMaxAnswers);
+  const editing = env.babysit.list().some((b) => b.status === 'active' && sessionKey(b) === key);
+  // One pending start per session: a re-worded goal replaces the older card.
+  for (const a of env.actions.list()) {
+    if (
+      a.status === 'pending' &&
+      a.kind === 'babysit_start' &&
+      a.serverId === s.serverId &&
+      a.sessionId === s.sessionId
+    )
+      env.actions.cancel(a.id);
+  }
+  const span = minutes % 60 === 0 ? `${minutes / 60} hour${minutes === 60 ? '' : 's'}` : `${minutes} minutes`;
+  const action = env.actions.create({
+    // Always confirmed: a misheard goal must never start answering a session.
+    tier: 'hard_confirm',
+    reasons: [
+      `I would answer ${s.sessionName}'s simple questions for you (up to ${maxAnswers}, for ${span})`,
+      ...(direction ? [`Lean: ${clip(direction, 160)}`] : []),
+      ...(never ? [`Never decide: ${clip(never, 160)}`] : []),
+    ],
+    kind: 'babysit_start',
+    serverId: s.serverId,
+    sessionId: s.sessionId,
+    sessionName: s.sessionName,
+    payload: goal,
+    readback: `${editing ? 'Update babysitting' : 'Babysit'} ${s.sessionName}: "${clip(goal, 100)}"`,
+    meta: {
+      babysit: {
+        serverId: s.serverId,
+        sessionId: s.sessionId,
+        sessionName: s.sessionName,
+        goal,
+        ...(direction ? { direction } : {}),
+        ...(never ? { never } : {}),
+        minutes,
+        maxAnswers,
+      },
+      userText: state.userText,
+    },
+  });
+  state.proposals.push({
+    actionId: action.id,
+    sessionKey: key,
+    sessionName: s.sessionName,
+    tier: action.tier,
+    confirmPhrase: action.confirmPhrase,
+  });
+  return ok({
+    action_id: action.id,
+    tier: action.tier,
+    readback: action.readback,
+    time_limit: span,
+    max_answers: maxAnswers,
+    confirm_phrase: action.confirmPhrase,
+    instruction:
+      `Nothing has started. In one or two short sentences read the goal back and say you would answer its simple questions, for ${span} at most, and bring anything else to them. ` +
+      (action.confirmPhrase
+        ? `They confirm by holding the card or by saying "${action.confirmPhrase}": say "say '${action.confirmPhrase}' to go ahead" (phrase mid-sentence, never last). A plain "yes" does not confirm it.`
+        : 'They confirm on the card.'),
+  });
 }
 
 async function proposeInterrupt(

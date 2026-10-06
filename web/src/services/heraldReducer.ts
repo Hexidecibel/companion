@@ -6,6 +6,7 @@
  */
 import type {
   HeraldAction,
+  HeraldBabysit,
   HeraldEvent,
   HeraldInboxItem,
   HeraldMessage,
@@ -36,6 +37,8 @@ export type HeraldClientAction =
   | { type: 'optimistic_add'; message: HeraldMessage }
   | { type: 'optimistic_remove'; id: string }
   | { type: 'action_result'; action: HeraldAction }
+  /** Briefs returned by herald_babysit_set / herald_babysit_stop (the broadcast follows). */
+  | { type: 'babysit_result'; babysits: HeraldBabysit[] }
   | { type: 'mark_heard_local'; ids: string[] }
   | { type: 'error'; error: string }
   | { type: 'clear_error' }
@@ -85,6 +88,18 @@ function upsertAction(list: HeraldAction[], action: HeraldAction): HeraldAction[
   if (idx === -1) return [...list, action];
   const next = list.slice();
   next[idx] = action;
+  return next;
+}
+
+/** Fold changed briefs into the list by id (new ones go last, like the hub's order). */
+export function upsertBabysits(list: HeraldBabysit[], changed: HeraldBabysit[]): HeraldBabysit[] {
+  if (changed.length === 0) return list;
+  const next = list.slice();
+  for (const b of changed) {
+    const idx = next.findIndex((x) => x.id === b.id);
+    if (idx === -1) next.push(b);
+    else next[idx] = b;
+  }
   return next;
 }
 
@@ -179,6 +194,8 @@ function applyEvent(state: HeraldClientState, event: HeraldEvent, receivedAt: nu
       return { ...state, server: { ...server, verbosity: event.verbosity } };
     case 'pronunciations':
       return { ...state, server: { ...server, pronunciations: event.pronunciations } };
+    case 'babysits':
+      return { ...state, server: { ...server, babysits: Array.isArray(event.babysits) ? event.babysits : [] } };
     case 'devices':
       return { ...state, server: { ...server, activeDevice: event.activeDevice, devices: event.devices } };
     case 'usage':
@@ -203,6 +220,11 @@ export function heraldReducer(state: HeraldClientState, action: HeraldClientActi
     case 'action_result': {
       const server = state.server ?? emptyServerState();
       return { ...state, server: { ...server, actions: upsertAction(server.actions, action.action) } };
+    }
+    case 'babysit_result': {
+      // An older hub never reports briefs: nothing to fold into.
+      if (!state.server || state.server.babysits === undefined) return state;
+      return { ...state, server: { ...state.server, babysits: upsertBabysits(state.server.babysits, action.babysits) } };
     }
     case 'mark_heard_local': {
       if (!state.server) return state;

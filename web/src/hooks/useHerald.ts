@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useReducer, useRef, useMemo } from 'react';
-import type { HeraldAction, HeraldEvent, HeraldInputMode, HeraldShowRequest, HeraldShowResult, HeraldIntent, HeraldMessage, HeraldPronunciation, HeraldState, HeraldUsageSummary, HeraldVerbosity } from '../types/herald';
+import type { HeraldAction, HeraldBabysit, HeraldBabysitErrorCode, HeraldBabysitSetRequest, HeraldBabysitStopRequest, HeraldEvent, HeraldInputMode, HeraldShowRequest, HeraldShowResult, HeraldIntent, HeraldMessage, HeraldPronunciation, HeraldState, HeraldUsageSummary, HeraldVerbosity } from '../types/herald';
 import {
   heraldReducer,
   initialHeraldClientState,
@@ -18,6 +18,15 @@ const SEND_TIMEOUT = 20000;
 /** Daemon answers unknown request types with this; means the hub predates Herald. */
 function isUnsupportedError(err: string | undefined): boolean {
   return !!err && /unknown message type/i.test(err);
+}
+
+/** Plain words for a failed babysit request (`payload.code` is a HeraldBabysitErrorCode). */
+export function babysitErrorText(res: { error?: string; payload?: unknown }, fallback: string): string {
+  if (isUnsupportedError(res.error)) return 'This hub is too old for babysitting';
+  const code = (res.payload as { code?: HeraldBabysitErrorCode } | undefined)?.code;
+  if (code === 'forbidden') return 'This device is not allowed to do that (it needs the dispatch permission)';
+  if (code === 'unavailable') return res.error || 'Herald is not set up on this hub';
+  return res.error || fallback;
 }
 
 function errorText(err: unknown, fallback: string): string {
@@ -50,6 +59,10 @@ export interface UseHeraldReturn {
   setBudget: (monthlyUsd: number | null | undefined) => Promise<string | null>;
   /** Replace the voice's pronunciation list on the hub. Resolves an error, or null. */
   setPronunciations: (list: HeraldPronunciation[]) => Promise<string | null>;
+  /** Start babysitting a session, or edit its active brief. Resolves an error, or null. */
+  setBabysit: (req: HeraldBabysitSetRequest) => Promise<string | null>;
+  /** Stop one brief (by id or session), or all of them. Resolves an error, or null. */
+  stopBabysit: (req: HeraldBabysitStopRequest) => Promise<string | null>;
   confirm: (actionId: string, decision: 'confirm' | 'cancel') => Promise<HeraldAction | null>;
   /** Confirm a red card by its spoken phrase; the hub verifies it. `error` is sayable. */
   confirmByVoice: (actionId: string, phrase: string, streamId?: string) => Promise<{ action: HeraldAction | null; error: string | null }>;
@@ -338,6 +351,34 @@ export function useHerald(serverId: string | null): UseHeraldReturn {
     }
   }, []);
 
+  const setBabysit = useCallback(async (req: HeraldBabysitSetRequest): Promise<string | null> => {
+    const t = transportRef.current;
+    if (!t || !t.isConnected()) return 'Not connected to the Herald host';
+    try {
+      const res = await t.request('herald_babysit_set', req);
+      if (!res.success) return babysitErrorText(res, 'Could not start babysitting');
+      const babysit = (res.payload as { babysit?: HeraldBabysit } | undefined)?.babysit;
+      if (babysit) dispatch({ type: 'babysit_result', babysits: [babysit] });
+      return null;
+    } catch (err) {
+      return errorText(err, 'Could not start babysitting');
+    }
+  }, []);
+
+  const stopBabysit = useCallback(async (req: HeraldBabysitStopRequest): Promise<string | null> => {
+    const t = transportRef.current;
+    if (!t || !t.isConnected()) return 'Not connected to the Herald host';
+    try {
+      const res = await t.request('herald_babysit_stop', req);
+      if (!res.success) return babysitErrorText(res, 'Could not stop babysitting');
+      const stopped = (res.payload as { stopped?: HeraldBabysit[] } | undefined)?.stopped;
+      if (Array.isArray(stopped)) dispatch({ type: 'babysit_result', babysits: stopped });
+      return null;
+    } catch (err) {
+      return errorText(err, 'Could not stop babysitting');
+    }
+  }, []);
+
   const getTransport = useCallback(() => transportRef.current, []);
   const clearError = useCallback(() => dispatch({ type: 'clear_error' }), []);
   const refresh = useCallback(() => { void fetchState(); }, [fetchState]);
@@ -356,6 +397,8 @@ export function useHerald(serverId: string | null): UseHeraldReturn {
     setVerbosity,
     setBudget,
     setPronunciations,
+    setBabysit,
+    stopBabysit,
     confirm,
     confirmByVoice,
     markHeard,

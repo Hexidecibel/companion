@@ -32,6 +32,10 @@ import { useBookmarks } from '../hooks/useBookmarks';
 import { BookmarkList } from './BookmarkList';
 import { FetchErrorBanner } from './FetchErrorBanner';
 import { StuckBanner } from './stuck/StuckBanner';
+import { BabysitBar } from './babysit/BabysitBar';
+import { BabysitBriefDialog } from './babysit/BabysitBriefDialog';
+import { BabysitHeaderButton } from './babysit/BabysitHeaderButton';
+import { useBabysit } from '../hooks/useBabysit';
 import { ComponentErrorBoundary } from './ComponentErrorBoundary';
 import { ScrollDebugPanel } from './ScrollDebugPanel';
 import { SettingsModal } from './SettingsModal';
@@ -230,21 +234,30 @@ export function SessionView({
 
 
 
+  // Session babysitter (Herald answers this session's simple questions). The
+  // view is reused across sessions: the brief dialog never carries over.
+  const babysit = useBabysit(serverId, sessionId);
+  const [showBabysitDialog, setShowBabysitDialog] = useState(false);
+  useEffect(() => { setShowBabysitDialog(false); }, [serverId, sessionId]);
+  const openBabysitDialog = useCallback(() => setShowBabysitDialog(true), []);
+  const closeBabysitDialog = useCallback(() => setShowBabysitDialog(false), []);
+
   // Track whether dispatch overlay is open on mobile (for back gesture)
   const dispatchOverlayOpen = isMobileViewport() && !dispatchCollapsed && totalAgents > 0;
 
   // Signal to Dashboard that an overlay is open (for back gesture coordination)
   useEffect(() => {
-    const isOverlay = showTerminal || showWorkGroupPanel || showConversationSearch || showFileFinder || showCodeReviewModal || dispatchOverlayOpen || !!viewingFile || !!artifactContent || showBookmarks || showSkillBrowser || showSettings;
+    const isOverlay = showBabysitDialog || showTerminal || showWorkGroupPanel || showConversationSearch || showFileFinder || showCodeReviewModal || dispatchOverlayOpen || !!viewingFile || !!artifactContent || showBookmarks || showSkillBrowser || showSettings;
     document.body.dataset.overlay = isOverlay ? 'true' : '';
     return () => { document.body.dataset.overlay = ''; };
-  }, [showTerminal, showWorkGroupPanel, showConversationSearch, showFileFinder, showCodeReviewModal, dispatchOverlayOpen, viewingFile, artifactContent, showBookmarks, showSkillBrowser, showSettings]);
+  }, [showTerminal, showWorkGroupPanel, showConversationSearch, showFileFinder, showCodeReviewModal, dispatchOverlayOpen, viewingFile, artifactContent, showBookmarks, showSkillBrowser, showSettings, showBabysitDialog]);
 
   // Listen for close-overlay event from Dashboard's back gesture handler
   useEffect(() => {
     const handler = () => {
       // Close innermost/topmost overlay first
-      if (showSettings) setShowSettings(false);
+      if (showBabysitDialog) setShowBabysitDialog(false);
+      else if (showSettings) setShowSettings(false);
       else if (showSkillBrowser) setShowSkillBrowser(false);
       else if (artifactContent) setArtifactContent(null);
       else if (viewingFile) setViewingFile(null);
@@ -257,7 +270,7 @@ export function SessionView({
       else if (showWorkGroupPanel) setShowWorkGroupPanel(false);
     };
     return eventBus.on('close-overlay', handler);
-  }, [showTerminal, showWorkGroupPanel, showConversationSearch, showFileFinder, showCodeReviewModal, dispatchOverlayOpen, viewingFile, artifactContent, showBookmarks, showSkillBrowser, showSettings]);
+  }, [showTerminal, showWorkGroupPanel, showConversationSearch, showFileFinder, showCodeReviewModal, dispatchOverlayOpen, viewingFile, artifactContent, showBookmarks, showSkillBrowser, showSettings, showBabysitDialog]);
 
   // Reset views when session changes, auto-focus on desktop only
   useEffect(() => {
@@ -623,6 +636,7 @@ export function SessionView({
         </button>
       )}
       <ReviewHeaderButton />
+      <BabysitHeaderButton serverId={serverId} sessionId={sessionId} onClick={openBabysitDialog} />
       <button
         className="session-header-btn"
         onClick={() => setShowSkillBrowser(true)}
@@ -714,6 +728,15 @@ export function SessionView({
     { label: 'Skills', onClick: () => setShowSkillBrowser(true) },
     ...(reviewSummary && reviewSummary.totalFiles > 0
       ? [{ label: 'Review', badge: reviewSummary.unreviewedFiles || undefined, onClick: () => setShowCodeReviewModal(true) }]
+      : []),
+    // Only for sessions on the Herald hub (and a hub new enough to babysit).
+    ...(babysit.available
+      ? [{
+          label: babysit.active ? 'Babysitting' : 'Babysit',
+          badge: babysit.active && babysit.babysit?.answersUsed ? babysit.babysit.answersUsed : undefined,
+          active: babysit.active,
+          onClick: openBabysitDialog,
+        }]
       : []),
   ];
 
@@ -849,6 +872,7 @@ export function SessionView({
             })()}
 
             {serverId && sessionId && <StuckBanner serverId={serverId} sessionId={sessionId} />}
+            {serverId && sessionId && <BabysitBar serverId={serverId} sessionId={sessionId} onEdit={openBabysitDialog} />}
 
             <TaskList tasks={tasks} loading={tasksLoading} />
 
@@ -999,6 +1023,16 @@ export function SessionView({
         <ScrollDebugPanel
           sessionId={sessionId}
           onClose={() => setShowScrollDebugPanel(false)}
+        />
+      )}
+
+      {showBabysitDialog && serverId && sessionId && (
+        <BabysitBriefDialog
+          key={`${serverId}:${sessionId}`}
+          serverId={serverId}
+          sessionId={sessionId}
+          sessionName={tmuxSessionName}
+          onClose={closeBabysitDialog}
         />
       )}
 

@@ -40,6 +40,13 @@ export interface LlmChatRequest {
   signal: AbortSignal;
   /** Called for each visible text delta as it streams. */
   onText: (delta: string) => void;
+  /**
+   * Per-call model instead of the provider's own (the babysitter's stronger
+   * model). Anthropic provider only; the others ignore it and use theirs.
+   */
+  model?: string;
+  /** Reasoning effort for this call (Anthropic provider only; omitted = the model's default). */
+  effort?: 'low' | 'medium' | 'high';
 }
 
 export type LlmStopReason = 'end' | 'tool_calls' | 'max_tokens' | 'refusal' | 'other';

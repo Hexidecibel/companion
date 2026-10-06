@@ -96,7 +96,10 @@ function markLastBlock(
 /** The Messages API request for one brain call (exported for tests). */
 export function buildAnthropicRequest(
   model: string,
-  req: Pick<LlmChatRequest, 'system' | 'messages' | 'tools' | 'toolChoice' | 'maxTokens' | 'cache'>
+  req: Pick<
+    LlmChatRequest,
+    'system' | 'messages' | 'tools' | 'toolChoice' | 'maxTokens' | 'cache' | 'effort'
+  >
 ): AnthropicClient.MessageCreateParamsNonStreaming {
   const cache: AnthropicClient.CacheControlEphemeral | undefined = req.cache
     ? req.cache.ttl === '1h'
@@ -112,6 +115,7 @@ export function buildAnthropicRequest(
     max_tokens: req.maxTokens,
     system: [{ type: 'text', text: req.system, ...(cache ? { cache_control: cache } : {}) }],
     messages,
+    ...(req.effort ? { output_config: { effort: req.effort } } : {}),
     ...(req.tools.length > 0
       ? {
           tools: req.tools.map((t) => ({
@@ -227,7 +231,7 @@ export class AnthropicProvider implements LlmProvider {
       if (firstTokenMs === undefined) firstTokenMs = Date.now() - started;
     };
     try {
-      const stream = client.messages.stream(buildAnthropicRequest(this.opts.model, req), {
+      const stream = client.messages.stream(buildAnthropicRequest(req.model || this.opts.model, req), {
         signal: req.signal,
       });
       stream.on('text', (delta: string) => {

@@ -62,6 +62,15 @@ describe('1. defaults: only "needs you" chimes', () => {
     expect(toneKindOf(item('x', { priority: 'progress' }))).toBeNull();
   });
 
+  it('the babysitter tally is always silent, whatever its priority', () => {
+    const babysit = { babysitId: 'b1', status: 'active' as const, answers: 3, escalations: 1 };
+    expect(toneKindOf(item('t', { priority: 'progress', babysit }))).toBeNull();
+    expect(toneKindOf(item('t', { priority: 'blocked', babysit }))).toBeNull();
+    expect(toneKindOf(item('t', { priority: 'finished', babysit: { ...babysit, status: 'ended', endReason: 'done' } }))).toBeNull();
+    const all = prefs({ kinds: { needs_you: true, finished: true, risk: true, stuck: true, error: true } });
+    expect(new ToneGate().offer([item('t', { priority: 'progress', babysit })], ctx({ prefs: all })).play).toBeNull();
+  });
+
   it('blocked and pairing chime; finished, risk, stuck and errors are silent by default', () => {
     for (const quiet of [finished('f'), riskItem('r'), stuckItem('s'), errorItem('e')]) {
       expect(new ToneGate().offer([quiet], ctx())).toEqual({ play: null, why: 'nothing' });

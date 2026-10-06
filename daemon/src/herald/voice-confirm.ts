@@ -84,6 +84,7 @@ export function deriveConfirmPhrase(input: {
   if (input.kind === 'cush_command' && input.cushOp) keyword = CUSH_KEYWORDS[input.cushOp] || null;
   else if (input.kind === 'spawn_session') keyword = 'launch';
   else if (input.kind === 'interrupt') keyword = 'interrupt';
+  else if (input.kind === 'babysit_start') keyword = 'babysit';
   if (!keyword) {
     const ids = new Set(input.ruleIds || []);
     keyword = KEYWORDS.find(([id]) => ids.has(id))?.[1] ?? 'send';

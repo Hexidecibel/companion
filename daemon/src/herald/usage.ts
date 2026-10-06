@@ -29,6 +29,9 @@ export interface PricingRates {
  */
 export const DEFAULT_PRICING: Record<string, PricingRates> = {
   'claude-haiku-4-5': { input: 1, output: 5, cacheWrite5m: 1.25, cacheWrite1h: 2, cacheRead: 0.1 },
+  // The babysitter's default model (herald.babysit_model). Cache writes follow
+  // the standard 1.25x / 2x multipliers; its calls are not cached today.
+  'claude-sonnet-5-5': { input: 2, output: 10, cacheWrite5m: 2.5, cacheWrite1h: 4, cacheRead: 0.2 },
 };
 
 export function ratesFor(
@@ -40,6 +43,20 @@ export function ratesFor(
     .filter((k) => model.startsWith(k))
     .sort((a, b) => b.length - a.length)[0];
   return key ? table[key] : null;
+}
+
+/**
+ * The rate charged for a model the table does not know: the dearest entry
+ * (by output, then input). A typo'd or brand-new model id must never be free,
+ * or it would slip past the monthly budget; overcounting is the safe side.
+ */
+export function fallbackRates(
+  table: Record<string, PricingRates> = DEFAULT_PRICING
+): PricingRates | null {
+  let best: PricingRates | null = null;
+  for (const r of Object.values(table))
+    if (!best || r.output > best.output || (r.output === best.output && r.input > best.input)) best = r;
+  return best;
 }
 
 export type CacheTtl = '5m' | '1h';
@@ -155,6 +172,7 @@ export class UsageMeter {
   private state: PersistedUsage;
   private readonly now: () => number;
   private readonly rates: PricingRates | null;
+  private readonly table: Record<string, PricingRates>;
   private readonly ttl: CacheTtl;
   private readonly configBudget: number | undefined;
   private readonly warnFraction: number;
@@ -163,7 +181,8 @@ export class UsageMeter {
   constructor(persisted: PersistedUsage | undefined, opts: UsageMeterOptions) {
     this.now = opts.now || Date.now;
     this.model = opts.model;
-    this.rates = ratesFor(opts.model, opts.pricing || DEFAULT_PRICING);
+    this.table = opts.pricing || DEFAULT_PRICING;
+    this.rates = ratesFor(opts.model, this.table);
     this.ttl = opts.cacheTtl || '5m';
     this.configBudget = validBudget(opts.configBudgetUsd) ? opts.configBudgetUsd : undefined;
     this.warnFraction = opts.warnFraction ?? 0.8;
@@ -197,10 +216,29 @@ export class UsageMeter {
     return this.rates !== null;
   }
 
-  /** Account one brain request. Returns its cost in USD. */
-  recordRequest(usage: LlmUsage): number {
+  /**
+   * How a second model (the babysitter's) is priced: its own entry, or the
+   * fallback the meter charges instead. Null `fallback` = priced exactly.
+   */
+  pricingFor(model: string): { exact: boolean; rates: PricingRates | null } {
+    if (model === this.model) return { exact: this.rates !== null, rates: this.rates };
+    const own = ratesFor(model, this.table);
+    return own ? { exact: true, rates: own } : { exact: false, rates: fallbackRates(this.table) };
+  }
+
+  /**
+   * Account one brain request. Returns its cost in USD. `model`: the request
+   * ran on another model than the meter's (the babysitter's), priced at that
+   * model's own rate. A second model without a price entry is charged the
+   * dearest known rate (never 0: it must still count toward the budget).
+   */
+  recordRequest(usage: LlmUsage, model?: string): number {
     this.roll();
-    const cost = this.rates ? costOf(usage, this.rates, this.ttl) : 0;
+    const rates =
+      model && model !== this.model
+        ? ratesFor(model, this.table) ?? fallbackRates(this.table)
+        : this.rates;
+    const cost = rates ? costOf(usage, rates, this.ttl) : 0;
     for (const b of [this.state.today, this.state.month]) {
       b.requests += 1;
       b.inputTokens += usage.inputTokens || 0;

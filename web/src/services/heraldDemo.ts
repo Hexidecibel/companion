@@ -5,7 +5,7 @@
  * import.meta.env.MODE, and the module is loaded via dynamic import.
  */
 import type { WebSocketResponse } from '../types';
-import type { HeraldAction, HeraldEvent, HeraldInboxItem, HeraldMessage, HeraldState } from '../types/herald';
+import type { HeraldAction, HeraldBabysit, HeraldEvent, HeraldInboxItem, HeraldMessage, HeraldState } from '../types/herald';
 import type { HeraldTransport } from './heraldTransport';
 
 const S = 'demo-server';
@@ -68,6 +68,20 @@ function createDemoTransport(): HeraldTransport {
     reasons: [], status: 'failed', error: 'tmux pane not found', createdAt: now - 18 * 60_000, resolvedAt: now - 18 * 60_000 + 3_000,
   };
 
+  // Session babysitter: one active brief with a short log (see BabysitBar).
+  const babysit: HeraldBabysit = {
+    id: 'b-blog', serverId: S, sessionId: 'blog', sessionName: 'blog',
+    goal: 'Finish the fleet post and get it ready to publish',
+    direction: 'Keep the tone plain. Prefer shorter sections.',
+    createdAt: now - 34 * 60_000, expiresAt: now + 86 * 60_000,
+    maxAnswers: 20, answersUsed: 2, escalations: 1, status: 'active',
+    log: [
+      { at: now - 30 * 60_000, question: 'Section one is drafted. Continue with section two?', answer: 'continue', kind: 'answered' },
+      { at: now - 12 * 60_000, question: 'Shorter intro, or keep the long one?', answer: 'option 1, Shorter intro', kind: 'answered', reason: 'The brief says to prefer shorter sections.' },
+      { at: now - 5 * 60_000, question: 'Should I name the competitor in the comparison table?', answer: 'Leave the name out', kind: 'escalated', reason: 'The brief does not cover naming other products.' },
+    ],
+  };
+
   const messages: HeraldMessage[] = [
     { id: 'm1', role: 'user', text: 'Tell companion to go ahead but skip the e2e suite.', createdAt: now - 21 * 60_000 },
     { id: 'm2', role: 'herald', text: 'Done. Companion picked it back up and is running the unit tests only.', createdAt: now - 21 * 60_000 + 3_000, actionIds: ['a-sent'], sessionRefs: [{ serverId: S, sessionId: 'companion', sessionName: 'companion' }] },
@@ -100,6 +114,7 @@ function createDemoTransport(): HeraldTransport {
   let state: HeraldState = {
     displayName: 'Herald', enabled: true, model: 'claude-haiku-4-5', busy: false,
     messages, inbox, actions: [sent, failed, echo, hard],
+    babysits: [babysit],
   };
 
   const updateAction = (id: string, patch: Partial<HeraldAction>): HeraldAction | null => {
@@ -195,6 +210,14 @@ function createDemoTransport(): HeraldTransport {
           state = { ...state, inbox: state.inbox.map((i) => (ids.has(i.id) ? { ...i, heard: true } : i)) };
           emit({ kind: 'inbox', inbox: state.inbox });
           return ok(type, {});
+        }
+        case 'herald_babysit_stop': {
+          const stopped = (state.babysits ?? [])
+            .filter((b) => b.status === 'active' && (!p.babysitId || b.id === p.babysitId))
+            .map((b): HeraldBabysit => ({ ...b, status: 'ended', endReason: 'stopped', endedAt: Date.now() }));
+          state = { ...state, babysits: (state.babysits ?? []).map((b) => stopped.find((x) => x.id === b.id) ?? b) };
+          if (stopped.length > 0) emit({ kind: 'babysits', babysits: state.babysits ?? [] });
+          return ok(type, { stopped });
         }
         case 'herald_set_pronunciations': {
           const list = Array.isArray(p.pronunciations) ? (p.pronunciations as HeraldState['pronunciations']) ?? [] : [];

@@ -37,6 +37,19 @@ export interface HeraldInboxItem {
    * on approve, deny or expiry.
    */
   pairing?: { pairingId: string; deviceName: string; platform: string; code: string; expiresAt: number };
+  /**
+   * The session babysitter's running tally for one brief ("Babysitting Out4: 3
+   * answers"): one coalesced `progress` item per brief, silent (no tone, never
+   * spoken unasked), replaced in place as answers are sent; it stays for a
+   * while after the brief ends, with `status: 'ended'`.
+   */
+  babysit?: {
+    babysitId: string;
+    status: HeraldBabysitStatus;
+    answers: number;
+    escalations: number;
+    endReason?: HeraldBabysitEndReason;
+  };
 }
 /**
  * How a message reached Herald: `voice` = push-to-talk, talking over Herald or
@@ -89,7 +102,14 @@ export interface HeraldAction {
   id: string;
   tier: HeraldActionTier;
   /** cush_command: a validated cush-tools command (payload = the command line; no session). */
-  kind: 'send_input' | 'answer_choice' | 'cush_command' | 'interrupt' | 'spawn_session';
+  kind:
+    | 'send_input'
+    | 'answer_choice'
+    | 'cush_command'
+    | 'interrupt'
+    | 'spawn_session'
+    /** Start babysitting a session (payload = the goal). Always hard_confirm. */
+    | 'babysit_start';
   serverId: string;
   sessionId: string;
   sessionName: string;
@@ -105,7 +125,133 @@ export interface HeraldAction {
   confirmPhrase?: string;
   /** hard_confirm: voice tries left (0 = on-screen only). */
   voiceAttemptsLeft?: number;
+  /**
+   * The babysitter's suggested answer to a question it brought to the user:
+   * Send / Cancel, NO countdown (an echo-tier suggestion has no `autoSendAt`
+   * and never sends by itself; a risky one is hard_confirm as usual). Expires
+   * like a hard_confirm card, or as soon as the question goes away.
+   */
+  suggested?: boolean;
+  /** The babysit brief this card belongs to (suggested answers, babysit_start once started). */
+  babysitId?: string;
+  /** suggested: why it was brought to the user instead of answered, one plain sentence. */
+  suggestedWhy?: string;
 }
+export type HeraldBabysitStatus = 'active' | 'ended';
+/**
+ * Why a brief ended: the user stopped it; its time limit; its answer cap; the
+ * session closed; the session reported the goal finished; the same question
+ * came back after Herald's answer (or the same answer was about to be sent
+ * twice in a row).
+ */
+export type HeraldBabysitEndReason =
+  | 'stopped'
+  | 'expired'
+  | 'max_answers'
+  | 'session_gone'
+  | 'done'
+  | 'loop';
+/**
+ * One thing the babysitter did. `answered`: Herald sent `answer` itself.
+ * `escalated`: brought to the user (`answer` = the suggested answer, '' when
+ * there is none). `user`: the user sent the suggested answer. `done`: the
+ * session reported the goal finished (`answer` is '').
+ */
+export interface HeraldBabysitLogEntry {
+  at: number;
+  question: string;
+  answer: string;
+  kind: 'answered' | 'escalated' | 'user' | 'done';
+  /** Why (the decider's one-line reason), when there is one. */
+  reason?: string;
+}
+/**
+ * A standing brief for ONE session: Herald answers its simple questions
+ * ("continue?", and what the brief clearly covers), brings everything else to
+ * the user with a suggested answer, and never answers permission prompts.
+ * One brief per session; an ended brief stays listed for about an hour.
+ */
+export interface HeraldBabysit {
+  id: string;
+  serverId: string;
+  sessionId: string;
+  sessionName: string;
+  goal: string;
+  /** Which way to lean when the session offers a choice. */
+  direction?: string;
+  /** Things Herald must never decide: always brought to the user. */
+  never?: string;
+  createdAt: number;
+  /** Epoch ms (daemon clock) the brief ends by itself. */
+  expiresAt: number;
+  /** The configured time limit in minutes (set on start and on every edit). Absent on older daemons. */
+  minutes?: number;
+  maxAnswers: number;
+  /** Answers Herald sent on its own (suggestions the user sent do not count). */
+  answersUsed: number;
+  /** Questions brought to the user. */
+  escalations: number;
+  status: HeraldBabysitStatus;
+  endReason?: HeraldBabysitEndReason;
+  endedAt?: number;
+  /** False: this daemon only suggests, never sends by itself (the sandbox). Absent = it sends. */
+  autoSend?: boolean;
+  /** The last 20 entries, oldest first. */
+  log: HeraldBabysitLogEntry[];
+}
+/** Bounds and defaults of a brief (the daemon clamps to them). */
+export const HERALD_BABYSIT_LIMITS = {
+  defaultMinutes: 120,
+  minMinutes: 5,
+  maxMinutes: 480,
+  defaultMaxAnswers: 20,
+  maxMaxAnswers: 50,
+  minGoalChars: 3,
+  maxGoalChars: 500,
+  maxDirectionChars: 1000,
+  maxNeverChars: 500,
+  maxLog: 20,
+  maxActive: 8,
+} as const;
+/**
+ * herald_babysit_set payload: start babysitting a session, or edit its active
+ * brief in place (same id; counters and log kept; the time limit restarts).
+ * Answered with { babysit: HeraldBabysit }. Needs the `dispatch` capability on
+ * narrowed credentials. Failures carry `payload.code` (HeraldBabysitErrorCode).
+ */
+export interface HeraldBabysitSetRequest {
+  sessionId: string;
+  /** Herald's server id for the session; absent = 'local' (the only one today). */
+  serverId?: string;
+  goal: string;
+  direction?: string;
+  never?: string;
+  /** Time limit in minutes (default 120, 5 to 480). */
+  minutes?: number;
+  /** Answer cap (default 20, 1 to 50). */
+  maxAnswers?: number;
+}
+/**
+ * herald_babysit_stop payload: stop one brief (`babysitId`, or the session's),
+ * or every active brief when neither is given. Answered with
+ * { stopped: HeraldBabysit[] } (empty when nothing was active).
+ */
+export interface HeraldBabysitStopRequest {
+  babysitId?: string;
+  sessionId?: string;
+  serverId?: string;
+}
+export type HeraldBabysitErrorCode =
+  /** A field is missing or out of range. */
+  | 'bad_request'
+  /** No such live session. */
+  | 'not_found'
+  /** Herald (or its brain) is not running here. */
+  | 'unavailable'
+  /** Too many active briefs. */
+  | 'limit'
+  /** The credential lacks the dispatch capability. */
+  | 'forbidden';
 export interface HeraldState {
   displayName: string;
   enabled: boolean;
@@ -127,6 +273,8 @@ export interface HeraldState {
   brain?: HeraldBrainStatus;
   /** The user's pronunciations for Herald's voice (persisted on the hub, follows the user). Absent on older daemons. */
   pronunciations?: HeraldPronunciation[];
+  /** Babysit briefs: active ones plus recently ended. Absent on older daemons. */
+  babysits?: HeraldBabysit[];
 }
 /** Token and dollar totals for one period. */
 export interface HeraldUsageBucket {
@@ -193,6 +341,8 @@ export type HeraldEvent =
   | { kind: 'settings'; verbosity: HeraldVerbosity }
   /** The pronunciation list changed (herald_set_pronunciations). */
   | { kind: 'pronunciations'; pronunciations: HeraldPronunciation[] }
+  /** The babysit briefs changed (the full list each time). */
+  | { kind: 'babysits'; babysits: HeraldBabysit[] }
   /** Remote trigger, sent ONLY to the active device (see HeraldTriggerAction). */
   | { kind: 'trigger'; action: HeraldTriggerAction; id: string; allowListen?: boolean }
   /** Usage totals changed; `notice` = a one-shot budget warning to announce (tone). */

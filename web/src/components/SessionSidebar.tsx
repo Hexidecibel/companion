@@ -10,6 +10,7 @@ import { TmuxModal } from './TmuxModal';
 
 import { ReviewSidebarPill } from './review/ReviewSidebarPill';
 import { StuckBadge } from './stuck/StuckBadge';
+import { BabysitBadge } from './babysit/BabysitBadge';
 
 const NewProjectModal = lazy(() => import('./NewProjectModal').then(m => ({ default: m.NewProjectModal })));
 import { ServerForm } from './ServerForm';
@@ -776,6 +777,7 @@ export function SessionSidebar({
                           )}
                         </div>
                         <StuckBadge serverId={snap.serverId} sessionId={session.id} />
+                        <BabysitBadge serverId={snap.serverId} sessionId={session.id} />
                         <ReviewSidebarPill serverId={snap.serverId} sessionId={session.id} />
                         {session.recentTimestamps && session.recentTimestamps.length > 0 && (
                           <Sparkline timestamps={session.recentTimestamps} />

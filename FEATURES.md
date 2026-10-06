@@ -595,6 +595,14 @@ Follow-up fixes layered on the Mobile UX round above: walks back the activity-ro
 - **Doubled header inset fixed** — `.dashboard` already applies `var(--safe-top)`, and `.session-header-mobile` was applying it again, creating an excessive top band. Inset now applied once plus a 6px gap (`global.css` mobile media queries)
 - **Autolink URLs inside emphasis** — `MarkdownRenderer.tsx` previously stored bold/italic inner text as a raw string and never re-parsed it, so URLs inside `**…**` / `*…*` never became links. Bold/italic now carry children and recurse, so URLs (plus code/file links and nested emphasis) inside emphasis render as the accent link pill, enabling long-press → Open Link / Copy link
 
+## Herald — session babysitter (2026-10-06)
+- Give Herald a standing brief for one session (goal, direction, "never decide" notes, time limit 5 min - 8 h, default 2 h; answer cap, default 20): it answers the session's simple questions itself ("continue?" and what the brief clearly covers), so long goals stop stalling on small things
+- Real judgment calls come to you as the usual "is asking" item plus a card with a suggested answer (Send / Cancel, no countdown); risky ones become hold-to-confirm; permission prompts are never answered
+- Guards in code, not in the prompt: the reason must quote the brief, the danger classifier runs on question + answer, a brain that is down or over budget escalates (fails closed), the live prompt is re-checked right before sending, and your own answer always wins
+- Ends by itself on time limit, answer cap, session gone, goal done or a loop; every answer is logged ("Out4 asked X, I answered Y", never spoken); briefs survive a daemon restart
+- Start by telling Herald (voice or chat, behind a hold-to-confirm card) or with the Babysit button in the session view; bar with status, answers used, time left and log, sidebar badge, "Babysitting" list in the Herald menu
+- Decisions use a stronger model (`herald.babysit_model`), metered at its own rate; Herald's chat stays on Haiku. In the sandbox the babysitter only suggests
+
 ## Desktop — links open in the browser, window comes back (2026-10-06)
 - Links in conversations (and "Report issue") open in the system browser on every platform; a native navigation guard keeps every Companion webview on the app, so a link can no longer strand the window on another site
 - The main window can always be brought back after closing or minimising it: Dock icon click (macOS), Window > "Show Companion", the tray item and a left-click on the tray icon

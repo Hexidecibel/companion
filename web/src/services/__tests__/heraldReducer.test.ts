@@ -10,7 +10,7 @@ import {
   sortPendingByUrgency,
   type HeraldClientState,
 } from '../heraldReducer';
-import type { HeraldAction, HeraldEvent, HeraldInboxItem, HeraldMessage, HeraldState } from '../../types/herald';
+import type { HeraldAction, HeraldBabysit, HeraldEvent, HeraldInboxItem, HeraldMessage, HeraldState } from '../../types/herald';
 
 const T0 = 1_700_000_000_000;
 
@@ -275,5 +275,44 @@ describe('heraldReducer: reply-length setting', () => {
     expect(selectMessages(s).map((m) => m.intent)).toEqual(['shorter']);
     s = apply(s, { kind: 'message_end', message: { ...msg('srv-1', 'user', 'Shorter.'), intent: 'shorter' } });
     expect(selectMessages(s).map((m) => [m.id, m.intent])).toEqual([['srv-1', 'shorter']]);
+  });
+});
+
+describe('heraldReducer: babysit briefs', () => {
+  const brief = (id: string, over: Partial<HeraldBabysit> = {}): HeraldBabysit => ({
+    id, serverId: 'local', sessionId: id, sessionName: id, goal: 'ship it', createdAt: T0, expiresAt: T0 + 3_600_000,
+    maxAnswers: 20, answersUsed: 0, escalations: 0, status: 'active', log: [], ...over,
+  });
+
+  it('the state snapshot seeds the list and a babysits event replaces it whole', () => {
+    let s = apply(initialHeraldClientState, { kind: 'state', state: baseState({ babysits: [brief('a')], messages: [msg('m', 'user', 'hi')] }) });
+    expect(s.server?.babysits?.map((b) => b.id)).toEqual(['a']);
+    s = apply(s, { kind: 'babysits', babysits: [brief('a', { answersUsed: 2 }), brief('b')] });
+    expect(s.server?.babysits?.map((b) => [b.id, b.answersUsed])).toEqual([['a', 2], ['b', 0]]);
+    s = apply(s, { kind: 'babysits', babysits: [] });
+    expect(s.server?.babysits).toEqual([]);
+    expect(s.server?.messages.map((m) => m.id)).toEqual(['m']);
+  });
+
+  it('an older hub has no list: the field stays absent', () => {
+    const s = apply(initialHeraldClientState, { kind: 'state', state: baseState() });
+    expect(s.server?.babysits).toBeUndefined();
+    expect(heraldReducer(s, { type: 'babysit_result', babysits: [brief('a')] }).server?.babysits).toBeUndefined();
+  });
+
+  it('a set / stop answer is folded in by id before the broadcast arrives', () => {
+    let s = apply(initialHeraldClientState, { kind: 'state', state: baseState({ babysits: [brief('a'), brief('b')] }) });
+    s = heraldReducer(s, { type: 'babysit_result', babysits: [brief('a', { status: 'ended', endReason: 'stopped' }), brief('c')] });
+    expect(s.server?.babysits?.map((b) => [b.id, b.status])).toEqual([['a', 'ended'], ['b', 'active'], ['c', 'active']]);
+    const same = heraldReducer(s, { type: 'babysit_result', babysits: [] });
+    expect(same.server?.babysits).toBe(s.server?.babysits);
+  });
+
+  it('a suggested answer has no countdown and sorts after echoes that are about to send', () => {
+    const base = { tier: 'echo' as const, kind: 'send_input' as const, serverId: 'local', sessionId: 's', sessionName: 's', payload: 'p', readback: 'r', reasons: [], status: 'pending' as const };
+    const suggested: HeraldAction = { ...base, id: 'sug', createdAt: T0, suggested: true, suggestedWhy: 'not covered' };
+    const echo: HeraldAction = { ...base, id: 'echo', createdAt: T0 + 5, autoSendAt: T0 + 20_000 };
+    expect(echoCountdown(suggested, T0, 0)).toBeNull();
+    expect(sortPendingByUrgency([suggested, echo]).map((a) => a.id)).toEqual(['echo', 'sug']);
   });
 });

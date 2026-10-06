@@ -22,6 +22,13 @@
  *   error    — (a finished item with `error`) the session's turn ended on an
  *              unresolved tool error (turn-error.ts). Replaces the plain
  *              "finished" note for that turn; same lifetime as one.
+ *   babysit  — (a progress item with `babysit`) the babysitter's tally for one
+ *              brief ("Babysitting Out4: 3 answers"). Replaced wholesale by
+ *              the babysitter's list; silent; never touched by the finished /
+ *              working-again rules. While the babysitter is deciding a
+ *              babysat session's question, that session's "is asking" /
+ *              "finished" item is held back (`deferBlock`): answered = never
+ *              shown, escalated = shown at once.
  *   pairing  — (a blocked item with `pairing`) a new device wants to pair with
  *              this daemon. Not a session: replaced wholesale by the pairing
  *              manager's pending list, so it goes on approve, deny or expiry.
@@ -131,6 +138,8 @@ export class InboxTracker {
   private seenKeys = new BoundedSet<string>(2000);
   private heard: Set<string>;
   private primed = false;
+  /** Items held back by `deferBlock` (session -> item id): shown once released. */
+  private held = new Map<string, string>();
 
   constructor(heardIds: string[] = []) {
     this.heard = new Set(heardIds.slice(-MAX_HEARD));
@@ -140,11 +149,15 @@ export class InboxTracker {
    * Apply a fresh set of snapshots. Returns true when the visible inbox changed.
    * `deferTurn(sessionKey)`: the session has an open ask, so its next finished /
    * question note is left to the ask-answer item instead.
+   * `deferBlock(snapshot)`: the babysitter is deciding this session's prompt
+   * ('hold': not yet, ask again next time) or has answered it ('suppress':
+   * never show it).
    */
   update(
     snaps: SessionSnapshot[],
     now: number,
-    deferTurn?: (sessionKey: string) => boolean
+    deferTurn?: (sessionKey: string) => boolean,
+    deferBlock?: (s: SessionSnapshot) => 'hold' | 'suppress' | null
   ): boolean {
     const before = this.signature();
     const present = new Set<string>();
@@ -169,8 +182,19 @@ export class InboxTracker {
       } else if (cur) {
         cur.misses = 0;
       }
-      if (blocked && !this.blockedBySession.has(sk)) {
-        const turnChanged = !!prev && (prev.status === 'working' || prev.turnKey !== s.lastTurnKey);
+      const finishedId =
+        s.status === 'idle' && !blocked && s.lastTurnKey ? `${sk}:f${fnv1a(s.lastTurnKey)}` : null;
+      const candidateId = blocked ? `${sk}:${blocked.key}` : finishedId;
+      // An item that was held back last time is still "new" once released.
+      const wasHeld = !!candidateId && this.held.get(sk) === candidateId;
+      const defer = candidateId && !this.items.has(candidateId) ? (deferBlock?.(s) ?? null) : null;
+      if (defer === 'hold' && candidateId) this.held.set(sk, candidateId);
+      else this.held.delete(sk);
+      if (defer === 'suppress' && candidateId) this.seenKeys.add(candidateId);
+
+      if (blocked && !this.blockedBySession.has(sk) && !defer) {
+        const turnChanged =
+          wasHeld || (!!prev && (prev.status === 'working' || prev.turnKey !== s.lastTurnKey));
         if (blocked.transitionOnly) {
           const id = `${sk}:${blocked.key}`;
           if (deferTurn?.(sk)) {
@@ -191,17 +215,19 @@ export class InboxTracker {
         // stays: it is what the user asked for; an answer that ended in a
         // question has been answered).
         for (const [id, item] of this.items) {
-          if (`${item.serverId}:${item.sessionId}` !== sk || item.review || item.stuck) continue;
+          if (`${item.serverId}:${item.sessionId}` !== sk || item.review || item.stuck || item.babysit)
+            continue;
           if (item.answer ? item.priority === 'blocked' : item.priority === 'finished')
             this.items.delete(id);
         }
       } else if (
         s.status === 'idle' &&
         !blocked &&
+        !defer &&
         this.primed &&
         prev &&
         s.lastTurnKey &&
-        (prev.status === 'working' || prev.turnKey !== s.lastTurnKey)
+        (wasHeld || prev.status === 'working' || prev.turnKey !== s.lastTurnKey)
       ) {
         const id = `${sk}:f${fnv1a(s.lastTurnKey)}`;
         if (deferTurn?.(sk)) {
@@ -214,6 +240,7 @@ export class InboxTracker {
               !item.answer &&
               !item.review &&
               !item.stuck &&
+              !item.babysit &&
               `${item.serverId}:${item.sessionId}` === sk
             )
               this.items.delete(oid);
@@ -250,6 +277,7 @@ export class InboxTracker {
       if (!present.has(sk)) {
         this.prev.delete(sk);
         this.blockedBySession.delete(sk);
+        this.held.delete(sk);
       }
     }
 
@@ -398,6 +426,49 @@ export class InboxTracker {
   }
 
   /**
+   * The babysitter's briefs (its whole list): one silent `progress` item per
+   * brief, keyed by brief + answers sent, so each new answer makes it news for
+   * "brief me" exactly once while the chip stays one per brief. `quiet`: not
+   * news at all (a brief that has done nothing yet). Returns true when the
+   * visible inbox changed.
+   */
+  setBabysitItems(
+    list: Array<{
+      key: string;
+      serverId: string;
+      sessionId: string;
+      sessionName: string;
+      headline: string;
+      quiet: boolean;
+      babysit: NonNullable<HeraldInboxItem['babysit']>;
+    }>,
+    now: number
+  ): boolean {
+    const before = JSON.stringify(this.list().filter((i) => i.babysit));
+    const keep = new Set<string>();
+    for (const a of list.slice(0, 30)) {
+      const id = `${a.serverId}:${a.sessionId}:bs${fnv1a(a.key)}`;
+      keep.add(id);
+      const prev = this.items.get(id);
+      if (a.quiet && !prev) this.heard.add(id);
+      this.seenKeys.add(id);
+      this.items.set(id, {
+        id,
+        serverId: a.serverId,
+        sessionId: a.sessionId,
+        sessionName: a.sessionName,
+        priority: 'progress',
+        headline: clip(oneLine(a.headline), 200),
+        createdAt: prev?.createdAt ?? now,
+        heard: prev?.heard ?? this.heard.has(id),
+        babysit: { ...a.babysit },
+      });
+    }
+    for (const [id, item] of this.items) if (item.babysit && !keep.has(id)) this.items.delete(id);
+    return JSON.stringify(this.list().filter((i) => i.babysit)) !== before;
+  }
+
+  /**
    * Pairing requests waiting for approval (the pairing manager's whole pending
    * list): one blocked item each, removed as soon as a request is approved,
    * denied or expires. Returns true when the visible inbox changed.
@@ -478,6 +549,8 @@ export class InboxTracker {
 
   private prune(now: number): void {
     for (const [id, item] of this.items) {
+      // Babysit items live as long as the babysitter lists them.
+      if (item.babysit) continue;
       if ((item.priority !== 'blocked' || item.answer) && now - item.createdAt > FINISHED_TTL_MS)
         this.items.delete(id);
     }
@@ -485,7 +558,7 @@ export class InboxTracker {
       const victims = this.list()
         .slice()
         .reverse()
-        .filter((i) => i.priority !== 'blocked');
+        .filter((i) => i.priority !== 'blocked' && !i.babysit);
       for (const v of victims) {
         if (this.items.size <= MAX_ITEMS) break;
         this.items.delete(v.id);

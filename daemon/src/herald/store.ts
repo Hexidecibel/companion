@@ -14,6 +14,7 @@ import type { HeraldPronunciation } from './protocol';
 import { sanitizePronunciations } from './pronunciations';
 import type { HeraldAction, HeraldInboxItem, HeraldMessage, HeraldVerbosity } from './protocol';
 import { sanitizeAsks, type AskLink } from './asks';
+import { sanitizeBabysits, type BabysitRecord } from './babysit/types';
 import { PersistedUsage, sanitizeUsage } from './usage';
 
 export const MAX_PERSISTED_MESSAGES = 100;
@@ -41,6 +42,8 @@ export interface PersistedHeraldState {
   answers?: HeraldInboxItem[];
   /** Code Review risk alerts in the inbox (resolved by marking the session reviewed). */
   reviews?: HeraldInboxItem[];
+  /** Babysit briefs with their bookkeeping (counts, handled prompts, expiry). */
+  babysits?: BabysitRecord[];
 }
 
 export const VERBOSITY_LEVELS: readonly HeraldVerbosity[] = ['auto', 'brief', 'normal', 'detailed'];
@@ -99,6 +102,7 @@ const ACTION_KINDS = new Set([
   'cush_command',
   'interrupt',
   'spawn_session',
+  'babysit_start',
 ]);
 
 function sanitizeAction(raw: unknown): HeraldAction | null {
@@ -137,6 +141,9 @@ function sanitizeAction(raw: unknown): HeraldAction | null {
   if (isNum(a.resolvedAt)) out.resolvedAt = a.resolvedAt;
   if (isStr(a.confirmPhrase)) out.confirmPhrase = a.confirmPhrase.slice(0, 120);
   if (isNum(a.voiceAttemptsLeft)) out.voiceAttemptsLeft = a.voiceAttemptsLeft;
+  if (a.suggested === true) out.suggested = true;
+  if (isStr(a.babysitId)) out.babysitId = a.babysitId.slice(0, 80);
+  if (isStr(a.suggestedWhy)) out.suggestedWhy = a.suggestedWhy.slice(0, 300);
   return out;
 }
 
@@ -242,7 +249,13 @@ export function sanitizeState(raw: unknown, now: number): PersistedHeraldState {
     ...withPronunciations(r.pronunciations),
     ...(sanitizeUsage(r.usage) ? { usage: sanitizeUsage(r.usage) } : {}),
     ...withAsks(r, now),
+    ...withBabysits(r.babysits, now),
   };
+}
+
+function withBabysits(raw: unknown, now: number): Pick<PersistedHeraldState, 'babysits'> {
+  const babysits = sanitizeBabysits(raw, now);
+  return babysits.length ? { babysits } : {};
 }
 
 function withAsks(

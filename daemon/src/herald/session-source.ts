@@ -109,6 +109,11 @@ export interface SessionSource {
   getExchangesSince?(sessionId: string, sinceMs: number): Promise<TranscriptExchange[]>;
   /** Interrupt the running turn (Ctrl+C). */
   interrupt?(sessionId: string): Promise<boolean>;
+  /**
+   * Sessions whose live prompt must be read on every listing, whatever the
+   * capture cap (babysat sessions: a prompt nobody reads is never answered).
+   */
+  setPinnedSessions?(sessionIds: string[]): void;
 }
 
 // ---------------------------------------------------------------------------
@@ -306,6 +311,8 @@ export class LocalSessionSource implements SessionSource {
   private listInFlight: Promise<SessionSnapshot[]> | null = null;
   /** Last on-demand transcript load attempt per session (throttles retries). */
   private loadAttempts = new BoundedMap<string, number>(256);
+  /** Sessions always inside the pane-capture set (see setPinnedSessions). */
+  private pinned = new Set<string>();
 
   constructor(deps: LocalSourceDeps) {
     this.deps = deps;
@@ -395,10 +402,15 @@ export class LocalSessionSource implements SessionSource {
     const names = this.deps.sessionNames.getAll();
     const sessions = summary.sessions || [];
 
-    // Capture panes for the most recently active live sessions only.
+    // Capture panes for the most recently active live sessions only; pinned
+    // (babysat) sessions come first, so the cap never drops them.
+    const isPinned = (s: ServerSummarySession) =>
+      this.pinned.has(s.id) || (!!s.tmuxSessionName && this.pinned.has(s.tmuxSessionName));
     const liveByRecency = sessions
       .filter((s) => !s.inactive)
-      .sort((a, b) => b.lastActivity - a.lastActivity)
+      .sort(
+        (a, b) => Number(isPinned(b)) - Number(isPinned(a)) || b.lastActivity - a.lastActivity
+      )
       .slice(0, MAX_PANE_CAPTURES);
     const choices = new Map<string, PendingChoice | null>();
     await Promise.all(
@@ -496,6 +508,10 @@ export class LocalSessionSource implements SessionSource {
   async interrupt(sessionId: string): Promise<boolean> {
     if (!this.deps.injector.cancelInput) return false;
     return this.deps.injector.cancelInput(sessionId);
+  }
+
+  setPinnedSessions(sessionIds: string[]): void {
+    this.pinned = new Set(sessionIds.slice(0, MAX_PANE_CAPTURES));
   }
 
   getLiveChoice(sessionId: string): Promise<PendingChoice | null> {

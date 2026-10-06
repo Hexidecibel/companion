@@ -39,6 +39,20 @@ describe('undoTarget', () => {
   });
 });
 
+describe('undoTarget and suggested cards', () => {
+  it("never picks the babysitter's suggested answer (it does not send by itself)", () => {
+    const suggested = action({ id: 'sug', suggested: true, autoSendAt: undefined, createdAt: 50 });
+    expect(undoTarget([suggested])).toBeNull();
+    expect(undoTarget([action({ id: 'real', createdAt: 5 }), suggested])?.id).toBe('real');
+  });
+
+  it('"undo that" with only a suggested card pending cancels nothing', async () => {
+    const d = deps([action({ id: 'sug', suggested: true, autoSendAt: undefined })]);
+    await expect(runUndo(d)).resolves.toBe('nothing');
+    expect(d.cancel).not.toHaveBeenCalled();
+  });
+});
+
 describe('runUndo', () => {
   it('cancels the pending send through herald_confirm and says "Cancelled."', async () => {
     const d = deps([action({ id: 'p' })]);

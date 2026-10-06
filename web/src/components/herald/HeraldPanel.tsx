@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { HeraldTonesVolume } from './HeraldVolume';
-import type { HeraldAction, HeraldInboxItem, HeraldMessage, HeraldSessionRef, HeraldVerbosity, InboxPriority } from '../../types/herald';
+import type { HeraldAction, HeraldBabysit, HeraldBabysitStopRequest, HeraldInboxItem, HeraldMessage, HeraldSessionRef, HeraldVerbosity, InboxPriority } from '../../types/herald';
 import { requestReviewDrawer } from '../../services/reviewNav';
 import { requestPairApproval } from '../../services/pairing';
 import { MIN_GAP_CHOICES_MS, QUIET_HOUR_MS, TONE_KINDS, TONE_KIND_LABEL } from '../../services/tts/tonePolicy';
@@ -23,7 +23,9 @@ import { HeraldOrb } from './HeraldOrb';
 import { HeraldBrainBadge, HeraldUsageMeter } from './HeraldUsage';
 import type { HeraldUsageSummary } from '../../types/herald';
 import { AudioLockedNotice, HeraldVoiceExtras } from './HeraldVoiceExtras';
-import { HeraldActionCard, HeraldPendingMarker, HeraldResolvedLine } from './HeraldActionCard';
+import { HeraldActionCard, HeraldPendingMarker, HeraldResolvedLine, isSuggestion } from './HeraldActionCard';
+import { HeraldBabysitMenu } from '../babysit/HeraldBabysitMenu';
+import { answersText, endReasonText } from '../../services/babysit';
 import { HeraldComposer } from './HeraldComposer';
 import { IconBack, IconBell, IconBellOff, IconBrief, IconClose, IconDown, IconMore, IconPlay, IconRefresh, IconSpeaker, IconSpeakerOff, IconStop, IconTrash, IconX } from './heraldIcons';
 
@@ -156,6 +158,16 @@ function Thinking({ name }: { name: string }) {
 // Inbox strip
 // ---------------------------------------------------------------------------
 
+/** Tooltip of a babysit tally chip: what Herald did there so far, or why it ended. */
+function babysitChipTitle(item: HeraldInboxItem): string {
+  const b = item.babysit;
+  if (!b) return item.headline;
+  const counts = `${answersText(b.answers)}${b.escalations > 0 ? `, ${b.escalations} brought to you` : ''}`;
+  return b.status === 'ended'
+    ? `Babysitting ended (${endReasonText(b.endReason)}): ${counts}. Open the session`
+    : `Babysitting, ${counts}. Open the session`;
+}
+
 function InboxStrip({ items, unheardCount, canAsk, onAsk, onChip }: {
   items: HeraldInboxItem[];
   unheardCount: number;
@@ -186,9 +198,9 @@ function InboxStrip({ items, unheardCount, canAsk, onAsk, onChip }: {
           key={item.id}
           type="button"
           role="listitem"
-          className={`herald-chip herald-chip--${item.priority}${item.review ? ` herald-chip--review herald-chip--review-${item.review.level}` : ''}${item.stuck ? ' herald-chip--stuck' : ''}${item.error ? ' herald-chip--error' : ''}${item.pairing ? ' herald-chip--pairing' : ''}${item.heard ? '' : ' herald-chip--unheard'}`}
+          className={`herald-chip herald-chip--${item.priority}${item.review ? ` herald-chip--review herald-chip--review-${item.review.level}` : ''}${item.stuck ? ' herald-chip--stuck' : ''}${item.error ? ' herald-chip--error' : ''}${item.pairing ? ' herald-chip--pairing' : ''}${item.babysit ? ' herald-chip--babysit' : ''}${item.heard ? '' : ' herald-chip--unheard'}`}
           onClick={() => onChip(item)}
-          title={item.review ? `Risky change, open review: ${item.headline}` : item.stuck ? `Looks stuck, open it: ${item.stuck.summary}` : item.pairing ? `New device, approve or deny it on screen: ${item.headline}` : item.error ? `Ended with an error, open it: ${item.headline}` : `${PRIORITY_LABEL[item.priority]}: ${item.headline}`}
+          title={item.review ? `Risky change, open review: ${item.headline}` : item.stuck ? `Looks stuck, open it: ${item.stuck.summary}` : item.pairing ? `New device, approve or deny it on screen: ${item.headline}` : item.error ? `Ended with an error, open it: ${item.headline}` : item.babysit ? babysitChipTitle(item) : `${PRIORITY_LABEL[item.priority]}: ${item.headline}`}
         >
           <span className="herald-chip__dot" aria-hidden="true" />
           <span className="herald-chip__name">{item.sessionName}</span>
@@ -196,9 +208,10 @@ function InboxStrip({ items, unheardCount, canAsk, onAsk, onChip }: {
           {item.stuck && <span className="herald-chip__stuck">Stuck?</span>}
           {item.error && <span className="herald-chip__error">Error</span>}
           {item.pairing && <span className="herald-chip__pairing">Pair</span>}
+          {item.babysit && <span className="herald-chip__babysit">Babysit</span>}
           <span className="herald-chip__headline">{item.headline}</span>
           <span className="herald-chip__age">{formatAgo(item.createdAt, now)}</span>
-          <span className="sr-only">{item.review ? 'Risky change' : item.stuck ? 'Looks stuck' : item.error ? 'Ended with an error' : item.pairing ? 'Pairing request' : PRIORITY_LABEL[item.priority]}{item.heard ? '' : ', new'}</span>
+          <span className="sr-only">{item.review ? 'Risky change' : item.stuck ? 'Looks stuck' : item.error ? 'Ended with an error' : item.pairing ? 'Pairing request' : item.babysit ? 'Babysitting' : PRIORITY_LABEL[item.priority]}{item.heard ? '' : ', new'}</span>
         </button>
       ))}
     </div>
@@ -435,7 +448,11 @@ function VoiceCommandsHelp() {
   );
 }
 
-function OverflowMenu({ model, onReset, onRefresh, disabled, voice, input, verbosity, onVerbosity, device, usage, onBudget }: {
+function OverflowMenu({ model, onReset, onRefresh, disabled, voice, input, verbosity, onVerbosity, device, usage, onBudget, babysits, skewMs, onOpenSession, onStopBabysit }: {
+  babysits: HeraldBabysit[] | undefined;
+  skewMs: number | null;
+  onOpenSession: OpenSession;
+  onStopBabysit: (req: HeraldBabysitStopRequest) => Promise<string | null>;
   device: HeraldDeviceControl;
   usage: HeraldUsageSummary | undefined;
   onBudget: (monthlyUsd: number | null | undefined) => Promise<string | null>;
@@ -490,7 +507,15 @@ function OverflowMenu({ model, onReset, onRefresh, disabled, voice, input, verbo
       {open && (
         <div className={`herald-menu__pop${advanced ? ' herald-menu__pop--advanced' : ' herald-menu__pop--main'}`} role="menu">
           {!advanced && !confirming ? (
-            <HeraldMenuMain onClose={close} onAdvanced={() => setAdvanced(true)} />
+            <>
+              <HeraldMenuMain onClose={close} onAdvanced={() => setAdvanced(true)} />
+              {babysits?.some((b) => b.status === 'active') && (
+                <>
+                  <div className="herald-menu__sep" role="separator" />
+                  <HeraldBabysitMenu babysits={babysits} skewMs={skewMs} onOpenSession={onOpenSession} onStop={onStopBabysit} onDone={close} />
+                </>
+              )}
+            </>
           ) : !confirming ? (
             <>
               <button type="button" className="herald-menu__item hm-back" onClick={() => setAdvanced(false)}>
@@ -715,8 +740,9 @@ export function HeraldPanel({ variant, onOpenSession, onClose }: HeraldPanelProp
       onOpenSession(item.serverId, item.sessionId);
       return;
     }
-    if (item.stuck || item.error) {
-      // A stuck session / a turn that ended on an error: open it (the evidence is there).
+    if (item.stuck || item.error || item.babysit) {
+      // A stuck session / a turn that ended on an error / a babysat session:
+      // open it (the evidence, or the babysitter's log, is there).
       onOpenSession(item.serverId, item.sessionId);
       return;
     }
@@ -733,7 +759,8 @@ export function HeraldPanel({ variant, onOpenSession, onClose }: HeraldPanelProp
   }, [h, canTalk, busy, send, onOpenSession]);
 
   const cancelNewestEcho = useCallback(() => {
-    const echo = [...pending].reverse().find((a) => a.tier === 'echo');
+    // A suggested answer never sends by itself: there is nothing to stop.
+    const echo = [...pending].reverse().find((a) => a.tier === 'echo' && !isSuggestion(a));
     if (echo) void h.confirm(echo.id, 'cancel');
   }, [pending, h]);
 
@@ -885,6 +912,10 @@ export function HeraldPanel({ variant, onOpenSession, onClose }: HeraldPanelProp
             device={h.device}
             usage={state?.usage}
             onBudget={h.setBudget}
+            babysits={state?.babysits}
+            skewMs={skewMs}
+            onOpenSession={onOpenSession}
+            onStopBabysit={h.stopBabysit}
           />
           {variant === 'docked' && (
             <button
@@ -1041,7 +1072,7 @@ export function HeraldPanel({ variant, onOpenSession, onClose }: HeraldPanelProp
           disabled={!canTalk}
           busy={busy}
           focusNonce={ui.focusNonce}
-          onEscape={pending.some((a) => a.tier === 'echo') ? cancelNewestEcho : undefined}
+          onEscape={pending.some((a) => a.tier === 'echo' && !isSuggestion(a)) ? cancelNewestEcho : undefined}
           autoFocus={variant === 'screen' ? false : undefined}
           onTyping={speaking ? stopVoice : undefined}
           onVoiceKeyDown={input.onComposerKeyDown}
@@ -1058,7 +1089,7 @@ export function HeraldPanel({ variant, onOpenSession, onClose }: HeraldPanelProp
             ? <><span className="herald-hint__sep" /><kbd>Esc</kbd> cancel</>
             : speaking
             ? <><span className="herald-hint__sep" /><kbd>Esc</kbd> stop voice</>
-            : pending.some((a) => a.tier === 'echo') && <><span className="herald-hint__sep" /><kbd>Esc</kbd> stop send</>}
+            : pending.some((a) => a.tier === 'echo' && !isSuggestion(a)) && <><span className="herald-hint__sep" /><kbd>Esc</kbd> stop send</>}
         </div>
       </div>
       {setup.helpOpen && !setup.diagnosticsOpen && <HeraldHelp onClose={() => setup.setHelpOpen(false)} />}

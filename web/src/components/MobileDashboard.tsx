@@ -16,6 +16,7 @@ import { connectionManager } from '../services/ConnectionManager';
 import { HeraldLauncher } from './herald/HeraldLauncher';
 import { SkeletonSessionCard } from './Skeleton';
 import { StuckBadge } from './stuck/StuckBadge';
+import { BabysitBadge } from './babysit/BabysitBadge';
 
 const STATUS_DOT_CLASS: Record<SessionSummary['status'], string> = {
   waiting: 'status-dot-blue status-dot-pulse',
@@ -406,6 +407,7 @@ function MobileSessionItem({ session, serverId, onSelect, onOpenInSplit, onClose
         )}
       </div>
       <StuckBadge serverId={serverId} sessionId={session.id} />
+      <BabysitBadge serverId={serverId} sessionId={session.id} />
       {session.recentTimestamps && session.recentTimestamps.length > 0 && (
         <Sparkline timestamps={session.recentTimestamps} />
       )}

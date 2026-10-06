@@ -42,6 +42,14 @@ function useDecision(action: HeraldAction, onDecide: Decide) {
   return { inflight, decide };
 }
 
+/**
+ * An echo-tier suggested answer (the babysitter's): it waits for the user and
+ * never counts down. A risky suggestion is hard_confirm and uses that card.
+ */
+export function isSuggestion(action: HeraldAction): boolean {
+  return action.tier === 'echo' && !!action.suggested;
+}
+
 /** Actions with no existing session to open: a cush-tools command, a session not started yet. */
 function hasNoSession(action: HeraldAction): boolean {
   return action.kind === 'cush_command' || action.kind === 'spawn_session';
@@ -176,17 +184,75 @@ function VoicePhrase({ action }: { action: HeraldAction }) {
   );
 }
 
+/** Why the babysitter brought this to the user instead of answering it. */
+function SuggestedWhy({ action }: { action: HeraldAction }) {
+  if (!action.suggested || !action.suggestedWhy) return null;
+  return <div className="herald-action__why">{action.suggestedWhy}</div>;
+}
+
+/**
+ * The babysitter's suggested answer: Send / Cancel and NO countdown. It never
+ * sends by itself; the hub expires it when the question goes away.
+ */
+function SuggestedCard({ action, onDecide, onOpenSession, disabled }: CardProps) {
+  const { inflight, decide } = useDecision(action, onDecide);
+  return (
+    <div className="herald-action herald-action--echo herald-action--suggested" role="group" aria-label={`Suggested answer: ${action.readback}`}>
+      <div className="herald-action__body">
+        <div className="herald-action__text">
+          <div className="herald-action__eyebrow">
+            <span>Suggested answer</span>
+            <SessionChip action={action} onOpenSession={onOpenSession} />
+          </div>
+          <div className="herald-action__readback">{action.readback}</div>
+          <SuggestedWhy action={action} />
+        </div>
+      </div>
+      <div className="herald-action__buttons">
+        <button
+          type="button"
+          className="herald-btn herald-btn--primary"
+          onClick={() => decide('confirm')}
+          disabled={disabled || !!inflight}
+        >
+          {inflight === 'confirm' ? 'Sending' : 'Send'}
+        </button>
+        <button
+          type="button"
+          className="herald-btn herald-btn--ghost"
+          onClick={() => decide('cancel')}
+          disabled={disabled || !!inflight}
+        >
+          {inflight === 'cancel' ? 'Cancelling' : 'Cancel'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function hardEyebrow(action: HeraldAction): string {
+  if (action.kind === 'babysit_start') return 'Start babysitting?';
+  if (action.suggested) return 'Suggested answer, needs your confirmation';
+  return 'Needs your confirmation';
+}
+
 function HardConfirmCard({ action, onDecide, onOpenSession, disabled }: CardProps) {
   const { inflight, decide } = useDecision(action, onDecide);
   return (
-    <div className="herald-action herald-action--hard" role="group" aria-label={`Needs confirmation: ${action.readback}`}>
+    <div className="herald-action herald-action--hard" role="group" aria-label={`${action.kind === 'babysit_start' ? 'Start babysitting' : 'Needs confirmation'}: ${action.readback}`}>
       <div className="herald-action__eyebrow herald-action__eyebrow--hard">
         <IconAlert />
-        <span>Needs your confirmation</span>
+        <span>{hardEyebrow(action)}</span>
         <SessionChip action={action} onOpenSession={onOpenSession} />
       </div>
       <div className="herald-action__readback">{action.readback}</div>
       <CommandLine action={action} />
+      <SuggestedWhy action={action} />
+      {action.kind === 'babysit_start' && (
+        <div className="herald-action__why">
+          Herald will answer this session's simple questions and bring the rest to you. It never answers permission prompts.
+        </div>
+      )}
       {action.reasons.length > 0 && (
         <ul className="herald-action__reasons">
           {action.reasons.map((r, i) => <li key={i}>{r}</li>)}
@@ -219,13 +285,25 @@ const RESOLVED_COPY: Record<Exclude<HeraldAction['status'], 'pending'>, string> 
   expired: 'Expired',
 };
 
+/** A started brief reads "Started", not "Sent"; a suggestion nobody sent was only a suggestion. */
+function resolvedCopy(action: HeraldAction): string {
+  if (action.status === 'pending') return '';
+  if (action.kind === 'babysit_start') {
+    if (action.status === 'sent') return 'Started';
+    if (action.status === 'cancelled') return 'Not started';
+  }
+  if (action.suggested && action.status === 'expired') return 'Suggestion expired';
+  if (action.suggested && action.status === 'cancelled') return 'Suggestion dismissed';
+  return RESOLVED_COPY[action.status];
+}
+
 export const HeraldResolvedLine = memo(function HeraldResolvedLine({ action, onOpenSession }: { action: HeraldAction; onOpenSession: CardProps['onOpenSession'] }) {
   if (action.status === 'pending') return null;
   const Icon = action.status === 'sent' ? IconCheck : action.status === 'failed' ? IconAlert : action.status === 'expired' ? IconClock : IconX;
   return (
     <div className={`herald-resolved herald-resolved--${action.status}`}>
       <Icon />
-      <span className="herald-resolved__status">{RESOLVED_COPY[action.status]}</span>
+      <span className="herald-resolved__status">{resolvedCopy(action)}</span>
       {hasNoSession(action) ? (
         <span className="herald-resolved__session">{action.sessionName}</span>
       ) : (
@@ -242,10 +320,11 @@ export const HeraldResolvedLine = memo(function HeraldResolvedLine({ action, onO
 
 /** Slim in-stream marker for an action whose live card is pinned above the composer. */
 export function HeraldPendingMarker({ action }: { action: HeraldAction }) {
+  const suggestedOnly = isSuggestion(action);
   return (
-    <div className={`herald-pending-marker herald-pending-marker--${action.tier}`}>
+    <div className={`herald-pending-marker herald-pending-marker--${action.tier}${suggestedOnly ? ' herald-pending-marker--suggested' : ''}`}>
       <span className="herald-pending-marker__pulse" />
-      {action.tier === 'hard_confirm' ? 'Waiting for your confirmation' : 'About to send'}
+      {action.tier === 'hard_confirm' ? 'Waiting for your confirmation' : suggestedOnly ? 'Suggested answer, waiting for you' : 'About to send'}
       <span className="herald-pending-marker__name">{action.sessionName}</span>
     </div>
   );
@@ -255,5 +334,6 @@ export function HeraldActionCard(props: CardProps) {
   if (props.action.status !== 'pending') {
     return <HeraldResolvedLine action={props.action} onOpenSession={props.onOpenSession} />;
   }
-  return props.action.tier === 'hard_confirm' ? <HardConfirmCard {...props} /> : <EchoCard {...props} />;
+  if (props.action.tier === 'hard_confirm') return <HardConfirmCard {...props} />;
+  return isSuggestion(props.action) ? <SuggestedCard {...props} /> : <EchoCard {...props} />;
 }

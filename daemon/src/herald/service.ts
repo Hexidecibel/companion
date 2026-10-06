@@ -73,6 +73,17 @@ import type {
 import type { LlmUsage } from './llm/provider';
 import type { StuckFinding, StuckKind } from '../stuck/protocol';
 import { classifyInterrupt } from './danger';
+import type { HeraldBabysit } from './protocol';
+import type { BabysitStartOutcome, BabysitStartRequest } from './actions';
+import {
+  babysitEndText,
+  BabysitError,
+  BabysitManager,
+  parseBabysitSpec,
+  type BabysitSpec,
+} from './babysit/manager';
+import { decideBabysit, type BabysitDecideInput, type BabysitVerdict } from './babysit/decider';
+import { isSandbox } from '../sandbox';
 
 export const MAX_USER_TEXT = 4000;
 /** A voice message is checked against Herald's replies started this recently. */
@@ -212,6 +223,12 @@ export interface HeraldServiceDeps {
    * or just stopped): its hands-off voice sends are dropped (voice-send backstop).
    */
   speakingSuppresses?: (clientId: string) => boolean;
+  /**
+   * Session babysitter overrides (tests). `autoSend` defaults to true, except
+   * in the sandbox (COMPANION_SANDBOX=1), where it only suggests unless
+   * HERALD_BABYSIT_AUTOSEND=1. `settleMs`: how long a prompt must be unchanged.
+   */
+  babysit?: { autoSend?: boolean; settleMs?: { choice: number; text: number } };
 }
 
 /** Where a turn came from: a connection, and whether it was a Herald device (reported presence) then. */
@@ -324,6 +341,8 @@ export class HeraldService {
   private stuckAlerts: HeraldStuckAlert[] = [];
   /** Pairing requests waiting for approval (inbox items; approved on screen only). */
   private pairingRequests: PendingPairingInfo[] = [];
+  /** Session babysitter: standing briefs, answered from the poll loop. */
+  private babysit: BabysitManager;
 
   constructor(deps: HeraldServiceDeps) {
     this.cfg = deps.config;
@@ -356,6 +375,7 @@ export class HeraldService {
       audit: (event, action, trigger, origin) => this.auditAction(event, action, trigger, origin),
       runCush: this.toolbox ? (cmd, action) => this.runCush(cmd, action) : undefined,
       runSpawn: deps.spawner ? (req, action) => this.runSpawn(req, action) : undefined,
+      runBabysit: (req) => this.runBabysit(req),
     });
     this.voiceDeps = {
       voiceEvidence: deps.voiceEvidence,
@@ -380,6 +400,75 @@ export class HeraldService {
         this.emit({ kind: 'inbox', inbox: this.inbox.list() });
       },
       persist: () => this.persist(),
+      log: (l) => console.log(l),
+    });
+    this.babysit = new BabysitManager({
+      getSource: (id) => this.getSource(id),
+      now: this.now,
+      decide: (input) => this.decideBabysit(input),
+      hasOpenAsk: (key) => this.asks.hasOpen(key),
+      hasUserAction: (key) =>
+        this.actions
+          .list()
+          .some(
+            (a) =>
+              a.status === 'pending' &&
+              !a.suggested &&
+              a.kind !== 'cush_command' &&
+              a.kind !== 'spawn_session' &&
+              `${a.serverId}:${a.sessionId}` === key
+          ),
+      voiceActive: () => this.now() - this.lastVoiceAt < VOICE_EXCHANGE_WINDOW_MS,
+      busy: () => this.busy,
+      post: (p) =>
+        this.postMessage('herald', p.text, {
+          sessionRefs: [p.ref],
+          ...(p.actionIds ? { actionIds: p.actionIds } : {}),
+          ...(p.quiet ? { quiet: true } : {}),
+        }),
+      suggest: (p) =>
+        this.actions.create({
+          tier: p.tier,
+          reasons: p.reasons,
+          kind: p.kind,
+          serverId: p.session.serverId,
+          sessionId: p.session.sessionId,
+          sessionName: p.session.sessionName,
+          payload: p.payload,
+          readback: p.readback,
+          meta: { ...(p.choice ? { choice: p.choice } : {}), ruleIds: p.ruleIds },
+          suggested: true,
+          babysitId: p.babysitId,
+          suggestedWhy: p.why,
+        }),
+      cancelAction: (id) => {
+        try {
+          this.actions.cancel(id);
+        } catch {
+          /* already gone */
+        }
+      },
+      audit: (action, payload, result, startedAt) => {
+        try {
+          this.auditFn({
+            ts: this.now(),
+            origin: SERVER_ORIGIN,
+            action,
+            payload,
+            result: result as AuditEntry['result'],
+            durationMs: Math.max(0, this.now() - startedAt),
+          });
+        } catch (err) {
+          console.error('Herald: audit append failed:', err);
+        }
+      },
+      changed: () => this.babysitChanged(),
+      kick: () => {
+        if (this.started && !this.disposed) void this.poll();
+      },
+      autoSend:
+        deps.babysit?.autoSend ?? (!isSandbox() || process.env.HERALD_BABYSIT_AUTOSEND === '1'),
+      settleMs: deps.babysit?.settleMs,
       log: (l) => console.log(l),
     });
     if (deps.spawner) {
@@ -436,6 +525,7 @@ export class HeraldService {
       brainConfigured: cfg.brainConfigured,
       disabledReason: cfg.disabledReason,
       pricing: cfg.pricing,
+      babysitModel: cfg.babysitModel,
     };
     this.provider = provider;
     this.outage = null;
@@ -443,6 +533,7 @@ export class HeraldService {
       ? `${this.cfg.provider} model=${this.cfg.model}`
       : `brain disabled (${this.cfg.disabledReason})`;
     console.log(`Herald: brain reloaded — ${brain}`);
+    this.warnUnpricedBabysitModel();
     if (this.started && !this.disposed) this.emit({ kind: 'state', state: this.getState() });
   }
 
@@ -465,6 +556,9 @@ export class HeraldService {
     this.verbosity = persisted.verbosity ?? 'auto';
     this.pronunciations = persisted.pronunciations ?? [];
     this.usage = this.newUsageMeter(persisted.usage);
+    this.babysit.load(persisted.babysits ?? []);
+    for (const src of this.sources) src.setPinnedSessions?.(this.babysit.pinned(src.serverId));
+    this.syncBabysitInbox(this.babysit.list());
     this.lastBrainKey = this.brainKey(this.brainStatus());
     if (persisted.actions.some((a) => a.status === 'expired' && a.error?.includes('restarted')))
       this.persist();
@@ -474,6 +568,7 @@ export class HeraldService {
     console.log(
       `Herald: started as "${this.cfg.displayName}" — ${brain}; ${this.messages.length} messages restored`
     );
+    this.warnUnpricedBabysitModel();
     this.pollTimer = setInterval(() => void this.poll(), this.pollIntervalMs);
     this.pollTimer.unref?.();
     void this.poll();
@@ -521,6 +616,7 @@ export class HeraldService {
       pronunciations: this.pronunciations.map((p) => ({ ...p })),
       usage: this.usage.summary(),
       brain: this.brainStatus(),
+      babysits: this.babysit.list(),
       ...this.deviceFields(),
     };
   }
@@ -590,6 +686,7 @@ export class HeraldService {
       answers: this.inbox.answers(),
       ...(this.inbox.reviewAlerts().length ? { reviews: this.inbox.reviewAlerts() } : {}),
       usage: this.usage.toPersisted(),
+      ...(this.babysit.persisted().length ? { babysits: this.babysit.persisted() } : {}),
     };
   }
 
@@ -632,9 +729,29 @@ export class HeraldService {
     return this.usage.summary();
   }
 
+  /**
+   * herald.babysit_model without a price entry: its decisions are charged the
+   * dearest known rate (never $0, so the budget still holds). Said once per
+   * model, at start and after a brain reload.
+   */
+  private warnedBabysitModel: string | null = null;
+  private warnUnpricedBabysitModel(): void {
+    const model = this.cfg.provider === 'anthropic' ? this.cfg.babysitModel : undefined;
+    if (!this.enabled || !model || model === this.warnedBabysitModel) return;
+    const p = this.usage.pricingFor(model);
+    if (p.exact) return;
+    this.warnedBabysitModel = model;
+    console.warn(
+      p.rates
+        ? `Herald: babysit model "${model}" has no price entry; its decisions are metered at the dearest known rate ` +
+            `($${p.rates.input}/$${p.rates.output} per MTok in/out) so they still count toward the budget.`
+        : `Herald: babysit model "${model}" has no price entry and no rate is known; its decisions cannot be metered in dollars.`
+    );
+  }
+
   /** Account one brain request; queue a budget notice for after the reply. */
-  private onUsage(u: LlmUsage): void {
-    this.usage.recordRequest(u);
+  private onUsage(u: LlmUsage, model?: string): void {
+    this.usage.recordRequest(u, model);
     const notice = this.usage.takeNotice();
     if (notice) this.pendingNotice = notice;
     this.persist();
@@ -847,8 +964,18 @@ export class HeraldService {
 
   private applyInbox(snaps: SessionSnapshot[]): void {
     if (this.disposed) return;
+    // The babysitter first: while it decides a babysat session's question, that
+    // session's "is asking" item (and its tone) is held back.
+    this.babysit.observe(snaps);
     // A session the user asked something: its answer replaces the generic note.
-    if (this.inbox.update(snaps, this.now(), (key) => this.asks.hasOpen(key))) {
+    if (
+      this.inbox.update(
+        snaps,
+        this.now(),
+        (key) => this.asks.hasOpen(key),
+        (s) => this.babysit.inboxHold(s)
+      )
+    ) {
       this.emit({ kind: 'inbox', inbox: this.inbox.list() });
     }
     this.asks.onSnapshots(snaps);
@@ -1037,7 +1164,10 @@ export class HeraldService {
     this.busy = busy;
     this.emit({ kind: 'busy', busy });
     // Spoken ask answers held back so they would not cut this reply off.
-    if (!busy) this.asks.flush();
+    if (!busy) {
+      this.asks.flush();
+      this.babysit.flush();
+    }
   }
 
   /**
@@ -1239,6 +1369,10 @@ export class HeraldService {
       showSession: (s, deviceId) => this.showResolved(s, deviceId),
       ...(this.review ? { review: this.review } : {}),
       ...(this.stuck ? { stuck: this.stuck } : {}),
+      babysit: {
+        list: () => this.babysit.list(),
+        stop: (sessionKey) => this.stopBabysitFor(sessionKey),
+      },
       resolveDevice: (phrase) => this.resolveDeviceWords(phrase, turn.origin?.clientId ?? null),
     };
     let verbositySet: HeraldVerbosity | null = null;
@@ -1413,7 +1547,7 @@ export class HeraldService {
     const now = this.now();
     return items.map(
       (i) =>
-        `[${i.answer ? 'answer' : i.review ? 'risky change' : i.stuck ? 'looks stuck' : i.error ? 'ended with an error' : i.pairing ? 'pairing request' : i.priority}] ${clip(oneLine(brainHeadline(i)), i.answer ? 320 : 200)} (${i.sessionName}, ${formatAgo(now - i.createdAt)} ago)`
+        `[${i.babysit ? 'babysitting' : i.answer ? 'answer' : i.review ? 'risky change' : i.stuck ? 'looks stuck' : i.error ? 'ended with an error' : i.pairing ? 'pairing request' : i.priority}] ${clip(oneLine(brainHeadline(i)), i.answer ? 320 : 200)} (${i.sessionName}, ${formatAgo(now - i.createdAt)} ago)`
     );
   }
 
@@ -1562,11 +1696,28 @@ export class HeraldService {
       if (unheardItems.length > SNAPSHOT_MAX_UNHEARD)
         parts.push(`(${unheardItems.length - SNAPSHOT_MAX_UNHEARD} more)`);
     }
+    // Standing briefs (live state: it belongs here, never in the system prompt).
+    const sitting = this.babysit.list().filter((b) => b.status === 'active');
+    if (sitting.length) {
+      parts.push(
+        `Babysitting (you answer these sessions' simple questions for the user${
+          sitting.some((b) => b.autoSend === false) ? '; on this server you only suggest answers' : ''
+        }):`
+      );
+      for (const b of sitting)
+        parts.push(
+          `- ${b.sessionName}: goal "${clip(oneLine(b.goal), 160)}"; ${b.answersUsed} of ${b.maxAnswers} answers sent, ${b.escalations} brought to the user; ${formatAgo(Math.max(0, b.expiresAt - now))} left`
+        );
+    }
     if (pending.length)
       parts.push(
         `Pending actions awaiting send/confirm: ${pending
           .map((a) =>
-            a.tier === 'hard_confirm' && a.confirmPhrase
+            a.suggested
+              ? `${a.readback} (your suggested answer for a babysat session; it waits for the user to press Send${
+                  a.tier === 'hard_confirm' && a.confirmPhrase ? ` or say "${a.confirmPhrase}"` : ''
+                })`
+              : a.tier === 'hard_confirm' && a.confirmPhrase
               ? `${a.readback} (needs confirmation: the card, or the user saying "${a.confirmPhrase}"; a plain "yes" does not confirm it)`
               : a.readback
           )
@@ -1899,6 +2050,182 @@ export class HeraldService {
     }
   }
 
+  // ---------------------------------------------------------------- babysitter
+
+  listBabysits(): HeraldBabysit[] {
+    return this.babysit.list();
+  }
+
+  /**
+   * herald_babysit_set: start babysitting a session, or edit its active brief.
+   * Throws BabysitError (code = HeraldBabysitErrorCode).
+   */
+  async setBabysit(raw: unknown, origin?: AuditOrigin): Promise<{ babysit: HeraldBabysit }> {
+    const started = this.now();
+    const babysit = await this.startBabysit(parseBabysitSpec(raw));
+    try {
+      this.auditFn({
+        ts: this.now(),
+        origin: origin || SERVER_ORIGIN,
+        action: 'herald_babysit_set',
+        payload: {
+          babysitId: babysit.id,
+          session: babysit.sessionId,
+          goal: clip(babysit.goal, 300),
+          expiresAt: babysit.expiresAt,
+          maxAnswers: babysit.maxAnswers,
+        },
+        result: { ok: true },
+        durationMs: Math.max(0, this.now() - started),
+      });
+    } catch (err) {
+      console.error('Herald: audit append failed:', err);
+    }
+    return { babysit };
+  }
+
+  private async startBabysit(spec: BabysitSpec): Promise<HeraldBabysit> {
+    if (!this.cfg.featureEnabled || this.disposed || !this.started)
+      throw new BabysitError('unavailable', 'Herald is not running');
+    // Every decision needs the brain: without one a brief could only escalate.
+    if (!this.provider)
+      throw new BabysitError('unavailable', this.cfg.disabledReason || 'Herald brain is not configured.');
+    if (!this.getSource(spec.serverId))
+      throw new BabysitError('not_found', `Server "${spec.serverId}" is not reachable.`);
+    const snaps = await this.listAll().catch(() => this.lastSnapshots);
+    const snap = snaps.find(
+      (s) =>
+        s.serverId === spec.serverId && (s.sessionId === spec.sessionId || s.tmuxName === spec.sessionId)
+    );
+    if (!snap || snap.inactive)
+      throw new BabysitError('not_found', `No running session "${spec.sessionId}".`);
+    return this.babysit.set(spec, snap);
+  }
+
+  /** A confirmed babysit_start card (the brain's propose_babysit). */
+  private async runBabysit(req: BabysitStartRequest): Promise<BabysitStartOutcome> {
+    try {
+      const b = await this.startBabysit(parseBabysitSpec(req));
+      const minutes = Math.round((b.expiresAt - this.now()) / 60_000);
+      const span =
+        minutes >= 120 && minutes % 60 === 0
+          ? `${minutes / 60} hours`
+          : minutes === 60
+            ? 'an hour'
+            : `${minutes} minutes`;
+      return {
+        ok: true,
+        babysitId: b.id,
+        message:
+          b.autoSend === false
+            ? `Babysitting ${b.sessionName} for ${span}. On this server I only suggest answers: nothing is sent without you.`
+            : `Babysitting ${b.sessionName} for ${span}: I'll answer its simple questions, up to ${b.maxAnswers}, and bring the rest to you.`,
+      };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return { ok: false, message: '', error: `${message} Nothing was started.` };
+    }
+  }
+
+  /** herald_babysit_stop: one brief (by id or session), or all of them. */
+  stopBabysit(raw: unknown, origin?: AuditOrigin): { stopped: HeraldBabysit[] } {
+    const r = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
+    const str = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, 200) : '');
+    if ((r.babysitId !== undefined && !str(r.babysitId)) || (r.sessionId !== undefined && !str(r.sessionId)))
+      throw new BabysitError('bad_request', 'babysitId and sessionId must be non-empty text');
+    const babysitId = str(r.babysitId);
+    const sessionId = str(r.sessionId);
+    const stopped = babysitId
+      ? this.babysit.stop({ babysitId })
+      : this.stopBabysitFor(sessionId ? `${str(r.serverId) || 'local'}:${sessionId}` : null);
+    try {
+      this.auditFn({
+        ts: this.now(),
+        origin: origin || SERVER_ORIGIN,
+        action: 'herald_babysit_stop',
+        payload: { ...(babysitId ? { babysitId } : {}), ...(sessionId ? { session: sessionId } : {}) },
+        result: { ok: true, stopped: stopped.map((b) => b.id) },
+        durationMs: 0,
+      });
+    } catch (err) {
+      console.error('Herald: audit append failed:', err);
+    }
+    return { stopped };
+  }
+
+  /** Stop the brief of one session (`serverId:sessionId`), or every active one (null). */
+  private stopBabysitFor(sessionKey: string | null): HeraldBabysit[] {
+    return this.babysit.stop(sessionKey ? { sessionKey } : {});
+  }
+
+  /** Briefs changed: clients, pinned panes, the inbox tally, disk. */
+  private babysitChanged(): void {
+    if (this.disposed) return;
+    const list = this.babysit.list();
+    for (const src of this.sources) src.setPinnedSessions?.(this.babysit.pinned(src.serverId));
+    if (!this.started) return;
+    this.emit({ kind: 'babysits', babysits: list });
+    if (this.syncBabysitInbox(list)) this.emit({ kind: 'inbox', inbox: this.inbox.list() });
+    this.persist();
+  }
+
+  /** One silent tally item per brief ("Babysitting Out4: 3 answers sent"). */
+  private syncBabysitInbox(list: HeraldBabysit[]): boolean {
+    return this.inbox.setBabysitItems(
+      list.map((b) => {
+        const sent = `${b.answersUsed} answer${b.answersUsed === 1 ? '' : 's'} sent`;
+        return {
+          // News once per answer sent, and once when it ends by itself.
+          key: `${b.id}:${b.answersUsed}:${b.status}`,
+          serverId: b.serverId,
+          sessionId: b.sessionId,
+          sessionName: b.sessionName,
+          headline:
+            b.status === 'active'
+              ? `Babysitting ${b.sessionName}: ${sent}${b.escalations ? `, ${b.escalations} brought to you` : ''}`
+              : `Babysitting ${b.sessionName} ended (${babysitEndText(b.endReason)}): ${sent}`,
+          quiet: b.status === 'active' ? b.answersUsed === 0 : b.endReason === 'stopped',
+          babysit: {
+            babysitId: b.id,
+            status: b.status,
+            answers: b.answersUsed,
+            escalations: b.escalations,
+            ...(b.endReason ? { endReason: b.endReason } : {}),
+          },
+        };
+      }),
+      this.now()
+    );
+  }
+
+  /**
+   * One babysitter decision: a single tool-less call on the babysit model,
+   * metered and budget-gated like every other brain request. Never throws.
+   */
+  private decideBabysit(input: BabysitDecideInput): Promise<BabysitVerdict> {
+    // Only the Anthropic provider takes a per-call model; the others decide on theirs.
+    const model = this.cfg.provider === 'anthropic' ? this.cfg.babysitModel : undefined;
+    return decideBabysit(
+      {
+        provider: this.cfg.featureEnabled && !this.disposed ? this.provider : null,
+        ...(model ? { model } : {}),
+        // Haiku takes no effort setting; everything else decides at medium.
+        ...(model && !/haiku/i.test(model) ? { effort: 'medium' as const } : {}),
+        skipReason: () => {
+          const r = this.skipBrainReason();
+          return r ? REASON_TEXT[r] : null;
+        },
+        onUsage: (u) => this.onUsage(u, model),
+      },
+      input
+    );
+  }
+
+  /** Tests: wait for babysitter decisions in flight. */
+  settleBabysit(): Promise<void> {
+    return this.babysit.settle();
+  }
+
   /** Remember a send that expects a reply (ask-and-report). */
   private openAsk(info: {
     actionId: string;
@@ -1980,6 +2307,13 @@ export class HeraldService {
       return;
     }
     const ref = { serverId: a.serverId, sessionId: a.sessionId, sessionName: a.sessionName };
+    if (a.kind === 'babysit_start') {
+      this.postMessage('herald', note || `Babysitting ${a.sessionName}.`, {
+        sessionRefs: [ref],
+        actionIds: [a.id],
+      });
+      return;
+    }
     if (a.kind === 'interrupt') {
       this.postMessage('herald', `Interrupted ${a.sessionName}.`, {
         sessionRefs: [ref],
@@ -1988,8 +2322,11 @@ export class HeraldService {
       void this.poll();
       return;
     }
+    // The user sent the babysitter's suggested answer: it goes in the brief's
+    // log. No ask link: the babysitter keeps watching that session itself.
+    if (a.suggested) this.babysit.onSuggestionSent(a);
     // Free text is a question or a request: report back what the session says.
-    if (a.kind === 'send_input') {
+    if (a.kind === 'send_input' && !a.suggested) {
       this.openAsk({
         actionId: a.id,
         serverId: a.serverId,

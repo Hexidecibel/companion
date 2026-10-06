@@ -29,11 +29,15 @@ export const UNDO_LINES = {
   nothing: 'Nothing to undo.',
 } as const;
 
-/** The newest pending echo-tier action (the one "undo that" means), or null. */
+/**
+ * The newest pending echo-tier action (the one "undo that" means), or null.
+ * A `suggested` card (the babysitter's suggested answer) is not one: it never
+ * sends by itself, so there is nothing about to go that could be undone.
+ */
 export function undoTarget(actions: readonly HeraldAction[]): HeraldAction | null {
   let best: HeraldAction | null = null;
   for (const a of actions) {
-    if (a.status !== 'pending' || a.tier !== 'echo') continue;
+    if (a.status !== 'pending' || a.tier !== 'echo' || a.suggested) continue;
     if (!best || a.createdAt > best.createdAt) best = a;
   }
   return best;

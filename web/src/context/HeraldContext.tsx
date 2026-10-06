@@ -2,6 +2,10 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { registerDiagnostics } from '../services/diagnostics';
 import { useConnections } from '../hooks/useConnections';
 import { useHerald, type UseHeraldReturn } from '../hooks/useHerald';
+import { babysitStore } from '../services/babysit';
+import type { HeraldBabysit } from '../types/herald';
+
+const NO_BABYSITS: HeraldBabysit[] = [];
 import { useHeraldVoice, type HeraldVoice } from '../hooks/useHeraldVoice';
 import { useHeraldVoiceInput, type HeraldVoiceInput } from '../hooks/useHeraldVoiceInput';
 import { HERALD_DEMO_SERVER_ID, isHeraldDemo } from '../services/heraldTransport';
@@ -221,6 +225,20 @@ export function HeraldProvider({ children }: { children: ReactNode }) {
     [herald.getTransport, herald.connected],
   );
   const voice = useHeraldVoice(herald.subscribeEvents, hostId, undefined, voiceHost);
+  // Session babysitter: the session view / sidebar read briefs from a store,
+  // not from the data context (which changes on every streamed token).
+  const heraldBabysits = herald.state?.babysits;
+  const heraldEnabled = herald.state?.enabled ?? true;
+  useEffect(() => {
+    babysitStore.update({
+      hostId,
+      supported: !!hostId && herald.supported !== false && heraldEnabled && heraldBabysits !== undefined,
+      connected: herald.connected,
+      babysits: heraldBabysits ?? NO_BABYSITS,
+      skewMs: herald.skewMs,
+    }, { set: herald.setBabysit, stop: herald.stopBabysit });
+  }, [hostId, herald.supported, herald.connected, herald.skewMs, heraldEnabled, heraldBabysits, herald.setBabysit, herald.stopBabysit]);
+  useEffect(() => () => babysitStore.reset(), []);
   const openRef = useRef(open);
   /** The setup control (declared further down): the "diagnostics" voice command opens its page. */
   const setupRef = useRef<{ setHelpOpen: (o: boolean) => void; setDiagnosticsOpen: (o: boolean) => void } | null>(null);

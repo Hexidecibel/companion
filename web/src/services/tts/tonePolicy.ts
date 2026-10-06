@@ -72,6 +72,8 @@ export const DEFAULT_TONE_PREFS: TonePrefs = {
 
 /** The tone category of an inbox item (null: never toned). */
 export function toneKindOf(item: HeraldInboxItem): ToneKind | null {
+  // The babysitter's running tally is always silent, whatever its priority.
+  if (item.babysit) return null;
   if (item.pairing || item.priority === 'blocked') return 'needs_you';
   if (item.review) return 'risk';
   if (item.stuck) return 'stuck';

@@ -11,6 +11,10 @@
  * An interrupt only fires while the session is still running a turn (Ctrl+C at an
  * idle prompt is a step toward exiting Claude Code).
  *
+ * A `suggested` action (the babysitter's suggested answer) never auto-sends on
+ * either tier: an echo-tier one simply has no timer, and expires like a
+ * hard_confirm card. Confirming it sends through the same re-validated path.
+ *
  * hard_confirm actions carry a `confirmPhrase` ("confirm deploy"): a voice
  * confirmation must say it (verified by the caller's check, see voice-confirm.ts),
  * at most MAX_VOICE_ATTEMPTS times per action, then on-screen only.
@@ -51,8 +55,29 @@ export interface SpawnRequest {
   name: string;
 }
 
+/** babysit_start: the brief to start once confirmed (re-validated then). */
+export interface BabysitStartRequest {
+  serverId: string;
+  sessionId: string;
+  sessionName: string;
+  goal: string;
+  direction?: string;
+  never?: string;
+  minutes?: number;
+  maxAnswers?: number;
+}
+
+/** Outcome of starting a brief; `message` is posted to the user verbatim. */
+export interface BabysitStartOutcome {
+  ok: boolean;
+  message: string;
+  error?: string;
+  babysitId?: string;
+}
+
 export interface ActionMeta {
   choice?: ChoiceMeta;
+  babysit?: BabysitStartRequest;
   /** cush_command: the validated command (never a shell string). */
   cush?: CushCommand;
   spawn?: SpawnRequest;
@@ -118,6 +143,8 @@ export interface ActionManagerDeps {
   runCush?: (cmd: CushCommand, action: HeraldAction) => Promise<CushExecOutcome>;
   /** Starts a Claude Code session (re-validates the dir). Absent = unsupported. */
   runSpawn?: (req: SpawnRequest, action: HeraldAction) => Promise<SpawnOutcome>;
+  /** Starts a babysit brief (re-validates the session). Absent = unsupported. */
+  runBabysit?: (req: BabysitStartRequest, action: HeraldAction) => Promise<BabysitStartOutcome>;
 }
 
 export type VoiceConfirmResult =
@@ -133,14 +160,14 @@ interface ActionRecord {
   expiresAt?: number;
 }
 
-class TimeoutError extends Error {
+export class TimeoutError extends Error {
   constructor(label: string, ms: number) {
     super(`${label} timed out after ${ms}ms`);
     this.name = 'TimeoutError';
   }
 }
 
-function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
+export function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
   let t: NodeJS.Timeout;
   return Promise.race([
     p.finally(() => clearTimeout(t)),
@@ -182,6 +209,10 @@ export class ActionManager {
     payload: string;
     readback: string;
     meta: ActionMeta;
+    /** The babysitter's suggested answer: never auto-sends (see the header). */
+    suggested?: boolean;
+    babysitId?: string;
+    suggestedWhy?: string;
   }): HeraldAction {
     const now = this.now();
     const action: HeraldAction = {
@@ -196,6 +227,9 @@ export class ActionManager {
       reasons: [...params.reasons],
       status: 'pending',
       createdAt: now,
+      ...(params.suggested ? { suggested: true } : {}),
+      ...(params.babysitId ? { babysitId: params.babysitId } : {}),
+      ...(params.suggestedWhy ? { suggestedWhy: params.suggestedWhy } : {}),
     };
     const rec: ActionRecord = { action, meta: params.meta, timer: null, inFlight: false };
     if (action.tier === 'hard_confirm') this.assignPhrase(rec);
@@ -227,7 +261,7 @@ export class ActionManager {
     if (rec.timer) clearTimeout(rec.timer);
     rec.timer = null;
     const now = this.now();
-    if (rec.action.tier === 'echo') {
+    if (rec.action.tier === 'echo' && !rec.action.suggested) {
       rec.action.autoSendAt = now + this.deps.echoDelayMs;
       rec.timer = setTimeout(() => {
         rec.timer = null;
@@ -385,6 +419,24 @@ export class ActionManager {
         this.deps.audit('sent', rec.action, trigger, origin);
         this.deps.onChange({ ...rec.action });
         this.deps.onSent({ ...rec.action }, out.message, { ...rec.meta }, out);
+        return { ...rec.action };
+      }
+      if (a.kind === 'babysit_start') {
+        const req = rec.meta.babysit;
+        if (!req || !this.deps.runBabysit) {
+          fail('failed', 'Babysitting is not available here; nothing was started.');
+          return { ...rec.action };
+        }
+        const out = await withTimeout(this.deps.runBabysit(req, { ...a }), REVALIDATE_TIMEOUT_MS, 'start');
+        if (!out.ok) {
+          fail('failed', out.error || out.message);
+          return { ...rec.action };
+        }
+        if (out.babysitId) rec.action.babysitId = out.babysitId;
+        this.resolve(rec, 'sent');
+        this.deps.audit('sent', rec.action, trigger, origin);
+        this.deps.onChange({ ...rec.action });
+        this.deps.onSent({ ...rec.action }, out.message, { ...rec.meta });
         return { ...rec.action };
       }
       const source = this.deps.getSource(a.serverId);
