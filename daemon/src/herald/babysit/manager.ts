@@ -174,6 +174,8 @@ export class BabysitManager {
   private queue: BabysitPost[] = [];
   /** Our suggested-answer card per session, and the prompt it answers. */
   private suggestions = new Map<string, { actionId: string; key: string; question: string }>();
+  /** Briefs already logged as "missing from the listing but still there" (log once). */
+  private goneWarned = new Set<string>();
 
   constructor(deps: BabysitManagerDeps, initial: BabysitRecord[] = []) {
     this.deps = deps;
@@ -291,16 +293,20 @@ export class BabysitManager {
   // ---------------------------------------------------------------- observing
 
   /** Feed a fresh listing (from the poll loop, BEFORE the inbox). Decisions run in the background. */
-  observe(snaps: SessionSnapshot[]): void {
+  observe(snaps: SessionSnapshot[], opts: { failedServers?: ReadonlySet<string> } = {}): void {
     const now = this.deps.now();
+    const failed = opts.failedServers;
     const events = this.tracker.update(snaps, now, {
       hasOpenAsk: (k) => this.deps.hasOpenAsk(k),
       settleMs: this.deps.settleMs,
+      listingOk: (serverId) => !failed?.has(serverId),
     });
     // A suggestion whose question went away is stale: take the card down.
     if (this.suggestions.size) {
       const bySession = new Map(snaps.map((s) => [sessionKeyOf(s), s] as const));
       for (const [key, sug] of Array.from(this.suggestions.entries())) {
+        // A failed listing says nothing about the question.
+        if (failed?.has(key.slice(0, key.indexOf(':')))) continue;
         const s = bySession.get(key);
         const p = s ? promptOf(s) : null;
         if (!this.tracker.active(key) || !p || !('prompt' in p) || p.prompt.key !== sug.key) {
@@ -317,10 +323,49 @@ export class BabysitManager {
         changed = true;
         continue;
       }
+      if (e.type === 'gone') {
+        const g = this.confirmGone(e.record).finally(() => this.inFlight.delete(g));
+        this.inFlight.add(g);
+        continue;
+      }
       const p = this.handle(e.record, e.snap, e.prompt).finally(() => this.inFlight.delete(p));
       this.inFlight.add(p);
     }
     if (changed) this.deps.changed();
+  }
+
+  /**
+   * The listing has not shown the session for a while. End the brief only when
+   * the strict existence check agrees; a check that fails or times out, or a
+   * session that still exists, leaves the brief running (asked again later).
+   */
+  private async confirmGone(rec: BabysitRecord): Promise<void> {
+    const b = rec.brief;
+    const key = sessionKeyOf(b);
+    try {
+      const src = this.deps.getSource(b.serverId);
+      if (!src) return;
+      const exists = await withTimeout(src.sessionExists(b.sessionId), REVALIDATE_TIMEOUT_MS, 'session check');
+      if (exists) {
+        if (!this.goneWarned.has(b.id)) {
+          this.goneWarned.add(b.id);
+          this.deps.log?.(
+            `Herald: babysitting ${b.sessionName}: missing from the session listing but its tmux session exists; still babysitting`
+          );
+        }
+        return;
+      }
+      // Seen again, stopped or replaced while we were checking.
+      if (this.tracker.active(key) !== rec || !this.tracker.stillMissing(key)) return;
+      this.finish(rec, 'session_gone');
+      this.deps.changed();
+    } catch (err) {
+      this.deps.log?.(
+        `Herald: babysitting ${b.sessionName}: could not check whether the session still exists (${
+          err instanceof Error ? err.message : String(err)
+        }); still babysitting`
+      );
+    }
   }
 
   /** The user sent our suggested answer (ActionManager's onSent). */
@@ -692,6 +737,7 @@ export class BabysitManager {
       this.suggestions.delete(key);
       this.deps.cancelAction(sug.actionId);
     }
+    this.goneWarned.delete(b.id);
     this.deps.audit(
       'herald_babysit_end',
       { babysitId: b.id, session: b.sessionId, reason, answersUsed: b.answersUsed, escalations: b.escalations },

@@ -22,6 +22,8 @@ import {
   BabysitTracker,
   ANSWERED_SUPPRESS_MS,
   HOLD_MAX_MS,
+  GONE_AFTER_MS,
+  GONE_RECHECK_MS,
   isPermissionChoice,
   MISSING_POLLS,
   promptOf,
@@ -192,7 +194,7 @@ describe('babysit tracker', () => {
     expect(ev[0]).toMatchObject({ type: 'prompt', prompt: { kind: 'choice', multiSelect: true } });
   });
 
-  it('ends a brief on its time limit and when the session is gone', () => {
+  it('ends a brief on its time limit; a missing session is only ever a candidate', () => {
     const t = new BabysitTracker();
     t.start(brief({ expiresAt: 10_000 }), working());
     expect(t.update([working()], 9_999, noAsk)).toEqual([]);
@@ -200,17 +202,42 @@ describe('babysit tracker', () => {
     expect(t.list()[0]).toMatchObject({ status: 'ended', endReason: 'expired', endedAt: 10_000 });
     expect(t.update([working()], 11_000, noAsk)).toEqual([]);
 
-    const g = new BabysitTracker();
-    g.start(brief(), working());
-    // A listing that misses the session a few times is not a closed session.
-    for (let i = 1; i < MISSING_POLLS; i++) expect(g.update([], 2000 + i, noAsk)).toEqual([]);
-    expect(g.update([working()], 3000, noAsk)).toEqual([]);
-    for (let i = 1; i < MISSING_POLLS; i++) expect(g.update([], 4000 + i, noAsk)).toEqual([]);
-    expect(g.update([], 5000, noAsk)).toMatchObject([{ type: 'end', reason: 'session_gone' }]);
-
+    // Production, 2026-10-06: the watcher listed a live session as closed
+    // ("inactive") for one listing while it rebuilt its tmux maps, and that one
+    // listing ended the brief as session_gone. One listing proves nothing.
     const c = new BabysitTracker();
     c.start(brief(), working());
-    expect(c.update([working({ inactive: true })], 2000, noAsk)).toMatchObject([{ type: 'end', reason: 'session_gone' }]);
+    expect(c.update([working({ inactive: true })], 2000, noAsk)).toEqual([]);
+    expect(c.update([], 3000, noAsk)).toEqual([]);
+    expect(c.update([working()], 4000, noAsk)).toEqual([]);
+    expect(c.stillMissing('local:out4')).toBe(false);
+    expect(c.list()[0].status).toBe('active');
+
+    // Many fast polls without the session are not a sustained absence either.
+    const g = new BabysitTracker();
+    g.start(brief(), working());
+    for (let i = 0; i < MISSING_POLLS * 3; i++) expect(g.update([], 2000 + i, noAsk)).toEqual([]);
+    // Nor is a long gap covered by too few listings, or by listings that failed.
+    const f = new BabysitTracker();
+    f.start(brief(), working());
+    expect(f.update([], 2000, noAsk)).toEqual([]);
+    expect(f.update([], 2000 + GONE_AFTER_MS * 2, noAsk)).toEqual([]);
+    const failing = { ...noAsk, listingOk: () => false };
+    for (let i = 0; i < 20; i++) expect(f.update([], 2000 + GONE_AFTER_MS * (3 + i), failing)).toEqual([]);
+    expect(f.stillMissing('local:out4')).toBe(true);
+
+    // Sustained: a `gone` candidate (the brief stays active), raised again later.
+    let at = 2000;
+    for (let i = 0; i < 14; i++) expect(g.update([working({ inactive: true })], (at += 4000), noAsk)).toEqual([]);
+    at = 2000 + GONE_AFTER_MS;
+    expect(g.update([], at, noAsk)).toMatchObject([{ type: 'gone' }]);
+    expect(g.list()[0].status).toBe('active');
+    expect(g.update([], at + 4000, noAsk)).toEqual([]);
+    expect(g.update([], at + GONE_RECHECK_MS, noAsk)).toMatchObject([{ type: 'gone' }]);
+    // Seen again: everything resets.
+    expect(g.update([working()], at + GONE_RECHECK_MS + 1, noAsk)).toEqual([]);
+    expect(g.stillMissing('local:out4')).toBe(false);
+    expect(g.update([], at + GONE_RECHECK_MS * 3, noAsk)).toEqual([]);
   });
 
   it('inbox hold: held while deciding (at most 20 s), suppressed once answered, shown once escalated', () => {
@@ -750,6 +777,74 @@ describe('babysit in HeraldService', () => {
   }
 
   const heraldLines = (svc: HeraldService) => svc.getState().messages.filter((m) => m.role === 'herald');
+
+  /** Poll every 4 s for `ms` of wall clock, letting existence checks finish. */
+  async function pollFor(svc: HeraldService, ms: number) {
+    for (let t = 0; t < ms; t += 4000) {
+      clock += 4000;
+      await svc.poll();
+      await svc.settleBabysit();
+    }
+  }
+
+  it('a live session listed as closed, missing, or behind a failing listing never ends its brief (production 2026-10-06)', async () => {
+    // The id the web sends for a session is its tmux name, which is Herald's id.
+    const live = working({ sessionId: 'companion-out4-muee37av', tmuxName: 'companion-out4-muee37av' });
+    const src = fakeSource([live]);
+    const { svc, audits } = make(scripted([CONTINUE]), src);
+    await svc.start();
+    await svc.poll();
+    const { babysit } = await svc.setBabysit({ sessionId: 'companion-out4-muee37av', serverId: 'local', goal: 'get this ready and on staging' });
+    expect(babysit.sessionId).toBe('companion-out4-muee37av');
+
+    // One listing caught the watcher mid-rebuild: the session shows as closed.
+    src.holder.sessions = [{ ...live, inactive: true }];
+    await pollFor(svc, 4000);
+    src.holder.sessions = [live];
+    await pollFor(svc, 8000);
+    expect(svc.getState().babysits![0].status).toBe('active');
+    expect(src.sessionExists).not.toHaveBeenCalled();
+
+    // The listing fails for ten minutes: not one miss is counted.
+    src.listSessions.mockRejectedValue(new Error('tmux is busy'));
+    jest.spyOn(console, 'error').mockImplementation(() => {});
+    await pollFor(svc, 10 * 60_000);
+    expect(src.sessionExists).not.toHaveBeenCalled();
+    src.listSessions.mockImplementation(async () => src.holder.sessions);
+
+    // Listed as closed for ten minutes while tmux still has it: checked, never ended.
+    src.holder.sessions = [{ ...live, inactive: true }];
+    await pollFor(svc, 10 * 60_000);
+    expect(src.sessionExists).toHaveBeenCalledWith('companion-out4-muee37av');
+    // The existence check itself failing is not "gone" either.
+    src.sessionExists.mockRejectedValue(new Error('spawn EAGAIN'));
+    src.holder.sessions = [];
+    await pollFor(svc, 5 * 60_000);
+    expect(svc.getState().babysits![0]).toMatchObject({ status: 'active' });
+    expect(audits.filter((a) => a.action === 'herald_babysit_end')).toEqual([]);
+    expect(src.pinned).toEqual(['companion-out4-muee37av']);
+
+    // Back in the listing: answered as usual.
+    src.sessionExists.mockResolvedValue(true);
+    src.holder.sessions = [{ ...asking('t1'), sessionId: live.sessionId, tmuxName: live.tmuxName }];
+    await tick(svc);
+    expect(src.sendText).toHaveBeenCalledTimes(1);
+    expect(svc.getState().babysits![0]).toMatchObject({ status: 'active', answersUsed: 1 });
+  });
+
+  it('ends as session_gone only after a sustained absence that the existence check confirms', async () => {
+    const { svc, src, audits } = await started([CONTINUE]);
+    src.holder.sessions = [];
+    src.sessionExists.mockResolvedValue(false);
+    await pollFor(svc, 40_000);
+    expect(src.sessionExists).not.toHaveBeenCalled();
+    expect(svc.getState().babysits![0].status).toBe('active');
+    await pollFor(svc, 40_000);
+    expect(src.sessionExists).toHaveBeenCalledWith('out4');
+    expect(svc.getState().babysits![0]).toMatchObject({ status: 'ended', endReason: 'session_gone' });
+    expect(audits.filter((a) => a.action === 'herald_babysit_end')).toMatchObject([{ payload: { reason: 'session_gone' } }]);
+    expect(src.pinned).toEqual([]);
+  });
 
   it('auto-answers a "continue?" once: prefixed text, quiet log line, counters, audit, no ask link', async () => {
     const { svc, src, p, events, audits, babysit } = await started([CONTINUE]);

@@ -301,6 +301,8 @@ export class HeraldService {
   private disposed = false;
 
   private pollTimer: NodeJS.Timeout | null = null;
+  /** Servers whose last listing failed: an empty list from them is not "no sessions". */
+  private listFailed: ReadonlySet<string> = new Set();
   private activityTimer: NodeJS.Timeout | null = null;
   private pollInFlight: Promise<void> | null = null;
   private lastSnapshots: SessionSnapshot[] = [];
@@ -919,14 +921,17 @@ export class HeraldService {
   }
 
   private async listAll(): Promise<SessionSnapshot[]> {
+    const failed = new Set<string>();
     const lists = await Promise.all(
       this.sources.map((s) =>
         s.listSessions().catch((err) => {
           console.error(`Herald: listing sessions from "${s.serverId}" failed:`, err);
+          failed.add(s.serverId);
           return [] as SessionSnapshot[];
         })
       )
     );
+    this.listFailed = failed;
     const all = lists.flat();
     this.trackStatus(all);
     this.lastSnapshots = all;
@@ -966,7 +971,7 @@ export class HeraldService {
     if (this.disposed) return;
     // The babysitter first: while it decides a babysat session's question, that
     // session's "is asking" item (and its tone) is held back.
-    this.babysit.observe(snaps);
+    this.babysit.observe(snaps, { failedServers: this.listFailed });
     // A session the user asked something: its answer replaces the generic note.
     if (
       this.inbox.update(

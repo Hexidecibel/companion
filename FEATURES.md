@@ -602,6 +602,7 @@ Follow-up fixes layered on the Mobile UX round above: walks back the activity-ro
 - Ends by itself on time limit, answer cap, session gone, goal done or a loop; every answer is logged ("Out4 asked X, I answered Y", never spoken); briefs survive a daemon restart
 - Start by telling Herald (voice or chat, behind a hold-to-confirm card) or with the Babysit button in the session view; bar with status, answers used, time left and log, sidebar badge, "Babysitting" list in the Herald menu
 - Decisions use a stronger model (`herald.babysit_model`), metered at its own rate; Herald's chat stays on Haiku. In the sandbox the babysitter only suggests
+- Fix: a brief no longer ends as "session closed" minutes after it starts. A flicker in the session listing is not a closed session: the brief ends as "session gone" only after a sustained absence AND a direct check that the tmux session is really gone; the watcher's tmux maps are now swapped in one step, so live sessions are never listed as closed mid-refresh
 
 ## Desktop — links open in the browser, window comes back (2026-10-06)
 - Links in conversations (and "Report issue") open in the system browser on every platform; a native navigation guard keeps every Companion webview on the app, so a link can no longer strand the window on another site

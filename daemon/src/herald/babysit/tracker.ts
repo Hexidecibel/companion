@@ -41,8 +41,19 @@ export const SETTLE_TEXT_MS = 6000;
 export const HOLD_MAX_MS = 20_000;
 /** After an answer, the item stays hidden this long (the box takes a moment to go away). */
 export const ANSWERED_SUPPRESS_MS = 45_000;
-/** Listings in a row without the session before the brief ends as "session gone". */
+/**
+ * "Session gone" is never decided from one listing, nor from a few fast ones:
+ * the session must be absent (or listed as closed) on at least MISSING_POLLS
+ * SUCCESSFUL listings spread over GONE_AFTER_MS of wall clock, and even then
+ * the tracker only reports a `gone` candidate. The manager ends the brief once
+ * the strict existence check says the session is really gone; while it still
+ * exists the candidate is raised again every GONE_RECHECK_MS.
+ * (The watcher's listing has shown live sessions as closed for a moment while
+ * it rebuilt its tmux maps; that ended real briefs minutes after they started.)
+ */
 export const MISSING_POLLS = 5;
+export const GONE_AFTER_MS = 60_000;
+export const GONE_RECHECK_MS = 30_000;
 const QUESTION_CHARS = 600;
 
 export interface BabysitPrompt {
@@ -142,19 +153,34 @@ interface Watch {
 
 export type BabysitEvent =
   | { type: 'prompt'; record: BabysitRecord; snap: SessionSnapshot; prompt: BabysitPrompt }
-  | { type: 'end'; record: BabysitRecord; reason: HeraldBabysitEndReason };
+  | { type: 'end'; record: BabysitRecord; reason: HeraldBabysitEndReason }
+  /** The session has been missing for a while: confirm it is gone before ending. */
+  | { type: 'gone'; record: BabysitRecord };
 
 export interface TrackerContext {
   /** The user has an open ask with this session (ask-and-report). */
   hasOpenAsk(sessionKey: string): boolean;
   settleMs?: { choice: number; text: number };
+  /**
+   * False when that server's listing failed (or is incomplete) this round: its
+   * sessions are then neither looked at nor counted as missing.
+   */
+  listingOk?(serverId: string): boolean;
+}
+
+interface Missing {
+  /** First successful listing without the session. */
+  since: number;
+  polls: number;
+  /** When a `gone` candidate was last raised (0 = never). */
+  raisedAt: number;
 }
 
 export class BabysitTracker {
   /** One record per session: its active brief, or the one that ended last. */
   private records = new Map<string, BabysitRecord>();
   private watch = new Map<string, Watch>();
-  private missing = new Map<string, number>();
+  private missing = new Map<string, Missing>();
 
   constructor(initial: BabysitRecord[] = []) {
     this.load(initial);
@@ -236,6 +262,11 @@ export class BabysitTracker {
     return rec;
   }
 
+  /** Is the session still unseen since a `gone` candidate was raised for it? */
+  stillMissing(sessionKey: string): boolean {
+    return this.missing.has(sessionKey);
+  }
+
   /** The decision for a prompt is in: it is never looked at again. */
   resolve(sessionKey: string, key: string, phase: 'answered' | 'escalated' | 'ignored', now: number): void {
     const rec = this.records.get(sessionKey);
@@ -259,8 +290,8 @@ export class BabysitTracker {
 
   /**
    * Apply a fresh listing. Returns the prompts that just became ready to
-   * decide and the briefs that ended by themselves (time limit, session gone);
-   * ended ones are already marked.
+   * decide, the briefs that ended by themselves (time limit; already marked)
+   * and the briefs whose session looks gone (`gone`: NOT ended, see above).
    */
   update(snaps: SessionSnapshot[], now: number, ctx: TrackerContext): BabysitEvent[] {
     const out: BabysitEvent[] = [];
@@ -281,14 +312,23 @@ export class BabysitTracker {
         out.push({ type: 'end', record: rec, reason: 'expired' });
         continue;
       }
+      // A listing that failed says nothing about this session.
+      if (ctx.listingOk && !ctx.listingOk(b.serverId)) continue;
       const s = bySession.get(key);
       if (!s || s.inactive) {
-        // A listing that fails or lags is not a closed session: several in a row are.
-        const n = s ? MISSING_POLLS : (this.missing.get(key) ?? 0) + 1;
-        this.missing.set(key, n);
-        if (n >= MISSING_POLLS) {
-          this.end(key, 'session_gone', now);
-          out.push({ type: 'end', record: rec, reason: 'session_gone' });
+        // Absent or "closed" in one listing is not a closed session (a listing
+        // can lag or be caught half-built): only a sustained absence is worth
+        // checking, and the check, not the listing, ends the brief.
+        const m = this.missing.get(key) ?? { since: now, polls: 0, raisedAt: 0 };
+        m.polls += 1;
+        this.missing.set(key, m);
+        if (
+          m.polls >= MISSING_POLLS &&
+          now - m.since >= GONE_AFTER_MS &&
+          (m.raisedAt === 0 || now - m.raisedAt >= GONE_RECHECK_MS)
+        ) {
+          m.raisedAt = now;
+          out.push({ type: 'gone', record: rec });
         }
         continue;
       }

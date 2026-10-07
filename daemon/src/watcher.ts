@@ -438,12 +438,17 @@ export class SessionWatcher extends EventEmitter {
         .split('\n')
         .filter((s) => s);
 
-      // Rebuild maps — only include tagged sessions (COMPANION_APP=1)
-      this.tmuxProjectPaths.clear();
-      this.tmuxSessionByPath.clear();
-      this.tmuxPathBySession.clear();
-      this.tmuxSessionWorkingDirs.clear();
-      this.tmuxSessionIdentity.clear();
+      // Rebuild maps — only include tagged sessions (COMPANION_APP=1).
+      // Built on the side and swapped in below in one synchronous step: the
+      // loop awaits several subprocesses per session, and anything that read
+      // the live maps meanwhile (getServerSummary, getSessions, ...) used to
+      // see them empty or half-filled, i.e. live sessions reported as
+      // closed ("inactive") for a moment every refresh.
+      const nextProjectPaths = new Set<string>();
+      const nextSessionByPath = new Map<string, string>();
+      const nextPathBySession = new Map<string, string>();
+      const nextWorkingDirs = new Map<string, string>();
+      const nextIdentity = new Map<string, SessionIdentity>();
 
       for (const name of sessionNames) {
         try {
@@ -464,12 +469,12 @@ export class SessionWatcher extends EventEmitter {
           if (!workingDir) continue;
 
           const encodedPath = encodeProjectDir(workingDir);
-          this.tmuxProjectPaths.add(encodedPath);
-          this.tmuxSessionByPath.set(encodedPath, name);
-          this.tmuxPathBySession.set(name, encodedPath);
-          this.tmuxSessionWorkingDirs.set(name, workingDir);
+          nextProjectPaths.add(encodedPath);
+          nextSessionByPath.set(encodedPath, name);
+          nextPathBySession.set(name, encodedPath);
+          nextWorkingDirs.set(name, workingDir);
           const claudePid = await findClaudePid(pane.panePid);
-          this.tmuxSessionIdentity.set(name, {
+          nextIdentity.set(name, {
             created: pane.created,
             panePid: pane.panePid,
             encodedPath,
@@ -483,6 +488,18 @@ export class SessionWatcher extends EventEmitter {
           // Session may have been killed between list and env check
         }
       }
+
+      // Swap (no await in between; the containers keep their identity).
+      this.tmuxProjectPaths.clear();
+      for (const p of nextProjectPaths) this.tmuxProjectPaths.add(p);
+      const swap = <V>(live: Map<string, V>, next: Map<string, V>) => {
+        live.clear();
+        for (const [k, v] of next) live.set(k, v);
+      };
+      swap(this.tmuxSessionByPath, nextSessionByPath);
+      swap(this.tmuxPathBySession, nextPathBySession);
+      swap(this.tmuxSessionWorkingDirs, nextWorkingDirs);
+      swap(this.tmuxSessionIdentity, nextIdentity);
 
       if (this.tmuxProjectPaths.size > 0) {
         console.log(

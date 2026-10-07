@@ -1043,6 +1043,36 @@ describe('SessionWatcher', () => {
     });
   });
 
+  describe('tmux map refresh is atomic', () => {
+    it('never shows a live session as closed while a refresh is in flight', async () => {
+      addTmuxSession(TMUX_SESSION_A, '/home/user/project-a');
+      addTmuxSession(TMUX_SESSION_B, '/home/user/project-b');
+      await startWatcher(watcher);
+      jest.useRealTimers();
+      // Sessions that were running at the last daemon start are in the persisted
+      // snapshot: missing from the live maps, they are listed as inactive.
+      for (const id of [TMUX_SESSION_A, TMUX_SESSION_B])
+        (watcher as any).persistedSessions.set(id, { id, name: id, projectPath: '', lastActivity: 1, savedAt: 1 });
+
+      let done = false;
+      const refresh = (watcher as any).refreshTmuxPaths().then(() => {
+        done = true;
+      });
+      const bad: string[] = [];
+      let looks = 0;
+      while (!done && looks < 500) {
+        looks++;
+        const { sessions } = await watcher.getServerSummary();
+        const live = sessions.filter((x) => !x.inactive).map((x) => x.id).sort();
+        if (live.join() !== [TMUX_SESSION_A, TMUX_SESSION_B].join()) bad.push(live.join() || '(none)');
+      }
+      await refresh;
+      jest.useFakeTimers();
+      expect(looks).toBeGreaterThan(1);
+      expect(bad).toEqual([]);
+    });
+  });
+
   describe('read-only shared state (sandbox)', () => {
     const MAPPINGS_PATH = `${CODE_HOME}/companion-session-mappings.json`;
     const SNAPSHOT_PATH = `${CODE_HOME}/companion-sessions-snapshot.json`;
