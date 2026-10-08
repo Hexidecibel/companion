@@ -521,6 +521,7 @@ describe('EscalationService', () => {
       const service = new EscalationService(store, push);
       expect(service.handleEvent(errorEvent()).shouldBroadcast).toBe(false);
       expect(push.consolidatedCalls).toHaveLength(0);
+      // eslint-disable-next-line @typescript-eslint/unbound-method
       expect(store.addHistoryEntry).not.toHaveBeenCalled();
       service.destroy();
 

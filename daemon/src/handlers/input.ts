@@ -32,6 +32,7 @@ function sanitizeFilename(name: string): string {
   // Take only the final path component — defeats "../../etc/passwd" and "a/b.txt".
   let base = path.basename(name);
   // Strip control chars and path separators that basename may not catch.
+  // eslint-disable-next-line no-control-regex
   base = base.replace(/[\x00-\x1f/\\]/g, '');
   // Collapse any leading dots to avoid hidden/traversal-style names like "..".
   base = base.replace(/^\.+/, '');
@@ -66,17 +67,17 @@ async function resolveTmuxSession(ctx: HandlerContext, sessionId: string): Promi
   return null;
 }
 
-export function registerInputHandlers(
-  ctx: HandlerContext
-): Record<string, MessageHandler> {
+export function registerInputHandlers(ctx: HandlerContext): Record<string, MessageHandler> {
   return {
     async send_input(client, payload, requestId) {
-      const inputPayload = payload as {
-        input: string;
-        sessionId?: string;
-        tmuxSessionName?: string;
-        clientMessageId?: string;
-      } | undefined;
+      const inputPayload = payload as
+        | {
+            input: string;
+            sessionId?: string;
+            tmuxSessionName?: string;
+            clientMessageId?: string;
+          }
+        | undefined;
 
       if (!inputPayload?.input) {
         ctx.send(client.ws, {
@@ -149,16 +150,22 @@ export function registerInputHandlers(
     },
 
     async send_choice(client, payload, requestId) {
-      const choicePayload = payload as {
-        selectedIndices: number[];
-        optionCount: number;
-        multiSelect: boolean;
-        otherText?: string;
-        sessionId?: string;
-        tmuxSessionName?: string;
-      } | undefined;
+      const choicePayload = payload as
+        | {
+            selectedIndices: number[];
+            optionCount: number;
+            multiSelect: boolean;
+            otherText?: string;
+            sessionId?: string;
+            tmuxSessionName?: string;
+          }
+        | undefined;
 
-      if (!choicePayload || !Array.isArray(choicePayload.selectedIndices) || !choicePayload.optionCount) {
+      if (
+        !choicePayload ||
+        !Array.isArray(choicePayload.selectedIndices) ||
+        !choicePayload.optionCount
+      ) {
         ctx.send(client.ws, {
           type: 'choice_sent',
           success: false,
@@ -212,11 +219,13 @@ export function registerInputHandlers(
     },
 
     async cancel_input(client, payload, requestId) {
-      const cancelPayload = payload as {
-        clientMessageId: string;
-        tmuxSessionName?: string;
-        sessionId?: string;
-      } | undefined;
+      const cancelPayload = payload as
+        | {
+            clientMessageId: string;
+            tmuxSessionName?: string;
+            sessionId?: string;
+          }
+        | undefined;
 
       if (!cancelPayload?.clientMessageId) {
         ctx.send(client.ws, {
@@ -230,7 +239,8 @@ export function registerInputHandlers(
 
       let sessionToUse = cancelPayload.tmuxSessionName || undefined;
       if (!sessionToUse && cancelPayload.sessionId) {
-        sessionToUse = ctx.watcher.getTmuxSessionForConversation(cancelPayload.sessionId) || undefined;
+        sessionToUse =
+          ctx.watcher.getTmuxSessionForConversation(cancelPayload.sessionId) || undefined;
       }
 
       let removed = false;
@@ -241,7 +251,9 @@ export function registerInputHandlers(
           if (pending.length === 0) ctx.pendingSentMessages.delete(tmuxName);
           removed = true;
           sessionToUse = sessionToUse || tmuxName;
-          console.log(`[CANCEL] Removed pending message ${cancelPayload.clientMessageId} from ${tmuxName}`);
+          console.log(
+            `[CANCEL] Removed pending message ${cancelPayload.clientMessageId} from ${tmuxName}`
+          );
           break;
         }
       }
@@ -303,11 +315,13 @@ export function registerInputHandlers(
 
     async upload_image(client, payload, requestId) {
       // Handles ANY file type (the request name is kept for compatibility).
-      const uploadPayload = payload as {
-        base64: string;
-        mimeType?: string;
-        filename?: string;
-      } | undefined;
+      const uploadPayload = payload as
+        | {
+            base64: string;
+            mimeType?: string;
+            filename?: string;
+          }
+        | undefined;
       if (!uploadPayload?.base64) {
         ctx.send(client.ws, {
           type: 'image_uploaded',
@@ -377,12 +391,14 @@ export function registerInputHandlers(
     },
 
     async send_with_images(client, payload, requestId) {
-      const msgPayload = payload as {
-        imagePaths: string[];
-        message: string;
-        tmuxSessionName?: string;
-        sessionId?: string;
-      } | undefined;
+      const msgPayload = payload as
+        | {
+            imagePaths: string[];
+            message: string;
+            tmuxSessionName?: string;
+            sessionId?: string;
+          }
+        | undefined;
 
       if (!msgPayload) {
         ctx.send(client.ws, {
@@ -503,13 +519,17 @@ export function registerInputHandlers(
           requestId,
         });
         if (feedbackSessionId) {
-          ctx.broadcast('status_change', {
-            sessionId: feedbackSessionId,
-            isWaitingForInput: false,
-            currentActivity: undefined,
-            lastMessage: undefined,
-            feedbackPrompt: undefined,
-          }, feedbackSessionId);
+          ctx.broadcast(
+            'status_change',
+            {
+              sessionId: feedbackSessionId,
+              isWaitingForInput: false,
+              currentActivity: undefined,
+              lastMessage: undefined,
+              feedbackPrompt: undefined,
+            },
+            feedbackSessionId
+          );
         }
       } catch (err) {
         ctx.send(client.ws, {

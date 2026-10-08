@@ -70,9 +70,13 @@ export function parseBabysitSpec(raw: unknown): BabysitSpec {
   const text = (v: unknown, name: string, max: number): string => {
     if (v === undefined || v === null) return '';
     if (typeof v !== 'string') throw new BabysitError('bad_request', `${name} must be text`);
-    // eslint-disable-next-line no-control-regex
-    const t = v.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, '').replace(/\s+/g, ' ').trim();
-    if (t.length > max) throw new BabysitError('bad_request', `${name} is too long (max ${max} characters)`);
+    const t = v
+      // eslint-disable-next-line no-control-regex
+      .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (t.length > max)
+      throw new BabysitError('bad_request', `${name} is too long (max ${max} characters)`);
     return t;
   };
   const num = (v: unknown, name: string, def: number, min: number, max: number): number => {
@@ -134,7 +138,12 @@ export interface BabysitManagerDeps {
     why: string;
   }): HeraldAction | null;
   cancelAction(actionId: string): void;
-  audit(action: string, payload: Record<string, unknown>, result: Record<string, unknown>, startedAt: number): void;
+  audit(
+    action: string,
+    payload: Record<string, unknown>,
+    result: Record<string, unknown>,
+    startedAt: number
+  ): void;
   /** Briefs changed: tell clients, refresh the inbox tally, persist. */
   changed(): void;
   /** Poll soon (an escalated question should show at once). */
@@ -345,7 +354,11 @@ export class BabysitManager {
     try {
       const src = this.deps.getSource(b.serverId);
       if (!src) return;
-      const exists = await withTimeout(src.sessionExists(b.sessionId), REVALIDATE_TIMEOUT_MS, 'session check');
+      const exists = await withTimeout(
+        src.sessionExists(b.sessionId),
+        REVALIDATE_TIMEOUT_MS,
+        'session check'
+      );
       if (exists) {
         if (!this.goneWarned.has(b.id)) {
           this.goneWarned.add(b.id);
@@ -376,7 +389,12 @@ export class BabysitManager {
     this.suggestions.delete(key);
     const rec = this.tracker.active(key);
     if (!rec) return;
-    this.pushLog(rec, { at: this.deps.now(), question: sug.question, answer: clip(oneLine(a.payload), 400), kind: 'user' });
+    this.pushLog(rec, {
+      at: this.deps.now(),
+      question: sug.question,
+      answer: clip(oneLine(a.payload), 400),
+      kind: 'user',
+    });
     this.deps.changed();
   }
 
@@ -397,7 +415,11 @@ export class BabysitManager {
     return this.tracker.active(key) === rec && this.tracker.deciding(key, prompt.key);
   }
 
-  private async handle(rec: BabysitRecord, snap: SessionSnapshot, prompt: BabysitPrompt): Promise<void> {
+  private async handle(
+    rec: BabysitRecord,
+    snap: SessionSnapshot,
+    prompt: BabysitPrompt
+  ): Promise<void> {
     const key = sessionKeyOf(rec.brief);
     try {
       if (prompt.multiSelect) {
@@ -416,7 +438,11 @@ export class BabysitManager {
       let latest = snap.lastTurnGist;
       if (src) {
         try {
-          const t = await withTimeout(src.getRecentTranscript(rec.brief.sessionId, 1), REVALIDATE_TIMEOUT_MS, 'transcript');
+          const t = await withTimeout(
+            src.getRecentTranscript(rec.brief.sessionId, 1),
+            REVALIDATE_TIMEOUT_MS,
+            'transcript'
+          );
           lastUserPrompt = t.lastUserPrompt?.text ?? null;
           if (!latest) latest = t.assistantTurns[t.assistantTurns.length - 1]?.text ?? null;
         } catch {
@@ -437,7 +463,13 @@ export class BabysitManager {
         return;
       }
       if (verdict.kind === 'done') {
-        this.pushLog(rec, { at: this.deps.now(), question: prompt.question, answer: '', kind: 'done', reason: verdict.reason });
+        this.pushLog(rec, {
+          at: this.deps.now(),
+          question: prompt.question,
+          answer: '',
+          kind: 'done',
+          reason: verdict.reason,
+        });
         this.tracker.resolve(key, prompt.key, 'escalated', this.deps.now());
         this.finish(rec, 'done', true, verdict.reason);
         this.deps.changed();
@@ -451,7 +483,10 @@ export class BabysitManager {
       // Answering: a question that comes straight back, or the same answer
       // twice running, means the answers are not moving it on.
       const answerKey = norm(verdict.answer.label);
-      if (rec.answered.includes(prompt.hash) || (!verdict.continueCase && rec.lastAnswer === answerKey)) {
+      if (
+        rec.answered.includes(prompt.hash) ||
+        (!verdict.continueCase && rec.lastAnswer === answerKey)
+      ) {
         this.tracker.resolve(key, prompt.key, 'escalated', this.deps.now());
         this.finish(rec, 'loop');
         this.deps.changed();
@@ -473,7 +508,9 @@ export class BabysitManager {
       await this.send(rec, prompt, verdict);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      this.deps.log?.(`Herald: babysitting ${rec.brief.sessionName}: decision failed (${message}); left for the user`);
+      this.deps.log?.(
+        `Herald: babysitting ${rec.brief.sessionName}: decision failed (${message}); left for the user`
+      );
       if (this.current(rec, prompt)) {
         this.escalate(rec, prompt, {
           kind: 'escalate',
@@ -522,18 +559,28 @@ export class BabysitManager {
     if (!src) return failed('I could not reach the session, so I left it for you.');
     let sendStarted = false;
     try {
-      const exists = await withTimeout(src.sessionExists(b.sessionId), REVALIDATE_TIMEOUT_MS, 'session check');
+      const exists = await withTimeout(
+        src.sessionExists(b.sessionId),
+        REVALIDATE_TIMEOUT_MS,
+        'session check'
+      );
       if (!exists) return dropped('the session is gone');
       // Strict read: an unreadable screen throws, and nothing is typed blind.
-      const live = await withTimeout(src.getLiveChoice(b.sessionId), REVALIDATE_TIMEOUT_MS, 'prompt check');
-      if (this.deps.hasOpenAsk(key) || this.deps.hasUserAction(key)) return dropped('the user is handling it');
+      const live = await withTimeout(
+        src.getLiveChoice(b.sessionId),
+        REVALIDATE_TIMEOUT_MS,
+        'prompt check'
+      );
+      if (this.deps.hasOpenAsk(key) || this.deps.hasUserAction(key))
+        return dropped('the user is handling it');
       if (!this.current(rec, prompt)) return dropped('the brief or the prompt changed');
       const answer = verdict.answer;
       let ok: boolean;
       let sent: string;
       if (prompt.kind === 'choice') {
         const index = answer.optionIndex;
-        if (!live || live.signature !== prompt.signature) return dropped('the question changed or was already answered');
+        if (!live || live.signature !== prompt.signature)
+          return dropped('the question changed or was already answered');
         if (live.multiSelect || index === undefined || index < 0 || index >= live.options.length)
           return dropped('that option is no longer offered');
         sent = live.options[index].label;
@@ -546,9 +593,9 @@ export class BabysitManager {
       } else {
         // Typed text can never answer a choice box (it would land in the wrong place).
         if (live) return dropped('the session is now showing a choice prompt');
-        const fresh = (await withTimeout(src.listSessions(), REVALIDATE_TIMEOUT_MS, 'status check')).find(
-          (s) => s.sessionId === b.sessionId
-        );
+        const fresh = (
+          await withTimeout(src.listSessions(), REVALIDATE_TIMEOUT_MS, 'status check')
+        ).find((s) => s.sessionId === b.sessionId);
         if (
           !fresh ||
           fresh.inactive ||
@@ -567,7 +614,8 @@ export class BabysitManager {
           'send'
         );
       }
-      if (!ok) return failed(`I could not deliver my answer to ${b.sessionName}, so I left it for you.`);
+      if (!ok)
+        return failed(`I could not deliver my answer to ${b.sessionName}, so I left it for you.`);
 
       const now = this.deps.now();
       b.answersUsed += 1;
@@ -575,7 +623,13 @@ export class BabysitManager {
       if (rec.answered.length > 80) rec.answered.splice(0, rec.answered.length - 80);
       if (!verdict.continueCase) rec.lastAnswer = norm(answer.label);
       const shown = clip(oneLine(sent), 200);
-      this.pushLog(rec, { at: now, question: prompt.question, answer: shown, kind: 'answered', reason: verdict.reason });
+      this.pushLog(rec, {
+        at: now,
+        question: prompt.question,
+        answer: shown,
+        kind: 'answered',
+        reason: verdict.reason,
+      });
       this.tracker.resolve(key, prompt.key, 'answered', now);
       this.deps.audit(
         'herald_babysit_answer',
@@ -643,7 +697,9 @@ export class BabysitManager {
       try {
         action = this.suggestionCard(rec, prompt, suggestion, verdict);
       } catch (err) {
-        this.deps.log?.(`Herald: babysitting ${b.sessionName}: suggestion card failed (${String(err)})`);
+        this.deps.log?.(
+          `Herald: babysitting ${b.sessionName}: suggestion card failed (${String(err)})`
+        );
       }
     }
     this.pushLog(rec, {
@@ -668,7 +724,11 @@ export class BabysitManager {
     );
     this.deps.log?.(`Herald: babysitting ${b.sessionName}: brought to the user (${verdict.why})`);
     if (action && suggestion) {
-      this.suggestions.set(key, { actionId: action.id, key: prompt.key, question: prompt.question });
+      this.suggestions.set(key, {
+        actionId: action.id,
+        key: prompt.key,
+        question: prompt.question,
+      });
       this.emit({
         text:
           `${b.sessionName} is asking: "${clip(oneLine(prompt.question), 160)}" ` +
@@ -708,7 +768,12 @@ export class BabysitManager {
         kind: 'answer_choice',
         payload: label,
         readback: `${b.sessionName}: option ${s.optionIndex + 1}, ${clip(oneLine(label), 80)}`,
-        choice: { index: s.optionIndex, optionCount: options.length, multiSelect: false, signature: prompt.signature },
+        choice: {
+          index: s.optionIndex,
+          optionCount: options.length,
+          multiSelect: false,
+          signature: prompt.signature,
+        },
       });
     }
     if (!s.text) return null;
@@ -723,13 +788,23 @@ export class BabysitManager {
   // ---------------------------------------------------------------- ending
 
   /** End an active brief and announce it. `announce` false = the user stopped it themselves. */
-  private finish(rec: BabysitRecord, reason: HeraldBabysitEndReason, announce = true, detail?: string): void {
+  private finish(
+    rec: BabysitRecord,
+    reason: HeraldBabysitEndReason,
+    announce = true,
+    detail?: string
+  ): void {
     const key = sessionKeyOf(rec.brief);
     if (!this.tracker.end(key, reason, this.deps.now())) return;
     this.announceEnd(rec, reason, announce, detail);
   }
 
-  private announceEnd(rec: BabysitRecord, reason: HeraldBabysitEndReason, announce: boolean, detail?: string): void {
+  private announceEnd(
+    rec: BabysitRecord,
+    reason: HeraldBabysitEndReason,
+    announce: boolean,
+    detail?: string
+  ): void {
     const b = rec.brief;
     const key = sessionKeyOf(b);
     const sug = this.suggestions.get(key);
@@ -740,7 +815,13 @@ export class BabysitManager {
     this.goneWarned.delete(b.id);
     this.deps.audit(
       'herald_babysit_end',
-      { babysitId: b.id, session: b.sessionId, reason, answersUsed: b.answersUsed, escalations: b.escalations },
+      {
+        babysitId: b.id,
+        session: b.sessionId,
+        reason,
+        answersUsed: b.answersUsed,
+        escalations: b.escalations,
+      },
       { ok: true },
       this.deps.now()
     );
@@ -779,7 +860,8 @@ export class BabysitManager {
       question: clip(oneLine(e.question), 300),
       ...(e.reason ? { reason: clip(oneLine(e.reason), 200) } : {}),
     });
-    if (rec.brief.log.length > LIMITS.maxLog) rec.brief.log.splice(0, rec.brief.log.length - LIMITS.maxLog);
+    if (rec.brief.log.length > LIMITS.maxLog)
+      rec.brief.log.splice(0, rec.brief.log.length - LIMITS.maxLog);
   }
 
   private emit(p: BabysitPost): void {

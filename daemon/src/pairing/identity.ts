@@ -26,8 +26,8 @@ export function defaultIdentityPath(): string {
 }
 
 export function daemonDisplayName(configured?: string): string {
-  // eslint-disable-next-line no-control-regex
   const n = (configured || '')
+    // eslint-disable-next-line no-control-regex
     .replace(/[\u0000-\u001f\u007f]/g, ' ')
     .trim()
     .slice(0, 60);

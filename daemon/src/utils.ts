@@ -1,12 +1,15 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import * as os from 'os';
 
 /**
  * Write a file atomically: write to a temp file in the same directory, then rename.
  * Prevents corruption if the process crashes mid-write.
  */
-export function atomicWriteFileSync(filePath: string, data: string, options?: fs.WriteFileOptions): void {
+export function atomicWriteFileSync(
+  filePath: string,
+  data: string,
+  options?: fs.WriteFileOptions
+): void {
   const dir = path.dirname(filePath);
   const tmpFile = path.join(dir, `.${path.basename(filePath)}.${process.pid}.tmp`);
   try {
@@ -14,7 +17,11 @@ export function atomicWriteFileSync(filePath: string, data: string, options?: fs
     fs.renameSync(tmpFile, filePath);
   } catch (err) {
     // Clean up temp file on failure
-    try { fs.unlinkSync(tmpFile); } catch { /* ignore */ }
+    try {
+      fs.unlinkSync(tmpFile);
+    } catch {
+      /* ignore */
+    }
     throw err;
   }
 }

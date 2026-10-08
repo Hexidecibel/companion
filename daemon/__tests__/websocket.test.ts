@@ -27,6 +27,7 @@ jest.mock('ws', () => {
 // Mock the dependencies
 const mockWatcher = new EventEmitter() as any;
 mockWatcher.getMessages = jest.fn().mockReturnValue([]);
+mockWatcher.getFreshMessages = jest.fn().mockReturnValue([]);
 mockWatcher.getStatus = jest.fn().mockReturnValue({
   isRunning: true,
   isWaitingForInput: false,

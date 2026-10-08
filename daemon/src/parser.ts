@@ -14,7 +14,19 @@ import {
 } from './types';
 import { APPROVAL_TOOLS, KNOWN_TOOL_NAMES, getToolDescription, isKnownTool } from './tool-config';
 import { incrementMessagesParsed } from './metrics';
-import { PARSER_WARNING_RATE_LIMIT_MS, PARSER_DEDUP_KEY_PREVIEW_LENGTH, FILE_ACTIVITY_READ_BUFFER_SIZE, COMMAND_LOG_PREVIEW_LENGTH, QUESTION_PREVIEW_LENGTH, TOOL_DESCRIPTION_PREVIEW_LENGTH, TOOL_APPROVAL_PREVIEW_LENGTH, SHORT_COMMAND_DISPLAY_LENGTH, TOOL_INPUT_SUMMARY_LENGTH, MAX_TOOL_OUTPUT_SIZE, MAX_SUMMARY_TEXT_LENGTH } from './constants';
+import {
+  PARSER_WARNING_RATE_LIMIT_MS,
+  PARSER_DEDUP_KEY_PREVIEW_LENGTH,
+  FILE_ACTIVITY_READ_BUFFER_SIZE,
+  COMMAND_LOG_PREVIEW_LENGTH,
+  QUESTION_PREVIEW_LENGTH,
+  TOOL_DESCRIPTION_PREVIEW_LENGTH,
+  TOOL_APPROVAL_PREVIEW_LENGTH,
+  SHORT_COMMAND_DISPLAY_LENGTH,
+  TOOL_INPUT_SUMMARY_LENGTH,
+  MAX_TOOL_OUTPUT_SIZE,
+  MAX_SUMMARY_TEXT_LENGTH,
+} from './constants';
 import { BoundedMap } from './utils';
 
 // Re-export TaskItem for tests
@@ -264,7 +276,13 @@ export function parseConversationFile(
       const entry: JsonlEntry = JSON.parse(lines[i]);
 
       if (entry.type === 'user' || entry.type === 'assistant') {
-        const message = parseEntry(entry, toolResults, toolStartTimes, toolCompleteTimes, toolErrors);
+        const message = parseEntry(
+          entry,
+          toolResults,
+          toolStartTimes,
+          toolCompleteTimes,
+          toolErrors
+        );
         if (message) {
           messages.unshift(message); // Add to beginning to maintain order
         }
@@ -374,8 +392,7 @@ export function parsePermissionPrompt(content: string): {
   // Match "Do you want to <action>?" followed by numbered options
   // Options are prefixed with ❯ (selected) or spaces, then "N. label"
   // Optionally followed by footer like "Esc to cancel · Tab to amend"
-  const promptRegex =
-    /(Do you want to [^\n]+\?)\n((?:[❯\s]*\d+\.\s+[^\n]+\n?)+)(?:\n?Esc[^\n]*)?/;
+  const promptRegex = /(Do you want to [^\n]+\?)\n((?:[❯\s]*\d+\.\s+[^\n]+\n?)+)(?:\n?Esc[^\n]*)?/;
   const promptMatch = content.match(promptRegex);
 
   if (!promptMatch) return null;
@@ -414,20 +431,6 @@ export function mapPermissionLabel(label: string): string {
   }
   return lower;
 }
-
-// Matches a single enumerated option line. Captures:
-//   [1] optional selector marker (❯ or >)
-//   [2] the enumerated index token (1. / 1) / (1) / a. / a))
-//   [3] the label text
-// Supported styles per line:
-//   "❯ 1. label"  "> 1) label"  "  1. label"  "1) label"  "(1) label"  "a. label"  "a) label"
-const TEXT_CHOICE_LINE =
-  /^[ \t]*([❯>])?[ \t]*(?:\((\d{1,2})\)|(\d{1,2})[.)]|([a-zA-Z])[.)])[ \t]+(\S.*?)[ \t]*$/;
-
-// A leading question / instruction line that, when immediately followed by an
-// enumerated list, is a strong signal of an interactive chooser.
-const TEXT_CHOICE_QUESTION =
-  /(?:^|\n)[ \t]*((?:Do you want|Would you like|Select|Choose|Which|Pick|How would you like|What would you like)[^\n]*\?)[ \t]*$/i;
 
 // Trailing affordance the CLI prints under an interactive selector.
 const TEXT_CHOICE_AFFORDANCE =
@@ -704,7 +707,8 @@ export function parseTextChoicePrompt(content: string): ParsedTextChoice | null 
     }
     if (i - lastOptLi > AUQ_MAX_OPTION_GAP_LINES) break;
   }
-  const blockEnd = footerLi >= 0 ? footerLi : Math.min(lines.length, lastOptLi + AUQ_MAX_OPTION_GAP_LINES);
+  const blockEnd =
+    footerLi >= 0 ? footerLi : Math.min(lines.length, lastOptLi + AUQ_MAX_OPTION_GAP_LINES);
 
   // 4. Build options, absorbing each option's indented multi-line description.
   const options: QuestionOption[] = [];
@@ -978,7 +982,12 @@ function parseEntry(
         }
         // Add Yes/No options for pending approval tools
         // But NOT for Task tools (background, stay "pending" long) or ExitPlanMode (has plan card UI)
-        else if (isPending && APPROVAL_TOOLS.includes(block.name) && block.name !== 'Task' && block.name !== 'ExitPlanMode') {
+        else if (
+          isPending &&
+          APPROVAL_TOOLS.includes(block.name) &&
+          block.name !== 'Task' &&
+          block.name !== 'ExitPlanMode'
+        ) {
           const input = block.input as Record<string, unknown>;
           let description = '';
 
@@ -1100,7 +1109,11 @@ export function parseLocalCommandPart(content: string): LocalCommandPart | null 
   }
   const out = t.match(/^<local-command-(stdout|stderr)>([\s\S]*?)<\/local-command-\1>$/);
   if (out) {
-    return { kind: 'output', text: out[2].replace(ANSI_RE, '').trim(), isError: out[1] === 'stderr' };
+    return {
+      kind: 'output',
+      text: out[2].replace(ANSI_RE, '').trim(),
+      isError: out[1] === 'stderr',
+    };
   }
   const cmd = t.match(/<command-name>([^<]*)<\/command-name>/);
   if (cmd) {
@@ -1171,7 +1184,12 @@ export function classifyLocalCommands(messages: ConversationMessage[]): {
     if (openCommand !== null) {
       const marker = markers.get(openCommand)!;
       const text = p.text;
-      if (text && !text.includes('\n') && text.length <= LOCAL_COMMAND_OUTPUT_MAX && !marker.output) {
+      if (
+        text &&
+        !text.includes('\n') &&
+        text.length <= LOCAL_COMMAND_OUTPUT_MAX &&
+        !marker.output
+      ) {
         marker.output = text;
       }
       if (p.isError) marker.isError = true;
@@ -1276,7 +1294,9 @@ export function extractHighlights(messages: ConversationMessage[]): Conversation
         if (msg.content.includes('<task-notification>')) return false;
         // Skip messages that are only system-reminder blocks (no user-visible content)
         if (msg.content.includes('<system-reminder>')) {
-          const stripped = msg.content.replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, '').trim();
+          const stripped = msg.content
+            .replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, '')
+            .trim();
           if (!stripped) return false;
         }
         return true;

@@ -105,6 +105,16 @@ async function completeAuth(
   // The authenticate() method is async — flush its continuations
   await flushMicrotasks();
   await flushMicrotasks();
+  // After a successful auth the connection subscribes to broadcasts and only
+  // reports 'connected' once the daemon has answered that request.
+  const subMsg = ws.sentMessages
+    .map((m) => JSON.parse(m) as { type: string; requestId?: string })
+    .find((m) => m.type === 'subscribe');
+  if (subMsg) {
+    ws.simulateMessage({ type: 'subscribed', success: true, requestId: subMsg.requestId });
+    await flushMicrotasks();
+    await flushMicrotasks();
+  }
 }
 
 // ---------------------------------------------------------------------------

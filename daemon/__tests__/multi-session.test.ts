@@ -67,6 +67,10 @@ function createMockWatcher() {
     return conv?.messages || [];
   });
 
+  // get_highlights reads the first page through getFreshMessages (a re-parse of
+  // the file in the real watcher); the mock serves the same in-memory messages.
+  watcher.getFreshMessages = jest.fn((sessionId?: string) => watcher.getMessages(sessionId));
+
   watcher.getStatus = jest.fn((sessionId?: string) => {
     const id = sessionId || watcher.getActiveSessionId();
     const conv = conversations.get(id);

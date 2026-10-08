@@ -1,5 +1,16 @@
 import { spawn, execFile } from 'child_process';
-import { TMUX_OPERATION_TIMEOUT_MS, INPUT_LOG_PREVIEW_LENGTH, POST_TEXT_DELAY_MS, POST_ENTER_DELAY_MS, POST_ENTER_BEFORE_TYPING_DELAY_MS, POST_OTHER_SELECT_DELAY_MS, POST_TEXT_INPUT_DELAY_MS, POST_CHOICE_DELAY_MS, DEFAULT_PANE_CAPTURE_LINES, OVERLAY_DISMISS_DELAY_MS, OVERLAY_DETECTION_LINES } from './constants';
+import {
+  TMUX_OPERATION_TIMEOUT_MS,
+  INPUT_LOG_PREVIEW_LENGTH,
+  POST_TEXT_DELAY_MS,
+  POST_ENTER_DELAY_MS,
+  POST_OTHER_SELECT_DELAY_MS,
+  POST_TEXT_INPUT_DELAY_MS,
+  POST_CHOICE_DELAY_MS,
+  DEFAULT_PANE_CAPTURE_LINES,
+  OVERLAY_DISMISS_DELAY_MS,
+  OVERLAY_DETECTION_LINES,
+} from './constants';
 import { incrementTmuxOperations } from './metrics';
 
 interface TmuxResult {
@@ -105,8 +116,8 @@ export class InputInjector {
     try {
       const paneContent = await this.capturePaneContent(session, OVERLAY_DETECTION_LINES);
       const overlayPatterns = [
-        /to select.*Enter to view.*Esc to close/,  // Background tasks panel
-        /Esc to close/,                              // Generic overlay catch-all
+        /to select.*Enter to view.*Esc to close/, // Background tasks panel
+        /Esc to close/, // Generic overlay catch-all
       ];
       const hasOverlay = overlayPatterns.some((p) => p.test(paneContent));
       if (hasOverlay) {
@@ -122,7 +133,9 @@ export class InputInjector {
 
   private async doSendInput(input: string, session: string): Promise<boolean> {
     try {
-      console.log(`Sending input to tmux session '${session}': ${input.substring(0, INPUT_LOG_PREVIEW_LENGTH)}...`);
+      console.log(
+        `Sending input to tmux session '${session}': ${input.substring(0, INPUT_LOG_PREVIEW_LENGTH)}...`
+      );
 
       // Send the text (avoids shell interpretation via -l --)
       const textResult = await this.runTmux(['send-keys', '-t', session, '-l', '--', input]);
@@ -289,7 +302,9 @@ export class InputInjector {
         // options, i.e. position (optionCount + 1). Pressing its digit highlights it and
         // opens an inline text field (no submit); then we type the text and press Enter.
         const otherNumber = optionCount + 1; // 1-based position of "Type something."
-        console.log(`Sending choice: Other "${otherText.substring(0, 60)}" (option ${otherNumber}) to '${session}'`);
+        console.log(
+          `Sending choice: Other "${otherText.substring(0, 60)}" (option ${otherNumber}) to '${session}'`
+        );
 
         if (otherNumber <= 9) {
           if (!(await sendKey(String(otherNumber)))) return false;
@@ -318,7 +333,9 @@ export class InputInjector {
         // address selected options directly with no positional drift. After toggling,
         // Right arrow opens the "Submit answers / Cancel" review screen and "1" confirms.
         const sorted = [...new Set(selectedIndices)].sort((a, b) => a - b);
-        console.log(`Sending multi-select choice: indices [${sorted.join(',')}] of ${optionCount} to '${session}'`);
+        console.log(
+          `Sending multi-select choice: indices [${sorted.join(',')}] of ${optionCount} to '${session}'`
+        );
 
         for (const idx of sorted) {
           const num = idx + 1; // 1-based option number
@@ -338,7 +355,9 @@ export class InputInjector {
         // Single-select: pressing the option's digit selects AND submits in one keypress.
         const idx = selectedIndices[0] || 0;
         const num = idx + 1; // 1-based option number
-        console.log(`Sending single-select choice: index ${idx} (option ${num}) of ${optionCount} to '${session}'`);
+        console.log(
+          `Sending single-select choice: index ${idx} (option ${num}) of ${optionCount} to '${session}'`
+        );
 
         if (num <= 9) {
           if (!(await sendKey(String(num)))) return false;
@@ -377,7 +396,10 @@ export class InputInjector {
   /**
    * Capture the current content of a tmux pane
    */
-  async capturePaneContent(targetSession?: string, lines = DEFAULT_PANE_CAPTURE_LINES): Promise<string> {
+  async capturePaneContent(
+    targetSession?: string,
+    lines = DEFAULT_PANE_CAPTURE_LINES
+  ): Promise<string> {
     const session = targetSession || this.activeSession;
     const result = await this.runTmux(['capture-pane', '-t', session, '-p', '-S', `-${lines}`]);
     if (result.status !== 0) return '';

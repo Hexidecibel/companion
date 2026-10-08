@@ -18,7 +18,13 @@ import * as chokidar from 'chokidar';
 import { EventEmitter } from 'events';
 import { exec } from 'child_process';
 import { promisify } from 'util';
-import { ConversationFile, ConversationMessage, FeedbackPrompt, SessionStatus, TmuxSession } from './types';
+import {
+  ConversationFile,
+  ConversationMessage,
+  FeedbackPrompt,
+  SessionStatus,
+  TmuxSession,
+} from './types';
 import { InputInjector } from './input-injector';
 import {
   parseConversationFile,
@@ -64,6 +70,7 @@ const execAsync = promisify(exec);
  */
 function parseFeedbackPrompt(tmuxText: string): FeedbackPrompt | null {
   // Strip ANSI escape codes
+  // eslint-disable-next-line no-control-regex
   const clean = tmuxText.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
 
   // Look for the question
@@ -96,14 +103,14 @@ interface TaskSummary {
 
 /** Snapshot of a session saved to disk for persistence across daemon restarts. */
 interface PersistedSessionSnapshot {
-  id: string;           // tmux session name
+  id: string; // tmux session name
   name: string;
   projectPath: string;
   conversationPath?: string;
   lastActivity: number;
   isWaitingForInput: boolean;
   messageCount: number;
-  savedAt: number;      // when this snapshot was taken
+  savedAt: number; // when this snapshot was taken
 }
 
 interface TrackedConversation {
@@ -186,7 +193,10 @@ export class SessionWatcher extends EventEmitter {
     this.loadPersistedSessions();
     // Refresh tmux paths periodically
     this.refreshTmuxPaths();
-    const tmuxRefreshInterval = setInterval(() => this.refreshTmuxPaths(), TMUX_PATH_REFRESH_INTERVAL_MS);
+    const tmuxRefreshInterval = setInterval(
+      () => this.refreshTmuxPaths(),
+      TMUX_PATH_REFRESH_INTERVAL_MS
+    );
     registerShutdownCallback(() => {
       clearInterval(tmuxRefreshInterval);
       this.persistSessions();
@@ -233,7 +243,8 @@ export class SessionWatcher extends EventEmitter {
             // from the files themselves (getConversationChain).
             const current = this.tmuxConversationIds.get(session);
             const clean = (ids as unknown[]).filter(
-              (id, i, arr): id is string => typeof id === 'string' && arr.indexOf(id) === i && id !== current
+              (id, i, arr): id is string =>
+                typeof id === 'string' && arr.indexOf(id) === i && id !== current
             );
             if (current) clean.push(current);
             this.tmuxConversationHistory.set(session, clean);
@@ -400,7 +411,8 @@ export class SessionWatcher extends EventEmitter {
         continue;
       }
       if (identityChanged(prev, cur)) {
-        const sessionNew = !!(prev.created && cur.created && prev.created !== cur.created) ||
+        const sessionNew =
+          !!(prev.created && cur.created && prev.created !== cur.created) ||
           !!(prev.panePid && cur.panePid && prev.panePid !== cur.panePid);
         console.log(
           `Watcher: ${name} is a ${sessionNew ? 'new tmux session with a reused name' : 'new claude process'}; dropping stale mapping -> ${this.tmuxConversationIds.get(name)?.substring(0, 8)}`
@@ -408,7 +420,10 @@ export class SessionWatcher extends EventEmitter {
         this.dropConversationMapping(name);
         const createdMs = Number(cur.created) * 1000;
         const startedMs = sessionNew ? createdMs : this.claudeStartMs.get(name) || 0;
-        this.newlyCreatedSessions.set(name, startedMs > 0 ? Math.min(startedMs, Date.now()) : Date.now() - 5000);
+        this.newlyCreatedSessions.set(
+          name,
+          startedMs > 0 ? Math.min(startedMs, Date.now()) : Date.now() - 5000
+        );
         if (this.activeTmuxSession === name) this.activeConversationId = null;
         changed = true;
         continue;
@@ -420,7 +435,11 @@ export class SessionWatcher extends EventEmitter {
         encodedPath: prev.encodedPath || cur.encodedPath,
         claudePid: prev.claudePid ?? cur.claudePid,
       };
-      if (filled.created !== prev.created || filled.panePid !== prev.panePid || filled.claudePid !== prev.claudePid) {
+      if (
+        filled.created !== prev.created ||
+        filled.panePid !== prev.panePid ||
+        filled.claudePid !== prev.claudePid
+      ) {
         this.mappingIdentity.set(name, filled);
         changed = true;
       }
@@ -986,7 +1005,10 @@ export class SessionWatcher extends EventEmitter {
       for (const [name, ePath] of this.tmuxPathBySession) {
         if (ePath === encodedDir) sessionsForPath.push(name);
       }
-      const startedAt = sessionsForPath.length === 1 ? this.newlyCreatedSessions.get(sessionsForPath[0]) : undefined;
+      const startedAt =
+        sessionsForPath.length === 1
+          ? this.newlyCreatedSessions.get(sessionsForPath[0])
+          : undefined;
       if (sessionsForPath.length === 1 && startedAt !== undefined && !bornAfter(stats, startedAt)) {
         // The session (or its claude) just started: an older transcript in the
         // same directory (e.g. the previous claude writing its exit lines) is
@@ -1101,7 +1123,10 @@ export class SessionWatcher extends EventEmitter {
       // real change does not replay a stale approval, and emit nothing (no
       // status-change -> escalation/push, no pending-approval -> auto-approve).
       const quietPending = getPendingApprovalTools(messages);
-      tracked.lastEmittedPendingTools = quietPending.map((t) => t.id).sort().join(',');
+      tracked.lastEmittedPendingTools = quietPending
+        .map((t) => t.id)
+        .sort()
+        .join(',');
       return;
     }
 
@@ -1135,7 +1160,8 @@ export class SessionWatcher extends EventEmitter {
         sessionId,
         projectPath,
         sessionName,
-        content: lastMsg?.content?.substring(0, SESSION_COMPLETION_MESSAGE_LENGTH) || 'Session completed',
+        content:
+          lastMsg?.content?.substring(0, SESSION_COMPLETION_MESSAGE_LENGTH) || 'Session completed',
       });
     }
 
@@ -1194,7 +1220,8 @@ export class SessionWatcher extends EventEmitter {
     const currentActivity = detectCurrentActivity(messages);
 
     // Feedback prompt polling: start when transitioning to waiting with no pending tool approvals
-    const hasPendingToolCalls = lastMessage?.type === 'assistant' &&
+    const hasPendingToolCalls =
+      lastMessage?.type === 'assistant' &&
       lastMessage.toolCalls?.some((tc) => tc.status === 'pending');
     if (waitingStatusChanged && conversationWaiting && !hasPendingToolCalls) {
       this.startFeedbackPolling(sessionId);
@@ -2037,8 +2064,7 @@ export class SessionWatcher extends EventEmitter {
         lastMsg?.type === 'assistant' &&
         (lastMsg.toolCalls?.some(
           (tc) =>
-            tc.status === 'pending' &&
-            (tc.name === 'AskUserQuestion' || tc.name === 'ExitPlanMode')
+            tc.status === 'pending' && (tc.name === 'AskUserQuestion' || tc.name === 'ExitPlanMode')
         ) ??
           false);
       if (hasInteractivePending) {
@@ -2075,9 +2101,8 @@ export class SessionWatcher extends EventEmitter {
 
     // Determine if this session has a feedback prompt
     // sessionId here is a tmux session name; feedbackSessionId is also a tmux session name
-    const feedbackPrompt = sessionId && this.feedbackSessionId === sessionId
-      ? this.feedbackPrompt
-      : undefined;
+    const feedbackPrompt =
+      sessionId && this.feedbackSessionId === sessionId ? this.feedbackPrompt : undefined;
 
     return {
       isRunning: true,
@@ -2453,9 +2478,7 @@ export class SessionWatcher extends EventEmitter {
         // Extract recent message timestamps for sparkline (last 30 min)
         if (messages) {
           const cutoff = Date.now() - 30 * 60 * 1000;
-          recentTimestamps = messages
-            .filter(m => m.timestamp >= cutoff)
-            .map(m => m.timestamp);
+          recentTimestamps = messages.filter((m) => m.timestamp >= cutoff).map((m) => m.timestamp);
         }
       }
 
