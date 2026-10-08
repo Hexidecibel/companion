@@ -46,7 +46,9 @@ const IGNORE_DIRS = new Set([
 const FILE_TREE_TTL = 30_000; // 30s cache
 const MAX_FILE_TREE_CACHE_ENTRIES = 50;
 
-const fileTreeCache = new BoundedMap<string, { files: string[]; timestamp: number }>(MAX_FILE_TREE_CACHE_ENTRIES);
+const fileTreeCache = new BoundedMap<string, { files: string[]; timestamp: number }>(
+  MAX_FILE_TREE_CACHE_ENTRIES
+);
 
 function walkDirectory(dir: string, root: string, files: string[], depth: number = 0): void {
   if (depth > MAX_DIRECTORY_TRAVERSAL_DEPTH) return;
@@ -86,9 +88,15 @@ function fuzzyScore(query: string, filePath: string, projectRoot: string): numbe
   const q = query.toLowerCase();
 
   if (basename === q) return FUZZY_SCORE_EXACT_MATCH;
-  if (basename.startsWith(q)) return FUZZY_SCORE_STARTS_WITH + (q.length / basename.length) * FUZZY_SCORE_LENGTH_MULTIPLIER;
+  if (basename.startsWith(q))
+    return FUZZY_SCORE_STARTS_WITH + (q.length / basename.length) * FUZZY_SCORE_LENGTH_MULTIPLIER;
   const basenameIdx = basename.indexOf(q);
-  if (basenameIdx >= 0) return FUZZY_SCORE_CONTAINS + (q.length / basename.length) * FUZZY_SCORE_LENGTH_MULTIPLIER - basenameIdx;
+  if (basenameIdx >= 0)
+    return (
+      FUZZY_SCORE_CONTAINS +
+      (q.length / basename.length) * FUZZY_SCORE_LENGTH_MULTIPLIER -
+      basenameIdx
+    );
   const pathIdx = relativePath.indexOf(q);
   if (pathIdx >= 0) return FUZZY_SCORE_PATH_MATCH - pathIdx * 0.1;
 
@@ -104,14 +112,13 @@ function fuzzyScore(query: string, filePath: string, projectRoot: string): numbe
       consecutive = 0;
     }
   }
-  if (qi === q.length) return FUZZY_SCORE_SUBSEQUENCE_BASE + maxConsecutive * FUZZY_SCORE_CONSECUTIVE_MULTIPLIER;
+  if (qi === q.length)
+    return FUZZY_SCORE_SUBSEQUENCE_BASE + maxConsecutive * FUZZY_SCORE_CONSECUTIVE_MULTIPLIER;
 
   return -1;
 }
 
-export function registerFileHandlers(
-  ctx: HandlerContext
-): Record<string, MessageHandler> {
+export function registerFileHandlers(ctx: HandlerContext): Record<string, MessageHandler> {
   return {
     browse_directories(client, payload, requestId) {
       const browsePayload = payload as { path?: string } | undefined;
@@ -308,7 +315,9 @@ export function registerFileHandlers(
     },
 
     search_files(client, payload, requestId) {
-      const searchPayload = payload as { query: string; limit?: number; sessionId?: string } | undefined;
+      const searchPayload = payload as
+        | { query: string; limit?: number; sessionId?: string }
+        | undefined;
       const query = searchPayload?.query?.trim();
       if (!query) {
         ctx.send(client.ws, {
@@ -576,7 +585,9 @@ export function registerFileHandlers(
             fileName,
             size: stats.size,
             mimeType:
-              ext === '.apk' ? 'application/vnd.android.package-archive' : 'application/octet-stream',
+              ext === '.apk'
+                ? 'application/vnd.android.package-archive'
+                : 'application/octet-stream',
             data: base64,
           },
           requestId,

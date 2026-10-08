@@ -2,13 +2,25 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { ReviewService } from '../service';
 import { GitRunner } from '../git-runner';
-import { prompt, toolUse, toolResult, editResult, writeCreate, jsonl, tmpDir, initRepo, commitAll, fakeWatcher } from './helpers';
+import {
+  prompt,
+  toolUse,
+  toolResult,
+  editResult,
+  writeCreate,
+  jsonl,
+  tmpDir,
+  initRepo,
+  commitAll,
+  fakeWatcher,
+} from './helpers';
 
 describe('get_session_diff compat (ledger + one bounded diff)', () => {
   it('includes tracked diffs AND untracked new files, with few git calls', async () => {
     const repo = initRepo();
     fs.mkdirSync(path.join(repo, 'src'));
-    for (let i = 0; i < 10; i++) fs.writeFileSync(path.join(repo, 'src', `f${i}.ts`), `line ${i}\n`);
+    for (let i = 0; i < 10; i++)
+      fs.writeFileSync(path.join(repo, 'src', `f${i}.ts`), `line ${i}\n`);
     commitAll(repo);
     const t0 = Date.parse('2026-09-30T08:00:00Z');
     const entries: unknown[] = [prompt('t1', 'edit all', t0)];
@@ -17,7 +29,19 @@ describe('get_session_diff compat (ledger + one bounded diff)', () => {
       fs.writeFileSync(p, `line ${i}\nnew ${i}\n`);
       entries.push(toolUse(`e${i}`, 'Edit', { file_path: p }, t0 + 10 * i + 1));
       entries.push(
-        toolResult(`e${i}`, editResult(p, [{ oldStart: 1, oldLines: 1, newStart: 1, newLines: 2, lines: [` line ${i}`, `+new ${i}`] }]), t0 + 10 * i + 2)
+        toolResult(
+          `e${i}`,
+          editResult(p, [
+            {
+              oldStart: 1,
+              oldLines: 1,
+              newStart: 1,
+              newLines: 2,
+              lines: [` line ${i}`, `+new ${i}`],
+            },
+          ]),
+          t0 + 10 * i + 2
+        )
       );
     }
     const created = path.join(repo, 'src', 'brand-new.ts');
@@ -31,7 +55,8 @@ describe('get_session_diff compat (ledger + one bounded diff)', () => {
     const runner = new GitRunner();
     const svc = new ReviewService({
       watcher: fakeWatcher([{ id: 's1', projectPath: repo, files: [conv] }]),
-      gitEnabled: () => true, excludeDirs: [],
+      gitEnabled: () => true,
+      excludeDirs: [],
       runner,
     });
     const out = await svc.compatSessionDiff('s1');
@@ -51,9 +76,20 @@ describe('get_session_diff compat (ledger + one bounded diff)', () => {
     const convDir = tmpDir();
     const conv = path.join(convDir, 'c.jsonl');
     const t0 = Date.now();
-    fs.writeFileSync(conv, jsonl([prompt('t1', 'x', t0), toolUse('e1', 'Edit', { file_path: '/nowhere/a.ts' }, t0 + 1), toolResult('e1', editResult('/nowhere/a.ts', []), t0 + 2)]));
+    fs.writeFileSync(
+      conv,
+      jsonl([
+        prompt('t1', 'x', t0),
+        toolUse('e1', 'Edit', { file_path: '/nowhere/a.ts' }, t0 + 1),
+        toolResult('e1', editResult('/nowhere/a.ts', []), t0 + 2),
+      ])
+    );
     const runner = new GitRunner({ enabled: () => false });
-    const svc = new ReviewService({ watcher: fakeWatcher([{ id: 's1', projectPath: '/nowhere', files: [conv] }]), gitEnabled: () => false, runner });
+    const svc = new ReviewService({
+      watcher: fakeWatcher([{ id: 's1', projectPath: '/nowhere', files: [conv] }]),
+      gitEnabled: () => false,
+      runner,
+    });
     const out = await svc.compatSessionDiff('s1');
     expect(out.map((f) => f.path)).toEqual(['/nowhere/a.ts']);
     expect(runner.spawnCount).toBe(0);

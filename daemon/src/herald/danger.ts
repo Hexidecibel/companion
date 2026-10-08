@@ -412,7 +412,11 @@ export function classifyChangedFile(
   const base = lower.split('/').pop() || lower;
   const abs = absPath.replace(/\\/g, '/').toLowerCase();
 
-  if (/(^|\/)migrations?\//.test(lower) || /(^|\/)db\/migrate\//.test(lower) || base.endsWith('.sql'))
+  if (
+    /(^|\/)migrations?\//.test(lower) ||
+    /(^|\/)db\/migrate\//.test(lower) ||
+    base.endsWith('.sql')
+  )
     add('migration', 'high', 'database migration');
   if (/(^|\/)\.github\/workflows\//.test(lower)) add('ci', 'high', 'CI workflow');
   else if (base === '.gitlab-ci.yml' || /(^|\/)\.circleci\//.test(lower) || base === 'jenkinsfile')

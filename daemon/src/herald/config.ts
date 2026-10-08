@@ -178,7 +178,9 @@ export function parseHeraldConfigBlock(raw: unknown): HeraldConfigBlock | undefi
   const strList = (v: unknown, max: number) =>
     Array.isArray(v)
       ? v
-          .filter((x): x is string => typeof x === 'string' && x.trim().length > 0 && x.length < 256)
+          .filter(
+            (x): x is string => typeof x === 'string' && x.trim().length > 0 && x.length < 256
+          )
           .map((x) => x.trim())
           .slice(0, max)
       : undefined;
@@ -290,7 +292,10 @@ export function resolveHeraldConfig(
     voiceUrl: resolveVoiceUrl(b, env),
     ...(b.monthly_budget_usd !== undefined ? { monthlyBudgetUsd: b.monthly_budget_usd } : {}),
     ...(b.prompt_cache === false ? {} : { promptCache: { ttl: b.cache_ttl || '5m' } }),
-    pricing: resolvePricing(b.model || (provider === 'anthropic' ? DEFAULT_ANTHROPIC_MODEL : ''), b.pricing),
+    pricing: resolvePricing(
+      b.model || (provider === 'anthropic' ? DEFAULT_ANTHROPIC_MODEL : ''),
+      b.pricing
+    ),
     trigger: resolveTriggerConfig(b),
     ...(provider === 'anthropic' ? { babysitModel: b.babysit_model || DEFAULT_BABYSIT_MODEL } : {}),
   };

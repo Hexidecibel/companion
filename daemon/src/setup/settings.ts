@@ -21,7 +21,9 @@ export function heraldChoice(block: DaemonConfig['herald']): HeraldProviderChoic
   return block.provider === 'anthropic' ? 'anthropic' : 'openai_compatible';
 }
 
-export function pairingPolicy(cfg: Pick<DaemonConfig, 'pairing' | 'pairingAllowPublic'>): PairingPolicy {
+export function pairingPolicy(
+  cfg: Pick<DaemonConfig, 'pairing' | 'pairingAllowPublic'>
+): PairingPolicy {
   if (cfg.pairing === false) return 'off';
   return cfg.pairingAllowPublic === true ? 'anywhere' : 'lan';
 }
@@ -101,7 +103,11 @@ export function applySettingsPatch(
   }
   if (patch.tmuxSession !== undefined) {
     const t = patch.tmuxSession;
-    if (typeof t !== 'string' || !/^[A-Za-z0-9_-]+$/.test(t) || t.length > SETUP_LIMITS.tmuxSessionMaxLength) {
+    if (
+      typeof t !== 'string' ||
+      !/^[A-Za-z0-9_-]+$/.test(t) ||
+      t.length > SETUP_LIMITS.tmuxSessionMaxLength
+    ) {
       throw new SettingsError('tmux session names use letters, digits, - and _ only');
     }
     ops.push(() => {
@@ -110,7 +116,8 @@ export function applySettingsPatch(
     out.restartNeeded = true;
   }
   if (patch.mdnsEnabled !== undefined) {
-    if (typeof patch.mdnsEnabled !== 'boolean') throw new SettingsError('mdnsEnabled must be true or false');
+    if (typeof patch.mdnsEnabled !== 'boolean')
+      throw new SettingsError('mdnsEnabled must be true or false');
     const v = patch.mdnsEnabled;
     ops.push(() => {
       raw.mdns_enabled = v;
@@ -119,7 +126,8 @@ export function applySettingsPatch(
   }
   if (patch.pairing !== undefined) {
     const p = patch.pairing;
-    if (p !== 'lan' && p !== 'anywhere' && p !== 'off') throw new SettingsError('pairing must be lan, anywhere or off');
+    if (p !== 'lan' && p !== 'anywhere' && p !== 'off')
+      throw new SettingsError('pairing must be lan, anywhere or off');
     ops.push(() => {
       raw.pairing = p !== 'off';
       raw.pairing_allow_public = p === 'anywhere';
@@ -128,7 +136,12 @@ export function applySettingsPatch(
   if (patch.herald !== undefined) {
     const h = obj(patch.herald);
     const provider = h.provider;
-    if (provider !== undefined && provider !== 'anthropic' && provider !== 'openai_compatible' && provider !== 'off') {
+    if (
+      provider !== undefined &&
+      provider !== 'anthropic' &&
+      provider !== 'openai_compatible' &&
+      provider !== 'off'
+    ) {
       throw new SettingsError('herald.provider must be anthropic, openai_compatible or off');
     }
     let baseUrl: string | undefined;
@@ -144,13 +157,19 @@ export function applySettingsPatch(
         } catch {
           throw new SettingsError('baseUrl must be an http(s) URL');
         }
-        if (u.protocol !== 'http:' && u.protocol !== 'https:') throw new SettingsError('baseUrl must be an http(s) URL');
-        if (u.username || u.password) throw new SettingsError('Put keys in the secret field, not in the URL');
+        if (u.protocol !== 'http:' && u.protocol !== 'https:')
+          throw new SettingsError('baseUrl must be an http(s) URL');
+        if (u.username || u.password)
+          throw new SettingsError('Put keys in the secret field, not in the URL');
       }
     }
     let model: string | undefined;
     if (h.model !== undefined) {
-      if (typeof h.model !== 'string' || h.model.length > SETUP_LIMITS.modelMaxLength || !/^[\w.:/@+-]*$/.test(h.model)) {
+      if (
+        typeof h.model !== 'string' ||
+        h.model.length > SETUP_LIMITS.modelMaxLength ||
+        !/^[\w.:/@+-]*$/.test(h.model)
+      ) {
         throw new SettingsError('model is not valid');
       }
       model = h.model.trim();
@@ -159,7 +178,8 @@ export function applySettingsPatch(
       const existing = obj(raw.herald);
       const effUrl = baseUrl ?? (typeof existing.base_url === 'string' ? existing.base_url : '');
       const effModel = model ?? (typeof existing.model === 'string' ? existing.model : '');
-      if (!effUrl || !effModel) throw new SettingsError('A local model needs its base URL and model name');
+      if (!effUrl || !effModel)
+        throw new SettingsError('A local model needs its base URL and model name');
     }
     ops.push(() => {
       const block = { ...obj(raw.herald) };

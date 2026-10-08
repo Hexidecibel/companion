@@ -87,12 +87,16 @@ export class NetViewBuilder {
   constructor(private host: NetViewHost) {}
 
   /** The session's repos: project repo first, then repos of touched dirs (<= 4). */
-  async sessionRepos(projectPath: string, absPaths: string[]): Promise<{ repos: RepoInfo[]; repoOf: Map<string, RepoInfo | null> }> {
+  async sessionRepos(
+    projectPath: string,
+    absPaths: string[]
+  ): Promise<{ repos: RepoInfo[]; repoOf: Map<string, RepoInfo | null> }> {
     const repos: RepoInfo[] = [];
     const repoOf = new Map<string, RepoInfo | null>();
     if (!this.host.gitEnabled()) return { repos, repoOf };
     const add = (r: RepoInfo | null) => {
-      if (r && !repos.some((x) => x.root === r.root) && repos.length < MAX_REPOS_PER_SESSION) repos.push(r);
+      if (r && !repos.some((x) => x.root === r.root) && repos.length < MAX_REPOS_PER_SESSION)
+        repos.push(r);
     };
     if (projectPath) add(await this.host.repos.resolve(projectPath).catch(() => null));
     const dirs = new Map<string, string[]>();
@@ -119,11 +123,17 @@ export class NetViewBuilder {
   ): Promise<{ tree: string | null; fromSnapshot: boolean }> {
     const pick = (list: TreeRef[] | undefined) => list?.find((t) => t.repoRoot === repo.root)?.tree;
     const candidate =
-      scope === 'since_checkpoint' && cp.reviewedThrough > 0 ? pick(cp.snapshots) : pick(cp.baseline);
+      scope === 'since_checkpoint' && cp.reviewedThrough > 0
+        ? pick(cp.snapshots)
+        : pick(cp.baseline);
     if (candidate) {
-      const ok = await objectsExist(this.host.runner, repo, [candidate]).catch(() => new Set<string>());
+      const ok = await objectsExist(this.host.runner, repo, [candidate]).catch(
+        () => new Set<string>()
+      );
       if (ok.has(candidate)) return { tree: candidate, fromSnapshot: true };
-      console.log(`Review: checkpoint snapshot ${candidate.slice(0, 8)} expired in ${repo.root}; using HEAD`);
+      console.log(
+        `Review: checkpoint snapshot ${candidate.slice(0, 8)} expired in ${repo.root}; using HEAD`
+      );
     }
     return { tree: await headTree(this.host.runner, repo), fromSnapshot: false };
   }
@@ -172,7 +182,12 @@ export class NetViewBuilder {
 
     for (const plan of plans) {
       const repo = plan.info;
-      const wire: ReviewRepo = { root: repo.root, worktree: repo.worktree, branch: repo.branch, head: repo.head };
+      const wire: ReviewRepo = {
+        root: repo.root,
+        worktree: repo.worktree,
+        branch: repo.branch,
+        head: repo.head,
+      };
       repoOut.push(wire);
       if (this.host.runner.isDegraded(repo.root)) {
         wire.degraded = 'timeout';
@@ -193,14 +208,31 @@ export class NetViewBuilder {
             limitTo: Array.from(plan.edits.keys()).map((a) => path.relative(repo.root, a)),
           });
         }
-        const diff = base.tree ? await this.cachedDiff(repo, base.tree, nowTree) : { files: [], numstat: null };
+        const diff = base.tree
+          ? await this.cachedDiff(repo, base.tree, nowTree)
+          : { files: [], numstat: null };
         const seen = new Set<string>();
-        const entries: Array<{ parsed: ParsedFileDiff | null; rel: string; oldRel?: string; numstat?: { a: number | null; d: number | null; binary: boolean } }> = [];
+        const entries: Array<{
+          parsed: ParsedFileDiff | null;
+          rel: string;
+          oldRel?: string;
+          numstat?: { a: number | null; d: number | null; binary: boolean };
+        }> = [];
         if (diff.files) {
-          for (const f of diff.files) entries.push({ parsed: f, rel: (f.newPath ?? f.oldPath)!, oldRel: f.oldPath && f.newPath && f.oldPath !== f.newPath ? f.oldPath : undefined });
+          for (const f of diff.files)
+            entries.push({
+              parsed: f,
+              rel: (f.newPath ?? f.oldPath)!,
+              oldRel: f.oldPath && f.newPath && f.oldPath !== f.newPath ? f.oldPath : undefined,
+            });
         } else if (diff.numstat) {
           for (const n of diff.numstat)
-            entries.push({ parsed: null, rel: n.path, oldRel: n.oldPath, numstat: { a: n.additions, d: n.deletions, binary: n.binary } });
+            entries.push({
+              parsed: null,
+              rel: n.path,
+              oldRel: n.oldPath,
+              numstat: { a: n.additions, d: n.deletions, binary: n.binary },
+            });
         }
         let unclaimed = 0;
         for (const ent of entries) {
@@ -228,10 +260,13 @@ export class NetViewBuilder {
         const missing = Array.from(plan.edits.keys()).filter((a) => !seen.has(a));
         if (missing.length) {
           const rels = missing.map((a) => path.relative(repo.root, a));
-          const ignored = await ignoredPaths(this.host.runner, repo, rels).catch(() => new Set<string>());
+          const ignored = await ignoredPaths(this.host.runner, repo, rels).catch(
+            () => new Set<string>()
+          );
           for (const abs of missing) {
             const rel = path.relative(repo.root, abs);
-            if (ignored.has(rel) || !base.fromSnapshot) transcriptOnly.set(abs, plan.edits.get(abs)!);
+            if (ignored.has(rel) || !base.fromSnapshot)
+              transcriptOnly.set(abs, plan.edits.get(abs)!);
           }
         }
       } catch (err) {
@@ -241,9 +276,11 @@ export class NetViewBuilder {
       }
     }
 
-    for (const [abs, edits] of transcriptOnly) files.push(this.transcriptFileChange(input, abs, edits, now));
+    for (const [abs, edits] of transcriptOnly)
+      files.push(this.transcriptFileChange(input, abs, edits, now));
 
-    const byHeat = (a: ReviewFileChange, b: ReviewFileChange) => b.heat - a.heat || a.path.localeCompare(b.path);
+    const byHeat = (a: ReviewFileChange, b: ReviewFileChange) =>
+      b.heat - a.heat || a.path.localeCompare(b.path);
     files.sort(byHeat);
     unattributed.sort(byHeat);
     let omittedFiles = 0;
@@ -295,28 +332,54 @@ export class NetViewBuilder {
     for (const e of claimed) if (!turnIds.includes(e.turnId)) turnIds.push(e.turnId);
     const lastChangeAt = claimed.length ? Math.max(...claimed.map((e) => e.at)) : null;
     const since = input.scope === 'since_checkpoint' ? input.cp.reviewedThrough : 0;
-    const alsoChangedBy = claimed.length ? this.host.alsoChangedBy(input.sessionId, abs, since) : [];
-    const unreviewed = claimed.length ? claimed.some((e) => input.isUnreviewed(e)) : input.scope === 'since_checkpoint';
-    return { turnIds, lastChangeAt: lastChangeAt ?? (claimed.length ? null : now), alsoChangedBy, unreviewed };
+    const alsoChangedBy = claimed.length
+      ? this.host.alsoChangedBy(input.sessionId, abs, since)
+      : [];
+    const unreviewed = claimed.length
+      ? claimed.some((e) => input.isUnreviewed(e))
+      : input.scope === 'since_checkpoint';
+    return {
+      turnIds,
+      lastChangeAt: lastChangeAt ?? (claimed.length ? null : now),
+      alsoChangedBy,
+      unreviewed,
+    };
   }
 
   private gitFileChange(
     input: NetViewInput,
     repo: RepoInfo,
-    ent: { parsed: ParsedFileDiff | null; rel: string; oldRel?: string; numstat?: { a: number | null; d: number | null; binary: boolean } },
+    ent: {
+      parsed: ParsedFileDiff | null;
+      rel: string;
+      oldRel?: string;
+      numstat?: { a: number | null; d: number | null; binary: boolean };
+    },
     claimed: LedgerEdit[],
     now: number
   ): ReviewFileChange {
     const abs = path.join(repo.root, ent.rel);
     const p = ent.parsed;
     const binary = p ? p.binary : !!ent.numstat?.binary;
-    const additions = p ? p.additions : ent.numstat?.a ?? 0;
-    const deletions = p ? p.deletions : ent.numstat?.d ?? 0;
-    const status = p ? (p.status === 'copied' ? 'added' : p.status) : ent.oldRel ? 'renamed' : 'modified';
+    const additions = p ? p.additions : (ent.numstat?.a ?? 0);
+    const deletions = p ? p.deletions : (ent.numstat?.d ?? 0);
+    const status = p
+      ? p.status === 'copied'
+        ? 'added'
+        : p.status
+      : ent.oldRel
+        ? 'renamed'
+        : 'modified';
     const display = this.host.displayPath(abs, input.projectPath);
     const facts = this.fileFacts(input, abs, claimed, now);
     const hunksRaw = p ? p.hunks : [];
-    const modeChanged = !!(p?.oldMode && p.newMode && p.oldMode !== p.newMode && status !== 'added' && status !== 'deleted');
+    const modeChanged = !!(
+      p?.oldMode &&
+      p.newMode &&
+      p.oldMode !== p.newMode &&
+      status !== 'added' &&
+      status !== 'deleted'
+    );
     const risks = classifyChangedFile(
       abs,
       ent.rel,
@@ -340,18 +403,27 @@ export class NetViewBuilder {
     if (binary) hunksOmitted = 'binary';
     else if (!p) hunksOmitted = 'too_large';
     else if (!focused && (trivial === 'lockfile' || trivial === 'generated')) hunksOmitted = 'lazy';
-    else if (!focused && countHunkLines(hunksRaw) > REVIEW_LIMITS.maxInlineHunkLinesPerFile) hunksOmitted = 'lazy';
+    else if (!focused && countHunkLines(hunksRaw) > REVIEW_LIMITS.maxInlineHunkLinesPerFile)
+      hunksOmitted = 'lazy';
     else hunks = hunksRaw.map((h) => toReviewHunk(gitHunkId(abs, h), h));
     return {
       path: display,
       absPath: abs,
-      ...(ent.oldRel ? { oldPath: this.host.displayPath(path.join(repo.root, ent.oldRel), input.projectPath) } : {}),
+      ...(ent.oldRel
+        ? { oldPath: this.host.displayPath(path.join(repo.root, ent.oldRel), input.projectPath) }
+        : {}),
       status,
       ...(binary ? { binary: true } : {}),
       additions,
       deletions,
       risks,
-      heat: heatScore(additions + deletions, Math.max(claimed.length, 1), maxRiskLevel(risks), facts.lastChangeAt, now),
+      heat: heatScore(
+        additions + deletions,
+        Math.max(claimed.length, 1),
+        maxRiskLevel(risks),
+        facts.lastChangeAt,
+        now
+      ),
       ...(trivial ? { trivial } : {}),
       source: 'git',
       turnIds: facts.turnIds,
@@ -363,7 +435,12 @@ export class NetViewBuilder {
   }
 
   /** Per edit, not merged: the transcript's own hunks in order. */
-  transcriptFileChange(input: NetViewInput, abs: string, edits: LedgerEdit[], now: number): ReviewFileChange {
+  transcriptFileChange(
+    input: NetViewInput,
+    abs: string,
+    edits: LedgerEdit[],
+    now: number
+  ): ReviewFileChange {
     const sorted = edits.slice().sort((a, b) => a.at - b.at);
     let additions = 0;
     let deletions = 0;
@@ -399,7 +476,12 @@ export class NetViewBuilder {
     if (unavailable) {
       out = null;
       hunksOmitted = 'unavailable';
-    } else if (!focused && (trivial === 'lockfile' || trivial === 'generated' || countHunkLines(hunks) > REVIEW_LIMITS.maxInlineHunkLinesPerFile)) {
+    } else if (
+      !focused &&
+      (trivial === 'lockfile' ||
+        trivial === 'generated' ||
+        countHunkLines(hunks) > REVIEW_LIMITS.maxInlineHunkLinesPerFile)
+    ) {
       out = null;
       hunksOmitted = 'lazy';
     }
@@ -410,7 +492,13 @@ export class NetViewBuilder {
       additions,
       deletions,
       risks,
-      heat: heatScore(additions + deletions, sorted.length, maxRiskLevel(risks), facts.lastChangeAt, now),
+      heat: heatScore(
+        additions + deletions,
+        sorted.length,
+        maxRiskLevel(risks),
+        facts.lastChangeAt,
+        now
+      ),
       ...(trivial ? { trivial } : {}),
       source: 'transcript',
       turnIds: facts.turnIds,
@@ -429,7 +517,10 @@ export class NetViewBuilder {
       try {
         out.push({ repoRoot: r.root, tree: await snapshotTree(this.host.runner, r) });
       } catch (err) {
-        console.error(`Review: snapshot of ${r.root} failed:`, err instanceof Error ? err.message : err);
+        console.error(
+          `Review: snapshot of ${r.root} failed:`,
+          err instanceof Error ? err.message : err
+        );
       }
     }
     return out;

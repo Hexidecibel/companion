@@ -408,9 +408,7 @@ export class LocalSessionSource implements SessionSource {
       this.pinned.has(s.id) || (!!s.tmuxSessionName && this.pinned.has(s.tmuxSessionName));
     const liveByRecency = sessions
       .filter((s) => !s.inactive)
-      .sort(
-        (a, b) => Number(isPinned(b)) - Number(isPinned(a)) || b.lastActivity - a.lastActivity
-      )
+      .sort((a, b) => Number(isPinned(b)) - Number(isPinned(a)) || b.lastActivity - a.lastActivity)
       .slice(0, MAX_PANE_CAPTURES);
     const choices = new Map<string, PendingChoice | null>();
     await Promise.all(

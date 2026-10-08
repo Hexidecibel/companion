@@ -55,7 +55,8 @@ export function fallbackRates(
 ): PricingRates | null {
   let best: PricingRates | null = null;
   for (const r of Object.values(table))
-    if (!best || r.output > best.output || (r.output === best.output && r.input > best.input)) best = r;
+    if (!best || r.output > best.output || (r.output === best.output && r.input > best.input))
+      best = r;
   return best;
 }
 
@@ -236,7 +237,7 @@ export class UsageMeter {
     this.roll();
     const rates =
       model && model !== this.model
-        ? ratesFor(model, this.table) ?? fallbackRates(this.table)
+        ? (ratesFor(model, this.table) ?? fallbackRates(this.table))
         : this.rates;
     const cost = rates ? costOf(usage, rates, this.ttl) : 0;
     for (const b of [this.state.today, this.state.month]) {

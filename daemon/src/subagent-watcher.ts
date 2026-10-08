@@ -151,7 +151,8 @@ export class SubAgentWatcher extends EventEmitter {
       // repeatedly and thrash listeners.
       if (existing?.isComplete && !agentData.isComplete) {
         agentData.isComplete = true;
-        agentData.completedAt = existing.completedAt ?? agentData.completedAt ?? agentData.lastActivity;
+        agentData.completedAt =
+          existing.completedAt ?? agentData.completedAt ?? agentData.lastActivity;
       }
 
       this.agents.set(key, agentData);
@@ -310,7 +311,11 @@ export class SubAgentWatcher extends EventEmitter {
         tracked.completedAt || (isStale ? tracked.lastActivity : undefined);
 
       // Skip old completed agents
-      if (status === 'completed' && effectiveCompletedAt && effectiveCompletedAt < completedCutoff) {
+      if (
+        status === 'completed' &&
+        effectiveCompletedAt &&
+        effectiveCompletedAt < completedCutoff
+      ) {
         continue;
       }
 

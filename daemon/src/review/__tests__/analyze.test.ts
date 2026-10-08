@@ -2,8 +2,16 @@ import { isWhitespaceOnly, trivialKind, heatScore, gitHunkId } from '../analyze'
 
 describe('analyze', () => {
   it('whitespace-only hunks', () => {
-    expect(isWhitespaceOnly([{ oldStart: 1, oldLines: 1, newStart: 1, newLines: 1, lines: ['-  a = 1;', '+a  =  1;'] }])).toBe(true);
-    expect(isWhitespaceOnly([{ oldStart: 1, oldLines: 1, newStart: 1, newLines: 1, lines: ['-a = 1;', '+a = 2;'] }])).toBe(false);
+    expect(
+      isWhitespaceOnly([
+        { oldStart: 1, oldLines: 1, newStart: 1, newLines: 1, lines: ['-  a = 1;', '+a  =  1;'] },
+      ])
+    ).toBe(true);
+    expect(
+      isWhitespaceOnly([
+        { oldStart: 1, oldLines: 1, newStart: 1, newLines: 1, lines: ['-a = 1;', '+a = 2;'] },
+      ])
+    ).toBe(false);
     expect(isWhitespaceOnly([])).toBe(false);
   });
 

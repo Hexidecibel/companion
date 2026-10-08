@@ -122,13 +122,11 @@ async function waitForClaudeReady(sessionName: string, timeoutMs: number): Promi
   const deadline = Date.now() + timeoutMs;
   const readyMarkers = ['❯', 'for shortcuts', 'Try "', 'shortcuts'];
   while (Date.now() < deadline) {
-    const result = spawnSync(
-      'tmux',
-      ['capture-pane', '-t', sessionName, '-p', '-S', '-200'],
-      { timeout: TMUX_CAPTURE_TIMEOUT_MS }
-    );
+    const result = spawnSync('tmux', ['capture-pane', '-t', sessionName, '-p', '-S', '-200'], {
+      timeout: TMUX_CAPTURE_TIMEOUT_MS,
+    });
     if (result.status === 0) {
-      const pane = (result.stdout?.toString() || '');
+      const pane = result.stdout?.toString() || '';
       if (readyMarkers.some((m) => pane.includes(m))) {
         return true;
       }
@@ -138,9 +136,7 @@ async function waitForClaudeReady(sessionName: string, timeoutMs: number): Promi
   return false;
 }
 
-export function registerRemoteHandlers(
-  ctx: HandlerContext
-): Record<string, MessageHandler> {
+export function registerRemoteHandlers(ctx: HandlerContext): Record<string, MessageHandler> {
   return {
     get_capabilities(client, _payload, requestId) {
       const listener = ctx.config.listeners.find((l) => l.port === client.listenerPort);
@@ -156,7 +152,7 @@ export function registerRemoteHandlers(
           dispatch: masterEnabled && Boolean(caps?.dispatch?.enabled),
           write: {
             enabled: masterEnabled && Boolean(caps?.write?.enabled),
-            roots: masterEnabled && caps?.write?.enabled ? caps?.write?.roots ?? [] : [],
+            roots: masterEnabled && caps?.write?.enabled ? (caps?.write?.roots ?? []) : [],
           },
         },
       };
@@ -275,10 +271,9 @@ export function registerRemoteHandlers(
         // the daemon's environment and an interactive shell don't matter.
         const shCmd = `${claudePath} -p ${shQuoted}`;
         try {
-          execSync(
-            `tmux new-session -d -s "${safeName}" -c "${cwd}" ${JSON.stringify(shCmd)}`,
-            { stdio: 'pipe' }
-          );
+          execSync(`tmux new-session -d -s "${safeName}" -c "${cwd}" ${JSON.stringify(shCmd)}`, {
+            stdio: 'pipe',
+          });
           execSync(`tmux set-environment -t "${safeName}" COMPANION_APP 1`, { stdio: 'pipe' });
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
@@ -390,7 +385,8 @@ export function registerRemoteHandlers(
       const listenerTls = Boolean(listener?.tls);
       const execPayload = (payload || {}) as ExecCommandPayload;
       const command = typeof execPayload.command === 'string' ? execPayload.command : '';
-      const cwd = typeof execPayload.cwd === 'string' && execPayload.cwd ? execPayload.cwd : undefined;
+      const cwd =
+        typeof execPayload.cwd === 'string' && execPayload.cwd ? execPayload.cwd : undefined;
       const requestedTimeout =
         typeof execPayload.timeout === 'number' && execPayload.timeout > 0
           ? Math.min(execPayload.timeout, EXEC_MAX_TIMEOUT_MS)
@@ -565,7 +561,7 @@ export function registerRemoteHandlers(
       void stdoutBytes;
       void stderrBytes;
 
-      const exitCode = timedOut ? -1 : exit.code ?? -1;
+      const exitCode = timedOut ? -1 : (exit.code ?? -1);
       // Report the ACTUAL terminating signal from the close event, not an
       // intended/pre-set value. If the process exited normally, signal is null.
       const signalName = exit.signal ?? null;
@@ -713,9 +709,12 @@ export function registerRemoteHandlers(
 
       let buffer: Buffer;
       try {
-        buffer = encoding === 'base64' ? Buffer.from(content, 'base64') : Buffer.from(content, 'utf-8');
+        buffer =
+          encoding === 'base64' ? Buffer.from(content, 'base64') : Buffer.from(content, 'utf-8');
       } catch (err) {
-        sendError('invalid_payload', { detail: `decode_failed: ${String((err as Error).message || err)}` });
+        sendError('invalid_payload', {
+          detail: `decode_failed: ${String((err as Error).message || err)}`,
+        });
         return;
       }
 

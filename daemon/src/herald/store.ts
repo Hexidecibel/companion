@@ -206,8 +206,14 @@ function sanitizeReviewItem(raw: unknown): HeraldInboxItem | null {
     heard: i.heard === true,
     review: {
       level: r.level,
-      kinds: r.kinds.filter(isStr).slice(0, 8).map((k) => k.slice(0, 40)),
-      paths: r.paths.filter(isStr).slice(0, 8).map((p) => p.slice(0, 300)),
+      kinds: r.kinds
+        .filter(isStr)
+        .slice(0, 8)
+        .map((k) => k.slice(0, 40)),
+      paths: r.paths
+        .filter(isStr)
+        .slice(0, 8)
+        .map((p) => p.slice(0, 300)),
     },
   };
 }

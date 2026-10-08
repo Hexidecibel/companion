@@ -69,9 +69,7 @@ export class AuditLog {
       }
     }
     parsed.reverse();
-    const filtered = typeof sinceTs === 'number'
-      ? parsed.filter((e) => e.ts > sinceTs)
-      : parsed;
+    const filtered = typeof sinceTs === 'number' ? parsed.filter((e) => e.ts > sinceTs) : parsed;
     const sliced = filtered.slice(0, limit);
     const hasMore = filtered.length > sliced.length;
     return { entries: sliced, hasMore };

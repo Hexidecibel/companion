@@ -162,7 +162,9 @@ export function registerHeraldHandlers(ctx: HandlerContext): Record<string, Mess
       const fail = (code: HeraldBabysitErrorCode, error: string) =>
         ctx.send(client.ws, { type, success: false, error, payload: { code }, requestId });
       if (!ctx.herald) return fail('unavailable', 'Herald is not available on this daemon');
-      const denied = client.originCredential ? ctx.requireRemoteCapability(client, 'dispatch') : null;
+      const denied = client.originCredential
+        ? ctx.requireRemoteCapability(client, 'dispatch')
+        : null;
       if (denied) return fail('forbidden', denied);
       try {
         const payload = await run();

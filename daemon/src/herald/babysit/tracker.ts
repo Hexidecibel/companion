@@ -73,7 +73,8 @@ export interface BabysitPrompt {
 
 export type PromptSkip = 'closed' | 'approval' | 'permission' | 'working' | 'none';
 
-const PERMISSION_LABEL = /don'?t ask again|allow all|always allow|\byes, allow\b|\bi accept\b|\btrust (?:this|the) (?:folder|files)\b/i;
+const PERMISSION_LABEL =
+  /don'?t ask again|allow all|always allow|\byes, allow\b|\bi accept\b|\btrust (?:this|the) (?:folder|files)\b/i;
 const PERMISSION_QUESTION =
   /^\s*do you want to\b|\b(?:allow|grant|approve) (?:this|the|claude)\b|\bpermission to\b|\bbypass permissions?\b|\btrust (?:this|the) (?:folder|files)\b/i;
 
@@ -85,7 +86,11 @@ const PERMISSION_QUESTION =
 export function isPermissionChoice(c: PendingChoice): boolean {
   const question = oneLine([c.header, c.question].filter(Boolean).join(' '));
   if (PERMISSION_QUESTION.test(question)) return true;
-  if (c.options.some((o) => PERMISSION_LABEL.test(o.label) || PERMISSION_LABEL.test(mapPermissionLabel(o.label))))
+  if (
+    c.options.some(
+      (o) => PERMISSION_LABEL.test(o.label) || PERMISSION_LABEL.test(mapPermissionLabel(o.label))
+    )
+  )
     return true;
   const rendered = `${c.question}\n${c.options.map((o, i) => `${i + 1}. ${o.label}`).join('\n')}`;
   return parsePermissionPrompt(rendered) !== null;
@@ -100,7 +105,8 @@ export function questionTail(text: string): string {
     .filter(Boolean);
   let tail = paragraphs[paragraphs.length - 1] || '';
   // A one-line ending ("Want me to continue?") reads better with what it follows.
-  if (tail.length < 80 && paragraphs.length > 1) tail = `${paragraphs[paragraphs.length - 2]}\n${tail}`;
+  if (tail.length < 80 && paragraphs.length > 1)
+    tail = `${paragraphs[paragraphs.length - 2]}\n${tail}`;
   return clipTail(tail, QUESTION_CHARS);
 }
 
@@ -268,7 +274,12 @@ export class BabysitTracker {
   }
 
   /** The decision for a prompt is in: it is never looked at again. */
-  resolve(sessionKey: string, key: string, phase: 'answered' | 'escalated' | 'ignored', now: number): void {
+  resolve(
+    sessionKey: string,
+    key: string,
+    phase: 'answered' | 'escalated' | 'ignored',
+    now: number
+  ): void {
     const rec = this.records.get(sessionKey);
     if (rec && !rec.handled.includes(key)) {
       rec.handled.push(key);
@@ -357,9 +368,10 @@ export class BabysitTracker {
         continue;
       }
       if (w.phase !== 'settling') continue;
-      const settle = prompt.kind === 'choice'
-        ? ctx.settleMs?.choice ?? SETTLE_CHOICE_MS
-        : ctx.settleMs?.text ?? SETTLE_TEXT_MS;
+      const settle =
+        prompt.kind === 'choice'
+          ? (ctx.settleMs?.choice ?? SETTLE_CHOICE_MS)
+          : (ctx.settleMs?.text ?? SETTLE_TEXT_MS);
       if (now - w.firstSeen < settle) continue;
       w.phase = 'deciding';
       w.at = now;

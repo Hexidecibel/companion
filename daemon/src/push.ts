@@ -70,7 +70,9 @@ export class PushNotificationService {
 
   registerDevice(deviceId: string, pushToken: string): void {
     if (this.disabled) {
-      console.log(`Push notifications: ignoring device registration from ${deviceId} (sandbox mode)`);
+      console.log(
+        `Push notifications: ignoring device registration from ${deviceId} (sandbox mode)`
+      );
       return;
     }
     this.store.setDevice({

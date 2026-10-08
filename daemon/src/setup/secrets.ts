@@ -95,7 +95,9 @@ export function validateSecretValue(value: unknown): string {
   if (v.length > SETUP_LIMITS.secretMaxLength) throw new SecretError('The value is too long');
   // eslint-disable-next-line no-control-regex
   if (/[\u0000-\u001f\u007f\s"'`\\$]/.test(v)) {
-    throw new SecretError('The value contains characters a key never has (spaces, quotes, newlines)');
+    throw new SecretError(
+      'The value contains characters a key never has (spaces, quotes, newlines)'
+    );
   }
   return v;
 }
@@ -124,7 +126,10 @@ export function writeSecretsFileKey(
   while (kept.length && kept[kept.length - 1].trim() === '') kept.pop();
   if (value !== null) kept.push(`${envKey}=${value}`);
   const body = kept.join('\n') + '\n';
-  const tmp = path.join(dir, `.${path.basename(file)}.${process.pid}.${crypto.randomBytes(4).toString('hex')}.tmp`);
+  const tmp = path.join(
+    dir,
+    `.${path.basename(file)}.${process.pid}.${crypto.randomBytes(4).toString('hex')}.tmp`
+  );
   let fd: number | null = null;
   try {
     fd = fs.openSync(tmp, 'wx', 0o600);
@@ -148,7 +153,9 @@ export function writeSecretsFileKey(
       /* ignore */
     }
     // Never include the value (or the file body) in what propagates.
-    throw new SecretError(`Could not write ${file}: ${(err as NodeJS.ErrnoException).code || 'error'}`);
+    throw new SecretError(
+      `Could not write ${file}: ${(err as NodeJS.ErrnoException).code || 'error'}`
+    );
   }
 }
 

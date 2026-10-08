@@ -13,10 +13,7 @@ import { liveChoiceHighlightId } from '../handlers/session';
 // auq-cc-locus.txt (a verbatim tmux capture).
 // ---------------------------------------------------------------------------
 
-const FIXTURE = fs.readFileSync(
-  path.join(__dirname, 'fixtures', 'auq-cc-locus.txt'),
-  'utf8'
-);
+const FIXTURE = fs.readFileSync(path.join(__dirname, 'fixtures', 'auq-cc-locus.txt'), 'utf8');
 
 // Every box-drawing / scissors glyph that could leak from the side panel.
 const BOX_ART_GLYPHS = /[┌│├└┤┐┘╭╮╰╯─━═✂]/;
@@ -87,7 +84,12 @@ describe('liveChoiceHighlightId — multi-question advance', () => {
   const q2 = {
     header: 'Scope',
     question: 'How widespread is this — is anyone besides this owner affected?',
-    options: [{ label: 'Just this owner' }, { label: 'Some owners' }, { label: 'All owners' }, { label: 'Unsure' }],
+    options: [
+      { label: 'Just this owner' },
+      { label: 'Some owners' },
+      { label: 'All owners' },
+      { label: 'Unsure' },
+    ],
   };
 
   it('is stable for the same question across repeated captures', () => {
@@ -99,7 +101,15 @@ describe('liveChoiceHighlightId — multi-question advance', () => {
   });
 
   it('changes when only the option labels change', () => {
-    const q1b = { ...q1, options: [{ label: 'Public' }, { label: 'Private' }, { label: 'Hidden' }, { label: 'Owner-only' }] };
+    const q1b = {
+      ...q1,
+      options: [
+        { label: 'Public' },
+        { label: 'Private' },
+        { label: 'Hidden' },
+        { label: 'Owner-only' },
+      ],
+    };
     expect(liveChoiceHighlightId(session, q1)).not.toBe(liveChoiceHighlightId(session, q1b));
   });
 

@@ -154,11 +154,19 @@ export function generateClaudeMd(
   sections.push('| File | Purpose |');
   sections.push('|------|---------|');
   sections.push('| `todo.md` | Quick capture for ideas and tasks. Items are raw, unplanned. |');
-  sections.push('| `plan.md` | Detailed implementation plans with status, design, file lists, and steps. |');
-  sections.push('| `FEATURES.md` | Completed features — living changelog of what\'s been shipped. |');
-  sections.push('| `backlog.md` | Deferred ideas, long-term research, and items not in the daily workflow. |');
+  sections.push(
+    '| `plan.md` | Detailed implementation plans with status, design, file lists, and steps. |'
+  );
+  sections.push(
+    "| `FEATURES.md` | Completed features — living changelog of what's been shipped. |"
+  );
+  sections.push(
+    '| `backlog.md` | Deferred ideas, long-term research, and items not in the daily workflow. |'
+  );
   sections.push('');
-  sections.push('**Flow:** `todo.md` (idea) -> `plan.md` (planned -> in-progress -> done) -> `FEATURES.md` (shipped)');
+  sections.push(
+    '**Flow:** `todo.md` (idea) -> `plan.md` (planned -> in-progress -> done) -> `FEATURES.md` (shipped)'
+  );
   sections.push('**Deferred:** Items moved from `todo.md` to `backlog.md` when not prioritized.');
   sections.push('');
   sections.push('When committing (`/commit`), update tracking files:');
@@ -179,7 +187,9 @@ export function generateClaudeMd(
   // Interaction style
   sections.push('## Interaction');
   sections.push('');
-  sections.push('When you need user input, prefer `AskUserQuestion` with clear options over open-ended questions. This renders a native chooser in the companion app rather than a wall of text.');
+  sections.push(
+    'When you need user input, prefer `AskUserQuestion` with clear options over open-ended questions. This renders a native chooser in the companion app rather than a wall of text.'
+  );
   sections.push('');
 
   return sections.join('\n');

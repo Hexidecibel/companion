@@ -114,7 +114,9 @@ async function main(): Promise<void> {
   const notificationStore = new NotificationStore();
   const sandbox = isSandbox();
   if (sandbox) {
-    console.log('Sandbox mode: push notifications and tool auto-approval are disabled; shared state is read-only');
+    console.log(
+      'Sandbox mode: push notifications and tool auto-approval are disabled; shared state is read-only'
+    );
   }
   const push = new PushNotificationService(
     config.fcmCredentialsPath,

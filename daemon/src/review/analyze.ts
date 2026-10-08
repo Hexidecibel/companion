@@ -48,7 +48,10 @@ export function isWhitespaceOnly(hunks: HunkLike[]): boolean {
   return changed;
 }
 
-export function trivialKind(relPath: string, hunks: HunkLike[] | null): ReviewTrivialKind | undefined {
+export function trivialKind(
+  relPath: string,
+  hunks: HunkLike[] | null
+): ReviewTrivialKind | undefined {
   if (isLockfile(relPath)) return 'lockfile';
   if (isGeneratedPath(relPath)) return 'generated';
   if (hunks && isWhitespaceOnly(hunks)) return 'whitespace';

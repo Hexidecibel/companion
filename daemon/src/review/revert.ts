@@ -129,7 +129,10 @@ function isBinary(buf: Buffer): boolean {
 /** Atomic replace: temp file in the same dir, same mode, fsync, rename. */
 async function writeAtomic(target: string, data: Buffer, mode: number | null): Promise<void> {
   const dir = path.dirname(target);
-  const tmp = path.join(dir, `.${path.basename(target)}.companion-revert-${process.pid}-${Date.now()}`);
+  const tmp = path.join(
+    dir,
+    `.${path.basename(target)}.companion-revert-${process.pid}-${Date.now()}`
+  );
   const fh = await fs.promises.open(tmp, 'wx', mode ?? 0o644);
   try {
     await fh.writeFile(data);
@@ -191,7 +194,12 @@ export class RevertManager {
       const patch = renderPatch('f', 'f', [hunk]);
       const noContext = !hunk.lines.some((l) => l.startsWith(' '));
       const args = ['apply', '-R', '--whitespace=nowarn', ...(noContext ? ['--unidiff-zero'] : [])];
-      const check = await this.deps.runner.run({ cwd: dir, kind: 'apply', args: [...args, '--check'], stdin: patch });
+      const check = await this.deps.runner.run({
+        cwd: dir,
+        kind: 'apply',
+        args: [...args, '--check'],
+        stdin: patch,
+      });
       if (check.code !== 0) return null;
       const r = await this.deps.runner.run({ cwd: dir, kind: 'apply', args, stdin: patch });
       if (r.code !== 0) return null;
@@ -253,8 +261,10 @@ export class RevertManager {
     if (input.blocked) return blockedResp(input.blocked.code, input.blocked.message);
 
     const cur = await readMaybe(input.absPath);
-    if (cur && cur.data.length > MAX_REVERT_BYTES) return blockedResp('too_large', 'the file is larger than 2 MB');
-    if (cur && isBinary(cur.data)) return blockedResp('binary', 'binary files cannot be reverted here');
+    if (cur && cur.data.length > MAX_REVERT_BYTES)
+      return blockedResp('too_large', 'the file is larger than 2 MB');
+    if (cur && isBinary(cur.data))
+      return blockedResp('binary', 'binary files cannot be reverted here');
 
     let result: Buffer | null;
     let effect: ReviewRevertEffect;
@@ -274,7 +284,8 @@ export class RevertManager {
       if (!input.repo) return blockedResp('not_in_repo', 'the file is not in a git repository');
       const rel = path.relative(input.repo.root, input.absPath);
       const rev = input.target.to === 'head' ? 'HEAD' : input.checkpointTree;
-      if (!rev) return blockedResp('no_checkpoint', 'there is no checkpoint snapshot for this repo');
+      if (!rev)
+        return blockedResp('no_checkpoint', 'there is no checkpoint snapshot for this repo');
       if (rev === 'HEAD' && !input.repo.head) {
         result = null;
       } else {
@@ -283,9 +294,11 @@ export class RevertManager {
       }
       if (result && result.length > MAX_REVERT_BYTES)
         return blockedResp('too_large', 'the target version is larger than 2 MB');
-      if (result && isBinary(result)) return blockedResp('binary', 'binary files cannot be reverted here');
+      if (result && isBinary(result))
+        return blockedResp('binary', 'binary files cannot be reverted here');
       effect = result === null ? 'delete' : 'restore';
-      if (result === null && !cur) return blockedResp('conflict', 'nothing to revert: the file does not exist');
+      if (result === null && !cur)
+        return blockedResp('conflict', 'nothing to revert: the file does not exist');
     }
     if (cur && result && cur.data.equals(result))
       return blockedResp('conflict', 'nothing to revert: the file already matches', effect);
@@ -377,7 +390,9 @@ export class RevertManager {
         by: device,
         lockKey,
       };
-      await fs.promises.writeFile(path.join(bdir, 'meta.json'), JSON.stringify(meta), { mode: 0o600 });
+      await fs.promises.writeFile(path.join(bdir, 'meta.json'), JSON.stringify(meta), {
+        mode: 0o600,
+      });
       if (t.result === null) {
         // CAS right before the unlink.
         const again = await readMaybe(t.absPath);
@@ -401,7 +416,10 @@ export class RevertManager {
   async readBackup(backupId: string): Promise<BackupMeta | null> {
     if (!/^[0-9a-f]{24}$/.test(backupId)) return null;
     try {
-      const raw = await fs.promises.readFile(path.join(this.deps.backupDir, backupId, 'meta.json'), 'utf-8');
+      const raw = await fs.promises.readFile(
+        path.join(this.deps.backupDir, backupId, 'meta.json'),
+        'utf-8'
+      );
       return JSON.parse(raw) as BackupMeta;
     } catch {
       return null;
@@ -418,7 +436,9 @@ export class RevertManager {
       if (sha256(cur ? cur.data : null) !== meta.postSha)
         throw new RevertError('blocked', 'conflict: the file changed after the revert');
       if (meta.existed) {
-        const data = await fs.promises.readFile(path.join(this.deps.backupDir, backupId, 'original'));
+        const data = await fs.promises.readFile(
+          path.join(this.deps.backupDir, backupId, 'original')
+        );
         await fs.promises.mkdir(path.dirname(meta.absPath), { recursive: true });
         await writeAtomic(meta.absPath, data, meta.mode);
       } else {
@@ -448,7 +468,8 @@ export class RevertManager {
       try {
         const st = await fs.promises.stat(dir);
         let bytes = 0;
-        for (const f of await fs.promises.readdir(dir)) bytes += (await fs.promises.stat(path.join(dir, f))).size;
+        for (const f of await fs.promises.readdir(dir))
+          bytes += (await fs.promises.stat(path.join(dir, f))).size;
         entries.push({ dir, at: st.mtimeMs, bytes });
       } catch {
         /* skip */

@@ -160,7 +160,14 @@ const KIND_NOUN: Partial<Record<ReviewRiskFlag['kind'], string>> = {
   deleted: 'a file',
 };
 const KIND_ORDER: ReviewRiskFlag['kind'][] = [
-  'secrets', 'env', 'migration', 'ci', 'agent_config', 'permissions', 'security', 'deleted',
+  'secrets',
+  'env',
+  'migration',
+  'ci',
+  'agent_config',
+  'permissions',
+  'security',
+  'deleted',
 ];
 
 /** Deterministic risk-alert headline ("Out4 changed a CI workflow: deploy.yml"). PURE. */
@@ -172,10 +179,14 @@ export function alertHeadline(name: string, items: AlertItem[]): string {
   const sorted = items.slice().sort((a, b) => rank(a.kind) - rank(b.kind));
   const paths = Array.from(new Set(sorted.map((i) => i.path)));
   // Deleted paths, the riskiest first (a deleted migration outranks a deleted helper).
-  const pathRank = (p: string) => Math.min(...sorted.filter((i) => i.path === p && i.kind !== 'deleted').map((i) => rank(i.kind)), 98);
-  const deleted = Array.from(new Set(sorted.filter((i) => i.kind === 'deleted').map((i) => i.path))).sort(
-    (a, b) => pathRank(a) - pathRank(b)
-  );
+  const pathRank = (p: string) =>
+    Math.min(
+      ...sorted.filter((i) => i.path === p && i.kind !== 'deleted').map((i) => rank(i.kind)),
+      98
+    );
+  const deleted = Array.from(
+    new Set(sorted.filter((i) => i.kind === 'deleted').map((i) => i.path))
+  ).sort((a, b) => pathRank(a) - pathRank(b));
   if (deleted.length && deleted.length === paths.length) {
     const n = deleted.length;
     return n === 1
@@ -185,8 +196,10 @@ export function alertHeadline(name: string, items: AlertItem[]): string {
   if (paths.length === 1) {
     const first = sorted[0];
     const base = path.basename(first.path);
-    if (first.kind === 'secrets' && /^adds/.test(first.reason)) return `${name} added what looks like a secret to ${base}`;
-    if (first.kind === 'ci' && first.reason === 'deploy script') return `${name} changed the deploy script: ${base}`;
+    if (first.kind === 'secrets' && /^adds/.test(first.reason))
+      return `${name} added what looks like a secret to ${base}`;
+    if (first.kind === 'ci' && first.reason === 'deploy script')
+      return `${name} changed the deploy script: ${base}`;
     return `${name} changed ${KIND_NOUN[first.kind] || first.reason}: ${base}`;
   }
   return `${name} made ${paths.length} risky changes including ${paths[0]}`;
@@ -249,7 +262,10 @@ export class ReviewService {
   /** Turn ids already scanned for Bash-made changes. */
   private scannedTurns = new Map<string, string>();
   /** Short memo of files views (recompute at most every 2 s). */
-  private filesMemo = new Map<string, { at: number; value: Promise<Awaited<ReturnType<NetViewBuilder['build']>>> }>();
+  private filesMemo = new Map<
+    string,
+    { at: number; value: Promise<Awaited<ReturnType<NetViewBuilder['build']>>> }
+  >();
 
   constructor(deps: ReviewServiceDeps) {
     this.deps = deps;
@@ -326,7 +342,10 @@ export class ReviewService {
     if (this.scannedTurns.get(ctx.sessionId) === last.id) return;
     this.scannedTurns.set(ctx.sessionId, last.id);
     void this.scanUnattributed(ctx).catch((err) =>
-      console.error(`Review: turn-end scan of ${ctx.sessionId} failed:`, err instanceof Error ? err.message : err)
+      console.error(
+        `Review: turn-end scan of ${ctx.sessionId} failed:`,
+        err instanceof Error ? err.message : err
+      )
     );
   }
 
@@ -344,7 +363,12 @@ export class ReviewService {
     const prev = this.unattributedCache.get(ctx.sessionId);
     // A scan that started before a mark must not resurrect what the mark cleared.
     if (cpBase(ctx.cp) !== cpBase(this.store.get(ctx.sessionId, ctx.led.projectPath))) return;
-    this.unattributedCache.set(ctx.sessionId, { count: list.length, risks, stamp, base: cpBase(ctx.cp) });
+    this.unattributedCache.set(ctx.sessionId, {
+      count: list.length,
+      risks,
+      stamp,
+      base: cpBase(ctx.cp),
+    });
     if (!prev || prev.stamp !== stamp) {
       this.bump(ctx.sessionId);
       this.onUnattributed(ctx, list);
@@ -355,7 +379,8 @@ export class ReviewService {
   protected onUnattributed(ctx: SessionContext, list: ReviewFileChange[]): void {
     const alerts: AlertItem[] = [];
     for (const f of list)
-      for (const r of f.risks) if (r.level === 'high') alerts.push({ path: f.path, kind: r.kind, reason: r.reason });
+      for (const r of f.risks)
+        if (r.level === 'high') alerts.push({ path: f.path, kind: r.kind, reason: r.reason });
     if (alerts.length) this.considerAlerts(ctx.sessionId, alerts);
   }
 
@@ -428,7 +453,11 @@ export class ReviewService {
     for (const c of changes) {
       const e = ctx.led.edits.get(c.editId);
       if (!e || e.excluded) continue;
-      const payload = { sessionId: ctx.sessionId, phase: c.phase, edit: this.reviewEditWithRisks(ctx, e) };
+      const payload = {
+        sessionId: ctx.sessionId,
+        phase: c.phase,
+        edit: this.reviewEditWithRisks(ctx, e),
+      };
       for (const id of clients) {
         if (!this.deps.sendToClient(id, 'review_live', payload)) this.dropClient(id);
       }
@@ -447,7 +476,8 @@ export class ReviewService {
     ctx.led.drainChanges();
     const set = this.watchers.get(clientId) || new Set<string>();
     if (live) {
-      if (set.size >= 8 && !set.has(sessionId)) throw new ReviewServiceError('busy', 'Watching too many sessions');
+      if (set.size >= 8 && !set.has(sessionId))
+        throw new ReviewServiceError('busy', 'Watching too many sessions');
       set.add(sessionId);
       this.watchers.set(clientId, set);
     } else {
@@ -589,7 +619,10 @@ export class ReviewService {
         this.store.put(sessionId, { ...cur, baseline: [{ repoRoot: repo.root, tree }] });
       });
     })().catch((err) =>
-      console.error(`Review: baseline for ${sessionId} failed:`, err instanceof Error ? err.message : err)
+      console.error(
+        `Review: baseline for ${sessionId} failed:`,
+        err instanceof Error ? err.message : err
+      )
     );
   }
 
@@ -614,9 +647,11 @@ export class ReviewService {
   displayPath(absPath: string, projectPath: string): string {
     if (projectPath) {
       const rel = path.relative(projectPath, absPath);
-      if (rel && !rel.startsWith('..') && !path.isAbsolute(rel)) return rel.split(path.sep).join('/');
+      if (rel && !rel.startsWith('..') && !path.isAbsolute(rel))
+        return rel.split(path.sep).join('/');
     }
-    if (absPath === HOME || absPath.startsWith(HOME + path.sep)) return `~${absPath.slice(HOME.length)}`;
+    if (absPath === HOME || absPath.startsWith(HOME + path.sep))
+      return `~${absPath.slice(HOME.length)}`;
     return absPath;
   }
 
@@ -749,7 +784,8 @@ export class ReviewService {
       unreviewedDeletions: dels,
       totalFiles: allFiles.size,
       totalTurns: turnsWithEdits.size,
-      riskLevel: maxRiskLevel(risks.filter((r) => r.level !== 'low')) ?? (risks.length ? 'low' : null),
+      riskLevel:
+        maxRiskLevel(risks.filter((r) => r.level !== 'low')) ?? (risks.length ? 'low' : null),
       topRisks: risks.slice(0, 3),
       lastChangeAt,
       live,
@@ -775,7 +811,11 @@ export class ReviewService {
   async summary(sessionId: string): Promise<ReviewSummary | null> {
     const ctx = await this.context(sessionId);
     if (!ctx) return null;
-    if (this.deps.gitEnabled() && ctx.led.projectPath && this.repos.peek(ctx.led.projectPath) === undefined) {
+    if (
+      this.deps.gitEnabled() &&
+      ctx.led.projectPath &&
+      this.repos.peek(ctx.led.projectPath) === undefined
+    ) {
       // First look at this project: learn whether it is a repo (cached afterwards).
       await this.repos.resolve(ctx.led.projectPath).catch(() => null);
     }
@@ -820,7 +860,10 @@ export class ReviewService {
 
   /** Edit with its own (single-edit) risk flags. */
   protected reviewEditWithRisks(ctx: SessionContext, e: LedgerEdit): ReviewEdit {
-    const risks = e.failed || e.pending ? [] : this.transcriptRisks(ctx, e.absPath, [e], ctx.cp.reviewedThrough);
+    const risks =
+      e.failed || e.pending
+        ? []
+        : this.transcriptRisks(ctx, e.absPath, [e], ctx.cp.reviewedThrough);
     return this.toReviewEdit(e, ctx.led.projectPath, risks);
   }
 
@@ -853,7 +896,11 @@ export class ReviewService {
     let riskLevel: ReviewRiskLevel | null = null;
     for (const [abs, edits] of files) {
       const lvl = maxRiskLevel(this.transcriptRisks(ctx, abs, edits, cp.reviewedThrough));
-      if (lvl && (riskLevel === null || ['high', 'medium', 'low'].indexOf(lvl) < ['high', 'medium', 'low'].indexOf(riskLevel)))
+      if (
+        lvl &&
+        (riskLevel === null ||
+          ['high', 'medium', 'low'].indexOf(lvl) < ['high', 'medium', 'low'].indexOf(riskLevel))
+      )
         riskLevel = lvl;
     }
     const polished = this.polishedGist(t, sum.gist);
@@ -899,7 +946,8 @@ export class ReviewService {
       .map((id) => ctx.led.getTurn(id))
       .filter((t): t is LedgerTurn => !!t);
     const todo = wanted.filter(
-      (t) => !this.store.getPolish(this.polishKey(t)) && this.turnEndedAt(t, ctx, t === last) !== null
+      (t) =>
+        !this.store.getPolish(this.polishKey(t)) && this.turnEndedAt(t, ctx, t === last) !== null
     );
     if (todo.length) {
       if (!this.herald?.featureEnabled || !this.herald.polishGists)
@@ -910,14 +958,26 @@ export class ReviewService {
           todo.map((t) => {
             const turn = this.buildTurn(ctx, t, t === last);
             const files = Array.from(
-              new Set(t.editIds.map((id) => ctx.led.edits.get(id)).filter((e): e is LedgerEdit => !!e && this.countable(e)).map((e) => path.basename(e.absPath)))
+              new Set(
+                t.editIds
+                  .map((id) => ctx.led.edits.get(id))
+                  .filter((e): e is LedgerEdit => !!e && this.countable(e))
+                  .map((e) => path.basename(e.absPath))
+              )
             );
-            return { id: t.id, prompt: t.prompt, reply: t.lastAssistantText, files, gist: turn.gist };
+            return {
+              id: t.id,
+              prompt: t.prompt,
+              reply: t.lastAssistantText,
+              files,
+              gist: turn.gist,
+            };
           })
         );
       } catch (err) {
         const code = (err as { code?: string }).code;
-        if (code === 'herald_unavailable') throw new ReviewServiceError(code, (err as Error).message);
+        if (code === 'herald_unavailable')
+          throw new ReviewServiceError(code, (err as Error).message);
         throw err;
       }
       for (const t of todo) {
@@ -938,7 +998,10 @@ export class ReviewService {
   // ------------------------------------------------------------------ herald digest
 
   /** Grounded data for Herald's review_changes tool. */
-  async digest(sessionId: string, scope: 'since_last_look' | 'last_turn' | 'all'): Promise<object | null> {
+  async digest(
+    sessionId: string,
+    scope: 'since_last_look' | 'last_turn' | 'all'
+  ): Promise<object | null> {
     const ctx = await this.context(sessionId);
     if (!ctx) return null;
     const now = this.now();
@@ -947,7 +1010,13 @@ export class ReviewService {
     if (scope === 'last_turn') {
       for (let i = ctx.led.turns.length - 1; i >= 0 && !turnId; i--) {
         const t = ctx.led.turns[i];
-        if (t.editIds.some((id) => { const e = ctx.led.edits.get(id); return !!e && this.countable(e); })) turnId = t.id;
+        if (
+          t.editIds.some((id) => {
+            const e = ctx.led.edits.get(id);
+            return !!e && this.countable(e);
+          })
+        )
+          turnId = t.id;
       }
     }
     const lastTurn = ctx.led.turns[ctx.led.turns.length - 1];
@@ -961,7 +1030,13 @@ export class ReviewService {
         risk: rt.riskLevel,
       };
     });
-    let files: Array<{ path: string; plus: number; minus: number; status: string; risks: string[] }> = [];
+    let files: Array<{
+      path: string;
+      plus: number;
+      minus: number;
+      status: string;
+      risks: string[];
+    }> = [];
     let more = 0;
     let unattributed = 0;
     if (turnsL.length) {
@@ -983,10 +1058,17 @@ export class ReviewService {
     }
     const sum = this.summaryFor(ctx);
     const notes: string[] = [];
-    if (!turns.length) notes.push(scope === 'since_last_look' ? 'Nothing new since the user last looked.' : 'No code changes in this scope.');
+    if (!turns.length)
+      notes.push(
+        scope === 'since_last_look'
+          ? 'Nothing new since the user last looked.'
+          : 'No code changes in this scope.'
+      );
     if (more) notes.push(`${more} more changed file${more === 1 ? ' is' : 's are'} not listed.`);
     if (unattributed)
-      notes.push(`${unattributed} other file${unattributed === 1 ? '' : 's'} changed outside the session's edit tools (shell commands or other programs).`);
+      notes.push(
+        `${unattributed} other file${unattributed === 1 ? '' : 's'} changed outside the session's edit tools (shell commands or other programs).`
+      );
     return {
       session: this.sessionName(sessionId),
       scope,
@@ -999,13 +1081,18 @@ export class ReviewService {
       },
       turns,
       files,
-      last_looked_ago: ctx.cp.reviewedThrough > 0 ? `${formatAgo(now - ctx.cp.updatedAt)} ago` : 'never',
+      last_looked_ago:
+        ctx.cp.reviewedThrough > 0 ? `${formatAgo(now - ctx.cp.updatedAt)} ago` : 'never',
       note: notes.join(' ') || undefined,
     };
   }
 
   /** Turns in scope, oldest first. */
-  turnsInScope(ctx: SessionContext, scope: 'since_checkpoint' | 'all', turnId?: string): LedgerTurn[] {
+  turnsInScope(
+    ctx: SessionContext,
+    scope: 'since_checkpoint' | 'all',
+    turnId?: string
+  ): LedgerTurn[] {
     const { led, cp } = ctx;
     const last = led.turns[led.turns.length - 1];
     return led.turns.filter((t) => {
@@ -1041,7 +1128,12 @@ export class ReviewService {
         for (const id of t.editIds) {
           const e = ctx.led.edits.get(id);
           if (!e || e.excluded) continue;
-          if (scope === 'since_checkpoint' && !req.turnId && !e.pending && !this.isUnreviewed(e, ctx.cp))
+          if (
+            scope === 'since_checkpoint' &&
+            !req.turnId &&
+            !e.pending &&
+            !this.isUnreviewed(e, ctx.cp)
+          )
             continue;
           all.push(e);
         }
@@ -1093,7 +1185,10 @@ export class ReviewService {
   }
 
   /** Repos for the session's project + touched dirs (<= 4). */
-  protected async reposFor(ctx: SessionContext, absPaths: string[]): Promise<ReviewGetResponse['repos']> {
+  protected async reposFor(
+    ctx: SessionContext,
+    absPaths: string[]
+  ): Promise<ReviewGetResponse['repos']> {
     const { repos } = await this.net.sessionRepos(ctx.led.projectPath, absPaths);
     return repos.map((r) => ({
       root: r.root,
@@ -1105,7 +1200,11 @@ export class ReviewService {
   }
 
   /** In-scope countable edits, oldest first. */
-  protected scopeEdits(ctx: SessionContext, scope: 'since_checkpoint' | 'all', turnId?: string): LedgerEdit[] {
+  protected scopeEdits(
+    ctx: SessionContext,
+    scope: 'since_checkpoint' | 'all',
+    turnId?: string
+  ): LedgerEdit[] {
     const out: LedgerEdit[] = [];
     for (const e of ctx.led.edits.values()) {
       if (!this.countable(e)) continue;
@@ -1143,7 +1242,8 @@ export class ReviewService {
     }
     value.catch(() => this.filesMemo.delete(key));
     const out = await value;
-    if (scope === 'since_checkpoint' && !turnId && !focusAbsPath) this.noteUnattributed(ctx, out.unattributed);
+    if (scope === 'since_checkpoint' && !turnId && !focusAbsPath)
+      this.noteUnattributed(ctx, out.unattributed);
     return out;
   }
 
@@ -1156,7 +1256,8 @@ export class ReviewService {
     if (req.turnId && !ctx.led.getTurn(req.turnId))
       throw new ReviewServiceError('not_found', `Unknown turn ${req.turnId}`);
     const fv = await this.filesView(ctx, scope, req.turnId, abs);
-    const file = fv.files.find((f) => f.absPath === abs) || fv.unattributed.find((f) => f.absPath === abs);
+    const file =
+      fv.files.find((f) => f.absPath === abs) || fv.unattributed.find((f) => f.absPath === abs);
     if (!file) throw new ReviewServiceError('not_found', `No changes to ${req.absPath} in scope`);
     return { file, truncated: !!fv.focusTruncated };
   }
@@ -1177,7 +1278,11 @@ export class ReviewService {
 
   // ------------------------------------------------------------------ checkpoint
 
-  async markReviewed(sessionId: string, through: number, device?: string): Promise<ReviewMarkResponse> {
+  async markReviewed(
+    sessionId: string,
+    through: number,
+    device?: string
+  ): Promise<ReviewMarkResponse> {
     if (!Number.isFinite(through) || through < 0)
       throw new ReviewServiceError('bad_request', 'through must be a timestamp');
     const ctx = await this.context(sessionId);
@@ -1208,10 +1313,16 @@ export class ReviewService {
     });
   }
 
-  async approveTurn(sessionId: string, turnId: string, approved: boolean, device?: string): Promise<ReviewMarkResponse> {
+  async approveTurn(
+    sessionId: string,
+    turnId: string,
+    approved: boolean,
+    device?: string
+  ): Promise<ReviewMarkResponse> {
     const ctx = await this.context(sessionId);
     if (!ctx) throw new ReviewServiceError('unknown_session', `Unknown session ${sessionId}`);
-    if (!ctx.led.getTurn(turnId)) throw new ReviewServiceError('not_found', `Unknown turn ${turnId}`);
+    if (!ctx.led.getTurn(turnId))
+      throw new ReviewServiceError('not_found', `Unknown turn ${turnId}`);
     return this.withLock(`cp:${sessionId}`, async () => {
       const cur = this.store.get(sessionId, ctx.led.projectPath);
       // Approvals stay individual (never folded into reviewedThrough here) so
@@ -1227,14 +1338,24 @@ export class ReviewService {
       const out = this.commitCheckpoint(ctx, cp, false);
       // Everything is now approved: the user looked, resolve their risk alerts.
       if (approved && out.summary.unreviewedTurns === 0 && out.summary.unreviewedFiles === 0)
-        this.onCheckpointMoved({ ...ctx, cp: this.store.get(sessionId, ctx.led.projectPath) }, true);
+        this.onCheckpointMoved(
+          { ...ctx, cp: this.store.get(sessionId, ctx.led.projectPath) },
+          true
+        );
       return out;
     });
   }
 
-  private commitCheckpoint(ctx: SessionContext, cp: StoredCheckpoint, moved: boolean): ReviewMarkResponse {
+  private commitCheckpoint(
+    ctx: SessionContext,
+    cp: StoredCheckpoint,
+    moved: boolean
+  ): ReviewMarkResponse {
     this.store.put(ctx.sessionId, cp);
-    const fresh: SessionContext = { ...ctx, cp: this.store.get(ctx.sessionId, ctx.led.projectPath) };
+    const fresh: SessionContext = {
+      ...ctx,
+      cp: this.store.get(ctx.sessionId, ctx.led.projectPath),
+    };
     this.bump(ctx.sessionId);
     const summary = this.summaryFor(fresh);
     this.scheduleBroadcast(summary);
@@ -1254,7 +1375,10 @@ export class ReviewService {
   }
 
   /** Working-tree snapshot trees for the session's repos (git only). */
-  protected async takeSnapshots(ctx: SessionContext, cp: StoredCheckpoint): Promise<StoredCheckpoint['snapshots']> {
+  protected async takeSnapshots(
+    ctx: SessionContext,
+    cp: StoredCheckpoint
+  ): Promise<StoredCheckpoint['snapshots']> {
     if (!this.deps.gitEnabled()) return cp.snapshots;
     const touched = new Set<string>();
     for (const e of ctx.led.edits.values()) if (this.countable(e)) touched.add(e.absPath);
@@ -1296,7 +1420,12 @@ export class ReviewService {
     hunkId: string,
     editId: string | undefined,
     scope: 'since_checkpoint' | 'all'
-  ): Promise<{ hunk: ParsedHunk; edit: LedgerEdit | null; isCreate: boolean; file: ReviewFileChange | null } | null> {
+  ): Promise<{
+    hunk: ParsedHunk;
+    edit: LedgerEdit | null;
+    isCreate: boolean;
+    file: ReviewFileChange | null;
+  } | null> {
     const m = hunkId.match(/^(.+)#(\d+)$/);
     if (m) {
       const e = ctx.led.edits.get(editId || m[1]);
@@ -1307,17 +1436,29 @@ export class ReviewService {
       return { hunk: h, edit: e, isCreate, file: null };
     }
     if (!hunkId.startsWith('g')) return null;
-    for (const sc of scope === 'all' ? (['all'] as const) : (['since_checkpoint', 'all'] as const)) {
+    for (const sc of scope === 'all'
+      ? (['all'] as const)
+      : (['since_checkpoint', 'all'] as const)) {
       const fv = await this.filesView(ctx, sc, undefined, absPath);
-      const file = fv.files.find((f) => f.absPath === absPath) || fv.unattributed.find((f) => f.absPath === absPath);
+      const file =
+        fv.files.find((f) => f.absPath === absPath) ||
+        fv.unattributed.find((f) => f.absPath === absPath);
       const h = file?.hunks?.find((x) => x.id === hunkId);
       if (file && h) {
         if (h.clipped) return null;
         const edit = file.turnIds.length
-          ? Array.from(ctx.led.edits.values()).find((e) => e.absPath === absPath && file.turnIds.includes(e.turnId)) || null
+          ? Array.from(ctx.led.edits.values()).find(
+              (e) => e.absPath === absPath && file.turnIds.includes(e.turnId)
+            ) || null
           : null;
         return {
-          hunk: { oldStart: h.oldStart, oldLines: h.oldLines, newStart: h.newStart, newLines: h.newLines, lines: h.lines },
+          hunk: {
+            oldStart: h.oldStart,
+            oldLines: h.oldLines,
+            newStart: h.newStart,
+            newLines: h.newLines,
+            lines: h.lines,
+          },
           edit,
           isCreate: file.status === 'added' && (file.hunks?.length ?? 0) === 1 && h.oldLines === 0,
           file,
@@ -1341,7 +1482,10 @@ export class ReviewService {
     const start = h.newLines > 0 ? h.newStart : h.oldStart;
     const end = start + Math.max((h.newLines > 0 ? h.newLines : h.oldLines) - 1, 0);
     const where = `${input.path}:${start}-${end}`;
-    const turn = input.turnIndex !== null ? ` (turn ${input.turnIndex}: "${(input.gist || '').replace(/"/g, "'")}")` : '';
+    const turn =
+      input.turnIndex !== null
+        ? ` (turn ${input.turnIndex}: "${(input.gist || '').replace(/"/g, "'")}")`
+        : '';
     const body = h.lines.slice(0, 40).map((l) => (l.length > 300 ? l.slice(0, 300) : l));
     const fence = body.some((l) => l.includes('```')) ? '~~~~' : '```';
     let text = `Why did you make this change? (from Companion review)\n${where}${turn}\n${fence}diff\n${body.join('\n')}${h.lines.length > 40 ? '\n…' : ''}\n${fence}`;
@@ -1353,7 +1497,8 @@ export class ReviewService {
   async ask(req: ReviewAskRequest, clientId?: string): Promise<ReviewAskResponse> {
     const ctx = await this.context(req.sessionId);
     if (!ctx) throw new ReviewServiceError('unknown_session', `Unknown session ${req.sessionId}`);
-    if (ctx.session.inactive) throw new ReviewServiceError('unavailable', 'The session is not running');
+    if (ctx.session.inactive)
+      throw new ReviewServiceError('unavailable', 'The session is not running');
     const abs = path.resolve(req.absPath);
     const found = await this.findHunk(ctx, abs, req.hunkId, req.editId, 'all');
     if (!found) throw new ReviewServiceError('not_found', 'That change is no longer available');
@@ -1376,7 +1521,8 @@ export class ReviewService {
           sessionId: req.sessionId,
           sessionName: this.sessionName(req.sessionId),
           prompt: sentText,
-          userText: question || `Why did ${this.sessionName(req.sessionId)} change ${path.basename(abs)}?`,
+          userText:
+            question || `Why did ${this.sessionName(req.sessionId)} change ${path.basename(abs)}?`,
           clientId,
         });
       } catch (err) {
@@ -1388,7 +1534,8 @@ export class ReviewService {
       this.auditAsk(req, 'herald', clientId);
       return { via: 'herald', askId: r.askId, sentText };
     }
-    if (!this.deps.sendDirect) throw new ReviewServiceError('herald_unavailable', 'No way to reach the session');
+    if (!this.deps.sendDirect)
+      throw new ReviewServiceError('herald_unavailable', 'No way to reach the session');
     if (this.deps.hasLiveChoice) {
       let waiting: boolean;
       try {
@@ -1396,7 +1543,11 @@ export class ReviewService {
       } catch {
         throw new ReviewServiceError('unavailable', "Could not read the session's screen");
       }
-      if (waiting) throw new ReviewServiceError('session_waiting', 'The session is waiting on a choice; answer it first');
+      if (waiting)
+        throw new ReviewServiceError(
+          'session_waiting',
+          'The session is waiting on a choice; answer it first'
+        );
     }
     const ok = await this.deps.sendDirect(req.sessionId, sentText);
     if (!ok) throw new ReviewServiceError('unavailable', 'Could not send to the session');
@@ -1405,7 +1556,13 @@ export class ReviewService {
   }
 
   private origin(clientId?: string): AuditOrigin {
-    return { addr: 'daemon', clientId: clientId || 'review', isLocal: true, tls: false, origin: null };
+    return {
+      addr: 'daemon',
+      clientId: clientId || 'review',
+      isLocal: true,
+      tls: false,
+      origin: null,
+    };
   }
 
   private auditAsk(req: ReviewAskRequest, via: string, clientId?: string): void {
@@ -1424,7 +1581,9 @@ export class ReviewService {
   /** Allowed to write here: under the project, home or config.allowedPaths; never denied paths. */
   isWritable(absPath: string, projectPath: string): boolean {
     if (isDeniedPath(absPath)) return false;
-    const roots = [projectPath, os.homedir(), ...(this.deps.allowedPaths?.() || [])].filter(Boolean);
+    const roots = [projectPath, os.homedir(), ...(this.deps.allowedPaths?.() || [])].filter(
+      Boolean
+    );
     return roots.some((r) => {
       const rel = path.relative(path.resolve(r), absPath);
       return rel !== '' && !rel.startsWith('..') && !path.isAbsolute(rel);
@@ -1442,12 +1601,23 @@ export class ReviewService {
     return false;
   }
 
-  async revertPreview(req: ReviewRevertPreviewRequest, clientId: string): Promise<ReviewRevertPreviewResponse> {
+  async revertPreview(
+    req: ReviewRevertPreviewRequest,
+    clientId: string
+  ): Promise<ReviewRevertPreviewResponse> {
     const ctx = await this.context(req.sessionId);
     if (!ctx) throw new ReviewServiceError('unknown_session', `Unknown session ${req.sessionId}`);
     const t = req.target;
-    if (!t || (t.kind !== 'hunk' && t.kind !== 'file') || typeof t.absPath !== 'string' || !path.isAbsolute(t.absPath))
-      throw new ReviewServiceError('bad_request', 'target must be a hunk or file with an absolute path');
+    if (
+      !t ||
+      (t.kind !== 'hunk' && t.kind !== 'file') ||
+      typeof t.absPath !== 'string' ||
+      !path.isAbsolute(t.absPath)
+    )
+      throw new ReviewServiceError(
+        'bad_request',
+        'target must be a hunk or file with an absolute path'
+      );
     if (t.kind === 'file' && t.to !== 'head' && t.to !== 'checkpoint')
       throw new ReviewServiceError('bad_request', "file target needs to: 'head' | 'checkpoint'");
     const abs = path.resolve(t.absPath);
@@ -1465,16 +1635,30 @@ export class ReviewService {
     const block = (code: ReviewRevertBlockCode, message: string) =>
       this.reverts.preview({ ...base, blocked: { code, message } });
     if (isSandbox()) return block('sandbox', 'reverts are disabled in the sandbox');
-    if (!this.isWritable(abs, ctx.led.projectPath)) return block('outside_allowed', 'that path is outside the allowed folders');
-    if (!this.deps.gitEnabled()) return block('git_disabled', 'git integration is disabled on this server');
-    if (this.editingNow(ctx, abs)) return block('session_editing', `${this.sessionName(req.sessionId)} is editing this file right now`);
+    if (!this.isWritable(abs, ctx.led.projectPath))
+      return block('outside_allowed', 'that path is outside the allowed folders');
+    if (!this.deps.gitEnabled())
+      return block('git_disabled', 'git integration is disabled on this server');
+    if (this.editingNow(ctx, abs))
+      return block(
+        'session_editing',
+        `${this.sessionName(req.sessionId)} is editing this file right now`
+      );
     const repo = await this.repos.resolve(path.dirname(abs)).catch(() => null);
     base.repo = repo;
-    const fileEdits = Array.from(ctx.led.edits.values()).filter((e) => e.absPath === abs && this.countable(e));
+    const fileEdits = Array.from(ctx.led.edits.values()).filter(
+      (e) => e.absPath === abs && this.countable(e)
+    );
     base.risks = fileEdits.length ? this.transcriptRisks(ctx, abs, fileEdits, 0) : [];
 
     if (t.kind === 'hunk') {
-      const found = await this.findHunk(ctx, abs, t.hunkId, t.editId, t.scope === 'all' ? 'all' : 'since_checkpoint');
+      const found = await this.findHunk(
+        ctx,
+        abs,
+        t.hunkId,
+        t.editId,
+        t.scope === 'all' ? 'all' : 'since_checkpoint'
+      );
       if (!found) return block('conflict', 'that change is no longer available');
       if (found.file) base.risks = found.file.risks;
       return this.reverts.preview({ ...base, hunk: found.hunk, hunkIsCreate: found.isCreate });
@@ -1493,9 +1677,14 @@ export class ReviewService {
     if (others.length) return block('foreign_changes', `${others[0]} also changed this file`);
     let checkpointTree: string | null = null;
     if (t.to === 'checkpoint') {
-      checkpointTree = ctx.cp.reviewedThrough > 0 ? ctx.cp.snapshots.find((x) => x.repoRoot === repo.root)?.tree || null : null;
+      checkpointTree =
+        ctx.cp.reviewedThrough > 0
+          ? ctx.cp.snapshots.find((x) => x.repoRoot === repo.root)?.tree || null
+          : null;
       if (checkpointTree) {
-        const ok = await objectsExist(this.runner, repo, [checkpointTree]).catch(() => new Set<string>());
+        const ok = await objectsExist(this.runner, repo, [checkpointTree]).catch(
+          () => new Set<string>()
+        );
         if (!ok.has(checkpointTree)) checkpointTree = null;
       }
     }
@@ -1514,8 +1703,18 @@ export class ReviewService {
         const led = this.peekLedger(t.sessionId);
         const session = this.findSession(t.sessionId);
         if (led && session) {
-          const ctx = { sessionId: t.sessionId, session, led, cp: this.store.get(t.sessionId, led.projectPath), working: this.isWorking(session) };
-          if (this.editingNow(ctx, t.absPath)) throw new RevertError('blocked', 'session_editing: the session is editing this file right now');
+          const ctx = {
+            sessionId: t.sessionId,
+            session,
+            led,
+            cp: this.store.get(t.sessionId, led.projectPath),
+            working: this.isWorking(session),
+          };
+          if (this.editingNow(ctx, t.absPath))
+            throw new RevertError(
+              'blocked',
+              'session_editing: the session is editing this file right now'
+            );
         }
       });
       this.auditRevert('review_revert', clientId, req, tokenInfo, out.meta, true, started);
@@ -1523,7 +1722,10 @@ export class ReviewService {
       if (req.notifySession !== false && this.deps.sendDirect) {
         const what = out.token.kind === 'hunk' ? 'a change' : 'the file';
         void this.deps
-          .sendDirect(out.meta.sessionId, `[Companion] I reverted ${what} in ${out.meta.path}; re-read it before editing.`)
+          .sendDirect(
+            out.meta.sessionId,
+            `[Companion] I reverted ${what} in ${out.meta.path}; re-read it before editing.`
+          )
           .catch(() => undefined);
       }
       const summary = await this.summary(out.meta.sessionId);
@@ -1535,14 +1737,16 @@ export class ReviewService {
         summary: summary!,
       };
     } catch (err) {
-      if (tokenInfo) this.auditRevert('review_revert', clientId, req, tokenInfo, null, false, started, err);
+      if (tokenInfo)
+        this.auditRevert('review_revert', clientId, req, tokenInfo, null, false, started, err);
       if (err instanceof RevertError) throw new ReviewServiceError(err.code, err.message);
       throw err;
     }
   }
 
   async revertUndo(backupId: string, clientId: string): Promise<ReviewRevertUndoResponse> {
-    if (typeof backupId !== 'string') throw new ReviewServiceError('bad_request', 'backupId is required');
+    if (typeof backupId !== 'string')
+      throw new ReviewServiceError('bad_request', 'backupId is required');
     const started = this.now();
     try {
       const meta = await this.reverts.undo(backupId);
@@ -1611,7 +1815,9 @@ export class ReviewService {
         device: req.device ?? null,
         backupId: meta?.backupId ?? null,
       },
-      result: ok ? { ok: true, effect: meta?.effect } : { ok: false, error: err instanceof Error ? err.message : String(err) },
+      result: ok
+        ? { ok: true, effect: meta?.effect }
+        : { ok: false, error: err instanceof Error ? err.message : String(err) },
       durationMs: this.now() - started,
     });
   }

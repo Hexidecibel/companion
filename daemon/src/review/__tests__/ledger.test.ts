@@ -86,7 +86,13 @@ describe('incremental tail', () => {
       toolUse('e1', 'Edit', { file_path: '/p/a.ts' }, t0 + 1000),
     ]);
     const second = JSON.stringify(
-      toolResult('e1', editResult('/p/a.ts', [{ oldStart: 1, oldLines: 1, newStart: 1, newLines: 1, lines: ['-a', '+b'] }]), t0 + 2000)
+      toolResult(
+        'e1',
+        editResult('/p/a.ts', [
+          { oldStart: 1, oldLines: 1, newStart: 1, newLines: 1, lines: ['-a', '+b'] },
+        ]),
+        t0 + 2000
+      )
     );
     fs.writeFileSync(f, first + second.slice(0, 40));
     const led = await load(f, '/p');
@@ -142,17 +148,31 @@ describe('subagent attribution', () => {
     );
     const subDir = path.join(dir, 'conv1', 'subagents');
     fs.mkdirSync(subDir, { recursive: true });
-    fs.writeFileSync(path.join(subDir, 'agent-abc.meta.json'), JSON.stringify({ toolUseId: 'agent-call' }));
+    fs.writeFileSync(
+      path.join(subDir, 'agent-abc.meta.json'),
+      JSON.stringify({ toolUseId: 'agent-call' })
+    );
     fs.writeFileSync(
       path.join(subDir, 'agent-abc.jsonl'),
       jsonl([
         { ...prompt('sp', 'sub prompt', t0 + 20), isSidechain: true },
         { ...toolUse('se', 'Edit', { file_path: '/p/x.ts' }, t0 + 200_000), isSidechain: true },
-        { ...toolResult('se', editResult('/p/x.ts', [{ oldStart: 1, oldLines: 1, newStart: 1, newLines: 1, lines: ['-a', '+b'] }]), t0 + 200_001), isSidechain: true },
+        {
+          ...toolResult(
+            'se',
+            editResult('/p/x.ts', [
+              { oldStart: 1, oldLines: 1, newStart: 1, newLines: 1, lines: ['-a', '+b'] },
+            ]),
+            t0 + 200_001
+          ),
+          isSidechain: true,
+        },
       ])
     );
     const subs = await listSubagentFiles([conv]);
-    expect(subs).toEqual([{ path: path.join(subDir, 'agent-abc.jsonl'), agentId: 'abc', parentToolUseId: 'agent-call' }]);
+    expect(subs).toEqual([
+      { path: path.join(subDir, 'agent-abc.jsonl'), agentId: 'abc', parentToolUseId: 'agent-call' },
+    ]);
     const led = new SessionLedger('s', '/p');
     led.setChain([conv], subs);
     await led.update();
@@ -175,22 +195,33 @@ describe('scan budget', () => {
     const t0 = Date.parse('2026-09-30T08:00:00Z');
     const filler = 'x'.repeat(2000);
     const lines: unknown[] = [prompt('t1', 'start', t0)];
-    for (let i = 0; i < 40; i++) lines.push({ ...prompt(`f${i}`, filler, t0 + 1 + i), isMeta: true });
+    for (let i = 0; i < 40; i++)
+      lines.push({ ...prompt(`f${i}`, filler, t0 + 1 + i), isMeta: true });
     fs.writeFileSync(conv, jsonl(lines));
     const led = new SessionLedger('s', '/p');
     led.setChain([conv], []);
     const budget = 30_000; // < file size: the first pass is partial
     await led.update(budget);
     expect(led.scannedBytes).toBeLessThanOrEqual(budget);
-    for (let i = 0; i < 5 && led.scannedBytes < fs.statSync(conv).size; i++) await led.update(budget);
+    for (let i = 0; i < 5 && led.scannedBytes < fs.statSync(conv).size; i++)
+      await led.update(budget);
     expect(led.scannedBytes).toBe(fs.statSync(conv).size);
 
     const t = t0 + 60_000;
-    fs.appendFileSync(conv, jsonl([
-      prompt('t2', 'more', t),
-      toolUse('late', 'Edit', { file_path: '/p/late.ts' }, t + 1),
-      toolResult('late', editResult('/p/late.ts', [{ oldStart: 1, oldLines: 1, newStart: 1, newLines: 1, lines: ['-a', '+b'] }]), t + 2),
-    ]));
+    fs.appendFileSync(
+      conv,
+      jsonl([
+        prompt('t2', 'more', t),
+        toolUse('late', 'Edit', { file_path: '/p/late.ts' }, t + 1),
+        toolResult(
+          'late',
+          editResult('/p/late.ts', [
+            { oldStart: 1, oldLines: 1, newStart: 1, newLines: 1, lines: ['-a', '+b'] },
+          ]),
+          t + 2
+        ),
+      ])
+    );
     await led.update(budget);
     expect(led.edits.get('late')).toMatchObject({ turnId: 't2', additions: 1 });
   });

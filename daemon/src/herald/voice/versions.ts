@@ -13,7 +13,8 @@
  */
 
 /** v-prefixed 2-4 parts, or a bare 3-part (semver-like) number. Not in words, paths or IPs. */
-const VERSION_IN_TEXT = /(?<![\w./-])(v|V|version\s+|release\s+)?(\d{1,4}(?:\.\d{1,4}){1,3})(?![\w-]|\.\d)/g;
+const VERSION_IN_TEXT =
+  /(?<![\w./-])(v|V|version\s+|release\s+)?(\d{1,4}(?:\.\d{1,4}){1,3})(?![\w-]|\.\d)/g;
 
 export const MAX_HINT_VERSIONS = 8;
 
@@ -29,7 +30,10 @@ export function versionsIn(text: string): string[] {
 }
 
 /** Distinct versions from texts given NEWEST first, at most `max`. */
-export function recentVersions(textsNewestFirst: Iterable<string>, max = MAX_HINT_VERSIONS): string[] {
+export function recentVersions(
+  textsNewestFirst: Iterable<string>,
+  max = MAX_HINT_VERSIONS
+): string[] {
   const seen = new Set<string>();
   const out: string[] = [];
   for (const t of textsNewestFirst) {
@@ -48,13 +52,41 @@ export function recentVersions(textsNewestFirst: Iterable<string>, max = MAX_HIN
 // Spoken numbers -> a known version
 
 const DIGIT_WORDS: Record<string, number> = {
-  zero: 0, oh: 0, o: 0, nought: 0, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9,
+  zero: 0,
+  oh: 0,
+  o: 0,
+  nought: 0,
+  one: 1,
+  two: 2,
+  three: 3,
+  four: 4,
+  five: 5,
+  six: 6,
+  seven: 7,
+  eight: 8,
+  nine: 9,
 };
 const TEEN_WORDS: Record<string, number> = {
-  ten: 10, eleven: 11, twelve: 12, thirteen: 13, fourteen: 14, fifteen: 15, sixteen: 16, seventeen: 17, eighteen: 18, nineteen: 19,
+  ten: 10,
+  eleven: 11,
+  twelve: 12,
+  thirteen: 13,
+  fourteen: 14,
+  fifteen: 15,
+  sixteen: 16,
+  seventeen: 17,
+  eighteen: 18,
+  nineteen: 19,
 };
 const TENS_WORDS: Record<string, number> = {
-  twenty: 20, thirty: 30, forty: 40, fifty: 50, sixty: 60, seventy: 70, eighty: 80, ninety: 90,
+  twenty: 20,
+  thirty: 30,
+  forty: 40,
+  fifty: 50,
+  sixty: 60,
+  seventy: 70,
+  eighty: 80,
+  ninety: 90,
 };
 const SEP_WORDS = new Set(['point', 'dot']);
 
@@ -74,7 +106,13 @@ function tokenize(text: string): Tok[] {
     const end = start + m[0].length;
     if (m[1]) {
       const parts = m[1].split('.');
-      out.push({ t: 'num', v: Number(parts[0]), parts: parts.length > 1 ? parts : undefined, start, end });
+      out.push({
+        t: 'num',
+        v: Number(parts[0]),
+        parts: parts.length > 1 ? parts : undefined,
+        start,
+        end,
+      });
     } else if (m[2]) {
       const w = m[2].toLowerCase();
       if (w in DIGIT_WORDS) out.push({ t: 'num', v: DIGIT_WORDS[w], start, end });
@@ -162,7 +200,8 @@ function runs(toks: Tok[]): Run[] {
         break;
       }
     }
-    if (numTokens === 1 && lastNum?.t === 'num' && lastNum.parts) run.digits = lastNum.parts.join('');
+    if (numTokens === 1 && lastNum?.t === 'num' && lastNum.parts)
+      run.digits = lastNum.parts.join('');
     if (run.comps.length) out.push(run);
   }
   return out;
@@ -209,7 +248,11 @@ export function normalizeSpokenVersions(transcript: string, known: readonly stri
         // Never cut through one written number ("2.0.7" is not "2.0" + "7").
         const before = run.comps[from - 1];
         const after = run.comps[from + len];
-        if ((before && before.start === comps[0].start) || (after && after.end === comps[comps.length - 1].end)) continue;
+        if (
+          (before && before.start === comps[0].start) ||
+          (after && after.end === comps[comps.length - 1].end)
+        )
+          continue;
         const k = matchKnown(run, comps, known);
         if (!k) continue;
         const start = comps[0].start;
@@ -220,11 +263,17 @@ export function normalizeSpokenVersions(transcript: string, known: readonly stri
     }
     // "2.07" written by Whisper for a known 2.0.7: same digits, one dotted number.
     if (!done && run.digits) {
-      const k = known.find((v) => v.split('.').length >= 3 && v.replace(/\./g, '') === run.digits && !known.includes(transcript.slice(run.comps[0].start, run.comps[0].end)));
+      const k = known.find(
+        (v) =>
+          v.split('.').length >= 3 &&
+          v.replace(/\./g, '') === run.digits &&
+          !known.includes(transcript.slice(run.comps[0].start, run.comps[0].end))
+      );
       if (k) edits.push({ start: run.comps[0].start, end: run.comps[n - 1].end, to: k });
     }
   }
   let out = transcript;
-  for (const e of edits.sort((a, b) => b.start - a.start)) out = out.slice(0, e.start) + e.to + out.slice(e.end);
+  for (const e of edits.sort((a, b) => b.start - a.start))
+    out = out.slice(0, e.start) + e.to + out.slice(e.end);
   return out;
 }

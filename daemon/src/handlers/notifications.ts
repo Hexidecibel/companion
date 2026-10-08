@@ -1,13 +1,8 @@
 import { HandlerContext, MessageHandler } from '../handler-context';
 import { EscalationConfig } from '../types';
-import {
-  FCM_TOKEN_LOG_PREVIEW_LENGTH,
-  DEFAULT_DIGEST_PERIOD_MS,
-} from '../constants';
+import { FCM_TOKEN_LOG_PREVIEW_LENGTH, DEFAULT_DIGEST_PERIOD_MS } from '../constants';
 
-export function registerNotificationHandlers(
-  ctx: HandlerContext
-): Record<string, MessageHandler> {
+export function registerNotificationHandlers(ctx: HandlerContext): Record<string, MessageHandler> {
   return {
     register_push(client, payload, requestId) {
       const pushPayload = payload as { fcmToken: string; deviceId: string; tokenType?: string };

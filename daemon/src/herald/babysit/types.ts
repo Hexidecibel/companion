@@ -45,7 +45,12 @@ const END_REASONS: readonly HeraldBabysitEndReason[] = [
   'done',
   'loop',
 ];
-const LOG_KINDS: readonly HeraldBabysitLogEntry['kind'][] = ['answered', 'escalated', 'user', 'done'];
+const LOG_KINDS: readonly HeraldBabysitLogEntry['kind'][] = [
+  'answered',
+  'escalated',
+  'user',
+  'done',
+];
 
 const isStr = (v: unknown): v is string => typeof v === 'string';
 const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
@@ -76,7 +81,8 @@ function sanitizeRecord(raw: unknown, now: number): BabysitRecord | null {
   const r = raw as Record<string, unknown>;
   const b = r.brief as Record<string, unknown> | undefined;
   if (!b || typeof b !== 'object') return null;
-  if (!isStr(b.id) || !isStr(b.serverId) || !isStr(b.sessionId) || !isStr(b.sessionName)) return null;
+  if (!isStr(b.id) || !isStr(b.serverId) || !isStr(b.sessionId) || !isStr(b.sessionName))
+    return null;
   if (!b.id || !b.serverId || !b.sessionId) return null;
   if (!isStr(b.goal) || b.goal.trim().length < BABYSIT_LIMITS.minGoalChars) return null;
   if (!isNum(b.createdAt) || !isNum(b.expiresAt) || b.createdAt > now + 60_000) return null;
@@ -87,7 +93,10 @@ function sanitizeRecord(raw: unknown, now: number): BabysitRecord | null {
   if (b.status === 'ended' && now - (endedAt ?? b.expiresAt) > BABYSIT_ENDED_KEEP_MS) return null;
   const maxAnswers = Math.min(
     BABYSIT_LIMITS.maxMaxAnswers,
-    Math.max(1, count(b.maxAnswers, BABYSIT_LIMITS.maxMaxAnswers) || BABYSIT_LIMITS.defaultMaxAnswers)
+    Math.max(
+      1,
+      count(b.maxAnswers, BABYSIT_LIMITS.maxMaxAnswers) || BABYSIT_LIMITS.defaultMaxAnswers
+    )
   );
   const brief: HeraldBabysit = {
     id: b.id.slice(0, 80),
@@ -98,10 +107,14 @@ function sanitizeRecord(raw: unknown, now: number): BabysitRecord | null {
     ...(isStr(b.direction) && b.direction.trim()
       ? { direction: b.direction.slice(0, BABYSIT_LIMITS.maxDirectionChars) }
       : {}),
-    ...(isStr(b.never) && b.never.trim() ? { never: b.never.slice(0, BABYSIT_LIMITS.maxNeverChars) } : {}),
+    ...(isStr(b.never) && b.never.trim()
+      ? { never: b.never.slice(0, BABYSIT_LIMITS.maxNeverChars) }
+      : {}),
     createdAt: b.createdAt,
     expiresAt: b.expiresAt,
-    ...(isNum(b.minutes) && b.minutes >= BABYSIT_LIMITS.minMinutes && b.minutes <= BABYSIT_LIMITS.maxMinutes
+    ...(isNum(b.minutes) &&
+    b.minutes >= BABYSIT_LIMITS.minMinutes &&
+    b.minutes <= BABYSIT_LIMITS.maxMinutes
       ? { minutes: Math.round(b.minutes) }
       : {}),
     maxAnswers,

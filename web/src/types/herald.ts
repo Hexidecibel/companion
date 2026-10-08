@@ -36,7 +36,13 @@ export interface HeraldInboxItem {
    * voice). `code` is for the screen: the brain only sees a placeholder. Gone
    * on approve, deny or expiry.
    */
-  pairing?: { pairingId: string; deviceName: string; platform: string; code: string; expiresAt: number };
+  pairing?: {
+    pairingId: string;
+    deviceName: string;
+    platform: string;
+    code: string;
+    expiresAt: number;
+  };
   /**
    * The session babysitter's running tally for one brief ("Babysitting Out4: 3
    * answers"): one coalesced `progress` item per brief, silent (no tone, never

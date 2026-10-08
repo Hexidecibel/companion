@@ -91,7 +91,12 @@ export type ExecFileFn = (
     windowsHide: boolean;
   },
   cb: (err: ExecErr | null, stdout: Buffer, stderr: Buffer) => void
-) => { stdin?: { end: (data?: string | Buffer) => void; on?: (ev: string, fn: () => void) => void } | null };
+) => {
+  stdin?: {
+    end: (data?: string | Buffer) => void;
+    on?: (ev: string, fn: () => void) => void;
+  } | null;
+};
 
 export interface GitRunnerOptions {
   enabled?: () => boolean;
@@ -101,9 +106,22 @@ export interface GitRunnerOptions {
   now?: () => number;
 }
 
-const SAFETY_FLAGS = ['-c', 'core.quotepath=off', '-c', 'color.ui=never', '-c', 'core.fsmonitor=false'];
+const SAFETY_FLAGS = [
+  '-c',
+  'core.quotepath=off',
+  '-c',
+  'color.ui=never',
+  '-c',
+  'core.fsmonitor=false',
+];
 const DIFF_CMDS = new Set(['diff', 'diff-tree', 'diff-index', 'diff-files', 'show', 'log']);
-const STRIPPED_ENV = ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_OBJECT_DIRECTORY', 'GIT_PREFIX'];
+const STRIPPED_ENV = [
+  'GIT_DIR',
+  'GIT_WORK_TREE',
+  'GIT_INDEX_FILE',
+  'GIT_OBJECT_DIRECTORY',
+  'GIT_PREFIX',
+];
 
 function hashKey(req: GitRunRequest): string {
   const h = createHash('sha1');

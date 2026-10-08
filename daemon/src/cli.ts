@@ -448,7 +448,9 @@ WantedBy=default.target
       try {
         execSync('systemctl --user daemon-reload', { stdio: 'inherit' });
         execSync('systemctl --user enable companion', { stdio: 'inherit' });
-        console.log(green('Autostart enabled (systemd user service); it starts at the next login / boot.'));
+        console.log(
+          green('Autostart enabled (systemd user service); it starts at the next login / boot.')
+        );
         console.log(dim(`  Unit: ${servicePath}`));
         console.log(dim('  The running daemon was not restarted.'));
       } catch {

@@ -8,7 +8,12 @@ let seq = 0;
 const iso = (ms: number) => new Date(ms).toISOString();
 const base = { userType: 'external', entrypoint: 'cli', version: '2.1.285', gitBranch: 'main' };
 
-export function prompt(uuid: string, text: string, at: number, extra: Record<string, unknown> = {}) {
+export function prompt(
+  uuid: string,
+  text: string,
+  at: number,
+  extra: Record<string, unknown> = {}
+) {
   return {
     parentUuid: null,
     isSidechain: false,
@@ -33,7 +38,13 @@ export function assistantText(text: string, at: number) {
   };
 }
 
-export function toolUse(id: string, name: string, input: Record<string, unknown>, at: number, extra: Record<string, unknown> = {}) {
+export function toolUse(
+  id: string,
+  name: string,
+  input: Record<string, unknown>,
+  at: number,
+  extra: Record<string, unknown> = {}
+) {
   return {
     type: 'assistant',
     isSidechain: false,
@@ -45,7 +56,12 @@ export function toolUse(id: string, name: string, input: Record<string, unknown>
   };
 }
 
-export function toolResult(id: string, tur: unknown, at: number, opts: { isError?: boolean; extra?: Record<string, unknown> } = {}) {
+export function toolResult(
+  id: string,
+  tur: unknown,
+  at: number,
+  opts: { isError?: boolean; extra?: Record<string, unknown> } = {}
+) {
   return {
     type: 'user',
     isSidechain: false,
@@ -68,8 +84,24 @@ export function toolResult(id: string, tur: unknown, at: number, opts: { isError
   };
 }
 
-export function editResult(filePath: string, hunks: Array<{ oldStart: number; oldLines: number; newStart: number; newLines: number; lines: string[] }>) {
-  return { filePath, oldString: 'x', newString: 'y', structuredPatch: hunks, userModified: false, replaceAll: false };
+export function editResult(
+  filePath: string,
+  hunks: Array<{
+    oldStart: number;
+    oldLines: number;
+    newStart: number;
+    newLines: number;
+    lines: string[];
+  }>
+) {
+  return {
+    filePath,
+    oldString: 'x',
+    newString: 'y',
+    structuredPatch: hunks,
+    userModified: false,
+    replaceAll: false,
+  };
 }
 
 export function writeCreate(filePath: string, content: string) {
@@ -88,7 +120,13 @@ export function git(cwd: string, ...args: string[]): string {
   return execFileSync('git', args, {
     cwd,
     encoding: 'utf8',
-    env: { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' },
+    env: {
+      ...process.env,
+      GIT_AUTHOR_NAME: 't',
+      GIT_AUTHOR_EMAIL: 't@t',
+      GIT_COMMITTER_NAME: 't',
+      GIT_COMMITTER_EMAIL: 't@t',
+    },
   });
 }
 
@@ -104,7 +142,9 @@ export function commitAll(dir: string, msg = 'c'): void {
 }
 
 /** A fake watcher with one session whose chain is `files`. */
-export function fakeWatcher(sessions: Array<{ id: string; projectPath: string; files: string[]; waiting?: boolean }>) {
+export function fakeWatcher(
+  sessions: Array<{ id: string; projectPath: string; files: string[]; waiting?: boolean }>
+) {
   return {
     getSessions: () =>
       sessions.map((s) => ({

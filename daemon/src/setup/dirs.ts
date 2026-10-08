@@ -51,7 +51,10 @@ export function listDirs(
 ): DirListing {
   const realHome = fs.realpathSync(home);
   const dir = resolveInHome(requested, home);
-  const limit = Math.max(1, Math.min(opts.limit ?? SETUP_LIMITS.maxDirEntries, SETUP_LIMITS.maxDirEntries));
+  const limit = Math.max(
+    1,
+    Math.min(opts.limit ?? SETUP_LIMITS.maxDirEntries, SETUP_LIMITS.maxDirEntries)
+  );
   let dirents: fs.Dirent[];
   try {
     dirents = fs.readdirSync(dir, { withFileTypes: true });

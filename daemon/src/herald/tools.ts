@@ -363,7 +363,7 @@ export const BABYSIT_TOOL_SPECS: LlmToolSpec[] = [
         session: SESSION_PROP,
         goal: {
           type: 'string',
-          description: 'What the session should get done, in the user\'s words.',
+          description: "What the session should get done, in the user's words.",
           maxLength: HERALD_BABYSIT_LIMITS.maxGoalChars,
         },
         direction: {
@@ -384,7 +384,8 @@ export const BABYSIT_TOOL_SPECS: LlmToolSpec[] = [
         },
         max_answers: {
           type: 'integer',
-          description: 'How many answers you may send if the user gave a number (default 20, at most 50).',
+          description:
+            'How many answers you may send if the user gave a number (default 20, at most 50).',
         },
       },
       required: ['session', 'goal'],
@@ -888,7 +889,14 @@ export async function executeTool(
           ended: b.status === 'ended' ? b.endReason : undefined,
           suggests_only: b.autoSend === false || undefined,
           recent: b.log.slice(-4).map((e) => ({
-            what: e.kind === 'answered' ? 'you answered' : e.kind === 'user' ? 'the user answered' : e.kind === 'done' ? 'goal reported done' : 'brought to the user',
+            what:
+              e.kind === 'answered'
+                ? 'you answered'
+                : e.kind === 'user'
+                  ? 'the user answered'
+                  : e.kind === 'done'
+                    ? 'goal reported done'
+                    : 'brought to the user',
             asked: clip(oneLine(e.question), 160),
             answer: e.answer ? clip(oneLine(e.answer), 120) : undefined,
             ago: formatAgo(now - e.at),
@@ -934,7 +942,10 @@ export async function executeTool(
           return err(
             `I can only review code changes for sessions on this machine for now; ${s.sessionName} is on another server.`
           );
-        const digest = await env.review.digest(s.sessionId, scope as (typeof REVIEW_SCOPES)[number]);
+        const digest = await env.review.digest(
+          s.sessionId,
+          scope as (typeof REVIEW_SCOPES)[number]
+        );
         if (!digest) return err(`No code changes are known for ${s.sessionName}.`);
         return safeOk(digest);
       }
@@ -947,15 +958,22 @@ export async function executeTool(
           if (!r.ok) return err(r.error);
           only = r.session;
           if (only.serverId !== 'local')
-            return err(`I can only tell for sessions on this machine for now; ${only.sessionName} is on another server.`);
+            return err(
+              `I can only tell for sessions on this machine for now; ${only.sessionName} is on another server.`
+            );
         }
         const now = env.now();
         const findings = env.stuck.list(only?.sessionId);
         const bySession = new Map<string, StuckFinding[]>();
-        for (const f of findings) bySession.set(f.sessionId, [...(bySession.get(f.sessionId) || []), f]);
+        for (const f of findings)
+          bySession.set(f.sessionId, [...(bySession.get(f.sessionId) || []), f]);
         for (const list of bySession.values()) {
           const f = list[0];
-          state.sessionRefs.set(`local:${f.sessionId}`, { serverId: 'local', sessionId: f.sessionId, sessionName: f.sessionName });
+          state.sessionRefs.set(`local:${f.sessionId}`, {
+            serverId: 'local',
+            sessionId: f.sessionId,
+            sessionName: f.sessionName,
+          });
         }
         const stuck = Array.from(bySession.values()).map((list) => ({
           session: list[0].sessionName,
@@ -985,8 +1003,11 @@ export async function executeTool(
         if (!r.ok) return err(r.error);
         const s = r.session;
         if (s.serverId !== 'local')
-          return err(`I can only do that for sessions on this machine for now; ${s.sessionName} is on another server.`);
-        const minutes = typeof args.minutes === 'number' ? Math.max(0, Math.min(1440, args.minutes)) : 30;
+          return err(
+            `I can only do that for sessions on this machine for now; ${s.sessionName} is on another server.`
+          );
+        const minutes =
+          typeof args.minutes === 'number' ? Math.max(0, Math.min(1440, args.minutes)) : 30;
         const until = env.stuck.snooze(s.sessionId, undefined, minutes);
         return ok({
           ok: true,
@@ -1275,7 +1296,8 @@ async function proposeBabysit(
     )
       env.actions.cancel(a.id);
   }
-  const span = minutes % 60 === 0 ? `${minutes / 60} hour${minutes === 60 ? '' : 's'}` : `${minutes} minutes`;
+  const span =
+    minutes % 60 === 0 ? `${minutes / 60} hour${minutes === 60 ? '' : 's'}` : `${minutes} minutes`;
   const action = env.actions.create({
     // Always confirmed: a misheard goal must never start answering a session.
     tier: 'hard_confirm',

@@ -63,8 +63,28 @@ const EXPECTED_FAILURE =
 
 /** Package runners and multi-command tools: the subcommand is part of the kind. */
 const SUBCOMMAND_TOOLS = new Set([
-  'npm', 'npx', 'yarn', 'pnpm', 'bun', 'cargo', 'go', 'git', 'docker', 'make', 'uv', 'poetry',
-  'pip', 'pip3', 'dotnet', 'gradle', './gradlew', 'gradlew', 'mvn', 'kubectl', 'gh', 'systemctl',
+  'npm',
+  'npx',
+  'yarn',
+  'pnpm',
+  'bun',
+  'cargo',
+  'go',
+  'git',
+  'docker',
+  'make',
+  'uv',
+  'poetry',
+  'pip',
+  'pip3',
+  'dotnet',
+  'gradle',
+  './gradlew',
+  'gradlew',
+  'mvn',
+  'kubectl',
+  'gh',
+  'systemctl',
 ]);
 const PREFIX_COMMANDS = /^(cd|source|\.|export|set|pushd|popd|unset|true|echo)$/;
 
@@ -98,7 +118,8 @@ export function bashKind(command: string): string {
     if (PREFIX_COMMANDS.test(head)) continue;
     const rest = words.slice(1).filter((w) => !w.startsWith('-'));
     if (SUBCOMMAND_TOOLS.has(head) && rest.length) {
-      if ((rest[0] === 'run' || rest[0] === 'exec') && rest[1]) return `${head} ${rest[0]} ${rest[1]}`;
+      if ((rest[0] === 'run' || rest[0] === 'exec') && rest[1])
+        return `${head} ${rest[0]} ${rest[1]}`;
       return `${head} ${rest[0]}`;
     }
     return head;

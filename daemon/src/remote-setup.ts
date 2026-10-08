@@ -56,7 +56,10 @@ function parseFlags(args: string[]): CliFlags {
       case '--enable': {
         const val = args[++i] || '';
         flags.nonInteractive = true;
-        for (const part of val.split(',').map((s) => s.trim()).filter(Boolean)) {
+        for (const part of val
+          .split(',')
+          .map((s) => s.trim())
+          .filter(Boolean)) {
           if (part === 'exec' || part === 'dispatch' || part === 'write') {
             flags.enable.add(part);
           } else {
@@ -69,12 +72,18 @@ function parseFlags(args: string[]): CliFlags {
       }
       case '--write-roots': {
         const val = args[++i] || '';
-        flags.writeRoots = val.split(',').map((s) => s.trim()).filter(Boolean);
+        flags.writeRoots = val
+          .split(',')
+          .map((s) => s.trim())
+          .filter(Boolean);
         break;
       }
       case '--allowed-origins': {
         const val = args[++i] || '';
-        flags.allowedOrigins = val.split(',').map((s) => s.trim()).filter(Boolean);
+        flags.allowedOrigins = val
+          .split(',')
+          .map((s) => s.trim())
+          .filter(Boolean);
         break;
       }
       default:
@@ -265,13 +274,15 @@ export async function cmdEnableRemote(args: string[]): Promise<void> {
       const currentWriteRoots: string[] = Array.isArray((currentBlock?.write as any)?.roots)
         ? ((currentBlock?.write as any).roots as string[])
         : [];
-      const currentAllowedOrigins: string[] = Array.isArray(
-        (currentBlock as any)?.allowed_origins
-      )
+      const currentAllowedOrigins: string[] = Array.isArray((currentBlock as any)?.allowed_origins)
         ? ((currentBlock as any).allowed_origins as string[])
         : [];
 
-      enabled = await yesNo(rl, 'Enable remote capabilities (master switch)?', currentEnabled || true);
+      enabled = await yesNo(
+        rl,
+        'Enable remote capabilities (master switch)?',
+        currentEnabled || true
+      );
 
       if (!enabled) {
         console.log(dim('Remote capabilities will be disabled.'));
@@ -292,7 +303,10 @@ export async function cmdEnableRemote(args: string[]): Promise<void> {
             )
           ).trim();
           const rootsInput = rootsAnswer || defaultRoots;
-          writeRoots = rootsInput.split(',').map((s) => s.trim()).filter(Boolean);
+          writeRoots = rootsInput
+            .split(',')
+            .map((s) => s.trim())
+            .filter(Boolean);
           for (const r of writeRoots) {
             if (!r.startsWith('/')) {
               console.error(red(`Write root must be an absolute path: ${r}`));
@@ -311,7 +325,10 @@ export async function cmdEnableRemote(args: string[]): Promise<void> {
           )
         ).trim();
         const originsInput = originsAnswer || defaultOrigins;
-        allowedOrigins = originsInput.split(',').map((s) => s.trim()).filter(Boolean);
+        allowedOrigins = originsInput
+          .split(',')
+          .map((s) => s.trim())
+          .filter(Boolean);
       }
     } finally {
       rl.close();

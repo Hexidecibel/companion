@@ -65,8 +65,8 @@ export interface DaemonConfig {
 }
 
 export interface FeedbackOption {
-  key: string;    // "0", "1", "2", "3"
-  label: string;  // "Dismiss", "Bad", "Fine", "Good"
+  key: string; // "0", "1", "2", "3"
+  label: string; // "Dismiss", "Bad", "Fine", "Good"
 }
 
 export interface FeedbackPrompt {

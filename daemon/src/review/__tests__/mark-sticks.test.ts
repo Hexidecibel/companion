@@ -9,13 +9,28 @@ import * as path from 'path';
 import { ReviewService } from '../service';
 import { ReviewStore } from '../store';
 import { GitRunner } from '../git-runner';
-import { prompt, toolUse, toolResult, editResult, jsonl, tmpDir, initRepo, commitAll, fakeWatcher } from './helpers';
+import {
+  prompt,
+  toolUse,
+  toolResult,
+  editResult,
+  jsonl,
+  tmpDir,
+  initRepo,
+  commitAll,
+  fakeWatcher,
+} from './helpers';
 
 const T0 = Date.now() - 60 * 60 * 1000;
-const oneLine = (from: string, to: string) => [{ oldStart: 1, oldLines: 1, newStart: 1, newLines: 1, lines: [`-${from}`, `+${to}`] }];
+const oneLine = (from: string, to: string) => [
+  { oldStart: 1, oldLines: 1, newStart: 1, newLines: 1, lines: [`-${from}`, `+${to}`] },
+];
 
 function edit(id: string, abs: string, at: number, from: string, to: string): unknown[] {
-  return [toolUse(id, 'Edit', { file_path: abs }, at), toolResult(id, editResult(abs, oneLine(from, to)), at + 1)];
+  return [
+    toolUse(id, 'Edit', { file_path: abs }, at),
+    toolResult(id, editResult(abs, oneLine(from, to)), at + 1),
+  ];
 }
 
 function setup() {
@@ -27,9 +42,21 @@ function setup() {
   const conv2 = path.join(dir, 's2.jsonl');
   // s1 edits a.ts, s2 (same repo) edits b.ts, a shell command changes c.ts.
   fs.writeFileSync(path.join(repo, 'a.ts'), 'A\n');
-  fs.writeFileSync(conv1, jsonl([prompt('t1', 'edit a', T0), ...edit('e1', path.join(repo, 'a.ts'), T0 + 1000, 'a.ts', 'A')]));
+  fs.writeFileSync(
+    conv1,
+    jsonl([
+      prompt('t1', 'edit a', T0),
+      ...edit('e1', path.join(repo, 'a.ts'), T0 + 1000, 'a.ts', 'A'),
+    ])
+  );
   fs.writeFileSync(path.join(repo, 'b.ts'), 'B\n');
-  fs.writeFileSync(conv2, jsonl([prompt('u1', 'edit b', T0), ...edit('f1', path.join(repo, 'b.ts'), T0 + 1500, 'b.ts', 'B')]));
+  fs.writeFileSync(
+    conv2,
+    jsonl([
+      prompt('u1', 'edit b', T0),
+      ...edit('f1', path.join(repo, 'b.ts'), T0 + 1500, 'b.ts', 'B'),
+    ])
+  );
   fs.writeFileSync(path.join(repo, 'c.ts'), 'C from a shell\n');
   const svc = new ReviewService({
     watcher: fakeWatcher([
@@ -79,7 +106,10 @@ describe('mark reviewed sticks', () => {
     // New work after the mark shows up again.
     const t = Date.now();
     fs.writeFileSync(path.join(repo, 'a.ts'), 'AA\n');
-    fs.appendFileSync(conv1, jsonl([prompt('t2', 'more', t), ...edit('e2', path.join(repo, 'a.ts'), t + 1, 'A', 'AA')]));
+    fs.appendFileSync(
+      conv1,
+      jsonl([prompt('t2', 'more', t), ...edit('e2', path.join(repo, 'a.ts'), t + 1, 'A', 'AA')])
+    );
     expect((await svc.summary('s1'))!).toMatchObject({ unreviewedFiles: 1, unreviewedTurns: 1 });
   });
 

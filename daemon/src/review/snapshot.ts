@@ -46,7 +46,12 @@ export async function snapshotTree(
       // nothing would make `git add` fail, so only existing paths go in.
       const present: string[] = [];
       for (const rel of opts.limitTo) {
-        if (await fs.promises.lstat(path.join(repo.root, rel)).then(() => true, () => false))
+        if (
+          await fs.promises.lstat(path.join(repo.root, rel)).then(
+            () => true,
+            () => false
+          )
+        )
           present.push(rel);
       }
       if (present.length) {
@@ -100,7 +105,11 @@ export async function emptyTree(runner: GitRunner, repo: RepoInfo): Promise<stri
 }
 
 /** Which of these objects still exist (gc may prune dangling snapshot trees). */
-export async function objectsExist(runner: GitRunner, repo: RepoInfo, ids: string[]): Promise<Set<string>> {
+export async function objectsExist(
+  runner: GitRunner,
+  repo: RepoInfo,
+  ids: string[]
+): Promise<Set<string>> {
   const out = new Set<string>();
   if (!ids.length) return out;
   const r = await runner.run({
@@ -124,7 +133,12 @@ export interface NetDiff {
 }
 
 /** Tree-to-tree diff with rename detection; falls back to numstat when huge. */
-export async function netDiff(runner: GitRunner, repo: RepoInfo, base: string, now: string): Promise<NetDiff> {
+export async function netDiff(
+  runner: GitRunner,
+  repo: RepoInfo,
+  base: string,
+  now: string
+): Promise<NetDiff> {
   if (base === now) return { files: [], numstat: null };
   const common = { cwd: repo.root, repoKey: repo.root, kind: 'diff' as const };
   try {
@@ -138,12 +152,17 @@ export async function netDiff(runner: GitRunner, repo: RepoInfo, base: string, n
     if (!(err instanceof GitError) || err.code !== 'too_large') throw err;
   }
   const n = await runner.run({ ...common, args: ['diff', '-M', '--numstat', '-z', base, now] });
-  if (n.code !== 0) throw new GitError('spawn_failed', `git diff --numstat failed: ${n.stderr.trim()}`);
+  if (n.code !== 0)
+    throw new GitError('spawn_failed', `git diff --numstat failed: ${n.stderr.trim()}`);
   return { files: null, numstat: parseNumstatZ(n.stdout) };
 }
 
 /** Repo-relative paths that are gitignored (`check-ignore --stdin`). */
-export async function ignoredPaths(runner: GitRunner, repo: RepoInfo, rels: string[]): Promise<Set<string>> {
+export async function ignoredPaths(
+  runner: GitRunner,
+  repo: RepoInfo,
+  rels: string[]
+): Promise<Set<string>> {
   const out = new Set<string>();
   if (!rels.length) return out;
   const r = await runner.run({

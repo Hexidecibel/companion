@@ -104,11 +104,7 @@ describe('parsePermissionPrompt', () => {
   });
 
   it('handles selector arrow on different options', () => {
-    const text = [
-      'Do you want to run this command?',
-      '  1. Yes',
-      '❯ 2. No',
-    ].join('\n');
+    const text = ['Do you want to run this command?', '  1. Yes', '❯ 2. No'].join('\n');
 
     const result = parsePermissionPrompt(text);
     expect(result).not.toBeNull();
@@ -157,11 +153,7 @@ describe('parsePermissionPrompt', () => {
   });
 
   it('returns null for question without "Do you want to" prefix', () => {
-    const text = [
-      'Should I proceed?',
-      '❯ 1. Yes',
-      '  2. No',
-    ].join('\n');
+    const text = ['Should I proceed?', '❯ 1. Yes', '  2. No'].join('\n');
     expect(parsePermissionPrompt(text)).toBeNull();
   });
 });
@@ -180,9 +172,7 @@ describe('mapPermissionLabel', () => {
   });
 
   it('normalizes "Yes, allow all" to session-level permission', () => {
-    expect(mapPermissionLabel('Yes, allow all')).toBe(
-      "yes, and don't ask again for this session"
-    );
+    expect(mapPermissionLabel('Yes, allow all')).toBe("yes, and don't ask again for this session");
   });
 
   it('normalizes "Don\'t ask again" variants', () => {
@@ -203,9 +193,7 @@ describe('mapPermissionLabel', () => {
 describe('tool-based approval options', () => {
   it('generates yes/always/no options for pending Bash tool', () => {
     const content = jsonl(
-      assistantWithTools('', [
-        { name: 'Bash', id: 'bash1', input: { command: 'npm test' } },
-      ])
+      assistantWithTools('', [{ name: 'Bash', id: 'bash1', input: { command: 'npm test' } }])
     );
     const msgs = parseConversationFile('test.jsonl', Infinity, content);
     expect(msgs[0].options).toBeDefined();
@@ -218,9 +206,7 @@ describe('tool-based approval options', () => {
 
   it('generates yes/always/no options for pending Edit tool', () => {
     const content = jsonl(
-      assistantWithTools('', [
-        { name: 'Edit', id: 'e1', input: { file_path: '/src/app.ts' } },
-      ])
+      assistantWithTools('', [{ name: 'Edit', id: 'e1', input: { file_path: '/src/app.ts' } }])
     );
     const msgs = parseConversationFile('test.jsonl', Infinity, content);
     expect(msgs[0].options).toBeDefined();
@@ -230,9 +216,7 @@ describe('tool-based approval options', () => {
 
   it('generates yes/always/no options for pending Write tool', () => {
     const content = jsonl(
-      assistantWithTools('', [
-        { name: 'Write', id: 'w1', input: { file_path: '/src/new.ts' } },
-      ])
+      assistantWithTools('', [{ name: 'Write', id: 'w1', input: { file_path: '/src/new.ts' } }])
     );
     const msgs = parseConversationFile('test.jsonl', Infinity, content);
     expect(msgs[0].options).toBeDefined();
@@ -242,9 +226,7 @@ describe('tool-based approval options', () => {
 
   it('generates yes/no (2 options) for pending EnterPlanMode tool', () => {
     const content = jsonl(
-      assistantWithTools('', [
-        { name: 'EnterPlanMode', id: 'pm1', input: {} },
-      ])
+      assistantWithTools('', [{ name: 'EnterPlanMode', id: 'pm1', input: {} }])
     );
     const msgs = parseConversationFile('test.jsonl', Infinity, content);
     expect(msgs[0].options).toBeDefined();
@@ -255,9 +237,7 @@ describe('tool-based approval options', () => {
 
   it('does not generate options for completed approval tools', () => {
     const content = jsonl(
-      assistantWithTools('', [
-        { name: 'Bash', id: 'bash1', input: { command: 'ls' } },
-      ]),
+      assistantWithTools('', [{ name: 'Bash', id: 'bash1', input: { command: 'ls' } }]),
       toolResult('bash1', 'file1\nfile2')
     );
     const msgs = parseConversationFile('test.jsonl', Infinity, content);
@@ -268,20 +248,14 @@ describe('tool-based approval options', () => {
 
   it('does not generate options for pending Task tool (background agent)', () => {
     const content = jsonl(
-      assistantWithTools('', [
-        { name: 'Task', id: 'task1', input: { description: 'Research' } },
-      ])
+      assistantWithTools('', [{ name: 'Task', id: 'task1', input: { description: 'Research' } }])
     );
     const msgs = parseConversationFile('test.jsonl', Infinity, content);
     expect(msgs[0].options).toBeUndefined();
   });
 
   it('does not generate options for pending ExitPlanMode tool', () => {
-    const content = jsonl(
-      assistantWithTools('', [
-        { name: 'ExitPlanMode', id: 'ep1', input: {} },
-      ])
-    );
+    const content = jsonl(assistantWithTools('', [{ name: 'ExitPlanMode', id: 'ep1', input: {} }]));
     const msgs = parseConversationFile('test.jsonl', Infinity, content);
     // ExitPlanMode is excluded from approval option generation
     expect(msgs[0].options).toBeUndefined();
@@ -324,11 +298,7 @@ describe('text prompt stripping (the fix)', () => {
   it('sets options from a text-only choice prompt with an arrow selector', () => {
     // Text has an interactive choice box but there's no pending approval tool —
     // this is the terminal-mode / text-rendered case the detector must cover.
-    const promptText = [
-      'Do you want to allow this edit?',
-      '❯ 1. Yes',
-      '  2. No',
-    ].join('\n');
+    const promptText = ['Do you want to allow this edit?', '❯ 1. Yes', '  2. No'].join('\n');
 
     const content = jsonl(
       // Assistant with just text (no tool_use blocks)
@@ -459,7 +429,13 @@ describe('extractHighlights visibility for permission prompts', () => {
         content: 'Done',
         timestamp: 1,
         toolCalls: [
-          { id: 'bash1', name: 'Bash', input: { command: 'ls' }, status: 'completed', output: 'ok' },
+          {
+            id: 'bash1',
+            name: 'Bash',
+            input: { command: 'ls' },
+            status: 'completed',
+            output: 'ok',
+          },
         ],
         options: [
           { label: 'yes', description: 'Approve' },
@@ -479,7 +455,9 @@ describe('extractHighlights visibility for permission prompts', () => {
         type: 'assistant',
         content: 'Approve?',
         timestamp: 1,
-        toolCalls: [{ id: 'bash1', name: 'Bash', input: { command: 'rm -rf /tmp' }, status: 'pending' }],
+        toolCalls: [
+          { id: 'bash1', name: 'Bash', input: { command: 'rm -rf /tmp' }, status: 'pending' },
+        ],
         options: [
           { label: 'yes', description: 'Approve' },
           { label: 'no', description: 'Reject' },
@@ -509,9 +487,11 @@ describe('end-to-end permission prompt scenarios', () => {
   it('full approval flow: pending tool -> user approves -> tool completes', () => {
     const content = jsonl(
       userMsg('Run the tests'),
-      assistantWithTools('Let me run the tests.', [
-        { name: 'Bash', id: 'bash1', input: { command: 'npm test' } },
-      ], { timestamp: '2026-01-28T10:01:00.000Z' }),
+      assistantWithTools(
+        'Let me run the tests.',
+        [{ name: 'Bash', id: 'bash1', input: { command: 'npm test' } }],
+        { timestamp: '2026-01-28T10:01:00.000Z' }
+      ),
       // User approves (tool_result from approval)
       toolResult('bash1', 'All tests passed', { timestamp: '2026-01-28T10:02:00.000Z' }),
       assistantText('All tests passed!', { timestamp: '2026-01-28T10:03:00.000Z' })
@@ -538,18 +518,15 @@ describe('end-to-end permission prompt scenarios', () => {
       '  2. No',
     ].join('\n');
 
-    const content = jsonl(
-      userMsg('Analyze the code'),
-      {
-        type: 'assistant',
-        message: {
-          role: 'assistant',
-          content: [{ type: 'text', text: promptText }],
-        },
-        uuid: 'asst-fp',
-        timestamp: '2026-01-28T10:01:00.000Z',
-      }
-    );
+    const content = jsonl(userMsg('Analyze the code'), {
+      type: 'assistant',
+      message: {
+        role: 'assistant',
+        content: [{ type: 'text', text: promptText }],
+      },
+      uuid: 'asst-fp',
+      timestamp: '2026-01-28T10:01:00.000Z',
+    });
 
     const msgs = parseConversationFile('test.jsonl', Infinity, content);
     const highlights = extractHighlights(msgs);
@@ -665,12 +642,9 @@ describe('parseTextChoicePrompt — enumeration styles', () => {
   });
 
   it('strips the question line and option block from cleanContent', () => {
-    const text = [
-      'Here is some context.',
-      'Do you want to continue?',
-      '❯ 1. Yes',
-      '  2. No',
-    ].join('\n');
+    const text = ['Here is some context.', 'Do you want to continue?', '❯ 1. Yes', '  2. No'].join(
+      '\n'
+    );
     const r = parseTextChoicePrompt(text);
     expect(r!.cleanContent).toBe('Here is some context.');
   });
@@ -780,11 +754,12 @@ describe('real AskUserQuestion box (snap_70 regression)', () => {
   // parse identically — stripAnsi runs per-input before the option regex.
   const E = '\x1b';
   const ANSI_BOX = PLAIN_BOX.split('\n')
-    .map((line) =>
-      line
-        .replace(/❯/g, `${E}[38;5;6m❯${E}[39m`)
-        .replace(/(\d+)\./g, `${E}[1m$1.${E}[22m`)
-        .replace(/(─+)/g, `${E}[2m$1${E}[22m`) + `${E}[0m`
+    .map(
+      (line) =>
+        line
+          .replace(/❯/g, `${E}[38;5;6m❯${E}[39m`)
+          .replace(/(\d+)\./g, `${E}[1m$1.${E}[22m`)
+          .replace(/(─+)/g, `${E}[2m$1${E}[22m`) + `${E}[0m`
     )
     .join('\n');
 

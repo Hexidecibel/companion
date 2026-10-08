@@ -58,9 +58,11 @@ export function brainHeadline(i: HeraldInboxItem): string {
   return i.headline;
 }
 
-const DECIDE = /\b(approve|approved|accept|allow|let\s+(?:it|them|\w+)\s+in|deny|reject|decline|refuse)\b/i;
+const DECIDE =
+  /\b(approve|approved|accept|allow|let\s+(?:it|them|\w+)\s+in|deny|reject|decline|refuse)\b/i;
 const PAIR_WORD = /\bpair(?:ing|ed)?\b/i;
-const DEVICE_WORD = /\b(device|ipad|iphone|phone|tablet|laptop|computer|desktop|mac|macbook|pc|android|pixel|browser)\b/i;
+const DEVICE_WORD =
+  /\b(device|ipad|iphone|phone|tablet|laptop|computer|desktop|mac|macbook|pc|android|pixel|browser)\b/i;
 
 /**
  * A request to approve / deny a pairing through Herald. Pairing is decided on
@@ -215,7 +217,12 @@ export class InboxTracker {
         // stays: it is what the user asked for; an answer that ended in a
         // question has been answered).
         for (const [id, item] of this.items) {
-          if (`${item.serverId}:${item.sessionId}` !== sk || item.review || item.stuck || item.babysit)
+          if (
+            `${item.serverId}:${item.sessionId}` !== sk ||
+            item.review ||
+            item.stuck ||
+            item.babysit
+          )
             continue;
           if (item.answer ? item.priority === 'blocked' : item.priority === 'finished')
             this.items.delete(id);
@@ -247,8 +254,17 @@ export class InboxTracker {
           }
           const gist = s.lastTurnGist ? firstSentence(s.lastTurnGist, 120) : '';
           if (s.turnError) {
-            const err = { tool: clip(oneLine(s.turnError.tool), 40), line: clip(oneLine(s.turnError.line), 160) };
-            this.add(id, s, 'finished', `${s.sessionName} ended with an error: ${err.tool}: ${err.line}`, now);
+            const err = {
+              tool: clip(oneLine(s.turnError.tool), 40),
+              line: clip(oneLine(s.turnError.line), 160),
+            };
+            this.add(
+              id,
+              s,
+              'finished',
+              `${s.sessionName} ended with an error: ${err.tool}: ${err.line}`,
+              now
+            );
             this.items.get(id)!.error = err;
           } else {
             this.add(

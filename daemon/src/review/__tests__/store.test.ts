@@ -11,8 +11,25 @@ describe('ReviewStore', () => {
     const s = sanitizeReviewState(
       {
         sessions: {
-          ok: { projectPath: '/p', reviewedThrough: 5, approvedTurnIds: ['t', 3], snapshots: [{ repoRoot: '/p', tree: TREE }, { repoRoot: '/p', tree: 'nope' }], updatedAt: now, seenAt: now },
-          old: { projectPath: '/p', reviewedThrough: 5, approvedTurnIds: [], snapshots: [], updatedAt: 1, seenAt: 1 },
+          ok: {
+            projectPath: '/p',
+            reviewedThrough: 5,
+            approvedTurnIds: ['t', 3],
+            snapshots: [
+              { repoRoot: '/p', tree: TREE },
+              { repoRoot: '/p', tree: 'nope' },
+            ],
+            updatedAt: now,
+            seenAt: now,
+          },
+          old: {
+            projectPath: '/p',
+            reviewedThrough: 5,
+            approvedTurnIds: [],
+            snapshots: [],
+            updatedAt: 1,
+            seenAt: 1,
+          },
           bad: { reviewedThrough: 'x' },
         },
         polish: { k: { gist: 'G', at: now } },
@@ -43,7 +60,11 @@ describe('ReviewStore', () => {
   });
 
   it('compacts contiguous approvals into reviewedThrough', () => {
-    const c = { ...emptyCheckpoint('/p', 0), reviewedThrough: 10, approvedTurnIds: ['t2', 't3', 't5'] };
+    const c = {
+      ...emptyCheckpoint('/p', 0),
+      reviewedThrough: 10,
+      approvedTurnIds: ['t2', 't3', 't5'],
+    };
     const turns = [
       { id: 't1', lastEditAt: 5 },
       { id: 't2', lastEditAt: 20 },

@@ -196,5 +196,7 @@ export function fallbackReply(f: FallbackInput): string {
       : f.kind === 'status'
         ? statusSummary(f.snapshots)
         : f.usage || '';
-  return f.announce ? `My brain's offline right now (${why}), so here's the short version. ${body}` : body;
+  return f.announce
+    ? `My brain's offline right now (${why}), so here's the short version. ${body}`
+    : body;
 }

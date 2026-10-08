@@ -109,7 +109,8 @@ export function buildAnthropicRequest(
   const messages = toAnthropicMessages(req.messages);
   // A tool-loop step (the request ends in tool results): cache the turn so far
   // for the next step. A plain first call does not: its tail is unique.
-  if (cache && req.messages[req.messages.length - 1]?.role === 'tool') markLastBlock(messages, cache);
+  if (cache && req.messages[req.messages.length - 1]?.role === 'tool')
+    markLastBlock(messages, cache);
   return {
     model,
     max_tokens: req.maxTokens,
@@ -142,7 +143,11 @@ export function usageFromAnthropic(u: Partial<AnthropicClient.Usage> | null | un
 const CREDIT_MESSAGE = /credit balance|billing|purchase credits|insufficient (?:funds|credit)/i;
 
 /** Map an SDK error to Herald's provider-neutral error classes. */
-export function classifyAnthropicError(err: unknown, Ctor: AnthropicCtor, aborted: boolean): LlmError {
+export function classifyAnthropicError(
+  err: unknown,
+  Ctor: AnthropicCtor,
+  aborted: boolean
+): LlmError {
   if (aborted || err instanceof Ctor.APIUserAbortError)
     return new LlmError('aborted', 'Request aborted');
   if (err instanceof Ctor.APIConnectionTimeoutError)
@@ -231,9 +236,12 @@ export class AnthropicProvider implements LlmProvider {
       if (firstTokenMs === undefined) firstTokenMs = Date.now() - started;
     };
     try {
-      const stream = client.messages.stream(buildAnthropicRequest(req.model || this.opts.model, req), {
-        signal: req.signal,
-      });
+      const stream = client.messages.stream(
+        buildAnthropicRequest(req.model || this.opts.model, req),
+        {
+          signal: req.signal,
+        }
+      );
       stream.on('text', (delta: string) => {
         mark();
         req.onText(delta);

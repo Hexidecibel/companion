@@ -27,11 +27,17 @@ export function clipWords(s: string, max = GIST_MAX): string {
 
 /** "I've fixed the guard" -> "Fixed the guard". */
 function firstPersonToImperative(s: string): string {
-  const m = s.match(/^(?:I(?:'ve|\s+have)?|We(?:'ve|\s+have)?)\s+(?:also\s+|now\s+|just\s+)?([a-z][a-z-]*)\b\s*(.*)$/i);
+  const m = s.match(
+    /^(?:I(?:'ve|\s+have)?|We(?:'ve|\s+have)?)\s+(?:also\s+|now\s+|just\s+)?([a-z][a-z-]*)\b\s*(.*)$/i
+  );
   if (!m) return s;
   const verb = m[1];
   // "I think", "I'm", "I can", ... are not reports of work.
-  if (/^(think|believe|can|could|will|would|should|might|may|am|need|want|see|noticed|found|was|did|do)$/i.test(verb))
+  if (
+    /^(think|believe|can|could|will|would|should|might|may|am|need|want|see|noticed|found|was|did|do)$/i.test(
+      verb
+    )
+  )
     return s;
   return `${verb[0].toUpperCase()}${verb.slice(1)} ${m[2]}`.trim();
 }

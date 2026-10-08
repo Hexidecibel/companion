@@ -110,7 +110,9 @@ export class AutoApprovalService {
 
     if (!hasApprovalPrompt) {
       // Prompt may not have rendered yet — wait and retry once
-      console.log(`[AUTO-APPROVE] No approval prompt detected, waiting ${APPROVAL_SEND_DELAY_MS}ms...`);
+      console.log(
+        `[AUTO-APPROVE] No approval prompt detected, waiting ${APPROVAL_SEND_DELAY_MS}ms...`
+      );
       await new Promise((resolve) => setTimeout(resolve, APPROVAL_SEND_DELAY_MS));
       const paneContent2 = await injector.capturePaneContent(target);
       const hasPrompt2 = AutoApprovalService.APPROVAL_PROMPT_RE.test(paneContent2);

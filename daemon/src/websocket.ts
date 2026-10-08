@@ -462,7 +462,8 @@ export class WebSocketHandler {
   private createSetup(): SetupService {
     const spawnDeps = {
       tmux: this.tmux,
-      storeTmuxSessionConfig: (n: string, d: string, c?: boolean) => this.storeTmuxSessionConfig(n, d, c),
+      storeTmuxSessionConfig: (n: string, d: string, c?: boolean) =>
+        this.storeTmuxSessionConfig(n, d, c),
       sessionNameStore: this.sessionNameStore,
       watcher: this.watcher,
       broadcast: (type: string, payload: unknown) => this.broadcast(type, payload),
@@ -744,7 +745,12 @@ export class WebSocketHandler {
     const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v);
     client.upgrade = {
       peer: remoteAddress,
-      proxied: !!(h['x-forwarded-for'] || h['forwarded'] || h['x-real-ip'] || h['x-forwarded-host']),
+      proxied: !!(
+        h['x-forwarded-for'] ||
+        h['forwarded'] ||
+        h['x-real-ip'] ||
+        h['x-forwarded-host']
+      ),
       host: one(h.host),
       origin: one(h.origin),
     };
@@ -1188,7 +1194,13 @@ export class WebSocketHandler {
         if (!this.localAutoPair(client)) {
           this.auditLog.append({
             ts: Date.now(),
-            origin: { addr: origin.client, clientId: client.id, isLocal: client.isLocal, tls: false, origin: null },
+            origin: {
+              addr: origin.client,
+              clientId: client.id,
+              isLocal: client.isLocal,
+              tls: false,
+              origin: null,
+            },
             action: 'setup_pair_local',
             payload: { reason: 'not_allowed' },
             result: { ok: false },
@@ -1197,7 +1209,8 @@ export class WebSocketHandler {
           answer({
             ok: false,
             code: 'not_allowed',
-            error: 'Automatic pairing only works from a browser on the server itself, before any device is paired',
+            error:
+              'Automatic pairing only works from a browser on the server itself, before any device is paired',
           });
           return;
         }
@@ -1212,10 +1225,18 @@ export class WebSocketHandler {
           answer({ ok: false, code: 'registry_error', error: 'Could not save the device' });
           return;
         }
-        console.log(`Pairing: "${issued.device.name}" paired automatically from this machine (first-run setup)`);
+        console.log(
+          `Pairing: "${issued.device.name}" paired automatically from this machine (first-run setup)`
+        );
         this.auditLog.append({
           ts: Date.now(),
-          origin: { addr: origin.client, clientId: client.id, isLocal: client.isLocal, tls: false, origin: null },
+          origin: {
+            addr: origin.client,
+            clientId: client.id,
+            isLocal: client.isLocal,
+            tls: false,
+            origin: null,
+          },
           action: 'setup_pair_local',
           payload: { deviceId: issued.device.id, deviceName: issued.device.name },
           result: { ok: true },
@@ -1289,7 +1310,10 @@ export class WebSocketHandler {
       setupMode: isSetupMode(this.config),
       deviceCount: this.devices.list().length,
       pairingEnabled: this.config.pairing !== false,
-      upgrade: client.upgrade ?? { peer: client.remoteAddress || '', proxied: !!client.forwardedFor },
+      upgrade: client.upgrade ?? {
+        peer: client.remoteAddress || '',
+        proxied: !!client.forwardedFor,
+      },
     });
   }
 

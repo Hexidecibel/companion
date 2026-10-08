@@ -103,14 +103,18 @@ function userText(content: unknown): { text: string; hasToolResult: boolean; has
     if (!b || typeof b !== 'object') continue;
     const blk = b as { type?: string; text?: string };
     if (blk.type === 'tool_result') hasToolResult = true;
-    else if (blk.type === 'text' && typeof blk.text === 'string') text += (text ? '\n' : '') + blk.text;
+    else if (blk.type === 'text' && typeof blk.text === 'string')
+      text += (text ? '\n' : '') + blk.text;
     else if (blk.type === 'image') hasImage = true;
   }
   return { text, hasToolResult, hasImage };
 }
 
 /** Classify a user prompt text: opener label, 'attach' (local command output), or null (ignore). */
-export function classifyPrompt(text: string, hasImage: boolean): { label: string } | 'attach' | null {
+export function classifyPrompt(
+  text: string,
+  hasImage: boolean
+): { label: string } | 'attach' | null {
   const t = text.trim();
   if (!t) return hasImage ? { label: '(image)' } : null;
   if (/^<local-command-/.test(t)) return 'attach';
@@ -120,7 +124,9 @@ export function classifyPrompt(text: string, hasImage: boolean): { label: string
   if (cmd) {
     const args = t.match(/<command-args>([^<]*)<\/command-args>/);
     const name = cmd[1].trim();
-    return { label: clipPrompt(`${name.startsWith('/') ? name : `/${name}`} ${args ? args[1] : ''}`) };
+    return {
+      label: clipPrompt(`${name.startsWith('/') ? name : `/${name}`} ${args ? args[1] : ''}`),
+    };
   }
   return { label: clipPrompt(t) };
 }
@@ -223,7 +229,10 @@ export class SessionLedger {
     return this.needsRebuild;
   }
 
-  setChain(mainFiles: string[], subagentFiles: Array<{ path: string; agentId: string; parentToolUseId?: string }>): void {
+  setChain(
+    mainFiles: string[],
+    subagentFiles: Array<{ path: string; agentId: string; parentToolUseId?: string }>
+  ): void {
     const mains = this.fileOrder.filter((f) => !this.files.get(f)?.agentId);
     // Existing main files must be a prefix of the new chain (append-only), else rebuild.
     for (let i = 0; i < mains.length; i++) {
@@ -421,7 +430,8 @@ export class SessionLedger {
           if (turn && b.text.trim()) turn.lastAssistantText = b.text;
           continue;
         }
-        if (b.type !== 'tool_use' || typeof b.name !== 'string' || typeof b.id !== 'string') continue;
+        if (b.type !== 'tool_use' || typeof b.name !== 'string' || typeof b.id !== 'string')
+          continue;
         if (b.name === 'Bash' && !isSub) {
           const turn = this.currentTurn();
           if (turn) turn.usedBash = true;

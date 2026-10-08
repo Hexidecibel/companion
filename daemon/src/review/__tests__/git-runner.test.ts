@@ -1,6 +1,11 @@
 import { GitError, GitRunner, ExecFileFn, hardenArgs, pathspecStdin } from '../git-runner';
 
-type Call = { args: string[]; opts: any; cb: (err: any, out: Buffer, errb: Buffer) => void; stdin: Array<string | Buffer | undefined> };
+type Call = {
+  args: string[];
+  opts: any;
+  cb: (err: any, out: Buffer, errb: Buffer) => void;
+  stdin: Array<string | Buffer | undefined>;
+};
 
 function fakeExec() {
   const calls: Call[] = [];
@@ -37,7 +42,14 @@ describe('GitRunner', () => {
     expect(c.opts.env.GIT_OPTIONAL_LOCKS).toBe('0');
     expect(c.opts.env.GIT_TERMINAL_PROMPT).toBe('0');
     expect(c.opts.env.LC_ALL).toBe('C');
-    expect(c.args.slice(0, 6)).toEqual(['-c', 'core.quotepath=off', '-c', 'color.ui=never', '-c', 'core.fsmonitor=false']);
+    expect(c.args.slice(0, 6)).toEqual([
+      '-c',
+      'core.quotepath=off',
+      '-c',
+      'color.ui=never',
+      '-c',
+      'core.fsmonitor=false',
+    ]);
     expect(c.args).toEqual(expect.arrayContaining(['--no-ext-diff', '--no-textconv']));
     ok(c);
     await p;
@@ -47,7 +59,11 @@ describe('GitRunner', () => {
     const { calls, fn } = fakeExec();
     const r = new GitRunner({ execFileFn: fn });
     const p = r.run({ cwd: '/r', args: ['status'] });
-    calls[0].cb(Object.assign(new Error('t'), { killed: true, signal: 'SIGKILL' }), Buffer.from(''), Buffer.from(''));
+    calls[0].cb(
+      Object.assign(new Error('t'), { killed: true, signal: 'SIGKILL' }),
+      Buffer.from(''),
+      Buffer.from('')
+    );
     await expect(p).rejects.toMatchObject({ code: 'timeout' });
   });
 
@@ -63,7 +79,11 @@ describe('GitRunner', () => {
     const { calls, fn } = fakeExec();
     const r = new GitRunner({ execFileFn: fn });
     const p = r.run({ cwd: '/r', args: ['diff'] });
-    calls[0].cb(Object.assign(new Error('x'), { code: 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER' }), Buffer.from(''), Buffer.from(''));
+    calls[0].cb(
+      Object.assign(new Error('x'), { code: 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER' }),
+      Buffer.from(''),
+      Buffer.from('')
+    );
     await expect(p).rejects.toMatchObject({ code: 'too_large' });
   });
 
@@ -71,7 +91,8 @@ describe('GitRunner', () => {
     const { calls, fn } = fakeExec();
     const r = new GitRunner({ execFileFn: fn });
     const ps: Promise<unknown>[] = [];
-    for (let i = 0; i < 23; i++) ps.push(r.run({ cwd: '/r', args: ['show', String(i)] }).catch((e) => e));
+    for (let i = 0; i < 23; i++)
+      ps.push(r.run({ cwd: '/r', args: ['show', String(i)] }).catch((e) => e));
     expect(calls).toHaveLength(3);
     expect(r.stats().queued).toBe(20);
     const busy = await r.run({ cwd: '/r', args: ['show', 'x'] }).catch((e) => e);
@@ -95,11 +116,17 @@ describe('GitRunner', () => {
     const r = new GitRunner({ execFileFn: fn, now: () => now });
     for (let i = 0; i < 3; i++) {
       const p = r.run({ cwd: '/r', repoKey: '/repo', args: ['status', String(i)] });
-      calls[i].cb(Object.assign(new Error('t'), { killed: true, signal: 'SIGKILL' }), Buffer.from(''), Buffer.from(''));
+      calls[i].cb(
+        Object.assign(new Error('t'), { killed: true, signal: 'SIGKILL' }),
+        Buffer.from(''),
+        Buffer.from('')
+      );
       await expect(p).rejects.toMatchObject({ code: 'timeout' });
     }
     expect(r.isDegraded('/repo')).toBe(true);
-    await expect(r.run({ cwd: '/r', repoKey: '/repo', args: ['status'] })).rejects.toMatchObject({ code: 'degraded' });
+    await expect(r.run({ cwd: '/r', repoKey: '/repo', args: ['status'] })).rejects.toMatchObject({
+      code: 'degraded',
+    });
     expect(calls).toHaveLength(3);
     now += 5 * 60_000 + 1;
     expect(r.isDegraded('/repo')).toBe(false);
@@ -108,7 +135,9 @@ describe('GitRunner', () => {
   it('pathspecs go through stdin, never argv', async () => {
     const { calls, fn } = fakeExec();
     const r = new GitRunner({ execFileFn: fn });
-    await expect(r.run({ cwd: '/r', args: ['diff', '--', 'a.ts'] })).rejects.toMatchObject({ code: 'bad_args' });
+    await expect(r.run({ cwd: '/r', args: ['diff', '--', 'a.ts'] })).rejects.toMatchObject({
+      code: 'bad_args',
+    });
     const ps = pathspecStdin(['a b.ts', 'c.ts']);
     const p = r.run({ cwd: '/r', args: ['add', '-A', ...ps.args], stdin: ps.stdin, kind: 'write' });
     expect(calls[0].args).not.toContain('a b.ts');
@@ -120,12 +149,18 @@ describe('GitRunner', () => {
   it('git disabled -> never execs', async () => {
     const { calls, fn } = fakeExec();
     const r = new GitRunner({ execFileFn: fn, enabled: () => false });
-    await expect(r.run({ cwd: '/r', args: ['status'] })).rejects.toMatchObject({ code: 'git_disabled' });
+    await expect(r.run({ cwd: '/r', args: ['status'] })).rejects.toMatchObject({
+      code: 'git_disabled',
+    });
     expect(calls).toHaveLength(0);
   });
 
   it('hardenArgs leaves non-diff commands alone', () => {
     expect(hardenArgs(['status'])).toEqual(['status']);
-    expect(hardenArgs(['diff', '--no-ext-diff'])).toEqual(['diff', '--no-textconv', '--no-ext-diff']);
+    expect(hardenArgs(['diff', '--no-ext-diff'])).toEqual([
+      'diff',
+      '--no-textconv',
+      '--no-ext-diff',
+    ]);
   });
 });

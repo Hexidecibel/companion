@@ -1,8 +1,6 @@
 import { HandlerContext, MessageHandler } from '../handler-context';
 
-export function registerWorkgroupHandlers(
-  ctx: HandlerContext
-): Record<string, MessageHandler> {
+export function registerWorkgroupHandlers(ctx: HandlerContext): Record<string, MessageHandler> {
   return {
     async spawn_work_group(client, payload, requestId) {
       if (!ctx.workGroupManager) {
@@ -15,19 +13,21 @@ export function registerWorkgroupHandlers(
         return;
       }
 
-      const spawnPayload = payload as {
-        name: string;
-        foremanSessionId: string;
-        foremanTmuxSession: string;
-        parentDir: string;
-        planFile?: string;
-        workers: {
-          taskSlug: string;
-          taskDescription: string;
-          planSection: string;
-          files: string[];
-        }[];
-      } | undefined;
+      const spawnPayload = payload as
+        | {
+            name: string;
+            foremanSessionId: string;
+            foremanTmuxSession: string;
+            parentDir: string;
+            planFile?: string;
+            workers: {
+              taskSlug: string;
+              taskDescription: string;
+              planSection: string;
+              files: string[];
+            }[];
+          }
+        | undefined;
 
       if (!spawnPayload?.name || !spawnPayload.workers?.length) {
         ctx.send(client.ws, {
@@ -158,7 +158,10 @@ export function registerWorkgroupHandlers(
         });
         return;
       }
-      const result = await ctx.workGroupManager.retryWorker(retryPayload.groupId, retryPayload.workerId);
+      const result = await ctx.workGroupManager.retryWorker(
+        retryPayload.groupId,
+        retryPayload.workerId
+      );
       ctx.send(client.ws, {
         type: 'worker_retried',
         success: result.success,
@@ -168,8 +171,15 @@ export function registerWorkgroupHandlers(
     },
 
     async send_worker_input(client, payload, requestId) {
-      const inputPayload = payload as { groupId: string; workerId: string; text: string } | undefined;
-      if (!ctx.workGroupManager || !inputPayload?.groupId || !inputPayload?.workerId || !inputPayload?.text) {
+      const inputPayload = payload as
+        | { groupId: string; workerId: string; text: string }
+        | undefined;
+      if (
+        !ctx.workGroupManager ||
+        !inputPayload?.groupId ||
+        !inputPayload?.workerId ||
+        !inputPayload?.text
+      ) {
         ctx.send(client.ws, {
           type: 'worker_input_sent',
           success: false,

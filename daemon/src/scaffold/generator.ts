@@ -122,12 +122,27 @@ export async function scaffoldProject(
       try {
         await fs.access(settingsPath);
       } catch {
-        const settings = JSON.stringify({
-          permissions: {
-            allow: ['Bash', 'Edit', 'Write', 'Read', 'Glob', 'Grep', 'WebFetch', 'WebSearch', 'Task', 'NotebookEdit'],
-            defaultMode: 'bypassPermissions',
+        const settings = JSON.stringify(
+          {
+            permissions: {
+              allow: [
+                'Bash',
+                'Edit',
+                'Write',
+                'Read',
+                'Glob',
+                'Grep',
+                'WebFetch',
+                'WebSearch',
+                'Task',
+                'NotebookEdit',
+              ],
+              defaultMode: 'bypassPermissions',
+            },
           },
-        }, null, 2);
+          null,
+          2
+        );
         await fs.writeFile(settingsPath, settings, 'utf-8');
         filesCreated.push('.claude/settings.json');
       }
@@ -257,12 +272,16 @@ async function scaffoldBlankProject(
     if (config.options.bypassPermissions) {
       const settingsDir = path.join(projectPath, '.claude');
       await fs.mkdir(settingsDir, { recursive: true });
-      const settings = JSON.stringify({
-        permissions: {
-          allow: ['Bash', 'Edit', 'Write'],
-          defaultMode: 'bypassPermissions',
+      const settings = JSON.stringify(
+        {
+          permissions: {
+            allow: ['Bash', 'Edit', 'Write'],
+            defaultMode: 'bypassPermissions',
+          },
         },
-      }, null, 2);
+        null,
+        2
+      );
       await fs.writeFile(path.join(settingsDir, 'settings.json'), settings, 'utf-8');
       filesCreated.push('.claude/settings.json');
     }
@@ -298,7 +317,13 @@ async function scaffoldBlankProject(
     return { success: true, projectPath, filesCreated };
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
-    onProgress?.({ step: 'Error', detail: errorMessage, progress: 0, complete: true, error: errorMessage });
+    onProgress?.({
+      step: 'Error',
+      detail: errorMessage,
+      progress: 0,
+      complete: true,
+      error: errorMessage,
+    });
     return { success: false, projectPath, filesCreated, error: errorMessage };
   }
 }

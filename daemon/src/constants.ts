@@ -18,17 +18,17 @@ export const OVERLAY_DETECTION_LINES = 10;
 // ========================================
 // File Size Limits
 // ========================================
-export const MAX_IMAGE_FILE_SIZE_BYTES = 5 * 1024 * 1024;     // 5MB
-export const MAX_TEXT_FILE_SIZE_BYTES = 1024 * 1024;           // 1MB
-export const MAX_APK_FILE_SIZE_BYTES = 150 * 1024 * 1024;     // 150MB
+export const MAX_IMAGE_FILE_SIZE_BYTES = 5 * 1024 * 1024; // 5MB
+export const MAX_TEXT_FILE_SIZE_BYTES = 1024 * 1024; // 1MB
+export const MAX_APK_FILE_SIZE_BYTES = 150 * 1024 * 1024; // 150MB
 export const MAX_ATTACHMENT_FILE_SIZE_BYTES = 50 * 1024 * 1024; // 50MB
 
 // ========================================
 // Buffer Sizes
 // ========================================
-export const FILE_ACTIVITY_READ_BUFFER_SIZE = 32 * 1024;      // 32KB
-export const CONVERSATION_READ_BUFFER_SIZE = 64 * 1024;       // 64KB
-export const BINARY_DETECTION_PROBE_SIZE = 8192;               // 8KB
+export const FILE_ACTIVITY_READ_BUFFER_SIZE = 32 * 1024; // 32KB
+export const CONVERSATION_READ_BUFFER_SIZE = 64 * 1024; // 64KB
+export const BINARY_DETECTION_PROBE_SIZE = 8192; // 8KB
 
 // ========================================
 // Polling & Debounce
@@ -39,7 +39,7 @@ export const CHOKIDAR_POLL_INTERVAL_MS = 50;
 export const FILE_WATCHER_POLL_INTERVAL_MS = 100;
 export const INITIAL_LOAD_COMPLETION_DELAY_MS = 3000;
 export const INITIAL_LOAD_WINDOW_MS = 3000;
-export const INITIAL_FILE_MAX_AGE_MS = 2 * 60 * 1000;         // 2 min
+export const INITIAL_FILE_MAX_AGE_MS = 2 * 60 * 1000; // 2 min
 
 // ========================================
 // Auto-Approval
@@ -103,7 +103,7 @@ export const FUZZY_SCORE_LENGTH_MULTIPLIER = 100;
 // Terminal
 // ========================================
 export const DEFAULT_TERMINAL_LINES = 100;
-export const DEFAULT_DIGEST_PERIOD_MS = 24 * 60 * 60 * 1000;  // 24h
+export const DEFAULT_DIGEST_PERIOD_MS = 24 * 60 * 60 * 1000; // 24h
 export const SCAFFOLD_INIT_TIMEOUT_MS = 5000;
 export const CLI_READY_POLL_INTERVAL_MS = 500;
 export const CLI_READY_TIMEOUT_MS = 30000;

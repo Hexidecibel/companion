@@ -3,8 +3,21 @@
 
 export type ReviewRiskLevel = 'high' | 'medium' | 'low';
 export type ReviewRiskKind =
-  | 'deleted' | 'migration' | 'ci' | 'config' | 'secrets' | 'env' | 'lockfile' | 'dependency'
-  | 'large_rewrite' | 'permissions' | 'security' | 'agent_config' | 'binary' | 'outside_project' | 'foreign';
+  | 'deleted'
+  | 'migration'
+  | 'ci'
+  | 'config'
+  | 'secrets'
+  | 'env'
+  | 'lockfile'
+  | 'dependency'
+  | 'large_rewrite'
+  | 'permissions'
+  | 'security'
+  | 'agent_config'
+  | 'binary'
+  | 'outside_project'
+  | 'foreign';
 export interface ReviewRiskFlag {
   kind: ReviewRiskKind;
   level: ReviewRiskLevel;
@@ -154,17 +167,32 @@ export interface ReviewSummary {
 }
 
 export type ReviewErrorCode =
-  | 'unknown_session' | 'bad_request' | 'unavailable' | 'expired' | 'tier_mismatch'
-  | 'blocked' | 'busy' | 'herald_unavailable' | 'session_waiting' | 'not_found';
+  | 'unknown_session'
+  | 'bad_request'
+  | 'unavailable'
+  | 'expired'
+  | 'tier_mismatch'
+  | 'blocked'
+  | 'busy'
+  | 'herald_unavailable'
+  | 'session_waiting'
+  | 'not_found';
 
 // Requests: envelope {type, payload, requestId}. Response: same `type`, {success, payload | error, requestId};
 // on failure payload = { code: ReviewErrorCode }.
 
 /** review_summary_list */
-export interface ReviewSummaryListResponse { summaries: ReviewSummary[] }
+export interface ReviewSummaryListResponse {
+  summaries: ReviewSummary[];
+}
 
 /** review_get */
-export interface ReviewGetRequest { sessionId: string; scope: ReviewScope; view: ReviewView; turnId?: string }
+export interface ReviewGetRequest {
+  sessionId: string;
+  scope: ReviewScope;
+  view: ReviewView;
+  turnId?: string;
+}
 export interface ReviewGetResponse {
   sessionId: string;
   scope: ReviewScope;
@@ -186,37 +214,92 @@ export interface ReviewGetResponse {
 }
 
 /** review_get_file: full hunks for one file (lazy / too_large in review_get). */
-export interface ReviewGetFileRequest { sessionId: string; absPath: string; scope: ReviewScope; turnId?: string }
-export interface ReviewGetFileResponse { file: ReviewFileChange; truncated: boolean }
+export interface ReviewGetFileRequest {
+  sessionId: string;
+  absPath: string;
+  scope: ReviewScope;
+  turnId?: string;
+}
+export interface ReviewGetFileResponse {
+  file: ReviewFileChange;
+  truncated: boolean;
+}
 
 /** review_get_edits: inline chips (by tool_use id). */
-export interface ReviewGetEditsRequest { sessionId: string; editIds: string[] }
-export interface ReviewGetEditsResponse { edits: ReviewEdit[]; missing: string[] }
+export interface ReviewGetEditsRequest {
+  sessionId: string;
+  editIds: string[];
+}
+export interface ReviewGetEditsResponse {
+  edits: ReviewEdit[];
+  missing: string[];
+}
 
 /** review_mark_reviewed: through = newest ReviewEdit.at / computedAt (review_get or summary) the device actually showed. */
-export interface ReviewMarkRequest { sessionId: string; through: number; device?: string }
+export interface ReviewMarkRequest {
+  sessionId: string;
+  through: number;
+  device?: string;
+}
 /** review_approve_turn */
-export interface ReviewApproveTurnRequest { sessionId: string; turnId: string; approved: boolean; device?: string }
-export interface ReviewMarkResponse { checkpoint: ReviewCheckpoint; summary: ReviewSummary }
+export interface ReviewApproveTurnRequest {
+  sessionId: string;
+  turnId: string;
+  approved: boolean;
+  device?: string;
+}
+export interface ReviewMarkResponse {
+  checkpoint: ReviewCheckpoint;
+  summary: ReviewSummary;
+}
 
 /** review_watch: live edit stream for this connection (live:false stops). */
-export interface ReviewWatchRequest { sessionId: string; live: boolean }
-export interface ReviewWatchResponse { watching: boolean; summary: ReviewSummary }
+export interface ReviewWatchRequest {
+  sessionId: string;
+  live: boolean;
+}
+export interface ReviewWatchResponse {
+  watching: boolean;
+  summary: ReviewSummary;
+}
 
 /** review_ask: "Ask why" on a hunk. */
-export interface ReviewAskRequest { sessionId: string; absPath: string; hunkId: string; editId?: string; question?: string }
-export interface ReviewAskResponse { via: 'herald' | 'direct'; askId: string | null; sentText: string }
+export interface ReviewAskRequest {
+  sessionId: string;
+  absPath: string;
+  hunkId: string;
+  editId?: string;
+  question?: string;
+}
+export interface ReviewAskResponse {
+  via: 'herald' | 'direct';
+  askId: string | null;
+  sentText: string;
+}
 
 export type ReviewRevertTarget =
   | { kind: 'hunk'; absPath: string; hunkId: string; editId?: string; scope: ReviewScope }
   | { kind: 'file'; absPath: string; to: 'head' | 'checkpoint' };
 export type ReviewRevertBlockCode =
-  | 'conflict' | 'session_editing' | 'staged_changes' | 'foreign_changes' | 'not_in_repo'
-  | 'binary' | 'too_large' | 'no_checkpoint' | 'sandbox' | 'busy' | 'outside_allowed' | 'git_disabled';
+  | 'conflict'
+  | 'session_editing'
+  | 'staged_changes'
+  | 'foreign_changes'
+  | 'not_in_repo'
+  | 'binary'
+  | 'too_large'
+  | 'no_checkpoint'
+  | 'sandbox'
+  | 'busy'
+  | 'outside_allowed'
+  | 'git_disabled';
 export type ReviewRevertEffect = 'patch' | 'restore' | 'delete';
 
 /** review_revert_preview */
-export interface ReviewRevertPreviewRequest { sessionId: string; target: ReviewRevertTarget }
+export interface ReviewRevertPreviewRequest {
+  sessionId: string;
+  target: ReviewRevertTarget;
+}
 export interface ReviewRevertPreviewResponse {
   /** null when blocked. Bound to this connection. */
   token: string | null;
@@ -232,7 +315,12 @@ export interface ReviewRevertPreviewResponse {
 }
 
 /** review_revert: confirm must be 'hold' for hard_confirm. */
-export interface ReviewRevertRequest { token: string; confirm: 'tap' | 'hold'; notifySession?: boolean; device?: string }
+export interface ReviewRevertRequest {
+  token: string;
+  confirm: 'tap' | 'hold';
+  notifySession?: boolean;
+  device?: string;
+}
 export interface ReviewRevertResponse {
   backupId: string;
   absPath: string;
@@ -242,18 +330,34 @@ export interface ReviewRevertResponse {
 }
 
 /** review_revert_undo */
-export interface ReviewRevertUndoRequest { backupId: string }
-export interface ReviewRevertUndoResponse { absPath: string; summary: ReviewSummary }
+export interface ReviewRevertUndoRequest {
+  backupId: string;
+}
+export interface ReviewRevertUndoResponse {
+  absPath: string;
+  summary: ReviewSummary;
+}
 
 /** review_polish_summaries (optional LLM polish, Herald provider; cached) */
-export interface ReviewPolishRequest { sessionId: string; turnIds: string[] }
-export interface ReviewPolishResponse { turns: Array<{ id: string; gist: string; summary: string }> }
+export interface ReviewPolishRequest {
+  sessionId: string;
+  turnIds: string[];
+}
+export interface ReviewPolishResponse {
+  turns: Array<{ id: string; gist: string; summary: string }>;
+}
 
 // Events: envelope {type, success: true, payload}; global (never session-scoped).
 /** type 'review_summary': any connected subscribed client; throttled 1/s per session, only on change. */
-export interface ReviewSummaryEvent { summary: ReviewSummary }
+export interface ReviewSummaryEvent {
+  summary: ReviewSummary;
+}
 /** type 'review_live': only connections watching that session. */
-export interface ReviewLiveEvent { sessionId: string; phase: 'started' | 'completed' | 'failed'; edit: ReviewEdit }
+export interface ReviewLiveEvent {
+  sessionId: string;
+  phase: 'started' | 'completed' | 'failed';
+  edit: ReviewEdit;
+}
 /** type 'review_reverted': everyone (other devices refresh + toast). */
 export interface ReviewRevertedEvent {
   sessionId: string;

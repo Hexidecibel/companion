@@ -69,7 +69,10 @@ export function blockKeyOf(s: SessionSnapshot): string | null {
 /** "the deploy question" / "approval to run a command", for "Out4 needs your input on ...". */
 export function blockedWhat(s: SessionSnapshot): string {
   if (s.pendingChoice) {
-    const q = clip(oneLine(s.pendingChoice.question || s.pendingChoice.header || '').replace(/[?.!\s]+$/, ''), 120);
+    const q = clip(
+      oneLine(s.pendingChoice.question || s.pendingChoice.header || '').replace(/[?.!\s]+$/, ''),
+      120
+    );
     if (!q) return 'a question';
     // "Which fixture" -> "which fixture" (mid-sentence), but keep "API ..." / "Out4 ...".
     const lower = /^[A-Z][a-z]/.test(q) ? q[0].toLowerCase() + q.slice(1) : q;

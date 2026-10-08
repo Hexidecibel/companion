@@ -119,12 +119,23 @@ export function buildDecidePrompt(input: BabysitDecideInput): string {
     '',
   ];
   if (input.lastUserPrompt)
-    lines.push(`The last thing typed into the session: ${JSON.stringify(clip(oneLine(input.lastUserPrompt), 400))}`);
+    lines.push(
+      `The last thing typed into the session: ${JSON.stringify(clip(oneLine(input.lastUserPrompt), 400))}`
+    );
   const latest = (input.latest || '').trim();
-  lines.push("The session's latest message:", '<<<', latest ? clipTail(latest, CONTEXT_CHARS) : '(not available)', '>>>', '');
+  lines.push(
+    "The session's latest message:",
+    '<<<',
+    latest ? clipTail(latest, CONTEXT_CHARS) : '(not available)',
+    '>>>',
+    ''
+  );
   if (prompt.kind === 'choice') {
     const q = [prompt.header, prompt.question].filter(Boolean).join(': ');
-    lines.push(`It is waiting on a multiple-choice prompt: ${JSON.stringify(clip(q, 400))}`, 'Options:');
+    lines.push(
+      `It is waiting on a multiple-choice prompt: ${JSON.stringify(clip(q, 400))}`,
+      'Options:'
+    );
     (prompt.options || []).forEach((o, i) =>
       lines.push(
         `${i + 1}) ${clip(oneLine(o.label), 160)}${o.description ? ` (${clip(oneLine(o.description), 200)})` : ''}`
@@ -158,7 +169,8 @@ const CONTINUE_QUESTION =
 const CONTINUE_ANSWER =
   /^(?:yes|yep|yeah|ok|okay|sure|please)?[,.!\s]*(?:(?:please\s+)?(?:continue|proceed|go ahead|keep going|carry on|go on|move on)(?:\s+(?:with|to|on to|onto|on with)\s+(?:(?:the\s+)?next\s+(?:step|phase|task|item|part|stage|one)|(?:step|phase|task|item|part|stage)\s+(?:\d{1,3}|[a-z])))?)?[.!\s]*$/i;
 const CONTINUE_OPTION = /^(?:yes|continue|proceed|go ahead|keep going|carry on)\b/i;
-const DECLINE_WORD = /\b(?:no|not|don'?t|do not|stop|cancel|skip|abort|never|instead|different|other)\b/i;
+const DECLINE_WORD =
+  /\b(?:no|not|don'?t|do not|stop|cancel|skip|abort|never|instead|different|other)\b/i;
 
 /**
  * The fixed "continue" case, decided from the texts themselves: the session
@@ -217,7 +229,15 @@ const escalate = (
   why: Extract<BabysitVerdict, { kind: 'escalate' }>['why'],
   reason: string,
   extra: Partial<Extract<BabysitVerdict, { kind: 'escalate' }>> = {}
-): BabysitVerdict => ({ kind: 'escalate', why, reason, tier: 'echo', reasons: [], ruleIds: [], ...extra });
+): BabysitVerdict => ({
+  kind: 'escalate',
+  why,
+  reason,
+  tier: 'echo',
+  reasons: [],
+  ruleIds: [],
+  ...extra,
+});
 
 /**
  * Turn the model's raw reply into a verdict. PURE: every guard is here, so it
@@ -239,7 +259,8 @@ export function judgeDecision(raw: string, input: BabysitDecideInput): BabysitVe
   const reason = clip(cleanText(typeof parsed.reason === 'string' ? parsed.reason : ''), 200);
   if (decision !== 'answer' && decision !== 'escalate' && decision !== 'done')
     return escalate('invalid', 'I could not work out a safe answer.');
-  if (decision === 'done') return { kind: 'done', reason: reason || 'It reports the goal is finished.' };
+  if (decision === 'done')
+    return { kind: 'done', reason: reason || 'It reports the goal is finished.' };
 
   // The answer (or, for an escalation, the suggestion).
   let answer: BabysitAnswer | null = null;
@@ -248,7 +269,12 @@ export function judgeDecision(raw: string, input: BabysitDecideInput): BabysitVe
   const textRaw = typeof parsed.text === 'string' ? cleanText(parsed.text) : '';
   if (prompt.kind === 'choice') {
     const options = prompt.options || [];
-    const n = typeof optRaw === 'number' ? optRaw : typeof optRaw === 'string' && /^\s*\d{1,2}\s*$/.test(optRaw) ? Number(optRaw) : NaN;
+    const n =
+      typeof optRaw === 'number'
+        ? optRaw
+        : typeof optRaw === 'string' && /^\s*\d{1,2}\s*$/.test(optRaw)
+          ? Number(optRaw)
+          : NaN;
     if (Number.isInteger(n) && n >= 1 && n <= options.length)
       answer = { optionIndex: n - 1, label: clip(oneLine(options[n - 1].label), 200) };
     else invalid = 'it did not pick one of the options';
@@ -265,7 +291,10 @@ export function judgeDecision(raw: string, input: BabysitDecideInput): BabysitVe
   const verdict = answer
     ? classifyAction({
         userText: '',
-        payload: answer.optionIndex !== undefined ? (prompt.options || [])[answer.optionIndex].label : answer.text || '',
+        payload:
+          answer.optionIndex !== undefined
+            ? (prompt.options || [])[answer.optionIndex].label
+            : answer.text || '',
         pendingQuestion: question,
         pendingOptions: prompt.options || null,
         sessionName: input.sessionName,
@@ -283,31 +312,60 @@ export function judgeDecision(raw: string, input: BabysitDecideInput): BabysitVe
   const suggestion = answer ? { suggestion: answer } : {};
 
   if (decision === 'escalate')
-    return escalate('model', reason || 'This one is a judgment call.', { ...suggestion, ...danger });
+    return escalate('model', reason || 'This one is a judgment call.', {
+      ...suggestion,
+      ...danger,
+    });
   if (!answer)
     return escalate('invalid', `I could not answer this one safely: ${invalid}.`, danger);
   if (verdict.tier === 'hard_confirm')
-    return escalate('danger', `It needs your say-so: ${verdict.reasons[0]}.`, { ...suggestion, ...danger });
-
-  const never = neverHits(brief.never, `${question}\n${answer.label}`);
-  if (never.length)
-    return escalate('never', `It touches something you said never to decide (${never.slice(0, 3).join(', ')}).`, {
+    return escalate('danger', `It needs your say-so: ${verdict.reasons[0]}.`, {
       ...suggestion,
       ...danger,
     });
 
+  const never = neverHits(brief.never, `${question}\n${answer.label}`);
+  if (never.length)
+    return escalate(
+      'never',
+      `It touches something you said never to decide (${never.slice(0, 3).join(', ')}).`,
+      {
+        ...suggestion,
+        ...danger,
+      }
+    );
+
   const basis = clip(cleanText(typeof parsed.basis === 'string' ? parsed.basis : ''), 200);
   if (norm(basis) === 'continue') {
     if (!isContinueCase(prompt, answer))
-      return escalate('basis', 'It is more than a plain "continue?", and your brief does not clearly cover it.', {
-        ...suggestion,
-        ...danger,
-      });
-    return { kind: 'answer', answer, basis: 'continue', continueCase: true, reason: reason || 'It only asked whether to continue.' };
+      return escalate(
+        'basis',
+        'It is more than a plain "continue?", and your brief does not clearly cover it.',
+        {
+          ...suggestion,
+          ...danger,
+        }
+      );
+    return {
+      kind: 'answer',
+      answer,
+      basis: 'continue',
+      continueCase: true,
+      reason: reason || 'It only asked whether to continue.',
+    };
   }
   if (!basisInBrief(basis, brief))
-    return escalate('basis', 'Your brief does not clearly cover this one.', { ...suggestion, ...danger });
-  return { kind: 'answer', answer, basis, continueCase: false, reason: reason || `Your brief says: ${basis}.` };
+    return escalate('basis', 'Your brief does not clearly cover this one.', {
+      ...suggestion,
+      ...danger,
+    });
+  return {
+    kind: 'answer',
+    answer,
+    basis,
+    continueCase: false,
+    reason: reason || `Your brief says: ${basis}.`,
+  };
 }
 
 /**
@@ -321,7 +379,8 @@ export async function decideBabysit(
   const provider = brain.provider;
   if (!provider) return escalate('brain_down', 'My brain is not available, so I left it for you.');
   const skip = brain.skipReason();
-  if (skip) return escalate('brain_down', `My brain is offline right now (${skip}), so I left it for you.`);
+  if (skip)
+    return escalate('brain_down', `My brain is offline right now (${skip}), so I left it for you.`);
   const ctrl = new AbortController();
   const onAbort = () => ctrl.abort();
   brain.signal?.addEventListener('abort', onAbort);
@@ -341,8 +400,7 @@ export async function decideBabysit(
     });
     brain.onUsage(res.usage || {});
     // A refusal, a cut-off reply or a stray tool call is not a decision.
-    if (res.stopReason !== 'end')
-      return escalate('parse', 'I could not work out a safe answer.');
+    if (res.stopReason !== 'end') return escalate('parse', 'I could not work out a safe answer.');
     return judgeDecision(res.text || '', input);
   } catch (err) {
     const what = err instanceof LlmError ? err.code : 'error';

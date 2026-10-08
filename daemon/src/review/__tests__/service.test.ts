@@ -4,10 +4,22 @@ import { ReviewService } from '../service';
 import { ReviewStore } from '../store';
 import { GitRunner } from '../git-runner';
 import { registerReviewHandlers } from '../../handlers/review';
-import { prompt, toolUse, toolResult, editResult, writeCreate, assistantText, jsonl, tmpDir, fakeWatcher } from './helpers';
+import {
+  prompt,
+  toolUse,
+  toolResult,
+  editResult,
+  writeCreate,
+  assistantText,
+  jsonl,
+  tmpDir,
+  fakeWatcher,
+} from './helpers';
 
 const T0 = Date.parse('2026-09-30T08:00:00Z');
-const hunk = (n: number) => [{ oldStart: n, oldLines: 1, newStart: n, newLines: 2, lines: [' ctx', `+line ${n}`] }];
+const hunk = (n: number) => [
+  { oldStart: n, oldLines: 1, newStart: n, newLines: 2, lines: [' ctx', `+line ${n}`] },
+];
 
 function scenario() {
   const dir = tmpDir();
@@ -57,7 +69,10 @@ describe('ReviewService (transcript mode)', () => {
   it('turns view: gists, edits with stable hunk ids, oldest first', async () => {
     const { svc } = scenario();
     const r = await svc.get({ sessionId: 'sess', scope: 'since_checkpoint', view: 'turns' });
-    expect(r.turns.map((t) => t.summary)).toEqual(['Fixed the guard: 1 file, +1 -0', 'Added the CI workflow: 1 file, +1 -0']);
+    expect(r.turns.map((t) => t.summary)).toEqual([
+      'Fixed the guard: 1 file, +1 -0',
+      'Added the CI workflow: 1 file, +1 -0',
+    ]);
     expect(r.turns[1].riskLevel).toBe('high');
     expect(r.edits.map((e) => e.id)).toEqual(['e1', 'e2']);
     expect(r.edits[0].hunks[0].id).toBe('e1#0');
@@ -107,7 +122,10 @@ describe('ReviewService (transcript mode)', () => {
     const since = await svc.get({ sessionId: 'sess', scope: 'since_checkpoint', view: 'turns' });
     expect(since.turns.map((t) => t.id)).toEqual(['t1']);
     const all = await svc.get({ sessionId: 'sess', scope: 'all', view: 'turns' });
-    expect(all.turns.map((t) => [t.id, t.approved])).toEqual([['t1', false], ['t2', true]]);
+    expect(all.turns.map((t) => [t.id, t.approved])).toEqual([
+      ['t1', false],
+      ['t2', true],
+    ]);
     // Mark all reviewed folds the approvals into reviewedThrough (monotonic).
     const m = await svc.markReviewed('sess', T0 + 59_000);
     expect(m.checkpoint.reviewedThrough).toBe(T0 + 59_000);
@@ -133,7 +151,11 @@ describe('ReviewService (transcript mode)', () => {
     await svc.markReviewed('sess', T0 + 59_000);
     fs.appendFileSync(
       conv,
-      jsonl([prompt('t3', 'more', T0 + 70_000), toolUse('e4', 'Edit', { file_path: '/proj/src/a.ts' }, T0 + 71_000), toolResult('e4', editResult('/proj/src/a.ts', hunk(3)), T0 + 72_000)])
+      jsonl([
+        prompt('t3', 'more', T0 + 70_000),
+        toolUse('e4', 'Edit', { file_path: '/proj/src/a.ts' }, T0 + 71_000),
+        toolResult('e4', editResult('/proj/src/a.ts', hunk(3)), T0 + 72_000),
+      ])
     );
     const s = (await svc.refresh('sess'))!;
     expect(s.unreviewedTurns).toBe(1);
@@ -144,7 +166,11 @@ describe('ReviewService (transcript mode)', () => {
 describe('review handlers', () => {
   function ctxFor(svc: ReviewService | null) {
     const sent: any[] = [];
-    const ctx: any = { review: svc, send: (_ws: unknown, r: unknown) => sent.push(r), watcher: { getActiveSessionId: () => null } };
+    const ctx: any = {
+      review: svc,
+      send: (_ws: unknown, r: unknown) => sent.push(r),
+      watcher: { getActiveSessionId: () => null },
+    };
     return { handlers: registerReviewHandlers(ctx), sent, client: { ws: {} } as any };
   }
 
@@ -152,7 +178,12 @@ describe('review handlers', () => {
     const { svc } = scenario();
     const { handlers, sent, client } = ctxFor(svc);
     await handlers.review_get(client, { sessionId: 'nope', scope: 'all', view: 'turns' }, 'r1');
-    expect(sent[0]).toMatchObject({ type: 'review_get', success: false, payload: { code: 'unknown_session' }, requestId: 'r1' });
+    expect(sent[0]).toMatchObject({
+      type: 'review_get',
+      success: false,
+      payload: { code: 'unknown_session' },
+      requestId: 'r1',
+    });
   });
 
   it('bad request + success shapes', async () => {
@@ -173,9 +204,15 @@ describe('review handlers', () => {
 });
 
 describe('isExcludedPath', () => {
-  const svc = new ReviewService({ watcher: fakeWatcher([]), gitEnabled: () => false, store: new ReviewStore(tmpDir(), 5) });
+  const svc = new ReviewService({
+    watcher: fakeWatcher([]),
+    gitEnabled: () => false,
+    store: new ReviewStore(tmpDir(), 5),
+  });
   it('excludes scratchpads always, temp dirs only outside the project', () => {
-    expect(svc.isExcludedPath('/tmp/claude-1000/x/scratchpad/a.md', '/tmp/claude-1000/x')).toBe(true);
+    expect(svc.isExcludedPath('/tmp/claude-1000/x/scratchpad/a.md', '/tmp/claude-1000/x')).toBe(
+      true
+    );
     expect(svc.isExcludedPath('/tmp/notes.txt', '/home/u/proj')).toBe(true);
     expect(svc.isExcludedPath('/tmp/proj/a.ts', '/tmp/proj')).toBe(false);
     expect(svc.isExcludedPath('/home/u/proj/a.ts', '/home/u/proj')).toBe(false);

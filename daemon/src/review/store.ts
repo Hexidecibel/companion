@@ -92,7 +92,8 @@ export function sanitizeReviewState(raw: unknown, now: number): PersistedReviewS
   if (!raw || typeof raw !== 'object') throw new Error('state is not an object');
   const r = raw as Record<string, unknown>;
   const sessions: Record<string, StoredCheckpoint> = {};
-  const rs = r.sessions && typeof r.sessions === 'object' ? (r.sessions as Record<string, unknown>) : {};
+  const rs =
+    r.sessions && typeof r.sessions === 'object' ? (r.sessions as Record<string, unknown>) : {};
   for (const [id, v] of Object.entries(rs).slice(0, MAX_SESSIONS)) {
     const c = sanitizeCheckpoint(v);
     if (!c) continue;
@@ -155,7 +156,11 @@ export function compactApprovals(
     approved.delete(t.id);
   }
   // Approvals of turns that no longer exist in the ledger are kept (a rebuild may bring them back).
-  return { ...c, reviewedThrough: through, approvedTurnIds: c.approvedTurnIds.filter((id) => approved.has(id)) };
+  return {
+    ...c,
+    reviewedThrough: through,
+    approvedTurnIds: c.approvedTurnIds.filter((id) => approved.has(id)),
+  };
 }
 
 export class ReviewStore {

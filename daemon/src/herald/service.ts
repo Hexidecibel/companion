@@ -22,7 +22,12 @@ import type {
 } from './protocol';
 import { ResolvedHeraldConfig } from './config';
 import { ActionManager } from './actions';
-import { InboxTracker, brainHeadline, pairingDecisionReply, type PendingPairingInfo } from './inbox';
+import {
+  InboxTracker,
+  brainHeadline,
+  pairingDecisionReply,
+  type PendingPairingInfo,
+} from './inbox';
 import {
   HeraldStore,
   isVerbosity,
@@ -55,7 +60,14 @@ import {
   type SpokenEvidence,
   type VoiceTranscriptEvidence,
 } from './voice-confirm';
-import { BudgetNotice, formatUsd, nextMonthStart, spokenUsd, usageAnswer, UsageMeter } from './usage';
+import {
+  BudgetNotice,
+  formatUsd,
+  nextMonthStart,
+  spokenUsd,
+  usageAnswer,
+  UsageMeter,
+} from './usage';
 import {
   classifyFallback,
   fallbackReply,
@@ -552,8 +564,13 @@ export class HeraldService {
     this.asks.load(persisted.asks ?? []);
     this.inbox.restoreAnswers(persisted.answers ?? [], this.now());
     this.inbox.restoreReviewAlerts(persisted.reviews ?? [], this.now());
-    if (this.stuckAlerts.length) this.inbox.setStuckAlerts(this.stuckAlerts.map((a) => ({ ...a, serverId: 'local' })), this.now());
-    if (this.pairingRequests.length) this.inbox.setPairingRequests(this.pairingRequests, this.now());
+    if (this.stuckAlerts.length)
+      this.inbox.setStuckAlerts(
+        this.stuckAlerts.map((a) => ({ ...a, serverId: 'local' })),
+        this.now()
+      );
+    if (this.pairingRequests.length)
+      this.inbox.setPairingRequests(this.pairingRequests, this.now());
     this.toolbox?.loadOpened(persisted.cushOpened);
     this.verbosity = persisted.verbosity ?? 'auto';
     this.pronunciations = persisted.pronunciations ?? [];
@@ -832,7 +849,13 @@ export class HeraldService {
     const now = this.now();
     if (!this.outage || this.outage.reason !== reason) {
       const announced = this.outage?.announced ?? false;
-      this.outage = { reason, since: this.outage?.since ?? now, failures: 0, retryAt: now, announced };
+      this.outage = {
+        reason,
+        since: this.outage?.since ?? now,
+        failures: 0,
+        retryAt: now,
+        announced,
+      };
       console.log(`Herald: brain offline (${REASON_TEXT[reason]}); answering from the fallback`);
     }
     this.outage.failures += 1;
@@ -905,7 +928,8 @@ export class HeraldService {
       if (this.outage) this.outage.announced = true;
     }
     const items = kind === 'brief' && intent !== 'brief' ? this.unheardForBriefing() : briefing;
-    if (kind === 'brief' && items.length && intent !== 'brief') this.markHeard(items.map((i) => i.id));
+    if (kind === 'brief' && items.length && intent !== 'brief')
+      this.markHeard(items.map((i) => i.id));
     return fallbackReply({
       kind,
       reason,
@@ -1010,7 +1034,10 @@ export class HeraldService {
    * Never changes the active device. See HeraldShowRequest.
    */
   async show(raw: unknown, opts: HeraldShowOptions): Promise<HeraldShowResult> {
-    const p = (raw && typeof raw === 'object' ? raw : {}) as { session?: unknown; device?: unknown };
+    const p = (raw && typeof raw === 'object' ? raw : {}) as {
+      session?: unknown;
+      device?: unknown;
+    };
     const session = typeof p.session === 'string' ? oneLine(p.session).slice(0, 200) : '';
     const device = typeof p.device === 'string' ? p.device.trim().slice(0, 200) : '';
     const sessions = await this.listAll().catch(() => this.lastSnapshots);
@@ -1018,7 +1045,11 @@ export class HeraldService {
   }
 
   /** Synchronous form over the last poll's listing (remote `show` trigger). */
-  showCached(session: string | undefined, device: string, opts: HeraldShowOptions): HeraldShowResult {
+  showCached(
+    session: string | undefined,
+    device: string,
+    opts: HeraldShowOptions
+  ): HeraldShowResult {
     return this.showWith(session || '', device, this.lastSnapshots, opts);
   }
 
@@ -1057,7 +1088,10 @@ export class HeraldService {
    * The device a navigation goes to: `device` (id, label or the user's words
    * like "my PC"; see resolveShowDevice), else the active one, else the requester.
    */
-  private showDevice(device: string, requesterId?: string | null): { id: string; label: string } | null {
+  private showDevice(
+    device: string,
+    requesterId?: string | null
+  ): { id: string; label: string } | null {
     const snap = this.devicesFn?.() ?? null;
     const labelOf = (id: string) => snap?.devices.find((d) => d.id === id)?.label || 'this device';
     if (device) {
@@ -1527,25 +1561,27 @@ export class HeraldService {
     const live = new Map(
       this.lastSnapshots.map((s) => [`${s.serverId}:${s.sessionId}`, s.status] as const)
     );
-    return this.inbox
-      .list()
-      .filter((i) => !i.heard)
-      .filter(
-        (i) =>
-          i.answer ||
-          !!i.review ||
-          !!i.stuck ||
-          !(i.priority === 'finished' && live.get(`${i.serverId}:${i.sessionId}`) === 'working')
-      )
-      // Answers to the user's own questions first, then blocked, stuck, finished.
-      .sort(
-        (a, b) =>
-          Number(!!b.answer) - Number(!!a.answer) ||
-          INBOX_RANK[a.priority] - INBOX_RANK[b.priority] ||
-          Number(!!b.stuck) - Number(!!a.stuck) ||
-          Number(!!b.error) - Number(!!a.error) ||
-          b.createdAt - a.createdAt
-      );
+    return (
+      this.inbox
+        .list()
+        .filter((i) => !i.heard)
+        .filter(
+          (i) =>
+            i.answer ||
+            !!i.review ||
+            !!i.stuck ||
+            !(i.priority === 'finished' && live.get(`${i.serverId}:${i.sessionId}`) === 'working')
+        )
+        // Answers to the user's own questions first, then blocked, stuck, finished.
+        .sort(
+          (a, b) =>
+            Number(!!b.answer) - Number(!!a.answer) ||
+            INBOX_RANK[a.priority] - INBOX_RANK[b.priority] ||
+            Number(!!b.stuck) - Number(!!a.stuck) ||
+            Number(!!b.error) - Number(!!a.error) ||
+            b.createdAt - a.createdAt
+        )
+    );
   }
 
   private briefingLines(items: HeraldInboxItem[]): string[] {
@@ -1589,15 +1625,20 @@ export class HeraldService {
       `${self.join(', ')}.${names.length ? ` Sessions: ${names.join(', ')}.` : ''}${versions.length ? ` Versions: ${versions.join(', ')}.` : ''} ${[...STT_HINT_TERMS, ...own].join(', ')}.`,
       STT_HINT_MAX_CHARS
     );
-    const hotwords = clip([...self, ...names, ...versions, ...STT_HINT_TERMS, ...own].join(' '), STT_HINT_MAX_CHARS);
+    const hotwords = clip(
+      [...self, ...names, ...versions, ...STT_HINT_TERMS, ...own].join(' '),
+      STT_HINT_MAX_CHARS
+    );
     return { prompt, hotwords, versions };
   }
 
   /** Recent text that may mention versions, newest first: the conversation, then sessions and inbox. */
   private recentHintTexts(live: SessionSnapshot[]): string[] {
     const texts: string[] = [];
-    for (let i = this.messages.length - 1, n = 0; i >= 0 && n < 30; i--, n++) texts.push(this.messages[i].text);
-    for (const s of live) texts.push(s.lastTurnGist ?? '', s.currentActivity ?? '', s.pendingQuestion ?? '');
+    for (let i = this.messages.length - 1, n = 0; i >= 0 && n < 30; i--, n++)
+      texts.push(this.messages[i].text);
+    for (const s of live)
+      texts.push(s.lastTurnGist ?? '', s.currentActivity ?? '', s.pendingQuestion ?? '');
     for (const item of this.inbox.list()) texts.push(brainHeadline(item));
     return texts;
   }
@@ -1706,7 +1747,9 @@ export class HeraldService {
     if (sitting.length) {
       parts.push(
         `Babysitting (you answer these sessions' simple questions for the user${
-          sitting.some((b) => b.autoSend === false) ? '; on this server you only suggest answers' : ''
+          sitting.some((b) => b.autoSend === false)
+            ? '; on this server you only suggest answers'
+            : ''
         }):`
       );
       for (const b of sitting)
@@ -1723,8 +1766,8 @@ export class HeraldService {
                   a.tier === 'hard_confirm' && a.confirmPhrase ? ` or say "${a.confirmPhrase}"` : ''
                 })`
               : a.tier === 'hard_confirm' && a.confirmPhrase
-              ? `${a.readback} (needs confirmation: the card, or the user saying "${a.confirmPhrase}"; a plain "yes" does not confirm it)`
-              : a.readback
+                ? `${a.readback} (needs confirmation: the card, or the user saying "${a.confirmPhrase}"; a plain "yes" does not confirm it)`
+                : a.readback
           )
           .join('; ')}`
       );
@@ -1757,7 +1800,8 @@ export class HeraldService {
     if (decision !== 'confirm' && decision !== 'cancel')
       throw new HeraldRequestError('decision must be "confirm" or "cancel"');
     if (!this.actions.get(actionId)) throw new HeraldRequestError('Unknown action');
-    if (decision === 'confirm' && opts.method === 'voice') return this.confirmByVoice(actionId, origin, opts);
+    if (decision === 'confirm' && opts.method === 'voice')
+      return this.confirmByVoice(actionId, origin, opts);
     return decision === 'confirm'
       ? this.actions.confirm(actionId, origin)
       : this.actions.cancel(actionId, origin);
@@ -1801,19 +1845,28 @@ export class HeraldService {
       `Herald: voice confirm rejected for ${res.action.sessionName} (${res.rejection}); ${res.action.voiceAttemptsLeft ?? 0} tries left`
     );
     throw new HeraldRequestError(
-      rejectionMessage(res.rejection, res.action.confirmPhrase || '', res.action.voiceAttemptsLeft ?? 0)
+      rejectionMessage(
+        res.rejection,
+        res.action.confirmPhrase || '',
+        res.action.voiceAttemptsLeft ?? 0
+      )
     );
   }
 
   private async runSpawn(req: SpawnRequest, a: HeraldAction): Promise<SpawnOutcome> {
     const runner = this.spawnRunner;
-    if (!runner) return { ok: false, message: '', error: 'Starting sessions is not available here.' };
+    if (!runner)
+      return { ok: false, message: '', error: 'Starting sessions is not available here.' };
     // Re-validate against the allowed roots right before acting.
     const where = this.spawnEnv
       ? resolveSpawnDir(req.dir, this.spawnEnv.roots, this.spawnEnv.userHome)
       : null;
     if (!where || !where.ok || where.dir !== req.dir)
-      return { ok: false, message: '', error: `${req.name} is no longer an allowed folder; nothing was started.` };
+      return {
+        ok: false,
+        message: '',
+        error: `${req.name} is no longer an allowed folder; nothing was started.`,
+      };
     const started = this.now();
     const out = await runner.run(req);
     try {
@@ -1944,7 +1997,12 @@ export class HeraldService {
   syncStuckAlerts(alerts: HeraldStuckAlert[]): void {
     this.stuckAlerts = alerts.map((a) => ({ ...a, kinds: [...a.kinds] }));
     if (!this.started || this.disposed) return;
-    if (this.inbox.setStuckAlerts(this.stuckAlerts.map((a) => ({ ...a, serverId: 'local' })), this.now()))
+    if (
+      this.inbox.setStuckAlerts(
+        this.stuckAlerts.map((a) => ({ ...a, serverId: 'local' })),
+        this.now()
+      )
+    )
       this.emit({ kind: 'inbox', inbox: this.inbox.list() });
   }
 
@@ -1961,7 +2019,12 @@ export class HeraldService {
       throw new HeraldRelayError('herald_unavailable', 'Herald is not running');
     for (const a of this.actions.list()) {
       // A second pending interrupt would be a double Ctrl+C (exits Claude).
-      if (a.status === 'pending' && a.kind === 'interrupt' && a.serverId === 'local' && a.sessionId === r.sessionId)
+      if (
+        a.status === 'pending' &&
+        a.kind === 'interrupt' &&
+        a.serverId === 'local' &&
+        a.sessionId === r.sessionId
+      )
         return { actionId: a.id, autoSendAt: a.autoSendAt ?? null };
     }
     const verdict = classifyInterrupt({});
@@ -2049,7 +2112,10 @@ export class HeraldService {
       return out;
     } catch (err) {
       if (err instanceof HeraldRelayError) throw err;
-      throw new HeraldRelayError('herald_unavailable', `Herald brain failed: ${err instanceof Error ? err.message : String(err)}`);
+      throw new HeraldRelayError(
+        'herald_unavailable',
+        `Herald brain failed: ${err instanceof Error ? err.message : String(err)}`
+      );
     } finally {
       clearTimeout(timer);
     }
@@ -2094,13 +2160,17 @@ export class HeraldService {
       throw new BabysitError('unavailable', 'Herald is not running');
     // Every decision needs the brain: without one a brief could only escalate.
     if (!this.provider)
-      throw new BabysitError('unavailable', this.cfg.disabledReason || 'Herald brain is not configured.');
+      throw new BabysitError(
+        'unavailable',
+        this.cfg.disabledReason || 'Herald brain is not configured.'
+      );
     if (!this.getSource(spec.serverId))
       throw new BabysitError('not_found', `Server "${spec.serverId}" is not reachable.`);
     const snaps = await this.listAll().catch(() => this.lastSnapshots);
     const snap = snaps.find(
       (s) =>
-        s.serverId === spec.serverId && (s.sessionId === spec.sessionId || s.tmuxName === spec.sessionId)
+        s.serverId === spec.serverId &&
+        (s.sessionId === spec.sessionId || s.tmuxName === spec.sessionId)
     );
     if (!snap || snap.inactive)
       throw new BabysitError('not_found', `No running session "${spec.sessionId}".`);
@@ -2136,7 +2206,10 @@ export class HeraldService {
   stopBabysit(raw: unknown, origin?: AuditOrigin): { stopped: HeraldBabysit[] } {
     const r = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
     const str = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, 200) : '');
-    if ((r.babysitId !== undefined && !str(r.babysitId)) || (r.sessionId !== undefined && !str(r.sessionId)))
+    if (
+      (r.babysitId !== undefined && !str(r.babysitId)) ||
+      (r.sessionId !== undefined && !str(r.sessionId))
+    )
       throw new BabysitError('bad_request', 'babysitId and sessionId must be non-empty text');
     const babysitId = str(r.babysitId);
     const sessionId = str(r.sessionId);
@@ -2148,7 +2221,10 @@ export class HeraldService {
         ts: this.now(),
         origin: origin || SERVER_ORIGIN,
         action: 'herald_babysit_stop',
-        payload: { ...(babysitId ? { babysitId } : {}), ...(sessionId ? { session: sessionId } : {}) },
+        payload: {
+          ...(babysitId ? { babysitId } : {}),
+          ...(sessionId ? { session: sessionId } : {}),
+        },
         result: { ok: true, stopped: stopped.map((b) => b.id) },
         durationMs: 0,
       });

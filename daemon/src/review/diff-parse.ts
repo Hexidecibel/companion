@@ -135,7 +135,13 @@ export function parseUnifiedDiff(text: string): ParsedFileDiff[] {
     else if (isCopy) cur.status = 'copied';
     else if (renameFrom !== null || (cur.oldPath && cur.newPath && cur.oldPath !== cur.newPath))
       cur.status = 'renamed';
-    else if (cur.oldMode && cur.newMode && cur.oldMode !== cur.newMode && cur.hunks.length === 0 && !cur.binary)
+    else if (
+      cur.oldMode &&
+      cur.newMode &&
+      cur.oldMode !== cur.newMode &&
+      cur.hunks.length === 0 &&
+      !cur.binary
+    )
       cur.status = 'mode_changed';
     else cur.status = 'modified';
     cur.raw = lines.slice(curStart, endLine).join('\n') + '\n';
@@ -263,7 +269,10 @@ export function parseNumstatZ(text: string): NumstatEntry[] {
 }
 
 /** Clip long lines; returns whether anything was clipped. */
-export function clipLines(lines: string[], maxChars: number): { lines: string[]; clipped: boolean } {
+export function clipLines(
+  lines: string[],
+  maxChars: number
+): { lines: string[]; clipped: boolean } {
   let clipped = false;
   const out = lines.map((l) => {
     if (l.length <= maxChars) return l;
@@ -274,7 +283,11 @@ export function clipLines(lines: string[], maxChars: number): { lines: string[];
 }
 
 /** Render hunks as a unified diff (used for synthesized patches + compat). */
-export function renderPatch(aPath: string | null, bPath: string | null, hunks: ParsedHunk[]): string {
+export function renderPatch(
+  aPath: string | null,
+  bPath: string | null,
+  hunks: ParsedHunk[]
+): string {
   const a = aPath === null ? '/dev/null' : `a/${aPath}`;
   const b = bPath === null ? '/dev/null' : `b/${bPath}`;
   let s = `--- ${a}\n+++ ${b}\n`;

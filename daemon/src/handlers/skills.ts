@@ -6,9 +6,7 @@ import { scaffoldProject, previewScaffold } from '../scaffold/generator';
 import { ProjectConfig } from '../scaffold/types';
 import { scoreTemplates } from '../scaffold/scorer';
 
-export function registerSkillHandlers(
-  ctx: HandlerContext
-): Record<string, MessageHandler> {
+export function registerSkillHandlers(ctx: HandlerContext): Record<string, MessageHandler> {
   return {
     list_skills(client, _payload, requestId) {
       try {
@@ -24,7 +22,12 @@ export function registerSkillHandlers(
           ...globalSkills.map((s) => s.id),
         ]);
 
-        const enrichInstalled = (s: { id: string; name: string; description: string; source: string }) => {
+        const enrichInstalled = (s: {
+          id: string;
+          name: string;
+          description: string;
+          source: string;
+        }) => {
           const catalogEntry = ctx.skillCatalog.getSkill(s.id);
           if (catalogEntry) {
             return {
@@ -85,7 +88,9 @@ export function registerSkillHandlers(
 
     install_skill(client, payload, requestId) {
       try {
-        const installPayload = payload as { skillId: string; target: 'project' | 'global'; sessionId?: string } | undefined;
+        const installPayload = payload as
+          | { skillId: string; target: 'project' | 'global'; sessionId?: string }
+          | undefined;
         if (!installPayload?.skillId) {
           ctx.send(client.ws, {
             type: 'skill_installed',
@@ -117,7 +122,9 @@ export function registerSkillHandlers(
 
     uninstall_skill(client, payload, requestId) {
       try {
-        const uninstallPayload = payload as { skillId: string; source: 'project' | 'global'; sessionId?: string } | undefined;
+        const uninstallPayload = payload as
+          | { skillId: string; source: 'project' | 'global'; sessionId?: string }
+          | undefined;
         if (!uninstallPayload?.skillId) {
           ctx.send(client.ws, {
             type: 'skill_uninstalled',
@@ -129,7 +136,11 @@ export function registerSkillHandlers(
         }
 
         const projectRoot = ctx.getProjectRoot(uninstallPayload.sessionId) || os.homedir();
-        ctx.skillCatalog.uninstallSkill(uninstallPayload.skillId, uninstallPayload.source, projectRoot);
+        ctx.skillCatalog.uninstallSkill(
+          uninstallPayload.skillId,
+          uninstallPayload.source,
+          projectRoot
+        );
 
         ctx.send(client.ws, {
           type: 'skill_uninstalled',
@@ -246,12 +257,7 @@ export function registerSkillHandlers(
     async scaffold_create(client, payload, requestId) {
       try {
         const createConfig = payload as ProjectConfig;
-        console.log(
-          'Scaffold: Creating project',
-          createConfig.name,
-          'at',
-          createConfig.location
-        );
+        console.log('Scaffold: Creating project', createConfig.name, 'at', createConfig.location);
         const createResult = await scaffoldProject(createConfig, (progress) => {
           console.log('Scaffold progress:', progress.step, progress.detail || '');
           ctx.send(client.ws, {

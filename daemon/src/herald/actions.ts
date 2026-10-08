@@ -427,7 +427,11 @@ export class ActionManager {
           fail('failed', 'Babysitting is not available here; nothing was started.');
           return { ...rec.action };
         }
-        const out = await withTimeout(this.deps.runBabysit(req, { ...a }), REVALIDATE_TIMEOUT_MS, 'start');
+        const out = await withTimeout(
+          this.deps.runBabysit(req, { ...a }),
+          REVALIDATE_TIMEOUT_MS,
+          'start'
+        );
         if (!out.ok) {
           fail('failed', out.error || out.message);
           return { ...rec.action };

@@ -5,7 +5,8 @@ import { REVIEW_LIMITS } from '../review/protocol';
 import type { ReviewErrorCode, ReviewRevertTarget } from '../review/protocol';
 
 type Obj = Record<string, unknown>;
-const obj = (p: unknown): Obj => (p && typeof p === 'object' && !Array.isArray(p) ? (p as Obj) : {});
+const obj = (p: unknown): Obj =>
+  p && typeof p === 'object' && !Array.isArray(p) ? (p as Obj) : {};
 const str = (v: unknown, max = 500): string | undefined =>
   typeof v === 'string' && v.length > 0 && v.length <= max ? v : undefined;
 
@@ -100,7 +101,8 @@ export function registerReviewHandlers(ctx: HandlerContext): Record<string, Mess
     }),
 
     review_watch: handle('review_watch', async (client, p) => {
-      if (typeof p.live !== 'boolean') throw new ReviewServiceError('bad_request', 'live must be a boolean');
+      if (typeof p.live !== 'boolean')
+        throw new ReviewServiceError('bad_request', 'live must be a boolean');
       return ctx.review!.watch(client.id, sessionIdOf(p), p.live);
     }),
 
@@ -109,8 +111,14 @@ export function registerReviewHandlers(ctx: HandlerContext): Record<string, Mess
       const hunkId = str(p.hunkId, 300);
       if (!absPath || !absPath.startsWith('/') || !hunkId)
         throw new ReviewServiceError('bad_request', 'absPath and hunkId are required');
-      if (p.question !== undefined && (typeof p.question !== 'string' || p.question.length > REVIEW_LIMITS.maxQuestionChars))
-        throw new ReviewServiceError('bad_request', `question must be at most ${REVIEW_LIMITS.maxQuestionChars} characters`);
+      if (
+        p.question !== undefined &&
+        (typeof p.question !== 'string' || p.question.length > REVIEW_LIMITS.maxQuestionChars)
+      )
+        throw new ReviewServiceError(
+          'bad_request',
+          `question must be at most ${REVIEW_LIMITS.maxQuestionChars} characters`
+        );
       const denied = gate(client, 'dispatch');
       if (denied) throw new ReviewServiceError('blocked', denied);
       return ctx.review!.ask(
@@ -140,7 +148,10 @@ export function registerReviewHandlers(ctx: HandlerContext): Record<string, Mess
       if (denied) throw new ReviewServiceError('blocked', denied);
       const token = str(p.token, 100);
       if (!token || (p.confirm !== 'tap' && p.confirm !== 'hold'))
-        throw new ReviewServiceError('bad_request', "token and confirm ('tap' | 'hold') are required");
+        throw new ReviewServiceError(
+          'bad_request',
+          "token and confirm ('tap' | 'hold') are required"
+        );
       return ctx.review!.revert(
         {
           token,
@@ -161,7 +172,11 @@ export function registerReviewHandlers(ctx: HandlerContext): Record<string, Mess
     }),
 
     review_polish_summaries: handle('review_polish_summaries', async (_c, p) => {
-      if (!Array.isArray(p.turnIds) || p.turnIds.some((x) => typeof x !== 'string') || p.turnIds.length > 20)
+      if (
+        !Array.isArray(p.turnIds) ||
+        p.turnIds.some((x) => typeof x !== 'string') ||
+        p.turnIds.length > 20
+      )
         throw new ReviewServiceError('bad_request', 'turnIds must be at most 20 strings');
       return ctx.review!.polish(sessionIdOf(p), p.turnIds as string[]);
     }),

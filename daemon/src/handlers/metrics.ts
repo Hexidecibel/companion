@@ -1,9 +1,7 @@
 import { HandlerContext, MessageHandler } from '../handler-context';
 import { getMetrics } from '../metrics';
 
-export function registerMetricsHandlers(
-  ctx: HandlerContext
-): Record<string, MessageHandler> {
+export function registerMetricsHandlers(ctx: HandlerContext): Record<string, MessageHandler> {
   return {
     get_metrics(client, _payload, requestId) {
       const activeClients = ctx.clients.size;

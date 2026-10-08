@@ -106,7 +106,10 @@ export function resolveConciergeDir(
  * it at /app/mcp/dist/index.js), else <repo>/mcp/dist/index.js next to the
  * concierge dir.
  */
-export function resolveMcpEntry(conciergeDir: string, env: NodeJS.ProcessEnv = process.env): string {
+export function resolveMcpEntry(
+  conciergeDir: string,
+  env: NodeJS.ProcessEnv = process.env
+): string {
   const fromEnv = (env.COMPANION_MCP_ENTRY || '').trim();
   if (fromEnv && path.isAbsolute(fromEnv)) return fromEnv;
   const repoRoot = path.dirname(conciergeDir);
@@ -135,7 +138,10 @@ function buildLocalEntry(ctx: HandlerContext): PushedServer {
  * ~/.companion/mcp-servers.json, preserving manually-added entries by name.
  * Returns the number of entries written and the file path.
  */
-function syncMcpServers(ctx: HandlerContext, pushed: PushedServer[]): { written: number; path: string } {
+function syncMcpServers(
+  ctx: HandlerContext,
+  pushed: PushedServer[]
+): { written: number; path: string } {
   const mcpPath = getMcpServersPath();
   const dir = path.dirname(mcpPath);
   if (!fs.existsSync(dir)) {
@@ -461,7 +467,9 @@ export function registerConciergeHandlers(ctx: HandlerContext): Record<string, M
         const cfg = loadConfig();
         const idx = cfg.listeners.findIndex((l) => l.port === client.listenerPort);
         if (idx === -1) {
-          sendError('no_listener', { detail: `Listener not found for port ${client.listenerPort}` });
+          sendError('no_listener', {
+            detail: `Listener not found for port ${client.listenerPort}`,
+          });
           return;
         }
         const target = cfg.listeners[idx];
@@ -476,7 +484,9 @@ export function registerConciergeHandlers(ctx: HandlerContext): Record<string, M
         if (p.capabilities && typeof p.capabilities === 'object') {
           cred.capabilities = {
             ...(typeof p.capabilities.exec === 'boolean' ? { exec: p.capabilities.exec } : {}),
-            ...(typeof p.capabilities.dispatch === 'boolean' ? { dispatch: p.capabilities.dispatch } : {}),
+            ...(typeof p.capabilities.dispatch === 'boolean'
+              ? { dispatch: p.capabilities.dispatch }
+              : {}),
             ...(typeof p.capabilities.write === 'boolean' ? { write: p.capabilities.write } : {}),
           };
         }

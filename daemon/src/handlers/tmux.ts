@@ -9,9 +9,7 @@ import {
 } from '../constants';
 import { createClaudeSession } from '../session-spawn';
 
-export function registerTmuxHandlers(
-  ctx: HandlerContext
-): Record<string, MessageHandler> {
+export function registerTmuxHandlers(ctx: HandlerContext): Record<string, MessageHandler> {
   return {
     async list_tmux_sessions(client, _payload, requestId) {
       console.log('WebSocket: Received list_tmux_sessions request');
@@ -53,9 +51,7 @@ export function registerTmuxHandlers(
           // Only surface a tappable choice prompt for the live view (offset 0);
           // paginated history captures should never drive the selector.
           const choicePrompt =
-            (termPayload.offset || 0) === 0
-              ? detectActiveChoicePrompt(output)
-              : null;
+            (termPayload.offset || 0) === 0 ? detectActiveChoicePrompt(output) : null;
           ctx.send(client.ws, {
             type: 'terminal_output',
             success: true,
@@ -158,7 +154,9 @@ export function registerTmuxHandlers(
     },
 
     async create_tmux_session(client, payload, requestId) {
-      const createPayload = payload as { name?: string; workingDir: string; startCli?: boolean } | undefined;
+      const createPayload = payload as
+        | { name?: string; workingDir: string; startCli?: boolean }
+        | undefined;
       if (!createPayload?.workingDir) {
         ctx.send(client.ws, {
           type: 'tmux_session_created',
@@ -187,7 +185,9 @@ export function registerTmuxHandlers(
         const sessionName = result.sessionName;
         ctx.injector.setActiveSession(sessionName);
         ctx.watcher.clearActiveSession();
-        console.log(`WebSocket: Cleared active session after creating tmux session "${sessionName}"`);
+        console.log(
+          `WebSocket: Cleared active session after creating tmux session "${sessionName}"`
+        );
 
         ctx.send(client.ws, {
           type: 'tmux_session_created',
@@ -211,12 +211,14 @@ export function registerTmuxHandlers(
     },
 
     async scaffold_open_session(client, payload, requestId) {
-      const scaffoldPayload = payload as {
-        workingDir: string;
-        projectName: string;
-        projectDescription?: string;
-        templateName?: string;
-      } | undefined;
+      const scaffoldPayload = payload as
+        | {
+            workingDir: string;
+            projectName: string;
+            projectDescription?: string;
+            templateName?: string;
+          }
+        | undefined;
 
       if (!scaffoldPayload?.workingDir || !scaffoldPayload?.projectName) {
         ctx.send(client.ws, {
@@ -229,7 +231,9 @@ export function registerTmuxHandlers(
       }
 
       const sessionName = ctx.tmux.generateSessionName(scaffoldPayload.workingDir);
-      console.log(`WebSocket: scaffold_open_session "${sessionName}" in ${scaffoldPayload.workingDir}`);
+      console.log(
+        `WebSocket: scaffold_open_session "${sessionName}" in ${scaffoldPayload.workingDir}`
+      );
 
       const result = await ctx.tmux.createSession(sessionName, scaffoldPayload.workingDir, true);
 
@@ -264,12 +268,14 @@ export function registerTmuxHandlers(
         const promptRe = /[>$]\s*$/;
 
         while (Date.now() < deadline) {
-          await new Promise(resolve => setTimeout(resolve, CLI_READY_POLL_INTERVAL_MS));
+          await new Promise((resolve) => setTimeout(resolve, CLI_READY_POLL_INTERVAL_MS));
           try {
             const paneContent = await ctx.injector.capturePaneContent(sessionName);
             if (promptRe.test(paneContent)) {
               console.log(`[SCAFFOLD] CLI ready in "${sessionName}", injecting initial message`);
-              const templateNote = templateName ? ` The project has been scaffolded with the "${templateName}" template.` : '';
+              const templateNote = templateName
+                ? ` The project has been scaffolded with the "${templateName}" template.`
+                : '';
               const description = projectDescription ? ` ${projectDescription}` : '';
               const message = `I'm starting a new project called "${projectName}".${description}${templateNote} Please:\n1. Review the project structure and CLAUDE.md\n2. Create a prioritized todo list (TaskCreate) with concrete steps to accomplish the goal\n3. Begin working on the first task`;
               await ctx.injector.sendInput(message, sessionName);
@@ -279,8 +285,10 @@ export function registerTmuxHandlers(
             console.log(`[SCAFFOLD] Poll error: ${err}`);
           }
         }
-        console.log(`[SCAFFOLD] CLI readiness timeout for "${sessionName}" after ${CLI_READY_TIMEOUT_MS}ms`);
-      })().catch(err => console.error(`[SCAFFOLD] Unexpected error: ${err}`));
+        console.log(
+          `[SCAFFOLD] CLI readiness timeout for "${sessionName}" after ${CLI_READY_TIMEOUT_MS}ms`
+        );
+      })().catch((err) => console.error(`[SCAFFOLD] Unexpected error: ${err}`));
     },
 
     async kill_tmux_session(client, payload, requestId) {
@@ -441,7 +449,9 @@ export function registerTmuxHandlers(
         return;
       }
 
-      console.log(`WebSocket: Recreating tmux session "${sessionName}" in ${savedConfig.workingDir}`);
+      console.log(
+        `WebSocket: Recreating tmux session "${sessionName}" in ${savedConfig.workingDir}`
+      );
 
       const result = await ctx.tmux.createSession(
         savedConfig.name,
@@ -485,7 +495,9 @@ export function registerTmuxHandlers(
         return;
       }
 
-      const wtPayload = payload as { parentDir: string; branch?: string; startCli?: boolean } | undefined;
+      const wtPayload = payload as
+        | { parentDir: string; branch?: string; startCli?: boolean }
+        | undefined;
       if (!wtPayload?.parentDir) {
         ctx.send(client.ws, {
           type: 'worktree_session_created',
