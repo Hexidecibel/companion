@@ -252,6 +252,7 @@ export function loadConfig(): DaemonConfig {
             : undefined,
         setupComplete:
           typeof parsed.setup_complete === 'boolean' ? parsed.setup_complete : undefined,
+        subagents: parseSubagentsBlock(parsed.subagents),
         projectRoots: Array.isArray(parsed.project_roots)
           ? parsed.project_roots.filter((r: unknown): r is string => typeof r === 'string')
           : undefined,
@@ -432,4 +433,14 @@ export function saveConfig(config: DaemonConfig): void {
       else raw[k] = v;
     }
   }, configPath);
+}
+
+/** `subagents: { enabled?: boolean, discovery?: 'watch' | 'legacy' }` (unknown values ignored). */
+export function parseSubagentsBlock(raw: unknown): DaemonConfig['subagents'] {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  const r = raw as Record<string, unknown>;
+  const out: NonNullable<DaemonConfig['subagents']> = {};
+  if (typeof r.enabled === 'boolean') out.enabled = r.enabled;
+  if (r.discovery === 'watch' || r.discovery === 'legacy') out.discovery = r.discovery;
+  return out;
 }

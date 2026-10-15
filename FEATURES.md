@@ -221,6 +221,14 @@ Prominent bottom drawer panel showing subagents as first-class UI, replacing the
 - Adaptive polling: 2s when agents running, 5s when idle
 - CLAUDE.md instructions for dispatch mode included in all scaffold templates
 
+- **Subagent tracker (2026-10-15)**: replaces the polling chokidar watcher (one stat loop per historical subagent file, full sync re-parse per change) with `fs.watch` discovery and incremental byte-offset tails; startup reads only recent conversations, older ones on demand
+- Correct status: completion comes from Claude Code's task notifications (completed / failed / stopped), so agents no longer flip to "done" between content blocks, on a mid-file `end_turn` or after 5 quiet minutes; failed agents show as failed, `waiting_child` for agents waiting on their own children
+- Nesting: parent/child links from `.meta.json` (`toolUseId`), real agent type and description; DispatchPanel shows the tree in order with indentation
+- Per-agent state chips + timeline (tools, tests, files, tokens = context size) and subagent stuck signals (repeated failures, no output); deterministic one-line rollup
+- Protocol `subagent_list` / `subagent_get` / `subagent_rollup` / `subagent_watch` with `subagent_update` deltas (1/s per watch), mirrored in `web/src/types/subagents.ts`; `get_agent_tree` / `get_agent_detail` kept (detail now async, newest 2 MB, cached until the file changes)
+- Web: list + watch + deltas instead of 2 s polling (polling fallback for older daemons), no re-render on unchanged polls, tiles show state and fetch the conversation only when expanded, the detail hook stops polling finished agents and backs off while disconnected
+- Fallback for one release: `subagents.discovery: 'legacy'` / `COMPANION_SUBAGENTS=legacy` (old watcher); `COMPANION_SUBAGENTS=off` turns tracking off
+
 ## Tiled Agent Conversations
 Dispatch panel shows agent conversations tiled side-by-side on desktop instead of card list + single detail view.
 

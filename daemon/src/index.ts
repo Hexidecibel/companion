@@ -2,7 +2,7 @@
 import { loadConfig, displayFirstRunWelcome, isSetupMode, resolveConfigPath } from './config';
 import { loadSecretsEnv, secretsFilePath } from './setup/secrets';
 import { SessionWatcher } from './watcher';
-import { SubAgentWatcher } from './subagent-watcher';
+import { SubAgentWatcher, resolveSubagentMode } from './subagent-watcher';
 import { InputInjector } from './input-injector';
 import { lanAddresses, MdnsAdvertiser } from './mdns';
 import { loadDaemonIdentity } from './pairing/identity';
@@ -110,7 +110,12 @@ async function main(): Promise<void> {
   // Initialize components
   const injector = new InputInjector(config.tmuxSession);
   const watcher = new SessionWatcher(config.codeHome, injector);
-  const subAgentWatcher = new SubAgentWatcher(config.codeHome);
+  const subAgentWatcher = new SubAgentWatcher(config.codeHome, {
+    mode:
+      config.subagents?.enabled === false
+        ? 'off'
+        : resolveSubagentMode(config.subagents?.discovery),
+  });
   const notificationStore = new NotificationStore();
   const sandbox = isSandbox();
   if (sandbox) {

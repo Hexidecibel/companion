@@ -4,6 +4,8 @@ import { useSubAgentDetail } from '../hooks/useSubAgentDetail';
 import { DispatchAgentCard } from './DispatchAgentCard';
 import { MessageBubble } from './MessageBubble';
 import { AgentTile } from './AgentTile';
+import { SubagentStatusChip, SubagentStateBody } from './SubagentState';
+import { indentOf, orderTree } from '../services/subagents';
 import { isMobileViewport } from '../utils/platform';
 
 interface DispatchPanelProps {
@@ -19,13 +21,19 @@ interface DispatchPanelProps {
 function DetailView({
   serverId,
   agentId,
+  listAgent,
   onBack,
 }: {
   serverId: string;
   agentId: string;
+  /** The agent as the live list knows it (tracker state on newer daemons). */
+  listAgent?: SubAgent;
   onBack: () => void;
 }) {
-  const { agent, highlights, loading } = useSubAgentDetail(serverId, agentId);
+  const { agent: fetched, highlights, loading } = useSubAgentDetail(serverId, agentId, {
+    version: listAgent && listAgent.status !== 'running' ? listAgent.summary?.version ?? listAgent.messageCount : undefined,
+  });
+  const agent = listAgent ?? fetched;
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // Auto-scroll to bottom when new messages arrive
@@ -45,23 +53,24 @@ function DetailView({
           <span className="dispatch-toolbar-label">
             {agent?.slug || 'Agent'}
           </span>
-          {agent && (
-            <span className={`dispatch-toolbar-status dispatch-status-${agent.status}`}>
-              {agent.status}
-            </span>
-          )}
+          {agent && <SubagentStatusChip agent={agent} />}
         </div>
         {agent && (
           <div className="dispatch-toolbar-right">
             {agent.subagentType && (
               <span className="dispatch-toolbar-meta">{agent.subagentType}</span>
             )}
-            <span className="dispatch-toolbar-meta">{agent.messageCount} msgs</span>
+            {!agent.summary && <span className="dispatch-toolbar-meta">{agent.messageCount} msgs</span>}
           </div>
         )}
       </div>
       {agent?.description && (
         <div className="dispatch-detail-desc">{agent.description}</div>
+      )}
+      {agent?.summary && (
+        <div className="dispatch-detail-desc">
+          <SubagentStateBody summary={agent.summary} />
+        </div>
       )}
       <div className="dispatch-detail-conversation" ref={scrollRef}>
         {loading && (
@@ -147,12 +156,8 @@ export function DispatchPanel({
 
   if (totalAgents === 0) return null;
 
-  // Sort: running first, then by lastActivity descending
-  const sorted = [...agents].sort((a, b) => {
-    if (a.status === 'running' && b.status !== 'running') return -1;
-    if (a.status !== 'running' && b.status === 'running') return 1;
-    return b.lastActivity - a.lastActivity;
-  });
+  // Tree order: running first, newest first; nested agents right under their parent.
+  const sorted = orderTree(agents);
 
   const visibleAgents = sorted.filter(a => !dismissedAgents.has(a.agentId));
   const dismissedCount = dismissedAgents.size;
@@ -180,6 +185,7 @@ export function DispatchPanel({
           <DetailView
             serverId={serverId}
             agentId={focusedAgentId}
+            listAgent={agents.find((a) => a.agentId === focusedAgentId)}
             onBack={() => setFocusedAgentId(null)}
           />
         ) : (
@@ -203,6 +209,7 @@ export function DispatchPanel({
                 <DispatchAgentCard
                   key={agent.agentId}
                   agent={agent}
+                  indent={indentOf(agent, visibleAgents)}
                   onClick={() => setFocusedAgentId(agent.agentId)}
                   onDismiss={agent.status !== 'running' ? () => handleDismiss(agent.agentId) : undefined}
                 />
@@ -259,6 +266,7 @@ export function DispatchPanel({
             key={agent.agentId}
             serverId={serverId}
             agent={agent}
+            indent={indentOf(agent, visibleAgents)}
             onDismiss={agent.status !== 'running' ? () => handleDismiss(agent.agentId) : undefined}
           />
         ))}

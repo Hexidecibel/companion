@@ -1,3 +1,4 @@
+import type { SubagentStatus, SubagentSummary } from './subagents';
 export interface Server {
   id: string;
   name: string;
@@ -190,6 +191,14 @@ export interface SubAgent {
   messageCount: number;
   lastActivity: number;
   currentActivity?: string;
+  /** Detailed status (newer daemons): starting / running / waiting_child / done / ... */
+  state?: SubagentStatus;
+  /** Spawning agent when nested (newer daemons). */
+  parentAgentId?: string;
+  /** Nesting depth, 1 = dispatched by the main thread (newer daemons). */
+  depth?: number;
+  /** Compact tracker state (newer daemons). */
+  summary?: SubagentSummary;
 }
 
 export interface AgentTree {

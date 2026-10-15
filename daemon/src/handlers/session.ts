@@ -511,7 +511,7 @@ export function registerSessionHandlers(ctx: HandlerContext): Record<string, Mes
       }
     },
 
-    get_agent_detail(client, payload, requestId) {
+    async get_agent_detail(client, payload, requestId) {
       if (!ctx.subAgentWatcher) {
         ctx.send(client.ws, {
           type: 'agent_detail',
@@ -534,7 +534,7 @@ export function registerSessionHandlers(ctx: HandlerContext): Record<string, Mes
       }
 
       try {
-        const detail = ctx.subAgentWatcher.getAgentDetail(detailPayload.agentId);
+        const detail = await ctx.subAgentWatcher.getAgentDetail(detailPayload.agentId);
         if (!detail) {
           ctx.send(client.ws, {
             type: 'agent_detail',

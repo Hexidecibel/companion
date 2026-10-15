@@ -1,351 +1,192 @@
+/**
+ * SubAgentWatcher: the daemon's subagent facade. By default it runs the
+ * SubagentTracker (daemon/src/subagents/: fs.watch discovery, byte-offset tails,
+ * notification-driven completion); `subagents.discovery: 'legacy'` (or env
+ * COMPANION_SUBAGENTS=legacy) runs the old chokidar watcher for one release.
+ * `get_agent_tree` / `get_agent_detail` keep their response shapes (fields only added).
+ */
+
 import * as fs from 'fs';
 import * as path from 'path';
-import * as chokidar from 'chokidar';
 import { EventEmitter } from 'events';
 import { SubAgent, AgentTree, ConversationHighlight } from './types';
 import { parseConversationFile, extractHighlights } from './parser';
+import { LegacySubAgentWatcher } from './subagent-watcher-legacy';
+import { SubagentTracker } from './subagents/tracker';
+import { SubagentDiscovery } from './subagents/discover';
+import { SubagentHub } from './subagents/hub';
+import { isActive, legacyStatus } from './subagents/completion';
+import { rollupText } from './subagents/rollup';
+import type { AgentRecord } from './subagents/state';
+import type { StuckSettings } from './stuck/protocol';
+import type { SubagentSummary, SubagentUpdateEvent } from './subagents/protocol';
 
-// On the initial chokidar scan, skip sub-agent files that haven't been written
-// to recently. Without this guard the watcher reads + JSON-parses every historical
-// sub-agent file (potentially thousands, hundreds of MB total) on startup and on
-// every poll tick, pegging the CPU. Active agents are always tracked because their
-// file mtime is fresh; once tracked they keep updating regardless of age.
-const SUBAGENT_INITIAL_MAX_AGE_MS = 10 * 60 * 1000; // 10 min
+export type SubagentMode = 'watch' | 'legacy' | 'off';
 
-interface SubAgentJsonlEntry {
-  agentId?: string;
-  slug?: string;
-  sessionId?: string;
-  type?: string;
-  message?: {
-    role?: string;
-    content?: string | Array<{ type: string; text?: string }>;
-    stop_reason?: string | null;
-  };
-  timestamp?: string;
+export interface SubAgentWatcherOptions {
+  mode?: SubagentMode;
+  stuckSettings?: () => StuckSettings;
+  /** Backstop tick (ms). */
+  tickMs?: number;
 }
 
-interface TrackedSubAgent {
-  agentId: string;
-  slug: string;
-  sessionId: string;
-  filePath: string;
-  startedAt: number;
-  completedAt?: number;
-  description?: string;
-  subagentType?: string;
-  messageCount: number;
-  lastActivity: number;
-  lastContent?: string;
-  isComplete: boolean;
+/** Recently finished agents stay in get_agent_tree this long (legacy panel semantics). */
+const TREE_FINISHED_MS = 5 * 60 * 1000;
+/** get_agent_detail reads at most the newest this-many bytes of a transcript. */
+const DETAIL_TAIL_BYTES = 2 * 1024 * 1024;
+const DETAIL_CACHE = 20;
+
+export function resolveSubagentMode(configured?: unknown, env = process.env): SubagentMode {
+  const e = (env.COMPANION_SUBAGENTS || '').trim().toLowerCase();
+  if (e === 'legacy' || e === 'off' || e === 'watch') return e;
+  if (configured === 'legacy' || configured === 'off' || configured === 'watch') return configured;
+  return 'watch';
 }
 
 export class SubAgentWatcher extends EventEmitter {
-  private codeHome: string;
-  private watcher: chokidar.FSWatcher | null = null;
-  private agents: Map<string, TrackedSubAgent> = new Map();
-  private cleanupInterval: NodeJS.Timeout | null = null;
-  // True until the initial chokidar scan has settled. While true we ignore stale
-  // historical files so startup doesn't parse the entire sub-agent backlog.
-  private initialScanActive = true;
+  readonly mode: SubagentMode;
+  private legacy: LegacySubAgentWatcher | null = null;
+  readonly tracker: SubagentTracker | null = null;
+  private discovery: SubagentDiscovery | null = null;
+  private hubRef: SubagentHub | null = null;
+  private tickTimer: NodeJS.Timeout | null = null;
+  private pruneTimer: NodeJS.Timeout | null = null;
+  private ticking = false;
+  private detailCache = new Map<
+    string,
+    { size: number; mtimeMs: number; highlights: ConversationHighlight[]; messageCount: number }
+  >();
 
-  constructor(codeHome: string) {
+  constructor(
+    private codeHome: string,
+    private opts: SubAgentWatcherOptions = {}
+  ) {
     super();
-    this.codeHome = codeHome;
-  }
-
-  // Remove agents older than 24 hours from memory
-  private cleanup(): void {
-    const oneDayAgo = Date.now() - 24 * 60 * 60 * 1000;
-    let removed = 0;
-    for (const [key, agent] of this.agents.entries()) {
-      if (agent.lastActivity < oneDayAgo) {
-        this.agents.delete(key);
-        removed++;
-      }
-    }
-    if (removed > 0) {
-      console.log(`SubAgentWatcher: Cleaned up ${removed} old agents`);
-    }
+    this.mode = opts.mode ?? resolveSubagentMode();
+    if (this.mode === 'legacy') this.legacy = new LegacySubAgentWatcher(codeHome);
+    else if (this.mode === 'watch')
+      this.tracker = new SubagentTracker({ stuckSettings: opts.stuckSettings });
   }
 
   start(): void {
+    if (this.legacy) {
+      console.log('SubAgentWatcher: legacy (chokidar polling) mode');
+      this.legacy.start();
+      return;
+    }
+    if (!this.tracker) {
+      console.log('SubAgentWatcher: disabled');
+      return;
+    }
     const projectsDir = path.join(this.codeHome, 'projects');
-    const pattern = path.join(projectsDir, '**', 'subagents', '*.jsonl');
-
-    console.log(`SubAgentWatcher: Watching for sub-agents in: ${projectsDir}`);
-
-    this.watcher = chokidar.watch(pattern, {
-      persistent: true,
-      ignoreInitial: false,
-      awaitWriteFinish: {
-        stabilityThreshold: 100,
-        pollInterval: 50,
-      },
-      depth: 4,
-      usePolling: true,
-      // Poll less aggressively. With many historical sub-agent files (this can be
-      // thousands), a 200ms interval stat-walks the whole tree 5x/sec and pegs the
-      // CPU. 1s is responsive enough for the dispatch panel.
-      interval: 1000,
-      binaryInterval: 1000,
-    });
-
-    this.watcher.on('add', (filePath) => this.handleFileChange(filePath));
-    this.watcher.on('change', (filePath) => this.handleFileChange(filePath));
-    this.watcher.on('error', (error) => {
-      console.error('SubAgentWatcher error:', error);
-    });
-    // Once the initial scan completes, stop ignoring stale files so that an old
-    // file which genuinely gets re-touched later is still picked up.
-    this.watcher.on('ready', () => {
-      this.initialScanActive = false;
-    });
-
-    // Run cleanup every hour
-    this.cleanupInterval = setInterval(() => this.cleanup(), 60 * 60 * 1000);
-    // Also run cleanup on start to clear any stale data
-    this.cleanup();
+    console.log(`SubAgentWatcher: tracking subagents in ${projectsDir} (fs.watch, incremental)`);
+    this.discovery = new SubagentDiscovery(projectsDir, this.tracker);
+    void this.discovery
+      .start()
+      .catch((err) => console.error('SubAgentWatcher: discovery failed:', err));
+    const tickMs = this.opts.tickMs ?? 5000;
+    this.tickTimer = setInterval(() => {
+      if (this.ticking) return;
+      this.ticking = true;
+      void this.tracker!.tick()
+        .catch(() => undefined)
+        .finally(() => {
+          this.ticking = false;
+        });
+    }, tickMs);
+    this.tickTimer.unref?.();
+    this.pruneTimer = setInterval(() => this.discovery?.prune(), 60_000);
+    this.pruneTimer.unref?.();
   }
 
   stop(): void {
-    if (this.watcher) {
-      this.watcher.close();
-      this.watcher = null;
-    }
-    if (this.cleanupInterval) {
-      clearInterval(this.cleanupInterval);
-      this.cleanupInterval = null;
-    }
+    this.legacy?.stop();
+    this.discovery?.stop();
+    this.tracker?.stop();
+    this.hubRef?.shutdown();
+    if (this.tickTimer) clearInterval(this.tickTimer);
+    if (this.pruneTimer) clearInterval(this.pruneTimer);
+    this.tickTimer = null;
+    this.pruneTimer = null;
   }
 
-  private handleFileChange(filePath: string): void {
-    try {
-      // During the initial scan, skip files that haven't been touched recently.
-      // This avoids parsing the entire historical sub-agent backlog (which can be
-      // hundreds of MB across thousands of files) on every startup poll tick.
-      // Files already tracked, and any file touched after startup, are never skipped.
-      if (this.initialScanActive) {
-        const key = this.fileKeyIfTracked(filePath);
-        if (!key) {
-          let ageMs = Infinity;
-          try {
-            ageMs = Date.now() - fs.statSync(filePath).mtimeMs;
-          } catch {
-            return;
-          }
-          if (ageMs > SUBAGENT_INITIAL_MAX_AGE_MS) return;
-        }
-      }
-
-      const agentData = this.parseSubAgentFile(filePath);
-      if (!agentData) return;
-
-      const key = `${agentData.sessionId}:${agentData.agentId}`;
-      const existing = this.agents.get(key);
-      const isNew = !existing;
-
-      // Latch completion: once an agent has been seen as complete, keep it complete.
-      // Sub-agent JSONL can append later lines that make the heuristic flip
-      // isComplete back to false, which would otherwise re-emit "completed"
-      // repeatedly and thrash listeners.
-      if (existing?.isComplete && !agentData.isComplete) {
-        agentData.isComplete = true;
-        agentData.completedAt =
-          existing.completedAt ?? agentData.completedAt ?? agentData.lastActivity;
-      }
-
-      this.agents.set(key, agentData);
-
-      if (isNew) {
-        console.log(`SubAgentWatcher: New agent ${agentData.agentId} (${agentData.slug})`);
-        this.emit('agent-started', agentData);
-      } else if (agentData.isComplete && !existing.isComplete) {
-        console.log(`SubAgentWatcher: Agent ${agentData.agentId} completed`);
-        this.emit('agent-completed', agentData);
-      } else {
-        this.emit('agent-update', agentData);
-      }
-    } catch (err) {
-      console.error(`SubAgentWatcher: Error parsing ${filePath}:`, err);
-    }
+  /** Live delta hub (created on first use; only when the tracker runs). */
+  hub(
+    send: (clientId: string, payload: SubagentUpdateEvent) => boolean,
+    resolve: (sessionKey: string | null) => string[] | null
+  ): SubagentHub | null {
+    if (!this.tracker) return null;
+    if (this.hubRef) return this.hubRef;
+    const tracker = this.tracker;
+    const hub = new SubagentHub({
+      summary: (id) => {
+        const rec = tracker.get(id);
+        return rec ? tracker.summary(rec) : undefined;
+      },
+      resolve,
+      send,
+    });
+    tracker.on('changed', (ids: string[], removed: string[]) => hub.onChanged(ids, removed));
+    this.hubRef = hub;
+    return hub;
   }
 
-  /** Return the tracking key if a file path is already tracked, else null. */
-  private fileKeyIfTracked(filePath: string): string | null {
-    for (const [key, agent] of this.agents.entries()) {
-      if (agent.filePath === filePath) return key;
-    }
-    return null;
+  get hubInstance(): SubagentHub | null {
+    return this.hubRef;
   }
 
-  private parseSubAgentFile(filePath: string): TrackedSubAgent | null {
-    if (!fs.existsSync(filePath)) return null;
-
-    const content = fs.readFileSync(filePath, 'utf-8');
-    const lines = content.split('\n').filter((line) => line.trim());
-
-    if (lines.length === 0) return null;
-
-    let agentId = '';
-    let slug = '';
-    let sessionId = '';
-    let startedAt = 0;
-    let completedAt: number | undefined;
-    let description = '';
-    const subagentType = '';
-    let messageCount = 0;
-    let lastActivity = 0;
-    let lastContent = '';
-    let isComplete = false;
-    let lastEntryIsAssistantText = false;
-
-    for (const line of lines) {
-      try {
-        const entry: SubAgentJsonlEntry = JSON.parse(line);
-
-        if (!agentId && entry.agentId) agentId = entry.agentId;
-        if (!slug && entry.slug) slug = entry.slug;
-        if (!sessionId && entry.sessionId) sessionId = entry.sessionId;
-
-        const timestamp = entry.timestamp ? new Date(entry.timestamp).getTime() : Date.now();
-
-        if (startedAt === 0) startedAt = timestamp;
-        lastActivity = timestamp;
-        lastEntryIsAssistantText = false;
-
-        if (entry.type === 'user' && entry.message?.content) {
-          messageCount++;
-          const content =
-            typeof entry.message.content === 'string'
-              ? entry.message.content
-              : entry.message.content.map((c) => c.text || '').join('');
-
-          if (!description && content) {
-            // Use first 100 chars of first user message as description
-            description = content.substring(0, 100);
-            if (content.length > 100) description += '...';
-          }
-        }
-
-        if (entry.type === 'assistant' && entry.message) {
-          messageCount++;
-
-          // Check for stop_reason to determine if complete
-          if (entry.message.stop_reason === 'end_turn') {
-            isComplete = true;
-            completedAt = timestamp;
-          }
-
-          // Track whether last entry is an assistant text response (not tool_use)
-          // This is a strong signal the agent is done — Claude Code doesn't set stop_reason in JSONL
-          let hasToolUse = false;
-          if (entry.message.content) {
-            if (typeof entry.message.content === 'string') {
-              lastContent = entry.message.content.substring(0, 50);
-              lastEntryIsAssistantText = true;
-            } else if (Array.isArray(entry.message.content)) {
-              for (const block of entry.message.content) {
-                if (block.type === 'text' && block.text) {
-                  lastContent = block.text.substring(0, 50);
-                } else if (block.type === 'tool_use') {
-                  lastContent = `Using tool...`;
-                  hasToolUse = true;
-                }
-              }
-              lastEntryIsAssistantText = !hasToolUse;
-            }
-          }
-        }
-      } catch {
-        // Skip malformed lines
-      }
-    }
-
-    // If the last entry is an assistant text response (no tool_use), the agent is done.
-    // Claude Code subagent JSONL doesn't reliably set stop_reason, so use this heuristic.
-    if (lastEntryIsAssistantText && !isComplete) {
-      isComplete = true;
-      completedAt = lastActivity;
-    }
-
-    if (!agentId || !sessionId) return null;
-
-    return {
-      agentId,
-      slug,
-      sessionId,
-      filePath,
-      startedAt,
-      completedAt,
-      description,
-      subagentType,
-      messageCount,
-      lastActivity,
-      lastContent,
-      isComplete,
+  private toLegacy(rec: AgentRecord): SubAgent {
+    const t = this.tracker!;
+    const s = t.summary(rec);
+    const status = legacyStatus(rec.status);
+    const out: SubAgent = {
+      agentId: rec.agentId,
+      slug: s.name,
+      sessionId: rec.sessionId,
+      status,
+      startedAt: s.startedAt,
+      description: s.name,
+      subagentType: s.type || '',
+      messageCount: rec.entries,
+      lastActivity: s.lastEntryAt,
+      state: rec.status,
+      depth: s.depth,
+      summary: s,
     };
+    if (s.endedAt !== undefined && status !== 'running') out.completedAt = s.endedAt;
+    if (s.activity) out.currentActivity = s.activity;
+    if (s.parentAgentId) out.parentAgentId = s.parentAgentId;
+    return out;
   }
 
   getAgentTree(sessionIds?: string[]): AgentTree {
-    const agents: SubAgent[] = [];
-    let runningCount = 0;
-    let completedCount = 0;
-
-    // Only show running agents + completed agents from last 5 minutes
-    const now = Date.now();
-    const completedCutoff = now - 5 * 60 * 1000;
-    const fiveMinAgo = now - 5 * 60 * 1000;
-
-    const sessionIdSet = sessionIds && sessionIds.length > 0 ? new Set(sessionIds) : null;
-
-    for (const tracked of this.agents.values()) {
-      // Filter by session if specified
-      if (sessionIdSet && !sessionIdSet.has(tracked.sessionId)) continue;
-
-      // Consider agent completed if explicitly marked OR no activity in 5 minutes
-      const isStale = tracked.lastActivity < fiveMinAgo;
-      const isActuallyComplete = tracked.isComplete || isStale;
-      const status = isActuallyComplete ? 'completed' : 'running';
-      const effectiveCompletedAt =
-        tracked.completedAt || (isStale ? tracked.lastActivity : undefined);
-
-      // Skip old completed agents
-      if (
-        status === 'completed' &&
-        effectiveCompletedAt &&
-        effectiveCompletedAt < completedCutoff
-      ) {
-        continue;
-      }
-
-      if (status === 'running') runningCount++;
-      else completedCount++;
-
-      agents.push({
-        agentId: tracked.agentId,
-        slug: tracked.slug,
-        sessionId: tracked.sessionId,
-        status,
-        startedAt: tracked.startedAt,
-        completedAt: effectiveCompletedAt,
-        description: tracked.description,
-        subagentType: tracked.subagentType,
-        messageCount: tracked.messageCount,
-        lastActivity: tracked.lastActivity,
-        currentActivity: tracked.lastContent,
-      });
-    }
-
-    // Sort by last activity (most recent first)
-    agents.sort((a, b) => b.lastActivity - a.lastActivity);
-
-    return {
+    if (this.legacy) return this.legacy.getAgentTree(sessionIds);
+    const empty: AgentTree = {
       sessionId: sessionIds?.[0] || 'all',
+      agents: [],
+      totalAgents: 0,
+      runningCount: 0,
+      completedCount: 0,
+    };
+    if (!this.tracker) return empty;
+    const now = Date.now();
+    const agents: SubAgent[] = [];
+    let running = 0;
+    let completed = 0;
+    for (const rec of this.tracker.list(sessionIds)) {
+      const active = isActive(rec.status);
+      if (!active && (rec.endedAt ?? 0) < now - TREE_FINISHED_MS) continue;
+      if (active) running++;
+      else completed++;
+      agents.push(this.toLegacy(rec));
+    }
+    agents.sort((a, b) => b.lastActivity - a.lastActivity);
+    return {
+      ...empty,
       agents,
       totalAgents: agents.length,
-      runningCount,
-      completedCount,
+      runningCount: running,
+      completedCount: completed,
     };
   }
 
@@ -353,51 +194,74 @@ export class SubAgentWatcher extends EventEmitter {
     return this.getAgentTree(sessionIds).agents;
   }
 
+  /** Summaries for subagent_list (every retained agent of these conversations). */
+  listSummaries(convIds?: string[] | null): {
+    agents: SubagentSummary[];
+    running: number;
+    rollup: string;
+  } {
+    if (!this.tracker) return { agents: [], running: 0, rollup: 'No subagents.' };
+    const t = this.tracker;
+    const agents = t.list(convIds).map((r) => t.summary(r));
+    return {
+      agents,
+      running: agents.filter((a) => isActive(a.status)).length,
+      rollup: rollupText(agents, Date.now()),
+    };
+  }
+
   /**
-   * Get detailed conversation for a specific sub-agent by parsing its .jsonl file
+   * Agent detail with conversation highlights. Served from the newest
+   * DETAIL_TAIL_BYTES of the transcript (async read), cached until the file grows.
    */
-  getAgentDetail(agentId: string): {
+  async getAgentDetail(agentId: string): Promise<{
     agent: SubAgent;
     highlights: ConversationHighlight[];
-  } | null {
-    // Find the tracked agent
-    let tracked: TrackedSubAgent | null = null;
-    for (const t of this.agents.values()) {
-      if (t.agentId === agentId) {
-        tracked = t;
-        break;
-      }
-    }
-
-    if (!tracked || !fs.existsSync(tracked.filePath)) {
+  } | null> {
+    if (this.legacy) return this.legacy.getAgentDetail(agentId);
+    if (!this.tracker) return null;
+    const rec = await this.tracker.hydrate(agentId);
+    if (!rec) return null;
+    let st: fs.Stats;
+    try {
+      st = await fs.promises.stat(rec.filePath);
+    } catch {
       return null;
     }
-
-    // Parse the agent's conversation file using the existing parser
-    const messages = parseConversationFile(tracked.filePath, 200);
-    const highlights = extractHighlights(messages);
-
-    // Build the SubAgent info
-    const now = Date.now();
-    const fiveMinAgo = now - 5 * 60 * 1000;
-    const isStale = tracked.lastActivity < fiveMinAgo;
-    const isActuallyComplete = tracked.isComplete || isStale;
-    const status = isActuallyComplete ? 'completed' : 'running';
-
-    const agent: SubAgent = {
-      agentId: tracked.agentId,
-      slug: tracked.slug,
-      sessionId: tracked.sessionId,
-      status,
-      startedAt: tracked.startedAt,
-      completedAt: tracked.completedAt || (isStale ? tracked.lastActivity : undefined),
-      description: tracked.description,
-      subagentType: tracked.subagentType,
-      messageCount: tracked.messageCount,
-      lastActivity: tracked.lastActivity,
-      currentActivity: tracked.lastContent,
-    };
-
-    return { agent, highlights };
+    let cached = this.detailCache.get(agentId);
+    if (!cached || cached.size !== st.size || cached.mtimeMs !== st.mtimeMs) {
+      const start = Math.max(0, st.size - DETAIL_TAIL_BYTES);
+      const len = st.size - start;
+      let content = '';
+      if (len > 0) {
+        const fh = await fs.promises.open(rec.filePath, 'r');
+        try {
+          const buf = Buffer.alloc(len);
+          const { bytesRead } = await fh.read(buf, 0, len, start);
+          content = buf.subarray(0, bytesRead).toString('utf8');
+        } finally {
+          await fh.close().catch(() => undefined);
+        }
+        if (start > 0) {
+          const nl = content.indexOf('\n');
+          content = nl >= 0 ? content.slice(nl + 1) : '';
+        }
+      }
+      const messages = content ? parseConversationFile(rec.filePath, 200, content) : [];
+      cached = {
+        size: st.size,
+        mtimeMs: st.mtimeMs,
+        highlights: extractHighlights(messages),
+        messageCount: messages.length,
+      };
+      this.detailCache.delete(agentId);
+      this.detailCache.set(agentId, cached);
+      while (this.detailCache.size > DETAIL_CACHE) {
+        const first = this.detailCache.keys().next().value;
+        if (first === undefined) break;
+        this.detailCache.delete(first);
+      }
+    }
+    return { agent: this.toLegacy(rec), highlights: cached.highlights };
   }
 }

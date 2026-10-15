@@ -93,7 +93,7 @@ export interface StuckCandidate {
   count: number;
 }
 
-function displayFor(tc: ToolCall): string {
+export function displayFor(tc: ToolCall): string {
   const i = tc.input || {};
   if (tc.name === 'Bash') return clip(oneLine(String(i.command ?? '')), 160);
   if (typeof i.file_path === 'string') return baseName(i.file_path);
@@ -104,7 +104,7 @@ function displayFor(tc: ToolCall): string {
   return tc.name;
 }
 
-function toEvent(tc: ToolCall, msgAt: number): StuckToolEvent {
+export function toEvent(tc: ToolCall, msgAt: number): StuckToolEvent {
   const pending = tc.status === 'pending' || tc.status === 'running';
   const at = tc.startedAt || msgAt;
   const input = tc.input || {};

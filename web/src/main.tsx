@@ -11,6 +11,7 @@ import './styles/global.css';
 import './styles/herald.css';
 import './styles/herald-setup.css';
 import './styles/review.css';
+import './styles/subagents.css';
 import './styles/stuck.css';
 import './styles/babysit.css';
 import { isOverlayWindow } from './services/overlayBridge';

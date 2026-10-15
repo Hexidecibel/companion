@@ -2115,3 +2115,307 @@ adds a per-friend-safe public download page listing the current APK / desktop bu
 - Auth with device token, legacy token, revoked token; revoke closes live sockets.
 - mDNS TXT has no secrets.
 - Web: discovery list, code entry, approval prompt, Devices settings, deep-link parsing.
+
+---
+
+## Item: Subagent visibility ("where's it at")
+**Status:** in-progress (phase 1 done, deployed 2026-10-15; phases 2-3 planned)
+
+Deep, cheap visibility into dispatched subagents: a per-agent timeline + a fleet rollup the user,
+Herald and the main Claude thread can all ask "where's it at?". Hard requirement from the user: NO
+added load on the daemon, no hot-path subprocesses, no regressions. Phase 1 must also make today's
+subagent path cheaper than it is now.
+
+### Audit of the current path (2026-10-14)
+`daemon/src/subagent-watcher.ts`:
+- **Polling glob over all history** (`:78-92`): chokidar `usePolling` on `projects/**/subagents/*.jsonl`
+  at 1 s. Polling = one `fs.watchFile` stat loop per matched file, and files are never deleted: 535
+  subagent files on this box today (497 MB in files > 20 MB) = ~535 stats/s forever, growing.
+  The 10-min initial-scan guard (`:128-139`) only skips the parse, not the watch.
+- **Full sync re-read + re-parse on every change** (`:182-187`): `readFileSync` + `split` +
+  `JSON.parse` of every line, per change event, on the event loop. O(n^2) over an agent's life; a
+  100 MB transcript blocks the loop for seconds per append. `fileKeyIfTracked` is a linear scan
+  (`:175`).
+- **Wrong completion, latched forever.** (a) "last assistant entry is text without tool_use" =
+  complete (`:240-270`), but Claude Code writes each content block as its own entry: in the last 150
+  subagent files a text-only assistant entry is followed by a tool_use entry 592 times. If a change
+  event lands between them the agent flips to complete and the latch (`:152-156`) keeps it there.
+  (b) `stop_reason: 'end_turn'` is set mid-file 95 times (agents resumed via SendMessage keep
+  writing) and also latches. (c) `getAgentTree` calls anything quiet for 5 min complete (`:306-308`):
+  a subagent waiting on a 6-min test run shows "done". (d) `status: 'error'` exists in the type but
+  is never produced; failed agents show as completed.
+- **Metadata ignored**: `.meta.json` (`agentType`, `description`, `toolUseId`, `spawnDepth`,
+  `requestShape`, `worktreePath`, `stoppedByUser`) is never read; `subagentType` is a hard-coded
+  `''` (`:196`), `description` is the first 100 chars of the prompt, `slug` is absent in ~25 % of
+  files. No parent/child link, so no tree.
+- **Events emitted into the void**: `agent-started/-completed/-update` (`:162-167`) have no
+  listeners anywhere; clients only poll.
+- **`getAgentDetail`** (`:359-401`) runs `parseConversationFile` = another full sync read of the whole
+  file (`parser.ts:221`) per request; matches by agentId only.
+- Memory is fine (small records, 24 h cleanup `:58`).
+
+Web:
+- `useSubAgents.ts` polls `get_agent_tree` every 2 s (5 s idle) per open SessionView and sets state
+  every poll even when nothing changed (re-renders the whole DispatchPanel, re-sorts).
+- `useSubAgentDetail.ts:63-65`: interval is chosen once from a ref initialised to `'running'`, so it
+  is ALWAYS 3 s, also for finished agents; it never backs off when disconnected.
+- Desktop DispatchPanel renders one `AgentTile` per visible agent (`DispatchPanel.tsx:257`) and each
+  tile runs `useSubAgentDetail` = with 10 agents open, 10 full synchronous parses of possibly huge
+  files every 3 s. This is the single worst cost in the feature today.
+- `get_server_summary` calls `getAgentTree` per session (`handlers/session.ts:337-346`): in-memory,
+  cheap, fine.
+
+Facts from real transcripts (structure only):
+- Every `Agent` tool_result is `toolUseResult.status: 'async_launched'` (116/116, foreground and
+  background alike). **The parent's tool_result is NOT a done signal.**
+- The definitive signal is a parent `type:'user'` entry whose text holds
+  `<task-notification><task-id>{agentId}</task-id><tool-use-id>…</tool-use-id><status>completed|failed</status><summary>…</summary>[<usage><subagent_tokens>…<tool_uses>…<duration_ms>…</usage>]`
+  (784 seen: 724 completed, 60 failed). It fires each time the agent stops; a resumed agent
+  (SendMessage) writes again and later notifies again. Background Bash tasks use the same envelope
+  (task-id is not an agent id: match on known agent ids only).
+- No `TodoWrite` / `TaskCreate` tool_use appears in any recent transcript (main or subagent; this
+  harness does not expose TodoWrite to agents). Checklist progress must be optional input, not the
+  backbone.
+- Assistant entries carry `message.usage` (input / cache / output tokens) and `stop_reason`.
+- Nested agents: meta has `spawnDepth` (all 1 so far) + `toolUseId` = the spawning tool_use id in the
+  parent's (or parent agent's) file; files are flat in `<conv-id>/subagents/`.
+
+Reusable: `review/jsonl-tail.ts` (async byte-offset tail, carry, shrink/inode reset, 8 MB line cap,
+per-read budget), `review/sources.ts` (`listSubagentFiles`, cached `.meta.json` reads; note its
+`sort().slice(0, 200)` drops arbitrary agents past 200 because ids are random), stuck
+`normalize.ts` (`analyzeFailure`, `inputKey`, `commandCore`, `isLongCommand`, `isPollingCommand`)
+and `signals.ts` `analyze()` (pure over a `StuckDigest`, so a digest built from subagent events
+works without the parser), Herald `polishGists` metering pattern (`herald/service.ts:2059`,
+`onUsage`), `syncStuckAlerts` inbox pattern, `HeraldToolDeps.stuck`-style late-bound tool deps
+(`herald/tools.ts:584`), redaction in `herald/knowledge/redact.ts`.
+
+### Design
+New module `daemon/src/subagents/` replacing the inside of `SubAgentWatcher` (class name and the
+`get_agent_tree` / `get_agent_detail` responses kept, fields only added).
+
+1. **Discovery without polling the past** (`discover.ts`). No glob watch. The set of *candidate
+   conversations* = conversations the main watcher has seen written in the last 30 min, plus any
+   conversation that still has a running agent (cap 32). For each: one `fs.watch` (inotify / FSEvents)
+   on `<conv-id>/subagents/` (created lazily: when the dir does not exist yet, re-check on that
+   conversation's next `conversation-update`, debounced). A dir event = readdir of that one dir
+   (debounced 250 ms). Backstop: a 5 s tick stats ONLY files of agents in `running` state (size
+   compare; read only on growth) because fs.watch can drop events. Files older than 10 min at
+   discovery are registered as history (meta only, no tail) unless the parent says they are live.
+2. **One incremental reader per subagent file** (`tracker.ts`): `JsonlTail` from `review/`, read
+   budget per pass (4 MB per file, 16 MB per tick overall), a new 100 MB file is read in slices across
+   ticks with `setImmediate` yields; never `readFileSync`. Each entry folds into a small fixed-size
+   `AgentState` (below) and is then dropped: nothing keeps raw lines.
+3. **Parent-side signals** come from the conversation the agent belongs to: the tracker runs one
+   cheap `JsonlTail` on each candidate parent file but only does a substring test (`task-notification`,
+   `"name":"Agent"`) before `JSON.parse`, so the parent tail costs a scan, not a parse. (Phase 3 may
+   hand those lines over from the review ledger instead, see Sharing.)
+4. **AgentState (bounded, per agent)**: ids (agentId, sessionId, parentToolUseId, parentAgentId,
+   depth), meta (type, description, background, worktree, model), timings (startedAt, lastEntryAt,
+   lastToolAt, endedAt, elapsed), status (below), counters (tool calls by name, edits, files touched =
+   capped set 50 with counts, Bash runs, tests run / passed / failed from `analyzeFailure` + test
+   command detection), tokens (sum of `usage`, plus the notification's `subagent_tokens` when
+   present), current activity (pending tool name + display, last assistant text clipped 160), last 40
+   timeline events (ring: tool + display + ok/fail + at), optional checklist (latest TodoWrite /
+   TaskCreate/TaskUpdate input, or `Step N/M:` text lines, see CLAUDE.md line), a stuck digest ring of
+   `StuckToolEvent` (MAX 200) for signals, notification summary + result excerpt (clipped 600).
+   Memory budget: ~16 KB per agent, LRU 300 agents, finished agents evicted 24 h after end (state
+   rebuilt from the file if asked later).
+5. **Nesting**: parent = the agent whose file contains a tool_use with id == child's
+   `meta.toolUseId` (index tool_use ids of `Agent` calls per file as they are tailed); depth from
+   `spawnDepth`. Tree rendered by parentAgentId.
+
+### Completion detection
+State machine per agent: `starting -> running -> (waiting_child) -> done | failed | stopped | lost`.
+- **done / failed**: the parent's `<task-notification>` with this agent id (status completed/failed;
+  `meta.stoppedByUser` -> `stopped`). Definitive; carries summary + usage.
+- **resumed**: new sidechain bytes after a notification whose timestamp is later than it ->
+  `running` again (no latch; a resumed agent must show as running).
+- **quiet-but-alive**: no notification, a tool_use pending -> `running` with the pending tool shown
+  (a 20-min test is not "done"). Pending `Agent` call -> `waiting_child`.
+- **probably done** (only when the parent file is unreadable / not candidate): last assistant entry
+  has `stop_reason: 'end_turn'` AND no new bytes for 30 s -> `done?` (shown as "finished
+  (unconfirmed)"), upgraded by the notification when it arrives.
+- **lost**: no notification, no bytes for 30 min, no pending tool -> `lost` (never silently "done").
+Text-only assistant entries never complete an agent.
+
+### Stuck signals for subagents
+Feed the agent's `StuckToolEvent` ring into `stuck/signals.ts` `analyze()` with `phase:'working'`
+and `pane: null` (so `stalled_tool` needs no capture: replaced by "pending tool older than its cap
+with no bytes written", since a subagent has no pane). Reuses repeated_failure / loop / oscillation /
+no_progress thresholds from stuck settings. Evaluated on the tracker tick only for running agents,
+never on a pane, never a subprocess. Findings are `AgentState.stuck` (kind + headline), not
+`StuckDetector` findings (no session banner); they feed the inbox below.
+
+### "Where's it at" rollup
+- `facts.ts` (pure): one compact JSON per dispatch group (agents of one session's turn, or one
+  agent): status counts, per agent {name, type, status, elapsed, idle, checklist x/y, current
+  activity, last 3 events, tests pass/fail, files touched count + top 5 basenames, stuck headline,
+  notification summary}. All strings through `redact.ts` + clipped. No raw transcript ever.
+- **Deterministic answer first** (`rollupText(facts)`): "3 of 5 done. Bob is running tests (2 failing,
+  4 min). Ann is idle 6 min on a Bash call." Free, always available; it is what Herald's fallback
+  brain and the MCP tool return when the LLM is off.
+- **LLM polish (optional)**: `HeraldService.polishRollup(facts)` modelled on `polishGists`: one
+  tool-less call, `maxTokens` ~200, 20 s timeout, `onUsage` metering, budget + brain-offline checks.
+  Triggered only (a) on demand (Herald tool, page "Summarize", MCP with `polish: true`) or (b) on a
+  material state change (an agent finished / failed / turned stuck) while some client has the status
+  page open, throttled to <= 1 per minute per group, cached by a facts hash. Setting
+  `subagents.rollup_llm`: `off | on_demand | auto`, default `on_demand`.
+
+### Surfaces
+- **WS** (new protocol file `daemon/src/subagents/protocol.ts`, mirrored byte-for-byte in
+  `web/src/types/subagents.ts` with a mirror test like stuck/review):
+  `subagent_list {sessionId?}` (tree + compact states), `subagent_get {agentId}` (full state with
+  timeline; the transcript highlights path stays `get_agent_detail` but is served from a cached,
+  bounded tail of the last 200 messages, rebuilt only when the file grew), `subagent_rollup
+  {sessionId?, agentId?, polish?}`, `subagent_watch {sessionId|null}` (opt-in live updates).
+  Event `subagent_update` = DELTAS (changed agent states only), sent only to connections that sent
+  `subagent_watch`, coalesced per connection to at most 1 per second.
+- **Web**: `useSubAgents` switches to watch + deltas (keeps a 15 s poll fallback for old daemons);
+  set state only on a real change; `AgentTile` stops fetching detail by default (shows the state:
+  checklist, current activity, last events, tests, tokens) and fetches highlights only when the tile
+  is expanded / focused; fix the detail interval bug. DispatchPanel: tree indentation, status chips
+  (running / waiting on child / done / failed / stopped / lost / stuck), elapsed + idle, tokens.
+  Status page (`components/subagents/SubagentStatusPage.tsx`) reachable from the panel header: all
+  dispatch groups across sessions with the rollup line + "Summarize" button.
+- **Herald**: tool `subagent_status {session?}` (deterministic facts + rollup; LLM polish only when
+  the user asks "summarize" or policy is auto), inbox items via `syncSubagentAlerts` (like
+  `syncStuckAlerts`): one item per dispatch group when the LAST running agent ends ("5 agents done in
+  Out4, 1 failed"), immediately for a failed agent, and for a stuck agent (stuck tone, never spoken).
+  Single agents finishing do not create items (noise), configurable.
+- **Main thread**: MCP tool `remote_subagent_status {server, cwd?|session?, agentId?, polish?}` in
+  `mcp/src/tools/remote_subagent_status.ts` (read-only request, no `remote_capabilities` needed, same
+  auth as `remote_list_sessions`). Optional status file `~/.companion/subagents/<sessionId>.json`
+  (written at most every 10 s, only while that session has running agents, off by default) for a main
+  thread without the MCP.
+
+### Performance budget / non-impact guarantees
+- **Strictly less I/O than today**: chokidar polling over every historical subagent file is removed
+  (535 stats/s -> fs.watch on <= 32 dirs + <= 1 stat per running agent per 5 s). Full re-reads and
+  sync parses are removed (each byte read once, async, budgeted).
+- **No subprocesses**, ever (no git, no tmux capture, no shell).
+- **Nothing added to the `conversation-update` hot path** except a debounced "is this conversation a
+  candidate / does its subagents dir exist" check (Map lookup + at most one async stat per 2 s per
+  conversation).
+- **Budgets per tick, not lifetime**: <= 16 MB read and <= 20 ms of synchronous fold work per tick,
+  then `setImmediate` yield; a 100 MB backlog is caught up over several ticks with the newest-first
+  rule for live agents (tail the last 2 MB of a never-seen huge file first for "current activity",
+  backfill counters lazily, mark `partial: true` until done).
+- **Bounded memory**: fixed-size AgentState, rings, LRU 300, eviction 24 h; parent notification index
+  capped; meta cache reused from `review/sources.ts`.
+- **Client traffic**: deltas only, only to watchers, 1/s coalescing; no polling while watching; detail
+  highlights only for the focused agent.
+- **LLM**: never on a timer, never without a client asking or a watcher present; <= 1/min/group;
+  cached by facts hash; metered and budget-gated; off-able.
+- **Kill switch**: config `subagents.enabled` (default true) + `subagents.discovery: 'watch' |
+  'legacy'` to fall back to the old watcher if fs.watch misbehaves on a platform.
+- Guard tests: a perf test feeding a 100 MB synthetic file asserts no single fold step > 50 ms and
+  total reads == file size.
+
+### Sharing one tail with the review ledger
+The ledger tails the same subagent files (only when review is used, on its own debounce). Phase 1
+keeps them separate (each byte is read at most once per consumer, async; today's watcher re-reads
+everything, so this is already a large net win). Phase 3: a `TranscriptFeed` that owns one
+`JsonlTail` per file and fans parsed entries out to subscribers (subagent tracker always; ledger when
+present). The ledger's rebuild path (re-read from 0 on chain change) stays as is, using its own
+temporary tail, so the shared feed never rewinds.
+
+### Protocol / types
+- New `daemon/src/subagents/protocol.ts` <-> `web/src/types/subagents.ts` (byte-identical, mirror
+  test). `SubagentState`, `SubagentStatus`, `SubagentEvent`, `SubagentChecklist`, `SubagentRollup`,
+  requests above, event `subagent_update`.
+- `SubAgent` in `daemon/src/types.ts` / `web/src/types/index.ts`: optional fields only (`status`
+  gains nothing breaking; new optional `state?: SubagentStatus`, `parentAgentId?`, `depth?`).
+- Herald: `HeraldInboxItem.subagents?` (optional) mirrored above the voice marker in
+  `web/src/types/herald.ts`.
+
+### Files
+- New: `daemon/src/subagents/{protocol,discover,tracker,state,completion,facts,rollup,index}.ts`,
+  `daemon/src/subagents/__tests__/*`, `daemon/src/handlers/subagents.ts`,
+  `web/src/types/subagents.ts`, `web/src/types/__tests__/subagentsProtocolMirror.test.ts`,
+  `web/src/services/subagents.ts`, `web/src/components/subagents/SubagentStatusPage.tsx`,
+  `mcp/src/tools/remote_subagent_status.ts`.
+- Changed: `daemon/src/subagent-watcher.ts` (thin facade over the tracker; legacy path behind the
+  switch), `daemon/src/index.ts`, `daemon/src/websocket.ts` / handler registration,
+  `daemon/src/herald/{tools,service,inbox,protocol,fallback}.ts`, `web/src/types/herald.ts`,
+  `web/src/hooks/{useSubAgents,useSubAgentDetail}.ts`,
+  `web/src/components/{DispatchPanel,DispatchAgentCard,AgentTile}.tsx`, `mcp/src/index.ts`,
+  `mcp/README.md`, `CLAUDE.md` (docs only, after shipping).
+
+### Phases
+1. **Tracker + correctness, zero LLM** (daemon + web) - DONE 2026-10-14: discovery via fs.watch, JsonlTail-based
+   tracker, meta read, notification-based completion state machine, nesting, counters / tests /
+   files / tokens / timeline, subagent stuck signals; protocol + mirror; `subagent_list/get/watch`,
+   deltas; web panel fixes (detail interval bug, no per-tile detail polling, no-op state updates,
+   tree + chips + timeline). Deterministic `rollupText`. Ships as a pure perf + accuracy win.
+2. **Herald + main thread** (zero LLM by default): `subagent_status` tool, inbox items (group done,
+   failed, stuck), fallback lines, MCP `remote_subagent_status`, optional status file.
+3. **Rollup polish + shared feed**: `polishRollup` (metered, throttled, cached, setting), status page
+   "Summarize", `TranscriptFeed` shared with the review ledger, `listSubagentFiles` 200-cap fix
+   (newest by mtime instead of sorted id).
+
+### Test plan
+- Jest (daemon, temp dirs, no real `~/.claude`): tail fold on synthetic transcripts (text entry then
+  tool_use entry never completes; mid-file `end_turn` + more bytes = running; notification
+  completed / failed; resume after notification; stoppedByUser; quiet with pending Bash = running;
+  lost after 30 min); nesting via meta toolUseId; budgets (100 MB file: total bytes read == size, no
+  sync read, yields); eviction / LRU; discovery (dir created after the conversation, fs.watch event
+  dropped -> backstop stat finds growth); stuck signals on a synthetic repeated-failure agent; facts
+  redaction (tokens / paths from `redact.ts` denylist never reach facts); rollupText golden cases;
+  delta coalescing (10 updates in 1 s -> 1 event); polishRollup throttle + cache + metering (fake
+  provider).
+- Web: protocol mirror test; `useSubAgents` delta merge + no-op suppression; detail hook backs off
+  for finished agents.
+- MCP: unit test of `remote_subagent_status` against a fake daemon client.
+- Live check on the PROBE instance only (`bin/herald-sandbox --instance probe start`, private
+  `TMUX_TMPDIR`, never the production daemon or 9877): start a throwaway Claude session in an
+  isolated tmux server, ask it to dispatch 3 background agents (one runs a deliberately failing
+  test 6 times, one sleeps in a slow test command, one finishes fast); assert via a probe script:
+  states over time, no false "done" during the slow command, failed notification -> failed,
+  stuck finding on the looping one, Herald `subagent_status` answer, inbox group item, MCP tool
+  output against port 9888. Measure daemon CPU/RSS before vs after with the same 535-file history
+  (`/proc/<pid>/stat` sampling) and require it to be lower than the legacy watcher.
+
+### Proposed CLAUDE.md line (not applied)
+"Subagents doing multi-step work keep a checklist: with a TodoWrite/Task tool, use it; otherwise
+start with a numbered plan and begin each progress message with `Step N/M:` so Companion can show
+progress."
+
+### Decisions (user, 2026-10-14)
+1. Inbox (phase 2): one item per finished dispatch group, plus a separate item for each failed or stuck agent.
+2. LLM rollup (phase 3): on demand only (`rollup_llm` default `on_demand`, never `auto` by default).
+3. No status file; the MCP tool `remote_subagent_status` only (phase 2).
+4. The status view shows subagents from ALL Claude sessions on the box, not only Companion's tmux
+   sessions (phase 1 discovery already watches every project dir; `subagent_list` without
+   `sessionId` returns all).
+5. Finished agents are retained 24 h (in memory; `SUBAGENT_LIMITS.retainMs`).
+6. The old chokidar watcher stays behind a fallback switch for ONE release, then is removed. The
+   new tracker is the default (`subagents.discovery: 'legacy'` or env `COMPANION_SUBAGENTS=legacy`;
+   `subagents.enabled: false` / `COMPANION_SUBAGENTS=off` turns tracking off).
+
+### Phase 1 as built (2026-10-14)
+- Daemon `daemon/src/subagents/`: `protocol.ts` (mirrored byte-for-byte in `web/src/types/subagents.ts`,
+  test `web/src/types/__tests__/subagentsProtocolMirror.test.ts`), `notify.ts` (task-notification
+  parsing: user entries + queue-operation enqueues, never tool results / assistant text; queued +
+  delivered copies dedupe), `completion.ts` (pure state machine), `state.ts` (`AgentRecord` fold,
+  bounded), `parent-scan.ts` (byte-level needle scan of parents, parse only matching lines, last
+  32 MB of a huge parent), `tracker.ts` (budgets, nesting, stuck via `stuck/signals.analyze` with a
+  synthetic pane = "no bytes written", eviction / LRU, `changed` events), `discover.ts` (fs.watch on
+  `projects/` + every project dir + <= 32 candidate `subagents/` dirs; startup looks only at
+  conversations touched in 24 h and reads only agent files written in 30 min; older = history, read
+  on demand), `hub.ts` (subagent_update deltas, watchers only, 1/s per watch), `rollup.ts`
+  (deterministic `rollupText`). `subagent-watcher.ts` is now the facade (legacy code moved to
+  `subagent-watcher-legacy.ts`); `get_agent_detail` is served from the newest 2 MB of the transcript,
+  async, cached until the file changes. `handlers/subagents.ts`: `subagent_list`, `subagent_get`,
+  `subagent_rollup`, `subagent_watch`. `stuck/signals.ts` only exports `toEvent` / `displayFor` now.
+  Very long unbroken tokens in tool output are hashed before the stuck normaliser (its path regex is
+  quadratic on them).
+- `summary.tokens` = context size (newest message's input + cache + output, or the notification's
+  `subagent_tokens`); cumulative per-kind usage is `tokenDetail`.
+- Web: `useSubAgents` (list + watch + deltas, 15 s safety re-list, `get_agent_tree` polling fallback
+  for older daemons, setState only on a real change), `useSubAgentDetail` (interval re-decided per
+  fetch, stops for finished agents, 10 s while disconnected, `enabled` flag), `AgentTile` (state view
+  by default, conversation fetched only when expanded), `SubagentState.tsx` (chips + state body),
+  DispatchPanel tree order + indentation, `services/subagents.ts`, `styles/subagents.css`.
+- Deferred to later phases: backfilling counters of a `partial` (huge / history) transcript, the
+  status page, Herald / inbox / MCP, LLM polish, the shared TranscriptFeed, the 100 MB perf test
+  (a 17 MB growth test asserts budgets + every byte read once + slices < 50 ms).

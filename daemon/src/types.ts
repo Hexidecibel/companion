@@ -1,4 +1,5 @@
 import type { HeraldConfigBlock } from './herald/config';
+import type { SubagentStatus, SubagentSummary } from './subagents/protocol';
 export interface OriginCredential {
   origin: string;
   token: string;
@@ -52,6 +53,9 @@ export interface DaemonConfig {
   concierge_dir?: string;
   // Herald conversational front layer (raw snake_case block; see herald/config.ts).
   herald?: HeraldConfigBlock;
+  // Subagent tracking: enabled (default true); discovery 'watch' (default, fs.watch +
+  // incremental tails) or 'legacy' (the old chokidar watcher, one release only).
+  subagents?: { enabled?: boolean; discovery?: 'watch' | 'legacy' };
   // Display name (mDNS, pairing). Default: "Companion on <hostname>".
   name?: string;
   // Device pairing (pairing/manager.ts). Default on; code pairing only from
@@ -286,6 +290,14 @@ export interface SubAgent {
   messageCount: number;
   lastActivity: number;
   currentActivity?: string;
+  /** Detailed status (newer daemons): starting / running / waiting_child / done / ... */
+  state?: SubagentStatus;
+  /** Spawning agent when nested (newer daemons). */
+  parentAgentId?: string;
+  /** Nesting depth, 1 = dispatched by the main thread (newer daemons). */
+  depth?: number;
+  /** Compact tracker state (newer daemons). */
+  summary?: SubagentSummary;
 }
 
 export interface AgentTree {

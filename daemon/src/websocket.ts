@@ -197,6 +197,10 @@ export class WebSocketHandler {
     }
 
     this.stuck = this.createStuck();
+    if (this.stuck && this.subAgentWatcher?.tracker) {
+      const stuck = this.stuck;
+      this.subAgentWatcher.tracker.setStuckSettings(() => stuck.getSettings());
+    }
     if (this.stuck && this.herald) {
       const stuck = this.stuck;
       stuck.setHerald(this.herald);
@@ -791,6 +795,7 @@ export class WebSocketHandler {
       this.pairing.clientGone(clientId);
       this.heraldVoice?.clientGone(clientId);
       this.review?.dropClient(clientId);
+      this.subAgentWatcher?.hubInstance?.dropClient(clientId);
       console.log(
         `WebSocket: Client disconnected (${clientId}) code=${code} reason=${reason?.toString() || 'none'}`
       );
