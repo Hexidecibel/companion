@@ -115,6 +115,7 @@ High-level features of the Companion daemon, web client, and desktop/mobile apps
 - Inline auto-approve toggle in session header
 - Text search across session history with match highlighting and prev/next navigation
 - Cross-session infinite scroll (chains JSONL files by creation time)
+- Message send times, text-message style (2026-10-15): the last bubble of a run shows its time in the corner ("3:42 PM", "Oct 12, 3:42 PM" on older days); the others reveal theirs on hover (desktop) or in the long-press menu, with full date + "ago"; a centred divider marks gaps of more than an hour
 
 ## File & Artifact Viewer
 - Open files referenced in conversation with a single tap/click

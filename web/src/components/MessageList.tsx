@@ -4,6 +4,7 @@ import { MessageBubble } from './MessageBubble';
 import { EMPTY_EDIT_ROWS, hiddenEditRows } from './review/editRows';
 import { SkeletonMessageBubble } from './Skeleton';
 import scrollDebugger from '../utils/scrollDebugger';
+import { layoutMessageTimes } from '../utils/messageTime';
 import { FOCUS_CLASS, FOCUS_HIGHLIGHT_MS, findPromptElement, hasSessionFocus, onSessionFocus, takeSessionFocus } from '../services/sessionFocus';
 
 
@@ -386,6 +387,9 @@ export const MessageList = memo(function MessageList({
     };
   }, [highlights, hideTools]);
 
+  // Which bubbles show their sent time, and where "time gap" dividers go (one pass).
+  const timeLayout = useMemo(() => layoutMessageTimes(visibleMessages, Date.now()), [visibleMessages]);
+
   const handleClick = useCallback((e: React.MouseEvent) => {
     const target = e.target as HTMLElement;
     if (target.closest('button, a, code, pre, .option-btn, .tool-card')) return;
@@ -435,6 +439,11 @@ export const MessageList = memo(function MessageList({
         )}
         {visibleMessages.map((msg) => (
           <div key={msg.id} id={`msg-${msg.id}`}>
+            {timeLayout.dividers.has(msg.id) && (
+              <div className="msg-time-divider" role="separator">
+                <span>{timeLayout.dividers.get(msg.id)}</span>
+              </div>
+            )}
             <MessageBubble
               message={msg}
               onSelectOption={onSelectOption}
@@ -449,6 +458,7 @@ export const MessageList = memo(function MessageList({
               onToggleBookmark={onToggleBookmark}
               serverId={serverId}
               editIds={editRows.get(msg.id)}
+              showTime={timeLayout.shown.has(msg.id)}
             />
           </div>
         ))}

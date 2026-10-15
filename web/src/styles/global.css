@@ -1232,6 +1232,56 @@ body {
   border-bottom-left-radius: 4px;
 }
 
+/* Sent time in the bubble corner (text-message style) */
+.msg-time {
+  display: block;
+  text-align: right;
+  font-size: 10.5px;
+  line-height: 1;
+  margin: 4px -6px -5px 12px;
+  color: var(--text-muted, #9ca3af);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  user-select: none;
+  cursor: default;
+}
+
+.msg-bubble-user .msg-time {
+  color: rgba(255, 255, 255, 0.65);
+}
+
+/* Not the last of a run: hidden, revealed beside the bubble on hover (long-press menu on touch) */
+.msg-time.msg-time-hover {
+  display: none;
+  position: absolute;
+  bottom: 2px;
+  margin: 0;
+  color: var(--text-muted, #9ca3af);
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .msg-time.msg-time-hover { display: block; }
+  .msg-bubble-user .msg-time.msg-time-hover { right: calc(100% + 8px); }
+  .msg-bubble-assistant .msg-time.msg-time-hover { left: calc(100% + 8px); }
+  .msg-bubble:hover .msg-time.msg-time-hover { opacity: 1; }
+}
+
+/* Divider for a gap of more than an hour between messages */
+.msg-time-divider {
+  display: flex;
+  justify-content: center;
+  margin: 10px 0 6px;
+  font-size: 11px;
+  color: var(--text-muted, #9ca3af);
+  user-select: none;
+}
+
+.msg-time-divider span {
+  padding: 1px 8px;
+}
+
 /* Quick copy button on message bubbles (touch devices) */
 .msg-copy-btn {
   position: absolute;

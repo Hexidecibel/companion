@@ -10,6 +10,7 @@ import { isTouchDevice } from '../utils/platform';
 import { URL_RE, ensureProtocol, formatLinkDomain as formatLinkDomainShared, extractUrls, cleanUrl } from '../utils/urls';
 import { copyToClipboard } from '../utils/clipboard';
 import { openExternal } from '../utils/externalLinks';
+import { formatBubbleTime, formatFullTime, hasTimeBubble } from '../utils/messageTime';
 
 export type { ChoiceData } from './QuestionBlock';
 
@@ -30,7 +31,29 @@ interface MessageBubbleProps {
   serverId?: string | null;
   /** Tools hidden: edit tool_use ids summarized in one chip row under this message. */
   editIds?: string[];
+  /** Show the sent time in the bubble corner (last of a run); otherwise it only appears on hover / long-press. */
+  showTime?: boolean;
 }
+
+/** Small muted sent time; full date + "ago" is computed only when hovered or pressed. */
+const MessageTime = memo(function MessageTime({ ts, visible }: { ts: number; visible: boolean }) {
+  // Day-relative label only needs a "now" when the message renders, not live.
+  const label = useMemo(() => formatBubbleTime(ts, Date.now()), [ts]);
+  const fill = useCallback((e: React.SyntheticEvent<HTMLElement>) => {
+    e.currentTarget.title = formatFullTime(ts, Date.now());
+  }, [ts]);
+  return (
+    <time
+      className={`msg-time${visible ? '' : ' msg-time-hover'}`}
+      dateTime={new Date(ts).toISOString()}
+      onMouseEnter={fill}
+      onPointerDown={fill}
+      onFocus={fill}
+    >
+      {label}
+    </time>
+  );
+});
 
 // Highlight search matches in text
 function HighlightedText({ text, term }: { text: string; term: string }) {
@@ -185,7 +208,7 @@ function SkillCard({ skillName, content, onViewFile, existingFiles }: { skillNam
   );
 }
 
-export const MessageBubble = memo(function MessageBubble({ message, onSelectOption, onSelectChoice, onCancelMessage, onViewFile, onViewArtifact, searchTerm, isCurrentMatch, planFilePath, isBookmarked, onToggleBookmark, serverId, editIds }: MessageBubbleProps) {
+export const MessageBubble = memo(function MessageBubble({ message, onSelectOption, onSelectChoice, onCancelMessage, onViewFile, onViewArtifact, searchTerm, isCurrentMatch, planFilePath, isBookmarked, onToggleBookmark, serverId, editIds, showTime }: MessageBubbleProps) {
   const isUser = message.type === 'user';
   const isSystem = message.type === 'system';
   const [allExpanded, setAllExpanded] = useState<boolean | undefined>(undefined);
@@ -292,6 +315,12 @@ export const MessageBubble = memo(function MessageBubble({ message, onSelectOpti
     const items: ContextMenuEntry[] = [];
     const ctx = touchContext.current;
 
+    // Sent time (full date + how long ago), computed when the menu opens
+    if (hasTimeBubble(message)) {
+      items.push({ label: formatFullTime(message.timestamp, Date.now()), onClick: () => {}, disabled: true });
+      items.push(null);
+    }
+
     // Context-specific items first
     if (ctx.type === 'link' && ctx.href) {
       items.push({
@@ -348,7 +377,7 @@ export const MessageBubble = memo(function MessageBubble({ message, onSelectOpti
       });
     }
     return items;
-  }, [message.content, message.id, isUser, isBookmarked, onToggleBookmark]);
+  }, [message, isUser, isBookmarked, onToggleBookmark]);
 
   // Render compaction summaries as expandable dividers
   if (isSystem && message.isCompaction) {
@@ -432,6 +461,7 @@ export const MessageBubble = memo(function MessageBubble({ message, onSelectOpti
               className="msg-markdown"
             />
           )}
+          {hasTimeBubble(message) && <MessageTime ts={message.timestamp} visible={!!showTime} />}
           {isUser && message.isPending && onCancelMessage && (
             <button
               className="msg-cancel-btn"
