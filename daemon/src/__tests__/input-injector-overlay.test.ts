@@ -82,8 +82,8 @@ describe('InputInjector overlay dismissal', () => {
 
     await injector.sendInput('hello', 'test-session');
 
-    // Should have captured pane, sent Escape, then sent the actual input
-    expect(capturedPanes().length).toBe(1);
+    // Captured the pane, sent Escape, re-captured (draft check), then sent the input
+    expect(capturedPanes().length).toBe(2);
     const keys = sentKeys();
     // First send-keys should be Escape
     expect(keys[0]).toContain('Escape');
@@ -94,12 +94,12 @@ describe('InputInjector overlay dismissal', () => {
   // -----------------------------------------------------------------------
   // Pattern: Generic "Esc to close" overlay
   // -----------------------------------------------------------------------
-  it('sends Escape for generic "Esc to close" overlay', async () => {
-    const genericOverlay = 'Some panel content\nPress Esc to close';
+  it('does not treat conversation text "Press Esc to close" as an overlay', async () => {
+    const conversationText = 'Some panel content\nPress Esc to close';
 
     mockSpawnSync.mockImplementation((_cmd: string, args: string[]) => {
       if (args[0] === 'has-session') return ok();
-      if (args[0] === 'capture-pane') return ok(genericOverlay);
+      if (args[0] === 'capture-pane') return ok(conversationText);
       if (args[0] === 'send-keys') return ok();
       return ok();
     });
@@ -107,7 +107,25 @@ describe('InputInjector overlay dismissal', () => {
     await injector.sendInput('test', 'test-session');
 
     const keys = sentKeys();
-    expect(keys[0]).toContain('Escape');
+    expect(keys.every((k) => !k.includes('Escape'))).toBe(true);
+  });
+
+  it('sends Escape for the shell details panel ("Esc/Enter/Space to close")', async () => {
+    const details = [
+      '  Shell details',
+      '  Status:   running',
+      '  Command:  sleep 120',
+      '  ← to go back · Esc/Enter/Space to close · x to stop',
+    ].join('\n');
+
+    mockSpawnSync.mockImplementation((_cmd: string, args: string[]) => {
+      if (args[0] === 'capture-pane') return ok(details);
+      return ok();
+    });
+
+    await injector.sendInput('test', 'test-session');
+
+    expect(sentKeys()[0]).toContain('Escape');
   });
 
   // -----------------------------------------------------------------------

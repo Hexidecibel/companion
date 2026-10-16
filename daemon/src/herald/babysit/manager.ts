@@ -614,8 +614,16 @@ export class BabysitManager {
           'send'
         );
       }
-      if (!ok)
-        return failed(`I could not deliver my answer to ${b.sessionName}, so I left it for you.`);
+      if (!ok) {
+        const refusal = prompt.kind === 'choice' ? null : src.lastSendRefusal?.(b.sessionId);
+        return failed(
+          refusal?.reason === 'draft'
+            ? `${b.sessionName} has an unsent draft in its prompt box, so I didn't type over it and left the question for you.`
+            : refusal?.reason === 'typing'
+              ? `Someone is typing in ${b.sessionName}'s terminal, so I left the question for you.`
+              : `I could not deliver my answer to ${b.sessionName}, so I left it for you.`
+        );
+      }
 
       const now = this.deps.now();
       b.answersUsed += 1;

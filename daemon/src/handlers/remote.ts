@@ -1,5 +1,6 @@
 import * as path from 'path';
 import * as fs from 'fs';
+import { startTmuxSession } from '../tmux-server';
 import { execSync, spawn, spawnSync } from 'child_process';
 import { HandlerContext, MessageHandler, AuthenticatedClient } from '../handler-context';
 import { appVersion } from '../version';
@@ -271,9 +272,7 @@ export function registerRemoteHandlers(ctx: HandlerContext): Record<string, Mess
         // the daemon's environment and an interactive shell don't matter.
         const shCmd = `${claudePath} -p ${shQuoted}`;
         try {
-          execSync(`tmux new-session -d -s "${safeName}" -c "${cwd}" ${JSON.stringify(shCmd)}`, {
-            stdio: 'pipe',
-          });
+          await startTmuxSession(safeName, ['-d', '-s', safeName, '-c', cwd, shCmd]);
           execSync(`tmux set-environment -t "${safeName}" COMPANION_APP 1`, { stdio: 'pipe' });
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);

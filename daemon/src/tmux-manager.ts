@@ -3,6 +3,17 @@ import { promisify } from 'util';
 import { trackedExecAsync, runTmux } from './impact/sub';
 import { tmuxSnapshot, invalidateTmuxSnapshot } from './tmux-snapshot';
 import * as path from 'path';
+import { startTmuxSession } from './tmux-server';
+
+/** Permission modes the app may start Claude with (`claude --permission-mode`). */
+export type ClaudePermissionMode = 'bypassPermissions';
+
+/** The shell line typed into a new session to start Claude. */
+export function claudeCommand(permissionMode?: ClaudePermissionMode): string {
+  return permissionMode === 'bypassPermissions'
+    ? 'claude --permission-mode bypassPermissions'
+    : 'claude';
+}
 
 const execAsync = trackedExecAsync('tmux-manager');
 const execFileAsync = promisify(execFile);
@@ -113,7 +124,8 @@ export class TmuxManager {
   async createSession(
     name: string,
     workingDir: string,
-    startCli: boolean = true
+    startCli: boolean = true,
+    opts: { permissionMode?: ClaudePermissionMode } = {}
   ): Promise<{ success: boolean; error?: string }> {
     // Validate session name
     const safeName = name.replace(/[^a-zA-Z0-9_-]/g, '_');
@@ -126,7 +138,9 @@ export class TmuxManager {
     try {
       // Create detached tmux session in the specified directory. execFile, no
       // shell: the directory is passed as one argument, never interpolated.
-      await execFileAsync('tmux', ['new-session', '-d', '-s', safeName, '-c', workingDir]);
+      // A tmux server that is not running yet is started in its own systemd
+      // scope (tmux-server.ts), never inside the daemon's cgroup.
+      await startTmuxSession(safeName, ['-d', '-s', safeName, '-c', workingDir]);
 
       // Tag session as managed by Companion so daemon only monitors our sessions
       await execFileAsync('tmux', ['set-environment', '-t', safeName, 'COMPANION_APP', '1']);
@@ -140,7 +154,13 @@ export class TmuxManager {
         await new Promise((resolve) => setTimeout(resolve, 200));
 
         // Send the CLI command
-        await execFileAsync('tmux', ['send-keys', '-t', safeName, 'claude', 'Enter']);
+        await execFileAsync('tmux', [
+          'send-keys',
+          '-t',
+          safeName,
+          claudeCommand(opts.permissionMode),
+          'Enter',
+        ]);
         console.log(`TmuxManager: Started CLI in session "${safeName}"`);
       }
 

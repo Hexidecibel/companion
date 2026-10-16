@@ -22,6 +22,9 @@ interface UseConversationReturn {
   error: string | null;
   firstItemIndex: number;
   sendInput: (text: string, opts?: { skipOptimistic?: boolean }) => Promise<boolean>;
+  /** Why the last send was refused by the daemon's input guard (unsent draft / typing). */
+  sendError: string | null;
+  clearSendError: () => void;
   cancelMessage: (clientMessageId: string) => Promise<string | null>;
   addOptimisticMessage: (text: string) => void;
   loadMore: () => void;
@@ -90,12 +93,30 @@ function mergeWithOptimistic(
   return merged;
 }
 
+/**
+ * User-facing text for a refused send: the daemon's input guard declines to
+ * type over an unsent draft in the terminal or while someone is typing there.
+ * Other failures return null (the input bar keeps the text, as before).
+ */
+export function describeSendError(error: string | undefined, payload?: unknown): string | null {
+  const message = (payload as { message?: unknown } | undefined)?.message;
+  if (error === 'prompt_has_draft' || error === 'user_typing') {
+    if (typeof message === 'string' && message) return message;
+    return error === 'prompt_has_draft'
+      ? 'Not sent: the prompt has an unsent draft in the terminal. Send or clear it there, then try again.'
+      : 'Not sent: someone is typing in the terminal right now. Try again in a moment.';
+  }
+  return null;
+}
+
 export function useConversation(
   serverId: string | null,
   sessionId: string | null,
   tmuxSessionName?: string,
 ): UseConversationReturn {
   const [highlights, setHighlights] = useState<ConversationHighlight[]>([]);
+  /** Why the last send was refused (the daemon's input guard), shown as a banner. */
+  const [sendError, setSendError] = useState<string | null>(null);
   const [status, setStatus] = useState<SessionStatus | null>(null);
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -482,6 +503,7 @@ export function useConversation(
             },
           ]);
         }
+        setSendError(response.success ? null : describeSendError(response.error, response.payload));
         return response.success;
       } catch {
         return false;
@@ -489,6 +511,8 @@ export function useConversation(
     },
     [serverId, sessionId, tmuxSessionName],
   );
+
+  const clearSendError = useCallback(() => setSendError(null), []);
 
   const cancelMessage = useCallback(
     async (clientMessageId: string): Promise<string | null> => {
@@ -533,5 +557,5 @@ export function useConversation(
     ]);
   }, []);
 
-  return { highlights, status, loading, loadingMore, hasMore, error, firstItemIndex, sendInput, cancelMessage, addOptimisticMessage, loadMore };
+  return { highlights, status, loading, loadingMore, hasMore, error, firstItemIndex, sendInput, sendError, clearSendError, cancelMessage, addOptimisticMessage, loadMore };
 }

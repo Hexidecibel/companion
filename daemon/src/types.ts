@@ -230,6 +230,8 @@ export interface TmuxSessionConfig {
   workingDir: string;
   startCli: boolean;
   lastUsed: number;
+  /** `claude --permission-mode` the session was started with (app spawns: bypassPermissions). */
+  permissionMode?: 'bypassPermissions';
   // Git worktree metadata (set when session was created via worktree)
   isWorktree?: boolean;
   mainRepoDir?: string;

@@ -3,6 +3,16 @@ import * as path from 'path';
 import * as os from 'os';
 import { HandlerContext, MessageHandler } from '../handler-context';
 import { MAX_ATTACHMENT_FILE_SIZE_BYTES } from '../constants';
+import type { SendInputResult } from '../input-injector';
+
+/** Wire error for a failed send: the guard's code (draft / typing), else the legacy text. */
+function sendErrorCode(
+  r: SendInputResult,
+  fallback = 'Failed to send input to session'
+): string | undefined {
+  if (r.ok) return undefined;
+  return r.reason === 'draft' || r.reason === 'typing' ? r.code : fallback;
+}
 
 // Known image file extensions (lowercase, with leading dot).
 const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.svg']);
@@ -123,7 +133,8 @@ export function registerInputHandlers(ctx: HandlerContext): Record<string, Messa
         return;
       }
 
-      const success = await ctx.injector.sendInput(inputPayload.input, sessionToUse);
+      const sendResult = await ctx.injector.sendInputDetailed(inputPayload.input, sessionToUse);
+      const success = sendResult.ok;
 
       if (success && inputPayload.clientMessageId) {
         const pending = ctx.pendingSentMessages.get(sessionToUse) || [];
@@ -138,7 +149,8 @@ export function registerInputHandlers(ctx: HandlerContext): Record<string, Messa
       ctx.send(client.ws, {
         type: 'input_sent',
         success,
-        error: success ? undefined : 'Failed to send input to session',
+        error: sendResult.ok ? undefined : sendErrorCode(sendResult),
+        ...(sendResult.ok ? {} : { payload: { message: sendResult.message } }),
         requestId,
       });
 
@@ -479,11 +491,13 @@ export function registerInputHandlers(ctx: HandlerContext): Record<string, Messa
         return;
       }
 
-      const success = await ctx.injector.sendInput(combinedMessage, sessionToUse);
+      const sendResult = await ctx.injector.sendInputDetailed(combinedMessage, sessionToUse);
+      const success = sendResult.ok;
       ctx.send(client.ws, {
         type: 'message_sent',
         success,
-        error: success ? undefined : 'Failed to send message',
+        error: sendResult.ok ? undefined : sendErrorCode(sendResult, 'Failed to send message'),
+        ...(sendResult.ok ? {} : { payload: { message: sendResult.message } }),
         requestId,
       });
 

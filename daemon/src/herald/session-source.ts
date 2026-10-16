@@ -17,6 +17,8 @@ import {
 import type { ConversationMessage } from '../types';
 import { detectTurnEndError } from '../turn-error';
 import { BoundedMap } from '../utils';
+import type { InputRefusal } from '../prompt-guard';
+import type { SendInputResult } from '../input-injector';
 import { fnv1a, oneLine, clip, trailingQuestion } from './text';
 
 export type HeraldSessionStatus = 'working' | 'waiting' | 'idle';
@@ -99,6 +101,11 @@ export interface SessionSource {
   getLiveChoice(sessionId: string): Promise<PendingChoice | null>;
   sessionExists(sessionId: string): Promise<boolean>;
   sendText(sessionId: string, text: string, tag: string): Promise<boolean>;
+  /**
+   * Why the most recent `sendText` to this session was refused by the input
+   * guard (an unsent draft in the prompt box, or someone typing), else null.
+   */
+  lastSendRefusal?(sessionId: string): InputRefusal | null;
   sendChoice(
     sessionId: string,
     index: number,
@@ -258,6 +265,8 @@ export interface LocalSourceDeps {
   };
   injector: {
     sendInput(input: string, targetSession?: string): Promise<boolean>;
+    /** Guarded send with the refusal reason (preferred when present). */
+    sendInputDetailed?(input: string, targetSession?: string): Promise<SendInputResult>;
     sendChoice(
       selectedIndices: number[],
       optionCount: number,
@@ -310,6 +319,8 @@ export class LocalSessionSource implements SessionSource {
   private loadAttempts = new BoundedMap<string, number>(256);
   /** Sessions always inside the pane-capture set (see setPinnedSessions). */
   private pinned = new Set<string>();
+  /** Input-guard refusal of the latest sendText per session. */
+  private refusals = new BoundedMap<string, InputRefusal>(200);
 
   constructor(deps: LocalSourceDeps) {
     this.deps = deps;
@@ -518,9 +529,27 @@ export class LocalSessionSource implements SessionSource {
   }
 
   async sendText(sessionId: string, text: string, tag: string): Promise<boolean> {
-    const ok = await this.deps.injector.sendInput(text, sessionId);
+    this.refusals.delete(sessionId);
+    let ok: boolean;
+    if (this.deps.injector.sendInputDetailed) {
+      const r = await this.deps.injector.sendInputDetailed(text, sessionId);
+      ok = r.ok;
+      if (!r.ok && (r.reason === 'draft' || r.reason === 'typing')) {
+        this.refusals.set(sessionId, {
+          reason: r.reason,
+          code: r.code,
+          message: r.message,
+        } as InputRefusal);
+      }
+    } else {
+      ok = await this.deps.injector.sendInput(text, sessionId);
+    }
     if (ok) this.deps.onSent?.(sessionId, text, tag);
     return ok;
+  }
+
+  lastSendRefusal(sessionId: string): InputRefusal | null {
+    return this.refusals.get(sessionId) ?? null;
   }
 
   async sendChoice(

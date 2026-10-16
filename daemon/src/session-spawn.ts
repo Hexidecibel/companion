@@ -2,11 +2,13 @@
  * Creating a Claude Code session in a tmux session: the one path shared by the
  * app's `create_tmux_session` request and Herald's `propose_spawn_session`.
  *
- *   1. Pre-write bypass permissions into <dir>/.claude/settings.json (sessions
- *      created from Companion have no terminal for interactive approval).
- *   2. tmux new-session (tagged COMPANION_APP=1) and start `claude` in it.
- *   3. Remember its config (recreate), give it a friendly name, and tell the
- *      watcher about it.
+ *   1. tmux new-session (tagged COMPANION_APP=1) and start
+ *      `claude --permission-mode bypassPermissions` in it (sessions created
+ *      from Companion have no terminal for interactive approval). Nothing is
+ *      written into the project's .claude/settings.json any more; settings an
+ *      older version wrote there are left alone.
+ *   2. Remember its config (recreate, with the same permission mode), give it
+ *      a friendly name, and tell the watcher about it.
  *
  * Callers decide what else happens (the app also makes it the active session;
  * Herald does not, so it never switches the user's view).
@@ -14,11 +16,19 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import type { TmuxManager } from './tmux-manager';
+import type { TmuxManager, ClaudePermissionMode } from './tmux-manager';
+
+/** The permission mode app-spawned sessions run in. */
+export const SPAWN_PERMISSION_MODE: ClaudePermissionMode = 'bypassPermissions';
 
 export interface SessionSpawnDeps {
   tmux: Pick<TmuxManager, 'createSession' | 'generateSessionName'>;
-  storeTmuxSessionConfig: (name: string, workingDir: string, startCli?: boolean) => void;
+  storeTmuxSessionConfig: (
+    name: string,
+    workingDir: string,
+    startCli?: boolean,
+    opts?: { permissionMode?: ClaudePermissionMode }
+  ) => void;
   sessionNameStore: {
     get(name: string): string | undefined;
     set(name: string, friendly: string): void;
@@ -40,37 +50,6 @@ export function dirToFriendlyName(dirPath: string): string {
   return base.replace(/[-_]+/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
-/** Bypass permissions for sessions started from Companion (merged into existing settings). */
-export function prewriteBypassPermissions(workingDir: string): void {
-  const settingsDir = path.join(workingDir, '.claude');
-  const settingsPath = path.join(settingsDir, 'settings.json');
-  if (!fs.existsSync(settingsDir)) fs.mkdirSync(settingsDir, { recursive: true });
-  let existing: Record<string, unknown> = {};
-  if (fs.existsSync(settingsPath)) {
-    try {
-      existing = JSON.parse(fs.readFileSync(settingsPath, 'utf-8')) as Record<string, unknown>;
-    } catch {
-      existing = {};
-    }
-  }
-  const perms = (existing.permissions || {}) as Record<string, unknown>;
-  perms.allow = perms.allow || [
-    'Bash',
-    'Edit',
-    'Write',
-    'Read',
-    'Glob',
-    'Grep',
-    'WebFetch',
-    'WebSearch',
-    'Task',
-    'NotebookEdit',
-  ];
-  perms.defaultMode = 'bypassPermissions';
-  existing.permissions = perms;
-  fs.writeFileSync(settingsPath, JSON.stringify(existing, null, 2), 'utf-8');
-}
-
 export async function createClaudeSession(
   deps: SessionSpawnDeps,
   req: { workingDir: string; name?: string; startCli?: boolean }
@@ -82,13 +61,12 @@ export async function createClaudeSession(
   const sessionName = req.name || deps.tmux.generateSessionName(req.workingDir);
   const startCli = req.startCli !== false;
   log(`Sessions: creating tmux session "${sessionName}" in ${req.workingDir}`);
-  if (startCli) {
-    prewriteBypassPermissions(req.workingDir);
-    log(`Sessions: pre-wrote bypass permissions for ${req.workingDir}`);
-  }
-  const result = await deps.tmux.createSession(sessionName, req.workingDir, startCli);
+  const permissionMode = startCli ? SPAWN_PERMISSION_MODE : undefined;
+  const result = await deps.tmux.createSession(sessionName, req.workingDir, startCli, {
+    permissionMode,
+  });
   if (!result.success) return { success: false, error: result.error };
-  deps.storeTmuxSessionConfig(sessionName, req.workingDir, startCli);
+  deps.storeTmuxSessionConfig(sessionName, req.workingDir, startCli, { permissionMode });
   if (!deps.sessionNameStore.get(sessionName)) {
     deps.sessionNameStore.set(sessionName, dirToFriendlyName(req.workingDir));
   }

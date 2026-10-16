@@ -108,7 +108,12 @@ export interface HandlerContext {
   scrollLogs: Array<{ event: string; ts: number; [key: string]: unknown }>;
 
   // Shared helper methods
-  storeTmuxSessionConfig: (name: string, workingDir: string, startCli?: boolean) => void;
+  storeTmuxSessionConfig: (
+    name: string,
+    workingDir: string,
+    startCli?: boolean,
+    opts?: { permissionMode?: 'bypassPermissions' }
+  ) => void;
   saveTmuxSessionConfigs: () => void;
   getProjectRoot: (sessionId?: string) => string | null;
 

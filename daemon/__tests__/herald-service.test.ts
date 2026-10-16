@@ -539,9 +539,12 @@ describe('HeraldService', () => {
     ]);
     const other = make(bad, fakeSource([]));
     await other.svc.start();
+    // Shares the state dir, so it may load the first instance's 'brief' depending on save timing:
+    // only assert that an invalid level changes nothing.
+    const before = other.svc.getState().verbosity;
     other.svc.send('be loud');
     await waitFor(() => !other.svc.getState().busy);
-    expect(other.svc.getState().verbosity).toBe('auto');
+    expect(other.svc.getState().verbosity).toBe(before);
     const toolResult = bad.calls[1].messages.find((m) => m.role === 'tool');
     expect(toolResult && toolResult.role === 'tool' ? toolResult.content : '').toMatch(/level must be one of/);
 

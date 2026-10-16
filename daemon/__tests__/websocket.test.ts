@@ -50,6 +50,12 @@ mockWatcher.getServerSummary = jest
 
 const mockInjector = {
   sendInput: jest.fn().mockResolvedValue(true),
+  // Guarded send (input-guard): delegates to sendInput so assertions stay on it.
+  sendInputDetailed: jest.fn(async (input: string, session?: string) =>
+    (await mockInjector.sendInput(input, session))
+      ? { ok: true }
+      : { ok: false, reason: 'tmux_error', code: 'send_failed', message: 'Failed' }
+  ),
   getActiveSession: jest.fn().mockReturnValue('claude'),
   setActiveSession: jest.fn(),
   checkSessionExists: jest.fn().mockResolvedValue(true),

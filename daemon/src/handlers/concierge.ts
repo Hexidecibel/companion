@@ -3,6 +3,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import { execSync, spawnSync } from 'child_process';
 import { HandlerContext, MessageHandler, AuthenticatedClient } from '../handler-context';
+import { startTmuxSession } from '../tmux-server';
 import { OriginCredential } from '../types';
 import { loadConfig, saveConfig } from '../config';
 import { getCertFingerprint } from '../cert-generator';
@@ -361,10 +362,7 @@ export function registerConciergeHandlers(ctx: HandlerContext): Record<string, M
         const safeName = CONCIERGE_TMUX_SESSION;
         const shCmd = `${claudePath} --dangerously-skip-permissions`;
         try {
-          execSync(
-            `tmux new-session -d -s "${safeName}" -c "${conciergeDir}" ${JSON.stringify(shCmd)}`,
-            { stdio: 'pipe' }
-          );
+          await startTmuxSession(safeName, ['-d', '-s', safeName, '-c', conciergeDir, shCmd]);
           execSync(`tmux set-environment -t "${safeName}" COMPANION_APP 1`, { stdio: 'pipe' });
         } catch (err) {
           sendError('tmux_create_failed', { detail: String((err as Error).message || err) });

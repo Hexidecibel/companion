@@ -480,8 +480,8 @@ export class WebSocketHandler {
       clientErrors: this.clientErrors,
       scrollLogs: this.scrollLogs,
 
-      storeTmuxSessionConfig: (name, workingDir, startCli) =>
-        this.storeTmuxSessionConfig(name, workingDir, startCli),
+      storeTmuxSessionConfig: (name, workingDir, startCli, opts) =>
+        this.storeTmuxSessionConfig(name, workingDir, startCli, opts),
       saveTmuxSessionConfigs: () => this.saveTmuxSessionConfigs(),
       getProjectRoot: (sessionId) => this.getProjectRoot(sessionId),
 
@@ -496,8 +496,12 @@ export class WebSocketHandler {
   private createSetup(): SetupService {
     const spawnDeps = {
       tmux: this.tmux,
-      storeTmuxSessionConfig: (n: string, d: string, c?: boolean) =>
-        this.storeTmuxSessionConfig(n, d, c),
+      storeTmuxSessionConfig: (
+        n: string,
+        d: string,
+        c?: boolean,
+        o?: { permissionMode?: 'bypassPermissions' }
+      ) => this.storeTmuxSessionConfig(n, d, c, o),
       sessionNameStore: this.sessionNameStore,
       watcher: this.watcher,
       broadcast: (type: string, payload: unknown) => this.broadcast(type, payload),
@@ -579,7 +583,7 @@ export class WebSocketHandler {
             const r = await createClaudeSession(
               {
                 tmux: this.tmux,
-                storeTmuxSessionConfig: (n, d, c) => this.storeTmuxSessionConfig(n, d, c),
+                storeTmuxSessionConfig: (n, d, c, o) => this.storeTmuxSessionConfig(n, d, c, o),
                 sessionNameStore: this.sessionNameStore,
                 watcher: this.watcher,
                 broadcast: (type, payload) => this.broadcast(type, payload),
@@ -742,12 +746,18 @@ export class WebSocketHandler {
     }
   }
 
-  private storeTmuxSessionConfig(name: string, workingDir: string, startCli: boolean = true): void {
+  private storeTmuxSessionConfig(
+    name: string,
+    workingDir: string,
+    startCli: boolean = true,
+    opts: { permissionMode?: 'bypassPermissions' } = {}
+  ): void {
     this.tmuxSessionConfigs.set(name, {
       name,
       workingDir,
       startCli,
       lastUsed: Date.now(),
+      ...(opts.permissionMode ? { permissionMode: opts.permissionMode } : {}),
     });
     this.saveTmuxSessionConfigs();
     console.log(`WebSocket: Stored tmux session config for "${name}" (${workingDir})`);

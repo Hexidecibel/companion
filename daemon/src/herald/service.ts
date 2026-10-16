@@ -96,6 +96,7 @@ import {
 } from './babysit/manager';
 import { decideBabysit, type BabysitDecideInput, type BabysitVerdict } from './babysit/decider';
 import { isSandbox } from '../sandbox';
+import { heraldRefusalText } from '../prompt-guard';
 import type { SubagentFacts } from '../subagents/protocol';
 import type { SubagentAlert } from '../subagents/alerts';
 
@@ -156,7 +157,12 @@ export class HeraldRequestError extends Error {
 /** Code Review relay failure; `code` is a ReviewErrorCode. */
 export class HeraldRelayError extends Error {
   constructor(
-    readonly code: 'herald_unavailable' | 'session_waiting' | 'unavailable',
+    readonly code:
+      | 'herald_unavailable'
+      | 'session_waiting'
+      | 'unavailable'
+      | 'prompt_has_draft'
+      | 'user_typing',
     message: string
   ) {
     super(message);
@@ -1960,7 +1966,15 @@ export class HeraldService {
     const askId = `review-${randomUUID()}`;
     const sentAt = this.now();
     const ok = await src.sendText(r.sessionId, r.prompt, askId);
-    if (!ok) throw new HeraldRelayError('unavailable', `Could not send to ${r.sessionName}`);
+    if (!ok) {
+      const refusal = src.lastSendRefusal?.(r.sessionId);
+      throw new HeraldRelayError(
+        refusal ? refusal.code : 'unavailable',
+        refusal
+          ? heraldRefusalText(r.sessionName, refusal.reason)
+          : `Could not send to ${r.sessionName}`
+      );
+    }
     this.openAsk({
       actionId: askId,
       serverId: 'local',

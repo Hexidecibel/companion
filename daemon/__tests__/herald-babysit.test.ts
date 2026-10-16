@@ -880,6 +880,22 @@ describe('babysit in HeraldService', () => {
     expect(src.sendText).toHaveBeenCalledTimes(1);
   });
 
+  it('a "continue?" refused by the input guard (user draft in the prompt) is left for the user, saying why', async () => {
+    const { svc, src } = await started([CONTINUE]);
+    src.sendText.mockImplementation(async () => false);
+    (src as unknown as { lastSendRefusal: (id: string) => unknown }).lastSendRefusal = () => ({
+      reason: 'draft',
+      code: 'prompt_has_draft',
+      message: 'x',
+    });
+    src.holder.sessions = [asking('t1')];
+    await tick(svc);
+    expect(src.sendText).toHaveBeenCalledTimes(1);
+    const b = svc.getState().babysits![0];
+    expect(b).toMatchObject({ answersUsed: 0, escalations: 1, status: 'active' });
+    expect(JSON.stringify(svc.getState())).toMatch(/unsent draft in its prompt box/);
+  });
+
   it('answers a choice the brief covers through sendChoice, after re-reading the live box', async () => {
     const { svc, src } = await started([say({ decision: 'answer', option: 1, basis: 'use SQLite for storage' })]);
     src.holder.sessions = [snap({ sessionId: 'out4', sessionName: 'Out4', status: 'waiting', pendingChoice: choice, lastTurnKey: 't1' })];

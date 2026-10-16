@@ -2,7 +2,7 @@ import { eventBus } from '../utils/eventBus';
 import { useDraggable } from '../hooks/useDraggable';
 import { useState, useEffect, useCallback, useMemo, useRef, lazy, Suspense } from 'react';
 import { PendingAttachment, WorkGroup } from '../types';
-import { useConversation } from '../hooks/useConversation';
+import { useConversation, describeSendError } from '../hooks/useConversation';
 import { useTasks } from '../hooks/useTasks';
 import { useSubAgents } from '../hooks/useSubAgents';
 import { useBypassPermissions } from '../hooks/useBypassPermissions';
@@ -90,6 +90,8 @@ export function SessionView({
     hasMore,
     error,
     sendInput,
+    sendError,
+    clearSendError,
     cancelMessage,
     addOptimisticMessage,
     loadMore,
@@ -104,6 +106,11 @@ export function SessionView({
   const { skills } = useSkills(serverId, sessionId || undefined);
   // Image send error state (auto-clears after 5s)
   const [imageSendError, setImageSendError] = useState<string | null>(null);
+  useEffect(() => {
+    if (!sendError) return;
+    const t = setTimeout(clearSendError, 8000);
+    return () => clearTimeout(t);
+  }, [sendError, clearSendError]);
   useEffect(() => {
     if (!imageSendError) return;
     const t = setTimeout(() => setImageSendError(null), 5000);
@@ -431,7 +438,7 @@ export function SessionView({
         if (!response.success) {
           const errMsg = response.error === 'tmux_session_not_found'
             ? 'tmux session not found'
-            : (response.error || 'Failed to send attachments');
+            : (describeSendError(response.error, response.payload) || response.error || 'Failed to send attachments');
           setImageSendError(errMsg);
         }
 
@@ -882,6 +889,9 @@ export function SessionView({
             )}
             {agentsError && (
               <FetchErrorBanner message={`Agents: ${agentsError}`} />
+            )}
+            {sendError && (
+              <FetchErrorBanner message={sendError} onDismiss={clearSendError} />
             )}
             {imageSendError && (
               <FetchErrorBanner message={imageSendError} onDismiss={() => setImageSendError(null)} />

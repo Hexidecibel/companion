@@ -5,7 +5,7 @@ Detailed plans for upcoming work items. Completed items are moved to FEATURES.md
 ---
 
 ## Item: Impact metrics + perf batch A
-**Status:** batch A done + deployed 2026-10-15 (production unit drop-in `companion.service.d/perf.conf`: `UV_USE_IO_URING=0`, `Nice=5`); batch B pending
+**Status:** batch A done + deployed 2026-10-15 (production unit drop-in `companion.service.d/perf.conf`: `UV_USE_IO_URING=0`, `Nice=5`); batch B done + deployed 2026-10-15 (daemon restart + herald-voice restart)
 
 Measure and cut what Companion costs the box while Claude Code runs.
 
@@ -22,12 +22,12 @@ Measure and cut what Companion costs the box while Claude Code runs.
 - One shared `tmux list-panes -a` (`tmux-snapshot.ts`, 2 s cache, in-flight shared, cached COMPANION_APP tag) for the watcher refresh (in-flight guarded, maps still built on the side and swapped synchronously) and every get_server_summary / list; pstree + display-message in PID detection replaced by /proc; terminal-view captures shared for 300 ms.
 - Session snapshot / mappings files written only when changed; stuck normaliser linear on long tokens; polled WebSocket requests summarised once a minute (`ws-log.ts`, `COMPANION_WS_DEBUG=1` for per-message logs).
 
-### Batch B (pending user decisions)
-- Input-injection guard: detect the user typing in the pane before injecting (populates `inputCollisions`).
-- herald-voice memory: ~3.9 GB RSS + 490 MB swap observed (swap 100 % used on the box).
-- tmux server in its own systemd scope (so daemon restarts / OOM never touch it).
-- `--permission-mode bypassPermissions` on app spawns (the one-time accept dialog parks new sessions).
-- Herald tool for the impact report (not added: herald/ was being changed by subagent phase 2).
+### Batch B (done + deployed 2026-10-15)
+- Input-injection guard (`daemon/src/prompt-guard.ts`, `InputInjector.sendInputDetailed`): free text into the prompt box first waits while an attached tmux client pressed a key in the last 2 s (`#{client_activity}`, up to 3 s, then refuses `user_typing`), then reads the rule-bounded prompt box from `capture-pane -p -e` (live-verified on Claude Code 2.1.301: `❯\u00a0text` between two gray `─` rules; the placeholder and prompt suggestions are DIM, SGR 2, and count as empty) and refuses `prompt_has_draft` when it holds typed text. Both bump `inputCollisions`. No prompt box (choice box, permission prompt, overlay) = proceed, so `sendChoice`, auto-approval and babysit choice answers are unaffected. Overlay Escape now only fires when the prompt box is gone AND a key-hint segment says "Esc to close" / "Esc/Enter/Space to close" (conversation text no longer matches). Errors reach the web (`input_sent` / `message_sent` error code + `payload.message` -> SessionView banner via `describeSendError`) and Herald (`SessionSource.lastSendRefusal` -> action failure / babysit escalation / relay error wording: "<name> has an unsent draft in its prompt box, so I didn't type over it.").
+- herald-voice: `HERALD_VOICE_IDLE_UNLOAD_S` (default 1800, 0 = off) unloads each engine after that long unused (on its own executor, then `gc.collect()` + glibc `malloc_trim(0)`), reloads on the next request (concurrent requests share one load); `/health` keeps `ready: true` (+ `loaded: false`, `idleUnloaded: true`, cached voices/sample rate) so the daemon and `bin/herald-voice status` (exit 0) treat it as up. Measured on a separate instance (port 9891, 60 s idle): fresh 863 MB, after use 1.80 GB, after unload 239 MB; first TTS after unload 1.3 s (warm 0.5 s).
+- tmux scope (`daemon/src/tmux-server.ts` `startTmuxSession`): every daemon `tmux new-session` (TmuxManager.createSession, remote one-shot dispatch, concierge) starts a NOT-yet-running server via `systemd-run --user --scope --unit=companion-tmux-<...>`; a running server is untouched; plain tmux in containers / non-Linux / no XDG_RUNTIME_DIR / no systemd-run / `COMPANION_TMUX_SCOPE=0`, or when systemd-run fails. Live-verified on a private socket (server cgroup = `app.slice/companion-tmux-private-1000-*.scope`, scope gone after kill-server).
+- App spawns (`session-spawn.ts`): no more `.claude/settings.json` writes; `claude --permission-mode bypassPermissions` (TmuxManager `claudeCommand`), stored as `permissionMode` in the tmux session config so recreate keeps it. Existing settings files are left alone. Live-verified on the probe (trust prompt still parks a new dir; footer "bypass permissions on").
+- Still open: Herald tool for the impact report.
 
 ---
 

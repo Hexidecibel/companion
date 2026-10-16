@@ -9,9 +9,36 @@ import {
   POST_CHOICE_DELAY_MS,
   DEFAULT_PANE_CAPTURE_LINES,
   OVERLAY_DISMISS_DELAY_MS,
-  OVERLAY_DETECTION_LINES,
 } from './constants';
 import { incrementTmuxOperations } from './metrics';
+import { impact } from './impact/state';
+import {
+  readPromptBox,
+  detectOverlay,
+  secondsSinceClientActivity,
+  refusalFor,
+  type InputRefusal,
+} from './prompt-guard';
+
+/** An attached client that pressed a key within this many seconds = someone is typing. */
+export const TYPING_QUIET_S = 2;
+/** How long a send waits for the typing to pause before it is refused. */
+export const TYPING_MAX_WAIT_MS = 3000;
+const TYPING_POLL_MS = 500;
+/** Lines captured to find the prompt box (a long draft makes the box tall). */
+const GUARD_CAPTURE_LINES = 60;
+
+export type SendInputResult =
+  | { ok: true }
+  | ({ ok: false } & (
+      | InputRefusal
+      | { reason: 'no_session' | 'tmux_error'; code: string; message: string }
+    ));
+
+export interface InputInjectorOptions {
+  now?: () => number;
+  sleep?: (ms: number) => Promise<void>;
+}
 
 interface TmuxResult {
   /** 0 on success; non-zero (or null for signal kills) on failure. */
@@ -26,10 +53,14 @@ export class InputInjector {
   private defaultSession: string;
   private activeSession: string;
   private sendLock: Promise<void> = Promise.resolve();
+  private now: () => number;
+  private sleep: (ms: number) => Promise<void>;
 
-  constructor(tmuxSession: string) {
+  constructor(tmuxSession: string, opts: InputInjectorOptions = {}) {
     this.defaultSession = tmuxSession;
     this.activeSession = tmuxSession;
+    this.now = opts.now || Date.now;
+    this.sleep = opts.sleep || ((ms) => new Promise((r) => setTimeout(r, ms)));
   }
 
   /**
@@ -60,6 +91,17 @@ export class InputInjector {
    * Uses a lock to prevent concurrent sends from interleaving
    */
   async sendInput(input: string, targetSession?: string): Promise<boolean> {
+    return (await this.sendInputDetailed(input, targetSession)).ok;
+  }
+
+  /**
+   * Free text into Claude's prompt box, guarded against collisions with the
+   * user: refused when the box already holds an unsent draft (typing would
+   * append to it and Enter would send both), and deferred (then refused) while
+   * an attached client typed within the last TYPING_QUIET_S seconds. Choice
+   * answers (`sendChoice`) never come here: a choice box replaces the prompt box.
+   */
+  async sendInputDetailed(input: string, targetSession?: string): Promise<SendInputResult> {
     // Wait for any pending send to complete before starting this one
     const previousLock = this.sendLock;
     let releaseLock: () => void;
@@ -76,36 +118,102 @@ export class InputInjector {
       const checkResult = await this.runTmux(['has-session', '-t', session]);
       if (checkResult.status !== 0) {
         console.error(`Tmux session '${session}' not found`);
-        return false;
+        return {
+          ok: false,
+          reason: 'no_session',
+          code: 'tmux_session_not_found',
+          message: 'The session is not running.',
+        };
       }
 
-      // Dismiss any TUI overlay before sending
-      await this.dismissOverlayIfPresent(session);
+      if (!(await this.waitForTypingPause(session))) {
+        impact.count('inputCollisions');
+        console.log(`Input to '${session}' refused: an attached client is typing`);
+        return { ok: false, ...refusalFor('typing') };
+      }
 
-      // Session exists, send the input
-      return await this.doSendInput(input, session);
+      // Dismiss any TUI overlay, then make sure the prompt box holds no draft.
+      let pane = await this.captureForGuard(session);
+      if (pane !== null && detectOverlay(pane)) {
+        console.log(`Overlay detected in session '${session}', sending Escape to dismiss`);
+        await this.runTmux(['send-keys', '-t', session, 'Escape']);
+        await this.sleep(OVERLAY_DISMISS_DELAY_MS);
+        pane = await this.captureForGuard(session);
+      }
+      if (pane !== null) {
+        const box = readPromptBox(pane);
+        if (box.found && box.draft) {
+          impact.count('inputCollisions');
+          console.log(
+            `Input to '${session}' refused: the prompt has an unsent draft (${box.draft.length} chars)`
+          );
+          return { ok: false, ...refusalFor('draft') };
+        }
+      }
+
+      const sent = await this.doSendInput(input, session);
+      return sent
+        ? { ok: true }
+        : {
+            ok: false,
+            reason: 'tmux_error',
+            code: 'send_failed',
+            message: 'Failed to send input to session',
+          };
     } finally {
       releaseLock!();
     }
   }
 
+  /** `capture-pane -e` of the bottom of the pane; null when it cannot be read (fail open). */
+  private async captureForGuard(session: string): Promise<string | null> {
+    try {
+      const r = await this.runTmux([
+        'capture-pane',
+        '-t',
+        session,
+        '-p',
+        '-e',
+        '-S',
+        `-${GUARD_CAPTURE_LINES}`,
+      ]);
+      return r.status === 0 ? r.stdout : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Seconds since an attached client's last keypress (null: none attached / unknown). */
+  private async clientIdleSeconds(session: string): Promise<number | null> {
+    const r = await this.runTmux(['list-clients', '-t', session, '-F', '#{client_activity}']);
+    if (r.status !== 0) return null;
+    return secondsSinceClientActivity(r.stdout, this.now());
+  }
+
+  /** False when someone kept typing for the whole wait window. */
+  private async waitForTypingPause(session: string): Promise<boolean> {
+    const deadline = this.now() + TYPING_MAX_WAIT_MS;
+    for (;;) {
+      const idle = await this.clientIdleSeconds(session);
+      if (idle === null || idle >= TYPING_QUIET_S) return true;
+      if (this.now() >= deadline) return false;
+      await this.sleep(TYPING_POLL_MS);
+    }
+  }
+
   /**
    * Detect and dismiss TUI overlays (e.g. "Background tasks" panel) before sending input.
-   * Overlays intercept keystrokes, causing messages to silently fail.
-   * Fails open: if capture errors, we proceed without dismissing.
+   * Overlays intercept keystrokes, causing messages to silently fail. Only a real
+   * overlay counts: the prompt box is gone and a key-hint line offers "Esc to close"
+   * (see prompt-guard.ts `detectOverlay`). Fails open on capture errors.
    */
   private async dismissOverlayIfPresent(session: string): Promise<void> {
     try {
-      const paneContent = await this.capturePaneContent(session, OVERLAY_DETECTION_LINES);
-      const overlayPatterns = [
-        /to select.*Enter to view.*Esc to close/, // Background tasks panel
-        /Esc to close/, // Generic overlay catch-all
-      ];
-      const hasOverlay = overlayPatterns.some((p) => p.test(paneContent));
-      if (hasOverlay) {
+      const paneContent = await this.captureForGuard(session);
+      if (paneContent !== null && detectOverlay(paneContent)) {
         console.log(`Overlay detected in session '${session}', sending Escape to dismiss`);
         await this.runTmux(['send-keys', '-t', session, 'Escape']);
-        await new Promise((resolve) => setTimeout(resolve, OVERLAY_DISMISS_DELAY_MS));
+        await this.sleep(OVERLAY_DISMISS_DELAY_MS);
       }
     } catch (err) {
       // Fail open — never block sending

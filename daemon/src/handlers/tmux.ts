@@ -456,11 +456,14 @@ export function registerTmuxHandlers(ctx: HandlerContext): Record<string, Messag
       const result = await ctx.tmux.createSession(
         savedConfig.name,
         savedConfig.workingDir,
-        savedConfig.startCli
+        savedConfig.startCli,
+        { permissionMode: savedConfig.permissionMode }
       );
 
       if (result.success) {
-        ctx.storeTmuxSessionConfig(savedConfig.name, savedConfig.workingDir, savedConfig.startCli);
+        ctx.storeTmuxSessionConfig(savedConfig.name, savedConfig.workingDir, savedConfig.startCli, {
+          permissionMode: savedConfig.permissionMode,
+        });
         ctx.injector.setActiveSession(sessionName);
 
         ctx.send(client.ws, {

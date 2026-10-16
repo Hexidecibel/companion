@@ -239,6 +239,10 @@ Prominent bottom drawer panel showing subagents as first-class UI, replacing the
 - Native fs events instead of 100 ms chokidar polling (`COMPANION_WATCH_POLLING=1` restores polling), with stat reconcile + new-transcript scan as safety nets
 - Incremental transcript parsing (byte-offset tails, full re-read on rotate/truncate) shared by the watcher, get_highlights, get_tasks and conversation_file
 - One shared, cached `tmux list-panes -a` snapshot; /proc instead of pstree/display-message for PID detection; snapshot/mapping files written only on change; polled WS requests logged as a once-a-minute summary (`COMPANION_WS_DEBUG=1` for per-message lines)
+- **Input-injection guard** (`prompt-guard.ts`): a free-text send waits while someone is typing in the attached pane (2 s, up to 3 s, then refuses `user_typing`) and never types over an unsent draft in Claude's prompt box (`prompt_has_draft`; placeholder / suggestions count as empty); counted in `inputCollisions`; the web shows a banner and Herald / babysit / Code Review relays say why ("<name> has an unsent draft in its prompt box, so I didn't type over it."). Overlay Escape only fires when the prompt box is gone and a key hint says "Esc to close"
+- New tmux servers started by the daemon run in their own systemd user scope (`companion-tmux-*.scope`), so daemon restarts / OOM kills never take sessions down (`COMPANION_TMUX_SCOPE=0` turns it off; plain tmux where systemd-run is unavailable)
+- App-spawned sessions use `claude --permission-mode bypassPermissions` (kept across recreate) instead of writing `.claude/settings.json`
+- herald-voice unloads idle engines after `HERALD_VOICE_IDLE_UNLOAD_S` (default 1800 s, 0 = off; `malloc_trim` after unload) and reloads on next use; `/health` stays `ready` (`loaded: false`, `idleUnloaded: true`). Measured 1.8 GB after use -> 239 MB unloaded, first TTS after unload ~1.3 s
 
 ## Tiled Agent Conversations
 Dispatch panel shows agent conversations tiled side-by-side on desktop instead of card list + single detail view.

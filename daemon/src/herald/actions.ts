@@ -24,6 +24,7 @@ import { randomUUID } from 'crypto';
 import type { HeraldAction, HeraldActionTier } from './protocol';
 import type { SessionSource } from './session-source';
 import type { AuditOrigin } from '../audit-log';
+import { heraldRefusalText } from '../prompt-guard';
 import type { CushCommand } from './knowledge/cush';
 import {
   deriveConfirmPhrase,
@@ -539,7 +540,13 @@ export class ActionManager {
       }
 
       if (!ok) {
-        fail('failed', `Could not deliver input to ${a.sessionName}'s terminal.`);
+        const refusal = a.kind === 'answer_choice' ? null : source.lastSendRefusal?.(a.sessionId);
+        fail(
+          'failed',
+          refusal
+            ? heraldRefusalText(a.sessionName, refusal.reason)
+            : `Could not deliver input to ${a.sessionName}'s terminal.`
+        );
         return { ...rec.action };
       }
       this.resolve(rec, 'sent');
