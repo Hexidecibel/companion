@@ -1,4 +1,4 @@
-import { spawn, execFile } from 'child_process';
+import { trySub, tmuxKind } from './impact/sub';
 import {
   TMUX_OPERATION_TIMEOUT_MS,
   INPUT_LOG_PREVIEW_LENGTH,
@@ -45,32 +45,14 @@ export class InputInjector {
    * shape so existing call-site checks (`result.status !== 0`,
    * `result.stdout?.toString()`) keep working unchanged.
    */
-  private runTmux(args: string[]): Promise<TmuxResult> {
-    return new Promise((resolve) => {
-      execFile(
-        'tmux',
-        args,
-        {
-          timeout: TMUX_OPERATION_TIMEOUT_MS,
-          killSignal: 'SIGKILL',
-          maxBuffer: 16 * 1024 * 1024,
-        },
-        (err, stdout, stderr) => {
-          const out = stdout ?? '';
-          const errOut = stderr ?? '';
-          if (err) {
-            const e = err as NodeJS.ErrnoException & { code?: number | string; killed?: boolean };
-            const timedOut = !!e.killed;
-            // execFile puts the exit code in err.code when it's a number; ENOENT
-            // and other spawn failures surface as a string code -> treat as status 1.
-            const status = typeof e.code === 'number' ? e.code : 1;
-            resolve({ status, stdout: out, stderr: errOut, timedOut });
-            return;
-          }
-          resolve({ status: 0, stdout: out, stderr: errOut, timedOut: false });
-        }
-      );
+  private async runTmux(args: string[]): Promise<TmuxResult> {
+    const r = await trySub(tmuxKind(args, 'injector'), 'tmux', args, {
+      timeoutMs: TMUX_OPERATION_TIMEOUT_MS,
+      maxBuffer: 16 * 1024 * 1024,
     });
+    // A non-numeric code (ENOENT, spawn failure) is status 1, like before.
+    const status = !r.error ? 0 : r.code >= 0 ? r.code : 1;
+    return { status, stdout: r.stdout, stderr: r.stderr, timedOut: r.timedOut };
   }
 
   /**
@@ -181,32 +163,13 @@ export class InputInjector {
 
   async checkSessionExists(sessionName?: string): Promise<boolean> {
     const session = sessionName || this.activeSession;
-    return new Promise((resolve) => {
-      const check = spawn('tmux', ['has-session', '-t', session]);
-      check.on('close', (code) => resolve(code === 0));
-      check.on('error', () => resolve(false));
-    });
+    const r = await this.runTmux(['has-session', '-t', session]);
+    return r.status === 0;
   }
 
   async listSessions(): Promise<string[]> {
-    return new Promise((resolve) => {
-      const list = spawn('tmux', ['list-sessions', '-F', '#{session_name}']);
-      let output = '';
-
-      list.stdout.on('data', (data) => {
-        output += data.toString();
-      });
-
-      list.on('close', (code) => {
-        if (code === 0) {
-          resolve(output.trim().split('\n').filter(Boolean));
-        } else {
-          resolve([]);
-        }
-      });
-
-      list.on('error', () => resolve([]));
-    });
+    const r = await this.runTmux(['list-sessions', '-F', '#{session_name}']);
+    return r.status === 0 ? r.stdout.trim().split('\n').filter(Boolean) : [];
   }
 
   setActiveSession(sessionName: string): void {

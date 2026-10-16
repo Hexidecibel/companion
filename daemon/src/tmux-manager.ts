@@ -1,8 +1,10 @@
-import { exec, execFile } from 'child_process';
+import { execFile } from 'child_process';
 import { promisify } from 'util';
+import { trackedExecAsync, runTmux } from './impact/sub';
+import { tmuxSnapshot, invalidateTmuxSnapshot } from './tmux-snapshot';
 import * as path from 'path';
 
-const execAsync = promisify(exec);
+const execAsync = trackedExecAsync('tmux-manager');
 const execFileAsync = promisify(execFile);
 
 export interface TmuxSessionInfo {
@@ -39,38 +41,21 @@ export class TmuxManager {
    */
   async listSessions(): Promise<TmuxSessionInfo[]> {
     try {
-      const { stdout } = await execAsync(
-        'tmux list-sessions -F "#{session_name}|#{session_created}|#{session_attached}|#{session_windows}" 2>/dev/null'
-      );
-
+      // Shared, ~2 s cached `tmux list-panes -a` (one subprocess for every
+      // caller) + the cached COMPANION_APP tag per session.
+      const snap = await tmuxSnapshot.get();
       const sessions: TmuxSessionInfo[] = [];
-
-      for (const line of stdout.trim().split('\n')) {
-        if (!line) continue;
-        const [name, created, attached, windows] = line.split('|');
-
-        // Include all sessions so users can interact with any tmux session
+      // Include all sessions so users can interact with any tmux session
+      for (const row of snap.sessions) {
         sessions.push({
-          name,
-          created: parseInt(created, 10) * 1000, // Convert to ms
-          attached: attached === '1',
-          windows: parseInt(windows, 10),
+          name: row.name,
+          created: parseInt(row.created, 10) * 1000, // Convert to ms
+          attached: row.attached === '1',
+          windows: row.windows,
+          workingDir: row.workingDir,
+          tagged: await tmuxSnapshot.isTagged(row),
         });
       }
-
-      // Get working directory and tagged status for each session
-      for (const session of sessions) {
-        try {
-          const { stdout: pwd } = await execAsync(
-            `tmux display-message -t "${session.name}" -p "#{pane_current_path}" 2>/dev/null`
-          );
-          session.workingDir = pwd.trim();
-        } catch {
-          // Ignore errors getting working dir
-        }
-        session.tagged = await this.isTagged(session.name);
-      }
-
       return sessions;
     } catch (err) {
       // No sessions or tmux not running
@@ -83,7 +68,7 @@ export class TmuxManager {
    */
   async sessionExists(name: string): Promise<boolean> {
     try {
-      await execAsync(`tmux has-session -t "${name}" 2>/dev/null`);
+      await runTmux(['has-session', '-t', name], 'tmux-manager', { timeoutMs: 3000 });
       return true;
     } catch {
       return false;
@@ -95,7 +80,8 @@ export class TmuxManager {
    */
   async tagSession(name: string): Promise<boolean> {
     try {
-      await execAsync(`tmux set-environment -t "${name}" COMPANION_APP 1`);
+      await runTmux(['set-environment', '-t', name, 'COMPANION_APP', '1'], 'tmux-manager');
+      invalidateTmuxSnapshot(name);
       console.log(`TmuxManager: Tagged session "${name}" as managed`);
       return true;
     } catch {
@@ -108,8 +94,12 @@ export class TmuxManager {
    */
   async isTagged(name: string): Promise<boolean> {
     try {
-      const { stdout } = await execAsync(
-        `tmux show-environment -t "${name}" COMPANION_APP 2>/dev/null`
+      const { stdout } = await runTmux(
+        ['show-environment', '-t', name, 'COMPANION_APP'],
+        'tmux-manager',
+        {
+          timeoutMs: 3000,
+        }
       );
       return stdout.trim().includes('COMPANION_APP=1');
     } catch {
@@ -140,6 +130,7 @@ export class TmuxManager {
 
       // Tag session as managed by Companion so daemon only monitors our sessions
       await execFileAsync('tmux', ['set-environment', '-t', safeName, 'COMPANION_APP', '1']);
+      invalidateTmuxSnapshot(safeName);
 
       console.log(`TmuxManager: Created session "${safeName}" in ${workingDir} (tagged)`);
 
@@ -194,6 +185,7 @@ export class TmuxManager {
         console.log(`TmuxManager: Session "${name}" exited gracefully`);
       }
 
+      invalidateTmuxSnapshot(name);
       return { success: true };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -302,16 +294,48 @@ export class TmuxManager {
    *   offset=150: lines 150-300 from bottom (-S -300 -E -150)
    */
   async capturePane(sessionName: string, lines: number = 100, offset: number = 0): Promise<string> {
+    // Clients poll the terminal view ~2/s each: identical captures within
+    // CAPTURE_SHARE_MS (or still running) share one tmux call.
+    const key = `${sessionName}\0${lines}\0${offset}`;
+    const now = Date.now();
+    const hit = this.captureShare.get(key);
+    if (hit && now - hit.at < TmuxManager.CAPTURE_SHARE_MS) return hit.p;
+    const p = this.capturePaneUncached(sessionName, lines, offset);
+    this.captureShare.set(key, { at: now, p });
+    if (this.captureShare.size > 64) {
+      for (const [k, v] of this.captureShare)
+        if (now - v.at >= TmuxManager.CAPTURE_SHARE_MS) this.captureShare.delete(k);
+    }
+    return p;
+  }
+
+  private static readonly CAPTURE_SHARE_MS = 300;
+  private captureShare = new Map<string, { at: number; p: Promise<string> }>();
+
+  private async capturePaneUncached(
+    sessionName: string,
+    lines: number,
+    offset: number
+  ): Promise<string> {
     try {
-      let cmd: string;
-      if (offset > 0) {
-        const start = offset + lines;
-        const end = offset;
-        cmd = `tmux capture-pane -p -e -t "${sessionName}" -S -${start} -E -${end} 2>/dev/null`;
-      } else {
-        cmd = `tmux capture-pane -p -e -t "${sessionName}" -S -${lines} 2>/dev/null`;
-      }
-      const { stdout } = await execAsync(cmd);
+      const args =
+        offset > 0
+          ? [
+              'capture-pane',
+              '-p',
+              '-e',
+              '-t',
+              sessionName,
+              '-S',
+              `-${offset + lines}`,
+              '-E',
+              `-${offset}`,
+            ]
+          : ['capture-pane', '-p', '-e', '-t', sessionName, '-S', `-${lines}`];
+      const { stdout } = await runTmux(args, 'tmux-manager', {
+        timeoutMs: 3000,
+        maxBuffer: 8 * 1024 * 1024,
+      });
       return stdout;
     } catch {
       return '';

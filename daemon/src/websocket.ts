@@ -1,3 +1,4 @@
+import { logRecv, logSend } from './ws-log';
 import { WebSocket, WebSocketServer } from 'ws';
 import { IncomingMessage, Server, ServerResponse } from 'http';
 import { v4 as uuidv4 } from 'uuid';
@@ -853,7 +854,9 @@ export class WebSocketHandler {
     // Audio chunks arrive ~10/s while someone talks, speaking heartbeats ~1/s
     // while Herald plays: never log them.
     if (type !== 'ping' && type !== 'herald_voice_audio' && type !== 'herald_speaking') {
-      console.log(`WebSocket: >> recv ${type} (${requestId || 'no-id'}) from ${client.id}`);
+      // Polled read-only requests are summarised once a minute (ws-log.ts).
+      if (logRecv(type))
+        console.log(`WebSocket: >> recv ${type} (${requestId || 'no-id'}) from ${client.id}`);
       updateLastActivity();
     }
 
@@ -1449,7 +1452,11 @@ export class WebSocketHandler {
   private send(ws: WebSocket, response: WebSocketResponse): void {
     if (ws.readyState === WebSocket.OPEN) {
       const data = JSON.stringify(response);
-      if (response.type !== 'pong' && response.requestId) {
+      if (
+        response.type !== 'pong' &&
+        response.requestId &&
+        logSend(response.type, response.success)
+      ) {
         console.log(
           `WebSocket: << send ${response.type} (${response.requestId}) ${data.length} bytes`
         );

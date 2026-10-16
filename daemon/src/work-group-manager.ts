@@ -4,15 +4,14 @@ import { v4 as uuidv4 } from 'uuid';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { exec } from 'child_process';
-import { promisify } from 'util';
+import { trackedExecAsync } from './impact/sub';
 import { WorkGroup, WorkerSession, WorkerQuestion } from './types';
 import { TmuxManager } from './tmux-manager';
 import { InputInjector } from './input-injector';
 import { SessionWatcher } from './watcher';
 import { atomicWriteFileSync } from './utils';
 
-const execAsync = promisify(exec);
+const execAsync = trackedExecAsync('workgroups');
 
 const STATE_FILE = path.join(os.homedir(), '.companion', 'work-groups.json');
 

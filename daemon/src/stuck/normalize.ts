@@ -20,20 +20,29 @@ export function stripAnsi(s: string): string {
  * uuids, hex ids, directory parts of paths and every number are replaced, and
  * whitespace collapsed. "src/api.test.ts:41:7 (12 ms)" -> "api.test.ts:#:# (# ms)".
  */
+const PATH_PARTS = /(?:[A-Za-z]:)?(?:~|\.{1,2})?[\\/]?(?:[\w.@+-]{1,255}[\\/])+([\w.@+-]+)/g;
+
 export function normalizeText(s: string): string {
-  return stripAnsi(s)
-    .replace(
-      /\b\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2}(?:[.,]\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?/g,
-      '<ts>'
-    )
-    .replace(/\b\d{1,2}:\d{2}:\d{2}(?:[.,]\d+)?\b/g, '<t>')
-    .replace(/\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi, '<id>')
-    .replace(/\b0x[0-9a-f]+\b/gi, '<hex>')
-    .replace(/\b(?=[0-9a-f]*[a-f])(?=[0-9a-f]*\d)[0-9a-f]{7,}\b/gi, '<hex>')
-    .replace(/(?:[A-Za-z]:)?(?:~|\.{1,2})?[\\/]?(?:[\w.@+-]+[\\/])+([\w.@+-]+)/g, '$1')
-    .replace(/\d+(?:\.\d+)?/g, '#')
-    .replace(/\s+/g, ' ')
-    .trim();
+  return (
+    stripAnsi(s)
+      .replace(
+        /\b\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2}(?:[.,]\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?/g,
+        '<ts>'
+      )
+      .replace(/\b\d{1,2}:\d{2}:\d{2}(?:[.,]\d+)?\b/g, '<t>')
+      .replace(/\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi, '<id>')
+      .replace(/\b0x[0-9a-f]+\b/gi, '<hex>')
+      .replace(/\b(?=[0-9a-f]*[a-f])(?=[0-9a-f]*\d)[0-9a-f]{7,}\b/gi, '<hex>')
+      // Directory parts are capped at 255 chars (NAME_MAX): an unbounded `+`
+      // here backtracked over every start position of a long slash-less token
+      // (minified code, base64, dotted ids) = quadratic (32K chars took ~0.5-0.8 s).
+      // Only whitespace-free tokens holding a slash can match (same result, far less work).
+      // (`\S+` is linear: each token is consumed once, no backtracking.)
+      .replace(/\S+/g, (tok) => (/[\\/]/.test(tok) ? tok.replace(PATH_PARTS, '$1') : tok))
+      .replace(/\d+(?:\.\d+)?/g, '#')
+      .replace(/\s+/g, ' ')
+      .trim()
+  );
 }
 
 /** Exact identity of a tool input: whitespace collapsed, keys sorted; numbers kept (sed -n 1,50p != 51,100p). */

@@ -121,6 +121,55 @@ export async function findClaudePid(panePid: number, procRoot = '/proc'): Promis
 }
 
 /**
+ * Every descendant of `root` (breadth first, children of every thread) from
+ * /proc, at most `max` pids and `maxDepth` levels: a bounded, subprocess-free
+ * replacement for `pstree -p`.
+ */
+export async function descendantPids(
+  root: number,
+  procRoot = '/proc',
+  max = 256,
+  maxDepth = 8
+): Promise<number[]> {
+  const out: number[] = [];
+  const seen = new Set<number>([root]);
+  let level = [root];
+  for (let depth = 0; depth < maxDepth && level.length && out.length < max; depth++) {
+    const next: number[] = [];
+    for (const pid of level) {
+      let tids: string[] = [];
+      try {
+        tids = await fs.promises.readdir(path.join(procRoot, String(pid), 'task'));
+      } catch {
+        continue;
+      }
+      for (const tid of tids) {
+        let raw = '';
+        try {
+          raw = await fs.promises.readFile(
+            path.join(procRoot, String(pid), 'task', tid, 'children'),
+            'utf-8'
+          );
+        } catch {
+          continue;
+        }
+        for (const c of raw.split(/\s+/)) {
+          if (!/^\d+$/.test(c)) continue;
+          const n = Number(c);
+          if (seen.has(n)) continue;
+          seen.add(n);
+          out.push(n);
+          next.push(n);
+          if (out.length >= max) return out;
+        }
+      }
+    }
+    level = next;
+  }
+  return out;
+}
+
+/**
  * When a process started (epoch ms) from /proc (Linux), null when unknown.
  * starttime (field 22 of /proc/<pid>/stat) is in clock ticks after boot (USER_HZ = 100).
  */

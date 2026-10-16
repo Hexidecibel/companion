@@ -1,5 +1,6 @@
 import { HandlerContext, MessageHandler } from '../handler-context';
 import { getMetrics } from '../metrics';
+import { getImpactReport } from '../impact';
 
 export function registerMetricsHandlers(ctx: HandlerContext): Record<string, MessageHandler> {
   return {
@@ -14,6 +15,21 @@ export function registerMetricsHandlers(ctx: HandlerContext): Record<string, Mes
         payload: metrics,
         requestId,
       });
+    },
+
+    /** Impact report (CPU, memory, loop lag, subprocesses); read-only, no payload. */
+    get_impact(client, _payload, requestId) {
+      try {
+        ctx.send(client.ws, {
+          type: 'get_impact',
+          success: true,
+          payload: getImpactReport(),
+          requestId,
+        });
+      } catch (err) {
+        console.error('Impact: get_impact failed:', err);
+        ctx.send(client.ws, { type: 'get_impact', success: false, error: String(err), requestId });
+      }
     },
   };
 }

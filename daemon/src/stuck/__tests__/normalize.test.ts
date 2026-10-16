@@ -172,3 +172,30 @@ describe('stuck WS handlers', () => {
     expect(sent[0]).toMatchObject({ success: false, payload: { code: 'unavailable' } });
   });
 });
+
+describe('normalizeText performance (long unbroken tokens)', () => {
+  // The path-stripping regex used to backtrack over every start position of a
+  // long slash-less token: 32K chars took ~0.5-0.8 s (quadratic).
+  const n = 64_000;
+  const shapes: Record<string, string> = {
+    word: 'a'.repeat(n),
+    dotted: 'a.'.repeat(n / 2),
+    slashThenLong: 'x/y:' + 'a'.repeat(n),
+    longSegmentThenSlash: 'a'.repeat(n) + '/b',
+    manySlashes: 'a/'.repeat(n / 2) + 'b'.repeat(n),
+    base64: 'Zm9vYmFy+/'.repeat(n / 10),
+  };
+  for (const [name, s] of Object.entries(shapes)) {
+    it(`${name} (${s.length} chars) is linear`, () => {
+      const t0 = performance.now();
+      normalizeText(s);
+      expect(performance.now() - t0).toBeLessThan(500); // was 2-3 s at this size
+    });
+  }
+
+  it('still strips directory parts as before', () => {
+    expect(normalizeText('src/api.test.ts:41:7 (12 ms)')).toBe('api.test.ts:#:# (# ms)');
+    expect(normalizeText('at /home/u/x/y.ts:1 and C:\\w\\z.js')).toBe('at y.ts:# and z.js');
+    expect(normalizeText('see ~/a/b.txt or ../c/d.md')).toBe('see b.txt or d.md');
+  });
+});

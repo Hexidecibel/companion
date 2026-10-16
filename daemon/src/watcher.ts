@@ -1,11 +1,10 @@
 import * as fs from 'fs';
 import {
-  PANE_INFO_FORMAT,
   SessionIdentity,
   encodeProjectDir,
   findClaudePid,
   identityChanged,
-  parsePaneInfo,
+  descendantPids,
   processStartMs,
   bornAfter,
   sanitizeIdentity,
@@ -16,8 +15,7 @@ import {
 import * as path from 'path';
 import * as chokidar from 'chokidar';
 import { EventEmitter } from 'events';
-import { exec } from 'child_process';
-import { promisify } from 'util';
+import { runTmux } from './impact/sub';
 import {
   ConversationFile,
   ConversationMessage,
@@ -27,15 +25,12 @@ import {
 } from './types';
 import { InputInjector } from './input-injector';
 import {
-  parseConversationFile,
   extractHighlights,
   detectWaitingForInput,
   detectCurrentActivity,
   detectCurrentActivityFast,
   getRecentActivity,
   getPendingApprovalTools,
-  detectCompaction,
-  extractTasks,
   detectActiveChoicePrompt,
   isTrivialHighlights,
 } from './parser';
@@ -58,9 +53,9 @@ import {
   RECENT_ACTIVITY_LIMIT,
 } from './constants';
 import { atomicWriteFileSync, registerShutdownCallback, BoundedMap } from './utils';
+import { transcriptCache, TranscriptSnapshot } from './transcript-cache';
+import { tmuxSnapshot } from './tmux-snapshot';
 import { isReadonlySharedState } from './sandbox';
-
-const execAsync = promisify(exec);
 
 /**
  * Parse a feedback prompt from tmux terminal output.
@@ -171,10 +166,20 @@ export class SessionWatcher extends EventEmitter {
   private debounceTimers: Map<string, NodeJS.Timeout> = new Map();
   private waitingDebounceTimers: Map<string, NodeJS.Timeout> = new Map();
   private static readonly DEBOUNCE_MS = 150; // Debounce file changes per session
+  /** A conversation written continuously is still processed at least this often. */
+  private static readonly DEBOUNCE_MAX_WAIT_MS = 1000;
+  private debounceSince: Map<string, number> = new Map();
+  private static readonly MISSED_SCAN_INTERVAL_MS = 10_000;
+  private static readonly MISSED_SCAN_MAX_FILES = 500;
+  private missedScanTimer: NodeJS.Timeout | null = null;
+  private missedScanRunning = false;
   private static readonly WAITING_DEBOUNCE_MS = 3000; // Delay before confirming "waiting" for non-interactive tools
 
   // Persisted sessions — loaded from disk on startup, merged with live data
   private persistedSessions: Map<string, PersistedSessionSnapshot> = new Map();
+  private lastSessionsSnapshotKey: string | null = null;
+  private lastTrackingLog = '';
+  private lastMappingsData: string | null = null;
 
   // Feedback prompt detection
   private inputInjector: InputInjector | null = null;
@@ -293,7 +298,10 @@ export class SessionWatcher extends EventEmitter {
         if (this.tmuxConversationIds.has(session)) identity[session] = id;
       }
 
-      atomicWriteFileSync(this.mappingsPath, JSON.stringify({ mappings, history, identity }));
+      const data = JSON.stringify({ mappings, history, identity });
+      if (data === this.lastMappingsData) return; // unchanged: no rewrite
+      atomicWriteFileSync(this.mappingsPath, data);
+      this.lastMappingsData = data;
     } catch {
       // Not critical
     }
@@ -337,9 +345,16 @@ export class SessionWatcher extends EventEmitter {
         lastActivity: s.lastActivity,
         isWaitingForInput: s.isWaitingForInput,
         messageCount: s.messageCount,
-        savedAt: Date.now(),
+        savedAt: 0,
       }));
+      // Written only when something besides savedAt changed (this runs on
+      // every 5 s refresh; an idle box used to rewrite the file each time).
+      const key = JSON.stringify(snapshots);
+      if (key === this.lastSessionsSnapshotKey) return;
+      const now = Date.now();
+      for (const snap of snapshots) snap.savedAt = now;
       atomicWriteFileSync(this.sessionsSnapshotPath, JSON.stringify(snapshots));
+      this.lastSessionsSnapshotKey = key;
     } catch {
       // Not critical
     }
@@ -447,44 +462,53 @@ export class SessionWatcher extends EventEmitter {
     if (changed) this.persistMappings();
   }
 
-  async refreshTmuxPaths(): Promise<void> {
+  private refreshInFlight: Promise<void> | null = null;
+
+  /**
+   * Re-read tagged tmux sessions (paths, identity) and reconcile mappings.
+   * Concurrent calls share one run (in-flight guard): the 5 s interval never
+   * stacks behind a slow tmux.
+   */
+  refreshTmuxPaths(): Promise<void> {
+    if (this.refreshInFlight) return this.refreshInFlight;
+    const p = this.refreshTmuxPathsInner().finally(() => {
+      this.refreshInFlight = null;
+    });
+    this.refreshInFlight = p;
+    return p;
+  }
+
+  private async refreshTmuxPathsInner(): Promise<void> {
     try {
-      const { stdout: sessionList } = await execAsync(
-        'tmux list-sessions -F "#{session_name}" 2>/dev/null'
-      );
-      const sessionNames = sessionList
-        .trim()
-        .split('\n')
-        .filter((s) => s);
+      // One `tmux list-panes -a` instead of list-sessions + 2 calls per
+      // session. Always fresh here (every 5 s); get_server_summary and other
+      // listings reuse this result for up to 2 s.
+      const snap = await tmuxSnapshot.get(0);
+      if (!snap.ok) return; // tmux did not answer in time: keep the last state
+      if (snap.sessions.length === 0) throw new Error('no tmux sessions');
 
       // Rebuild maps — only include tagged sessions (COMPANION_APP=1).
       // Built on the side and swapped in below in one synchronous step: the
-      // loop awaits several subprocesses per session, and anything that read
-      // the live maps meanwhile (getServerSummary, getSessions, ...) used to
-      // see them empty or half-filled, i.e. live sessions reported as
-      // closed ("inactive") for a moment every refresh.
+      // loop awaits per session, and anything that read the live maps
+      // meanwhile (getServerSummary, getSessions, ...) used to see them empty
+      // or half-filled, i.e. live sessions reported as closed ("inactive") for
+      // a moment every refresh. Never clear-then-await here.
       const nextProjectPaths = new Set<string>();
       const nextSessionByPath = new Map<string, string>();
       const nextPathBySession = new Map<string, string>();
       const nextWorkingDirs = new Map<string, string>();
       const nextIdentity = new Map<string, SessionIdentity>();
 
-      for (const name of sessionNames) {
+      for (const row of snap.sessions) {
+        const name = row.name;
         try {
-          // Check if this session is tagged with COMPANION_APP=1
-          const { stdout: envOut } = await execAsync(
-            `tmux show-environment -t "${name}" COMPANION_APP 2>/dev/null`
-          );
-          if (!envOut.trim().includes('COMPANION_APP=1')) {
+          // Check if this session is tagged with COMPANION_APP=1 (cached)
+          if (!(await tmuxSnapshot.isTagged(row))) {
             continue; // Skip untagged sessions
           }
 
-          // Active pane's working directory + session identity, in one call
-          const { stdout: paneOut } = await execAsync(
-            `tmux display-message -t "${name}" -p "${PANE_INFO_FORMAT}" 2>/dev/null`
-          );
-          const pane = parsePaneInfo(paneOut);
-          const workingDir = pane.workingDir;
+          // Active pane's working directory + session identity (from the snapshot)
+          const workingDir = row.workingDir;
           if (!workingDir) continue;
 
           const encodedPath = encodeProjectDir(workingDir);
@@ -492,10 +516,10 @@ export class SessionWatcher extends EventEmitter {
           nextSessionByPath.set(encodedPath, name);
           nextPathBySession.set(name, encodedPath);
           nextWorkingDirs.set(name, workingDir);
-          const claudePid = await findClaudePid(pane.panePid);
+          const claudePid = await findClaudePid(row.panePid);
           nextIdentity.set(name, {
-            created: pane.created,
-            panePid: pane.panePid,
+            created: row.created,
+            panePid: row.panePid,
             encodedPath,
             claudePid,
           });
@@ -520,11 +544,12 @@ export class SessionWatcher extends EventEmitter {
       swap(this.tmuxSessionWorkingDirs, nextWorkingDirs);
       swap(this.tmuxSessionIdentity, nextIdentity);
 
-      if (this.tmuxProjectPaths.size > 0) {
-        console.log(
-          `Watcher: Tracking ${this.tmuxProjectPaths.size} paths from ${this.tmuxPathBySession.size} tagged tmux session(s)`
-        );
+      // Every 5 s: log only when the tracked set changes.
+      const trackingLog = `Watcher: Tracking ${this.tmuxProjectPaths.size} paths from ${this.tmuxPathBySession.size} tagged tmux session(s)`;
+      if (this.tmuxProjectPaths.size > 0 && trackingLog !== this.lastTrackingLog) {
+        console.log(trackingLog);
       }
+      this.lastTrackingLog = trackingLog;
 
       // Prune conversations that no longer match any active tagged tmux path
       if (this.tmuxFilterEnabled && this.tmuxProjectPaths.size > 0) {
@@ -593,7 +618,10 @@ export class SessionWatcher extends EventEmitter {
 
   async start(): Promise<void> {
     // Load tmux paths BEFORE starting chokidar so the initial file scan
-    // is filtered correctly (avoids loading all historical conversation files)
+    // is filtered correctly (avoids loading all historical conversation files).
+    // A refresh still running from the constructor may predate the current
+    // sessions: let it finish, then run a fresh one.
+    if (this.refreshInFlight) await this.refreshInFlight.catch(() => undefined);
     await this.refreshTmuxPaths();
 
     const projectsDir = path.join(this.codeHome, 'projects');
@@ -603,17 +631,39 @@ export class SessionWatcher extends EventEmitter {
 
     console.log(`Watching for conversations in: ${projectsDir}`);
 
+    // Native fs events (inotify) by default. Polling (stat of every transcript
+    // every 100 ms, plus awaitWriteFinish's 50 ms re-stats) was the daemon's
+    // largest steady CPU cost; it was chosen only for latency (93b3694), and
+    // native events are faster. awaitWriteFinish is gone too: the incremental
+    // reader (transcript-cache.ts) never consumes a half-written line, and the
+    // per-conversation debounce coalesces bursts. Missed events are covered by
+    // reconcileTrackedConversations (stat of tracked files every 5 s) and
+    // scanForMissedTranscripts (new files in tagged project dirs every 10 s).
+    // COMPANION_WATCH_POLLING=1 restores polling (e.g. a network / VM-shared
+    // filesystem that delivers no inotify events).
+    const polling = process.env.COMPANION_WATCH_POLLING === '1';
     this.watcher = chokidar.watch(pattern, {
       persistent: true,
       ignoreInitial: false,
-      awaitWriteFinish: {
-        stabilityThreshold: CHOKIDAR_STABILITY_THRESHOLD_MS,
-        pollInterval: CHOKIDAR_POLL_INTERVAL_MS,
-      },
       depth: 2,
-      usePolling: true,
-      interval: FILE_WATCHER_POLL_INTERVAL_MS,
+      ...(polling
+        ? {
+            usePolling: true,
+            interval: FILE_WATCHER_POLL_INTERVAL_MS,
+            awaitWriteFinish: {
+              stabilityThreshold: CHOKIDAR_STABILITY_THRESHOLD_MS,
+              pollInterval: CHOKIDAR_POLL_INTERVAL_MS,
+            },
+          }
+        : { usePolling: false }),
     });
+    if (!polling) {
+      this.missedScanTimer = setInterval(
+        () => void this.scanForMissedTranscripts(),
+        SessionWatcher.MISSED_SCAN_INTERVAL_MS
+      );
+      this.missedScanTimer.unref?.();
+    }
 
     this.watcher.on('add', (filePath) => this.handleFileChange(filePath));
     this.watcher.on('change', (filePath) => this.handleFileChange(filePath));
@@ -637,6 +687,10 @@ export class SessionWatcher extends EventEmitter {
     if (this.watcher) {
       this.watcher.close();
       this.watcher = null;
+    }
+    if (this.missedScanTimer) {
+      clearInterval(this.missedScanTimer);
+      this.missedScanTimer = null;
     }
     // Clear all debounce timers
     for (const timer of this.debounceTimers.values()) {
@@ -794,18 +848,29 @@ export class SessionWatcher extends EventEmitter {
 
     // Debounce per conversation - avoid blocking the event loop with rapid
     // successive file parses when the CLI is actively writing
+    // successive file parses when the CLI is actively writing. A file written
+    // without a 150 ms pause (streaming) still gets processed every second.
+    const now = Date.now();
+    const since = this.debounceSince.get(convId) ?? now;
     const existingTimer = this.debounceTimers.get(convId);
     if (existingTimer) {
+      if (now - since >= SessionWatcher.DEBOUNCE_MAX_WAIT_MS) return; // fires soon anyway
       clearTimeout(existingTimer);
     }
+    this.debounceSince.set(convId, since);
+    const delay = Math.max(
+      0,
+      Math.min(SessionWatcher.DEBOUNCE_MS, SessionWatcher.DEBOUNCE_MAX_WAIT_MS - (now - since))
+    );
     this.debounceTimers.set(
       convId,
       setTimeout(() => {
         this.debounceTimers.delete(convId);
+        this.debounceSince.delete(convId);
         void this.processFileChangeAsync(filePath, convId).catch((err) =>
           console.error(`Watcher: processFileChangeAsync failed for ${convId}:`, err)
         );
-      }, SessionWatcher.DEBOUNCE_MS)
+      }, delay)
     );
   }
 
@@ -823,15 +888,10 @@ export class SessionWatcher extends EventEmitter {
           const tracked = this.conversations.get(convId);
           if (!tracked) return;
 
-          // Re-parse to confirm still waiting. Read off the event loop so a large
-          // conversation file doesn't block pings/pongs.
-          let content: string;
-          try {
-            content = await fs.promises.readFile(filePath, 'utf-8');
-          } catch {
-            return;
-          }
-          const messages = parseConversationFile(filePath, undefined, content);
+          // Re-parse to confirm still waiting (incremental: only new bytes are read).
+          const snap = await transcriptCache.get(filePath);
+          if (!snap) return;
+          const messages = snap.messages();
           if (!detectWaitingForInput(messages)) return;
 
           // Confirmed: tool is genuinely waiting for input (not just running)
@@ -876,15 +936,19 @@ export class SessionWatcher extends EventEmitter {
     // paths should use processFileChangeAsync() so a large-file read never stalls
     // the event loop long enough to delay WebSocket pongs.
     let stats: fs.Stats;
-    let content: string;
+    let snap: TranscriptSnapshot | null;
     try {
       stats = fs.statSync(filePath);
-      content = fs.readFileSync(filePath, 'utf-8');
+      snap = transcriptCache.getSync(filePath);
     } catch (err) {
       console.log(`Watcher: processFileChange read failed for ${convId}: ${err}`);
       return;
     }
-    this.applyFileChange(filePath, convId, content, stats, opts);
+    if (!snap) {
+      console.log(`Watcher: processFileChange read failed for ${convId}`);
+      return;
+    }
+    this.applyFileChange(filePath, convId, snap, stats, opts);
   }
 
   /**
@@ -895,23 +959,28 @@ export class SessionWatcher extends EventEmitter {
    */
   private async processFileChangeAsync(filePath: string, convId: string): Promise<void> {
     let stats: fs.Stats;
-    let content: string;
+    let snap: TranscriptSnapshot | null;
     try {
-      [stats, content] = await Promise.all([
+      // Only the bytes appended since the last read are read and parsed.
+      [stats, snap] = await Promise.all([
         fs.promises.stat(filePath),
-        fs.promises.readFile(filePath, 'utf-8'),
+        transcriptCache.get(filePath),
       ]);
     } catch (err) {
       console.log(`Watcher: processFileChangeAsync read failed for ${convId}: ${err}`);
       return;
     }
-    this.applyFileChange(filePath, convId, content, stats);
+    if (!snap) {
+      console.log(`Watcher: processFileChangeAsync read failed for ${convId}`);
+      return;
+    }
+    this.applyFileChange(filePath, convId, snap, stats);
   }
 
   private applyFileChange(
     filePath: string,
     convId: string,
-    content: string,
+    snap: TranscriptSnapshot,
     stats: fs.Stats,
     opts: FileChangeOptions = {}
   ): void {
@@ -920,7 +989,7 @@ export class SessionWatcher extends EventEmitter {
 
     // Parse the conversation from content (already read by the caller)
     const t0 = Date.now();
-    const messages = parseConversationFile(filePath, undefined, content);
+    const messages = snap.messages();
     const t1 = Date.now();
     const highlights = extractHighlights(messages);
     const t2 = Date.now();
@@ -1054,13 +1123,11 @@ export class SessionWatcher extends EventEmitter {
 
     // Use tmux session name as display name, fallback to project dir name
     const sessionName = tmuxName || projectPath.split('/').pop() || convId;
-    const { event: compactionEvent, lastLine: newCompactionLine } = detectCompaction(
-      filePath,
+    const { event: compactionEvent, lastLine: newCompactionLine } = snap.compactionSince(
+      lastCompactionLine,
       tmuxName || convId,
       sessionName,
-      projectPath,
-      lastCompactionLine,
-      content
+      projectPath
     );
 
     if (compactionEvent && !quiet) {
@@ -1076,7 +1143,7 @@ export class SessionWatcher extends EventEmitter {
     // Extract and cache task summary from already-read content
     let cachedTaskSummary: TaskSummary | undefined;
     try {
-      const tasks = extractTasks(content);
+      const tasks = snap.tasks();
       if (tasks.length > 0) {
         const pending = tasks.filter((t) => t.status === 'pending').length;
         const inProgressTasks = tasks.filter((t) => t.status === 'in_progress');
@@ -1542,12 +1609,10 @@ export class SessionWatcher extends EventEmitter {
   private async detectConversationForSessionInner(sessionName: string): Promise<string | null> {
     const projectsDir = path.join(this.codeHome, 'projects');
     try {
-      const { stdout: pidOut } = await execAsync(
-        `tmux display-message -t "${sessionName}" -p "#{pane_pid}" 2>/dev/null`,
-        { timeout: 2000, killSignal: 'SIGKILL' }
-      );
-      const rootPid = pidOut.trim();
-      if (!rootPid) return null;
+      // Pane root pid from the last refresh (the shared tmux snapshot), so no
+      // tmux call here; the root must still be alive.
+      const rootPid = String(this.tmuxSessionIdentity.get(sessionName)?.panePid || '');
+      if (!rootPid || rootPid === '0') return null;
 
       // If the pane's root PID is gone, skip — nothing to trace.
       try {
@@ -1556,21 +1621,9 @@ export class SessionWatcher extends EventEmitter {
         return null;
       }
 
-      // Get all descendant PIDs using pstree (single command, bounded).
-      // Without a timeout + SIGKILL, a wedged pstree keeps the shell child alive
-      // and stacks up across the 5s refresh interval.
+      // All descendant PIDs from /proc (bounded walk; was `pstree` via a shell).
       const pids: string[] = [rootPid];
-      try {
-        const { stdout: tree } = await execAsync(`pstree -p ${rootPid} 2>/dev/null`, {
-          timeout: 2000,
-          killSignal: 'SIGKILL',
-        });
-        for (const match of tree.matchAll(/\((\d+)\)/g)) {
-          if (match[1] !== rootPid) pids.push(match[1]);
-        }
-      } catch {
-        /* pstree not available or hung — fall back to root PID only */
-      }
+      for (const pid of await descendantPids(Number(rootPid))) pids.push(String(pid));
 
       // Check /proc/<pid>/fd/ for open JSONL files in the projects directory
       for (const pid of pids) {
@@ -1758,8 +1811,10 @@ export class SessionWatcher extends EventEmitter {
         if (this.newlyCreatedSessions.has(sessionName)) continue; // Skip newly created sessions
         try {
           // Capture scrollback history (up to 500 lines) to find user prompts
-          const { stdout: paneText } = await execAsync(
-            `tmux capture-pane -t "${sessionName}" -p -S -500 2>/dev/null`
+          const { stdout: paneText } = await runTmux(
+            ['capture-pane', '-t', sessionName, '-p', '-S', '-500'],
+            'watcher',
+            { timeoutMs: 3000 }
           );
 
           // Extract user prompts from terminal output (lines after ❯ prompt)
@@ -1986,6 +2041,44 @@ export class SessionWatcher extends EventEmitter {
   }
 
   /**
+   * Safety net for a missed 'add' event with native watching: look for
+   * recently written transcripts in the TAGGED sessions' project dirs that we
+   * do not track yet and feed them to handleFileChange (which applies the
+   * usual filters). Async, bounded, at most one run at a time.
+   */
+  private async scanForMissedTranscripts(): Promise<void> {
+    if (this.missedScanRunning || !this.watcher) return;
+    this.missedScanRunning = true;
+    try {
+      const projectsDir = path.join(this.codeHome, 'projects');
+      for (const encoded of [...this.tmuxProjectPaths]) {
+        const dir = path.join(projectsDir, encoded);
+        let names: string[];
+        try {
+          names = (await fs.promises.readdir(dir)).filter((f) => f.endsWith('.jsonl'));
+        } catch {
+          continue;
+        }
+        if (names.length > SessionWatcher.MISSED_SCAN_MAX_FILES) continue;
+        for (const name of names) {
+          const convId = name.slice(0, -'.jsonl'.length);
+          const tracked = this.conversations.get(convId);
+          if (tracked) continue; // tracked files: reconcileTrackedConversations
+          const file = path.join(dir, name);
+          try {
+            const st = await fs.promises.stat(file);
+            if (Date.now() - st.mtimeMs <= INITIAL_FILE_MAX_AGE_MS) this.handleFileChange(file);
+          } catch {
+            /* gone */
+          }
+        }
+      }
+    } finally {
+      this.missedScanRunning = false;
+    }
+  }
+
+  /**
    * Re-process any tracked conversation whose on-disk file is newer than our
    * cached snapshot. This is a safety net for missed/dropped file-watch events:
    * processFileChange re-parses, refreshes the cache, and emits conversation-update
@@ -2005,6 +2098,11 @@ export class SessionWatcher extends EventEmitter {
     }
   }
 
+  /** Messages of a transcript via the shared incremental cache ([] when unreadable). */
+  private readMessagesSync(filePath: string): ConversationMessage[] {
+    return transcriptCache.getSync(filePath)?.messages() ?? [];
+  }
+
   getMessages(sessionId?: string): ConversationMessage[] {
     const targetId = this.resolveToConversationId(sessionId);
     if (!targetId) return [];
@@ -2017,8 +2115,8 @@ export class SessionWatcher extends EventEmitter {
       try {
         const currentMtime = fs.statSync(tracked.path).mtimeMs;
         if (currentMtime > tracked.lastModified) {
-          // File changed since cache — re-parse and update cache
-          const messages = parseConversationFile(tracked.path);
+          // File changed since cache — catch up (reads only the new bytes)
+          const messages = this.readMessagesSync(tracked.path);
           tracked.cachedMessages = messages;
           tracked.lastModified = currentMtime;
           return messages;
@@ -2028,7 +2126,7 @@ export class SessionWatcher extends EventEmitter {
       }
       return tracked.cachedMessages;
     }
-    return parseConversationFile(tracked.path);
+    return this.readMessagesSync(tracked.path);
   }
 
   /**
@@ -2047,7 +2145,7 @@ export class SessionWatcher extends EventEmitter {
     if (!tracked) return this.getMessages(sessionId);
 
     try {
-      const messages = parseConversationFile(tracked.path);
+      const messages = this.readMessagesSync(tracked.path);
       // Refresh the cached message snapshot (but not lastModified) so other
       // cache readers (getStatus, etc.) stay consistent with what we just served.
       tracked.cachedMessages = messages;
@@ -2096,7 +2194,7 @@ export class SessionWatcher extends EventEmitter {
     }
 
     // Use cached messages instead of re-parsing
-    const messages = tracked.cachedMessages || parseConversationFile(tracked.path);
+    const messages = tracked.cachedMessages || this.readMessagesSync(tracked.path);
     const lastMessage = messages[messages.length - 1];
 
     // Determine if this session has a feedback prompt
@@ -2268,7 +2366,7 @@ export class SessionWatcher extends EventEmitter {
     this.lastMessageCount = best.conv.messageCount;
 
     // Use cached messages instead of re-parsing
-    const messages = best.conv.cachedMessages || parseConversationFile(best.conv.path);
+    const messages = best.conv.cachedMessages || this.readMessagesSync(best.conv.path);
     const hlights = extractHighlights(messages);
 
     this.emit('conversation-update', {
@@ -2372,7 +2470,7 @@ export class SessionWatcher extends EventEmitter {
     const resolved = this.resolveConversationForSession(targetTmux);
     if (!resolved) return;
 
-    const messages = resolved.conv.cachedMessages || parseConversationFile(resolved.conv.path);
+    const messages = resolved.conv.cachedMessages || this.readMessagesSync(resolved.conv.path);
     const pendingTools = getPendingApprovalTools(messages);
     if (pendingTools.length > 0) {
       this.emit('pending-approval', {

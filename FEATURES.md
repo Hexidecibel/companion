@@ -233,6 +233,13 @@ Prominent bottom drawer panel showing subagents as first-class UI, replacing the
 - Herald inbox news for subagents: one "agents finished" item per group of 2+ agents that ran together (20 s settle), a "failed" item per failed agent, a "looks stuck" item per stuck running agent; restarts never replay old news, quiet hours respected; tones: stuck = stuck tone, failed = error tone, group done = finished
 - `subagent_rollup {facts: true}` returns the structured facts (mirrored in `web/src/types/subagents.ts`); MCP `remote_subagent_status {server, session?}` lets the main Claude thread ask any daemon the same question
 
+## Impact Metrics & Daemon Performance (2026-10-15)
+- **Impact metrics** (`get_impact`, Help > Diagnostics > Impact): daemon / herald-voice / tmux / MCP CPU + memory, swap, event-loop lag p50/p99/max, every subprocess per kind (count, duration, timeouts, failures), a 30 s tmux probe latency, transcript parse cost; 1-minute buckets kept 24 h in `~/.companion/impact.json`; threshold flags (loop p99 > 100 ms, daemon CPU > 10 %, tmux probe > 50 ms, timeouts, swap > 90 %)
+- Root cause of the daemon's ~13 % CPU fixed: libuv io_uring SQPOLL busy-polling (`UV_USE_IO_URING=0` in the unit template, `bin/companion` and the production drop-in; `Nice=5` so Claude Code sessions win contention)
+- Native fs events instead of 100 ms chokidar polling (`COMPANION_WATCH_POLLING=1` restores polling), with stat reconcile + new-transcript scan as safety nets
+- Incremental transcript parsing (byte-offset tails, full re-read on rotate/truncate) shared by the watcher, get_highlights, get_tasks and conversation_file
+- One shared, cached `tmux list-panes -a` snapshot; /proc instead of pstree/display-message for PID detection; snapshot/mapping files written only on change; polled WS requests logged as a once-a-minute summary (`COMPANION_WS_DEBUG=1` for per-message lines)
+
 ## Tiled Agent Conversations
 Dispatch panel shows agent conversations tiled side-by-side on desktop instead of card list + single detail view.
 

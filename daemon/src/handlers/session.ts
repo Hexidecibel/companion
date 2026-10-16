@@ -1,15 +1,9 @@
+import { transcriptCache } from '../transcript-cache';
 import * as fs from 'fs';
 import * as path from 'path';
-import { promisify } from 'util';
-import { exec } from 'child_process';
+import { trackedExecAsync } from '../impact/sub';
 import { HandlerContext, MessageHandler } from '../handler-context';
-import {
-  extractHighlights,
-  extractTasks,
-  parseConversationChain,
-  parseConversationFile,
-  detectActiveChoicePrompt,
-} from '../parser';
+import { extractHighlights, parseConversationChain, detectActiveChoicePrompt } from '../parser';
 import { WebSocketResponse, Question, ConversationHighlight } from '../types';
 import {
   SLOW_OPERATION_THRESHOLD_MS,
@@ -20,7 +14,7 @@ import {
   DEFAULT_HIGHLIGHTS_LIMIT,
 } from '../constants';
 
-const execAsync = promisify(exec);
+const execAsync = trackedExecAsync('session');
 
 /**
  * Resolve a sessionId to a tmux session name.
@@ -134,7 +128,12 @@ export function registerSessionHandlers(ctx: HandlerContext): Record<string, Mes
       let hasMore: boolean;
 
       if (chain.length > 1 && limit > 0) {
-        const result = parseConversationChain(chain, limit, offset);
+        const result = parseConversationChain(
+          chain,
+          limit,
+          offset,
+          (f) => transcriptCache.getSync(f)?.messages() ?? []
+        );
         resultHighlights = result.highlights;
         total = result.total;
         hasMore = result.hasMore;
@@ -313,9 +312,11 @@ export function registerSessionHandlers(ctx: HandlerContext): Record<string, Mes
         statusParams?.sessionId || client.subscribedSessionId || ctx.watcher.getActiveSessionId();
       const status = ctx.watcher.getStatus(statusSessionId || undefined);
       const t1 = Date.now();
-      console.log(
-        `WebSocket: get_status - ${t1 - t0}ms - waiting: ${status.isWaitingForInput}, running: ${status.isRunning}, session: ${statusSessionId}`
-      );
+      // Polled by every client: log only when slow.
+      if (t1 - t0 > SLOW_OPERATION_THRESHOLD_MS)
+        console.log(
+          `WebSocket: get_status - ${t1 - t0}ms - waiting: ${status.isWaitingForInput}, running: ${status.isRunning}, session: ${statusSessionId}`
+        );
 
       ctx.send(client.ws, {
         type: 'status',
@@ -376,7 +377,7 @@ export function registerSessionHandlers(ctx: HandlerContext): Record<string, Mes
       });
     },
 
-    get_tasks(client, payload, requestId) {
+    async get_tasks(client, payload, requestId) {
       const tasksPayload = payload as { sessionId?: string } | undefined;
       const tasksSessionId = tasksPayload?.sessionId || ctx.watcher.getActiveSessionId();
       if (tasksSessionId) {
@@ -384,8 +385,11 @@ export function registerSessionHandlers(ctx: HandlerContext): Record<string, Mes
         const session = sessionSessions.find((s) => s.id === tasksSessionId);
         if (session?.conversationPath) {
           try {
-            const content = fs.readFileSync(session.conversationPath, 'utf-8');
-            const tasks = extractTasks(content);
+            // Polled every 5 s per client: the shared incremental cache reads
+            // only bytes appended since the last read (async, never the whole file).
+            const snap = await transcriptCache.get(session.conversationPath);
+            if (!snap) throw new Error('unreadable');
+            const tasks = snap.tasks();
             ctx.send(client.ws, {
               type: 'tasks',
               success: true,
@@ -758,7 +762,7 @@ export function registerSessionHandlers(ctx: HandlerContext): Record<string, Mes
       }
 
       try {
-        const messages = parseConversationFile(resolved);
+        const messages = transcriptCache.getSync(resolved)?.messages() ?? [];
         const allHighlights = extractHighlights(messages);
         const total = allHighlights.length;
         const limit = filePayload.limit || DEFAULT_HIGHLIGHTS_LIMIT;

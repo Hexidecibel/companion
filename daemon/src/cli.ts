@@ -433,7 +433,11 @@ After=network.target
 
 [Service]
 Type=simple
-${envLines}ExecStart=${nodePath} ${daemonEntry}
+${envLines}# io_uring SQPOLL (libuv >= 1.45) busy-polls a kernel thread: ~12 % of a core
+# for the daemon's fs activity. Nice=5: Claude Code sessions win contention.
+Environment=UV_USE_IO_URING=0
+Nice=5
+ExecStart=${nodePath} ${daemonEntry}
 Restart=on-failure
 RestartSec=5
 

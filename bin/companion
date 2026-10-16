@@ -582,6 +582,12 @@ if [ -f "$PLAIN_SECRETS" ] && [ "$PLAIN_SECRETS" != "$SECRETS_ENV" ]; then
   unset line key val
 fi
 
+# libuv >= 1.45 (e.g. distro node linked to the system libuv 1.48) runs fs ops
+# through io_uring with an SQPOLL kernel thread that busy-polls: with the
+# daemon's steady fs activity that thread alone cost ~12 % of a core
+# (measured 2026-10-15). Off unless the caller set it.
+export UV_USE_IO_URING="${UV_USE_IO_URING:-0}"
+
 # --- Always ensure daemon is built ---
 build_daemon
 

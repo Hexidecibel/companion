@@ -19,6 +19,7 @@ import { dispatchCli, writePidFile, removePidFile } from './cli';
 import { SHUTDOWN_TIMEOUT_MS, STATUS_LOG_INTERVAL_MS } from './constants';
 import { AutoApprovalService } from './auto-approval';
 import { registerShutdownCallback, runShutdownCallbacks } from './utils';
+import { startImpact } from './impact';
 
 // Crash handlers — ensure crash reasons are always logged before exit
 // EADDRINUSE errors are handled by server.on('error') retry logic — don't exit here
@@ -106,6 +107,9 @@ async function main(): Promise<void> {
       }
     }
   }
+
+  // Impact metrics (CPU, loop lag, subprocesses): first, so it sees everything.
+  startImpact();
 
   // Initialize components
   const injector = new InputInjector(config.tmuxSession);

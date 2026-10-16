@@ -59,7 +59,34 @@ jest.mock('child_process', () => {
   // Copy the custom promisify symbol to the jest.fn wrapper
   (fn as any)[promisify.custom] = (mockExec as any)[promisify.custom];
 
-  return { exec: fn };
+  // execFile form (tmux-snapshot / runTmux): list-panes, show-environment.
+  function mockExecFile(file: string, args: string[], opts: unknown, cb?: Function) {
+    const done = (typeof opts === 'function' ? opts : cb) as Function;
+    if (file !== 'tmux') return done(new Error('unknown command'), '', '');
+    const sub = args[0];
+    if (sub === 'list-panes') {
+      if (tmuxSessions.size === 0) {
+        const e: any = new Error('no server running');
+        e.code = 1;
+        return done(e, '', 'no server running on /tmp/tmux-1000/default');
+      }
+      let i = 0;
+      const lines = Array.from(tmuxSessions.entries()).map(([name, s]) =>
+        [name, `$${i++}`, s.created ?? '', '0', '1', '1', '1', s.workingDir, s.panePid ?? ''].join('\t')
+      );
+      return done(null, lines.join('\n') + '\n', '');
+    }
+    if (sub === 'show-environment') {
+      const name = args[args.indexOf('-t') + 1];
+      const session = tmuxSessions.get(name);
+      return done(null, session?.tagged ? 'COMPANION_APP=1' : '', '');
+    }
+    const e: any = new Error('unsupported');
+    e.code = 1;
+    return done(e, '', '');
+  }
+
+  return { exec: fn, execFile: jest.fn(mockExecFile) };
 });
 
 // Mock chokidar
@@ -88,6 +115,7 @@ jest.mock('fs', () => {
 
 import chokidar from 'chokidar';
 import { SessionWatcher } from '../src/watcher';
+import { invalidateTmuxSnapshot } from '../src/tmux-snapshot';
 
 const mockFs = fs as jest.Mocked<typeof fs>;
 const mockChokidar = chokidar as jest.Mocked<typeof chokidar>;
@@ -141,6 +169,7 @@ describe('SessionWatcher', () => {
     jest.useFakeTimers();
     jest.clearAllMocks();
     tmuxSessions.clear();
+    invalidateTmuxSnapshot();
     mockFs.existsSync.mockReturnValue(true);
     mockFs.readFileSync.mockReturnValue('');
     mockFs.statSync.mockReturnValue({ mtimeMs: Date.now(), birthtimeMs: Date.now(), isDirectory: () => false } as any);

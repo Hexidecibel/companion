@@ -1,3 +1,4 @@
+import { impact } from './impact/state';
 import * as fs from 'fs';
 import {
   ConversationMessage,
@@ -218,12 +219,20 @@ export function parseConversationFile(
   limit: number = MAX_MESSAGES,
   preReadContent?: string
 ): ConversationMessage[] {
+  const t0 = performance.now();
   const content =
     preReadContent ?? (fs.existsSync(filePath) ? fs.readFileSync(filePath, 'utf-8') : '');
   if (!content) {
     return [];
   }
+  try {
+    return parseConversationContent(content, limit);
+  } finally {
+    impact.recordTranscriptParse(content.length, performance.now() - t0, true);
+  }
+}
 
+function parseConversationContent(content: string, limit: number): ConversationMessage[] {
   const lines = content.split('\n').filter((line) => line.trim());
   incrementMessagesParsed(lines.length);
 
@@ -335,10 +344,18 @@ export function parseConversationFile(
   }
 
   // Post-pass: detect skill invocations and mark the expanded user message.
-  // Two patterns:
-  //   1. User message with <command-name>/foo</command-name> → next user message is expansion
-  //   2. Assistant message with Skill tool_use → next user message (after tool_result) is expansion
   const trimmed = messages.slice(-limit);
+  markSkillExpansions(trimmed);
+  return trimmed;
+}
+
+/**
+ * Two patterns:
+ *   1. User message with <command-name>/foo</command-name> -> next user message is expansion
+ *   2. Assistant message with Skill tool_use -> next user message (after tool_result) is expansion
+ * Mutates `trimmed` (sets skillName).
+ */
+function markSkillExpansions(trimmed: ConversationMessage[]): void {
   for (let i = 0; i < trimmed.length - 1; i++) {
     // Pattern 1: <command-name> user message
     if (trimmed[i].type === 'user') {
@@ -371,7 +388,6 @@ export function parseConversationFile(
       }
     }
   }
-  return trimmed;
 }
 
 function parseQueueOperation(_entry: JsonlEntry): ConversationMessage | null {
@@ -1219,7 +1235,9 @@ export function isTrivialHighlights(highlights: ConversationHighlight[]): boolea
 export function parseConversationChain(
   files: string[],
   limit: number,
-  offset: number
+  offset: number,
+  /** How to read one file's messages (the handlers pass the incremental cache). */
+  load: (file: string) => ConversationMessage[] = (f) => parseConversationFile(f)
 ): { highlights: ConversationHighlight[]; total: number; hasMore: boolean } {
   if (files.length === 0) {
     return { highlights: [], total: 0, hasMore: false };
@@ -1233,7 +1251,7 @@ export function parseConversationChain(
 
   // Walk from newest to oldest, stop once we have enough
   for (let i = files.length - 1; i >= 0; i--) {
-    const messages = parseConversationFile(files[i]);
+    const messages = load(files[i]);
     const highlights = extractHighlights(messages);
     // An older file holding only a directly-run command (e.g. a `/login` that
     // wrote its own transcript) is not a previous session: skip it, no divider.
@@ -1836,19 +1854,41 @@ interface TaskUpdateInput {
  * Extract tasks from JSONL content (from TaskCreate/TaskUpdate tool calls)
  */
 export function extractTasks(content: string): TaskItem[] {
-  const lines = content.split('\n').filter((line) => line.trim());
-
-  // Track tasks by temporary ID (toolu_xxx) until we get real ID from result
-  const pendingTasks = new Map<string, { task: Partial<TaskItem>; timestamp: number }>();
-  // Map toolu_xxx to real task ID
-  const toolIdToTaskId = new Map<string, string>();
-  // Final tasks by real ID
-  const tasks = new Map<string, TaskItem>();
-
-  for (const line of lines) {
+  const acc = new TaskAccumulator();
+  for (const line of content.split('\n')) {
+    if (!line.trim()) continue;
+    let entry: unknown;
     try {
-      const entry = JSON.parse(line);
+      entry = JSON.parse(line);
+    } catch {
+      continue; // Skip malformed lines
+    }
+    acc.add(entry);
+  }
+  return acc.tasks();
+}
 
+/**
+ * Task list state machine fed one JSONL entry at a time (TaskCreate /
+ * TaskUpdate tool_use + the TaskCreate tool_result carrying the real id), so a
+ * transcript tail can be applied without re-reading the whole file.
+ */
+export class TaskAccumulator {
+  // Track tasks by temporary ID (toolu_xxx) until we get real ID from result
+  private pendingTasks = new Map<string, { task: Partial<TaskItem>; timestamp: number }>();
+  // Map toolu_xxx to real task ID
+  private toolIdToTaskId = new Map<string, string>();
+  // Final tasks by real ID
+  private byId = new Map<string, TaskItem>();
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  add(entryIn: unknown): void {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const entry = entryIn as any;
+    const pendingTasks = this.pendingTasks;
+    const toolIdToTaskId = this.toolIdToTaskId;
+    const tasks = this.byId;
+    try {
       if (entry.message?.content && Array.isArray(entry.message.content)) {
         const timestamp = entry.timestamp ? new Date(entry.timestamp).getTime() : Date.now();
 
@@ -1964,12 +2004,20 @@ export function extractTasks(content: string): TaskItem[] {
     }
   }
 
-  // Return tasks sorted by ID (numeric order)
-  return Array.from(tasks.values()).sort((a, b) => {
-    const aNum = parseInt(a.id, 10);
-    const bNum = parseInt(b.id, 10);
-    return aNum - bNum;
-  });
+  /** Tasks sorted by ID (numeric order); copies, safe to hand out. */
+  tasks(): TaskItem[] {
+    return Array.from(this.byId.values())
+      .map((t) => ({
+        ...t,
+        blockedBy: t.blockedBy && [...t.blockedBy],
+        blocks: t.blocks && [...t.blocks],
+      }))
+      .sort((a, b) => {
+        const aNum = parseInt(a.id, 10);
+        const bNum = parseInt(b.id, 10);
+        return aNum - bNum;
+      });
+  }
 }
 
 /**
@@ -2044,4 +2092,277 @@ export function extractFileChanges(content: string): FileChange[] {
 
   // Return sorted by path for stable ordering
   return Array.from(changesByPath.values()).sort((a, b) => a.path.localeCompare(b.path));
+}
+
+// ---------------------------------------------------------------------------
+// Incremental conversation parsing
+// ---------------------------------------------------------------------------
+
+/**
+ * Split JSONL text into entries the way every parser here does
+ * (`split('\n').filter(trim)`), one slot per non-blank line: the parsed
+ * object, or null for a malformed / non-object line (every consumer skips
+ * those, so a null slot behaves exactly like the skipped line).
+ */
+export function parseJsonlLines(text: string): Array<JsonlEntry | null> {
+  const out: Array<JsonlEntry | null> = [];
+  for (const line of text.split('\n')) {
+    if (!line.trim()) continue;
+    try {
+      const v = JSON.parse(line);
+      out.push(v && typeof v === 'object' && !Array.isArray(v) ? (v as JsonlEntry) : null);
+    } catch {
+      out.push(null);
+    }
+  }
+  return out;
+}
+
+type EntrySlot =
+  | {
+      k: 'msg';
+      /** Kept only when the entry has tool_use blocks (it may need re-parsing). */
+      entry: JsonlEntry | null;
+      msg: ConversationMessage | null;
+    }
+  | { k: 'summary'; ts: number; summary: string }
+  | { k: 'compact'; ts: number }
+  | { k: 'skip' };
+
+interface CompactionMark {
+  index: number;
+  ts: number;
+  legacy: boolean;
+  /** Legacy summary text, or the boundary's summary once its next line arrived. */
+  summary: string | null;
+}
+
+/**
+ * parseConversationFile, fed in pieces: append the entries of new lines and
+ * get exactly what a full parse of all lines so far would return (pinned by
+ * equivalence tests). Per-entry messages are cached; an entry is re-parsed
+ * only when a tool it holds gets a result / timing / error later in the file.
+ * Also keeps the task list (TaskAccumulator) and compaction marks
+ * (detectCompaction) incrementally.
+ */
+export class ConversationAccumulator {
+  private slots: EntrySlot[] = [];
+  private toolResults = new Map<string, string>();
+  private toolStartTimes = new Map<string, number>();
+  private toolCompleteTimes = new Map<string, number>();
+  private toolErrors = new Set<string>();
+  /** tool id -> slot indexes whose message reads that id. */
+  private dependents = new Map<string, number[]>();
+  private assembled: ConversationMessage[] | null = null;
+  private taskAcc = new TaskAccumulator();
+  private compactions: CompactionMark[] = [];
+
+  /** Non-blank lines seen (== detectCompaction's `lastLine`). */
+  get lineCount(): number {
+    return this.slots.length;
+  }
+
+  append(entries: Array<JsonlEntry | null>): void {
+    if (entries.length === 0) return;
+    const base = this.slots.length;
+    const dirty = new Set<number>();
+    const touch = (key: string) => {
+      const deps = this.dependents.get(key);
+      if (deps) for (const i of deps) dirty.add(i);
+    };
+
+    // Pass 1 (same rules as parseConversationFile's first pass), plus tasks
+    // and the summary for a compact boundary waiting on its next line.
+    for (let n = 0; n < entries.length; n++) {
+      const entry = entries[n];
+      const index = base + n;
+      const prev = this.compactions[this.compactions.length - 1];
+      if (prev && !prev.legacy && prev.index === index - 1 && prev.summary === null) {
+        prev.summary = entry ? compactBoundarySummary(entry) : null;
+      }
+      if (!entry) continue;
+      this.taskAcc.add(entry);
+      try {
+        const timestamp = entry.timestamp ? new Date(entry.timestamp).getTime() : Date.now();
+        if (entry.message?.content && Array.isArray(entry.message.content)) {
+          for (const block of entry.message.content) {
+            if (block.type === 'tool_use' && block.id) {
+              this.toolStartTimes.set(block.id, timestamp);
+              touch(block.id);
+            }
+            if (block.type === 'tool_result' && block.tool_use_id) {
+              this.toolCompleteTimes.set(block.tool_use_id, timestamp);
+              if (block.is_error === true) this.toolErrors.add(block.tool_use_id);
+              let output = '';
+              if (typeof block.content === 'string') {
+                output = block.content;
+              } else if (Array.isArray(block.content)) {
+                output = block.content
+                  .filter((c) => c.type === 'text' && c.text)
+                  .map((c) => c.text || '')
+                  .join('\n');
+              }
+              this.toolResults.set(block.tool_use_id, output);
+              touch(block.tool_use_id);
+            }
+          }
+        }
+      } catch {
+        // Skip malformed lines
+      }
+    }
+
+    // Pass 2 for the new entries (after ALL their pass-1 data is in).
+    for (let n = 0; n < entries.length; n++) {
+      this.slots.push(this.makeSlot(entries[n], base + n));
+    }
+    // Re-parse older entries whose tools changed.
+    for (const i of dirty) {
+      if (i >= base) continue;
+      const slot = this.slots[i];
+      if (slot.k === 'msg' && slot.entry) slot.msg = this.parse(slot.entry);
+    }
+    this.assembled = null;
+  }
+
+  private parse(entry: JsonlEntry): ConversationMessage | null {
+    try {
+      return parseEntry(
+        entry,
+        this.toolResults,
+        this.toolStartTimes,
+        this.toolCompleteTimes,
+        this.toolErrors
+      );
+    } catch {
+      return null;
+    }
+  }
+
+  private makeSlot(entry: JsonlEntry | null, index: number): EntrySlot {
+    if (!entry) return { k: 'skip' };
+    try {
+      if (entry.type === 'user' || entry.type === 'assistant') {
+        const ids: string[] = [];
+        const content = entry.message?.content;
+        if (Array.isArray(content)) {
+          for (const block of content) {
+            if (block && block.type === 'tool_use' && block.name)
+              ids.push(block.id || entry.uuid || '');
+          }
+        }
+        for (const id of ids) {
+          const deps = this.dependents.get(id);
+          if (deps) deps.push(index);
+          else this.dependents.set(id, [index]);
+        }
+        return { k: 'msg', entry: ids.length > 0 ? entry : null, msg: this.parse(entry) };
+      }
+      if (entry.type === 'summary') {
+        if (!entry.summary) return { k: 'skip' };
+        const ts = entry.timestamp ? new Date(entry.timestamp).getTime() : Date.now();
+        this.compactions.push({ index, ts, legacy: true, summary: entry.summary });
+        return { k: 'summary', ts, summary: entry.summary };
+      }
+      if (entry.type === 'system' && entry.subtype === 'compact_boundary') {
+        const ts = entry.timestamp ? new Date(entry.timestamp).getTime() : Date.now();
+        this.compactions.push({ index, ts, legacy: false, summary: null });
+        return { k: 'compact', ts };
+      }
+    } catch {
+      // Skip malformed lines
+    }
+    return { k: 'skip' };
+  }
+
+  /** Same result as parseConversationFile over every line appended so far. */
+  messages(): ConversationMessage[] {
+    if (this.assembled) return this.assembled;
+    // Built newest-first like the full parser (its messages[0] is our last element).
+    const rev: ConversationMessage[] = [];
+    for (let i = this.slots.length - 1; i >= 0; i--) {
+      const slot = this.slots[i];
+      if (slot.k === 'msg') {
+        if (slot.msg) rev.push({ ...slot.msg });
+      } else if (slot.k === 'summary') {
+        rev.push({
+          id: `compaction-${slot.ts}`,
+          type: 'system',
+          content: cleanCompactionSummary(slot.summary),
+          timestamp: slot.ts,
+          isCompaction: true,
+        });
+      } else if (slot.k === 'compact') {
+        const first = rev[rev.length - 1];
+        if (first && first.type === 'user') {
+          rev[rev.length - 1] = {
+            ...first,
+            id: `compaction-${slot.ts}`,
+            type: 'system',
+            content: cleanCompactionSummary(first.content),
+            isCompaction: true,
+          };
+        } else {
+          rev.push({
+            id: `compaction-${slot.ts}`,
+            type: 'system',
+            content: 'Context compacted',
+            timestamp: slot.ts,
+            isCompaction: true,
+          });
+        }
+      }
+    }
+    const messages = rev.reverse();
+    markSkillExpansions(messages);
+    this.assembled = messages;
+    return messages;
+  }
+
+  tasks(): TaskItem[] {
+    return this.taskAcc.tasks();
+  }
+
+  /** detectCompaction(..., lastCheckedLine) over the lines appended so far. */
+  compactionSince(
+    lastCheckedLine: number,
+    sessionId: string,
+    sessionName: string,
+    projectPath: string
+  ): { event: CompactionEvent | null; lastLine: number } {
+    let event: CompactionEvent | null = null;
+    for (const c of this.compactions) {
+      if (c.index < lastCheckedLine) continue;
+      const summary = c.legacy
+        ? (c.summary as string)
+        : c.index + 1 < this.slots.length && c.summary !== null
+          ? c.summary
+          : 'Context compacted';
+      event = {
+        sessionId,
+        sessionName,
+        projectPath,
+        summary: cleanCompactionSummary(summary),
+        timestamp: c.ts,
+      };
+    }
+    return { event, lastLine: this.slots.length };
+  }
+}
+
+/** The summary detectCompaction reads from the line after a compact boundary. */
+function compactBoundarySummary(next: JsonlEntry): string | null {
+  try {
+    if (next.type === 'user' && next.message?.content) {
+      const c = next.message.content;
+      if (typeof c === 'string') return c.slice(0, MAX_SUMMARY_TEXT_LENGTH);
+      if (Array.isArray(c)) {
+        const textBlock = c.find((b) => b.type === 'text' && b.text);
+        if (textBlock) return (textBlock.text || '').slice(0, MAX_SUMMARY_TEXT_LENGTH);
+      }
+    }
+  } catch {
+    /* skip */
+  }
+  return null;
 }

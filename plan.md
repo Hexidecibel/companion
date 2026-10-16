@@ -4,6 +4,33 @@ Detailed plans for upcoming work items. Completed items are moved to FEATURES.md
 
 ---
 
+## Item: Impact metrics + perf batch A
+**Status:** batch A done + deployed 2026-10-15 (production unit drop-in `companion.service.d/perf.conf`: `UV_USE_IO_URING=0`, `Nice=5`); batch B pending
+
+Measure and cut what Companion costs the box while Claude Code runs.
+
+### Metrics (`daemon/src/impact/`)
+- `sub.ts`: `runSub` / `trySub` / `runTmux` (execFile, never a shell, SIGKILL timeout, bounded buffer), each call recorded per kind (`tmux:capture-pane@herald`, `git:diff`, ...): count, duration histogram, timeouts, failures, in-flight peak. GitRunner records into it; `trackedExecAsync` covers the remaining legacy `exec` call sites.
+- `sampler.ts`: every 10 s CPU + RSS/swap from /proc for the daemon, herald-voice, the tmux server and companion MCP node processes, system swap, `monitorEventLoopDelay` p50/p99/max; every 30 s one timed `tmux display-message -p '#{pid}'`; console lines counted.
+- `registry.ts`: 1-minute buckets, 24 h ring, saved hourly + on shutdown to `~/.companion/impact.json` (`COMPANION_IMPACT_FILE`); counters for transcript parses (bytes, ms, full vs tail), git index.lock errors, input collisions (placeholder for batch B).
+- Protocol `daemon/src/impact/protocol.ts` <-> `web/src/types/impact.ts` (mirror test); request `get_impact`. Web: Impact section in Help > Diagnostics (`ImpactDiagnostics.tsx`, fetch on open + every 10 s, 24 h sparklines, threshold flags: loop p99 > 100 ms, daemon CPU > 10 %, tmux probe > 50 ms, any subprocess timeout, swap > 90 %, any typing collision).
+
+### Fixes
+- Root cause of the 13-15 % system time: production runs `/usr/bin/node` 18 linked to the system libuv 1.48, whose io_uring SQPOLL kernel thread (`iou-sqp-<pid>`) busy-polls after every fs op; chokidar's 100 ms polling kept it awake (~90 % of the daemon's CPU). Unit template (`cli.ts`) and `bin/companion` now set `UV_USE_IO_URING=0` and the template `Nice=5`.
+- chokidar: native fs events instead of 100 ms polling + awaitWriteFinish (`COMPANION_WATCH_POLLING=1` restores polling); debounce now has a 1 s max wait; safety nets: the 5 s stat reconcile of tracked files + a 10 s scan for missed new transcripts in tagged project dirs.
+- Incremental transcripts (`transcript-cache.ts` + `ConversationAccumulator` / `TaskAccumulator` in parser.ts): tail reads from a byte offset, partial lines kept, inode change / truncation / rewrite = full re-read; equivalence tests + a replay of all 418 local transcripts matched the full parse. Used by the watcher, get_highlights (fresh + chain), get_tasks (now async), conversation_file.
+- One shared `tmux list-panes -a` (`tmux-snapshot.ts`, 2 s cache, in-flight shared, cached COMPANION_APP tag) for the watcher refresh (in-flight guarded, maps still built on the side and swapped synchronously) and every get_server_summary / list; pstree + display-message in PID detection replaced by /proc; terminal-view captures shared for 300 ms.
+- Session snapshot / mappings files written only when changed; stuck normaliser linear on long tokens; polled WebSocket requests summarised once a minute (`ws-log.ts`, `COMPANION_WS_DEBUG=1` for per-message logs).
+
+### Batch B (pending user decisions)
+- Input-injection guard: detect the user typing in the pane before injecting (populates `inputCollisions`).
+- herald-voice memory: ~3.9 GB RSS + 490 MB swap observed (swap 100 % used on the box).
+- tmux server in its own systemd scope (so daemon restarts / OOM never touch it).
+- `--permission-mode bypassPermissions` on app spawns (the one-time accept dialog parks new sessions).
+- Herald tool for the impact report (not added: herald/ was being changed by subagent phase 2).
+
+---
+
 ## Item: Stuck-session detection ("Out4 looks stuck")
 **Status:** done (live-verified on the probe; production needs a daemon restart)
 

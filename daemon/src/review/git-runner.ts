@@ -18,6 +18,7 @@
  */
 
 import { execFile as nodeExecFile } from 'child_process';
+import { impact } from '../impact/state';
 import { createHash } from 'crypto';
 
 export type GitOpKind = 'rev-parse' | 'status' | 'diff' | 'write' | 'apply' | 'read';
@@ -240,8 +241,11 @@ export class GitRunner {
     const args = [...SAFETY_FLAGS, ...hardenArgs(req.args)];
     return new Promise<GitRunResult>((resolve, reject) => {
       let child: ReturnType<ExecFileFn>;
+      const impactKind = `git:${req.args[0] || '?'}`;
+      const t0 = performance.now();
       try {
         this.spawnCount++;
+        impact.subStart(impactKind);
         child = this.execFileFn(
           'git',
           args,
@@ -259,6 +263,12 @@ export class GitRunner {
             const errText = (Buffer.isBuffer(stderr) ? stderr : Buffer.from(stderr || '')).toString(
               'utf8'
             );
+            const killed = !!err && (err.killed || err.signal === 'SIGKILL');
+            impact.subEnd(impactKind, performance.now() - t0, {
+              timedOut: killed,
+              failed: !!err && !killed,
+            });
+            if (err && /index\.lock/.test(errText)) impact.count('gitIndexLockErrors');
             if (!err) {
               resolve({ code: 0, stdout: out.toString('utf8'), stderr: errText, stdoutBuf: out });
               return;
@@ -285,6 +295,7 @@ export class GitRunner {
           }
         );
       } catch (e) {
+        impact.subEnd(impactKind, performance.now() - t0, { failed: true });
         reject(new GitError('spawn_failed', `git failed to start: ${String(e)}`));
         return;
       }

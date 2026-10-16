@@ -6,7 +6,7 @@
  * watcher + tmux panes and acts through the existing InputInjector path.
  */
 
-import { execFile } from 'child_process';
+import { runTmux } from '../impact/sub';
 import * as path from 'path';
 import {
   classifyLocalCommands,
@@ -283,14 +283,11 @@ export const MAX_PANE_CAPTURES = 12;
 
 /** Capture a pane. Rejects on failure (timeout, missing session) so callers can fail closed. */
 export function defaultCapturePane(tmuxName: string): Promise<string> {
-  return new Promise((resolve, reject) => {
-    execFile(
-      'tmux',
-      ['capture-pane', '-p', '-t', tmuxName, '-S', `-${PANE_CAPTURE_LINES}`],
-      { timeout: PANE_CAPTURE_TIMEOUT_MS, maxBuffer: 1024 * 1024, killSignal: 'SIGKILL' },
-      (err, stdout) => (err ? reject(err) : resolve(String(stdout || '')))
-    );
-  });
+  // runTmux: execFile + SIGKILL timeout, recorded in the impact metrics.
+  return runTmux(['capture-pane', '-p', '-t', tmuxName, '-S', `-${PANE_CAPTURE_LINES}`], 'herald', {
+    timeoutMs: PANE_CAPTURE_TIMEOUT_MS,
+    maxBuffer: 1024 * 1024,
+  }).then((r) => r.stdout);
 }
 
 interface DerivedTurnInfo {

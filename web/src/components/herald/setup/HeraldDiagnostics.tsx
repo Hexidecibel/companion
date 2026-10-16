@@ -9,6 +9,7 @@ import { openInputMonitoringSettings } from '../../../services/nativeBridge';
 import { displayChordText } from '../../../services/voice/hotkeys';
 import { isMacDesktop } from '../../../hooks/useNativeHerald';
 import type { HeraldVoiceStatus } from '../../../types/herald';
+import { ImpactDiagnostics } from './ImpactDiagnostics';
 
 export type DiagLevel = 'ok' | 'warn' | 'bad' | 'info';
 export interface DiagRow {
@@ -331,6 +332,7 @@ export function HeraldDiagnostics({ onClose }: { onClose: () => void }) {
             )}
           </section>
         ))}
+        <ImpactDiagnostics getTransport={getTransport} />
         <p className="hh-foot">The copied JSON has no tokens, transcripts or audio.</p>
       </div>
     </div>
