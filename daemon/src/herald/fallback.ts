@@ -8,6 +8,7 @@
  *   "anything for me" / brief -> unheard inbox headlines, most urgent first
  *   "status"                  -> one line per live session
  *   "how much have you cost"  -> the usage meter
+ *   "where are the agents at" -> the subagent rollup (deterministic)
  *   anything else             -> "My brain's offline right now (<why>) — here's what's waiting: ..."
  *
  * The outage itself (the "why") is told once per outage; later answers in the
@@ -69,7 +70,7 @@ export function recoveryDelayMs(reason: HeraldBrainDownReason, failures: number)
   return Math.min(10 * 60_000, base * 2 ** Math.max(0, Math.min(failures - 1, 6)));
 }
 
-export type FallbackKind = 'brief' | 'status' | 'usage' | 'other';
+export type FallbackKind = 'brief' | 'status' | 'usage' | 'subagents' | 'other';
 
 const BRIEF_RE =
   /\b(?:any(?:thing)?\s+(?:new\s+)?for\s+me|what(?:'s|\s+is)\s+new|brief\s+me|briefing|catch\s+me\s+up|what\s+did\s+i\s+miss|what(?:'s|\s+is)\s+waiting|anything\s+(?:new|waiting))\b/i;
@@ -77,6 +78,14 @@ const STATUS_RE =
   /\b(?:status|what(?:'s|\s+is)\s+(?:every(?:one|body)|everything)\s+(?:doing|up\s+to)|what(?:'s|\s+is)\s+(?:going\s+on|happening|up)|how(?:'s|\s+is|\s+are)\s+(?:things|the\s+sessions|everyone|everything)|sessions?\s+status)\b/i;
 const USAGE_RE =
   /\b(?:how\s+much\s+(?:have\s+you|did\s+you|do\s+you|are\s+you|you've|you\s+have)\s+(?:cost|costing|spent|spend|charged?)|what(?:'s|\s+is|\s+are|\s+have)\s+(?:you\s+)?(?:cost(?:ing)?|spen[dt]|my\s+(?:api\s+)?(?:bill|spend|usage|costs?))|how\s+(?:expensive|much)\s+(?:are\s+you|is\s+(?:herald|this|the\s+api))|api\s+(?:cost|costs|spend|usage|bill)|(?:monthly\s+)?budget\s+(?:left|used|status))\b/i;
+
+const SUBAGENTS_RE =
+  /\b(?:where(?:'s|\s+is)\s+it\s+at|(?:sub-?)?agents?\b.*\b(?:at|doing|going|status|progress|done|finished|running|up\s+to)|(?:how|what)(?:'s|\s+is|\s+are)\s+(?:the|my)\s+(?:sub-?)?agents?)\b/i;
+
+/** "Where's it at?" / "how are the agents doing?": answered from the subagent tracker. */
+export function isSubagentQuestion(text: string): boolean {
+  return SUBAGENTS_RE.test(text);
+}
 
 /** Questions about Herald's own cost: answered from the meter, no LLM needed. */
 export function isUsageQuestion(text: string): boolean {
@@ -86,6 +95,7 @@ export function isUsageQuestion(text: string): boolean {
 export function classifyFallback(text: string, intent?: string): FallbackKind {
   if (intent === 'brief') return 'brief';
   if (isUsageQuestion(text)) return 'usage';
+  if (isSubagentQuestion(text)) return 'subagents';
   if (BRIEF_RE.test(text)) return 'brief';
   if (STATUS_RE.test(text)) return 'status';
   return 'other';
@@ -179,6 +189,8 @@ export interface FallbackInput {
   briefing: HeraldInboxItem[];
   /** The usage answer, for kind 'usage'. */
   usage?: string;
+  /** The subagent rollup, for kind 'subagents'. */
+  subagents?: string;
 }
 
 /** The fallback reply text. */
@@ -195,7 +207,9 @@ export function fallbackReply(f: FallbackInput): string {
       ? briefSummary(f.briefing)
       : f.kind === 'status'
         ? statusSummary(f.snapshots)
-        : f.usage || '';
+        : f.kind === 'subagents'
+          ? f.subagents || "I can't see subagents right now."
+          : f.usage || '';
   return f.announce
     ? `My brain's offline right now (${why}), so here's the short version. ${body}`
     : body;

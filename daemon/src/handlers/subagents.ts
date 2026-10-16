@@ -8,6 +8,7 @@ import type {
   SubagentWatchResponse,
 } from '../subagents/protocol';
 import { isActive } from '../subagents/completion';
+import { convsForSession, factsFor, type SubagentLinkDeps } from '../subagents/links';
 
 type Obj = Record<string, unknown>;
 const obj = (p: unknown): Obj =>
@@ -30,12 +31,13 @@ class SubagentError extends Error {
  */
 export function registerSubagentHandlers(ctx: HandlerContext): Record<string, MessageHandler> {
   /** A session id as the app names it (tmux session) -> its conversation id(s). */
-  const resolve = (sessionKey: string | null): string[] | null => {
-    if (!sessionKey) return null;
-    const info = ctx.watcher.getConversationInfo(sessionKey);
-    const base = info?.path.split('/').pop()?.replace('.jsonl', '');
-    return base && base !== sessionKey ? [base, sessionKey] : [sessionKey];
+  const links: SubagentLinkDeps = {
+    watcher: ctx.watcher,
+    sessionName: (id) => ctx.sessionNameStore.get(id),
+    tracker: () => ctx.subAgentWatcher?.tracker ?? null,
   };
+  const resolve = (sessionKey: string | null): string[] | null =>
+    sessionKey ? convsForSession(links, sessionKey) : null;
 
   const tracker = () => {
     const t = ctx.subAgentWatcher?.tracker;
@@ -98,11 +100,16 @@ export function registerSubagentHandlers(ctx: HandlerContext): Record<string, Me
       } else {
         agents = t.list(resolve(str(p.sessionId) ?? null)).map((r) => t.summary(r));
       }
-      return {
+      const out: SubagentRollupResponse = {
         text: rollupText(agents, Date.now()),
         running: agents.filter((a) => isActive(a.status)).length,
         total: agents.length,
       };
+      if (p.facts === true && !agentId) {
+        const facts = factsFor(links, str(p.sessionId));
+        if (facts) out.facts = facts;
+      }
+      return out;
     }),
 
     subagent_watch: handle('subagent_watch', (client, p): SubagentWatchResponse => {

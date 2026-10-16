@@ -29,6 +29,9 @@
  *              babysat session's question, that session's "is asking" /
  *              "finished" item is held back (`deferBlock`): answered = never
  *              shown, escalated = shown at once.
+ *   subagents — (a finished item with `subagents`) dispatched agents: a group
+ *              that finished, a failed agent, a stuck one. Replaced wholesale
+ *              by the subagent alert list; survives the session working again.
  *   pairing  — (a blocked item with `pairing`) a new device wants to pair with
  *              this daemon. Not a session: replaced wholesale by the pairing
  *              manager's pending list, so it goes on approve, deny or expiry.
@@ -221,6 +224,7 @@ export class InboxTracker {
             `${item.serverId}:${item.sessionId}` !== sk ||
             item.review ||
             item.stuck ||
+            item.subagents ||
             item.babysit
           )
             continue;
@@ -247,6 +251,7 @@ export class InboxTracker {
               !item.answer &&
               !item.review &&
               !item.stuck &&
+              !item.subagents &&
               !item.babysit &&
               `${item.serverId}:${item.sessionId}` === sk
             )
@@ -439,6 +444,55 @@ export class InboxTracker {
     for (const [id, item] of this.items) if (item.stuck && !keep.has(id)) this.items.delete(id);
     this.prune(now);
     return JSON.stringify(this.list().filter((i) => i.stuck)) !== before;
+  }
+
+  /**
+   * Subagent alerts (subagents/alerts.ts): the whole current list. News items
+   * (group done, failed) are keyed by their fact, so a repeat is the same item
+   * (one tone); stuck items update in place. Returns true when the visible
+   * inbox changed.
+   */
+  setSubagentAlerts(
+    alerts: Array<{
+      key: string;
+      serverId: string;
+      sessionId: string;
+      sessionName: string;
+      headline: string;
+      at: number;
+      subagents: NonNullable<HeraldInboxItem['subagents']>;
+    }>,
+    now: number
+  ): boolean {
+    const before = JSON.stringify(this.list().filter((i) => i.subagents));
+    const keep = new Set<string>();
+    for (const a of alerts.slice(0, 30)) {
+      const id = `${a.serverId}:${a.sessionId}:sa${fnv1a(a.key)}`;
+      keep.add(id);
+      const prev = this.items.get(id);
+      this.seenKeys.add(id);
+      this.items.set(id, {
+        id,
+        serverId: a.serverId,
+        sessionId: a.sessionId,
+        sessionName: a.sessionName,
+        priority: 'finished',
+        headline: clip(oneLine(a.headline), 200),
+        createdAt: prev?.createdAt ?? a.at ?? now,
+        heard: prev?.heard ?? this.heard.has(id),
+        subagents: {
+          kind: a.subagents.kind,
+          agentIds: a.subagents.agentIds.slice(0, 20).map((x) => clip(x, 60)),
+          names: a.subagents.names.slice(0, 8).map((x) => clip(oneLine(x), 60)),
+          total: Math.max(0, Math.round(a.subagents.total) || 0),
+          failed: Math.max(0, Math.round(a.subagents.failed) || 0),
+          ...(a.subagents.stuckKind ? { stuckKind: clip(a.subagents.stuckKind, 40) } : {}),
+        },
+      });
+    }
+    for (const [id, item] of this.items) if (item.subagents && !keep.has(id)) this.items.delete(id);
+    this.prune(now);
+    return JSON.stringify(this.list().filter((i) => i.subagents)) !== before;
   }
 
   /**

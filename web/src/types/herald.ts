@@ -31,6 +31,21 @@ export interface HeraldInboxItem {
    */
   error?: { tool: string; line: string };
   /**
+   * Dispatched subagents (subagent tracker): `group_done` = every agent of one
+   * dispatch has ended (one item per group), `failed` = one agent failed,
+   * `stuck` = a running agent looks stuck (current truth, gone when it recovers).
+   * A finished-toned item (stuck: the `stuck` tone, failed: the error tone),
+   * never spoken unasked; it survives the session working again.
+   */
+  subagents?: {
+    kind: 'group_done' | 'failed' | 'stuck';
+    agentIds: string[];
+    names: string[];
+    total: number;
+    failed: number;
+    stuckKind?: string;
+  };
+  /**
    * A new device wants to pair with this daemon: a blocked-toned item on the
    * active device, never spoken unasked, approved ON SCREEN ONLY (never by
    * voice). `code` is for the screen: the brain only sees a placeholder. Gone

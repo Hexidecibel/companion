@@ -198,7 +198,7 @@ function InboxStrip({ items, unheardCount, canAsk, onAsk, onChip }: {
           key={item.id}
           type="button"
           role="listitem"
-          className={`herald-chip herald-chip--${item.priority}${item.review ? ` herald-chip--review herald-chip--review-${item.review.level}` : ''}${item.stuck ? ' herald-chip--stuck' : ''}${item.error ? ' herald-chip--error' : ''}${item.pairing ? ' herald-chip--pairing' : ''}${item.babysit ? ' herald-chip--babysit' : ''}${item.heard ? '' : ' herald-chip--unheard'}`}
+          className={`herald-chip herald-chip--${item.priority}${item.review ? ` herald-chip--review herald-chip--review-${item.review.level}` : ''}${item.stuck || item.subagents?.kind === 'stuck' ? ' herald-chip--stuck' : ''}{item.subagents?.kind === 'failed' ? ' herald-chip--error' : ''}${item.error ? ' herald-chip--error' : ''}${item.pairing ? ' herald-chip--pairing' : ''}${item.babysit ? ' herald-chip--babysit' : ''}${item.heard ? '' : ' herald-chip--unheard'}`}
           onClick={() => onChip(item)}
           title={item.review ? `Risky change, open review: ${item.headline}` : item.stuck ? `Looks stuck, open it: ${item.stuck.summary}` : item.pairing ? `New device, approve or deny it on screen: ${item.headline}` : item.error ? `Ended with an error, open it: ${item.headline}` : item.babysit ? babysitChipTitle(item) : `${PRIORITY_LABEL[item.priority]}: ${item.headline}`}
         >
@@ -740,7 +740,7 @@ export function HeraldPanel({ variant, onOpenSession, onClose }: HeraldPanelProp
       onOpenSession(item.serverId, item.sessionId);
       return;
     }
-    if (item.stuck || item.error || item.babysit) {
+    if (item.stuck || item.error || item.babysit || item.subagents) {
       // A stuck session / a turn that ended on an error / a babysat session:
       // open it (the evidence, or the babysitter's log, is there).
       onOpenSession(item.serverId, item.sessionId);

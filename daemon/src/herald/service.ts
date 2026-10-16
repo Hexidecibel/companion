@@ -96,6 +96,8 @@ import {
 } from './babysit/manager';
 import { decideBabysit, type BabysitDecideInput, type BabysitVerdict } from './babysit/decider';
 import { isSandbox } from '../sandbox';
+import type { SubagentFacts } from '../subagents/protocol';
+import type { SubagentAlert } from '../subagents/alerts';
 
 export const MAX_USER_TEXT = 4000;
 /** A voice message is checked against Herald's replies started this recently. */
@@ -110,6 +112,14 @@ const SNAPSHOT_MAX_SESSIONS = 20;
 /** Named sessions whose summaries are pre-fetched into the turn (more = a broad question). */
 const MAX_PREFETCH_SESSIONS = 2;
 const SNAPSHOT_MAX_UNHEARD = 6;
+
+function subagentTag(kind: 'group_done' | 'failed' | 'stuck'): string {
+  return kind === 'group_done'
+    ? 'agents finished'
+    : kind === 'failed'
+      ? 'agent failed'
+      : 'agent looks stuck';
+}
 const INBOX_RANK = { blocked: 0, finished: 1, progress: 2 } as const;
 /** Words the user says that Whisper tends to get wrong (tmux -> "T-MUX", daemon -> "demon"). */
 const STT_HINT_TERMS = [
@@ -164,6 +174,12 @@ export interface HeraldReviewLink {
 export interface HeraldStuckLink {
   list(sessionId?: string): StuckFinding[];
   snooze(sessionId: string, kind: StuckKind | undefined, minutes: number): number;
+}
+
+/** What Herald needs from the subagent tracker (late-bound, in-memory only). */
+export interface HeraldSubagentLink {
+  /** "Where's it at" facts: one app session (tmux id), or every recent one. Null = tracking off. */
+  facts(sessionId?: string): SubagentFacts | null;
 }
 
 /** One stuck session for the inbox (from StuckDetector.alerts()). */
@@ -353,6 +369,9 @@ export class HeraldService {
   private stuck: HeraldStuckLink | null = null;
   /** Latest stuck list from the detector (re-applied when the inbox is rebuilt at start). */
   private stuckAlerts: HeraldStuckAlert[] = [];
+  private subagents: HeraldSubagentLink | null = null;
+  /** Latest subagent alert list (re-applied when the inbox is rebuilt at start). */
+  private subagentAlerts: SubagentAlert[] = [];
   /** Pairing requests waiting for approval (inbox items; approved on screen only). */
   private pairingRequests: PendingPairingInfo[] = [];
   /** Session babysitter: standing briefs, answered from the poll loop. */
@@ -571,6 +590,8 @@ export class HeraldService {
       );
     if (this.pairingRequests.length)
       this.inbox.setPairingRequests(this.pairingRequests, this.now());
+    if (this.subagentAlerts.length)
+      this.inbox.setSubagentAlerts(this.subagentInboxRows(), this.now());
     this.toolbox?.loadOpened(persisted.cushOpened);
     this.verbosity = persisted.verbosity ?? 'auto';
     this.pronunciations = persisted.pronunciations ?? [];
@@ -937,7 +958,24 @@ export class HeraldService {
       snapshots: this.lastSnapshots,
       briefing: items,
       usage: kind === 'usage' ? usageAnswer(this.usage.summary()) : undefined,
+      subagents: kind === 'subagents' ? this.subagentFallbackText() : undefined,
     });
+  }
+
+  /** Deterministic "where's it at" for the fallback brain. */
+  private subagentFallbackText(): string {
+    let f: SubagentFacts | null = null;
+    try {
+      f = this.subagents?.facts() ?? null;
+    } catch {
+      f = null;
+    }
+    if (!f) return "I can't see subagents on this server.";
+    if (!f.sessions.length) return 'No subagents are running or finished recently.';
+    return f.sessions
+      .slice(0, 3)
+      .map((s) => `${s.session}: ${s.rollup}`)
+      .join(' ');
   }
 
   private getSource(serverId: string): SessionSource | null {
@@ -1408,6 +1446,7 @@ export class HeraldService {
       showSession: (s, deviceId) => this.showResolved(s, deviceId),
       ...(this.review ? { review: this.review } : {}),
       ...(this.stuck ? { stuck: this.stuck } : {}),
+      ...(this.subagents ? { subagents: this.subagents } : {}),
       babysit: {
         list: () => this.babysit.list(),
         stop: (sessionKey) => this.stopBabysitFor(sessionKey),
@@ -1570,6 +1609,7 @@ export class HeraldService {
             i.answer ||
             !!i.review ||
             !!i.stuck ||
+            !!i.subagents ||
             !(i.priority === 'finished' && live.get(`${i.serverId}:${i.sessionId}`) === 'working')
         )
         // Answers to the user's own questions first, then blocked, stuck, finished.
@@ -1588,7 +1628,7 @@ export class HeraldService {
     const now = this.now();
     return items.map(
       (i) =>
-        `[${i.babysit ? 'babysitting' : i.answer ? 'answer' : i.review ? 'risky change' : i.stuck ? 'looks stuck' : i.error ? 'ended with an error' : i.pairing ? 'pairing request' : i.priority}] ${clip(oneLine(brainHeadline(i)), i.answer ? 320 : 200)} (${i.sessionName}, ${formatAgo(now - i.createdAt)} ago)`
+        `[${i.babysit ? 'babysitting' : i.answer ? 'answer' : i.review ? 'risky change' : i.stuck ? 'looks stuck' : i.subagents ? subagentTag(i.subagents.kind) : i.error ? 'ended with an error' : i.pairing ? 'pairing request' : i.priority}] ${clip(oneLine(brainHeadline(i)), i.answer ? 320 : 200)} (${i.sessionName}, ${formatAgo(now - i.createdAt)} ago)`
     );
   }
 
@@ -1712,7 +1752,7 @@ export class HeraldService {
       current.get(`${i.serverId}:${i.sessionId}`)?.status ?? 'closed';
     const inbox = this.inbox
       .list()
-      .filter((i) => !(i.priority === 'finished' && statusOf(i) === 'working'));
+      .filter((i) => i.subagents || !(i.priority === 'finished' && statusOf(i) === 'working'));
     const blocked = inbox.filter((i) => i.priority === 'blocked').length;
     const finished = inbox.filter((i) => i.priority === 'finished').length;
     const pending = this.actions.list().filter((a) => a.status === 'pending');
@@ -1736,12 +1776,14 @@ export class HeraldService {
         parts.push(
           i.pairing
             ? `- [pairing request] ${clip(oneLine(brainHeadline(i)), 200)} (${formatAgo(now - i.createdAt)} ago)`
-            : `- [${i.error ? 'ended with an error' : i.priority}] ${clip(oneLine(i.headline), 200)} (${formatAgo(now - i.createdAt)} ago; ${i.sessionName} is ${statusOf(i)} now)`
+            : `- [${i.subagents ? subagentTag(i.subagents.kind) : i.error ? 'ended with an error' : i.priority}] ${clip(oneLine(i.headline), 200)} (${formatAgo(now - i.createdAt)} ago; ${i.sessionName} is ${statusOf(i)} now)`
         );
       }
       if (unheardItems.length > SNAPSHOT_MAX_UNHEARD)
         parts.push(`(${unheardItems.length - SNAPSHOT_MAX_UNHEARD} more)`);
     }
+    const agentsLine = this.subagentSnapshotLine();
+    if (agentsLine) parts.push(agentsLine);
     // Standing briefs (live state: it belongs here, never in the system prompt).
     const sitting = this.babysit.list().filter((b) => b.status === 'active');
     if (sitting.length) {
@@ -1987,6 +2029,63 @@ export class HeraldService {
 
   setStuck(link: HeraldStuckLink | null): void {
     this.stuck = link;
+  }
+
+  // ---------------------------------------------------------------- subagents
+
+  setSubagents(link: HeraldSubagentLink | null): void {
+    this.subagents = link;
+  }
+
+  /**
+   * The subagent alert list (subagents/alerts.ts: quiet hours already applied):
+   * a group that finished, each failed agent, each stuck one. Finished-toned
+   * news (stuck: its own tone), never spoken unasked.
+   */
+  syncSubagentAlerts(alerts: SubagentAlert[]): void {
+    this.subagentAlerts = alerts.map((a) => ({ ...a }));
+    if (!this.started || this.disposed) return;
+    if (this.inbox.setSubagentAlerts(this.subagentInboxRows(), this.now()))
+      this.emit({ kind: 'inbox', inbox: this.inbox.list() });
+  }
+
+  private subagentInboxRows() {
+    return this.subagentAlerts.map((a) => ({
+      key: a.key,
+      serverId: 'local',
+      sessionId: a.sessionId,
+      sessionName: a.sessionName,
+      headline: a.headline,
+      at: a.at,
+      subagents: {
+        kind: a.kind,
+        agentIds: a.agentIds,
+        names: a.names,
+        total: a.total,
+        failed: a.failed,
+        ...(a.stuckKind ? { stuckKind: a.stuckKind } : {}),
+      },
+    }));
+  }
+
+  /** Snapshot line: sessions with subagents running now (live state, never in the system prompt). */
+  private subagentSnapshotLine(): string | null {
+    if (!this.subagents) return null;
+    let f: SubagentFacts | null = null;
+    try {
+      f = this.subagents.facts();
+    } catch {
+      return null;
+    }
+    const running = f?.sessions.filter((s) => s.running > 0) ?? [];
+    if (!running.length) return null;
+    const bits = running
+      .slice(0, 4)
+      .map(
+        (s) =>
+          `${s.session} ${s.running} running of ${s.total}${s.failed ? `, ${s.failed} failed` : ''}`
+      );
+    return `Subagents running: ${bits.join('; ')}${running.length > 4 ? ` (+${running.length - 4} more)` : ''}. subagent_status has the detail.`;
   }
 
   /**

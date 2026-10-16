@@ -49,6 +49,9 @@ import { VoiceServiceClient } from './herald/voice/client';
 import { HeraldTriggerService } from './herald/trigger';
 import { ReviewService } from './review/service';
 import { StuckDetector } from './stuck/detector';
+import { inQuietHours } from './stuck/store';
+import { SubagentAlerts } from './subagents/alerts';
+import { factsFor, sessionOf, type SubagentLinkDeps } from './subagents/links';
 import { DeviceRegistry, isDeviceToken, normalizePlatform } from './pairing/registry';
 import { PairingManager, PairResult, PendingPairing } from './pairing/manager';
 import { DaemonIdentity, ephemeralIdentity } from './pairing/identity';
@@ -112,6 +115,7 @@ export class WebSocketHandler {
   private heraldTrigger: HeraldTriggerService;
   private review: ReviewService | null = null;
   private stuck: StuckDetector | null = null;
+  private subagentAlerts: SubagentAlerts | null = null;
   private identity: DaemonIdentity;
   private devices: DeviceRegistry;
   private pairing: PairingManager;
@@ -208,6 +212,31 @@ export class WebSocketHandler {
         list: (id) => stuck.list(id),
         snooze: (id, kind, minutes) => stuck.snooze(id, kind, minutes),
       });
+    }
+
+    // Subagents -> Herald: subagent_status facts + inbox alerts (group done, failed, stuck),
+    // fed by the tracker's coalesced 'changed' events (in-memory only).
+    if (this.herald && this.subAgentWatcher?.tracker) {
+      const tracker = this.subAgentWatcher.tracker;
+      const herald = this.herald;
+      const links: SubagentLinkDeps = {
+        watcher: this.watcher,
+        sessionName: (id) => this.sessionNameStore.get(id),
+        tracker: () => tracker,
+      };
+      herald.setSubagents({ facts: (id) => factsFor(links, id) });
+      this.subagentAlerts = new SubagentAlerts({
+        summary: (id) => {
+          const rec = tracker.get(id);
+          return rec ? tracker.summary(rec) : undefined;
+        },
+        label: (conv) => sessionOf(links, conv),
+        quiet: () =>
+          inQuietHours(this.push.getStore().getEscalation().quietHours ?? null, new Date()),
+        publish: (alerts) => herald.syncSubagentAlerts(alerts),
+      });
+      const alerts = this.subagentAlerts;
+      tracker.on('changed', (ids: string[], removed: string[]) => alerts.onChanged(ids, removed));
     }
 
     // Device pairing (registry is read lazily: nothing touches devices.json until used)
@@ -1494,5 +1523,6 @@ export class WebSocketHandler {
     this.heraldVoice?.shutdown();
     this.review?.shutdown();
     this.stuck?.shutdown();
+    this.subagentAlerts?.dispose();
   }
 }

@@ -19,6 +19,7 @@ import { remoteSendInput } from './tools/remote_send_input';
 import { remoteCancel } from './tools/remote_cancel';
 import { remoteExec } from './tools/remote_exec';
 import { remoteWrite } from './tools/remote_write';
+import { remoteSubagentStatus } from './tools/remote_subagent_status';
 
 const config = loadConfig();
 const origin = getOrCreateOrigin();
@@ -83,6 +84,28 @@ const TOOLS = [
           type: 'string',
           description:
             'Optional absolute project path; when given, resolved = newest matching sessionId (or null).',
+        },
+      },
+      required: ['server'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'remote_subagent_status',
+    description:
+      "Where a remote daemon's dispatched subagents are at (read-only, from its subagent tracker): " +
+      'a deterministic rollup ("3 of 5 done, 2 running. Bob is running tests ...") plus per session ' +
+      'and per agent status, current activity, elapsed / idle time, checklist step, tests, files touched ' +
+      'and stuck headline. No transcript text. Omit session for every session with running or recently ' +
+      'finished agents.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        server: { type: 'string', description: 'Server name from mcp-servers.json' },
+        session: {
+          type: 'string',
+          description:
+            'Optional tmux session name (as in remote_list_sessions) or conversation id; only its agents.',
         },
       },
       required: ['server'],
@@ -233,6 +256,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           pool,
           args as { server: string; cwd?: string }
         );
+        break;
+      case 'remote_subagent_status':
+        result = await remoteSubagentStatus(pool, args as { server: string; session?: string });
         break;
       case 'remote_dispatch':
         result = await remoteDispatch(

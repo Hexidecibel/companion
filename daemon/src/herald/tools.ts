@@ -30,6 +30,7 @@ import { cushCommandLine, cushReadback, CUSH_OPS, publicUrl } from './knowledge/
 import { MAX_QUERY_CHARS } from './knowledge/sources';
 import { redactSecrets } from './knowledge/redact';
 import type { StuckFinding, StuckKind } from '../stuck/protocol';
+import type { SubagentFacts } from '../subagents/protocol';
 import { resolveSession, normalizeRef } from './resolve';
 import { clip, clipTail, firstSentence, formatAgo, oneLine, plainToolAction } from './text';
 
@@ -346,6 +347,20 @@ TOOL_SPECS.push({
   },
 });
 
+TOOL_SPECS.push({
+  name: 'subagent_status',
+  description:
+    "Where a session's dispatched subagents (background agents) are at: per session how many are running, done or failed, and per agent its status, what it is doing now, how long it has run or been idle, checklist step, tests and whether it looks stuck. Use for 'where's it at?', 'how are the agents doing?', 'is the Out4 agent done?'. Omit session for every session with recent agents. Answer from 'rollup' and the agent lines; never invent progress.",
+  parameters: {
+    type: 'object',
+    properties: {
+      session: { ...SESSION_PROP, description: 'Only this session (optional).' },
+    },
+    required: [],
+    additionalProperties: false,
+  },
+});
+
 /**
  * Session babysitter. Static specs (the prompt prefix stays cacheable): live
  * brief state reaches the brain through the fleet snapshot and babysit_status.
@@ -542,6 +557,8 @@ function example(name: string): string {
       return '{"session": "Out4"}';
     case 'snooze_stuck':
       return '{"session": "Out4", "minutes": 30}';
+    case 'subagent_status':
+      return '{"session": "Out4"}';
     default:
       return '{"session": "companion"}';
   }
@@ -585,6 +602,10 @@ export interface ToolEnv {
   stuck?: {
     list(sessionId?: string): StuckFinding[];
     snooze(sessionId: string, kind: StuckKind | undefined, minutes: number): number;
+  };
+  /** Subagent tracker facts. Absent = subagent_status reports unavailable. */
+  subagents?: {
+    facts(sessionId?: string): SubagentFacts | null;
   };
   /** Session babysitter. Absent = the babysit tools report unavailable. */
   babysit?: {
@@ -994,6 +1015,67 @@ export async function executeTool(
           stuck,
           instruction:
             'One plain sentence per session from "what" (e.g. "Out4 looks stuck: the same test failed 6 times in 18 minutes."). Then offer, in a few words, to ask it what is going on, interrupt it, show it, or ignore it for a while. Never act without the user asking: asking = propose_input with a short question, interrupting = propose_interrupt, showing = show_session, ignoring = snooze_stuck.',
+        });
+      }
+
+      case 'subagent_status': {
+        if (!env.subagents) return err('Subagent tracking is not available on this server.');
+        let only: SessionSnapshot | null = null;
+        if (typeof args.session === 'string' && args.session.trim()) {
+          const r = await resolveFresh(env, args.session, state);
+          if (!r.ok) return err(r.error);
+          only = r.session;
+          if (only.serverId !== 'local')
+            return err(
+              `I can only see subagents of sessions on this machine for now; ${only.sessionName} is on another server.`
+            );
+        }
+        const facts = env.subagents.facts(only?.sessionId);
+        if (!facts) return err('Subagent tracking is off on this server.');
+        for (const s of facts.sessions) {
+          if (!s.sessionId) continue;
+          state.sessionRefs.set(`local:${s.sessionId}`, {
+            serverId: 'local',
+            sessionId: s.sessionId,
+            sessionName: s.session,
+          });
+        }
+        if (!facts.sessions.length)
+          return safeOk({
+            sessions: [],
+            instruction: only
+              ? `${only.sessionName} has no subagents running or finished recently. Say so in a few words.`
+              : 'No subagents are running or finished in the last two hours. Say so in a few words.',
+          });
+        const fmt = (ms: number | undefined) =>
+          ms === undefined ? undefined : formatAgo(Math.max(0, ms));
+        return safeOk({
+          running: facts.running,
+          total: facts.total,
+          sessions: facts.sessions.map((s) => ({
+            session: s.session,
+            rollup: s.rollup,
+            running: s.running,
+            total: s.total,
+            failed: s.failed,
+            agents: s.agents.map((a) => ({
+              name: a.name,
+              ...(a.type ? { type: a.type } : {}),
+              status: a.status,
+              line: a.line,
+              ran: fmt(a.elapsedMs),
+              ...(a.idleMs !== undefined && a.idleMs >= 60_000 ? { idle: fmt(a.idleMs) } : {}),
+              ...(a.checklist ? { step: a.checklist } : {}),
+              ...(a.tests ? { tests: a.tests } : {}),
+              ...(a.filesTouched ? { filesTouched: a.filesTouched } : {}),
+              ...(a.stuck ? { stuck: a.stuck } : {}),
+              ...(a.summary ? { result: a.summary } : {}),
+            })),
+            ...(s.more ? { moreAgents: s.more } : {}),
+          })),
+          ...(facts.moreSessions ? { moreSessions: facts.moreSessions } : {}),
+          instruction:
+            'Lead with the count per session from "rollup" ("Out4: 3 of 5 done, 2 running."), then at most two agents that matter most (stuck or failing first, else the longest running) in plain words. Never invent progress or causes not listed.',
         });
       }
 

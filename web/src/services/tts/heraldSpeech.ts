@@ -479,7 +479,7 @@ export class InboxChimeTracker {
         this.toned.set(item.id, { lastToneAt: now, reminders: 0 });
       } else if (item.review) {
         if (this.riskTones && kind !== 'blocked') kind = 'risk';
-      } else if (item.stuck) {
+      } else if (item.stuck || item.subagents?.kind === 'stuck') {
         if (kind === null || kind === 'finished') kind = 'stuck';
       } else if (item.priority === 'finished' && kind === null) kind = 'finished';
     }

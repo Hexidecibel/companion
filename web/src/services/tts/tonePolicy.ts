@@ -76,8 +76,8 @@ export function toneKindOf(item: HeraldInboxItem): ToneKind | null {
   if (item.babysit) return null;
   if (item.pairing || item.priority === 'blocked') return 'needs_you';
   if (item.review) return 'risk';
-  if (item.stuck) return 'stuck';
-  if (item.error) return 'error';
+  if (item.stuck || item.subagents?.kind === 'stuck') return 'stuck';
+  if (item.error || item.subagents?.kind === 'failed') return 'error';
   if (item.priority === 'finished') return 'finished';
   return null;
 }

@@ -181,12 +181,68 @@ export interface SubagentWatchResponse {
 export interface SubagentRollupRequest {
   sessionId?: string;
   agentId?: string;
+  /** Also return structured facts (Herald's subagent_status, the MCP remote_subagent_status). */
+  facts?: boolean;
 }
 
 export interface SubagentRollupResponse {
   text: string;
   running: number;
   total: number;
+  /** Present when the request asked for facts. */
+  facts?: SubagentFacts;
+}
+
+/** One agent in "where's it at" facts: structured, clipped and redacted; never transcript text. */
+export interface SubagentAgentFacts {
+  agentId: string;
+  name: string;
+  type?: string;
+  status: SubagentStatus;
+  /** Deterministic sentence ("Bob is running tests (2 failing runs, 4 min)"). */
+  line: string;
+  elapsedMs: number;
+  /** Time since its newest transcript entry (active agents). */
+  idleMs?: number;
+  /** What it is doing now (active agents). */
+  activity?: string;
+  /** "3/5" from its checklist. */
+  checklist?: string;
+  tests?: { runs: number; failed: number; lastFailed: boolean };
+  filesTouched: number;
+  /** Stuck headline (active agents). */
+  stuck?: string;
+  /** Task-notification summary (finished agents). */
+  summary?: string;
+  parentAgentId?: string;
+}
+
+/** The agents of one conversation. */
+export interface SubagentSessionFacts {
+  /** Conversation id the agents belong to. */
+  conversationId: string;
+  /** App session id (tmux session) when the conversation runs in one. */
+  sessionId?: string;
+  /** Display name: the session's name, else "a session in <project>". */
+  session: string;
+  rollup: string;
+  running: number;
+  total: number;
+  failed: number;
+  /** Active agents first, then the newest finished ones. */
+  agents: SubagentAgentFacts[];
+  /** Agents left out (limits). */
+  more: number;
+}
+
+export interface SubagentFacts {
+  rollup: string;
+  running: number;
+  total: number;
+  sessions: SubagentSessionFacts[];
+  /** Sessions left out (limits). */
+  moreSessions: number;
+  generatedAt: number;
 }
 
 /**

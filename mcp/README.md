@@ -50,3 +50,23 @@ claude mcp add companion-remote -- node /absolute/path/to/mcp/dist/index.js
 - `remote_read({ server, path })` — proxies to daemon `read_file`.
 - `remote_get_conversation({ server, sessionId, mode? })` — proxies to
   `get_highlights` (default) or `get_full`.
+- `remote_list_sessions({ server, cwd? })` — the daemon's live sessions; with
+  `cwd`, `resolved` = the newest session in that project (or null).
+- `remote_subagent_status({ server, session? })` — "where's it at?" for
+  dispatched subagents, read-only (no `remote_capabilities` needed, same auth
+  as `remote_list_sessions`). Proxies `subagent_rollup {facts: true}` and
+  returns a deterministic `rollup` line ("3 of 5 done, 2 running. Bob is
+  running tests (2 failing runs, 4 min).") plus `sessions[]`, each with its
+  own rollup, running / total / failed counts and up to 8 agents (status,
+  one-line description, elapsed / idle ms, activity, checklist step, tests,
+  files touched, stuck headline, notification summary). Structured facts
+  only, redacted daemon-side; no transcript text. `session` = a tmux session
+  name or a conversation id; omit it for every session with running or
+  recently finished (2 h) agents. Older daemons answer with the rollup line
+  only (`sessions: []`), or an error asking for an update.
+
+## Tests
+
+```bash
+npm test   # tsc + node --test dist/__tests__/*.test.js
+```

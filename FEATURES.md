@@ -229,6 +229,9 @@ Prominent bottom drawer panel showing subagents as first-class UI, replacing the
 - Protocol `subagent_list` / `subagent_get` / `subagent_rollup` / `subagent_watch` with `subagent_update` deltas (1/s per watch), mirrored in `web/src/types/subagents.ts`; `get_agent_tree` / `get_agent_detail` kept (detail now async, newest 2 MB, cached until the file changes)
 - Web: list + watch + deltas instead of 2 s polling (polling fallback for older daemons), no re-render on unchanged polls, tiles show state and fetch the conversation only when expanded, the detail hook stops polling finished agents and backs off while disconnected
 - Fallback for one release: `subagents.discovery: 'legacy'` / `COMPANION_SUBAGENTS=legacy` (old watcher); `COMPANION_SUBAGENTS=off` turns tracking off
+- **"Where's it at?" (phase 2, 2026-10-15)**: Herald answers from the tracker with zero LLM cost for the facts: brain tool `subagent_status {session?}` (deterministic per-agent lines: elapsed, activity, checklist, tests, files, stuck headline; secrets redacted, no transcript text), and the offline fallback answers "where's it at" / "how are the agents doing" from the rollup
+- Herald inbox news for subagents: one "agents finished" item per group of 2+ agents that ran together (20 s settle), a "failed" item per failed agent, a "looks stuck" item per stuck running agent; restarts never replay old news, quiet hours respected; tones: stuck = stuck tone, failed = error tone, group done = finished
+- `subagent_rollup {facts: true}` returns the structured facts (mirrored in `web/src/types/subagents.ts`); MCP `remote_subagent_status {server, session?}` lets the main Claude thread ask any daemon the same question
 
 ## Tiled Agent Conversations
 Dispatch panel shows agent conversations tiled side-by-side on desktop instead of card list + single detail view.

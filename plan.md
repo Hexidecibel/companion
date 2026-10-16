@@ -2119,7 +2119,7 @@ adds a per-friend-safe public download page listing the current APK / desktop bu
 ---
 
 ## Item: Subagent visibility ("where's it at")
-**Status:** in-progress (phase 1 done, deployed 2026-10-15; phases 2-3 planned)
+**Status:** in-progress (phase 1 done, deployed 2026-10-15; phase 2 done + deployed 2026-10-15; phase 3 planned)
 
 Deep, cheap visibility into dispatched subagents: a per-agent timeline + a fleet rollup the user,
 Herald and the main Claude thread can all ask "where's it at?". Hard requirement from the user: NO
@@ -2347,8 +2347,9 @@ temporary tail, so the shared feed never rewinds.
    files / tokens / timeline, subagent stuck signals; protocol + mirror; `subagent_list/get/watch`,
    deltas; web panel fixes (detail interval bug, no per-tile detail polling, no-op state updates,
    tree + chips + timeline). Deterministic `rollupText`. Ships as a pure perf + accuracy win.
-2. **Herald + main thread** (zero LLM by default): `subagent_status` tool, inbox items (group done,
-   failed, stuck), fallback lines, MCP `remote_subagent_status`, optional status file.
+2. **Herald + main thread** (zero LLM by default) - DONE + deployed 2026-10-15: `subagent_status`
+   tool, inbox items (group done, failed, stuck), fallback lines, MCP `remote_subagent_status`; no
+   status file (decision 3).
 3. **Rollup polish + shared feed**: `polishRollup` (metered, throttled, cached, setting), status page
    "Summarize", `TranscriptFeed` shared with the review ledger, `listSubagentFiles` 200-cap fix
    (newest by mtime instead of sorted id).
@@ -2419,3 +2420,41 @@ progress."
 - Deferred to later phases: backfilling counters of a `partial` (huge / history) transcript, the
   status page, Herald / inbox / MCP, LLM polish, the shared TranscriptFeed, the 100 MB perf test
   (a 17 MB growth test asserts budgets + every byte read once + slices < 50 ms).
+
+### Phase 2 as built (2026-10-15, deployed 2026-10-15)
+- `subagents/facts.ts` (pure): `buildFacts` -> `SubagentFacts` (per conversation: display name,
+  app session id, rollup, running / total / failed, <= 8 agents active-first with deterministic
+  `line`, elapsed / idle, activity, checklist "x/y", tests, files count, stuck headline, notification
+  summary; every string through `redactSecrets` + clipped; no transcript text). Fleet view keeps
+  finished agents of the last 2 h; a session filter keeps all retained ones. Protocol (mirrored):
+  `SubagentFacts` / `SubagentSessionFacts` / `SubagentAgentFacts`, `subagent_rollup {facts: true}`
+  -> `facts`.
+- `subagents/links.ts`: tmux session <-> conversation ids (current + compaction history),
+  names (session name store, else "a session in <project>"), `factsFor`; in-memory only. The
+  handlers' resolve uses it too (now includes compaction history).
+- `subagents/alerts.ts` `SubagentAlerts`, subscribed to the tracker's coalesced `changed` events
+  (no fs, no subprocess): group = agents of one conversation + one spawning agent that ran
+  together; ONE `group_done` item when all have ended and none joined for 20 s (settle, catches
+  sequential dispatch in one turn), only for groups >= 2 (single agents = noise, `minGroup`);
+  `failed` item per failed agent at once; `stuck` item per stuck running agent (current truth,
+  updated in place). Only agents this process saw running that ended after it started make
+  news (a restart never replays). Dedupe keys: failed = agent + end time (a resumed agent that
+  fails again is new), group = scope + first member, stuck = agent + kind + since. Quiet hours:
+  no news made, stuck withheld. Non-Companion conversations make no inbox items (visible
+  through the tool). News TTL 12 h, max 20.
+- Herald: `HeraldInboxItem.subagents?` (mirrored), `InboxTracker.setSubagentAlerts` (wholesale,
+  survives the session working again), `HeraldService.setSubagents` / `syncSubagentAlerts`,
+  briefing / snapshot tags `[agents finished]` / `[agent failed]` / `[agent looks stuck]`, a
+  "Subagents running: ..." snapshot line (user turn only), brain tool `subagent_status {session?}`
+  (+ one system-prompt line), fallback kind `subagents` ("where's it at", "how are the agents
+  doing") answered from the rollup. Web: tones (stuck agent = stuck tone, failed = error tone,
+  group = finished), chip opens the session.
+- MCP: `remote_subagent_status {server, session?}` (`mcp/src/tools/remote_subagent_status.ts`,
+  read-only, no capability gate, like `remote_list_sessions`), README, `npm test` (node:test).
+- Tests: daemon `subagents/__tests__/{alerts,facts}.test.ts`, `__tests__/herald-subagents.test.ts`
+  (1649 daemon tests green); web `services/tts/__tests__/subagentTone.test.ts` (1168 green); MCP 3.
+  Probe (9888): "Where are the agents at?" -> subagent_status -> "Companion: two of four agents
+  are done. The build subagent is 14 minutes in, tests passing so far. Batch A ... is 6 minutes
+  along." (ttft 1.9 s).
+- Deploy: `cd daemon && npm run build`, `cd mcp && npm run build`, web build via `bin/test`, then
+  one user-approved daemon restart; Claude Code sessions pick up the MCP tool on their next start.
