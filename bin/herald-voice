@@ -26,7 +26,9 @@
 # Env overrides: HERALD_VOICE_PORT, HERALD_VOICE_HOME (venv+models, default
 # ~/.local/share/herald-voice), HERALD_TTS_VOICE, HERALD_TTS_THREADS (6),
 # HERALD_STT_MODEL (base.en), HERALD_STT_THREADS (4), HERALD_WAKE_MODELS
-# (hey_jarvis, or comma list incl. paths to custom .onnx), HERALD_WAKE_THRESHOLD (0.5).
+# (hey_jarvis, or comma list incl. paths to custom .onnx), HERALD_WAKE_THRESHOLD (0.5),
+# HERALD_VOICE_IDLE_UNLOAD_S (1800: unload models after 30 min unused, reload on the
+# next request; 0 = keep loaded; status still reports an unloaded engine as ready).
 
 set -euo pipefail
 

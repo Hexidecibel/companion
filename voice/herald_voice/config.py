@@ -65,6 +65,11 @@ class Settings:
     # Backpressure: requests queued per engine before we answer 503.
     max_queue: int = 8
 
+    # Unload an engine's model after this many seconds without a request and
+    # reload it on the next one (0 = keep everything loaded). /health keeps
+    # reporting an idle-unloaded engine as ready.
+    idle_unload_s: float = 1800.0
+
     # Transcripts are user data: logged only when this is set.
     debug_transcripts: bool = False
 
@@ -93,4 +98,5 @@ def load_settings() -> Settings:
         wake_models=wake,
         wake_threshold=_float("HERALD_WAKE_THRESHOLD", 0.5, 0.05, 0.99),
         debug_transcripts=_flag("HERALD_DEBUG_TOOLS"),
+        idle_unload_s=_float("HERALD_VOICE_IDLE_UNLOAD_S", 1800.0, 0.0, 7 * 86400.0),
     )

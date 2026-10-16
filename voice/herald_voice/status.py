@@ -1,7 +1,8 @@
 """Format /health JSON (stdin) for `bin/herald-voice status`. Stdlib only.
 
 Env: PID, OWNER (port owner pid), CPU, RSS, PORT. Exit 0 only when every engine
-is ready and the service PID owns the port.
+is ready and the service PID owns the port. An engine unloaded after sitting idle
+(HERALD_VOICE_IDLE_UNLOAD_S) is ready: the next request reloads it.
 """
 
 import json
@@ -17,9 +18,12 @@ def main() -> int:
     print(f"{head}: PID {env.get('PID')} on 127.0.0.1:{env.get('PORT')} (cpu {env.get('CPU')}%, rss {env.get('RSS')})")
     for k in ("tts", "stt", "wake"):
         e = d[k]
-        state = "ready" if e["ready"] else ("loading" if e.get("loading") else "down")
+        if e["ready"] and e.get("loaded") is False:
+            state = "ready (idle, unloaded; reloads on next use)"
+        else:
+            state = "ready" if e["ready"] else ("loading" if e.get("loading") else "down")
         extra = ""
-        if k == "tts" and e["ready"]:
+        if k == "tts" and e["ready"] and "voices" in e:
             extra = f" default voice {e['defaultVoice']}, {len(e['voices'])} voices"
         elif k == "stt":
             extra = f" model {e['model']}"

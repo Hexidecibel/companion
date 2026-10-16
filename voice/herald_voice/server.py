@@ -11,11 +11,16 @@ Endpoints (all bodies bounded; audio is never written to disk):
 
 The browser never talks to this service; the daemon authenticates clients and
 proxies. Engines load in the background at startup so /health answers at once.
+An engine idle for HERALD_VOICE_IDLE_UNLOAD_S (default 1800 s, 0 = never) is
+unloaded and its memory returned to the OS; the next request reloads it (a few
+seconds), and /health keeps reporting it as ready ("loaded": false).
 """
 
 from __future__ import annotations
 
 import asyncio
+import ctypes
+import gc
 import logging
 import re
 import time
@@ -43,51 +48,132 @@ class Busy(Exception):
     pass
 
 
+def release_memory() -> None:
+    """Give freed model memory back to the OS: collect cycles, then ask glibc to
+    trim its heap and arenas (onnxruntime / CTranslate2 free into malloc, which
+    otherwise keeps the pages mapped). A no-op where malloc_trim is missing."""
+    gc.collect()
+    try:
+        ctypes.CDLL("libc.so.6").malloc_trim(0)
+    except (OSError, AttributeError):
+        pass
+
+
 @dataclass
 class EngineSlot:
-    """One engine, its loader and a single-worker executor with a bounded queue."""
+    """One engine, its loader and a single-worker executor with a bounded queue.
+
+    With `idle_unload_s` > 0 the engine is dropped after that long without a
+    request (`unload_if_idle`) and loaded again by the next request (`run`).
+    An engine unloaded that way still counts as ready: it is one load away.
+    `info` keeps what /health reports about it (voices, sample rate) meanwhile.
+    """
 
     name: str
     loader: Callable[[], Any]
     max_queue: int
+    idle_unload_s: float = 0.0
+    describe: Optional[Callable[[Any], dict]] = None
+    clock: Callable[[], float] = time.monotonic
     engine: Any = None
     error: Optional[str] = None
     loading: bool = False
     pending: int = 0
+    idle_unloaded: bool = False
+    unloads: int = 0
+    last_used: float = 0.0
+    info: dict = field(default_factory=dict)
     executor: ThreadPoolExecutor = field(default=None)  # type: ignore[assignment]
+    _load_task: Optional["asyncio.Future[None]"] = None
 
     def __post_init__(self) -> None:
         self.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix=f"hv-{self.name}")
+        self.last_used = self.clock()
+
+    @property
+    def loaded(self) -> bool:
+        return self.engine is not None
 
     @property
     def ready(self) -> bool:
-        return self.engine is not None
+        return self.engine is not None or (self.idle_unloaded and self.error is None)
 
     async def load(self) -> None:
-        if self.engine is not None or self.loading:
+        if self.engine is not None:
             return
+        if self._load_task is None:
+            self._load_task = asyncio.ensure_future(self._do_load())
+        await asyncio.shield(self._load_task)
+
+    async def _do_load(self) -> None:
         self.loading = True
         loop = asyncio.get_running_loop()
+        t0 = time.monotonic()
         try:
             self.engine = await loop.run_in_executor(self.executor, self.loader)
             self.error = None
+            if self.describe is not None:
+                self.info = self.describe(self.engine)
+            if self.idle_unloaded:
+                log.info("%s: reloaded after idle unload in %.1fs", self.name, time.monotonic() - t0)
+            self.idle_unloaded = False
+            self.last_used = self.clock()
         except Exception as exc:  # noqa: BLE001 - reported via /health
             self.error = f"{type(exc).__name__}: {exc}"
             log.error("%s: failed to load: %s", self.name, self.error)
         finally:
             self.loading = False
+            self._load_task = None
 
     async def run(self, fn: Callable[[Any], Any]) -> Any:
         if self.engine is None:
-            raise web.HTTPServiceUnavailable(text=f"{self.name} engine not ready")
+            if not self.idle_unloaded:
+                raise web.HTTPServiceUnavailable(text=f"{self.name} engine not ready")
+            if self.pending >= self.max_queue:
+                raise Busy()
         if self.pending >= self.max_queue:
             raise Busy()
         self.pending += 1
+        self.last_used = self.clock()
         loop = asyncio.get_running_loop()
         try:
-            return await loop.run_in_executor(self.executor, fn, self.engine)
+            if self.engine is None:
+                await self.load()
+                if self.engine is None:
+                    raise web.HTTPServiceUnavailable(text=f"{self.name} engine failed to reload")
+            engine = self.engine
+            return await loop.run_in_executor(self.executor, fn, engine)
         finally:
             self.pending -= 1
+            self.last_used = self.clock()
+
+    def _drop(self) -> bool:
+        """Executor thread: runs after any queued work for this engine."""
+        if self.pending > 0 or self.engine is None:
+            return False
+        self.engine = None
+        release_memory()
+        return True
+
+    async def unload_if_idle(self) -> bool:
+        if (
+            self.idle_unload_s <= 0
+            or self.engine is None
+            or self.loading
+            or self.pending > 0
+            or self.clock() - self.last_used < self.idle_unload_s
+        ):
+            return False
+        # Mark first so a request arriving meanwhile reloads instead of failing.
+        self.idle_unloaded = True
+        loop = asyncio.get_running_loop()
+        dropped = await loop.run_in_executor(self.executor, self._drop)
+        if dropped:
+            self.unloads += 1
+            log.info("%s: unloaded after %.0f s idle", self.name, self.idle_unload_s)
+        elif self.engine is not None:
+            self.idle_unloaded = False
+        return dropped
 
     def shutdown(self) -> None:
         self.executor.shutdown(wait=False, cancel_futures=True)
@@ -155,12 +241,30 @@ def create_app(
     stt_loader: Callable[[], Any],
     wake_factory: Callable[[], Any],
     preload: bool = True,
+    clock: Optional[Callable[[], float]] = None,
+    sweep_interval_s: float = 15.0,
 ) -> web.Application:
     app = web.Application(client_max_size=MAX_BODY)
-    tts = EngineSlot("tts", tts_loader, settings.max_queue)
-    stt = EngineSlot("stt", stt_loader, settings.max_queue)
+    idle = settings.idle_unload_s
+    clock = clock or time.monotonic
+
+    def describe_tts(e: Any) -> dict:
+        return {
+            "voices": [v.as_json() for v in e.voices()],
+            "defaultVoice": e.default_voice,
+            "sampleRate": e.sample_rate,
+        }
+
+    def wake_loader() -> Any:
+        streams = WakeStreams(wake_factory, settings.wake_max_streams, settings.wake_stream_ttl_s)
+        # Build the first detector now so the first "Hey Jarvis" is fast.
+        streams._spare.append(streams._factory())
+        return streams
+
+    tts = EngineSlot("tts", tts_loader, settings.max_queue, idle, describe_tts, clock)
+    stt = EngineSlot("stt", stt_loader, settings.max_queue, idle, None, clock)
     # The wake "engine" is the stream table; detectors are created lazily per stream.
-    wake = EngineSlot("wake", lambda: WakeStreams(wake_factory, settings.wake_max_streams, settings.wake_stream_ttl_s), settings.max_queue * 4)
+    wake = EngineSlot("wake", wake_loader, settings.max_queue * 4, idle, None, clock)
     app["slots"] = {"tts": tts, "stt": stt, "wake": wake}
     app["settings"] = settings
 
@@ -169,18 +273,23 @@ def create_app(
             # Sequential: loading all three at once would spike every core.
             for slot in (tts, stt, wake):
                 await slot.load()
-            if wake.ready:
-                # Build the first detector now so the first "Hey Jarvis" is fast.
-                await wake.run(lambda streams: streams._spare.append(streams._factory()) if not streams._spare else None)
 
         async def sweeper() -> None:
             while True:
-                await asyncio.sleep(15)
-                if wake.ready:
+                await asyncio.sleep(sweep_interval_s)
+                if wake.loaded:
                     try:
+                        # Housekeeping only: never counts as use of the engine.
+                        last = wake.last_used
                         await wake.run(lambda s: s.sweep())
+                        wake.last_used = last
                     except Exception:  # noqa: BLE001
                         pass
+                for slot in (tts, stt, wake):
+                    try:
+                        await slot.unload_if_idle()
+                    except Exception as exc:  # noqa: BLE001
+                        log.warning("%s: idle unload failed: %s", slot.name, exc)
 
         app["tasks"] = []
         if preload:
@@ -197,22 +306,29 @@ def create_app(
     app.on_cleanup.append(on_cleanup)
 
     def slot_state(slot: EngineSlot) -> dict:
-        return {"ready": slot.ready, "loading": slot.loading, "error": slot.error, "pending": slot.pending}
+        return {
+            "ready": slot.ready,
+            "loaded": slot.loaded,
+            "idleUnloaded": slot.idle_unloaded and not slot.loaded,
+            "loading": slot.loading,
+            "error": slot.error,
+            "pending": slot.pending,
+        }
 
     async def health(_req: web.Request) -> web.Response:
         tts_info: dict = slot_state(tts)
-        if tts.ready:
-            tts_info["voices"] = [v.as_json() for v in tts.engine.voices()]
-            tts_info["defaultVoice"] = tts.engine.default_voice
-            tts_info["sampleRate"] = tts.engine.sample_rate
+        if tts.ready and tts.info:
+            tts_info.update(tts.info)
         stt_info = slot_state(stt)
         stt_info["model"] = settings.stt_model
         wake_info = slot_state(wake)
         wake_info["models"] = list(settings.wake_models)
         wake_info["threshold"] = settings.wake_threshold
-        wake_info["streams"] = len(wake.engine) if wake.ready else 0
+        wake_info["streams"] = len(wake.engine) if wake.loaded else 0
         ok = tts.ready or stt.ready or wake.ready
-        return web.json_response({"ok": ok, "tts": tts_info, "stt": stt_info, "wake": wake_info})
+        return web.json_response(
+            {"ok": ok, "idleUnloadS": idle, "tts": tts_info, "stt": stt_info, "wake": wake_info}
+        )
 
     async def post_tts(req: web.Request) -> web.Response:
         try:
@@ -235,13 +351,14 @@ def create_app(
         except Busy:
             raise web.HTTPServiceUnavailable(text="tts busy")
         synth_ms = (time.monotonic() - t0) * 1000
-        audio_ms = len(pcm) / tts.engine.sample_rate * 1000
+        sample_rate = int(tts.info.get("sampleRate") or 24000)
+        audio_ms = len(pcm) / sample_rate * 1000
         log.info("tts: %d chars -> %.0f ms audio in %.0f ms (rtf %.2f)", len(text), audio_ms, synth_ms, synth_ms / max(audio_ms, 1))
         return web.Response(
             body=pcm.tobytes(),
             content_type="audio/L16",
             headers={
-                "X-Sample-Rate": str(tts.engine.sample_rate),
+                "X-Sample-Rate": str(sample_rate),
                 "X-Synth-Ms": f"{synth_ms:.0f}",
                 "X-Audio-Ms": f"{audio_ms:.0f}",
             },
@@ -292,8 +409,11 @@ def create_app(
         if not STREAM_ID.match(sid):
             raise web.HTTPBadRequest(text="bad stream id")
         dropped = False
-        if wake.ready:
+        if wake.loaded:
+            # Dropping a stream never reloads the detector nor counts as use.
+            last = wake.last_used
             dropped = await wake.run(lambda streams: streams.drop(sid))
+            wake.last_used = last
         best = wake_best.pop(sid, None)
         if best is not None:
             # One line per utterance the client checked: how close it came (no audio, no text).

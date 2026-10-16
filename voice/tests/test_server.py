@@ -189,3 +189,140 @@ def test_prompt_echo_guard():
     assert not echoes_prompt("Companion.", prompt)
     assert not echoes_prompt("Tell Out4 to hold the refunds.", prompt)
     assert not echoes_prompt("Doc Upload Site deploy", None)
+
+
+# ---------------------------------------------------------------------------
+# Idle unload (HERALD_VOICE_IDLE_UNLOAD_S)
+
+
+class Clock:
+    def __init__(self):
+        self.t = 1000.0
+
+    def __call__(self):
+        return self.t
+
+
+def make_idle_app(idle=60.0):
+    clock = Clock()
+    loads = {"tts": 0, "stt": 0, "wake": 0}
+
+    def tts_loader():
+        loads["tts"] += 1
+        return FakeTts()
+
+    def stt_loader():
+        loads["stt"] += 1
+        return FakeStt()
+
+    def wake_factory():
+        loads["wake"] += 1
+        return FakeWake()
+
+    app = create_app(
+        Settings(idle_unload_s=idle),
+        tts_loader=tts_loader,
+        stt_loader=stt_loader,
+        wake_factory=wake_factory,
+        preload=True,
+        clock=clock,
+        sweep_interval_s=0.01,
+    )
+    return app, clock, loads
+
+
+async def wait_for(cond, n=200):
+    for _ in range(n):
+        if cond():
+            return
+        await asyncio.sleep(0.01)
+    raise AssertionError("condition never became true")
+
+
+async def test_idle_engines_unload_stay_healthy_and_reload_on_use(aiohttp_client):
+    app, clock, loads = make_idle_app(60.0)
+    client = await aiohttp_client(app)
+    await ready(client)
+    slots = app["slots"]
+    assert all(s.loaded for s in slots.values())
+
+    clock.t += 30  # not idle long enough
+    await asyncio.sleep(0.05)
+    assert all(s.loaded for s in slots.values())
+
+    clock.t += 61
+    await wait_for(lambda: not any(s.loaded for s in slots.values()))
+    body = await (await client.get("/health")).json()
+    for k in ("tts", "stt", "wake"):
+        assert body[k]["ready"] is True, k
+        assert body[k]["loaded"] is False and body[k]["idleUnloaded"] is True
+    # Voices stay listed while unloaded (the daemon's voice picker needs them).
+    assert body["tts"]["voices"][0]["id"] == "af_heart"
+    assert body["tts"]["sampleRate"] == 24000
+
+    # Next request reloads transparently.
+    r = await client.post("/tts", json={"text": "hello"})
+    assert r.status == 200 and r.headers["X-Sample-Rate"] == "24000"
+    assert loads["tts"] == 2 and slots["tts"].loaded
+    r = await client.post("/stt", data=np.zeros(16000, dtype="<i2").tobytes())
+    assert r.status == 200 and loads["stt"] == 2
+    r = await client.post("/wake/s1", data=np.zeros(1600, dtype="<i2").tobytes())
+    assert r.status == 200 and slots["wake"].loaded
+    # Only the reloaded ones are loaded; the rest stay unloaded until used.
+    body = await (await client.get("/health")).json()
+    assert body["tts"]["loaded"] is True and body["tts"]["idleUnloaded"] is False
+
+
+async def test_concurrent_requests_share_one_reload(aiohttp_client):
+    app, clock, loads = make_idle_app(60.0)
+    client = await aiohttp_client(app)
+    await ready(client)
+    clock.t += 120
+    await wait_for(lambda: not app["slots"]["tts"].loaded)
+    rs = await asyncio.gather(*[client.post("/tts", json={"text": f"hi {i}"}) for i in range(4)])
+    assert [r.status for r in rs] == [200] * 4
+    assert loads["tts"] == 2
+
+
+async def test_wake_housekeeping_does_not_keep_engines_loaded(aiohttp_client):
+    app, clock, _ = make_idle_app(60.0)
+    client = await aiohttp_client(app)
+    await ready(client)
+    # A dropped stream is housekeeping, not use.
+    await client.delete("/wake/nobody")
+    clock.t += 61
+    await wait_for(lambda: not app["slots"]["wake"].loaded)
+
+
+async def test_zero_disables_idle_unload(aiohttp_client):
+    app, clock, _ = make_idle_app(0.0)
+    client = await aiohttp_client(app)
+    await ready(client)
+    clock.t += 10**6
+    await asyncio.sleep(0.05)
+    assert all(s.loaded for s in app["slots"].values())
+
+
+def test_status_reports_unloaded_as_ready(tmp_path):
+    import json
+    import os
+    import subprocess
+    import sys
+
+    eng = {"ready": True, "loaded": False, "idleUnloaded": True, "loading": False, "error": None}
+    health = {
+        "ok": True,
+        "tts": {**eng, "voices": [{"id": "af_heart"}], "defaultVoice": "af_heart"},
+        "stt": {**eng, "model": "base.en"},
+        "wake": {**eng, "models": ["hey_jarvis"], "threshold": 0.5},
+    }
+    script = os.path.join(os.path.dirname(__file__), "..", "herald_voice", "status.py")
+    r = subprocess.run(
+        [sys.executable, script],
+        input=json.dumps(health),
+        capture_output=True,
+        text=True,
+        env={**os.environ, "PID": "1", "OWNER": "1", "PORT": "9889", "CPU": "0", "RSS": "1 MB"},
+    )
+    assert r.returncode == 0, r.stdout
+    assert "HEALTHY" in r.stdout and "idle, unloaded" in r.stdout
