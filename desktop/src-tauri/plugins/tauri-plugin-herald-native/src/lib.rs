@@ -21,7 +21,9 @@
 //! * `set_prefer_builtin_mic { on }` - iOS: keep A2DP output and listen on the
 //!   built-in mic (no HFP); Android: capture preference; desktop: no-op.
 //!
-//! Android sideload updater (ApkUpdater.kt; elsewhere these reject):
+//! Android sideload updater (ApkUpdater.kt; elsewhere these reject; iOS has
+//! `app_update_info` (CFBundleVersion) and `app_update_fetch_feed` for the
+//! "new build on TestFlight" banner):
 //! * `app_update_info` - installed versionCode / versionName, `canInstall`
 //!   ("Install unknown apps" granted).
 //! * `app_update_fetch_feed { url }` - `{ body }` of the feed entry (HTTPS).
@@ -273,7 +275,8 @@ mod commands {
         }
     }
 
-    #[cfg(target_os = "android")]
+    /// Runs a mobile plugin method (named for its first users, the Android updater).
+    #[cfg(mobile)]
     fn android<R: Runtime>(app: &AppHandle<R>, method: &str, payload: serde_json::Value) -> Result<serde_json::Value, String> {
         use tauri::Manager;
         app.state::<super::mobile::HeraldNative<R>>().run(method, payload)
@@ -283,27 +286,30 @@ mod commands {
     const ANDROID_ONLY: &str = "the sideload updater is Android only";
 
     /// Android: installed version + whether "Install unknown apps" is granted.
+    /// iOS: `versionCode` = CFBundleVersion (the CI run number), versionName =
+    /// CFBundleShortVersionString, `canInstall` false (TestFlight installs).
     #[command]
     pub async fn app_update_info<R: Runtime>(app: AppHandle<R>) -> Result<serde_json::Value, String> {
-        #[cfg(target_os = "android")]
+        #[cfg(mobile)]
         {
             android(&app, "appUpdateInfo", serde_json::json!({}))
         }
-        #[cfg(not(target_os = "android"))]
+        #[cfg(not(mobile))]
         {
             let _ = app;
             Err(ANDROID_ONLY.into())
         }
     }
 
-    /// Android: the update feed entry, fetched natively (no WebView CORS).
+    /// Mobile: the update feed entry (android.json / ios.json), fetched
+    /// natively (no WebView CORS).
     #[command]
     pub async fn app_update_fetch_feed<R: Runtime>(app: AppHandle<R>, url: String) -> Result<serde_json::Value, String> {
-        #[cfg(target_os = "android")]
+        #[cfg(mobile)]
         {
             android(&app, "appUpdateFetchFeed", serde_json::json!({ "url": url }))
         }
-        #[cfg(not(target_os = "android"))]
+        #[cfg(not(mobile))]
         {
             let _ = (app, url);
             Err(ANDROID_ONLY.into())

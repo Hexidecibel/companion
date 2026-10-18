@@ -9163,7 +9163,8 @@ html {
   cursor: pointer;
 }
 
-.update-banner--android {
+.update-banner--android,
+.update-banner--ios {
   top: calc(var(--safe-top, env(safe-area-inset-top, 0px)) + 8px);
   bottom: auto;
   left: 12px;
@@ -9172,7 +9173,8 @@ html {
   margin: 0 auto;
 }
 
-.update-banner--android .update-banner-text {
+.update-banner--android .update-banner-text,
+.update-banner--ios .update-banner-text {
   flex: 1;
   min-width: 0;
 }

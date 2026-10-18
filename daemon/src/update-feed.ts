@@ -9,7 +9,8 @@ import * as path from 'path';
  * `bin/companion publish-update` fills. The desktop app's updater fetches
  * <channel>/latest.json, then the signed bundle it names (verified by the app,
  * minisign). The Android app fetches <channel>/android.json, then the APK it
- * names (sha256 + signing certificate checked on the device). First installs
+ * names (sha256 + signing certificate checked on the device). The iOS app
+ * fetches <channel>/ios.json ("Build N is on TestFlight" banner). First installs
  * use <channel>/installers.json (dmg, NSIS setup.exe, AppImage, deb). No auth needed.
  *
  * Hardening: GET/HEAD only, every path segment must be a plain file name

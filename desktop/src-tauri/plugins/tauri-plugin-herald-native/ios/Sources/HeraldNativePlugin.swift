@@ -26,6 +26,23 @@ class SecureSetArgs: Decodable {
   let value: String
 }
 
+class FeedArgs: Decodable {
+  let url: String
+}
+
+/// Matches AndroidInstalledInfo in web/src/services/androidUpdate.ts; on iOS
+/// versionCode is CFBundleVersion (the release run number), never installable.
+struct InstalledInfo: Encodable {
+  let packageName: String
+  let versionCode: Int
+  let versionName: String
+  let canInstall: Bool
+}
+
+struct FeedBody: Encodable {
+  let body: String
+}
+
 /// `{ value }`; absent when there is none.
 struct SecureValue: Encodable {
   let value: String?
@@ -190,6 +207,44 @@ class HeraldNativePlugin: Plugin {
       invoke.resolve(DiscoverResult(daemons: found))
       DispatchQueue.main.async { self?.browsers.removeAll { $0 === b } }
     }
+  }
+
+  // ---- "new build on TestFlight" banner (web/src/hooks/useIosTestflight.ts) ----
+
+  @objc public func appUpdateInfo(_ invoke: Invoke) throws {
+    let info = Bundle.main.infoDictionary ?? [:]
+    let build = Int((info["CFBundleVersion"] as? String) ?? "") ?? 0
+    invoke.resolve(InstalledInfo(
+      packageName: Bundle.main.bundleIdentifier ?? "",
+      versionCode: build,
+      versionName: (info["CFBundleShortVersionString"] as? String) ?? "",
+      canInstall: false
+    ))
+  }
+
+  /// GET a small HTTPS feed entry natively (no WebView CORS); resolves { body }.
+  @objc public func appUpdateFetchFeed(_ invoke: Invoke) throws {
+    let args = try invoke.parseArgs(FeedArgs.self)
+    guard let url = URL(string: args.url), url.scheme == "https" else {
+      invoke.reject("bad_url: feed must be https")
+      return
+    }
+    var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 15)
+    request.httpMethod = "GET"
+    URLSession.shared.dataTask(with: request) { data, response, error in
+      if let error = error {
+        invoke.reject("feed_failed: \(error.localizedDescription)")
+        return
+      }
+      let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+      guard status == 200, let data = data, data.count <= 65536,
+        let body = String(data: data, encoding: .utf8)
+      else {
+        invoke.reject("feed_failed: HTTP \(status)")
+        return
+      }
+      invoke.resolve(FeedBody(body: body))
+    }.resume()
   }
 
   // ---- secure storage (paired-device tokens; SecureStore.swift) ----

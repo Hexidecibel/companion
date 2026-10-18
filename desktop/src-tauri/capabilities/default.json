@@ -19,6 +19,10 @@
     "notification:allow-notify",
     "shell:allow-open",
     "opener:default",
+    {
+      "identifier": "opener:allow-open-url",
+      "allow": [{ "url": "itms-beta:*" }, { "url": "itms-beta://*" }]
+    },
     "fcm:default",
     "store:default",
     "herald-native:default"

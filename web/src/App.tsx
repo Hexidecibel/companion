@@ -7,6 +7,7 @@ import { StatusPage } from './components/StatusPage';
 import { Dashboard } from './components/Dashboard';
 import { UpdateBanner } from './components/UpdateBanner';
 import { AndroidUpdateBanner } from './components/AndroidUpdateBanner';
+import { IosTestflightBanner } from './components/IosTestflightBanner';
 import { CommandPalette, CommandAction } from './components/CommandPalette';
 import { PairingHost } from './components/PairingHost';
 import { SetupHost } from './components/setup/SetupHost';
@@ -195,6 +196,7 @@ export function App() {
 
             <UpdateBanner />
             <AndroidUpdateBanner />
+            <IosTestflightBanner />
             <PairingHost />
             <SetupHost />
 

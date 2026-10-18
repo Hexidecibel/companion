@@ -34,6 +34,11 @@
  * (versionCode, versionName, url, sha256, size, certSha256). Uses aapt2 and
  * apksigner from $ANDROID_HOME (or ~/Android/Sdk) build-tools.
  *
+ * iOS (--run only): when the run has the ios-ipa artifact and its build-ios
+ * job's "Upload IPA to TestFlight" step succeeded, also writes ios.json
+ * (build = run number = CFBundleVersion, versionName, publishedAt,
+ * testflightUrl; see ios-feed.js). Skipped TestFlight = ios.json untouched.
+ *
  * Options:
  *   --channel <name>   default "stable"
  *   --notes <text>     release notes (default: "Companion <version>")
@@ -41,6 +46,7 @@
  *   --base-url <url>   public feed URL (default https://dev.cush.rocks/updates)
  *   --keep <n>         versions to keep on disk (default 3)
  *   --allow-older      publish even if the feed already has a newer version
+ *   --ios-app-id <id>  Apple app ID for ios.json's TestFlight link (or $COMPANION_IOS_APP_ID)
  *   --dry-run          verify and print the manifest, write nothing
  */
 'use strict';
@@ -109,6 +115,9 @@ function parseArgs(argv) {
       case '--keep':
         opts.keep = Math.max(1, parseInt(val(), 10) || 3);
         break;
+      case '--ios-app-id':
+        opts.iosAppId = val();
+        break;
       case '--allow-older':
         opts.allowOlder = true;
         break;
@@ -121,7 +130,8 @@ function parseArgs(argv) {
           fs
             .readFileSync(__filename, 'utf8')
             .split('\n')
-            .slice(2, 46)
+            .slice(2)
+            .filter((l, i, all) => i < all.indexOf(' */'))
             .map((l) => l.replace(/^ \* ?/, ''))
             .join('\n')
         );
@@ -189,7 +199,61 @@ function downloadRun(run) {
     cwd: ROOT,
     stdio: 'inherit',
   });
-  return dest;
+  let meta = null;
+  try {
+    meta = JSON.parse(gh(['run', 'view', id, '--json', 'number,headSha,jobs']));
+  } catch (e) {
+    console.warn(`publish-update: cannot read run ${id} jobs (${e.message}); ios.json left alone`);
+  }
+  return { dest, id, available, meta };
+}
+
+/**
+ * iOS: when the run uploaded its IPA to TestFlight, write <channel>/ios.json so
+ * the iOS app can say "Build N is on TestFlight". A run that skipped TestFlight
+ * (or has no ios-ipa artifact) leaves ios.json untouched.
+ */
+function publishIos(opts, runInfo, versionName) {
+  const iosf = require('./ios-feed');
+  if (!runInfo || !runInfo.meta) return;
+  const verdict = iosf.shouldPublishIos({ artifacts: runInfo.available, jobs: runInfo.meta.jobs });
+  if (!verdict.ok) {
+    console.log(`iOS: ${verdict.reason}; ios.json not changed`);
+    return;
+  }
+  const build = Number(runInfo.meta.number);
+  const channelDir = path.join(opts.dir, opts.channel);
+  const manifestPath = path.join(channelDir, iosf.MANIFEST);
+  let current = null;
+  if (fs.existsSync(manifestPath)) {
+    try {
+      current = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+    } catch (e) {
+      die(`cannot read ${manifestPath}: ${e.message}`);
+    }
+  }
+  try {
+    iosf.checkPublishable(opts.allowOlder ? null : current, build);
+  } catch (e) {
+    die(e.message);
+  }
+  const entry = iosf.buildIosEntry({
+    build,
+    versionName,
+    runId: runInfo.id,
+    appleId: opts.iosAppId || process.env.COMPANION_IOS_APP_ID,
+    now: Date.now(),
+  });
+  if (opts.dryRun) {
+    console.log(JSON.stringify(entry, null, 2));
+    return;
+  }
+  fs.mkdirSync(channelDir, { recursive: true });
+  const tmp = `${manifestPath}.tmp-${process.pid}`;
+  fs.writeFileSync(tmp, JSON.stringify(entry, null, 2) + '\n', { mode: 0o644 });
+  fs.renameSync(tmp, manifestPath);
+  console.log(`Published iOS build ${build} (${versionName}) to ${manifestPath}`);
+  console.log(`iOS feed: ${opts.baseUrl}/${opts.channel}/${iosf.MANIFEST}`);
 }
 
 // --- minisign (Tauri updater signatures) ---------------------------------
@@ -336,7 +400,8 @@ function main() {
   const inst = require('./installers-feed');
   const opts = parseArgs(process.argv.slice(2));
   if (opts.apk) return publishApk(opts);
-  const src = opts.from ? path.resolve(opts.from) : downloadRun(opts.run);
+  const runInfo = opts.from ? null : downloadRun(opts.run);
+  const src = opts.from ? path.resolve(opts.from) : runInfo.dest;
   if (!fs.existsSync(src)) die(`no such dir: ${src}`);
 
   const pub = pubkeyFromConfig();
@@ -434,6 +499,7 @@ function main() {
   if (opts.dryRun) {
     console.log(JSON.stringify(manifest, null, 2));
     console.log(JSON.stringify(installersManifest, null, 2));
+    publishIos(opts, runInfo, version);
     return;
   }
 
@@ -475,6 +541,7 @@ function main() {
   console.log(`Published ${version} to ${manifestPath}`);
   console.log(`Feed URL: ${opts.baseUrl}/${opts.channel}/latest.json`);
   console.log(`Installers: ${opts.baseUrl}/${opts.channel}/${inst.MANIFEST}`);
+  publishIos(opts, runInfo, version);
   if (opts.run) fs.rmSync(src, { recursive: true, force: true });
 }
 
