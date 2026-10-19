@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, useCallback, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useState, useCallback, useMemo, type ReactNode } from 'react';
 import { Server } from '../types';
 import { connectionManager, ConnectionSnapshot } from '../services/ConnectionManager';
 import { getServers, saveServers, addServer as storageAddServer, updateServer as storageUpdateServer, deleteServer as storageDeleteServer } from '../services/storage';
@@ -136,19 +136,20 @@ export function ConnectionProvider({ children }: { children: ReactNode }) {
   const connectedCount = snapshots.filter((s) => s.state.status === 'connected').length;
   const totalCount = servers.filter((s) => s.enabled !== false).length;
 
+  // Memoized: an inline object re-rendered every consumer on any provider render.
+  const value = useMemo<ConnectionContextValue>(() => ({
+    servers,
+    snapshots,
+    connectedCount,
+    totalCount,
+    addServer,
+    updateServer,
+    deleteServer,
+    refreshServers,
+  }), [servers, snapshots, connectedCount, totalCount, addServer, updateServer, deleteServer, refreshServers]);
+
   return (
-    <ConnectionContext.Provider
-      value={{
-        servers,
-        snapshots,
-        connectedCount,
-        totalCount,
-        addServer,
-        updateServer,
-        deleteServer,
-        refreshServers,
-      }}
-    >
+    <ConnectionContext.Provider value={value}>
       {children}
     </ConnectionContext.Provider>
   );

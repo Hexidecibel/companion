@@ -83,13 +83,17 @@ export function Dashboard({ onSettings }: DashboardProps) {
     initPush();
   }, []);
 
-  // Re-register push token when connections change (new server connected)
+  // Re-register the push token when the SET of connected servers changes (a
+  // server (re)connected), not on every connection-state snapshot.
+  const connectedKey = useMemo(
+    () => snapshots.filter(s => s.state.status === 'connected').map(s => s.serverId).sort().join('|'),
+    [snapshots],
+  );
   useEffect(() => {
-    const connected = snapshots.filter(s => s.state.status === 'connected');
-    if (connected.length > 0) {
+    if (connectedKey) {
       registerWithAllServers();
     }
-  }, [snapshots]);
+  }, [connectedKey]);
 
   // Track viewport width for mobile/desktop layout switching
   useEffect(() => {
