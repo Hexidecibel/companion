@@ -24,6 +24,7 @@ const SHORTCUT_GROUPS = [
       { keys: `${MOD}+Alt+T`, description: 'Toggle terminal' },
       { keys: `${MOD}+Alt+F`, description: 'Search messages' },
       { keys: `${MOD}+Alt+P`, description: 'Open file finder' },
+      { keys: `${MOD}+Alt+G`, description: 'Toggle agent dispatch panel' },
       { keys: `${MOD}+Alt+Shift+A`, description: 'Toggle auto-approve' },
       { keys: `${MOD}+Alt+Shift+M`, description: 'Toggle mute' },
     ],

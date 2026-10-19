@@ -3305,6 +3305,37 @@ html {
   color: var(--accent-blue);
 }
 
+/* Mobile bar, all agents finished: quieter, dismissible */
+.dispatch-mobile-bar-done {
+  padding: 4px 8px 4px 16px;
+  background-color: transparent;
+  border-top: 1px solid var(--border-color, #374151);
+}
+
+.dispatch-mobile-bar-done .dispatch-mobile-label {
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.dispatch-mobile-bar-close {
+  margin-left: auto;
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 13px;
+  min-width: 32px;
+  min-height: 32px;
+  cursor: pointer;
+}
+
+/* Desktop header chip that opens the dispatch panel */
+.session-agent-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
 /* Mobile overlay (expanded) */
 .dispatch-mobile-overlay {
   position: fixed;

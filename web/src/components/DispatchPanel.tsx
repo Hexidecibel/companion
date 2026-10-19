@@ -16,6 +16,9 @@ interface DispatchPanelProps {
   height: number;
   collapsed: boolean;
   onCollapse: () => void;
+  /** Mobile: the user closed the quiet "N agents done" bar for this session. */
+  doneBarDismissed?: boolean;
+  onDismissDoneBar?: () => void;
 }
 
 function DetailView({
@@ -101,6 +104,8 @@ export function DispatchPanel({
   height,
   collapsed,
   onCollapse,
+  doneBarDismissed = false,
+  onDismissDoneBar,
 }: DispatchPanelProps) {
   const [focusedAgentId, setFocusedAgentId] = useState<string | null>(null);
   const [dismissedAgents, setDismissedAgents] = useState<Set<string>>(new Set());
@@ -166,9 +171,29 @@ export function DispatchPanel({
   // Mobile: full-screen overlay
   if (mobile) {
     if (collapsed) {
-      // Only show the bar while agents are actively running. Once everything
-      // has finished we hide it instead of leaving a "X agents done" pill.
-      if (runningCount === 0) return null;
+      // Everything finished: a quieter "N agents done" bar keeps the results
+      // reachable until the user closes it (per session, see SessionView).
+      if (runningCount === 0) {
+        if (doneBarDismissed) return null;
+        return (
+          <div className="dispatch-mobile-bar dispatch-mobile-bar-done" onClick={(e) => { e.stopPropagation(); onCollapse(); }}>
+            <span className="dispatch-mobile-dot dispatch-dot-done" />
+            <span className="dispatch-mobile-label">
+              {`${totalAgents} agent${totalAgents !== 1 ? 's' : ''} done`}
+            </span>
+            {onDismissDoneBar && (
+              <button
+                className="dispatch-mobile-bar-close"
+                onClick={(e) => { e.stopPropagation(); onDismissDoneBar(); }}
+                title="Hide"
+                aria-label="Hide finished agents bar"
+              >
+                {'\u2715'}
+              </button>
+            )}
+          </div>
+        );
+      }
       return (
         <div className="dispatch-mobile-bar" onClick={(e) => { e.stopPropagation(); onCollapse(); }}>
           <span className="dispatch-mobile-dot dispatch-dot-running" />
@@ -236,7 +261,8 @@ export function DispatchPanel({
     );
   }
 
-  // Desktop: collapsed bar is rendered by SessionView at the top of conversation
+  // Desktop: when collapsed, the opener is the header chip (DispatchOpener)
+  // rendered by SessionView in session-header-actions.
   if (collapsed) return null;
 
   return (

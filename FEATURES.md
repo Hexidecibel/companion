@@ -212,12 +212,13 @@ High-level features of the Companion daemon, web client, and desktop/mobile apps
 Prominent bottom drawer panel showing subagents as first-class UI, replacing the old modal-based SubAgent components.
 
 - Auto-shows when agents spawn (runningCount 0 → >0, desktop only), auto-collapses ~3s after all agents finish
-- Desktop: collapsed bar always visible when agents exist (status dot + count + expand arrow), click to reopen
+- Desktop: header chip ("N running / M done" or "M agents") whenever agents exist toggles the panel; Ctrl/Cmd+Alt+G toggles it too
 - Two-line agent cards: Row 1 = status dot + slug + duration, Row 2 = description + message count + chevron
 - Status dots: pulsing green = running, blue = completed, red = error
 - Click-to-drill-down into agent conversation detail with back button
 - Resizable via draggable divider (height persisted to localStorage)
 - Mobile: collapsed bar at bottom → full-screen overlay on tap (no auto-maximize)
+- Mobile: once all agents finish, a quiet dismissible "M agents done" bar keeps results reachable (closed per session, returns when new agents appear)
 - Mobile dispatch overlay integrated with Android back gesture (swipe back closes overlay)
 - Completed agents expire from tree after 5 minutes (was 30)
 - Adaptive polling: 2s when agents running, 5s when idle

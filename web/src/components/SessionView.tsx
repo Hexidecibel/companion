@@ -18,6 +18,7 @@ import { TaskList } from './TaskList';
 import { MessageList } from './MessageList';
 import { InputBar, InputBarHandle } from './InputBar';
 import { DispatchPanel } from './DispatchPanel';
+import { DispatchOpener } from './DispatchOpener';
 import { ArtifactViewerModal } from './ArtifactViewerModal';
 import { FileTabBar } from './FileTabBar';
 import { extractPlanFilePath, extractInlinePlan } from './MessageBubble';
@@ -120,6 +121,10 @@ export function SessionView({
   // Dispatch panel state
   const DISPATCH_HEIGHT_KEY = 'dispatch-panel-height';
   const [dispatchCollapsed, setDispatchCollapsed] = useState(true);
+  // Mobile "N agents done" bar: closed per session; reappears when the agent count grows.
+  const [doneBarDismissedAt, setDoneBarDismissedAt] = useState<Record<string, number>>({});
+  const doneBarKey = `${serverId ?? ''}:${sessionId ?? ''}`;
+  const doneBarDismissed = (doneBarDismissedAt[doneBarKey] ?? -1) >= totalAgents;
   const dispatchDrag = useDraggable({
     direction: 'vertical',
     initialValue: 280,
@@ -501,6 +506,7 @@ export function SessionView({
     { key: 'f', meta: true, alt: true, handler: () => setShowSearch(true) },
     { key: 'p', meta: true, alt: true, handler: () => setShowFileFinder(true) },
     { key: 't', meta: true, alt: true, handler: () => { if (tmuxSessionName) setShowTerminal(prev => !prev); } },
+    { key: 'g', meta: true, alt: true, handler: () => { if (totalAgents > 0) setDispatchCollapsed(prev => !prev); } },
     { key: 'a', meta: true, alt: true, shift: true, handler: () => bypass.toggle() },
     { key: 'm', meta: true, alt: true, shift: true, handler: () => { if (sessionId) sessionMute.toggleMute(sessionId); } },
     { key: 'd', meta: true, alt: true, shift: true, handler: () => setShowScrollDebugPanel(prev => !prev) },
@@ -512,7 +518,7 @@ export function SessionView({
       else if (viewingFile) setViewingFile(null);
       else if (showConversationSearch) setShowConversationSearch(false);
     }},
-  ], [tmuxSessionName, showSearch, showFileFinder, showCodeReviewModal, viewingFile, showConversationSearch, artifactContent, sessionId, bypass, sessionMute, handleCloseSearch]));
+  ], [tmuxSessionName, totalAgents, showSearch, showFileFinder, showCodeReviewModal, viewingFile, showConversationSearch, artifactContent, sessionId, bypass, sessionMute, handleCloseSearch]));
 
   const sendTerminalText = useCallback(async (text: string): Promise<boolean> => {
     if (!serverId || !tmuxSessionName) return false;
@@ -688,6 +694,14 @@ export function SessionView({
     <div className="session-header-actions">
       {transientButtons}
       {viewButtons}
+      {serverId && (
+        <DispatchOpener
+          runningCount={runningCount}
+          totalAgents={totalAgents}
+          open={!dispatchCollapsed}
+          onToggle={() => setDispatchCollapsed(prev => !prev)}
+        />
+      )}
       {gearButton}
     </div>
   );
@@ -970,6 +984,8 @@ export function SessionView({
             height={dispatchDrag.value}
             collapsed={dispatchCollapsed}
             onCollapse={() => setDispatchCollapsed(prev => !prev)}
+            doneBarDismissed={doneBarDismissed}
+            onDismissDoneBar={() => setDoneBarDismissedAt(prev => ({ ...prev, [doneBarKey]: totalAgents }))}
           />
         </ComponentErrorBoundary>
       )}
