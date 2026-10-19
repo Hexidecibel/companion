@@ -2,7 +2,7 @@ import { eventBus } from '../utils/eventBus';
 import { useDraggable } from '../hooks/useDraggable';
 import { useState, useEffect, useCallback, useMemo, useRef, lazy, Suspense } from 'react';
 import { PendingAttachment, WorkGroup } from '../types';
-import { useConversation, describeSendError } from '../hooks/useConversation';
+import { useConversation, describeSendError, type SendOutcome } from '../hooks/useConversation';
 import { useTasks } from '../hooks/useTasks';
 import { useSubAgents } from '../hooks/useSubAgents';
 import { useBypassPermissions } from '../hooks/useBypassPermissions';
@@ -91,6 +91,8 @@ export function SessionView({
     hasMore,
     error,
     sendInput,
+    sendInputDetailed,
+    connected,
     sendError,
     clearSendError,
     cancelMessage,
@@ -374,10 +376,10 @@ export function SessionView({
   }, []);
 
   const handleSend = useCallback(
-    async (text: string): Promise<boolean> => {
-      return sendInput(text);
+    async (text: string): Promise<SendOutcome> => {
+      return sendInputDetailed(text);
     },
-    [sendInput],
+    [sendInputDetailed],
   );
 
   const handleReviewComment = useCallback((text: string) => { void sendInput(text); }, [sendInput]);
@@ -595,7 +597,8 @@ export function SessionView({
     );
   }
 
-  if (error) {
+  // A cached conversation stays readable when a refresh fails / offline.
+  if (error && highlights.length === 0) {
     return (
       <div className="session-view-empty" style={style}>
         <p className="session-view-error">{error}</p>
@@ -995,6 +998,7 @@ export function SessionView({
         onSend={handleSend}
         onSendWithImages={handleSendWithAttachments}
         disabled={false}
+        offline={!connected}
         skills={skills}
         terminalMode={showTerminal}
         onTerminalSend={sendTerminalText}

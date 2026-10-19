@@ -18,6 +18,7 @@ import './styles/babysit.css';
 import { isOverlayWindow } from './services/overlayBridge';
 import { HeraldOverlayApp } from './components/herald/HeraldOverlayApp';
 import { heraldSetupStore } from './services/heraldSetup/setupStore';
+import { initOfflineCache } from './services/offlineCache';
 
 if (isOverlayWindow()) {
   // The desktop app's floating orb window: just the orb, no app.
@@ -36,7 +37,10 @@ function startApp(): void {
   // then apply settings and render.
   // Then the mobile apps read the device tokens from the Keystore / Keychain
   // (and move any left in app storage there): secureTokens.ts.
-  initStorage().then(() => initSecureTokens()).then(() => {
+  // The offline cache (last session lists / conversations) loads alongside, so
+  // the first frame can show cached sessions; never wait on it for long.
+  const cacheReady = Promise.race([initOfflineCache(), new Promise<void>((r) => setTimeout(r, 400))]);
+  Promise.all([initStorage().then(() => initSecureTokens()), cacheReady]).then(() => {
     applyFontScale();
     // Herald setup (profile, floating orb) was read before the restore.
     heraldSetupStore.reload();

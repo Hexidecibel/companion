@@ -9230,3 +9230,58 @@ html {
   padding: 0 4px;
   cursor: pointer;
 }
+
+/* Connection resilience: unsent notice, offline hint, cached-data freshness pill */
+.input-bar-unsent {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 6px;
+  padding: 6px 10px;
+  border: 1px solid #f59e0b;
+  border-radius: 8px;
+  background: rgba(245, 158, 11, 0.08);
+  font-size: 12px;
+  color: var(--text-primary, #f3f4f6);
+  min-width: 0;
+}
+.input-bar-unsent-label { color: #f59e0b; flex-shrink: 0; }
+.input-bar-unsent-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-secondary, #9ca3af);
+}
+.input-bar-unsent-btn {
+  flex-shrink: 0;
+  background: transparent;
+  border: 1px solid #374151;
+  border-radius: 6px;
+  color: inherit;
+  font-size: 12px;
+  padding: 2px 8px;
+  cursor: pointer;
+}
+.input-bar-unsent-btn:disabled { opacity: 0.5; cursor: default; }
+.input-bar-offline {
+  margin: 0 0 4px;
+  font-size: 11px;
+  color: var(--text-muted, #9ca3af);
+}
+.server-freshness-pill {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 6px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  border: 1px solid #374151;
+  font-size: 10px;
+  line-height: 16px;
+  color: var(--text-muted, #9ca3af);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 180px;
+}

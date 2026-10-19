@@ -1,4 +1,5 @@
 import { sessionToneKey, toneStore } from '../services/tts/tonePolicy';
+import { ServerFreshness } from './ServerFreshness';
 import { eventBus } from '../utils/eventBus';
 import { useState, useMemo, useEffect, useCallback, lazy, Suspense } from 'react';
 import { ServerSummary, ActiveSession, SessionSummary, WorkGroup, WorkerSession } from '../types';
@@ -570,7 +571,8 @@ export function SessionSidebar({
                   title={healthTooltip}
                 />
                 <span>{snap.serverName}</span>
-                {isConnected && summary && summary.sessions.length > 0 && (
+                {summary && !isConnected && <ServerFreshness serverId={snap.serverId} status={snap.state.status} />}
+                {summary && summary.sessions.length > 0 && (
                   <span className="sidebar-session-count">{summary.sessions.length}</span>
                 )}
                 {isConnected && (
@@ -659,11 +661,11 @@ export function SessionSidebar({
                 </div>
               )}
 
-              {isConnected && summary && summary.sessions.length === 0 && (
+              {summary && summary.sessions.length === 0 && (
                 <div className="sidebar-server-offline">No active sessions</div>
               )}
 
-              {isConnected && summary && summary.sessions.length > 0 && allSessions.length === 0 && (
+              {summary && summary.sessions.length > 0 && allSessions.length === 0 && (
                 <div className="sidebar-server-offline">No {statusFilter} sessions</div>
               )}
 
@@ -690,9 +692,9 @@ export function SessionSidebar({
                     });
                   }
 
-                  const disconnectedStyle = !isConnected ? { opacity: 0.5, pointerEvents: 'none' as const } : undefined;
-
-                  return (<div style={disconnectedStyle}>{projectGroups.map((group) => {
+                  // Cached sessions stay clickable while reconnecting / offline
+                  // (the conversation opens from the offline cache).
+                  return (<div>{projectGroups.map((group) => {
                     const showGroupHeader = group.sessions.length > 1;
                     const isGroupCollapsedProject = collapsedGroups.has(`project:${group.path}`);
 

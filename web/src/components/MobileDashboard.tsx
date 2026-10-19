@@ -1,4 +1,5 @@
 import { eventBus } from '../utils/eventBus';
+import { ServerFreshness } from './ServerFreshness';
 import { useState, useMemo, useRef, useCallback, useEffect, lazy, Suspense } from 'react';
 import { ServerSummary, SessionSummary, ActiveSession } from '../types';
 import { useConnections } from '../hooks/useConnections';
@@ -476,6 +477,7 @@ function ServerCard({ snap, summary, onSelectSession, onToggleEnabled, onDelete,
       <div className="mobile-server-header">
         <span className={`status-dot ${dotClass}`} />
         <span className="mobile-server-name">{snap.serverName}</span>
+        {summary && <ServerFreshness serverId={snap.serverId} status={snap.state.status} />}
         {waitingCount > 0 && (
           <span className="mobile-attention-dot" />
         )}
@@ -540,7 +542,7 @@ function ServerCard({ snap, summary, onSelectSession, onToggleEnabled, onDelete,
         </div>
       )}
 
-      {!isConnected && isConnecting && (
+      {!isConnected && isConnecting && !summary && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '8px 12px' }}>
           <SkeletonSessionCard />
           <SkeletonSessionCard />
@@ -548,17 +550,18 @@ function ServerCard({ snap, summary, onSelectSession, onToggleEnabled, onDelete,
         </div>
       )}
 
-      {!isConnected && !isConnecting && (
+      {!isConnected && !isConnecting && !summary && (
         <div className="mobile-server-status">
           {snap.state.error || 'Disconnected'}
         </div>
       )}
 
-      {isConnected && sessions.length === 0 && (
+      {summary && sessions.length === 0 && (
         <div className="mobile-server-status">No active sessions</div>
       )}
 
-      {isConnected && (() => {
+      {/* Cached sessions stay listed (and openable) while reconnecting / offline. */}
+      {summary && (() => {
         // Group sessions by projectPath for multi-session projects
         const groupMap = new Map<string, SessionSummary[]>();
         const groupOrder: string[] = [];

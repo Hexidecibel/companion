@@ -7,10 +7,21 @@ import { isMobileViewport, isTauriMobile } from '../utils/platform';
 import { compressImage } from '../utils/imageCompression';
 import { focusTrapActive } from '../utils/focusTrap';
 
+/** true = sent, false = not sent, 'uncertain' = it left but no answer came back. */
+export type InputSendResult = boolean | 'uncertain';
+
+/** A message that may not have reached the session, kept for Retry / Discard. */
+interface UnsentNotice {
+  text: string;
+  kind: 'uncertain' | 'failed';
+}
+
 interface InputBarProps {
-  onSend: (text: string) => Promise<boolean>;
+  onSend: (text: string) => Promise<InputSendResult>;
   onSendWithImages?: (text: string, images: PendingAttachment[]) => Promise<boolean>;
   disabled?: boolean;
+  /** The server is not connected: say so, but keep the composer usable. */
+  offline?: boolean;
   skills?: Skill[];
   terminalMode?: boolean;
   onTerminalSend?: (text: string) => Promise<boolean>;
@@ -54,9 +65,12 @@ function formatBytes(bytes: number): string {
   return `${value < 10 ? value.toFixed(1) : Math.round(value)} ${units[i]}`;
 }
 
-export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function InputBar({ onSend, onSendWithImages, disabled, skills = [], terminalMode, onTerminalSend, onTerminalKey }, ref) {
+export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function InputBar({ onSend, onSendWithImages, disabled, offline, skills = [], terminalMode, onTerminalSend, onTerminalKey }, ref) {
   const { value: text, onChange: setText, undo, redo, reset: resetHistory } = useUndoHistory();
   const [sending, setSending] = useState(false);
+  const [unsent, setUnsent] = useState<UnsentNotice | null>(null);
+  /** Set when the user types after a send started (so a failure won't overwrite it). */
+  const typedSinceSendRef = useRef(false);
   const [images, setImages] = useState<PendingAttachment[]>([]);
   const [dragging, setDragging] = useState(false);
   const [showSlashMenu, setShowSlashMenu] = useState(false);
@@ -121,16 +135,28 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
       textareaRef.current.style.height = 'auto';
     }
 
-    let success: boolean;
+    typedSinceSendRef.current = false;
+    let success: InputSendResult;
     if (savedImages.length > 0 && onSendWithImages) {
       success = await onSendWithImages(trimmed, savedImages);
     } else {
       success = await onSend(trimmed);
     }
 
-    if (!success) {
-      setText(savedText);
-      setImages(savedImages);
+    if (success === 'uncertain') {
+      // It went out but no answer came back: the session may already have it.
+      // Never put it back in the box as if unsent (Enter would send it twice).
+      setUnsent({ text: trimmed, kind: 'uncertain' });
+    } else if (!success) {
+      // Typing stays enabled while sending: if the box is no longer empty,
+      // keep the failed text in the notice instead of overwriting new typing.
+      if (!typedSinceSendRef.current) {
+        setText(savedText);
+        setImages(savedImages);
+      } else {
+        setUnsent({ text: trimmed, kind: 'failed' });
+        setImages((prev) => (prev.length === 0 ? savedImages : prev));
+      }
     } else {
       // Clean up preview URLs
       savedImages.forEach((img) => { if (img.previewUrl) URL.revokeObjectURL(img.previewUrl); });
@@ -138,6 +164,16 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
     setSending(false);
     requestAnimationFrame(() => focusComposer(textareaRef.current));
   }, [text, images, sending, disabled, onSend, onSendWithImages, resetHistory]);
+
+  const retryUnsent = useCallback(async () => {
+    if (!unsent || sending) return;
+    const pendingText = unsent.text;
+    setUnsent(null);
+    setSending(true);
+    const result = await onSend(pendingText);
+    if (result !== true) setUnsent({ text: pendingText, kind: result === 'uncertain' ? 'uncertain' : 'failed' });
+    setSending(false);
+  }, [unsent, sending, onSend]);
 
   const handleTerminalSend = useCallback(async () => {
     if (sending || !onTerminalSend) return;
@@ -200,6 +236,7 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
 
   const handleTextChange = useCallback(
     (value: string) => {
+      typedSinceSendRef.current = true;
       setText(value);
       // Show slash menu when typing / at the start (only in chat mode)
       if (!terminalMode && value.match(/^\/\S*$/) && !value.includes(' ')) {
@@ -388,6 +425,19 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
           onClose={() => setShowSlashMenu(false)}
         />
       )}
+      {unsent && (
+        <div className="input-bar-unsent" role="status">
+          <span className="input-bar-unsent-label">
+            {unsent.kind === 'uncertain' ? 'May not have sent:' : 'Not sent:'}
+          </span>
+          <span className="input-bar-unsent-text" title={unsent.text}>{unsent.text}</span>
+          <button className="input-bar-unsent-btn" onClick={retryUnsent} disabled={sending}>Retry</button>
+          <button className="input-bar-unsent-btn" onClick={() => setUnsent(null)}>Discard</button>
+        </div>
+      )}
+      {offline && (
+        <div className="input-bar-offline" role="status">Offline — will reconnect</div>
+      )}
       {images.length > 0 && (
         <div className="input-bar-images">
           {images.map((att) => (
@@ -514,8 +564,11 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
           onChange={(e) => { handleTextChange(e.target.value); handleInput(); }}
           onKeyDown={handleKeyDown}
           onPaste={handlePaste}
-          placeholder={terminalMode ? 'Type a command...' : 'Send a message...'}
-          disabled={disabled || sending}
+          placeholder={offline ? 'Offline — will reconnect' : terminalMode ? 'Type a command...' : 'Send a message...'}
+          // Never locked while a send is in flight (a dead-but-open socket can
+          // hold it for 10 s): the send button shows the sending state instead.
+          disabled={disabled}
+          aria-busy={sending || undefined}
           rows={1}
         />
         {terminalMode && mobile && (

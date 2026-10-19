@@ -4,14 +4,23 @@ import { connectionManager } from '../services/ConnectionManager';
 import {
   getCachedHighlights,
   setCachedHighlights,
-  highlightsEqual,
   highlightEqual,
 } from '../services/SessionCache';
 import { beginSwitch, isValid } from '../services/SessionGuard';
+import { loadConversation, saveConversation } from '../services/offlineCache';
 import { isMobileViewport } from '../utils/platform';
 
 const POLL_INTERVAL = 30000;
 const PAGE_SIZE = isMobileViewport() ? 20 : 50;
+/** When a poll's tail no longer overlaps what we have, refetch at most this many. */
+const GAP_REFETCH_LIMIT = 200;
+
+/**
+ * Result of a send: true = delivered (or queued while offline), false = not
+ * sent (refused / failed before it left), 'uncertain' = it went out but no
+ * answer came back (timeout / connection lost): the daemon may have typed it.
+ */
+export type SendOutcome = boolean | 'uncertain';
 
 interface UseConversationReturn {
   highlights: ConversationHighlight[];
@@ -22,6 +31,10 @@ interface UseConversationReturn {
   error: string | null;
   firstItemIndex: number;
   sendInput: (text: string, opts?: { skipOptimistic?: boolean }) => Promise<boolean>;
+  /** Like sendInput, but tells a timeout ('uncertain') apart from a failure. */
+  sendInputDetailed: (text: string, opts?: { skipOptimistic?: boolean }) => Promise<SendOutcome>;
+  /** The server connection is live (false = showing cached data). */
+  connected: boolean;
   /** Why the last send was refused by the daemon's input guard (unsent draft / typing). */
   sendError: string | null;
   clearSendError: () => void;
@@ -37,6 +50,50 @@ let clientMessageCounter = 0;
  */
 function isOptimistic(h: ConversationHighlight): boolean {
   return h.id.startsWith('sent-') || h.id.startsWith('terminal-');
+}
+
+function sameJson(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  try {
+    return JSON.stringify(a) === JSON.stringify(b);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Merge a server page into what we already show, by stable id: unchanged
+ * messages keep their object identity (memoized bubbles skip re-rendering
+ * markdown), and if the tail overlaps the current list the older messages
+ * already loaded are kept. Returns `prev` itself when nothing changed, and
+ * `null` when the page does not overlap `prev` at all (a gap).
+ */
+export function mergeTail(
+  prev: ConversationHighlight[],
+  tail: ConversationHighlight[],
+): ConversationHighlight[] | null {
+  if (prev.length === 0) return tail;
+  if (tail.length === 0) return prev.length === 0 ? prev : tail;
+  const start = prev.findIndex((h) => h.id === tail[0].id);
+  if (start === -1) {
+    // The page begins before (or at a different place than) our list: if it
+    // contains our first message it is a superset, else it is a gap.
+    const prevIds = new Set(prev.map((h) => h.id));
+    if (!tail.some((h) => prevIds.has(h.id))) return null;
+  }
+  const head = start === -1 ? [] : prev.slice(0, start);
+  const byId = new Map(prev.map((h) => [h.id, h]));
+  let changed = start === -1 || prev.length - start !== tail.length;
+  const merged = tail.map((h, i) => {
+    const old = byId.get(h.id);
+    if (old && highlightEqual(old, h) && sameJson(old, h)) {
+      if (!changed && prev[start + i] !== old) changed = true;
+      return old;
+    }
+    changed = true;
+    return h;
+  });
+  return changed ? [...head, ...merged] : prev;
 }
 
 /**
@@ -123,6 +180,7 @@ export function useConversation(
   const [hasMore, setHasMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [firstItemIndex, setFirstItemIndex] = useState(1_000_000);
+  const [connected, setConnected] = useState(false);
 
   const highlightsRef = useRef(highlights);
   highlightsRef.current = highlights;
@@ -145,25 +203,41 @@ export function useConversation(
     const guardEpoch = beginSwitch(serverId, sessionId);
     epochRef.current = guardEpoch;
 
-    // Show cached data immediately
+    // Show cached data immediately: memory first, then the offline cache.
     const cached = getCachedHighlights(serverId, sessionId);
+    let cancelled = false;
+    setError(null);
     if (cached) {
       setHighlights(cached);
       setLoading(false);
     } else {
+      setHighlights([]);
       setLoading(true);
+      void loadConversation(serverId, sessionId).then((row) => {
+        if (cancelled || !row || row.highlights.length === 0 || !isValid(serverId, sessionId, guardEpoch)) return;
+        // Only while nothing fresher arrived: never replace live data with cache.
+        if (highlightsRef.current.length > 0) return;
+        setHighlights(row.highlights);
+        setLoading(false);
+        setError(null);
+      });
     }
+
+    const remember = (list: ConversationHighlight[]) => {
+      setCachedHighlights(serverId, sessionId, list);
+      saveConversation(serverId, sessionId, list.filter((h) => !isOptimistic(h)));
+    };
 
     const conn = connectionManager.getConnection(serverId);
     if (!conn) {
-      // No connection object at all (server removed) — nothing to wire up.
-      setError('Server not connected');
+      // No connection object at all (server removed): show cache if any.
+      setConnected(false);
       setLoading(false);
-      return;
+      if (!cached) setError('Server not connected');
+      return () => { cancelled = true; };
     }
 
     const hadCache = !!cached;
-    let cancelled = false;
     let pollTimer: ReturnType<typeof setInterval> | null = null;
     let pollInFlight = false;
     let pollDebounceTimer: ReturnType<typeof setTimeout> | null = null;
@@ -192,13 +266,19 @@ export function useConversation(
             total: number;
             hasMore: boolean;
           };
-          const hasOptimistic = highlightsRef.current.some(isOptimistic);
-          if (hasOptimistic || !highlightsEqual(payload.highlights, highlightsRef.current)) {
-            const merged = mergeWithOptimistic(highlightsRef.current, payload.highlights);
+          const prev = highlightsRef.current;
+          const prevReal = prev.filter((h) => !isOptimistic(h));
+          // Merge by id instead of swapping in a whole new list (a reconnect
+          // used to re-render every bubble); a gap replaces it.
+          const real = mergeTail(prevReal, payload.highlights) ?? payload.highlights;
+          const merged = real === prevReal && prev.length === prevReal.length
+            ? prev
+            : mergeWithOptimistic(prev, real);
+          if (!(merged.length === prev.length && merged.every((h, i) => h === prev[i]))) {
             setHighlights(merged);
-            setCachedHighlights(serverId!, sessionId!, merged);
           }
-          setHasMore(payload.hasMore);
+          remember(merged);
+          setHasMore(typeof payload.total === 'number' ? payload.total > real.length : payload.hasMore);
         }
 
         if (statusResponse.success && statusResponse.payload) {
@@ -211,7 +291,8 @@ export function useConversation(
 
         setError(null);
       } catch (err) {
-        if (!cancelled && isValid(serverId!, sessionId!, guardEpoch)) {
+        // A failed refresh keeps whatever we already show (cache / last good).
+        if (!cancelled && isValid(serverId!, sessionId!, guardEpoch) && highlightsRef.current.length === 0) {
           setError(err instanceof Error ? err.message : 'Failed to load conversation');
         }
       } finally {
@@ -227,72 +308,44 @@ export function useConversation(
       if (pollInFlight) return;
       pollInFlight = true;
       try {
-        const pollLimit = Math.max(PAGE_SIZE, highlightsRef.current.length);
+        // Only the tail: a poll used to re-download everything loaded so far.
         const [hlResponse, statusResponse] = await Promise.all([
-          conn.sendRequest('get_highlights', { limit: pollLimit, sessionId }),
+          conn.sendRequest('get_highlights', { limit: PAGE_SIZE, sessionId }),
           conn.sendRequest('get_status', { sessionId }),
         ]);
 
         if (cancelled || !isValid(serverId!, sessionId!, guardEpoch)) return;
 
         if (hlResponse.success && hlResponse.payload) {
-          const payload = hlResponse.payload as {
+          let payload = hlResponse.payload as {
             highlights: ConversationHighlight[];
             total: number;
             hasMore: boolean;
           };
+          const prevReal0 = highlightsRef.current.filter((h) => !isOptimistic(h));
+          if (mergeTail(prevReal0, payload.highlights) === null) {
+            // More new messages than one page since we last looked: one capped refetch.
+            const wide = await conn.sendRequest('get_highlights', { limit: GAP_REFETCH_LIMIT, sessionId });
+            if (cancelled || !isValid(serverId!, sessionId!, guardEpoch)) return;
+            if (wide.success && wide.payload) payload = wide.payload as typeof payload;
+          }
           const serverData = payload.highlights;
-          const hasOptimistic = highlightsRef.current.some(isOptimistic);
+          const realLen = (mergeTail(highlightsRef.current.filter((h) => !isOptimistic(h)), serverData) ?? serverData).length;
 
           setHighlights(prev => {
-            // Filter out optimistic messages for comparison
             const prevReal = prev.filter(h => !isOptimistic(h));
-
-            // Fast path: check if only new items appended or last item updated
-            if (serverData.length >= prevReal.length && prevReal.length > 0) {
-              // Check prefix stability (all items except possibly the last match by id)
-              let prefixMatch = true;
-              for (let i = 0; i < prevReal.length - 1; i++) {
-                if (prevReal[i].id !== serverData[i]?.id) {
-                  prefixMatch = false;
-                  break;
-                }
-              }
-
-              if (prefixMatch) {
-                const lastIdx = prevReal.length - 1;
-                const lastChanged = lastIdx >= 0 && serverData[lastIdx] &&
-                  !highlightEqual(prevReal[lastIdx], serverData[lastIdx]);
-
-                // No change at all — return same reference
-                if (!lastChanged && serverData.length === prevReal.length) {
-                  return prev;
-                }
-
-                // Build result preserving existing references where possible
-                const result = [...prevReal];
-                if (lastChanged && lastIdx >= 0) {
-                  result[lastIdx] = serverData[lastIdx];
-                }
-                for (let i = prevReal.length; i < serverData.length; i++) {
-                  result.push(serverData[i]);
-                }
-                const merged = mergeWithOptimistic(prev, result);
-                setCachedHighlights(serverId!, sessionId!, merged);
-                return merged;
-              }
-            }
-
-            // Fallback: full replacement
-            if (hasOptimistic || !highlightsEqual(serverData, prevReal)) {
-              const merged = mergeWithOptimistic(prev, serverData);
-              setCachedHighlights(serverId!, sessionId!, merged);
-              return merged;
-            }
-            return prev;
+            const real = mergeTail(prevReal, serverData) ?? serverData;
+            const hasOptimistic = prev.length !== prevReal.length;
+            if (real === prevReal && !hasOptimistic) return prev;
+            const merged = mergeWithOptimistic(prev, real);
+            if (merged.length === prev.length && merged.every((h, i) => h === prev[i])) return prev;
+            remember(merged);
+            return merged;
           });
 
-          setHasMore(payload.hasMore);
+          setHasMore(typeof payload.total === 'number' && realLen > 0
+            ? payload.total > realLen
+            : payload.hasMore);
         }
 
         if (statusResponse.success && statusResponse.payload) {
@@ -364,6 +417,7 @@ export function useConversation(
     unsubState = conn.onStateChange((state) => {
       if (cancelled || !isValid(serverId!, sessionId!, guardEpoch)) return;
 
+      setConnected(state.status === 'connected');
       if (state.status === 'connected') {
         if (!activatedForConnection) {
           activatedForConnection = true;
@@ -440,8 +494,8 @@ export function useConversation(
       });
   }, [serverId, sessionId, loadingMore, hasMore, highlights.length]);
 
-  const sendInput = useCallback(
-    async (text: string, opts?: { skipOptimistic?: boolean }): Promise<boolean> => {
+  const sendInputDetailed = useCallback(
+    async (text: string, opts?: { skipOptimistic?: boolean }): Promise<SendOutcome> => {
       if (!serverId || (!sessionId && !tmuxSessionName)) return false;
       const conn = connectionManager.getConnection(serverId);
       if (!conn) return false;
@@ -505,11 +559,21 @@ export function useConversation(
         }
         setSendError(response.success ? null : describeSendError(response.error, response.payload));
         return response.success;
-      } catch {
+      } catch (err) {
+        // The request left (timeout / socket died before the answer): the
+        // daemon may already have typed it, so this is NOT a plain failure.
+        const msg = err instanceof Error ? err.message : '';
+        if (msg === 'Request timeout' || msg === 'Connection lost') return 'uncertain';
         return false;
       }
     },
     [serverId, sessionId, tmuxSessionName],
+  );
+
+  const sendInput = useCallback(
+    async (text: string, opts?: { skipOptimistic?: boolean }): Promise<boolean> =>
+      (await sendInputDetailed(text, opts)) === true,
+    [sendInputDetailed],
   );
 
   const clearSendError = useCallback(() => setSendError(null), []);
@@ -557,5 +621,5 @@ export function useConversation(
     ]);
   }, []);
 
-  return { highlights, status, loading, loadingMore, hasMore, error, firstItemIndex, sendInput, sendError, clearSendError, cancelMessage, addOptimisticMessage, loadMore };
+  return { highlights, status, loading, loadingMore, hasMore, error, firstItemIndex, sendInput, sendInputDetailed, connected, sendError, clearSendError, cancelMessage, addOptimisticMessage, loadMore };
 }
