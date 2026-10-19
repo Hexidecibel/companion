@@ -4,6 +4,17 @@ Detailed plans for upcoming work items. Completed items are moved to FEATURES.md
 
 ---
 
+## Item: Connection resilience
+**Status:** phase 1 done 2026-10-18 (web only); phases 2-3 designed, not started
+
+Stop the app freezing on flaky connections and never blank / flash sessions during interruptions.
+
+**Phase 1 (done, web only):** zombie-socket fix (per-socket handlers, close + detach on every drop), kick never interrupts a fresh connect / resets backoff, queued sends flush only after auth, re-render churn cut (health throttle, memoized context, push re-register on server-set change, summary identity + in-flight guard + out-of-order discard, conversation merge by id + tail-only polls), composer never disabled + "May not have sent" Retry / Discard notice, IndexedDB offline cache (summaries + last 50 messages x 30 sessions, LRU ~5 MB, schema-versioned, memory fallback) with stale-while-revalidate UI ("Reconnecting · updated Xm ago", sessions clickable, cached conversation readable offline). Harness `bin/e2e-flaky-net`. MessageList virtualization skipped (scroll-to-question / flash in `sessionFocus.ts` and the time grouping in `messageTime.ts` make it risky; revisit separately).
+
+**Phase 2 (designed):** durable outbox: queued messages persisted (IndexedDB) with a `clientMsgId`; the daemon dedupes on `clientMsgId` so a retry after an uncertain send never types twice; a message queued for more than 10 min needs a confirm before it is sent; an undo window exists but is off by default.
+
+**Phase 3 (designed):** attachments in the outbox (later).
+
 ## Item: Impact metrics + perf batch A
 **Status:** batch A done + deployed 2026-10-15 (production unit drop-in `companion.service.d/perf.conf`: `UV_USE_IO_URING=0`, `Nice=5`); batch B done + deployed 2026-10-15 (daemon restart + herald-voice restart)
 

@@ -1,0 +1,40 @@
+#!/bin/bash
+# e2e-flaky-net — run the web client through a chaos WebSocket proxy against the
+# PROBE sandbox daemon (port 9888) and print resilience measurements.
+#
+#   bin/e2e-flaky-net [OUT_JSON]
+#
+# Builds the web app into a temp dir (web/dist is never touched) unless WEB_DIR is
+# set, starts the probe instance if it is not running (and stops it afterwards
+# only if this script started it), runs web/e2e/flaky-net.cjs in headless Chrome.
+# The proxy forwards only read-only message types, so nothing typed reaches a
+# session. Env: WEB_DIR, DURATION_S (180), SEED, PLAYWRIGHT_CORE, CHROME.
+set -euo pipefail
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+OUT="${1:-}"
+[ -s "$HOME/.nvm/nvm.sh" ] && . "$HOME/.nvm/nvm.sh" >/dev/null
+WORK="$(mktemp -d -t companion-flaky-XXXXXX)"
+STARTED=0
+cleanup() {
+  rm -rf "$WORK"
+  if [ "$STARTED" = 1 ]; then "$ROOT/bin/herald-sandbox" --instance probe stop || true; fi
+}
+trap cleanup EXIT
+if [ -z "${WEB_DIR:-}" ]; then
+  (cd "$ROOT/web" && npx vite build --outDir "$WORK/web" --emptyOutDir >/dev/null 2>&1)
+  WEB_DIR="$WORK/web"
+fi
+if [ -z "${PLAYWRIGHT_CORE:-}" ]; then
+  for c in "$ROOT/web/node_modules/playwright-core" "$HOME"/local/src/*/node_modules/playwright-core; do
+    [ -d "$c" ] && { PLAYWRIGHT_CORE="$c"; break; }
+  done
+fi
+[ -n "${PLAYWRIGHT_CORE:-}" ] || { echo "playwright-core not found (set PLAYWRIGHT_CORE)" >&2; exit 2; }
+if ! "$ROOT/bin/herald-sandbox" --instance probe status >/dev/null 2>&1 || ! ss -ltn | grep -q ':9888 '; then
+  "$ROOT/bin/herald-sandbox" --instance probe start
+  STARTED=1
+fi
+SANDBOX_DIR="${HERALD_SANDBOX_DIR:-$HOME/.cache/companion-herald-sandbox}-probe"
+WEB_DIR="$(realpath "$WEB_DIR")" TOKEN_FILE="$SANDBOX_DIR/config.json" OUT="$OUT" \
+  PLAYWRIGHT_CORE="$PLAYWRIGHT_CORE" timeout $(( ${DURATION_S:-180} + 240 )) \
+  node "$ROOT/web/e2e/flaky-net.cjs"
