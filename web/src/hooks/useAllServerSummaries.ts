@@ -11,6 +11,10 @@ import {
 } from '../services/offlineCache';
 
 const POLL_INTERVAL = 5000;
+/** A session status event re-polls that server after this (coalesces bursts). */
+const EVENT_REPOLL_DELAY = 250;
+/** Broadcasts that mean some session's status changed on that server. */
+const STATUS_EVENTS = new Set(['status_change', 'other_session_activity', 'session_completed']);
 
 function sameJson(a: unknown, b: unknown): boolean {
   if (a === b) return true;
@@ -68,7 +72,9 @@ function seedFromCache(): Map<string, ServerSummary> {
  *  - a failed refresh or a disconnect keeps the last good summary;
  *  - one request in flight per server (per connection), out-of-order answers
  *    are discarded, and the Map keeps its identity when nothing changed;
- *  - re-polls a server right away only when it (re)connects.
+ *  - re-polls a server right away when it (re)connects, and shortly after a
+ *    session status event from it (a poll already in flight is followed by
+ *    one more, so a change during it is never left for the next interval).
  */
 export function useAllServerSummaries(): Map<string, ServerSummary> {
   const [summaries, setSummaries] = useState<Map<string, ServerSummary>>(seedFromCache);
@@ -80,6 +86,10 @@ export function useAllServerSummaries(): Map<string, ServerSummary> {
     const issued = new Map<string, number>();
     const applied = new Map<string, number>();
     const lastStatus = new Map<string, ConnectionState['status']>();
+    /** Servers that asked for a poll while one was in flight. */
+    const repoll = new Set<string>();
+    const eventTimers = new Map<string, ReturnType<typeof setTimeout>>();
+    const messageSubs = new Map<string, { conn: unknown; unsub: () => void }>();
 
     const apply = (serverId: string, fresh: ServerSummary) => {
       setSummaries((prev) => {
@@ -112,7 +122,10 @@ export function useAllServerSummaries(): Map<string, ServerSummary> {
       const generation = conn.getState().lastConnected ?? 0;
       // One request at a time per server. A request still pending from an
       // older connection (generation) does not block the new one.
-      if (inFlight.has(serverId) && inFlight.get(serverId) === generation) return;
+      if (inFlight.has(serverId) && inFlight.get(serverId) === generation) {
+        repoll.add(serverId);
+        return;
+      }
       inFlight.set(serverId, generation);
       const seq = (issued.get(serverId) ?? 0) + 1;
       issued.set(serverId, seq);
@@ -132,6 +145,36 @@ export function useAllServerSummaries(): Map<string, ServerSummary> {
         // Timeout / dropped connection: keep the last good summary.
       } finally {
         if (inFlight.get(serverId) === generation) inFlight.delete(serverId);
+        if (!cancelled && repoll.delete(serverId)) void pollServer(serverId);
+      }
+    }
+
+    function schedulePoll(serverId: string) {
+      if (eventTimers.has(serverId)) return;
+      eventTimers.set(serverId, setTimeout(() => {
+        eventTimers.delete(serverId);
+        if (!cancelled) void pollServer(serverId);
+      }, EVENT_REPOLL_DELAY));
+    }
+
+    /** Listen on each server's connection for session status broadcasts. */
+    function syncMessageSubs() {
+      const live = new Set<string>();
+      for (const snap of connectionManager.getSnapshots()) {
+        const conn = connectionManager.getConnection(snap.serverId);
+        if (!conn || typeof conn.onMessage !== 'function') continue;
+        live.add(snap.serverId);
+        const cur = messageSubs.get(snap.serverId);
+        if (cur && cur.conn === conn) continue;
+        cur?.unsub();
+        const serverId = snap.serverId;
+        const unsub = conn.onMessage((msg) => {
+          if (STATUS_EVENTS.has(msg.type)) schedulePoll(serverId);
+        });
+        messageSubs.set(serverId, { conn, unsub });
+      }
+      for (const [id, sub] of [...messageSubs]) {
+        if (!live.has(id)) { sub.unsub(); messageSubs.delete(id); }
       }
     }
 
@@ -159,6 +202,7 @@ export function useAllServerSummaries(): Map<string, ServerSummary> {
     });
 
     for (const snap of connectionManager.getSnapshots()) lastStatus.set(snap.serverId, snap.state.status);
+    syncMessageSubs();
     pollAll();
     const timer = setInterval(pollAll, POLL_INTERVAL);
 
@@ -173,6 +217,7 @@ export function useAllServerSummaries(): Map<string, ServerSummary> {
       for (const id of [...lastStatus.keys()]) {
         if (!snapshots.some((s) => s.serverId === id)) lastStatus.delete(id);
       }
+      syncMessageSubs();
       prune();
     });
 
@@ -181,6 +226,8 @@ export function useAllServerSummaries(): Map<string, ServerSummary> {
       clearInterval(timer);
       unsub();
       unsubCache();
+      for (const t of eventTimers.values()) clearTimeout(t);
+      for (const sub of messageSubs.values()) sub.unsub();
     };
   }, []);
 

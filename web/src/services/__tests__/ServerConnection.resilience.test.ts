@@ -221,4 +221,33 @@ describe('ServerConnection resilience', () => {
     expect(ws.closeCalls).toBe(1);
     expect(conn.getState().status).toBe('reconnecting');
   });
+  it('push events on the CURRENT socket after a reconnect (resume) reach handlers; the old one stays muted', async () => {
+    const conn = new ServerConnection(server);
+    const seen: Array<{ type: string; sessionId?: string; payload?: unknown }> = [];
+    conn.onMessage((m) => seen.push(m as never));
+    conn.connect();
+    const ws1 = await handshake(conn);
+    ws1.message({ type: 'status_change', success: true, sessionId: 'a', payload: { isWaitingForInput: true } });
+    expect(seen.map((m) => m.type)).toEqual(['status_change']);
+
+    // iPad resume after a long suspend: the silent socket is stale and replaced.
+    await vi.advanceTimersByTimeAsync(25_000 + 60_000 + 1000);
+    conn.checkAlive();
+    expect(conn.getState().status).toBe('reconnecting');
+    await vi.advanceTimersByTimeAsync(2100); // first backoff (1 s + jitter)
+    const ws2 = FakeWebSocket.all[FakeWebSocket.all.length - 1];
+    expect(ws2).not.toBe(ws1);
+    await handshake(conn);
+    seen.length = 0;
+
+    ws2.message({ type: 'status_change', success: true, sessionId: 'a', payload: { isWaitingForInput: false } });
+    ws2.message({ type: 'conversation_update', success: true, sessionId: 'a', payload: {} });
+    ws1.message({ type: 'status_change', success: true, sessionId: 'a', payload: { isWaitingForInput: true } });
+    expect(seen.map((m) => m.type)).toEqual(['status_change', 'conversation_update']);
+    expect((seen[0].payload as { isWaitingForInput: boolean }).isWaitingForInput).toBe(false);
+    // Requests on the new socket resolve too.
+    const p = conn.sendRequest('get_server_summary');
+    ws2.message({ type: 'server_summary', success: true, requestId: ws2.last('get_server_summary')!.requestId, payload: { sessions: [] } });
+    await expect(p).resolves.toMatchObject({ success: true });
+  });
 });

@@ -9,7 +9,9 @@ let status: 'connected' | 'reconnecting' = 'connected';
 let lastConnected = 1;
 const changeHandlers = new Set<(s: unknown[]) => void>();
 const snapshot = () => [{ serverId: 'a', serverName: 'A', state: { status, reconnectAttempts: 0, lastConnected }, gitEnabled: true }];
+const messageHandlers = new Set<(m: { type: string }) => void>();
 const conn = {
+  onMessage: (h: (m: { type: string }) => void) => { messageHandlers.add(h); return () => messageHandlers.delete(h); },
   isConnected: () => status === 'connected',
   getState: () => ({ status, reconnectAttempts: 0, lastConnected }),
   sendRequest: vi.fn(() => new Promise((resolve, reject) => pending.push({ resolve, reject }))),
@@ -24,11 +26,12 @@ vi.mock('../../services/ConnectionManager', () => ({
 }));
 vi.mock('../../services/storage', () => ({ getServers: () => [{ id: 'a' }] }));
 const saved: ServerSummary[] = [];
+const cacheLoaded = new Set<() => void>();
 vi.mock('../../services/offlineCache', () => ({
   initOfflineCache: () => Promise.resolve(),
   getCachedSummaries: () => new Map([['a', { key: 'a', updatedAt: 1, summary: cachedSummary }]]),
   saveSummary: (_id: string, s: ServerSummary) => { saved.push(s); },
-  onOfflineCacheLoaded: () => () => {},
+  onOfflineCacheLoaded: (fn: () => void) => { cacheLoaded.add(fn); return () => cacheLoaded.delete(fn); },
   forgetServer: () => Promise.resolve(),
 }));
 
@@ -120,6 +123,65 @@ describe('useAllServerSummaries', () => {
     act(() => changeHandlers.forEach((h) => h(snapshot())));
     act(() => changeHandlers.forEach((h) => h(snapshot())));
     expect(conn.sendRequest).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('useAllServerSummaries: live status (regressions)', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    pending.length = 0;
+    saved.length = 0;
+    status = 'connected';
+    lastConnected = 1;
+    conn.sendRequest.mockClear();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('a status change reaches the list within one poll', async () => {
+    const { result } = renderHook(() => useAllServerSummaries());
+    await answer(0, summary(sess('s1', { status: 'waiting' })));
+    expect(result.current.get('a')?.sessions[0].status).toBe('waiting');
+    await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+    expect(conn.sendRequest).toHaveBeenCalledTimes(2);
+    await answer(1, summary(sess('s1', { status: 'working', currentActivity: 'Processing...' })));
+    expect(result.current.get('a')?.sessions[0].status).toBe('working');
+    // ... and back, with background work: still applied on the next poll.
+    await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+    await answer(2, summary(sess('s1', { status: 'working', backgroundWork: { agents: 2, shells: 0 } })));
+    expect(result.current.get('a')?.sessions[0]).toMatchObject({ backgroundWork: { agents: 2, shells: 0 } });
+  });
+
+  it('a status broadcast re-polls right away instead of waiting for the interval', async () => {
+    const { result } = renderHook(() => useAllServerSummaries());
+    await answer(0, summary(sess('s1', { status: 'waiting' })));
+    act(() => messageHandlers.forEach((h) => h({ type: 'other_session_activity' })));
+    await act(async () => { await vi.advanceTimersByTimeAsync(300); });
+    expect(conn.sendRequest).toHaveBeenCalledTimes(2);
+    await answer(1, summary(sess('s1', { status: 'working' })));
+    expect(result.current.get('a')?.sessions[0].status).toBe('working');
+  });
+
+  it('a status broadcast during an in-flight poll is followed by one more poll', async () => {
+    renderHook(() => useAllServerSummaries());
+    act(() => messageHandlers.forEach((h) => h({ type: 'status_change' })));
+    await act(async () => { await vi.advanceTimersByTimeAsync(300); });
+    expect(conn.sendRequest).toHaveBeenCalledTimes(1); // one in flight
+    await answer(0, summary(sess('stale')));
+    await act(async () => { await vi.advanceTimersByTimeAsync(10); });
+    expect(conn.sendRequest).toHaveBeenCalledTimes(2); // the change is fetched now, not in 5 s
+  });
+
+  it('the offline cache never overrides fresher data', async () => {
+    const { result } = renderHook(() => useAllServerSummaries());
+    expect(result.current.get('a')?.sessions[0].id).toBe('cached');
+    await answer(0, summary(sess('fresh', { status: 'working' })));
+    // The cache finishing its (slow) load afterwards must not bring the old list back.
+    act(() => cacheLoaded.forEach((fn) => fn()));
+    expect(result.current.get('a')?.sessions[0].id).toBe('fresh');
+    expect(result.current.get('a')?.sessions[0].status).toBe('working');
+    expect(saved[saved.length - 1].sessions[0].id).toBe('fresh');
   });
 });
 

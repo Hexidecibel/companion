@@ -5,7 +5,7 @@ Detailed plans for upcoming work items. Completed items are moved to FEATURES.md
 ---
 
 ## Item: Connection resilience
-**Status:** phase 1 done 2026-10-18 (web only); phases 2-3 designed, not started
+**Status:** phase 1 done 2026-10-18 (web only; follow-up fix: no stale status across a session switch, event-driven summary re-poll); phases 2-3 designed, not started
 
 Stop the app freezing on flaky connections and never blank / flash sessions during interruptions.
 

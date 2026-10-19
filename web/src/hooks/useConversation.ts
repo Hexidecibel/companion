@@ -52,6 +52,26 @@ function isOptimistic(h: ConversationHighlight): boolean {
   return h.id.startsWith('sent-') || h.id.startsWith('terminal-');
 }
 
+/** A fresh status differs from what we show in a way the UI renders. */
+export function statusChanged(cur: SessionStatus | null, ns: SessionStatus): boolean {
+  return (
+    !cur ||
+    ns.isRunning !== cur.isRunning ||
+    ns.isWaitingForInput !== cur.isWaitingForInput ||
+    ns.lastActivity !== cur.lastActivity ||
+    ns.currentActivity !== cur.currentActivity ||
+    ns.conversationId !== cur.conversationId ||
+    (ns.feedbackPrompt != null) !== (cur.feedbackPrompt != null) ||
+    (ns.backgroundWork?.agents ?? 0) !== (cur.backgroundWork?.agents ?? 0) ||
+    (ns.backgroundWork?.shells ?? 0) !== (cur.backgroundWork?.shells ?? 0)
+  );
+}
+
+/** A get_status answer for another session (a late reply after a switch) is not ours. */
+function statusIsFor(response: { sessionId?: string }, sessionId: string): boolean {
+  return !response.sessionId || response.sessionId === sessionId;
+}
+
 function sameJson(a: unknown, b: unknown): boolean {
   if (a === b) return true;
   try {
@@ -202,6 +222,10 @@ export function useConversation(
 
     const guardEpoch = beginSwitch(serverId, sessionId);
     epochRef.current = guardEpoch;
+    // The previous session's status must never show for this one (an old
+    // "Waiting for input" banner stayed up until this session's first answer).
+    setStatus(null);
+    statusRef.current = null;
 
     // Show cached data immediately: memory first, then the offline cache.
     const cached = getCachedHighlights(serverId, sessionId);
@@ -281,10 +305,10 @@ export function useConversation(
           setHasMore(typeof payload.total === 'number' ? payload.total > real.length : payload.hasMore);
         }
 
-        if (statusResponse.success && statusResponse.payload) {
+        if (statusResponse.success && statusResponse.payload && statusIsFor(statusResponse, sessionId!)) {
           const ns = statusResponse.payload as SessionStatus;
           const cur = statusRef.current;
-          if (!cur || ns.isRunning !== cur.isRunning || ns.isWaitingForInput !== cur.isWaitingForInput || ns.lastActivity !== cur.lastActivity || ns.currentActivity !== cur.currentActivity || ns.conversationId !== cur.conversationId || (ns.feedbackPrompt != null) !== (cur.feedbackPrompt != null)) {
+          if (statusChanged(cur, ns)) {
             setStatus(ns);
           }
         }
@@ -348,10 +372,10 @@ export function useConversation(
             : payload.hasMore);
         }
 
-        if (statusResponse.success && statusResponse.payload) {
+        if (statusResponse.success && statusResponse.payload && statusIsFor(statusResponse, sessionId!)) {
           const ns = statusResponse.payload as SessionStatus;
           const cur = statusRef.current;
-          if (!cur || ns.isRunning !== cur.isRunning || ns.isWaitingForInput !== cur.isWaitingForInput || ns.lastActivity !== cur.lastActivity || ns.currentActivity !== cur.currentActivity || ns.conversationId !== cur.conversationId || (ns.feedbackPrompt != null) !== (cur.feedbackPrompt != null)) {
+          if (statusChanged(cur, ns)) {
             setStatus(ns);
           }
         }
@@ -382,7 +406,7 @@ export function useConversation(
       if (msg.type === 'status_change' && msg.payload) {
         const ns = msg.payload as SessionStatus;
         const cur = statusRef.current;
-        if (!cur || ns.isRunning !== cur.isRunning || ns.isWaitingForInput !== cur.isWaitingForInput || ns.lastActivity !== cur.lastActivity || ns.currentActivity !== cur.currentActivity || ns.conversationId !== cur.conversationId || (ns.feedbackPrompt != null) !== (cur.feedbackPrompt != null)) {
+        if (statusChanged(cur, ns)) {
           setStatus(ns);
         }
       }

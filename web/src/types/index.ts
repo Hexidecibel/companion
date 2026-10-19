@@ -129,6 +129,14 @@ export interface SessionStatus {
   currentActivity?: string;
   recentActivity?: ActivityDetail[];
   feedbackPrompt?: FeedbackPrompt;
+  /** Main thread idle while background agents / shells run (then isWaitingForInput is false). */
+  backgroundWork?: BackgroundWork;
+}
+
+/** Background subagents / shells still running after the main thread ended its turn. */
+export interface BackgroundWork {
+  agents: number;
+  shells: number;
 }
 
 export interface SessionSummary {
@@ -145,6 +153,8 @@ export interface SessionSummary {
   subagentTotal?: number;
   /** True when session was restored from persistence but is no longer running in tmux. */
   inactive?: boolean;
+  /** status 'working' because background agents / shells run while the main thread is idle. */
+  backgroundWork?: BackgroundWork;
 }
 
 export interface ServerSummary {
