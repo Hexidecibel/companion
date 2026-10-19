@@ -2146,7 +2146,7 @@ adds a per-friend-safe public download page listing the current APK / desktop bu
 ---
 
 ## Item: Subagent visibility ("where's it at")
-**Status:** in-progress (phase 1 done, deployed 2026-10-15; phase 2 done + deployed 2026-10-15; phase 3 planned)
+**Status:** in-progress (phase 1 done, deployed 2026-10-15; phase 2 done + deployed 2026-10-15; phase 3 status page done 2026-10-18, web live after a hard refresh, session labels need a daemon restart; LLM rollup still planned)
 
 Deep, cheap visibility into dispatched subagents: a per-agent timeline + a fleet rollup the user,
 Herald and the main Claude thread can all ask "where's it at?". Hard requirement from the user: NO
@@ -2485,3 +2485,19 @@ progress."
   along." (ttft 1.9 s).
 - Deploy: `cd daemon && npm run build`, `cd mcp && npm run build`, web build via `bin/test`, then
   one user-approved daemon restart; Claude Code sessions pick up the MCP tool on their next start.
+
+### Phase 3 status page as built (2026-10-18)
+- Web: all-sessions **Agents** page (`web/src/components/agents/AgentsPage.tsx`, `AgentDetail.tsx`,
+  `AgentsNavButton.tsx`, `styles/agents.css`). Model is pure and tested:
+  `web/src/services/agentsOverview.ts` (2 h window, attention strip stuck > failed, cards attention >
+  running by newest activity, tree indent, 5 rows then "+N more", finished folded, finished-only
+  sessions in one bottom line, idle line). Live data: `web/src/services/agentsStore.ts` (one shared,
+  ref-counted `subagent_list {}` + `subagent_watch {live:true}` per server; nothing while the
+  document is hidden; 30 s safety re-list; per-session panel watches untouched).
+- Entry: "Agents" row in the desktop sidebar and the mobile dashboard, badge = running count, red on
+  stuck/failed, hidden at zero. Voice: "show me the agents" (`services/voice/showAgents.ts`, this
+  device only; "... on my phone" still goes to the hub's show path = follow-up: a hub-side
+  `herald_show {view:'agents'}`).
+- Protocol: optional `SubagentListResponse.sessions` (conversation id -> `{session, sessionId?,
+  project?}`, `links.ts sessionLabels`). Older daemons: labels fall back to `subagent_rollup
+  {facts:true}` (6 most recent sessions), else "session <id>". Needs a daemon restart to go live.

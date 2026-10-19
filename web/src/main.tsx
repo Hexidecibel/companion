@@ -13,6 +13,7 @@ import './styles/herald-setup.css';
 import './styles/review.css';
 import './styles/subagents.css';
 import './styles/stuck.css';
+import './styles/agents.css';
 import './styles/babysit.css';
 import { isOverlayWindow } from './services/overlayBridge';
 import { HeraldOverlayApp } from './components/herald/HeraldOverlayApp';

@@ -8,7 +8,7 @@ import type {
   SubagentWatchResponse,
 } from '../subagents/protocol';
 import { isActive } from '../subagents/completion';
-import { convsForSession, factsFor, type SubagentLinkDeps } from '../subagents/links';
+import { convsForSession, factsFor, sessionLabels, type SubagentLinkDeps } from '../subagents/links';
 
 type Obj = Record<string, unknown>;
 const obj = (p: unknown): Obj =>
@@ -76,6 +76,10 @@ export function registerSubagentHandlers(ctx: HandlerContext): Record<string, Me
         total: out.agents.length,
         rollup: out.rollup,
         generatedAt: Date.now(),
+        sessions: sessionLabels(
+          links,
+          out.agents.map((a) => a.sessionId)
+        ),
       };
     }),
 

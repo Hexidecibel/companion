@@ -7,6 +7,8 @@ type EventMap = {
   'toggle-herald': void;
   /** Herald "show me": open this session (Dashboard navigates; MessageList focuses). */
   'herald-show-session': { serverId: string; sessionId: string; pending: boolean };
+  /** Herald "show me the agents": open the all-sessions Agents page. */
+  'herald-show-agents': void;
   'companion-in-app-notification': { title: string; body?: string; tag?: string };
   /** Open the Code Review drawer for a session (consumed via reviewNav). */
   'review-open': { serverId: string; sessionId: string };

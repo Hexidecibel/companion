@@ -9,6 +9,7 @@ import { SessionView } from './SessionView';
 import { MobileDashboard } from './MobileDashboard';
 import { ShortcutHelpOverlay } from './ShortcutHelpOverlay';
 import { ComponentErrorBoundary } from './ComponentErrorBoundary';
+import { AgentsPage } from './agents/AgentsPage';
 import { useSessionMute } from '../hooks/useSessionMute';
 
 const NotificationSettingsModal = lazy(() => import('./NotificationSettingsModal').then(m => ({ default: m.NotificationSettingsModal })));
@@ -32,6 +33,8 @@ interface DashboardProps {
 
 export function Dashboard({ onSettings }: DashboardProps) {
   const [activeSession, setActiveSession] = useState<ActiveSession | null>(null);
+  /** The all-sessions Agents page is showing (desktop: in the main area; mobile: full screen). */
+  const [agentsOpen, setAgentsOpen] = useState(false);
   const [showNotifSettings, setShowNotifSettings] = useState(false);
   const [capabilitiesServerId, setCapabilitiesServerId] = useState<string | null>(null);
   const [showShortcutHelp, setShowShortcutHelp] = useState(false);
@@ -242,6 +245,8 @@ export function Dashboard({ onSettings }: DashboardProps) {
 
   const handleSelectSession = useCallback((serverId: string, sessionId: string) => {
     setActiveSession({ serverId, sessionId });
+    // Desktop: the session replaces the Agents page. Mobile: back returns to it.
+    if (!isMobile) setAgentsOpen(false);
     if (isMobile) {
       setSidebarOpen(false);
       // Push history so Android back gesture returns to dashboard.
@@ -295,6 +300,9 @@ export function Dashboard({ onSettings }: DashboardProps) {
         setActiveSession(null);
         // Re-push base entry so next back on dashboard doesn't exit the app
         history.pushState({ base: true }, '');
+      } else if (agentsOpen) {
+        setAgentsOpen(false);
+        history.pushState({ base: true }, '');
       } else {
         // On dashboard with nowhere to go — re-push to prevent app exit
         history.pushState({ base: true }, '');
@@ -302,7 +310,7 @@ export function Dashboard({ onSettings }: DashboardProps) {
     };
     window.addEventListener('popstate', handler);
     return () => window.removeEventListener('popstate', handler);
-  }, [isMobile, activeSession, showNotifSettings, heraldScreenOpen, herald.close]);
+  }, [isMobile, activeSession, agentsOpen, showNotifSettings, heraldScreenOpen, herald.close]);
 
   // Mobile Herald is a full screen: give it a history entry so the back
   // gesture closes it like any other screen.
@@ -332,6 +340,7 @@ export function Dashboard({ onSettings }: DashboardProps) {
   // Session chips inside Herald jump straight to that session's view.
   const handleHeraldOpenSession = useCallback((rawServerId: string, sessionId: string) => {
     const serverId = resolveHeraldServerId(rawServerId, heraldHostId, snapshotsRef.current.map((s) => s.serverId));
+    setAgentsOpen(false);
     if (isMobile) {
       herald.close();
       setActiveSession({ serverId, sessionId });
@@ -353,6 +362,32 @@ export function Dashboard({ onSettings }: DashboardProps) {
       pending,
     );
   }), [handleHeraldOpenSession, heraldHostId]);
+
+  const openAgents = useCallback(() => {
+    if (isMobile && !agentsOpen) history.pushState({ agents: true }, '');
+    setAgentsOpen(true);
+  }, [isMobile, agentsOpen]);
+
+  // Herald "show me the agents".
+  useEffect(() => eventBus.on('herald-show-agents', () => {
+    if (isMobile) {
+      herald.close();
+      setActiveSession(null);
+      // Reuse Herald's history entry (no extra back press), like a session chip.
+      if (history.state?.herald) {
+        history.replaceState({ agents: true }, '');
+        setAgentsOpen(true);
+        return;
+      }
+    }
+    openAgents();
+  }), [isMobile, herald.close, openAgents]);
+
+  const agentsPage = (onClose?: () => void) => (
+    <ComponentErrorBoundary name="AgentsPage">
+      <AgentsPage summaries={summaries} onOpenSession={handleSelectSession} onClose={onClose} />
+    </ComponentErrorBoundary>
+  );
 
   const heraldScreen = heraldScreenOpen ? (
     <ComponentErrorBoundary name="Herald">
@@ -655,9 +690,27 @@ export function Dashboard({ onSettings }: DashboardProps) {
       );
     }
 
+    if (agentsOpen) {
+      return (
+        <div className="dashboard">
+          <main className="dashboard-main" style={{ width: '100%' }}>
+            {agentsPage(() => {
+              if (history.state?.agents) {
+                suppressPopstate.current = true;
+                history.back();
+              }
+              setAgentsOpen(false);
+            })}
+          </main>
+          {heraldScreen}
+        </div>
+      );
+    }
+
     return (
       <>
         <MobileDashboard
+          onOpenAgents={openAgents}
           summaries={summaries}
           activeSession={activeSession}
           onSelectSession={handleSelectSession}
@@ -710,6 +763,8 @@ export function Dashboard({ onSettings }: DashboardProps) {
           showJumpNumbers={showJumpNumbers}
           jumpNumberMap={jumpNumberMap}
           style={{ width: sidebarWidth }}
+          onOpenAgents={() => (agentsOpen ? setAgentsOpen(false) : openAgents())}
+          agentsActive={agentsOpen}
         />
       </ComponentErrorBoundary>
       <div className="sidebar-drag-handle" onMouseDown={handleDragStart} />
@@ -717,6 +772,7 @@ export function Dashboard({ onSettings }: DashboardProps) {
         className={`dashboard-main${secondarySession ? ' split-enabled' : ''}`}
         ref={splitContainerRef as React.RefObject<HTMLElement>}
       >
+        {agentsOpen ? agentsPage(() => setAgentsOpen(false)) : (<>
         <ComponentErrorBoundary name="SessionView">
           <SessionView
             serverId={activeSession?.serverId ?? null}
@@ -778,6 +834,7 @@ export function Dashboard({ onSettings }: DashboardProps) {
             </ComponentErrorBoundary>
           </>
         )}
+        </>)}
       </main>
 
       <aside

@@ -10,7 +10,7 @@ import * as os from 'os';
 import * as path from 'path';
 import type { SubagentTracker } from './tracker';
 import { convOfAgentFile } from './tracker';
-import type { SubagentFacts } from './protocol';
+import type { SubagentFacts, SubagentSessionLabel } from './protocol';
 import { buildFacts, FACTS_DEFAULTS, projectLabelOf, type FactsLabel } from './facts';
 
 export interface SubagentLinkDeps {
@@ -58,6 +58,25 @@ export function factsLabel(deps: SubagentLinkDeps, conversationId: string): Fact
   const s = sessionOf(deps, conversationId);
   if (s) return { session: s.sessionName, sessionId: s.sessionId };
   return { session: `a session in ${projectOf(deps, conversationId)}` };
+}
+
+/** Labels for the conversations of a subagent_list (all-sessions views). In-memory only. */
+export function sessionLabels(
+  deps: SubagentLinkDeps,
+  conversationIds: Iterable<string>
+): Record<string, SubagentSessionLabel> {
+  const out: Record<string, SubagentSessionLabel> = {};
+  for (const conv of conversationIds) {
+    if (out[conv]) continue;
+    const project = projectOf(deps, conv);
+    const s = sessionOf(deps, conv);
+    const label: SubagentSessionLabel = s
+      ? { session: s.sessionName, sessionId: s.sessionId }
+      : { session: `a session in ${project}` };
+    if (project !== 'a project') label.project = project;
+    out[conv] = label;
+  }
+  return out;
 }
 
 /** Facts for one app session (every retained agent) or for every session (recent ones). */

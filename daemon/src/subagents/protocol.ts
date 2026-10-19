@@ -157,6 +157,18 @@ export interface SubagentListResponse {
   /** Deterministic one-line rollup ("3 of 5 done. ..."). */
   rollup: string;
   generatedAt: number;
+  /** Conversation id -> how to name it (newer daemons; absent = the client falls back to facts / ids). */
+  sessions?: Record<string, SubagentSessionLabel>;
+}
+
+/** How a conversation is named in all-sessions views. */
+export interface SubagentSessionLabel {
+  /** Display name: the session's name, else "a session in <project>". */
+  session: string;
+  /** App session id (tmux session) when the conversation runs in one. */
+  sessionId?: string;
+  /** Short project label ("companion"). */
+  project?: string;
 }
 
 export interface SubagentGetRequest {

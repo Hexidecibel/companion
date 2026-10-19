@@ -19,6 +19,7 @@ import { getFontScale, saveFontScale } from '../services/storage';
 import { Sparkline } from './Sparkline';
 import { SkeletonSessionCard } from './Skeleton';
 import { HeraldLauncher } from './herald/HeraldLauncher';
+import { AgentsNavButton } from './agents/AgentsNavButton';
 import { useConnectionHealth, ServerHealth } from '../hooks/useConnectionHealth';
 
 interface SessionSidebarProps {
@@ -40,6 +41,9 @@ interface SessionSidebarProps {
   showJumpNumbers?: boolean;
   jumpNumberMap?: Map<string, number>;
   style?: React.CSSProperties;
+  /** Open the all-sessions Agents page. */
+  onOpenAgents?: () => void;
+  agentsActive?: boolean;
 }
 
 const STATUS_DOT_CLASS: Record<SessionSummary['status'], string> = {
@@ -144,6 +148,8 @@ export function SessionSidebar({
   showJumpNumbers,
   jumpNumberMap,
   style,
+  onOpenAgents,
+  agentsActive,
 }: SessionSidebarProps) {
   const { snapshots } = useConnections();
   const { getServer, toggleEnabled, deleteServer } = useServers();
@@ -514,6 +520,12 @@ export function SessionSidebar({
               {f === 'all' ? 'All' : f.charAt(0).toUpperCase() + f.slice(1)}
             </button>
           ))}
+        </div>
+      )}
+
+      {onOpenAgents && (
+        <div className="agents-nav-row">
+          <AgentsNavButton onClick={onOpenAgents} active={agentsActive} />
         </div>
       )}
 

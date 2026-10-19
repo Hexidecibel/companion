@@ -18,6 +18,7 @@ import { QUIET_HOUR_MS, noteInteraction } from '../services/tts/tonePolicy';
 import { detectVoiceConfirm, isPendingConfirmPhrase, runVoiceConfirm } from '../services/voice/confirmPhrase';
 import { runUndo } from '../services/voice/voiceUndo';
 import { matchDiagnosticsCommand, matchShowCommand, stripWakeWord, type ShowCommand } from '../services/voice/voiceCommands';
+import { matchShowAgentsCommand } from '../services/voice/showAgents';
 import { localShowTarget, matchClarifyAnswer, runShowCommand, showLines, type ShowClarify } from '../services/voice/showCommand';
 import type { HeraldActiveDevice, HeraldDeviceInfo, HeraldIntent } from '../types/herald';
 import { TICK_VOLUME, playChime, startShimmer } from '../services/tts/chime';
@@ -420,6 +421,15 @@ export function HeraldProvider({ children }: { children: ReactNode }) {
       setupRef.current?.setDiagnosticsOpen(true);
       return null;
     }
+    // "Show me the agents": the all-sessions Agents page, on this device.
+    if (matchShowAgentsCommand(text)) {
+      followUp.cancel();
+      cues.turnDone();
+      maybeBringToFront('show');
+      eventBus.emit('herald-show-agents');
+      showAck('Here are the agents.');
+      return null;
+    }
     const show = matchShowCommand(text, (heraldRef.current.state?.devices ?? []).map((d) => d.label));
     if (show) {
       followUp.cancel();
@@ -457,7 +467,7 @@ export function HeraldProvider({ children }: { children: ReactNode }) {
       cues.turnDone();
     }
     return r.send;
-  }, [sendIntent, followUp, cues, noteVoiceTurn, runShow]);
+  }, [sendIntent, followUp, cues, noteVoiceTurn, runShow, showAck]);
   const voiceInputRef = useRef<ReturnType<typeof useHeraldVoiceInput> | null>(null);
   const isPendingConfirmText = useCallback(
     (text: string) => isPendingConfirmPhrase(text, heraldRef.current.state?.actions),

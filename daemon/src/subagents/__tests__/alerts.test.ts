@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import { SubagentAlerts, type SubagentAlert } from '../alerts';
 import { SubagentTracker } from '../tracker';
 import type { SubagentSummary } from '../protocol';
-import { factsFor } from '../links';
+import { factsFor, sessionLabels } from '../links';
 import {
   T0,
   CONV,
@@ -281,19 +281,20 @@ describe('subagent inbox alerts', () => {
       now = T0 + 3000;
       await tracker.pass();
       expect(ids.map((id) => tracker.get(id)!.status)).toEqual(['running', 'running']);
-      const facts = factsFor(
-        {
-          watcher: {
-            getConversationInfo: () => null,
-            getConversationIdsForSession: (k) => (k === 'out4' ? [CONV] : []),
-            getTmuxSessionForConversation: (c) => (c === CONV ? 'out4' : null),
-          },
-          sessionName: () => 'Out4',
-          tracker: () => tracker,
-          now: () => now,
+      const deps = {
+        watcher: {
+          getConversationInfo: () => null,
+          getConversationIdsForSession: (k: string) => (k === 'out4' ? [CONV] : []),
+          getTmuxSessionForConversation: (c: string) => (c === CONV ? 'out4' : null),
         },
-        'out4'
-      )!;
+        sessionName: () => 'Out4',
+        tracker: () => tracker,
+        now: () => now,
+      };
+      const facts = factsFor(deps, 'out4')!;
+      const labels = sessionLabels(deps, [CONV, CONV, 'unknown-conv']);
+      expect(labels[CONV]).toMatchObject({ session: 'Out4', sessionId: 'out4' });
+      expect(labels['unknown-conv']).toEqual({ session: 'a session in a project' });
       expect(facts.sessions[0]).toMatchObject({
         session: 'Out4',
         sessionId: 'out4',

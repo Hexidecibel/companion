@@ -14,6 +14,7 @@ import { ConnectionSnapshot } from '../services/ConnectionManager';
 import { Sparkline } from './Sparkline';
 import { connectionManager } from '../services/ConnectionManager';
 import { HeraldLauncher } from './herald/HeraldLauncher';
+import { AgentsNavButton } from './agents/AgentsNavButton';
 import { SkeletonSessionCard } from './Skeleton';
 import { StuckBadge } from './stuck/StuckBadge';
 import { BabysitBadge } from './babysit/BabysitBadge';
@@ -62,6 +63,8 @@ interface MobileDashboardProps {
   onOpenInSplit?: (serverId: string, sessionId: string) => void;
   onCloseSplit?: () => void;
   secondarySession?: ActiveSession | null;
+  /** Open the all-sessions Agents page. */
+  onOpenAgents?: () => void;
 }
 
 export function MobileDashboard({
@@ -74,6 +77,7 @@ export function MobileDashboard({
   onOpenInSplit,
   onCloseSplit,
   secondarySession,
+  onOpenAgents,
 }: MobileDashboardProps) {
   const { snapshots } = useConnections();
   const { servers, toggleEnabled, deleteServer } = useServers();
@@ -140,6 +144,11 @@ export function MobileDashboard({
       </header>
 
       <div className="mobile-dashboard-content">
+        {onOpenAgents && snapshots.length > 0 && (
+          <div className="agents-nav-row agents-nav-row--mobile">
+            <AgentsNavButton onClick={onOpenAgents} />
+          </div>
+        )}
         {snapshots.length === 0 && !addingServer && (
           <div className="mobile-empty-state">
             <div className="mobile-empty-icon">&#x1F4E1;</div>
