@@ -1,5 +1,6 @@
 import { eventBus } from '../utils/eventBus';
 import { ServerFreshness } from './ServerFreshness';
+import { backgroundWorkLabel } from '../utils/backgroundWork';
 import { useState, useMemo, useRef, useCallback, useEffect, lazy, Suspense } from 'react';
 import { ServerSummary, SessionSummary, ActiveSession } from '../types';
 import { useConnections } from '../hooks/useConnections';
@@ -404,8 +405,10 @@ function MobileSessionItem({ session, serverId, onSelect, onOpenInSplit, onClose
       )}
       <div className="mobile-session-info">
         <div className="mobile-session-name">{session.friendlyName || session.name}</div>
-        {session.currentActivity && (
-          <div className="mobile-session-activity">{session.currentActivity}</div>
+        {(backgroundWorkLabel(session.backgroundWork) || session.currentActivity) && (
+          <div className={`mobile-session-activity${session.backgroundWork ? ' background-work' : ''}`}>
+            {backgroundWorkLabel(session.backgroundWork) || session.currentActivity}
+          </div>
         )}
         {session.subagentTotal && session.subagentTotal > 0 && (
           <div className="mobile-session-subagents">

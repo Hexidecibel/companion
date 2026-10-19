@@ -71,12 +71,25 @@ import { registerSetupHandlers } from './handlers/setup';
 import { updatesDir } from './update-feed';
 import { lanAddresses } from './mdns';
 import { resolveVoiceUrl } from './herald/config';
+import { BackgroundWorkMonitor } from './background-work';
 
 const normalizePlatformSafe = (p: unknown) => normalizePlatform(p);
 
 // File for persisting tmux session configs
 const TMUX_CONFIGS_FILE = path.join(os.homedir(), '.companion', 'tmux-sessions.json');
 
+interface StatusChangeData {
+  sessionId?: string;
+  isWaitingForInput: boolean;
+  currentActivity?: string;
+  lastMessage?: { content: string };
+  [k: string]: unknown;
+}
+interface CompletedData {
+  sessionId: string;
+  sessionName: string;
+  content: string;
+}
 export class WebSocketHandler {
   private wssMap: Map<number, WebSocketServer> = new Map();
   private tokenMap: Map<number, string> = new Map();
@@ -103,6 +116,14 @@ export class WebSocketHandler {
   > = new Map();
   private static readonly PENDING_SENT_TTL = 10 * 60 * 1000;
   private escalation: EscalationService;
+  /** Background agents / shells per session (background-work.ts). */
+  private backgroundWork: BackgroundWorkMonitor;
+  /**
+   * Sessions whose turn ended while background work ran: the needs-input /
+   * finished flow is held back until the work is done (checked in memory).
+   */
+  private deferredIdle = new Map<string, { status?: StatusChangeData; completed?: CompletedData; since: number }>();
+  private deferredIdleTimer: NodeJS.Timeout | null = null;
   private workGroupManager: WorkGroupManager | null;
   private skillCatalog: SkillCatalog;
   private oauthUsageFetcher: OAuthUsageFetcher;
@@ -161,6 +182,12 @@ export class WebSocketHandler {
     this.tmux = tmux || new TmuxManager('companion');
 
     this.escalation = new EscalationService(this.push.getStore(), this.push);
+    this.backgroundWork = new BackgroundWorkMonitor({
+      runningAgents: (sessionId) => this.runningAgentsFor(sessionId),
+    });
+    if (typeof this.watcher.setBackgroundWork === 'function') {
+      this.watcher.setBackgroundWork(this.backgroundWork);
+    }
     this.skillCatalog = new SkillCatalog();
     this.sessionNameStore = new SessionNameStore(path.join(os.homedir(), '.companion'));
     this.auditLog = new AuditLog();
@@ -355,27 +382,20 @@ export class WebSocketHandler {
       this.broadcast('conversation_update', data, data.sessionId);
     });
 
-    this.watcher.on('status-change', (data) => {
-      this.broadcast('status_change', data, data.sessionId);
-
-      if (data.isWaitingForInput && data.lastMessage) {
-        const event: EscalationEvent = {
-          eventType: 'waiting_for_input',
-          sessionId: data.sessionId || 'unknown',
-          sessionName: this.injector.getActiveSession() || 'unknown',
-          content: data.lastMessage.content,
-        };
-        const result = this.escalation.handleEvent(event);
-        if (result.shouldBroadcast) {
-          console.log(`Escalation: waiting_for_input broadcast for session "${event.sessionName}"`);
-        }
-      } else if (!data.isWaitingForInput && data.sessionId) {
-        this.escalation.acknowledgeSession(data.sessionId);
+    this.watcher.on('status-change', (raw) => {
+      // A main thread idle while its background work runs is working: clients see
+      // isWaitingForInput false + backgroundWork, and nothing notifies until the
+      // work is done (releaseDeferredIdle then replays this as a real wait).
+      const data = this.applyBackgroundOverlay(raw);
+      if (raw.sessionId) {
+        if (raw.isWaitingForInput && !data.isWaitingForInput) this.deferIdle(raw.sessionId, { status: raw });
+        else this.deferredIdle.delete(raw.sessionId);
       }
+      this.handleStatusChange(data);
     });
 
     this.watcher.on('other-session-activity', (data) => {
-      this.broadcast('other_session_activity', data);
+      this.broadcast('other_session_activity', this.applyBackgroundOverlay(data));
     });
 
     this.watcher.on('compaction', (data) => {
@@ -405,9 +425,15 @@ export class WebSocketHandler {
     this.watcher.on('error-detected', (data) =>
       handleEscalationEvent('error_detected', data, { gated: true })
     );
-    this.watcher.on('session-completed', (data) =>
-      handleEscalationEvent('session_completed', data)
-    );
+    this.watcher.on('session-completed', (data) => {
+      // Finished, but its background agents / shells still run: say so only once they are done.
+      const o = data?.sessionId ? this.watcher.sessionOverlay?.(data.sessionId, true) : undefined;
+      if (o && !o.waiting) {
+        this.deferIdle(data.sessionId, { completed: data });
+        return;
+      }
+      handleEscalationEvent('session_completed', data);
+    });
 
     if (this.workGroupManager) {
       this.workGroupManager.on('work-group-update', (group) => {
@@ -617,6 +643,7 @@ export class WebSocketHandler {
       watcher: this.watcher,
       injector: this.injector,
       sessionNames: this.sessionNameStore,
+      onCapture: (tmuxName, pane) => this.backgroundWork.noteCapture(tmuxName, pane),
       onSent: (tmuxName, text, tag) => {
         // Same bookkeeping as send_input: optimistic chat echo + escalation ack.
         if (text) {
@@ -1476,6 +1503,94 @@ export class WebSocketHandler {
       console.log(
         `WebSocket: !! send FAILED - ws not open (state: ${ws.readyState}) for ${response.type}`
       );
+    }
+  }
+
+  private handleStatusChange(data: StatusChangeData): void {
+    this.broadcast('status_change', data, data.sessionId);
+
+    if (data.isWaitingForInput && data.lastMessage) {
+      const event: EscalationEvent = {
+        eventType: 'waiting_for_input',
+        sessionId: data.sessionId || 'unknown',
+        sessionName: this.injector.getActiveSession() || 'unknown',
+        content: data.lastMessage.content,
+      };
+      const result = this.escalation.handleEvent(event);
+      if (result.shouldBroadcast) {
+        console.log(`Escalation: waiting_for_input broadcast for session "${event.sessionName}"`);
+      }
+    } else if (!data.isWaitingForInput && data.sessionId) {
+      this.escalation.acknowledgeSession(data.sessionId);
+    }
+  }
+
+  /** Overlay the background-work state on a watcher status payload. */
+  private applyBackgroundOverlay<
+    T extends { sessionId?: string; isWaitingForInput?: boolean; currentActivity?: string },
+  >(data: T): T {
+    if (!data || !data.isWaitingForInput || !data.sessionId) return data;
+    if (typeof this.watcher.sessionOverlay !== 'function') return data;
+    const o = this.watcher.sessionOverlay(data.sessionId, true, data.currentActivity);
+    if (o.waiting) return data;
+    return {
+      ...data,
+      isWaitingForInput: false,
+      currentActivity: o.currentActivity ?? data.currentActivity,
+      ...(o.backgroundWork ? { backgroundWork: o.backgroundWork } : {}),
+    };
+  }
+
+  private runningAgentsFor(sessionId: string): number {
+    if (!this.subAgentWatcher) return 0;
+    const info = this.watcher.getConversationInfo?.(sessionId);
+    const base = info?.path?.split('/').pop()?.replace('.jsonl', '');
+    if (!base) return 0;
+    return this.subAgentWatcher.getAgentTree([base]).runningCount || 0;
+  }
+
+  private deferIdle(sessionId: string, part: { status?: StatusChangeData; completed?: CompletedData }): void {
+    const cur = this.deferredIdle.get(sessionId) || { since: Date.now() };
+    this.deferredIdle.set(sessionId, { ...cur, ...part });
+    if (!this.deferredIdleTimer) {
+      // In-memory only (tracker + cached pane footers): no subprocess here.
+      this.deferredIdleTimer = setInterval(() => this.releaseDeferredIdle(), 5000);
+      this.deferredIdleTimer.unref?.();
+    }
+  }
+
+  /** Background work done and the main thread still idle: run the normal waiting / finished flow now. */
+  releaseDeferredIdle(): void {
+    for (const [sessionId, d] of [...this.deferredIdle]) {
+      const status = this.watcher.getStatus(sessionId);
+      if (!status.isWaitingForInput) {
+        // The main thread moved on (a new turn): its own events take over.
+        this.deferredIdle.delete(sessionId);
+        continue;
+      }
+      const o = this.watcher.sessionOverlay(sessionId, true, status.currentActivity);
+      if (!o.waiting) continue; // still running
+      this.deferredIdle.delete(sessionId);
+      if (d.status) {
+        this.handleStatusChange({
+          ...d.status,
+          sessionId,
+          isWaitingForInput: true,
+          currentActivity: status.currentActivity,
+        });
+      }
+      if (d.completed) {
+        const event: EscalationEvent = { eventType: 'session_completed', ...d.completed };
+        const result = this.escalation.handleEvent(event);
+        if (result.shouldBroadcast) {
+          console.log(`Escalation: session_completed broadcast for session "${d.completed.sessionName}"`);
+        }
+        this.broadcast('session_completed', d.completed);
+      }
+    }
+    if (this.deferredIdle.size === 0 && this.deferredIdleTimer) {
+      clearInterval(this.deferredIdleTimer);
+      this.deferredIdleTimer = null;
     }
   }
 

@@ -310,7 +310,10 @@ export function registerSessionHandlers(ctx: HandlerContext): Record<string, Mes
       const t0 = Date.now();
       const statusSessionId =
         statusParams?.sessionId || client.subscribedSessionId || ctx.watcher.getActiveSessionId();
-      const status = ctx.watcher.getStatus(statusSessionId || undefined);
+      const status =
+        typeof ctx.watcher.getClientStatus === 'function'
+          ? ctx.watcher.getClientStatus(statusSessionId || undefined)
+          : ctx.watcher.getStatus(statusSessionId || undefined);
       const t1 = Date.now();
       // Polled by every client: log only when slow.
       if (t1 - t0 > SLOW_OPERATION_THRESHOLD_MS)

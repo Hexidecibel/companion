@@ -34,8 +34,9 @@ export function useBrowserNotificationListener(): void {
       const eventType = msg.type;
 
       if (eventType === 'status_change') {
-        const payload = msg.payload as { isWaitingForInput?: boolean; sessionId?: string } | undefined;
-        if (!payload?.isWaitingForInput) return;
+        const payload = msg.payload as { isWaitingForInput?: boolean; sessionId?: string; backgroundWork?: unknown } | undefined;
+        // Background agents / shells still running: not waiting for the user yet.
+        if (!payload?.isWaitingForInput || payload.backgroundWork) return;
         if (isMuted(serverId, payload.sessionId)) return;
         if (!browserNotifications.isEventEnabled('waiting_for_input')) return;
         browserNotifications.show('Waiting for input', {

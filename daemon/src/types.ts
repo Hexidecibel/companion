@@ -174,6 +174,12 @@ export interface SessionStatus {
   currentActivity?: string;
   recentActivity?: ActivityDetail[];
   feedbackPrompt?: FeedbackPrompt;
+  /**
+   * The main thread is idle but background agents / shells it started are
+   * still running: isWaitingForInput is then false (optional; older clients
+   * ignore it and see a working session).
+   */
+  backgroundWork?: { agents: number; shells: number };
 }
 
 export interface TmuxSession {

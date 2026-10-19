@@ -1,5 +1,6 @@
 import { sessionToneKey, toneStore } from '../services/tts/tonePolicy';
 import { ServerFreshness } from './ServerFreshness';
+import { backgroundWorkLabel } from '../utils/backgroundWork';
 import { eventBus } from '../utils/eventBus';
 import { useState, useMemo, useEffect, useCallback, lazy, Suspense } from 'react';
 import { ServerSummary, ActiveSession, SessionSummary, WorkGroup, WorkerSession } from '../types';
@@ -784,9 +785,9 @@ export function SessionSidebar({
                               </span>
                             </div>
                           )}
-                          {!foremanGroup && session.currentActivity && (
-                            <span className="sidebar-session-activity">
-                              {session.currentActivity}
+                          {!foremanGroup && (backgroundWorkLabel(session.backgroundWork) || session.currentActivity) && (
+                            <span className={`sidebar-session-activity${session.backgroundWork ? ' background-work' : ''}`}>
+                              {backgroundWorkLabel(session.backgroundWork) || session.currentActivity}
                             </span>
                           )}
                         </div>

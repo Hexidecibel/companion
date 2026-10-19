@@ -56,6 +56,7 @@ import { atomicWriteFileSync, registerShutdownCallback, BoundedMap } from './uti
 import { transcriptCache, TranscriptSnapshot } from './transcript-cache';
 import { tmuxSnapshot } from './tmux-snapshot';
 import { isReadonlySharedState } from './sandbox';
+import type { BackgroundWork, BackgroundWorkMonitor, SessionOverlay } from './background-work';
 
 /**
  * Parse a feedback prompt from tmux terminal output.
@@ -152,6 +153,8 @@ export class SessionWatcher extends EventEmitter {
   private activeConversationId: string | null = null; // internal UUID for conversation lookups
   private lastMessageCount: number = 0;
   private isWaitingForInput: boolean = false;
+  /** Background agents / shells + bypass-mode source (background-work.ts); null = raw transcript state. */
+  private bgWork: BackgroundWorkMonitor | null = null;
   private initialLoadComplete: boolean = false;
   private startTime: number = Date.now();
   private tmuxProjectPaths: Set<string> = new Set(); // encoded paths of tagged sessions only
@@ -2174,6 +2177,37 @@ export class SessionWatcher extends EventEmitter {
     }
   }
 
+  setBackgroundWork(monitor: BackgroundWorkMonitor | null): void {
+    this.bgWork = monitor;
+  }
+
+  /**
+   * Effective waiting state of a session for clients and notifications: the
+   * transcript's flag, except a main thread idle while its background agents /
+   * shells run (or a tool running in bypass mode) is working (background-work.ts).
+   */
+  sessionOverlay(sessionId: string, waiting: boolean, currentActivity?: string): SessionOverlay {
+    if (!waiting || !this.bgWork) return { waiting };
+    const targetId = this.resolveToConversationId(sessionId);
+    const tracked = targetId ? this.conversations.get(targetId) : undefined;
+    return this.bgWork.overlay(sessionId, waiting, tracked?.cachedMessages, currentActivity);
+  }
+
+  /** get_status as clients see it: getStatus with the background-work overlay applied. */
+  getClientStatus(sessionId?: string): SessionStatus {
+    const status = this.getStatus(sessionId);
+    const id = sessionId || this.activeTmuxSession || undefined;
+    if (!id || !status.isWaitingForInput) return status;
+    const o = this.sessionOverlay(id, true, status.currentActivity);
+    if (o.waiting) return status;
+    return {
+      ...status,
+      isWaitingForInput: false,
+      currentActivity: o.currentActivity ?? status.currentActivity,
+      ...(o.backgroundWork ? { backgroundWork: o.backgroundWork } : {}),
+    };
+  }
+
   getStatus(sessionId?: string): SessionStatus {
     const targetId = this.resolveToConversationId(sessionId);
     if (!targetId) {
@@ -2506,6 +2540,7 @@ export class SessionWatcher extends EventEmitter {
         activeTask?: string;
       };
       recentTimestamps?: number[];
+      backgroundWork?: BackgroundWork;
     }>;
     totalSessions: number;
     waitingCount: number;
@@ -2528,6 +2563,7 @@ export class SessionWatcher extends EventEmitter {
         activeTask?: string;
       };
       recentTimestamps?: number[];
+      backgroundWork?: BackgroundWork;
     }> = [];
 
     let waitingCount = 0;
@@ -2552,6 +2588,7 @@ export class SessionWatcher extends EventEmitter {
       let projectPath = ts.workingDir || '';
 
       let recentTimestamps: number[] | undefined;
+      let backgroundWork: BackgroundWork | undefined;
 
       if (best) {
         const conv = best.conv;
@@ -2565,7 +2602,15 @@ export class SessionWatcher extends EventEmitter {
           ? detectCurrentActivity(messages)
           : detectCurrentActivityFast(conv.path);
 
-        if (conv.isWaitingForInput) {
+        // Main thread idle while its background agents / shells run (or a tool
+        // running in bypass mode): working, never waiting (background-work.ts).
+        const overlay = this.bgWork
+          ? this.bgWork.overlay(ts.name, conv.isWaitingForInput, messages, currentActivity)
+          : { waiting: conv.isWaitingForInput };
+        if (overlay.currentActivity) currentActivity = overlay.currentActivity;
+        if (overlay.backgroundWork) backgroundWork = overlay.backgroundWork;
+
+        if (overlay.waiting) {
           status = 'waiting';
           waitingCount++;
         } else if (currentActivity) {
@@ -2590,6 +2635,7 @@ export class SessionWatcher extends EventEmitter {
         tmuxSessionName: ts.name,
         taskSummary,
         recentTimestamps,
+        ...(backgroundWork ? { backgroundWork } : {}),
       });
     }
 

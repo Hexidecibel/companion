@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect } from 'react';
 import { SessionStatus, FeedbackOption } from '../types';
 import { connectionManager } from '../services/ConnectionManager';
+import { backgroundWorkLabel } from '../utils/backgroundWork';
 
 interface WaitingIndicatorProps {
   status: SessionStatus | null;
@@ -63,6 +64,17 @@ export function WaitingIndicator({ status, serverId, sessionId, tmuxSessionName,
     return (
       <div className="feedback-prompt feedback-prompt-sent">
         <span className="feedback-prompt-question">Sent</span>
+      </div>
+    );
+  }
+
+  // Main thread idle, its background agents / shells still running.
+  const background = backgroundWorkLabel(status.backgroundWork);
+  if (background && !status.isWaitingForInput) {
+    return (
+      <div className="waiting-banner waiting-banner-blue background-work">
+        <div className="spinner small" />
+        <span>{background}</span>
       </div>
     );
   }

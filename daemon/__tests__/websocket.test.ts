@@ -597,6 +597,83 @@ describe('WebSocketHandler', () => {
       );
     });
 
+    it('holds back needs-input while background agents run, then releases it once they finish', () => {
+      const mockClient = new MockWebSocket();
+      mockWss.clients.add(mockClient);
+      mockWss.emit('connection', mockClient, { socket: { remoteAddress: '127.0.0.1' } });
+      mockClient.emit('message', JSON.stringify({ type: 'authenticate', token: 'test-token' }));
+      mockClient.emit(
+        'message',
+        JSON.stringify({ type: 'subscribe', payload: { sessionId: 'bg-session' } })
+      );
+      mockClient.send.mockClear();
+      const escalate = jest.spyOn((handler as any).escalation, 'handleEvent');
+      let running = true;
+      mockWatcher.sessionOverlay = jest.fn(() =>
+        running
+          ? { waiting: false, backgroundWork: { agents: 2, shells: 0 }, currentActivity: '2 agents running' }
+          : { waiting: true }
+      );
+      mockWatcher.getStatus.mockReturnValue({ isRunning: true, isWaitingForInput: true, lastActivity: 1 });
+      try {
+        // Only the latest handler reacts (older beforeEach handlers share the mock emitter).
+        mockWatcher.removeAllListeners('status-change');
+        mockWatcher.removeAllListeners('session-completed');
+        handler = new WebSocketHandler(
+          [{ server: mockServer, listener: mockListener }],
+          mockConfig,
+          mockWatcher,
+          mockInjector,
+          mockPush
+        );
+        const wss = (handler as any).wssMap.get(9877);
+        const client = new MockWebSocket();
+        wss.clients.add(client);
+        wss.emit('connection', client, { socket: { remoteAddress: '127.0.0.1' } });
+        client.emit('message', JSON.stringify({ type: 'authenticate', token: 'test-token' }));
+        client.emit('message', JSON.stringify({ type: 'subscribe', payload: { sessionId: 'bg-session' } }));
+        client.send.mockClear();
+        const esc = jest.spyOn((handler as any).escalation, 'handleEvent');
+
+        mockWatcher.emit('status-change', {
+          sessionId: 'bg-session',
+          isWaitingForInput: true,
+          lastMessage: { content: 'Dispatched 2 agents.' },
+        });
+        mockWatcher.emit('session-completed', { sessionId: 'bg-session', sessionName: 'bg', content: 'x' });
+        const sent = client.send.mock.calls.map((c: unknown[]) => JSON.parse(c[0] as string));
+        const status = sent.find((m: { type: string }) => m.type === 'status_change');
+        expect(status.payload).toMatchObject({
+          isWaitingForInput: false,
+          backgroundWork: { agents: 2, shells: 0 },
+          currentActivity: '2 agents running',
+        });
+        expect(esc).not.toHaveBeenCalled();
+        expect(sent.some((m: { type: string }) => m.type === 'session_completed')).toBe(false);
+
+        // Still running: nothing released.
+        handler.releaseDeferredIdle();
+        expect(esc).not.toHaveBeenCalled();
+
+        // Work done, main thread still idle: the normal flow runs now.
+        running = false;
+        client.send.mockClear();
+        handler.releaseDeferredIdle();
+        expect(esc).toHaveBeenCalledWith(expect.objectContaining({ eventType: 'waiting_for_input', sessionId: 'bg-session' }));
+        expect(esc).toHaveBeenCalledWith(expect.objectContaining({ eventType: 'session_completed', sessionId: 'bg-session' }));
+        const after = client.send.mock.calls.map((c: unknown[]) => JSON.parse(c[0] as string));
+        expect(after.find((m: { type: string }) => m.type === 'status_change').payload.isWaitingForInput).toBe(true);
+        // Released once.
+        esc.mockClear();
+        handler.releaseDeferredIdle();
+        expect(esc).not.toHaveBeenCalled();
+      } finally {
+        escalate.mockRestore();
+        delete mockWatcher.sessionOverlay;
+        mockWatcher.getStatus.mockReturnValue({ isRunning: true, isWaitingForInput: false, lastActivity: Date.now() });
+      }
+    });
+
     it('should not forward events to unsubscribed clients', () => {
       const mockClient = new MockWebSocket();
       mockWss.clients.add(mockClient);

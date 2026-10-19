@@ -253,6 +253,8 @@ interface ServerSummarySession {
 }
 
 export interface LocalSourceDeps {
+  /** Every successful pane capture (the background-work monitor reads its footer). */
+  onCapture?: (tmuxName: string, pane: string) => void;
   watcher: {
     getServerSummary(): Promise<{ sessions: ServerSummarySession[] }>;
     getMessages(sessionId?: string): ConversationMessage[];
@@ -478,6 +480,13 @@ export class LocalSessionSource implements SessionSource {
     } catch {
       if (strict) throw new Error(`could not read ${tmuxName}'s screen to re-check it`);
       return null;
+    }
+    if (pane && this.deps.onCapture) {
+      try {
+        this.deps.onCapture(tmuxName, pane);
+      } catch {
+        // observers never break a listing
+      }
     }
     try {
       if (!pane) {
