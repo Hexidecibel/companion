@@ -1,54 +1,68 @@
-import { eventBus } from '../utils/eventBus';
-import { useDraggable } from '../hooks/useDraggable';
-import { useState, useEffect, useCallback, useMemo, useRef, lazy, Suspense } from 'react';
-import { PendingAttachment, WorkGroup } from '../types';
-import { useConversation, describeSendError, type SendOutcome } from '../hooks/useConversation';
-import { useTasks } from '../hooks/useTasks';
-import { useSubAgents } from '../hooks/useSubAgents';
-import { useBypassPermissions } from '../hooks/useBypassPermissions';
-import { useOpenFiles } from '../hooks/useOpenFiles';
-import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
-import { connectionManager } from '../services/ConnectionManager';
-import { isMobileViewport } from '../utils/platform';
-import { focusTrapActive } from '../utils/focusTrap';
-import { useSessionMute } from '../hooks/useSessionMute';
-import { useSkills } from '../hooks/useSkills';
-import { WaitingIndicator } from './WaitingIndicator';
-import { TaskList } from './TaskList';
-import { MessageList } from './MessageList';
-import { InputBar, InputBarHandle } from './InputBar';
-import { DispatchPanel } from './DispatchPanel';
-import { DispatchOpener } from './DispatchOpener';
-import { ArtifactViewerModal } from './ArtifactViewerModal';
-import { FileTabBar } from './FileTabBar';
-import { extractPlanFilePath, extractInlinePlan } from './MessageBubble';
-import { SearchBar } from './SearchBar';
-import { ConversationSearch } from './ConversationSearch';
-import { TerminalPanel } from './TerminalPanel';
-import { WorkGroupBar } from './WorkGroupBar';
-import { WorkGroupPanel } from './WorkGroupPanel';
-import { FileFinder } from './FileFinder';
-import { SkillBrowser } from './SkillBrowser';
-import { useBookmarks } from '../hooks/useBookmarks';
-import { BookmarkList } from './BookmarkList';
-import { FetchErrorBanner } from './FetchErrorBanner';
-import { StuckBanner } from './stuck/StuckBanner';
-import { BabysitBar } from './babysit/BabysitBar';
-import { BabysitBriefDialog } from './babysit/BabysitBriefDialog';
-import { BabysitHeaderButton } from './babysit/BabysitHeaderButton';
-import { useBabysit } from '../hooks/useBabysit';
-import { ComponentErrorBoundary } from './ComponentErrorBoundary';
-import { ScrollDebugPanel } from './ScrollDebugPanel';
-import { SettingsModal } from './SettingsModal';
-import { HeaderOverflowMenu, OverflowMenuItem } from './HeaderOverflowMenu';
-import { hideToolsKey } from '../services/storageKeys';
-import { ReviewProvider, type ReviewApi } from './review/ReviewContext';
-import { ChangeStrip } from './review/ChangeStrip';
-import { ReviewShell } from './review/ReviewShell';
-import { ReviewHeaderButton } from './review/ReviewHeaderButton';
-import { useReviewSummary } from '../hooks/useReviewSummary';
+import { eventBus } from "../utils/eventBus";
+import { useDraggable } from "../hooks/useDraggable";
+import {
+  useState,
+  useEffect,
+  useCallback,
+  useMemo,
+  useRef,
+  lazy,
+  Suspense,
+} from "react";
+import { PendingAttachment, WorkGroup } from "../types";
+import {
+  useConversation,
+  describeSendError,
+  type SendOutcome,
+} from "../hooks/useConversation";
+import { useTasks } from "../hooks/useTasks";
+import { useSubAgents } from "../hooks/useSubAgents";
+import { useBypassPermissions } from "../hooks/useBypassPermissions";
+import { useOpenFiles } from "../hooks/useOpenFiles";
+import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
+import { connectionManager } from "../services/ConnectionManager";
+import { isMobileViewport } from "../utils/platform";
+import { focusTrapActive } from "../utils/focusTrap";
+import { useSessionMute } from "../hooks/useSessionMute";
+import { useSkills } from "../hooks/useSkills";
+import { WaitingIndicator } from "./WaitingIndicator";
+import { TaskList } from "./TaskList";
+import { MessageList } from "./MessageList";
+import { InputBar, InputBarHandle } from "./InputBar";
+import { DispatchPanel } from "./DispatchPanel";
+import { DispatchOpener } from "./DispatchOpener";
+import { ArtifactViewerModal } from "./ArtifactViewerModal";
+import { FileTabBar } from "./FileTabBar";
+import { extractPlanFilePath, extractInlinePlan } from "./MessageBubble";
+import { SearchBar } from "./SearchBar";
+import { ConversationSearch } from "./ConversationSearch";
+import { TerminalPanel } from "./TerminalPanel";
+import { WorkGroupBar } from "./WorkGroupBar";
+import { WorkGroupPanel } from "./WorkGroupPanel";
+import { FileFinder } from "./FileFinder";
+import { SkillBrowser } from "./SkillBrowser";
+import { useBookmarks } from "../hooks/useBookmarks";
+import { BookmarkList } from "./BookmarkList";
+import { FetchErrorBanner } from "./FetchErrorBanner";
+import { StuckBanner } from "./stuck/StuckBanner";
+import { BabysitBar } from "./babysit/BabysitBar";
+import { BabysitBriefDialog } from "./babysit/BabysitBriefDialog";
+import { BabysitHeaderButton } from "./babysit/BabysitHeaderButton";
+import { useBabysit } from "../hooks/useBabysit";
+import { ComponentErrorBoundary } from "./ComponentErrorBoundary";
+import { ScrollDebugPanel } from "./ScrollDebugPanel";
+import { SettingsModal } from "./SettingsModal";
+import { HeaderOverflowMenu, OverflowMenuItem } from "./HeaderOverflowMenu";
+import { hideToolsKey } from "../services/storageKeys";
+import { ReviewProvider, type ReviewApi } from "./review/ReviewContext";
+import { ChangeStrip } from "./review/ChangeStrip";
+import { ReviewShell } from "./review/ReviewShell";
+import { ReviewHeaderButton } from "./review/ReviewHeaderButton";
+import { useReviewSummary } from "../hooks/useReviewSummary";
 
-const FileViewerModal = lazy(() => import('./FileViewerModal').then(m => ({ default: m.FileViewerModal })));
+const FileViewerModal = lazy(() =>
+  import("./FileViewerModal").then((m) => ({ default: m.FileViewerModal })),
+);
 
 interface SessionViewProps {
   serverId: string | null;
@@ -100,10 +114,20 @@ export function SessionView({
     loadMore,
   } = useConversation(serverId, sessionId, tmuxSessionName);
 
-  const { tasks, loading: tasksLoading, error: tasksError, refresh: refreshTasks } = useTasks(serverId, sessionId);
+  const {
+    tasks,
+    loading: tasksLoading,
+    error: tasksError,
+    refresh: refreshTasks,
+  } = useTasks(serverId, sessionId);
   const reviewSummary = useReviewSummary(serverId, sessionId);
   const reviewApi = useRef<ReviewApi | null>(null);
-  const { agents, runningCount, totalAgents, error: agentsError } = useSubAgents(serverId, sessionId);
+  const {
+    agents,
+    runningCount,
+    totalAgents,
+    error: agentsError,
+  } = useSubAgents(serverId, sessionId);
   const bypass = useBypassPermissions(serverId, sessionId);
   const sessionMute = useSessionMute(serverId);
   const { skills } = useSkills(serverId, sessionId || undefined);
@@ -121,20 +145,25 @@ export function SessionView({
   }, [imageSendError]);
 
   // Dispatch panel state
-  const DISPATCH_HEIGHT_KEY = 'dispatch-panel-height';
+  const DISPATCH_HEIGHT_KEY = "dispatch-panel-height";
   const [dispatchCollapsed, setDispatchCollapsed] = useState(true);
   // Mobile "N agents done" bar: closed per session; reappears when the agent count grows.
-  const [doneBarDismissedAt, setDoneBarDismissedAt] = useState<Record<string, number>>({});
-  const doneBarKey = `${serverId ?? ''}:${sessionId ?? ''}`;
-  const doneBarDismissed = (doneBarDismissedAt[doneBarKey] ?? -1) >= totalAgents;
+  const [doneBarDismissedAt, setDoneBarDismissedAt] = useState<
+    Record<string, number>
+  >({});
+  const doneBarKey = `${serverId ?? ""}:${sessionId ?? ""}`;
+  const doneBarDismissed =
+    (doneBarDismissedAt[doneBarKey] ?? -1) >= totalAgents;
   const dispatchDrag = useDraggable({
-    direction: 'vertical',
+    direction: "vertical",
     initialValue: 280,
     min: 100,
     max: 2000,
     storageKey: DISPATCH_HEIGHT_KEY,
     transform: (ev, startEvent) => {
-      const container = (startEvent.target as HTMLElement).closest('.session-view');
+      const container = (startEvent.target as HTMLElement).closest(
+        ".session-view",
+      );
       if (!container) return 280;
       const rect = container.getBoundingClientRect();
       return Math.min(
@@ -146,13 +175,21 @@ export function SessionView({
 
   // File viewer state
   const [viewingFile, setViewingFile] = useState<string | null>(null);
-  const { openFiles, openFile, closeFile: closeOpenFile, closeAllFiles } = useOpenFiles(serverId, sessionId);
+  const {
+    openFiles,
+    openFile,
+    closeFile: closeOpenFile,
+    closeAllFiles,
+  } = useOpenFiles(serverId, sessionId);
 
   // Conversation search state
   const [showConversationSearch, setShowConversationSearch] = useState(false);
 
   // Artifact viewer state
-  const [artifactContent, setArtifactContent] = useState<{ content: string; title?: string } | null>(null);
+  const [artifactContent, setArtifactContent] = useState<{
+    content: string;
+    title?: string;
+  } | null>(null);
 
   // Terminal view state
   const [showTerminal, setShowTerminal] = useState(false);
@@ -185,7 +222,8 @@ export function SessionView({
   const [showScrollDebugPanel, setShowScrollDebugPanel] = useState(false);
 
   // Bookmarks
-  const { addBookmark, removeBookmark, isBookmarked, sessionBookmarks } = useBookmarks(serverId);
+  const { addBookmark, removeBookmark, isBookmarked, sessionBookmarks } =
+    useBookmarks(serverId);
   const [showBookmarks, setShowBookmarks] = useState(false);
   const currentBookmarks = sessionId ? sessionBookmarks(sessionId) : [];
 
@@ -201,28 +239,35 @@ export function SessionView({
   // because the inline per-message filter ran against a mismatched snapshot.
   const toolsKey = sessionId ? hideToolsKey(sessionId) : null;
   const readHideTools = (key: string | null) =>
-    key ? localStorage.getItem(key) !== '0' : true;
-  const [hideToolsState, setHideToolsState] = useState<{ key: string | null; value: boolean }>(
-    () => ({ key: toolsKey, value: readHideTools(toolsKey) }),
-  );
+    key ? localStorage.getItem(key) !== "0" : true;
+  const [hideToolsState, setHideToolsState] = useState<{
+    key: string | null;
+    value: boolean;
+  }>(() => ({ key: toolsKey, value: readHideTools(toolsKey) }));
   if (hideToolsState.key !== toolsKey) {
     // Sync recompute during render — no extra commit, no stale first paint.
     setHideToolsState({ key: toolsKey, value: readHideTools(toolsKey) });
   }
-  const hideTools = hideToolsState.key === toolsKey
-    ? hideToolsState.value
-    : readHideTools(toolsKey);
-  const setHideTools = useCallback((hide: boolean) => {
-    setHideToolsState({ key: toolsKey, value: hide });
-    if (toolsKey) localStorage.setItem(toolsKey, hide ? '1' : '0');
-  }, [toolsKey]);
+  const hideTools =
+    hideToolsState.key === toolsKey
+      ? hideToolsState.value
+      : readHideTools(toolsKey);
+  const setHideTools = useCallback(
+    (hide: boolean) => {
+      setHideToolsState({ key: toolsKey, value: hide });
+      if (toolsKey) localStorage.setItem(toolsKey, hide ? "1" : "0");
+    },
+    [toolsKey],
+  );
 
   const searchMatches = useMemo(() => {
     if (!searchTerm) return [];
     const lower = searchTerm.toLowerCase();
     return highlights
       .map((h, i) => ({ id: h.id, index: i }))
-      .filter(({ index }) => highlights[index].content?.toLowerCase().includes(lower));
+      .filter(({ index }) =>
+        highlights[index].content?.toLowerCase().includes(lower),
+      );
   }, [highlights, searchTerm]);
 
   // Detect plan file from conversation (Claude-generated plans)
@@ -246,25 +291,53 @@ export function SessionView({
 
   const showDispatchPanel = !dispatchCollapsed && totalAgents > 0;
 
-
-
   // Session babysitter (Herald answers this session's simple questions). The
   // view is reused across sessions: the brief dialog never carries over.
   const babysit = useBabysit(serverId, sessionId);
   const [showBabysitDialog, setShowBabysitDialog] = useState(false);
-  useEffect(() => { setShowBabysitDialog(false); }, [serverId, sessionId]);
+  useEffect(() => {
+    setShowBabysitDialog(false);
+  }, [serverId, sessionId]);
   const openBabysitDialog = useCallback(() => setShowBabysitDialog(true), []);
   const closeBabysitDialog = useCallback(() => setShowBabysitDialog(false), []);
 
   // Track whether dispatch overlay is open on mobile (for back gesture)
-  const dispatchOverlayOpen = isMobileViewport() && !dispatchCollapsed && totalAgents > 0;
+  const dispatchOverlayOpen =
+    isMobileViewport() && !dispatchCollapsed && totalAgents > 0;
 
   // Signal to Dashboard that an overlay is open (for back gesture coordination)
   useEffect(() => {
-    const isOverlay = showBabysitDialog || showTerminal || showWorkGroupPanel || showConversationSearch || showFileFinder || showCodeReviewModal || dispatchOverlayOpen || !!viewingFile || !!artifactContent || showBookmarks || showSkillBrowser || showSettings;
-    document.body.dataset.overlay = isOverlay ? 'true' : '';
-    return () => { document.body.dataset.overlay = ''; };
-  }, [showTerminal, showWorkGroupPanel, showConversationSearch, showFileFinder, showCodeReviewModal, dispatchOverlayOpen, viewingFile, artifactContent, showBookmarks, showSkillBrowser, showSettings, showBabysitDialog]);
+    const isOverlay =
+      showBabysitDialog ||
+      showTerminal ||
+      showWorkGroupPanel ||
+      showConversationSearch ||
+      showFileFinder ||
+      showCodeReviewModal ||
+      dispatchOverlayOpen ||
+      !!viewingFile ||
+      !!artifactContent ||
+      showBookmarks ||
+      showSkillBrowser ||
+      showSettings;
+    document.body.dataset.overlay = isOverlay ? "true" : "";
+    return () => {
+      document.body.dataset.overlay = "";
+    };
+  }, [
+    showTerminal,
+    showWorkGroupPanel,
+    showConversationSearch,
+    showFileFinder,
+    showCodeReviewModal,
+    dispatchOverlayOpen,
+    viewingFile,
+    artifactContent,
+    showBookmarks,
+    showSkillBrowser,
+    showSettings,
+    showBabysitDialog,
+  ]);
 
   // Listen for close-overlay event from Dashboard's back gesture handler
   useEffect(() => {
@@ -283,8 +356,21 @@ export function SessionView({
       else if (showTerminal) setShowTerminal(false);
       else if (showWorkGroupPanel) setShowWorkGroupPanel(false);
     };
-    return eventBus.on('close-overlay', handler);
-  }, [showTerminal, showWorkGroupPanel, showConversationSearch, showFileFinder, showCodeReviewModal, dispatchOverlayOpen, viewingFile, artifactContent, showBookmarks, showSkillBrowser, showSettings, showBabysitDialog]);
+    return eventBus.on("close-overlay", handler);
+  }, [
+    showTerminal,
+    showWorkGroupPanel,
+    showConversationSearch,
+    showFileFinder,
+    showCodeReviewModal,
+    dispatchOverlayOpen,
+    viewingFile,
+    artifactContent,
+    showBookmarks,
+    showSkillBrowser,
+    showSettings,
+    showBabysitDialog,
+  ]);
 
   // Reset views when session changes, auto-focus on desktop only
   useEffect(() => {
@@ -295,7 +381,9 @@ export function SessionView({
     if (serverId && sessionId && !isMobileViewport()) {
       requestAnimationFrame(() => {
         if (focusTrapActive()) return;
-        const textarea = document.querySelector('.input-bar-textarea') as HTMLElement | null;
+        const textarea = document.querySelector(
+          ".input-bar-textarea",
+        ) as HTMLElement | null;
         textarea?.focus();
       });
     }
@@ -306,7 +394,9 @@ export function SessionView({
     if (isMobileViewport() || !serverId || !sessionId) return;
     // Track mouse-down state to avoid stealing focus during click-drag selection
     let mouseDown = false;
-    const onMouseDown = () => { mouseDown = true; };
+    const onMouseDown = () => {
+      mouseDown = true;
+    };
     const onMouseUp = () => {
       mouseDown = false;
       // After mouseup, refocus if no text was selected and focus isn't on an interactive element
@@ -314,10 +404,18 @@ export function SessionView({
         // The review drawer owns the keyboard while open.
         if (focusTrapActive()) return;
         const active = document.activeElement;
-        if (active && active.closest('input, textarea:not(.input-bar-textarea), [contenteditable], select, a, button, [role="button"], .context-menu')) return;
+        if (
+          active &&
+          active.closest(
+            'input, textarea:not(.input-bar-textarea), [contenteditable], select, a, button, [role="button"], .context-menu',
+          )
+        )
+          return;
         const selection = window.getSelection();
         if (selection && selection.toString().length > 0) return;
-        const textarea = document.querySelector('.input-bar-textarea') as HTMLElement | null;
+        const textarea = document.querySelector(
+          ".input-bar-textarea",
+        ) as HTMLElement | null;
         textarea?.focus();
       });
     };
@@ -328,11 +426,19 @@ export function SessionView({
         if (focusTrapActive()) return;
         const active = document.activeElement;
         // Don't steal focus from other interactive elements
-        if (active && active.closest('input, textarea:not(.input-bar-textarea), [contenteditable], select, a, button, [role="button"], .context-menu')) return;
+        if (
+          active &&
+          active.closest(
+            'input, textarea:not(.input-bar-textarea), [contenteditable], select, a, button, [role="button"], .context-menu',
+          )
+        )
+          return;
         // Don't steal focus if user is selecting text
         const selection = window.getSelection();
         if (selection && selection.toString().length > 0) return;
-        const textarea = document.querySelector('.input-bar-textarea') as HTMLElement | null;
+        const textarea = document.querySelector(
+          ".input-bar-textarea",
+        ) as HTMLElement | null;
         textarea?.focus();
       });
     };
@@ -345,20 +451,22 @@ export function SessionView({
       if (focusTrapActive()) return; // drawer shortcuts (j/k/...) are not typing
       const active = document.activeElement;
       if (active && active !== document.body) return;
-      const textarea = document.querySelector('.input-bar-textarea') as HTMLElement | null;
+      const textarea = document.querySelector(
+        ".input-bar-textarea",
+      ) as HTMLElement | null;
       textarea?.focus();
     };
 
     // Re-focus when clicks happen outside interactive elements
-    document.addEventListener('focusout', refocus);
-    document.addEventListener('mousedown', onMouseDown);
-    document.addEventListener('mouseup', onMouseUp);
-    document.addEventListener('keydown', onKeyDown);
+    document.addEventListener("focusout", refocus);
+    document.addEventListener("mousedown", onMouseDown);
+    document.addEventListener("mouseup", onMouseUp);
+    document.addEventListener("keydown", onKeyDown);
     return () => {
-      document.removeEventListener('focusout', refocus);
-      document.removeEventListener('mousedown', onMouseDown);
-      document.removeEventListener('mouseup', onMouseUp);
-      document.removeEventListener('keydown', onKeyDown);
+      document.removeEventListener("focusout", refocus);
+      document.removeEventListener("mousedown", onMouseDown);
+      document.removeEventListener("mouseup", onMouseUp);
+      document.removeEventListener("keydown", onKeyDown);
     };
   }, [showTerminal, serverId, sessionId]);
 
@@ -367,11 +475,18 @@ export function SessionView({
     if (isMobileViewport() || focusTrapActive()) return;
     const target = e.target as HTMLElement;
     // Don't steal focus from interactive elements
-    if (target.closest('button, a, input, textarea, [role="button"], .msg-option-btn, .tool-card, .question-block, .dispatch-panel, .dispatch-mobile-overlay')) return;
+    if (
+      target.closest(
+        'button, a, input, textarea, [role="button"], .msg-option-btn, .tool-card, .question-block, .dispatch-panel, .dispatch-mobile-overlay',
+      )
+    )
+      return;
     // Don't steal focus if user is selecting text
     const selection = window.getSelection();
     if (selection && selection.toString().length > 0) return;
-    const textarea = document.querySelector('.input-bar-textarea') as HTMLElement | null;
+    const textarea = document.querySelector(
+      ".input-bar-textarea",
+    ) as HTMLElement | null;
     textarea?.focus();
   }, []);
 
@@ -382,10 +497,18 @@ export function SessionView({
     [sendInputDetailed],
   );
 
-  const handleReviewComment = useCallback((text: string) => { void sendInput(text); }, [sendInput]);
+  const handleReviewComment = useCallback(
+    (text: string) => {
+      void sendInput(text);
+    },
+    [sendInput],
+  );
 
   const handleSendWithAttachments = useCallback(
-    async (text: string, attachments: PendingAttachment[]): Promise<boolean> => {
+    async (
+      text: string,
+      attachments: PendingAttachment[],
+    ): Promise<boolean> => {
       if (!serverId) return false;
       const conn = connectionManager.getConnection(serverId);
       if (!conn) return false;
@@ -409,22 +532,22 @@ export function SessionView({
             reader.onload = () => {
               const result = reader.result as string;
               // Strip data:<mime>;base64, prefix
-              const b64 = result.includes(',') ? result.split(',')[1] : result;
+              const b64 = result.includes(",") ? result.split(",")[1] : result;
               resolve(b64);
             };
             reader.onerror = reject;
             reader.readAsDataURL(att.file);
           });
 
-          const response = await conn.sendRequest('upload_image', {
+          const response = await conn.sendRequest("upload_image", {
             base64,
             mimeType: att.mimeType,
             filename: att.name,
           });
 
           if (!response.success) {
-            console.error('Attachment upload failed:', response.error);
-            setImageSendError(response.error || 'Attachment upload failed');
+            console.error("Attachment upload failed:", response.error);
+            setImageSendError(response.error || "Attachment upload failed");
             return false;
           }
 
@@ -435,7 +558,7 @@ export function SessionView({
         }
 
         // Send message with attachment paths
-        const response = await conn.sendRequest('send_with_images', {
+        const response = await conn.sendRequest("send_with_images", {
           message: text,
           imagePaths,
           tmuxSessionName,
@@ -443,31 +566,40 @@ export function SessionView({
         });
 
         if (!response.success) {
-          const errMsg = response.error === 'tmux_session_not_found'
-            ? 'tmux session not found'
-            : (describeSendError(response.error, response.payload) || response.error || 'Failed to send attachments');
+          const errMsg =
+            response.error === "tmux_session_not_found"
+              ? "tmux session not found"
+              : describeSendError(response.error, response.payload) ||
+                response.error ||
+                "Failed to send attachments";
           setImageSendError(errMsg);
         }
 
         return response.success;
       } catch (err) {
-        console.error('Failed to send attachments:', err);
-        setImageSendError('Failed to send attachments');
+        console.error("Failed to send attachments:", err);
+        setImageSendError("Failed to send attachments");
         return false;
       }
     },
     [serverId, sessionId, tmuxSessionName],
   );
 
-  const handleViewFile = useCallback((path: string) => {
-    setViewingFile(path);
-    openFile(path);
-  }, [openFile]);
+  const handleViewFile = useCallback(
+    (path: string) => {
+      setViewingFile(path);
+      openFile(path);
+    },
+    [openFile],
+  );
 
-  const handleCloseFileTab = useCallback((path: string) => {
-    closeOpenFile(path);
-    setViewingFile(prev => prev === path ? null : prev);
-  }, [closeOpenFile]);
+  const handleCloseFileTab = useCallback(
+    (path: string) => {
+      closeOpenFile(path);
+      setViewingFile((prev) => (prev === path ? null : prev));
+    },
+    [closeOpenFile],
+  );
 
   const handleCloseAllFileTabs = useCallback(() => {
     closeAllFiles();
@@ -478,14 +610,17 @@ export function SessionView({
     setArtifactContent({ content, title });
   }, []);
 
-  const handleToggleBookmark = useCallback((messageId: string, content: string) => {
-    if (!sessionId) return;
-    if (isBookmarked(messageId)) {
-      removeBookmark(messageId);
-    } else {
-      addBookmark(messageId, sessionId, content);
-    }
-  }, [sessionId, isBookmarked, removeBookmark, addBookmark]);
+  const handleToggleBookmark = useCallback(
+    (messageId: string, content: string) => {
+      if (!sessionId) return;
+      if (isBookmarked(messageId)) {
+        removeBookmark(messageId);
+      } else {
+        addBookmark(messageId, sessionId, content);
+      }
+    },
+    [sessionId, isBookmarked, removeBookmark, addBookmark],
+  );
 
   const handleCloseSearch = useCallback(() => {
     setShowSearch(false);
@@ -495,99 +630,176 @@ export function SessionView({
 
   const handleSearchNext = useCallback(() => {
     if (searchMatches.length === 0) return;
-    setCurrentMatchIndex(prev => (prev + 1) % searchMatches.length);
+    setCurrentMatchIndex((prev) => (prev + 1) % searchMatches.length);
   }, [searchMatches.length]);
 
   const handleSearchPrev = useCallback(() => {
     if (searchMatches.length === 0) return;
-    setCurrentMatchIndex(prev => (prev - 1 + searchMatches.length) % searchMatches.length);
+    setCurrentMatchIndex(
+      (prev) => (prev - 1 + searchMatches.length) % searchMatches.length,
+    );
   }, [searchMatches.length]);
 
   // Session-specific keyboard shortcuts
-  useKeyboardShortcuts(useMemo(() => [
-    { key: 'f', meta: true, alt: true, handler: () => setShowSearch(true) },
-    { key: 'p', meta: true, alt: true, handler: () => setShowFileFinder(true) },
-    { key: 't', meta: true, alt: true, handler: () => { if (tmuxSessionName) setShowTerminal(prev => !prev); } },
-    { key: 'g', meta: true, alt: true, handler: () => { if (totalAgents > 0) setDispatchCollapsed(prev => !prev); } },
-    { key: 'a', meta: true, alt: true, shift: true, handler: () => bypass.toggle() },
-    { key: 'm', meta: true, alt: true, shift: true, handler: () => { if (sessionId) sessionMute.toggleMute(sessionId); } },
-    { key: 'd', meta: true, alt: true, shift: true, handler: () => setShowScrollDebugPanel(prev => !prev) },
-    { key: 'Escape', handler: () => {
-      if (showCodeReviewModal) setShowCodeReviewModal(false);
-      else if (showFileFinder) setShowFileFinder(false);
-      else if (showSearch) handleCloseSearch();
-      else if (artifactContent) setArtifactContent(null);
-      else if (viewingFile) setViewingFile(null);
-      else if (showConversationSearch) setShowConversationSearch(false);
-    }},
-  ], [tmuxSessionName, totalAgents, showSearch, showFileFinder, showCodeReviewModal, viewingFile, showConversationSearch, artifactContent, sessionId, bypass, sessionMute, handleCloseSearch]));
+  useKeyboardShortcuts(
+    useMemo(
+      () => [
+        { key: "f", meta: true, alt: true, handler: () => setShowSearch(true) },
+        {
+          key: "p",
+          meta: true,
+          alt: true,
+          handler: () => setShowFileFinder(true),
+        },
+        {
+          key: "t",
+          meta: true,
+          alt: true,
+          handler: () => {
+            if (tmuxSessionName) setShowTerminal((prev) => !prev);
+          },
+        },
+        {
+          key: "g",
+          meta: true,
+          alt: true,
+          handler: () => {
+            if (totalAgents > 0) setDispatchCollapsed((prev) => !prev);
+          },
+        },
+        {
+          key: "a",
+          meta: true,
+          alt: true,
+          shift: true,
+          handler: () => bypass.toggle(),
+        },
+        {
+          key: "m",
+          meta: true,
+          alt: true,
+          shift: true,
+          handler: () => {
+            if (sessionId) sessionMute.toggleMute(sessionId);
+          },
+        },
+        {
+          key: "d",
+          meta: true,
+          alt: true,
+          shift: true,
+          handler: () => setShowScrollDebugPanel((prev) => !prev),
+        },
+        {
+          key: "Escape",
+          handler: () => {
+            if (showCodeReviewModal) setShowCodeReviewModal(false);
+            else if (showFileFinder) setShowFileFinder(false);
+            else if (showSearch) handleCloseSearch();
+            else if (artifactContent) setArtifactContent(null);
+            else if (viewingFile) setViewingFile(null);
+            else if (showConversationSearch) setShowConversationSearch(false);
+          },
+        },
+      ],
+      [
+        tmuxSessionName,
+        totalAgents,
+        showSearch,
+        showFileFinder,
+        showCodeReviewModal,
+        viewingFile,
+        showConversationSearch,
+        artifactContent,
+        sessionId,
+        bypass,
+        sessionMute,
+        handleCloseSearch,
+      ],
+    ),
+  );
 
-  const sendTerminalText = useCallback(async (text: string): Promise<boolean> => {
-    if (!serverId || !tmuxSessionName) return false;
-    const conn = connectionManager.getConnection(serverId);
-    if (!conn?.isConnected()) return false;
-    try {
-      const response = await conn.sendRequest('send_terminal_text', {
-        sessionName: tmuxSessionName,
-        text,
-      });
-      if (response.success) {
-        addOptimisticMessage(text);
+  const sendTerminalText = useCallback(
+    async (text: string): Promise<boolean> => {
+      if (!serverId || !tmuxSessionName) return false;
+      const conn = connectionManager.getConnection(serverId);
+      if (!conn?.isConnected()) return false;
+      try {
+        const response = await conn.sendRequest("send_terminal_text", {
+          sessionName: tmuxSessionName,
+          text,
+        });
+        if (response.success) {
+          addOptimisticMessage(text);
+        }
+        return response.success;
+      } catch {
+        return false;
       }
-      return response.success;
-    } catch {
-      return false;
-    }
-  }, [serverId, tmuxSessionName, addOptimisticMessage]);
+    },
+    [serverId, tmuxSessionName, addOptimisticMessage],
+  );
 
-  const sendTerminalKey = useCallback((key: string) => {
-    if (!serverId || !tmuxSessionName) return;
-    const conn = connectionManager.getConnection(serverId);
-    if (!conn?.isConnected()) return;
-    conn.sendRequest('send_terminal_keys', {
-      sessionName: tmuxSessionName,
-      keys: [key],
-    });
-  }, [serverId, tmuxSessionName]);
+  const sendTerminalKey = useCallback(
+    (key: string) => {
+      if (!serverId || !tmuxSessionName) return;
+      const conn = connectionManager.getConnection(serverId);
+      if (!conn?.isConnected()) return;
+      conn.sendRequest("send_terminal_keys", {
+        sessionName: tmuxSessionName,
+        keys: [key],
+      });
+    },
+    [serverId, tmuxSessionName],
+  );
 
   const handleCancel = useCallback(() => {
-    sendTerminalKey('C-c');
+    sendTerminalKey("C-c");
   }, [sendTerminalKey]);
 
   // Reference to InputBar for pre-filling text on cancel
   const inputBarRef = useRef<InputBarHandle>(null);
 
-  const handleCancelMessage = useCallback(async (clientMessageId: string) => {
-    const originalText = await cancelMessage(clientMessageId);
-    if (originalText && inputBarRef.current) {
-      inputBarRef.current.prefill(originalText);
-    }
-  }, [cancelMessage]);
+  const handleCancelMessage = useCallback(
+    async (clientMessageId: string) => {
+      const originalText = await cancelMessage(clientMessageId);
+      if (originalText && inputBarRef.current) {
+        inputBarRef.current.prefill(originalText);
+      }
+    },
+    [cancelMessage],
+  );
 
-  const handleSelectOption = useCallback((label: string) => {
-    return sendInput(label, { skipOptimistic: true });
-  }, [sendInput]);
+  const handleSelectOption = useCallback(
+    (label: string) => {
+      return sendInput(label, { skipOptimistic: true });
+    },
+    [sendInput],
+  );
 
-  const handleSelectChoice = useCallback(async (choice: {
-    selectedIndices: number[];
-    optionCount: number;
-    multiSelect: boolean;
-    otherText?: string;
-  }): Promise<boolean> => {
-    if (!serverId || !sessionId) return false;
-    const conn = connectionManager.getConnection(serverId);
-    if (!conn?.isConnected()) return false;
-    try {
-      const response = await conn.sendRequest('send_choice', {
-        ...choice,
-        sessionId,
-        tmuxSessionName: tmuxSessionName || sessionId,
-      });
-      return response.success;
-    } catch {
-      return false;
-    }
-  }, [serverId, sessionId, tmuxSessionName]);
+  const handleSelectChoice = useCallback(
+    async (choice: {
+      selectedIndices: number[];
+      optionCount: number;
+      multiSelect: boolean;
+      otherText?: string;
+    }): Promise<boolean> => {
+      if (!serverId || !sessionId) return false;
+      const conn = connectionManager.getConnection(serverId);
+      if (!conn?.isConnected()) return false;
+      try {
+        const response = await conn.sendRequest("send_choice", {
+          ...choice,
+          sessionId,
+          tmuxSessionName: tmuxSessionName || sessionId,
+        });
+        return response.success;
+      } catch {
+        return false;
+      }
+    },
+    [serverId, sessionId, tmuxSessionName],
+  );
 
   if (!serverId || !sessionId) {
     return (
@@ -629,7 +841,9 @@ export function SessionView({
       ) : latestInlinePlan ? (
         <button
           className="session-header-btn plan-btn"
-          onClick={() => setArtifactContent({ content: latestInlinePlan, title: 'Plan' })}
+          onClick={() =>
+            setArtifactContent({ content: latestInlinePlan, title: "Plan" })
+          }
           title="View plan"
         >
           Plan
@@ -652,7 +866,11 @@ export function SessionView({
         </button>
       )}
       <ReviewHeaderButton />
-      <BabysitHeaderButton serverId={serverId} sessionId={sessionId} onClick={openBabysitDialog} />
+      <BabysitHeaderButton
+        serverId={serverId}
+        sessionId={sessionId}
+        onClick={openBabysitDialog}
+      />
       <button
         className="session-header-btn"
         onClick={() => setShowSkillBrowser(true)}
@@ -669,9 +887,9 @@ export function SessionView({
     <>
       {tmuxSessionName && (
         <button
-          className={`session-header-btn ${showTerminal ? 'terminal-active' : ''}`}
+          className={`session-header-btn ${showTerminal ? "terminal-active" : ""}`}
           onClick={() => setShowTerminal(!showTerminal)}
-          title={showTerminal ? 'Show conversation' : 'Show terminal output'}
+          title={showTerminal ? "Show conversation" : "Show terminal output"}
         >
           Terminal
         </button>
@@ -688,7 +906,7 @@ export function SessionView({
       aria-label="Open session settings"
     >
       {/* Unicode gear glyph */}
-      {'⚙'}
+      {"⚙"}
     </button>
   );
 
@@ -702,7 +920,7 @@ export function SessionView({
           runningCount={runningCount}
           totalAgents={totalAgents}
           open={!dispatchCollapsed}
-          onToggle={() => setDispatchCollapsed(prev => !prev)}
+          onToggle={() => setDispatchCollapsed((prev) => !prev)}
         />
       )}
       {gearButton}
@@ -728,39 +946,53 @@ export function SessionView({
   ) : latestInlinePlan ? (
     <button
       className="session-header-btn plan-btn"
-      onClick={() => setArtifactContent({ content: latestInlinePlan, title: 'Plan' })}
+      onClick={() =>
+        setArtifactContent({ content: latestInlinePlan, title: "Plan" })
+      }
       title="View plan"
     >
       Plan
     </button>
   ) : null;
 
-  const mobileBookmarksButton = currentBookmarks.length > 0 ? (
-    <button
-      className={`session-header-btn ${showBookmarks ? 'terminal-active' : ''}`}
-      onClick={() => setShowBookmarks(!showBookmarks)}
-      title="View bookmarks"
-    >
-      Bookmarks ({currentBookmarks.length})
-    </button>
-  ) : null;
+  const mobileBookmarksButton =
+    currentBookmarks.length > 0 ? (
+      <button
+        className={`session-header-btn ${showBookmarks ? "terminal-active" : ""}`}
+        onClick={() => setShowBookmarks(!showBookmarks)}
+        title="View bookmarks"
+      >
+        Bookmarks ({currentBookmarks.length})
+      </button>
+    ) : null;
 
   // "Tools" dropdown items (mobile only). Review preserves its badge count.
   const mobileToolsItems: OverflowMenuItem[] = [
-    { label: 'Files', onClick: () => setShowFileFinder(true) },
-    { label: 'Search', onClick: () => setShowConversationSearch(true) },
-    { label: 'Skills', onClick: () => setShowSkillBrowser(true) },
+    { label: "Files", onClick: () => setShowFileFinder(true) },
+    { label: "Search", onClick: () => setShowConversationSearch(true) },
+    { label: "Skills", onClick: () => setShowSkillBrowser(true) },
     ...(reviewSummary && reviewSummary.totalFiles > 0
-      ? [{ label: 'Review', badge: reviewSummary.unreviewedFiles || undefined, onClick: () => setShowCodeReviewModal(true) }]
+      ? [
+          {
+            label: "Review",
+            badge: reviewSummary.unreviewedFiles || undefined,
+            onClick: () => setShowCodeReviewModal(true),
+          },
+        ]
       : []),
     // Only for sessions on the Herald hub (and a hub new enough to babysit).
     ...(babysit.available
-      ? [{
-          label: babysit.active ? 'Babysitting' : 'Babysit',
-          badge: babysit.active && babysit.babysit?.answersUsed ? babysit.babysit.answersUsed : undefined,
-          active: babysit.active,
-          onClick: openBabysitDialog,
-        }]
+      ? [
+          {
+            label: babysit.active ? "Babysitting" : "Babysit",
+            badge:
+              babysit.active && babysit.babysit?.answersUsed
+                ? babysit.babysit.answersUsed
+                : undefined,
+            active: babysit.active,
+            onClick: openBabysitDialog,
+          },
+        ]
       : []),
   ];
 
@@ -786,78 +1018,109 @@ export function SessionView({
       apiRef={reviewApi}
       onDrawerChange={setShowCodeReviewModalState}
     >
-    <div className="session-view" style={style}>
-      {/* Top header: back arrow on mobile, full header on desktop */}
-      <div className={`session-header ${mobile ? 'session-header-mobile' : ''}`}>
-        {onToggleSidebar && (
-          mobile ? (
-            <button
-              className="mobile-back-btn"
-              onClick={onToggleSidebar}
-              title="Back"
-              aria-label="Back"
-            >
-              <span className="back-arrow">{'\u2190'}</span> Back
-            </button>
-          ) : (
-            <button
-              className="mobile-menu-btn"
-              onClick={onToggleSidebar}
-              title="Toggle sidebar"
-              aria-label="Toggle sidebar"
-            >
-              {'\u2630'}
-            </button>
-          )
-        )}
-        {/* Both desktop and mobile render the full action cluster inline in
+      <div className="session-view" style={style}>
+        {/* Top header: back arrow on mobile, full header on desktop */}
+        <div
+          className={`session-header ${mobile ? "session-header-mobile" : ""}`}
+        >
+          {onToggleSidebar &&
+            (mobile ? (
+              <button
+                className="mobile-back-btn"
+                onClick={onToggleSidebar}
+                title="Back"
+                aria-label="Back"
+              >
+                <span className="back-arrow">{"\u2190"}</span> Back
+              </button>
+            ) : (
+              <button
+                className="mobile-menu-btn"
+                onClick={onToggleSidebar}
+                title="Toggle sidebar"
+                aria-label="Toggle sidebar"
+              >
+                {"\u2630"}
+              </button>
+            ))}
+          {/* Both desktop and mobile render the full action cluster inline in
             this single top header row. Mobile uses a compact variant where the
             lower-frequency actions collapse into the "Tools" dropdown. */}
-        {mobile ? mobileActionButtons : actionButtons}
-      </div>
+          {mobile ? mobileActionButtons : actionButtons}
+        </div>
 
-      <ChangeStrip />
+        <ChangeStrip />
 
-      {showTerminal && tmuxSessionName && serverId && (
-        <TerminalPanel
-          serverId={serverId}
-          tmuxSessionName={tmuxSessionName}
-          fastPoll
-          onClose={() => setShowTerminal(false)}
-        />
-      )}
+        {showTerminal && tmuxSessionName && serverId && (
+          <TerminalPanel
+            serverId={serverId}
+            tmuxSessionName={tmuxSessionName}
+            fastPoll
+            onClose={() => setShowTerminal(false)}
+          />
+        )}
 
-      {showWorkGroupPanel && workGroup && onViewWorker && onSendWorkerInput && onMergeGroup && onCancelGroup && onRetryWorker && (
-        <WorkGroupPanel
-          group={workGroup}
-          onBack={() => setShowWorkGroupPanel(false)}
-          onViewWorker={(workerSessionId) => {
-            setShowWorkGroupPanel(false);
-            onViewWorker(workerSessionId);
+        {showWorkGroupPanel &&
+          workGroup &&
+          onViewWorker &&
+          onSendWorkerInput &&
+          onMergeGroup &&
+          onCancelGroup &&
+          onRetryWorker && (
+            <WorkGroupPanel
+              group={workGroup}
+              onBack={() => setShowWorkGroupPanel(false)}
+              onViewWorker={(workerSessionId) => {
+                setShowWorkGroupPanel(false);
+                onViewWorker(workerSessionId);
+              }}
+              onSendWorkerInput={onSendWorkerInput}
+              onMerge={onMergeGroup}
+              onCancel={onCancelGroup}
+              onRetryWorker={onRetryWorker}
+              onDismiss={onDismissGroup}
+              merging={merging}
+            />
+          )}
+
+        <div
+          className="session-conversation"
+          onClick={handleConversationClick}
+          style={{
+            display: showTerminal || showWorkGroupPanel ? "none" : undefined,
           }}
-          onSendWorkerInput={onSendWorkerInput}
-          onMerge={onMergeGroup}
-          onCancel={onCancelGroup}
-          onRetryWorker={onRetryWorker}
-          onDismiss={onDismissGroup}
-          merging={merging}
-        />
-      )}
-
-      <div className="session-conversation" onClick={handleConversationClick} style={{ display: showTerminal || showWorkGroupPanel ? 'none' : undefined }}>
-          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minHeight: 0 }}>
+        >
+          <div
+            style={{
+              flex: 1,
+              display: "flex",
+              flexDirection: "column",
+              overflow: "hidden",
+              minHeight: 0,
+            }}
+          >
             {(() => {
-              const hasWaiting = !!status && (
-                !!status.feedbackPrompt ||
-                status.isWaitingForInput ||
-                !!status.currentActivity
-              );
-              const hasWorkGroup = !!workGroup && (
-                workGroup.status === 'active' ||
-                workGroup.status === 'merging' ||
-                workGroup.status === 'completed' ||
-                workGroup.status === 'failed'
-              );
+              // Background agents only: the dispatch bar / header chip already says "N running"
+              // (and opens the panel), so don't repeat it in the status bar.
+              const agentsOnlyBackground =
+                !!status?.backgroundWork &&
+                status.backgroundWork.agents > 0 &&
+                status.backgroundWork.shells === 0 &&
+                !status.isWaitingForInput &&
+                !status.feedbackPrompt &&
+                totalAgents > 0;
+              const hasWaiting =
+                !!status &&
+                !agentsOnlyBackground &&
+                (!!status.feedbackPrompt ||
+                  status.isWaitingForInput ||
+                  !!status.currentActivity);
+              const hasWorkGroup =
+                !!workGroup &&
+                (workGroup.status === "active" ||
+                  workGroup.status === "merging" ||
+                  workGroup.status === "completed" ||
+                  workGroup.status === "failed");
 
               const waitingCell = hasWaiting ? (
                 <div className="session-bars-cell">
@@ -866,20 +1129,27 @@ export function SessionView({
                     serverId={serverId}
                     sessionId={sessionId}
                     tmuxSessionName={tmuxSessionName}
-                    canCancel={!!(status?.isRunning && !status?.isWaitingForInput && tmuxSessionName)}
+                    canCancel={
+                      !!(
+                        status?.isRunning &&
+                        !status?.isWaitingForInput &&
+                        tmuxSessionName
+                      )
+                    }
                     onCancel={handleCancel}
                   />
                 </div>
               ) : null;
 
-              const workGroupCell = (hasWorkGroup && workGroup) ? (
-                <div className="session-bars-cell">
-                  <WorkGroupBar
-                    group={workGroup}
-                    onClick={() => setShowWorkGroupPanel(true)}
-                  />
-                </div>
-              ) : null;
+              const workGroupCell =
+                hasWorkGroup && workGroup ? (
+                  <div className="session-bars-cell">
+                    <WorkGroupBar
+                      group={workGroup}
+                      onClick={() => setShowWorkGroupPanel(true)}
+                    />
+                  </div>
+                ) : null;
 
               // Activity row (both platforms): only render when there's an
               // active status or work group to show. The action cluster lives
@@ -895,28 +1165,47 @@ export function SessionView({
               );
             })()}
 
-            {serverId && sessionId && <StuckBanner serverId={serverId} sessionId={sessionId} />}
-            {serverId && sessionId && <BabysitBar serverId={serverId} sessionId={sessionId} onEdit={openBabysitDialog} />}
+            {serverId && sessionId && (
+              <StuckBanner serverId={serverId} sessionId={sessionId} />
+            )}
+            {serverId && sessionId && (
+              <BabysitBar
+                serverId={serverId}
+                sessionId={sessionId}
+                onEdit={openBabysitDialog}
+              />
+            )}
 
             <TaskList tasks={tasks} loading={tasksLoading} />
 
-
             {tasksError && (
-              <FetchErrorBanner message={`Tasks: ${tasksError}`} onRetry={refreshTasks} />
+              <FetchErrorBanner
+                message={`Tasks: ${tasksError}`}
+                onRetry={refreshTasks}
+              />
             )}
             {agentsError && (
               <FetchErrorBanner message={`Agents: ${agentsError}`} />
             )}
             {sendError && (
-              <FetchErrorBanner message={sendError} onDismiss={clearSendError} />
+              <FetchErrorBanner
+                message={sendError}
+                onDismiss={clearSendError}
+              />
             )}
             {imageSendError && (
-              <FetchErrorBanner message={imageSendError} onDismiss={() => setImageSendError(null)} />
+              <FetchErrorBanner
+                message={imageSendError}
+                onDismiss={() => setImageSendError(null)}
+              />
             )}
 
             {showSearch && (
               <SearchBar
-                onSearch={(term) => { setSearchTerm(term || null); setCurrentMatchIndex(0); }}
+                onSearch={(term) => {
+                  setSearchTerm(term || null);
+                  setCurrentMatchIndex(0);
+                }}
                 matchCount={searchMatches.length}
                 currentMatch={currentMatchIndex}
                 onNext={handleSearchNext}
@@ -929,8 +1218,11 @@ export function SessionView({
               <BookmarkList
                 bookmarks={currentBookmarks}
                 onNavigate={(messageId) => {
-                  const el = document.querySelector(`[data-highlight-id="${messageId}"]`);
-                  if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                  const el = document.querySelector(
+                    `[data-highlight-id="${messageId}"]`,
+                  );
+                  if (el)
+                    el.scrollIntoView({ behavior: "smooth", block: "center" });
                 }}
                 onRemove={removeBookmark}
                 onClose={() => setShowBookmarks(false)}
@@ -951,7 +1243,11 @@ export function SessionView({
                 onViewFile={handleViewFile}
                 onViewArtifact={handleViewArtifact}
                 searchTerm={searchTerm}
-                currentMatchId={searchMatches.length > 0 ? searchMatches[currentMatchIndex]?.id : null}
+                currentMatchId={
+                  searchMatches.length > 0
+                    ? searchMatches[currentMatchIndex]?.id
+                    : null
+                }
                 scrollToBottom={!showTerminal}
                 planFilePath={latestPlanFile}
                 hideTools={hideTools}
@@ -963,121 +1259,133 @@ export function SessionView({
             </ComponentErrorBoundary>
 
             <FileTabBar
-              files={openFiles.map(f => f.path)}
+              files={openFiles.map((f) => f.path)}
               activeFile={viewingFile}
               onSelectFile={setViewingFile}
               onCloseFile={handleCloseFileTab}
               onCloseAll={handleCloseAllFileTabs}
             />
           </div>
+        </div>
 
+        {showDispatchPanel && !mobile && (
+          <div
+            className="dispatch-divider"
+            onMouseDown={dispatchDrag.onMouseDown}
+          />
+        )}
+
+        {serverId && totalAgents > 0 && (
+          <ComponentErrorBoundary name="DispatchPanel">
+            <DispatchPanel
+              serverId={serverId}
+              agents={agents}
+              runningCount={runningCount}
+              totalAgents={totalAgents}
+              height={dispatchDrag.value}
+              collapsed={dispatchCollapsed}
+              onCollapse={() => setDispatchCollapsed((prev) => !prev)}
+              doneBarDismissed={doneBarDismissed}
+              onDismissDoneBar={() =>
+                setDoneBarDismissedAt((prev) => ({
+                  ...prev,
+                  [doneBarKey]: totalAgents,
+                }))
+              }
+            />
+          </ComponentErrorBoundary>
+        )}
+
+        <InputBar
+          ref={inputBarRef}
+          onSend={handleSend}
+          onSendWithImages={handleSendWithAttachments}
+          disabled={false}
+          offline={!connected}
+          skills={skills}
+          terminalMode={showTerminal}
+          onTerminalSend={sendTerminalText}
+          onTerminalKey={sendTerminalKey}
+        />
+
+        {/* Modals */}
+        {viewingFile && serverId && (
+          <Suspense fallback={null}>
+            <FileViewerModal
+              serverId={serverId}
+              filePath={viewingFile}
+              onClose={() => setViewingFile(null)}
+            />
+          </Suspense>
+        )}
+
+        {artifactContent && (
+          <ArtifactViewerModal
+            content={artifactContent.content}
+            title={artifactContent.title}
+            onClose={() => setArtifactContent(null)}
+            onFileClick={handleViewFile}
+          />
+        )}
+
+        <ReviewShell />
+
+        {showConversationSearch && serverId && (
+          <ConversationSearch
+            serverId={serverId}
+            onClose={() => setShowConversationSearch(false)}
+          />
+        )}
+
+        {showFileFinder && serverId && (
+          <FileFinder
+            serverId={serverId}
+            sessionId={sessionId || undefined}
+            onSelectFile={handleViewFile}
+            onClose={() => setShowFileFinder(false)}
+          />
+        )}
+
+        {showSkillBrowser && serverId && (
+          <SkillBrowser
+            serverId={serverId}
+            sessionId={sessionId || undefined}
+            projectPath={projectPath}
+            onClose={() => setShowSkillBrowser(false)}
+          />
+        )}
+
+        {showScrollDebugPanel && (
+          <ScrollDebugPanel
+            sessionId={sessionId}
+            onClose={() => setShowScrollDebugPanel(false)}
+          />
+        )}
+
+        {showBabysitDialog && serverId && sessionId && (
+          <BabysitBriefDialog
+            key={`${serverId}:${sessionId}`}
+            serverId={serverId}
+            sessionId={sessionId}
+            sessionName={tmuxSessionName}
+            onClose={closeBabysitDialog}
+          />
+        )}
+
+        <SettingsModal
+          open={showSettings}
+          onClose={() => setShowSettings(false)}
+          notifyEnabled={sessionId ? !sessionMute.isMuted(sessionId) : false}
+          onToggleNotify={() => {
+            if (sessionId) sessionMute.toggleMute(sessionId);
+          }}
+          bypassEnabled={bypass.enabled}
+          bypassLoading={bypass.loading}
+          onToggleBypass={bypass.toggle}
+          hideTools={hideTools}
+          onToggleHideTools={() => setHideTools(!hideTools)}
+        />
       </div>
-
-      {showDispatchPanel && !mobile && (
-        <div className="dispatch-divider" onMouseDown={dispatchDrag.onMouseDown} />
-      )}
-
-      {serverId && totalAgents > 0 && (
-        <ComponentErrorBoundary name="DispatchPanel">
-          <DispatchPanel
-            serverId={serverId}
-            agents={agents}
-            runningCount={runningCount}
-            totalAgents={totalAgents}
-            height={dispatchDrag.value}
-            collapsed={dispatchCollapsed}
-            onCollapse={() => setDispatchCollapsed(prev => !prev)}
-            doneBarDismissed={doneBarDismissed}
-            onDismissDoneBar={() => setDoneBarDismissedAt(prev => ({ ...prev, [doneBarKey]: totalAgents }))}
-          />
-        </ComponentErrorBoundary>
-      )}
-
-      <InputBar
-        ref={inputBarRef}
-        onSend={handleSend}
-        onSendWithImages={handleSendWithAttachments}
-        disabled={false}
-        offline={!connected}
-        skills={skills}
-        terminalMode={showTerminal}
-        onTerminalSend={sendTerminalText}
-        onTerminalKey={sendTerminalKey}
-      />
-
-      {/* Modals */}
-      {viewingFile && serverId && (
-        <Suspense fallback={null}>
-          <FileViewerModal
-            serverId={serverId}
-            filePath={viewingFile}
-            onClose={() => setViewingFile(null)}
-          />
-        </Suspense>
-      )}
-
-      {artifactContent && (
-        <ArtifactViewerModal
-          content={artifactContent.content}
-          title={artifactContent.title}
-          onClose={() => setArtifactContent(null)}
-          onFileClick={handleViewFile}
-        />
-      )}
-
-      <ReviewShell />
-
-      {showConversationSearch && serverId && (
-        <ConversationSearch serverId={serverId} onClose={() => setShowConversationSearch(false)} />
-      )}
-
-      {showFileFinder && serverId && (
-        <FileFinder
-          serverId={serverId}
-          sessionId={sessionId || undefined}
-          onSelectFile={handleViewFile}
-          onClose={() => setShowFileFinder(false)}
-        />
-      )}
-
-      {showSkillBrowser && serverId && (
-        <SkillBrowser
-          serverId={serverId}
-          sessionId={sessionId || undefined}
-          projectPath={projectPath}
-          onClose={() => setShowSkillBrowser(false)}
-        />
-      )}
-
-      {showScrollDebugPanel && (
-        <ScrollDebugPanel
-          sessionId={sessionId}
-          onClose={() => setShowScrollDebugPanel(false)}
-        />
-      )}
-
-      {showBabysitDialog && serverId && sessionId && (
-        <BabysitBriefDialog
-          key={`${serverId}:${sessionId}`}
-          serverId={serverId}
-          sessionId={sessionId}
-          sessionName={tmuxSessionName}
-          onClose={closeBabysitDialog}
-        />
-      )}
-
-      <SettingsModal
-        open={showSettings}
-        onClose={() => setShowSettings(false)}
-        notifyEnabled={sessionId ? !sessionMute.isMuted(sessionId) : false}
-        onToggleNotify={() => { if (sessionId) sessionMute.toggleMute(sessionId); }}
-        bypassEnabled={bypass.enabled}
-        bypassLoading={bypass.loading}
-        onToggleBypass={bypass.toggle}
-        hideTools={hideTools}
-        onToggleHideTools={() => setHideTools(!hideTools)}
-      />
-    </div>
     </ReviewProvider>
   );
 }
