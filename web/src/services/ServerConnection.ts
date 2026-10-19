@@ -18,6 +18,8 @@ const CONNECTION_TIMEOUT = 10000;
 // A link that flaps faster than this keeps its accumulated attempts so the
 // exponential backoff actually widens instead of resetting every reconnect.
 const STABLE_UPTIME = 30000;
+// A resume/focus kick never retries the same connection more often than this.
+const MIN_KICK_GAP = 2000;
 
 export class ServerConnection {
   readonly serverId: string;
@@ -57,6 +59,8 @@ export class ServerConnection {
   // path closes the socket AND calls handleDisconnect, and the later onclose would
   // otherwise fire it a second time, double-incrementing reconnectAttempts).
   private isDisconnecting = false;
+  /** When the current connect attempt started (Date.now()), 0 when none. */
+  private attemptStartedAt = 0;
 
   // Outbound send queue for fire-and-forget user payloads composed while the
   // socket is briefly down (reconnect window). Flushed on re-auth.
@@ -101,36 +105,61 @@ export class ServerConnection {
     const protocol = this.server.useTls ? 'wss' : 'ws';
     const url = `${protocol}://${this.server.host}:${this.server.port}`;
 
+    // Never leave an older socket alive behind the new one.
+    if (this.ws) {
+      const old = this.ws;
+      this.ws = null;
+      ServerConnection.detachSocket(old);
+    }
+    this.attemptStartedAt = Date.now();
+
     try {
-      this.ws = new WebSocket(url);
+      const ws = new WebSocket(url);
+      this.ws = ws;
 
       this.connectionTimer = setTimeout(() => {
+        if (ws !== this.ws) return;
         if (this.connectionState.status === 'connecting' || this.connectionState.status === 'reconnecting') {
-          this.ws?.close();
           this.handleDisconnect('Connection timeout');
         }
       }, CONNECTION_TIMEOUT);
 
-      this.ws.onopen = () => this.handleOpen();
-      this.ws.onmessage = (event) => this.handleMessage(event);
-      this.ws.onclose = (event) => this.handleClose(event);
-      this.ws.onerror = () => {};
+      // Every handler is bound to THIS socket: events from a socket that is no
+      // longer this.ws (a late onclose / onmessage after it was replaced) are
+      // ignored, so they can never tear down or feed the live connection.
+      ws.onopen = () => { if (ws === this.ws) this.handleOpen(ws); };
+      ws.onmessage = (event) => { if (ws === this.ws) this.handleMessage(event); };
+      ws.onclose = (event) => { if (ws === this.ws) this.handleClose(event); };
+      ws.onerror = () => {};
     } catch {
       this.handleDisconnect('Failed to create connection');
     }
   }
 
-  private handleOpen(): void {
+  /** Detach every handler from a socket we are done with and close it. */
+  private static detachSocket(ws: WebSocket): void {
+    ws.onopen = null;
+    ws.onmessage = null;
+    ws.onclose = null;
+    ws.onerror = null;
+    try {
+      if (ws.readyState === WebSocket.CONNECTING || ws.readyState === WebSocket.OPEN) ws.close();
+    } catch {
+      // ignore
+    }
+  }
+
+  private handleOpen(ws: WebSocket): void {
     this.clearConnectionTimer();
 
     setTimeout(() => {
-      if (this.ws?.readyState === WebSocket.OPEN) {
-        this.authenticate(this.server.token);
+      if (ws === this.ws && ws.readyState === WebSocket.OPEN) {
+        this.authenticate(this.server.token, ws);
       }
     }, 50);
   }
 
-  private async authenticate(token: string): Promise<void> {
+  private async authenticate(token: string, ws: WebSocket): Promise<void> {
     try {
       const requestId = `req_${++this.requestCounter}`;
       const response = await new Promise<WebSocketResponse>((resolve, reject) => {
@@ -144,6 +173,8 @@ export class ServerConnection {
         });
         this.send({ type: 'authenticate', token, requestId }).catch(reject);
       });
+      // The socket was replaced while we waited: this handshake is moot.
+      if (ws !== this.ws) return;
 
       if (response.success) {
         this._isLocal = !!(response as unknown as { isLocal?: boolean }).isLocal;
@@ -156,6 +187,7 @@ export class ServerConnection {
         // Subscribe to broadcasts so we receive real-time status_change events
         const subscribePayload = this.lastSessionId ? { sessionId: this.lastSessionId } : undefined;
         const subResponse = await this.sendRequest('subscribe', subscribePayload, 10000);
+        if (ws !== this.ws) return;
         if (subResponse.type === 'subscribed' && (subResponse as unknown as { sessionId?: string }).sessionId) {
           this.lastSessionId = (subResponse as unknown as { sessionId?: string }).sessionId;
         }
@@ -201,7 +233,9 @@ export class ServerConnection {
         this.ws?.close();
       }
     } catch {
-      this.handleDisconnect('Authentication failed');
+      // Only the live socket's handshake may tear the connection down; a stale
+      // one (already replaced) just goes away.
+      if (ws === this.ws) this.handleDisconnect('Authentication failed');
     }
   }
 
@@ -253,7 +287,14 @@ export class ServerConnection {
     if (this.isDisconnecting) return;
     this.isDisconnecting = true;
 
+    // Close the old socket and detach its handlers: a socket that is merely
+    // forgotten keeps dispatching messages (browsers auto-pong the daemon's
+    // pings, so the daemon never drops it) and its late onclose would hit
+    // whatever socket is current by then.
+    const old = this.ws;
     this.ws = null;
+    if (old) ServerConnection.detachSocket(old);
+    this.attemptStartedAt = 0;
     this.clearTimers();
 
     this.pendingRequests.forEach(({ reject }) => {
@@ -294,10 +335,11 @@ export class ServerConnection {
     this.clearTimers();
 
     if (this.ws) {
-      this.ws.onclose = null;
-      this.ws.close();
+      const old = this.ws;
       this.ws = null;
+      ServerConnection.detachSocket(old);
     }
+    this.attemptStartedAt = 0;
 
     this.pendingRequests.forEach(({ reject }) => {
       reject(new Error('Disconnected'));
@@ -390,7 +432,8 @@ export class ServerConnection {
       console.warn(
         `[${this.serverId}] Pong timeout (${this.missedPongs} consecutive) — connection dead, reconnecting`,
       );
-      this.ws?.close();
+      // A dead link may take minutes to report onclose: drop it now.
+      this.handleDisconnect('Pong timeout');
     } else {
       console.warn(
         `[${this.serverId}] Missed pong (${this.missedPongs}/${MAX_MISSED_PONGS}) — tolerating, arming another window`,
@@ -456,9 +499,11 @@ export class ServerConnection {
    * they are never queued or double-sent.
    */
   sendQueued(message: WebSocketMessage): void {
-    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+    // Only an AUTHENTICATED socket may carry it: the daemon drops anything sent
+    // before auth ("Not authenticated"), so an open-but-authenticating socket queues.
+    if (this.isConnected()) {
       try {
-        this.ws.send(JSON.stringify(message));
+        this.ws!.send(JSON.stringify(message));
         return;
       } catch {
         // fall through to queue
@@ -496,11 +541,6 @@ export class ServerConnection {
       console.warn(
         `[${this.serverId}] Socket stale on resume (${Math.round(silent / 1000)}s silent) — forcing reconnect`,
       );
-      try {
-        this.ws?.close();
-      } catch {
-        // ignore
-      }
       this.handleDisconnect('stale on resume');
       return;
     }
@@ -588,6 +628,28 @@ export class ServerConnection {
     if (this.isConnected()) {
       this.send({ type: 'switch_session', payload: { sessionId: null } }).catch(() => {});
     }
+  }
+
+  /**
+   * Resume / focus / online nudge. Probes a connected socket; otherwise retries
+   * now, but never interrupts a connect attempt that is still within its connect
+   * timeout, never retries more than once per MIN_KICK_GAP, and keeps the
+   * backoff counter (only STABLE_UPTIME of real uptime resets it).
+   */
+  kick(): void {
+    if (this.server.enabled === false || this.revoked) return;
+    if (this.connectionState.status === 'connected') {
+      this.checkAlive();
+      return;
+    }
+    const age = this.attemptStartedAt ? Date.now() - this.attemptStartedAt : Infinity;
+    const inFlight = !!this.ws && (this.ws.readyState === WebSocket.CONNECTING || this.ws.readyState === WebSocket.OPEN);
+    // In flight and young: its own timeouts (connect / auth / subscribe) decide.
+    // An older one (timers frozen while the app was suspended) is restarted.
+    if (inFlight && age < CONNECTION_TIMEOUT) return;
+    if (age < MIN_KICK_GAP) return;
+    this.clearReconnectTimer();
+    this.doConnect();
   }
 
   reconnect(): void {
