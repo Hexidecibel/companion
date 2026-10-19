@@ -8,7 +8,12 @@ import type {
   SubagentWatchResponse,
 } from '../subagents/protocol';
 import { isActive } from '../subagents/completion';
-import { convsForSession, factsFor, sessionLabels, type SubagentLinkDeps } from '../subagents/links';
+import {
+  convsForSession,
+  factsFor,
+  sessionLabels,
+  type SubagentLinkDeps,
+} from '../subagents/links';
 
 type Obj = Record<string, unknown>;
 const obj = (p: unknown): Obj =>

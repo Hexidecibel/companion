@@ -122,7 +122,10 @@ export class WebSocketHandler {
    * Sessions whose turn ended while background work ran: the needs-input /
    * finished flow is held back until the work is done (checked in memory).
    */
-  private deferredIdle = new Map<string, { status?: StatusChangeData; completed?: CompletedData; since: number }>();
+  private deferredIdle = new Map<
+    string,
+    { status?: StatusChangeData; completed?: CompletedData; since: number }
+  >();
   private deferredIdleTimer: NodeJS.Timeout | null = null;
   private workGroupManager: WorkGroupManager | null;
   private skillCatalog: SkillCatalog;
@@ -388,7 +391,8 @@ export class WebSocketHandler {
       // work is done (releaseDeferredIdle then replays this as a real wait).
       const data = this.applyBackgroundOverlay(raw);
       if (raw.sessionId) {
-        if (raw.isWaitingForInput && !data.isWaitingForInput) this.deferIdle(raw.sessionId, { status: raw });
+        if (raw.isWaitingForInput && !data.isWaitingForInput)
+          this.deferIdle(raw.sessionId, { status: raw });
         else this.deferredIdle.delete(raw.sessionId);
       }
       this.handleStatusChange(data);
@@ -1549,7 +1553,10 @@ export class WebSocketHandler {
     return this.subAgentWatcher.getAgentTree([base]).runningCount || 0;
   }
 
-  private deferIdle(sessionId: string, part: { status?: StatusChangeData; completed?: CompletedData }): void {
+  private deferIdle(
+    sessionId: string,
+    part: { status?: StatusChangeData; completed?: CompletedData }
+  ): void {
     const cur = this.deferredIdle.get(sessionId) || { since: Date.now() };
     this.deferredIdle.set(sessionId, { ...cur, ...part });
     if (!this.deferredIdleTimer) {
@@ -1583,7 +1590,9 @@ export class WebSocketHandler {
         const event: EscalationEvent = { eventType: 'session_completed', ...d.completed };
         const result = this.escalation.handleEvent(event);
         if (result.shouldBroadcast) {
-          console.log(`Escalation: session_completed broadcast for session "${d.completed.sessionName}"`);
+          console.log(
+            `Escalation: session_completed broadcast for session "${d.completed.sessionName}"`
+          );
         }
         this.broadcast('session_completed', d.completed);
       }

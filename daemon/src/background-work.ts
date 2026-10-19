@@ -127,7 +127,9 @@ export function overlaySessionState(input: SessionOverlayInput): SessionOverlay 
   const msgs = input.messages || [];
   const last = msgs[msgs.length - 1];
   const pending =
-    last?.type === 'assistant' ? (last.toolCalls || []).filter((tc) => tc.status === 'pending') : [];
+    last?.type === 'assistant'
+      ? (last.toolCalls || []).filter((tc) => tc.status === 'pending')
+      : [];
   if (pending.some((tc) => INTERACTIVE.has(tc.name))) return { waiting: true };
   if (pending.some((tc) => APPROVAL_LIKE.has(tc.name))) {
     // Bypass mode never asks: the tool is running.
@@ -135,7 +137,9 @@ export function overlaySessionState(input: SessionOverlayInput): SessionOverlay 
       const act = input.currentActivity || '';
       return {
         waiting: false,
-        currentActivity: act.startsWith('Approve? ') ? `Running: ${act.slice(9)}` : act || 'Running a tool',
+        currentActivity: act.startsWith('Approve? ')
+          ? `Running: ${act.slice(9)}`
+          : act || 'Running a tool',
       };
     }
     return { waiting: true };
