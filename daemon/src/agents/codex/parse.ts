@@ -631,11 +631,36 @@ export function codexTurnEnded(messages: ConversationMessage[]): boolean {
   return !!last && (last.stopReason === CODEX_TURN_END || last.stopReason === CODEX_TURN_ABORTED);
 }
 
+/**
+ * Calls of the open turn that wait on the user's approval: an `exec_command`
+ * that asked for sandbox escalation (`sandbox_permissions: require_escalated`)
+ * and has no output yet. Codex writes the call before it draws the approval
+ * box and the output only after the answer (checked live, 0.165). Like
+ * Claude's pending tool_use, an approved command that runs long still counts
+ * until its output lands. Edits outside the sandbox ask without any mark in
+ * the rollout; those are only seen on the pane.
+ */
+export function codexAwaitingApproval(
+  messages: ConversationMessage[]
+): Array<{ name: string; id: string }> {
+  if (messages.length === 0 || codexTurnEnded(messages)) return [];
+  const last = messages[messages.length - 1];
+  if (last.type !== 'assistant' || !last.toolCalls) return [];
+  return last.toolCalls
+    .filter(
+      (tc) =>
+        (tc.status === 'running' || tc.status === 'pending') &&
+        tc.input?.sandbox_permissions === 'require_escalated'
+    )
+    .map((tc) => ({ name: tc.name, id: tc.id }));
+}
+
 const PREVIEW = 60;
 
 /** Status-bar text while Codex works; undefined once the turn ended. */
 export function codexCurrentActivity(messages: ConversationMessage[]): string | undefined {
   if (messages.length === 0 || codexTurnEnded(messages)) return undefined;
+  if (codexAwaitingApproval(messages).length > 0) return 'Waiting for approval';
   const last = messages[messages.length - 1];
   if (last.type === 'user') return 'Processing...';
   if (last.type !== 'assistant') return undefined;

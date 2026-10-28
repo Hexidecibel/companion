@@ -749,6 +749,24 @@ export class SessionWatcher extends EventEmitter {
   }
 
   private agentHints: Map<string, AgentId> = new Map();
+  private codexNudges = new Map<string, NodeJS.Timeout>();
+
+  /**
+   * Text was just sent to a session. A Codex TUI creates its rollout at the
+   * first prompt; re-run discovery shortly after (once per session at a time,
+   * through the in-flight-guarded refresh) instead of waiting up to 5 s for
+   * the next periodic refresh, so the first turn's status shows at once.
+   */
+  nudgeCodexDiscovery(sessionId: string): void {
+    if (this.agentFor(sessionId).id !== 'codex' || this.codexBySession.has(sessionId)) return;
+    if (this.codexNudges.has(sessionId)) return;
+    const t = setTimeout(() => {
+      this.codexNudges.delete(sessionId);
+      void this.refreshTmuxPaths().catch(() => {});
+    }, 1500);
+    t.unref?.();
+    this.codexNudges.set(sessionId, t);
+  }
 
   /** The agent whose transcript a file is. */
   private agentForFile(filePath: string): AgentAdapter {

@@ -5,14 +5,24 @@
  * Status rules (from the file alone):
  *   - working: a task_started without its task_complete / turn_aborted
  *   - waiting for input (the app's "turn over" state): the last turn ended
- *   - a tool call without output: running (an approval request is NOT in the
- *     file; it is read from the pane by the terminal half)
+ *   - a tool call without output: running, except an exec_command that asked
+ *     for sandbox escalation: that one waits on the approval box (waiting,
+ *     and listed as a pending approval). Other approval boxes (edits outside
+ *     the sandbox) are only on the pane, read by the terminal half.
  */
 import * as path from 'path';
 import type { ConversationMessage, SessionStatus } from '../../types';
 import type { AgentEditExtractor, AgentTranscript } from '../types';
 import { findCodexPid } from './discovery';
-import { codexCurrentActivity, codexTurnEnded, parseCodexFile } from './parse';
+import {
+  codexAwaitingApproval,
+  codexCurrentActivity,
+  codexTurnEnded,
+  parseCodexFile,
+} from './parse';
+
+const codexWaiting = (messages: ConversationMessage[]) =>
+  codexTurnEnded(messages) || codexAwaitingApproval(messages).length > 0;
 
 /** Step 4 parses apply_patch envelopes into hunks; until then Codex reports no edits. */
 const codexEdits: AgentEditExtractor = {
@@ -29,15 +39,15 @@ export const codexTranscript: AgentTranscript = {
   transcriptPath: (codexHome, rel) => path.join(codexHome, 'sessions', rel),
   findAgentPid: findCodexPid,
   parseFile: parseCodexFile,
-  detectWaitingForInput: codexTurnEnded,
+  detectWaitingForInput: codexWaiting,
   detectIdle: codexTurnEnded,
-  getPendingApprovalTools: () => [],
+  getPendingApprovalTools: codexAwaitingApproval,
   getSessionStatus(conversationPath: string, isProcessRunning: boolean): SessionStatus {
     const messages = parseCodexFile(conversationPath);
     const last = messages[messages.length - 1];
     return {
       isRunning: isProcessRunning,
-      isWaitingForInput: isProcessRunning && codexTurnEnded(messages),
+      isWaitingForInput: isProcessRunning && codexWaiting(messages),
       lastActivity: last?.timestamp || 0,
       conversationId: conversationPath,
       currentActivity: isProcessRunning ? codexCurrentActivity(messages) : undefined,

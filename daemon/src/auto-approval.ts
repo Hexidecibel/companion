@@ -131,7 +131,12 @@ export class AutoApprovalService {
     // gets its first option ("Yes, proceed") through the choice path.
     const agent = target ? injector.agentFor(target) : defaultAgent();
     if (agent.terminal.requiresLiveChoiceBox) {
-      const ok = await injector.sendChoice([0], 2, false, undefined, target);
+      // The rollout shows the request a moment before the box is drawn.
+      let ok = await injector.sendChoice([0], 2, false, undefined, target);
+      if (!ok) {
+        await new Promise((resolve) => setTimeout(resolve, APPROVAL_SEND_DELAY_MS));
+        ok = await injector.sendChoice([0], 2, false, undefined, target);
+      }
       console.log(`[AUTO-APPROVE] ${ok ? 'Sent' : 'Could not send'} option 1 to ${agent.displayName}`);
       return;
     }

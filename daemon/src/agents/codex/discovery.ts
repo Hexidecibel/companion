@@ -160,7 +160,7 @@ export interface RolloutCandidate {
 
 /**
  * The rollout a codex process writes:
- *   1. a thread in its cwd born after the process started (newest written):
+ *   1. a thread in its cwd born after the process started (newest born):
  *      a fresh `codex`, or a `/new` after a resume;
  *   2. else the thread named by `codex resume <uuid>` (whenever it was written);
  *   3. else the newest thread in its cwd written since the process started
@@ -179,10 +179,20 @@ export function pickRollout(
   const written = free.filter(
     (c) => c.meta.cwd === proc.cwd && (start === null || c.mtimeMs >= start - 2000)
   );
+  // A TUI's threads are born after it started (/proc start times are only
+  // second-accurate: 1.5 s of slack). Among them the newest BORN is current
+  // (a /new); by latest write instead, a second TUI started a few seconds
+  // later in the same folder took the first one's thread whenever that one
+  // had just been written (seen live, 2026-10-28).
   const born = written.filter(
-    (c) => start !== null && c.meta.startedAt !== null && c.meta.startedAt >= start - 5000
+    (c) => start !== null && c.meta.startedAt !== null && c.meta.startedAt >= start - 1500
   );
-  if (born.length) return newest(born);
+  if (born.length)
+    return born.reduce((a, b) => {
+      const ab = a.meta.startedAt ?? 0;
+      const bb = b.meta.startedAt ?? 0;
+      return bb > ab || (bb === ab && b.mtimeMs > a.mtimeMs) ? b : a;
+    });
   if (proc.resumeId) {
     const hit = free.find((c) => c.id === proc.resumeId);
     if (hit) return hit;

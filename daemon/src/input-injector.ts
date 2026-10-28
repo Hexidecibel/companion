@@ -67,6 +67,12 @@ export class InputInjector {
     this.agentResolver = resolve;
   }
 
+  /** Called after text reached a session (the watcher re-checks a fresh Codex's rollout). */
+  setAfterSend(fn: (session: string) => void): void {
+    this.afterSend = fn;
+  }
+  private afterSend: ((session: string) => void) | null = null;
+
   /** The agent in a tmux session (falls back to Claude on any resolver error). */
   agentFor(session: string): AgentAdapter {
     try {
@@ -175,6 +181,13 @@ export class InputInjector {
       }
 
       const sent = await this.doSendInput(input, session, agent);
+      if (sent && this.afterSend) {
+        try {
+          this.afterSend(session);
+        } catch {
+          // an observer never fails a send
+        }
+      }
       return sent
         ? { ok: true }
         : {

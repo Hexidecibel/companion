@@ -116,6 +116,7 @@ async function main(): Promise<void> {
   const watcher = new SessionWatcher(config.codeHome, injector, { codexHome: config.codexHome });
   // Text, choice and interrupt keys follow the agent running in each pane.
   injector.setAgentResolver((session) => watcher.agentFor(session));
+  injector.setAfterSend((session) => watcher.nudgeCodexDiscovery(session));
   const subAgentWatcher = new SubAgentWatcher(config.codeHome, {
     mode:
       config.subagents?.enabled === false
