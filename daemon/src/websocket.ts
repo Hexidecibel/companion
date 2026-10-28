@@ -530,7 +530,7 @@ export class WebSocketHandler {
         n: string,
         d: string,
         c?: boolean,
-        o?: { permissionMode?: 'bypassPermissions' }
+        o?: { permissionMode?: 'bypassPermissions'; agent?: 'claude' | 'codex' }
       ) => this.storeTmuxSessionConfig(n, d, c, o),
       sessionNameStore: this.sessionNameStore,
       watcher: this.watcher,
@@ -609,7 +609,7 @@ export class WebSocketHandler {
         // propose_spawn_session: the app's own session-creation path. It does not
         // become the active session (Herald never switches the user's view).
         spawner: {
-          spawn: async ({ dir }) => {
+          spawn: async ({ dir, agent }) => {
             const r = await createClaudeSession(
               {
                 tmux: this.tmux,
@@ -618,7 +618,7 @@ export class WebSocketHandler {
                 watcher: this.watcher,
                 broadcast: (type, payload) => this.broadcast(type, payload),
               },
-              { workingDir: dir }
+              { workingDir: dir, ...(agent ? { agent } : {}) }
             );
             return r.success
               ? { ok: true, sessionId: r.sessionName, sessionName: r.friendlyName }
@@ -781,7 +781,7 @@ export class WebSocketHandler {
     name: string,
     workingDir: string,
     startCli: boolean = true,
-    opts: { permissionMode?: 'bypassPermissions' } = {}
+    opts: { permissionMode?: 'bypassPermissions'; agent?: 'claude' | 'codex' } = {}
   ): void {
     this.tmuxSessionConfigs.set(name, {
       name,
@@ -789,6 +789,7 @@ export class WebSocketHandler {
       startCli,
       lastUsed: Date.now(),
       ...(opts.permissionMode ? { permissionMode: opts.permissionMode } : {}),
+      ...(opts.agent && opts.agent !== 'claude' ? { agent: opts.agent } : {}),
     });
     this.saveTmuxSessionConfigs();
     console.log(`WebSocket: Stored tmux session config for "${name}" (${workingDir})`);

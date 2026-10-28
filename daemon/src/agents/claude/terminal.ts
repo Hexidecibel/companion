@@ -12,7 +12,12 @@ import {
   parseTextChoicePrompt,
 } from '../../parser';
 import { detectOverlay, readPromptBox } from '../../prompt-guard';
-import { POST_OTHER_SELECT_DELAY_MS, POST_TEXT_INPUT_DELAY_MS } from '../../constants';
+import {
+  POST_ENTER_DELAY_MS,
+  POST_OTHER_SELECT_DELAY_MS,
+  POST_TEXT_DELAY_MS,
+  POST_TEXT_INPUT_DELAY_MS,
+} from '../../constants';
 import type {
   AgentTerminal,
   ChoiceKeyPlan,
@@ -159,6 +164,16 @@ export function claudeChoiceKeys(req: ChoiceRequest): ChoiceKeyPlan {
   };
 }
 
+/** Free text: typed literally, a pause for the TUI to take it, then Enter. */
+export function claudeTextKeys(text: string): KeyStep[] {
+  return [
+    { type: 'text', text },
+    { type: 'delay', ms: POST_TEXT_DELAY_MS },
+    { type: 'key', key: 'Enter' },
+    { type: 'delay', ms: POST_ENTER_DELAY_MS },
+  ];
+}
+
 export const claudeTerminal: AgentTerminal<ClaudePermissionMode> = {
   launchCommand: claudeCommand,
   readPromptBox,
@@ -169,4 +184,6 @@ export const claudeTerminal: AgentTerminal<ClaudePermissionMode> = {
   approvalPromptRe: CLAUDE_APPROVAL_PROMPT_RE,
   choiceKeys: claudeChoiceKeys,
   classifyStartupPane,
+  textKeys: claudeTextKeys,
+  interruptKeys: () => [{ type: 'key', key: 'C-c' }],
 };

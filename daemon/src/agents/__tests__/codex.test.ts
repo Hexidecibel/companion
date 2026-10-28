@@ -24,9 +24,12 @@ import {
 } from '../codex/parse';
 import {
   detectCodexActiveChoicePrompt,
+  detectCodexOverlay,
   parseCodexApprovalBox,
   classifyCodexStartupPane,
+  readCodexPromptBox,
 } from '../codex/terminal';
+import { isPermissionChoice } from '../../herald/babysit/tracker';
 import {
   CodexRolloutIndex,
   dateDirsSince,
@@ -362,176 +365,113 @@ describe('Codex approval box', () => {
     expect(classifyCodexStartupPane('')).toBe('starting');
   });
 
-  it('choice keys are not implemented yet: the plan sends nothing and says so', () => {
-    const plan = codexAdapter.terminal.choiceKeys({
-      selectedIndices: [0],
+  it('choice keys: the option digit (selects + confirms); feedback = Esc then a pasted message', () => {
+    const t = codexAdapter.terminal;
+    expect(t.choiceKeys({ selectedIndices: [1], optionCount: 3, multiSelect: false }).steps).toEqual([
+      { type: 'key', key: '2' },
+    ]);
+    const fb = t.choiceKeys({
+      selectedIndices: [],
       optionCount: 3,
       multiSelect: false,
+      otherText: 'use wget instead',
     });
-    expect(plan.steps).toEqual([]);
-    expect(plan.warnings[0]).toMatch(/not supported/);
+    expect(fb.steps[0]).toEqual({ type: 'key', key: 'Escape' });
+    expect(fb.steps).toContainEqual({ type: 'paste', text: 'use wget instead' });
+    expect(fb.steps.filter((s) => s.type === 'key').map((s) => (s as { key: string }).key)).toEqual(
+      ['Escape', 'Enter']
+    );
+    expect(t.requiresLiveChoiceBox).toBe(true);
+  });
+
+  it('text = bracketed paste + Enter; interrupt = Esc, never Ctrl+C', () => {
+    const t = codexAdapter.terminal;
+    const steps = t.textKeys('line one\nline two');
+    expect(steps[0]).toEqual({ type: 'paste', text: 'line one\nline two' });
+    expect(steps.filter((s) => s.type === 'key')).toEqual([{ type: 'key', key: 'Enter' }]);
+    expect(t.interruptKeys()).toEqual([{ type: 'key', key: 'Escape' }]);
+    // Claude keeps typing + Enter and Ctrl+C
+    const c = getAgentAdapter('claude').terminal;
+    expect(c.textKeys('hi')[0]).toEqual({ type: 'text', text: 'hi' });
+    expect(c.interruptKeys()).toEqual([{ type: 'key', key: 'C-c' }]);
+  });
+
+  it('launch line and env', () => {
+    const t = codexAdapter.terminal;
+    expect(t.launchCommand()).toBe('codex');
+    expect(t.launchCommand('bypassPermissions')).toBe(
+      'codex --dangerously-bypass-approvals-and-sandbox'
+    );
+    expect(t.launchEnv?.({ codexHome: '/h/.codex' })).toEqual({ CODEX_HOME: '/h/.codex' });
+    expect(t.launchEnv?.({})).toEqual({});
   });
 });
 
-describe('Codex discovery', () => {
-  it('codex home precedence', () => {
+describe('Codex TUI (live captures, codex-cli 0.165)', () => {
+  it('exec approval box', () => {
+    const pane = read('live-approval-exec.txt');
+    const box = parseCodexApprovalBox(pane)!;
+    expect(box.command).toBe('curl -sI https://example.com | head -1');
+    expect(box.hotkeys).toEqual(['y', 'p', 'esc']);
+    expect(box.selected).toBe(0);
+    expect(readCodexPromptBox(pane).found).toBe(false);
+    expect(detectCodexOverlay(pane)).toBe(false);
+  });
+
+  it('edit approval box (Destination / Description)', () => {
+    const pane = read('live-approval-patch.txt');
+    const box = parseCodexApprovalBox(pane)!;
+    expect(box.question).toBe('Would you like to make the following edits?');
+    expect(box.destination).toBe('/tmp/claude-1000/cdx/newdir/x.txt');
+    expect(box.description).toMatch(/retry without sandbox/);
+    expect(box.hotkeys).toEqual(['y', 'a', 'esc']);
+    const c = detectCodexActiveChoicePrompt(pane)!;
+    expect(c.question).toMatch(/Destination: \/tmp/);
+    expect(codexAdapter.terminal.approvalPromptRe.test(pane)).toBe(true);
+    // never the babysitter's to answer
     expect(
-      resolveCodexHome({ configured: '/c', env: { CODEX_HOME: '/e' }, codeHome: '/h/.claude' })
-    ).toBe('/c');
-    expect(resolveCodexHome({ env: { CODEX_HOME: '/e' }, codeHome: '/h/.claude' })).toBe('/e');
-    expect(resolveCodexHome({ env: {}, codeHome: '/h/.claude' })).toBe('/h/.codex');
-    expect(resolveCodexHome({ env: {}, codeHome: '/srv/claude-data' })).toBe(
-      path.join(os.homedir(), '.codex')
-    );
+      isPermissionChoice({
+        header: c.header,
+        question: c.question,
+        options: c.options.map((o) => ({ label: o.label })),
+        multiSelect: false,
+      } as Parameters<typeof isPermissionChoice>[0])
+    ).toBe(true);
   });
 
-  it('process + file names', () => {
-    expect(isCodexArgv(['node', '/home/u/.nvm/versions/node/v24/bin/codex'])).toBe(true);
-    expect(isCodexArgv(['/x/vendor/x86_64-unknown-linux-musl/bin/codex'])).toBe(true);
-    expect(isCodexArgv(['/x/bin/codex', 'app-server', '--listen', 'unix://'])).toBe(false);
-    expect(isCodexArgv(['node', '/x/bin/claude'])).toBe(false);
-    expect(
-      resumeIdFromArgv(['node', 'codex', 'resume', '01A18489-6c75-7bb1-ab42-09c09097479d'])
-    ).toBe('01a18489-6c75-7bb1-ab42-09c09097479d');
-    expect(resumeIdFromArgv(['node', 'codex'])).toBeNull();
-    const f =
-      '/h/.codex/sessions/2026/10/28/rollout-2026-10-28T15-02-41-01a18489-6c75-7bb1-ab42-09c09097479d.jsonl';
-    expect(rolloutIdOf(f)).toBe('01a18489-6c75-7bb1-ab42-09c09097479d');
-    expect(isCodexRollout(f)).toBe(true);
-    expect(
-      isCodexRollout('/h/.claude/projects/-x/01a18489-6c75-7bb1-ab42-09c09097479d.jsonl')
-    ).toBe(false);
+  it('composer: dim placeholder is empty, a typed draft is a draft', () => {
+    const idle = read('live-idle.ansi');
+    expect(readCodexPromptBox(idle)).toEqual({ found: true, draft: '' });
+    expect(classifyCodexStartupPane(idle)).toBe('ready');
+    expect(detectCodexOverlay(idle)).toBe(false);
+    const draft = idle.replace(/\x1b\[2mAsk Codex to do anything\x1b\[0m/, 'hello draft');
+    expect(readCodexPromptBox(draft)).toEqual({ found: true, draft: 'hello draft' });
+    const multi = [
+      '› Write a 300 word poem about rain.',
+      '',
+      '• Working (3s • esc to interrupt)',
+      '',
+      '› line one',
+      '  line two',
+      '',
+      '  GPT-6.1-Sol default · ~/x',
+      '',
+    ].join('\n');
+    expect(readCodexPromptBox(multi)).toEqual({ found: true, draft: 'line one\nline two' });
+    // a plain capture still knows the placeholder
+    expect(readCodexPromptBox('› Ask Codex to do anything\n\n  GPT · ~/x\n').draft).toBe('');
   });
 
-  it('date dirs cover the process lifetime (local dates), bounded', () => {
-    const start = new Date(2026, 9, 28, 15, 0).getTime();
-    expect(dateDirsSince(start, start + 3600_000)).toEqual([
-      '2026/10/27',
-      '2026/10/28',
-      '2026/10/29',
-    ]);
-    const long = dateDirsSince(start - 60 * 86_400_000, start);
-    expect(long.length).toBeLessThanOrEqual(6);
-    expect(long).toContain('2026/10/28');
-  });
-
-  it('pickRollout: same cwd, written since start, born after start first, then newest', () => {
-    const start = 1_000_000;
-    const c = (
-      id: string,
-      cwd: string,
-      mtimeMs: number,
-      born: number | null
-    ): RolloutCandidate => ({
-      file: `/s/rollout-${id}.jsonl`,
-      id,
-      mtimeMs,
-      meta: { id, cwd, startedAt: born },
-    });
-    const old = c('old', '/p', start + 50_000, start - 60_000); // previous TUI's thread, still written
-    const mine = c('mine', '/p', start + 40_000, start + 3_000);
-    const other = c('other', '/q', start + 90_000, start + 1_000);
-    const stale = c('stale', '/p', start - 10_000, start - 90_000);
-    const proc = { cwd: '/p', startedAt: start, resumeId: null };
-    expect(pickRollout(proc, [old, mine, other, stale])?.id).toBe('mine');
-    expect(pickRollout(proc, [old, other, stale])?.id).toBe('old');
-    expect(pickRollout(proc, [other, stale])).toBeNull();
-    expect(pickRollout(proc, [old, mine], new Set([mine.file]))?.id).toBe('old');
-    // resume: the named thread, even if not written since the start ...
-    expect(pickRollout({ ...proc, resumeId: 'stale' }, [old, stale])?.id).toBe('stale');
-    // ... unless a thread was born after the start (a /new after the resume)
-    expect(pickRollout({ ...proc, resumeId: 'stale' }, [old, mine, stale])?.id).toBe('mine');
-  });
-
-  it('finds the rollout of a codex process on disk', async () => {
-    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-home-'));
-    try {
-      const now = Date.now();
-      const d = new Date(now);
-      const dir = path.join(
-        home,
-        'sessions',
-        String(d.getFullYear()),
-        String(d.getMonth() + 1).padStart(2, '0'),
-        String(d.getDate()).padStart(2, '0')
-      );
-      fs.mkdirSync(dir, { recursive: true });
-      const write = (id: string, cwd: string, born: number) => {
-        const f = path.join(dir, `rollout-2026-10-28T15-02-41-${id}.jsonl`);
-        fs.writeFileSync(
-          f,
-          JSON.stringify({
-            type: 'session_meta',
-            payload: { id, cwd, timestamp: new Date(born).toISOString() },
-          }) + '\n'
-        );
-        return f;
-      };
-      const a = write('01a18489-6c75-7bb1-ab42-09c09097479d', home, now - 1000);
-      write('01a18488-5806-7d83-b714-d8d4d4589312', '/elsewhere', now - 500);
-      fs.writeFileSync(path.join(dir, 'not-a-rollout.jsonl'), '{}\n');
-      const idx = new CodexRolloutIndex(home);
-      const hit = await idx.findRollout({
-        pid: 1,
-        cwd: fs.realpathSync(home),
-        startedAt: now - 5000,
-        resumeId: null,
-      });
-      expect(hit?.file).toBe(a);
-      expect(hit?.id).toBe('01a18489-6c75-7bb1-ab42-09c09097479d');
-      expect(
-        await idx.findRollout({ pid: 1, cwd: '/nowhere', startedAt: now - 5000, resumeId: null })
-      ).toBeNull();
-      // `codex resume <id>` of a thread in an old date dir
-      const oldDir = path.join(home, 'sessions', '2025', '01', '02');
-      fs.mkdirSync(oldDir, { recursive: true });
-      const resumed = path.join(
-        oldDir,
-        'rollout-2025-01-02T10-00-00-0a000000-0000-4000-8000-000000000001.jsonl'
-      );
-      fs.writeFileSync(
-        resumed,
-        JSON.stringify({
-          type: 'session_meta',
-          payload: {
-            id: '0a000000-0000-4000-8000-000000000001',
-            cwd: '/old',
-            timestamp: '2025-01-02T10:00:00Z',
-          },
-        }) + '\n'
-      );
-      const r = await idx.findRollout({
-        pid: 2,
-        cwd: '/old',
-        startedAt: now - 5000,
-        resumeId: '0a000000-0000-4000-8000-000000000001',
-      });
-      expect(r?.file).toBe(resumed);
-    } finally {
-      fs.rmSync(home, { recursive: true, force: true });
-    }
-  });
-
-  it('finds the codex process under a pane in a fake /proc', async () => {
-    const proc = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-proc-'));
-    try {
-      const mk = (pid: number, argv: string[], children: number[]) => {
-        fs.mkdirSync(path.join(proc, String(pid), 'task', String(pid)), { recursive: true });
-        fs.writeFileSync(path.join(proc, String(pid), 'cmdline'), argv.join('\0') + '\0');
-        fs.writeFileSync(
-          path.join(proc, String(pid), 'task', String(pid), 'children'),
-          children.join(' ')
-        );
-      };
-      mk(10, ['-fish'], [11]);
-      mk(11, ['node', '/home/u/.nvm/versions/node/v24/bin/codex'], [12]);
-      mk(12, ['/x/vendor/bin/codex'], []);
-      mk(20, ['-fish'], [21]);
-      mk(21, ['node', '/x/bin/claude'], []);
-      expect(await findCodexPid(10, proc)).toBe(11);
-      expect(await findCodexPid(20, proc)).toBeNull();
-    } finally {
-      fs.rmSync(proc, { recursive: true, force: true });
-    }
+  it('overlays: transcript pager and the Ctrl+C dialog; not the trust prompt', () => {
+    expect(detectCodexOverlay(read('live-backtrack.txt'))).toBe(true);
+    const dialog = read('live-ctrlc-dialog.txt');
+    expect(detectCodexOverlay(dialog)).toBe(true);
+    expect(readCodexPromptBox(dialog).found).toBe(false);
+    expect(parseCodexApprovalBox(dialog)).toBeNull();
+    expect(detectCodexOverlay('› Ask Codex to do anything\n  ? / esc close')).toBe(true);
+    const trust = read('live-trust.txt');
+    expect(classifyCodexStartupPane(trust)).toBe('trust_prompt');
+    expect(detectCodexOverlay(trust)).toBe(false);
+    expect(parseCodexApprovalBox(trust)).toBeNull();
   });
 });

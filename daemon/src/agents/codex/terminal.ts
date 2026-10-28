@@ -1,8 +1,34 @@
 /**
- * Codex CLI's terminal side (read-only in step 2): the approval box parser
- * that the existing pane-capture paths use to surface "waiting for approval",
- * plus the trivially right bits (launch line, start-up screen). Answering a
- * choice (key sequences) and the prompt-box guard are step 3.
+ * Codex CLI's terminal side: launch line, the composer (prompt box), overlays,
+ * the approval box, start-up screens and the keys that drive them. Everything
+ * here was checked against a live Codex 0.165 TUI in tmux (2026-10-28):
+ *
+ * - Composer: `› <text>` at column 0 above a blank line and the footer
+ *   (`<model> · <cwd>`, `← for agents · ? for shortcuts`). The empty composer
+ *   shows a DIM placeholder (`Ask Codex to do anything`); a draft is plain
+ *   text, continuation lines are indented two spaces. Working shows
+ *   `• Working (3s • esc to interrupt)` above the composer.
+ * - Text: a fast typed burst counts as a paste, and an Enter that arrives
+ *   inside it becomes a newline (a 1.4K-char `send-keys -l` + Enter 150 ms
+ *   later stayed a draft). A bracketed paste (`paste-buffer -p`) followed by
+ *   Enter submits reliably, multi-line included. Enter while working steers
+ *   the running turn, like Claude.
+ * - Approval box: digit N selects AND confirms option N (verified for 1 and 2);
+ *   the hotkey letters work too. Option 3 ("No, and tell Codex what to do
+ *   differently", hotkey esc) aborts the turn ("Conversation interrupted")
+ *   and returns to the composer, where the feedback is typed as a new message.
+ *   An edit outside the sandbox asks "Would you like to make the following
+ *   edits?" with Description / Destination lines instead of `$ command`.
+ * - Interrupt: Esc ("esc to interrupt"). Ctrl+C while working opens a "Task is
+ *   still running" dialog (Cancel task / Run in background / Exit), and
+ *   Ctrl+C on an idle composer QUITS Codex at once. Never send Ctrl+C.
+ * - Overlays: Esc twice on an idle composer opens "Browsing transcript" whose
+ *   Enter REWINDS the conversation; `?` opens the shortcut sheet
+ *   ("? / esc close"). Both close with Esc.
+ * - Start-up: a git folder Codex has not been told to trust shows "Folder
+ *   access / Trust this folder?" (1. Trust and continue / 2. Back to Agent
+ *   Command Center); a plain folder does not. `--dangerously-bypass-approvals-
+ *   and-sandbox` shows no extra warning screen.
  *
  * The approval box as Codex 0.165 draws it:
  *
@@ -20,19 +46,35 @@
  *
  *     Press enter to confirm or esc to cancel
  */
-import { stripAnsi } from '../../prompt-guard';
+import { stripAnsi, stripDim, type PromptBoxState } from '../../prompt-guard';
 import type { TerminalChoicePrompt } from '../../types';
 import type {
   AgentTerminal,
   ChoiceKeyPlan,
   ChoiceRequest,
+  KeyStep,
   PermissionPrompt,
   StartupPaneState,
   TextChoicePrompt,
 } from '../types';
 
-/** Codex has no permission-mode switch the app uses yet. */
-export type CodexPermissionMode = never;
+/**
+ * The app's spawn mode. Companion starts Claude with
+ * `--permission-mode bypassPermissions` (no prompts, no sandbox). Codex's
+ * equivalent is `--dangerously-bypass-approvals-and-sandbox`: no approval
+ * prompts and no sandbox, i.e. the same trust the user already gives an
+ * app-spawned Claude. (`--approve-for-me` would keep the sandbox but routes
+ * approvals through an automatic reviewer model, and 0.165 has no
+ * `--full-auto`.) Plain `codex` (no mode) keeps Codex's own defaults
+ * (on-request approvals, workspace-write sandbox), which the app can answer.
+ */
+export type CodexPermissionMode = 'bypassPermissions';
+
+export function codexCommand(permissionMode?: CodexPermissionMode): string {
+  return permissionMode === 'bypassPermissions'
+    ? 'codex --dangerously-bypass-approvals-and-sandbox'
+    : 'codex';
+}
 
 const QUESTION_RE = /^(Would you like to .+\?|Do you want to .+\?|Allow .+\?|Approve .+\?)\s*$/i;
 const OPTION_RE = /^(?:[›❯>]\s*)?(\d{1,2})\.\s+(.+?)\s*$/;
@@ -49,6 +91,10 @@ export interface CodexApprovalBox extends PermissionPrompt {
   command?: string;
   reason?: string;
   environment?: string;
+  /** Edit approval: the file(s) the patch writes ("Destination: ..."). */
+  destination?: string;
+  /** Edit approval: "Description: ..." line. */
+  description?: string;
   /** Hotkey per option ("y", "p", "esc"), aligned with options. */
   hotkeys: Array<string | null>;
   /** Index of the highlighted option (›), if shown. */
@@ -105,6 +151,8 @@ export function parseCodexApprovalBox(content: string): CodexApprovalBox | null 
   let command: string | undefined;
   let reason: string | undefined;
   let environment: string | undefined;
+  let destination: string | undefined;
+  let description: string | undefined;
   const body: string[] = [];
   for (let i = q + 1; i < start; i++) {
     const t = lines[i].trim();
@@ -113,7 +161,9 @@ export function parseCodexApprovalBox(content: string): CodexApprovalBox | null 
     if (t.startsWith('$ ') && command === undefined) command = t.slice(2).trim();
     else if (/^Reason:/i.test(t)) reason = t.replace(/^Reason:\s*/i, '');
     else if (/^Environment:/i.test(t)) environment = t.replace(/^Environment:\s*/i, '');
-    else if (command !== undefined && !/^Reason:|^Environment:/i.test(t)) command += `\n${t}`;
+    else if (/^Destination:/i.test(t)) destination = t.replace(/^Destination:\s*/i, '');
+    else if (/^Description:/i.test(t)) description = t.replace(/^Description:\s*/i, '');
+    else if (command !== undefined) command += `\n${t}`;
   }
   const cleanContent = [question, ...body, ...options.map((o, i) => `${i + 1}. ${o.label}`)].join(
     '\n'
@@ -127,6 +177,8 @@ export function parseCodexApprovalBox(content: string): CodexApprovalBox | null 
     ...(command !== undefined ? { command } : {}),
     ...(reason !== undefined ? { reason } : {}),
     ...(environment !== undefined ? { environment } : {}),
+    ...(destination !== undefined ? { destination } : {}),
+    ...(description !== undefined ? { description } : {}),
   };
 }
 
@@ -154,7 +206,12 @@ export function parseCodexTextChoicePrompt(content: string): TextChoicePrompt | 
 export function detectCodexActiveChoicePrompt(paneOutput: string): TerminalChoicePrompt | null {
   const box = parseCodexApprovalBox(paneOutput);
   if (!box) return null;
-  const detail = [box.command ? `$ ${box.command}` : '', box.reason ? `Reason: ${box.reason}` : '']
+  const detail = [
+    box.command ? `$ ${box.command}` : '',
+    box.destination ? `Destination: ${box.destination}` : '',
+    box.reason ? `Reason: ${box.reason}` : '',
+    box.description ? `Description: ${box.description}` : '',
+  ]
     .filter(Boolean)
     .join('\n');
   return {
@@ -180,24 +237,147 @@ export function classifyCodexStartupPane(pane: string): StartupPaneState {
   return 'starting';
 }
 
-/** Step 3: Codex choice keys are not implemented; the plan sends nothing. */
+// ---------------------------------------------------------------------------
+// Composer + overlays
+
+/** The composer must start within this many non-empty lines of the bottom. */
+const MAX_LINES_BELOW_COMPOSER = 5;
+/** Placeholders a plain (non -e) capture cannot tell from a draft. */
+const PLACEHOLDERS = [/^Ask Codex to do anything$/i];
+const NUMBERED_ROW_RE = /^›\s*\d{1,2}\.\s/;
+
+/**
+ * Codex's composer from a `capture-pane -p -e` capture: the last `›` line at
+ * column 0 near the bottom, through the next blank line. The dim placeholder
+ * is not a draft. A choice list (`› 1. ...`) or the approval box means there
+ * is no composer on screen.
+ */
+export function readCodexPromptBox(capture: string): PromptBoxState {
+  const none = { found: false, draft: '' };
+  const lines = (capture || '').replace(/\r/g, '').split('\n');
+  const plain = lines.map((l) => stripAnsi(l).replace(/\s+$/, ''));
+  if (parseCodexApprovalBox(plain.join('\n'))) return none;
+  let below = 0;
+  let at = -1;
+  for (let i = plain.length - 1; i >= 0; i--) {
+    const t = plain[i];
+    if (t.startsWith('›')) {
+      at = i;
+      break;
+    }
+    if (t.trim() !== '') below++;
+    if (below > MAX_LINES_BELOW_COMPOSER) return none;
+  }
+  if (at < 0 || NUMBERED_ROW_RE.test(plain[at])) return none;
+  const parts: string[] = [];
+  for (let i = at; i < lines.length; i++) {
+    if (i > at && plain[i].trim() === '') break;
+    let text = stripDim(lines[i]).replace(/ /g, ' ');
+    if (i === at) text = text.replace(/^\s*›/, '');
+    parts.push(text.trim());
+  }
+  let draft = parts.filter(Boolean).join('\n').trim();
+  if (PLACEHOLDERS.some((re) => re.test(draft))) draft = '';
+  return { found: true, draft };
+}
+
+/** "esc back" / "esc close" / "? / esc close" as its own hint segment, or the transcript pager. */
+const CODEX_OVERLAY_HINT_RE =
+  /(?:^|·)\s*(?:\?\s*\/\s*)?esc\s+(?:back|close|to close|to go back)\s*(?:·|$)|^Browsing transcript\b/i;
+
+/**
+ * An overlay that would eat typed text (or turn Enter into "rewind"): the
+ * transcript pager, the shortcut sheet, the Ctrl+C "Task is still running"
+ * dialog. Never the approval box (a choice) or the trust prompt (start-up;
+ * its "esc back" leaves the session).
+ */
+export function detectCodexOverlay(capture: string, hintLines = 4): boolean {
+  const plain = stripAnsi(capture || '')
+    .replace(/\r/g, '')
+    .split('\n')
+    .map((l) => l.trim())
+    .filter((l) => l !== '');
+  if (classifyCodexStartupPane(plain.join('\n')) === 'trust_prompt') return false;
+  if (parseCodexApprovalBox(plain.join('\n'))) return false;
+  return plain.slice(-hintLines).some((l) => CODEX_OVERLAY_HINT_RE.test(l));
+}
+
+// ---------------------------------------------------------------------------
+// Keys
+
+/** Time for the turn to abort and the composer to come back after "No (esc)". */
+export const CODEX_FEEDBACK_DELAY_MS = 1000;
+/** Pause between the bracketed paste and Enter. */
+export const CODEX_PASTE_SETTLE_MS = 250;
+const CHOICE_KEY_DELAY_MS = 120;
+
+/** Free text: one bracketed paste, then Enter (see the header on paste bursts). */
+export function codexTextKeys(text: string): KeyStep[] {
+  return [
+    { type: 'paste', text },
+    { type: 'delay', ms: CODEX_PASTE_SETTLE_MS },
+    { type: 'key', key: 'Enter' },
+    { type: 'delay', ms: 50 },
+  ];
+}
+
+/**
+ * Keys that answer the approval box. Digit N selects and confirms option N.
+ * Free text (the app's "Other") = the box's "No, and tell Codex what to do
+ * differently (esc)": Esc aborts the turn, then the text goes in as a new
+ * message, which is what that option asks for.
+ */
 export function codexChoiceKeys(req: ChoiceRequest): ChoiceKeyPlan {
+  const { selectedIndices, optionCount, multiSelect, otherText } = req;
+  const warnings: string[] = [];
+  if (otherText !== undefined) {
+    return {
+      description: `codex choice: decline (esc) + feedback "${otherText.substring(0, 60)}"`,
+      warnings,
+      steps: [
+        { type: 'key', key: 'Escape' },
+        { type: 'delay', ms: CODEX_FEEDBACK_DELAY_MS },
+        ...codexTextKeys(otherText),
+      ],
+    };
+  }
+  if (multiSelect || selectedIndices.length > 1)
+    warnings.push('Codex choice boxes are single-select; sending the first selection only');
+  const idx = selectedIndices[0] || 0;
+  const num = idx + 1;
+  const steps: KeyStep[] = [];
+  if (num <= 9) {
+    steps.push({ type: 'key', key: String(num) });
+  } else {
+    for (let i = 0; i < idx; i++) {
+      steps.push({ type: 'key', key: 'Down' });
+      steps.push({ type: 'delay', ms: CHOICE_KEY_DELAY_MS });
+    }
+    steps.push({ type: 'key', key: 'Enter' });
+  }
   return {
-    description: `codex choice: indices [${req.selectedIndices.join(',')}] of ${req.optionCount} (not supported)`,
-    warnings: ['Answering Codex choice boxes is not supported yet; nothing was sent'],
-    steps: [],
+    description: `codex choice: index ${idx} (option ${num}) of ${optionCount}`,
+    warnings,
+    steps,
   };
 }
 
 export const codexTerminal: AgentTerminal<CodexPermissionMode> = {
-  launchCommand: () => 'codex',
-  // The prompt-box guard is Claude-shaped; Codex's composer is step 3.
-  readPromptBox: () => ({ found: false, draft: '' }),
-  detectOverlay: () => false,
+  launchCommand: codexCommand,
+  readPromptBox: readCodexPromptBox,
+  detectOverlay: detectCodexOverlay,
   parsePermissionPrompt: parseCodexPermissionPrompt,
   parseTextChoicePrompt: parseCodexTextChoicePrompt,
   detectActiveChoicePrompt: detectCodexActiveChoicePrompt,
   approvalPromptRe: CODEX_APPROVAL_PROMPT_RE,
   choiceKeys: codexChoiceKeys,
   classifyStartupPane: classifyCodexStartupPane,
+  textKeys: codexTextKeys,
+  // Esc stops the turn; Ctrl+C would open a dialog (working) or quit Codex (idle).
+  interruptKeys: () => [{ type: 'key', key: 'Escape' }],
+  requiresLiveChoiceBox: true,
+  // A daemon with its own HOME (the probe sandbox) must still hand Codex the
+  // real home: auth.json and the rollouts the watcher reads live there.
+  launchEnv: ({ codexHome }): Record<string, string> =>
+    codexHome ? { CODEX_HOME: codexHome } : {},
 };

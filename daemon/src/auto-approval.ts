@@ -17,8 +17,12 @@ export class AutoApprovalService {
   private approvedToolIds: BoundedSet<string>;
   private deps: AutoApprovalDeps;
 
-  /** The agent's approval-prompt matcher (Claude: agents/claude/terminal.ts). */
-  private static readonly APPROVAL_PROMPT_RE = defaultAgent().terminal.approvalPromptRe;
+  /** The approval-prompt matcher of the agent in the pane (Claude: agents/claude/terminal.ts). */
+  private approvalRe(target: string | undefined): RegExp {
+    return target
+      ? this.deps.injector.agentFor(target).terminal.approvalPromptRe
+      : defaultAgent().terminal.approvalPromptRe;
+  }
 
   constructor(deps: AutoApprovalDeps) {
     this.deps = deps;
@@ -107,7 +111,8 @@ export class AutoApprovalService {
     const { injector } = this.deps;
 
     const paneContent = await injector.capturePaneContent(target);
-    const hasApprovalPrompt = AutoApprovalService.APPROVAL_PROMPT_RE.test(paneContent);
+    const approvalRe = this.approvalRe(target);
+    const hasApprovalPrompt = approvalRe.test(paneContent);
 
     if (!hasApprovalPrompt) {
       // Prompt may not have rendered yet — wait and retry once
@@ -116,12 +121,20 @@ export class AutoApprovalService {
       );
       await new Promise((resolve) => setTimeout(resolve, APPROVAL_SEND_DELAY_MS));
       const paneContent2 = await injector.capturePaneContent(target);
-      const hasPrompt2 = AutoApprovalService.APPROVAL_PROMPT_RE.test(paneContent2);
+      const hasPrompt2 = approvalRe.test(paneContent2);
       if (!hasPrompt2) {
         console.log(`[AUTO-APPROVE] Still no prompt after wait, sending anyway`);
       }
     }
 
+    // Claude takes "yes" + Enter; an agent that needs a live box (Codex)
+    // gets its first option ("Yes, proceed") through the choice path.
+    const agent = target ? injector.agentFor(target) : defaultAgent();
+    if (agent.terminal.requiresLiveChoiceBox) {
+      const ok = await injector.sendChoice([0], 2, false, undefined, target);
+      console.log(`[AUTO-APPROVE] ${ok ? 'Sent' : 'Could not send'} option 1 to ${agent.displayName}`);
+      return;
+    }
     const success = await injector.sendInput('yes', target);
     if (!success) {
       console.log(`[AUTO-APPROVE] Send failed, retrying after ${APPROVAL_SEND_DELAY_MS}ms...`);

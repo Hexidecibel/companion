@@ -2,15 +2,13 @@ import { trySub, tmuxKind } from './impact/sub';
 import {
   TMUX_OPERATION_TIMEOUT_MS,
   INPUT_LOG_PREVIEW_LENGTH,
-  POST_TEXT_DELAY_MS,
-  POST_ENTER_DELAY_MS,
   POST_CHOICE_DELAY_MS,
   DEFAULT_PANE_CAPTURE_LINES,
   OVERLAY_DISMISS_DELAY_MS,
 } from './constants';
 import { incrementTmuxOperations } from './metrics';
 import { impact } from './impact/state';
-import { defaultAgent } from './agents';
+import { defaultAgent, type AgentAdapter, type KeyStep } from './agents';
 import { secondsSinceClientActivity, refusalFor, type InputRefusal } from './prompt-guard';
 
 /** An attached client that pressed a key within this many seconds = someone is typing. */
@@ -49,14 +47,33 @@ export class InputInjector {
   private now: () => number;
   private sleep: (ms: number) => Promise<void>;
 
-  /** TUI knowledge (prompt box, overlays, choice keys) for the agent in the pane. */
-  private readonly agent = defaultAgent();
+  /**
+   * TUI knowledge (prompt box, overlays, text / choice / interrupt keys) for
+   * the agent in a pane. The watcher knows which agent runs where
+   * (`setAgentResolver`); without it every pane is Claude.
+   */
+  private agentResolver: (session: string) => AgentAdapter = () => defaultAgent();
+  private pasteSeq = 0;
 
   constructor(tmuxSession: string, opts: InputInjectorOptions = {}) {
     this.defaultSession = tmuxSession;
     this.activeSession = tmuxSession;
     this.now = opts.now || Date.now;
     this.sleep = opts.sleep || ((ms) => new Promise((r) => setTimeout(r, ms)));
+  }
+
+  /** Which agent runs in each tmux session (SessionWatcher.agentFor). */
+  setAgentResolver(resolve: (session: string) => AgentAdapter): void {
+    this.agentResolver = resolve;
+  }
+
+  /** The agent in a tmux session (falls back to Claude on any resolver error). */
+  agentFor(session: string): AgentAdapter {
+    try {
+      return this.agentResolver(session) || defaultAgent();
+    } catch {
+      return defaultAgent();
+    }
   }
 
   /**
@@ -109,6 +126,7 @@ export class InputInjector {
       await previousLock;
 
       const session = targetSession || this.activeSession;
+      const agent = this.agentFor(session);
 
       // First, check if the tmux session exists
       const checkResult = await this.runTmux(['has-session', '-t', session]);
@@ -122,6 +140,15 @@ export class InputInjector {
         };
       }
 
+      // A bare Ctrl+C character (the app's "/cancel" quick command) is the
+      // agent's interrupt, not text: Codex quits on a literal Ctrl+C.
+      if (input === '\x03' && agent.id !== 'claude') {
+        const sent = await this.runSteps(session, agent.terminal.interruptKeys(), 'interrupt');
+        return sent
+          ? { ok: true }
+          : { ok: false, reason: 'tmux_error', code: 'send_failed', message: 'Failed to interrupt' };
+      }
+
       if (!(await this.waitForTypingPause(session))) {
         impact.count('inputCollisions');
         console.log(`Input to '${session}' refused: an attached client is typing`);
@@ -130,14 +157,14 @@ export class InputInjector {
 
       // Dismiss any TUI overlay, then make sure the prompt box holds no draft.
       let pane = await this.captureForGuard(session);
-      if (pane !== null && this.agent.terminal.detectOverlay(pane)) {
+      if (pane !== null && agent.terminal.detectOverlay(pane)) {
         console.log(`Overlay detected in session '${session}', sending Escape to dismiss`);
         await this.runTmux(['send-keys', '-t', session, 'Escape']);
         await this.sleep(OVERLAY_DISMISS_DELAY_MS);
         pane = await this.captureForGuard(session);
       }
       if (pane !== null) {
-        const box = this.agent.terminal.readPromptBox(pane);
+        const box = agent.terminal.readPromptBox(pane);
         if (box.found && box.draft) {
           impact.count('inputCollisions');
           console.log(
@@ -147,7 +174,7 @@ export class InputInjector {
         }
       }
 
-      const sent = await this.doSendInput(input, session);
+      const sent = await this.doSendInput(input, session, agent);
       return sent
         ? { ok: true }
         : {
@@ -206,7 +233,7 @@ export class InputInjector {
   private async dismissOverlayIfPresent(session: string): Promise<void> {
     try {
       const paneContent = await this.captureForGuard(session);
-      if (paneContent !== null && this.agent.terminal.detectOverlay(paneContent)) {
+      if (paneContent !== null && this.agentFor(session).terminal.detectOverlay(paneContent)) {
         console.log(`Overlay detected in session '${session}', sending Escape to dismiss`);
         await this.runTmux(['send-keys', '-t', session, 'Escape']);
         await this.sleep(OVERLAY_DISMISS_DELAY_MS);
@@ -217,34 +244,14 @@ export class InputInjector {
     }
   }
 
-  private async doSendInput(input: string, session: string): Promise<boolean> {
+  private async doSendInput(input: string, session: string, agent: AgentAdapter): Promise<boolean> {
     try {
       console.log(
         `Sending input to tmux session '${session}': ${input.substring(0, INPUT_LOG_PREVIEW_LENGTH)}...`
       );
-
-      // Send the text (avoids shell interpretation via -l --)
-      const textResult = await this.runTmux(['send-keys', '-t', session, '-l', '--', input]);
-      if (textResult.status !== 0) {
-        console.error('Failed to send text:', textResult.stderr);
-        return false;
-      }
-      console.log('Text sent to tmux');
-
-      // Wait for tmux to process the text before sending Enter
-      await new Promise((resolve) => setTimeout(resolve, POST_TEXT_DELAY_MS));
-
-      // Send Enter
-      const enterResult = await this.runTmux(['send-keys', '-t', session, 'Enter']);
-      if (enterResult.status !== 0) {
-        console.error('Failed to send Enter:', enterResult.stderr);
-        return false;
-      }
-      console.log('Enter sent to tmux');
-
-      // Small delay after Enter to ensure tmux processes it before next message
-      await new Promise((resolve) => setTimeout(resolve, POST_ENTER_DELAY_MS));
-
+      // The agent decides how text goes in (Claude: typed + Enter; Codex:
+      // bracketed paste + Enter).
+      if (!(await this.runSteps(session, agent.terminal.textKeys(input), 'text'))) return false;
       console.log(`Input sent successfully to tmux session '${session}'`);
       incrementTmuxOperations();
       return true;
@@ -252,6 +259,44 @@ export class InputInjector {
       console.error('Error sending input to tmux:', err);
       return false;
     }
+  }
+
+  /**
+   * Execute a key plan against a pane. Stops at the first failed step.
+   * `paste` = a named buffer pasted with bracketed-paste markers and deleted.
+   */
+  private async runSteps(session: string, steps: KeyStep[], what: string): Promise<boolean> {
+    for (const step of steps) {
+      if (step.type === 'key') {
+        const r = await this.runTmux(['send-keys', '-t', session, step.key]);
+        if (r.status !== 0) {
+          console.error(`Failed to send key '${step.key}' (${what}):`, r.stderr);
+          return false;
+        }
+      } else if (step.type === 'text') {
+        const r = await this.runTmux(['send-keys', '-t', session, '-l', '--', step.text]);
+        if (r.status !== 0) {
+          console.error(`Failed to send text (${what}):`, r.stderr);
+          return false;
+        }
+      } else if (step.type === 'paste') {
+        const buffer = `companion-${process.pid}-${++this.pasteSeq}`;
+        const set = await this.runTmux(['set-buffer', '-b', buffer, '--', step.text]);
+        if (set.status !== 0) {
+          console.error(`Failed to stage paste (${what}):`, set.stderr);
+          return false;
+        }
+        const r = await this.runTmux(['paste-buffer', '-p', '-d', '-b', buffer, '-t', session]);
+        if (r.status !== 0) {
+          console.error(`Failed to paste (${what}):`, r.stderr);
+          await this.runTmux(['delete-buffer', '-b', buffer]);
+          return false;
+        }
+      } else {
+        await this.sleep(step.ms);
+      }
+    }
+    return true;
   }
 
   private escapeTmuxInput(input: string): string {
@@ -333,10 +378,28 @@ export class InputInjector {
         return false;
       }
 
-      // Dismiss any TUI overlay before sending
-      await this.dismissOverlayIfPresent(session);
+      const agent = this.agentFor(session);
+      if (agent.terminal.requiresLiveChoiceBox) {
+        // Codex: a digit sent to the bare composer would be typed into it and
+        // Esc would interrupt, so answer only a box that is on screen now.
+        const pane = await this.captureForGuard(session);
+        if (pane === null || !agent.terminal.detectActiveChoicePrompt(pane)) {
+          console.log(`Choice for '${session}' not sent: no ${agent.displayName} choice box on screen`);
+          return false;
+        }
+      } else {
+        // Dismiss any TUI overlay before sending
+        await this.dismissOverlayIfPresent(session);
+      }
 
-      return await this.doSendChoice(selectedIndices, optionCount, multiSelect, otherText, session);
+      return await this.doSendChoice(
+        selectedIndices,
+        optionCount,
+        multiSelect,
+        otherText,
+        session,
+        agent
+      );
     } finally {
       releaseLock!();
     }
@@ -347,21 +410,13 @@ export class InputInjector {
     optionCount: number,
     multiSelect: boolean,
     otherText: string | undefined,
-    session: string
+    session: string,
+    agent: AgentAdapter
   ): Promise<boolean> {
     try {
-      const sendKey = async (key: string): Promise<boolean> => {
-        const result = await this.runTmux(['send-keys', '-t', session, key]);
-        if (result.status !== 0) {
-          console.error(`Failed to send key '${key}':`, result.stderr);
-          return false;
-        }
-        return true;
-      };
-      const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
-      // The agent decides the keys (Claude: digits, arrows, Right + "1" to submit).
-      const plan = this.agent.terminal.choiceKeys({
+      // The agent decides the keys (Claude: digits, arrows, Right + "1" to submit;
+      // Codex: the option's digit, or Esc + a pasted message for feedback).
+      const plan = agent.terminal.choiceKeys({
         selectedIndices,
         optionCount,
         multiSelect,
@@ -369,29 +424,11 @@ export class InputInjector {
       });
       console.log(`Sending ${plan.description} to '${session}'`);
       for (const w of plan.warnings) console.warn(w);
+      if (plan.steps.length === 0) return false;
 
-      for (const step of plan.steps) {
-        if (step.type === 'key') {
-          if (!(await sendKey(step.key))) return false;
-        } else if (step.type === 'text') {
-          const textResult = await this.runTmux([
-            'send-keys',
-            '-t',
-            session,
-            '-l',
-            '--',
-            step.text,
-          ]);
-          if (textResult.status !== 0) {
-            console.error('Failed to type Other text:', textResult.stderr);
-            return false;
-          }
-        } else {
-          await delay(step.ms);
-        }
-      }
+      if (!(await this.runSteps(session, plan.steps, 'choice'))) return false;
 
-      await delay(POST_CHOICE_DELAY_MS);
+      await this.sleep(POST_CHOICE_DELAY_MS);
       console.log(`Choice sent successfully to tmux session '${session}'`);
       incrementTmuxOperations();
       return true;
@@ -402,15 +439,15 @@ export class InputInjector {
   }
 
   /**
-   * Send Ctrl+C to cancel current input in a tmux session
+   * Interrupt the running turn: the agent's interrupt keys (Claude: Ctrl+C;
+   * Codex: Esc, since its Ctrl+C quits an idle session).
    */
   async cancelInput(targetSession?: string): Promise<boolean> {
     const session = targetSession || this.activeSession;
     const checkResult = await this.runTmux(['has-session', '-t', session]);
     if (checkResult.status !== 0) return false;
     await this.dismissOverlayIfPresent(session);
-    const result = await this.runTmux(['send-keys', '-t', session, 'C-c']);
-    return result.status === 0;
+    return this.runSteps(session, this.agentFor(session).terminal.interruptKeys(), 'interrupt');
   }
 
   /**

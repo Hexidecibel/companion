@@ -20,7 +20,7 @@
  */
 
 import { mapPermissionLabel } from '../../parser';
-import { defaultAgent } from '../../agents';
+import { codexAdapter, getAgentAdapter, listAgentIds } from '../../agents';
 import type { HeraldBabysit, HeraldBabysitEndReason } from '../protocol';
 import type { PendingChoice, SessionSnapshot } from '../session-source';
 import { clipTail, fnv1a, oneLine } from '../text';
@@ -77,12 +77,15 @@ export type PromptSkip = 'closed' | 'approval' | 'permission' | 'working' | 'non
 const PERMISSION_LABEL =
   /don'?t ask again|allow all|always allow|\byes, allow\b|\bi accept\b|\btrust (?:this|the) (?:folder|files)\b/i;
 const PERMISSION_QUESTION =
-  /^\s*do you want to\b|\b(?:allow|grant|approve) (?:this|the|claude)\b|\bpermission to\b|\bbypass permissions?\b|\btrust (?:this|the) (?:folder|files)\b/i;
+  /^\s*do you want to\b|^\s*would you like to (?:run|make|apply|grant|allow)\b|\b(?:allow|grant|approve) (?:this|the|claude)\b|\bpermission to\b|\bbypass permissions?\b|\btrust (?:this|the) (?:folder|files)\b/i;
 
 /**
- * A choice box that is Claude Code asking for permission (run this command,
+ * A choice box that is the agent asking for permission (run this command,
  * make this edit, trust this folder), not the session asking a question.
  * Errs toward "permission": those are never the babysitter's to answer.
+ * Codex's only choice box is its approval box ("Would you like to run the
+ * following command?" / "... make the following edits?"), so every Codex
+ * choice counts.
  */
 export function isPermissionChoice(c: PendingChoice): boolean {
   const question = oneLine([c.header, c.question].filter(Boolean).join(' '));
@@ -93,8 +96,11 @@ export function isPermissionChoice(c: PendingChoice): boolean {
     )
   )
     return true;
+  if (c.header === codexAdapter.displayName) return true;
   const rendered = `${c.question}\n${c.options.map((o, i) => `${i + 1}. ${o.label}`).join('\n')}`;
-  return defaultAgent().terminal.parsePermissionPrompt(rendered) !== null;
+  return listAgentIds().some(
+    (id) => getAgentAdapter(id).terminal.parsePermissionPrompt(rendered) !== null
+  );
 }
 
 /** The end of the session's last message: where a question, if any, is. */

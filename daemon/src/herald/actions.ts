@@ -54,6 +54,8 @@ export interface SpawnRequest {
   firstPrompt: string;
   /** Friendly name for the new session (from the folder). */
   name: string;
+  /** Coding agent to start (absent = Claude Code). */
+  agent?: 'codex';
 }
 
 /** babysit_start: the brief to start once confirmed (re-validated then). */

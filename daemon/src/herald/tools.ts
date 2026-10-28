@@ -233,7 +233,7 @@ export const SESSION_CONTROL_TOOL_SPECS: LlmToolSpec[] = [
   {
     name: 'propose_spawn_session',
     description:
-      'Propose starting a NEW Claude Code session in a project folder with a first prompt. Only when the user explicitly asks to start, open or spin up a new session. ' +
+      'Propose starting a NEW coding session (Claude Code, or Codex CLI when the user asks for Codex) in a project folder with a first prompt. Only when the user explicitly asks to start, open or spin up a new session. ' +
       'It never starts without the user confirming (on the card, or by saying the confirm phrase). The session runs with permissions bypassed.',
     parameters: {
       type: 'object',
@@ -248,6 +248,11 @@ export const SESSION_CONTROL_TOOL_SPECS: LlmToolSpec[] = [
           type: 'string',
           description: "The first instruction for the new session, in the user's words.",
           maxLength: 2000,
+        },
+        agent: {
+          type: 'string',
+          enum: ['claude', 'codex'],
+          description: 'Which coding agent to start: "claude" (default) or "codex" only when the user names Codex.',
         },
         confirm: {
           type: 'boolean',
@@ -1515,6 +1520,9 @@ async function proposeSpawn(
   if (!where.ok) return err(where.error);
   const prompt = cleanFirstPrompt(args.first_prompt);
   if (!prompt.ok) return err(prompt.error);
+  if (args.agent !== undefined && args.agent !== 'claude' && args.agent !== 'codex')
+    return err('agent must be "claude" or "codex".');
+  const codex = args.agent === 'codex';
   const key = `spawn:${where.dir}`;
   if (state.proposals.some((p) => p.sessionKey === key))
     return err(`You already proposed a new session in ${where.name} in this request.`);
@@ -1545,9 +1553,14 @@ async function proposeSpawn(
     sessionId: key,
     sessionName: where.name,
     payload: prompt.prompt,
-    readback: `New session in ${where.name}: "${clip(oneLine(prompt.prompt), 100)}"`,
+    readback: `New ${codex ? 'Codex ' : ''}session in ${where.name}: "${clip(oneLine(prompt.prompt), 100)}"`,
     meta: {
-      spawn: { dir: where.dir, firstPrompt: prompt.prompt, name: where.name },
+      spawn: {
+        dir: where.dir,
+        firstPrompt: prompt.prompt,
+        name: where.name,
+        ...(codex ? { agent: 'codex' as const } : {}),
+      },
       userText: state.userText,
       ruleIds: verdict.ruleIds,
     },

@@ -1,0 +1,45 @@
+› Run exactly this shell command and nothing else: curl -sI https://example.com | head -1
+
+• Ran curl -sI https://example.com | head -1
+  └ HTTP/2 200
+
+• HTTP/2 200
+
+  Worked for 17s • 4:32 PM
+
+
+› Run exactly: curl -sI https://example.org | head -1
+
+
+• I’ll run the command exactly as provided.
+
+✗ You canceled the request to run curl -sI https://example.org | head -1
+
+• Exited (status 1) curl -sI https://example.org | head -1
+  └ (no output)
+
+■ Conversation interrupted - use /feedback if something went wrong
+
+
+› Write a 400 word poem about tea.
+
+
+■ Conversation interrupted - use /feedback if something went wrong
+
+
+› Write a 400 word poem about coffee.
+
+
+• Before the sun remembers rooftops, coffee wakes beneath the kettle, gathering its dark intentions in the kitchen's small blue silence.
+  I measure out the fragrant grounds like soil from some
+
+
+  Task is still running
+  Choose what happens to the current task.
+
+
+› 1. Cancel task        Stop the current task and stay in Codex
+  2. Run in background  Exit Codex and leave the task running
+  3. Exit               Stop the current task and exit Codex
+
+  enter select · esc back

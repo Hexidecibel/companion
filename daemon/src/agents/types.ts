@@ -118,6 +118,12 @@ export type KeyStep =
   | { type: 'key'; key: string }
   /** Literal text (`send-keys -l --`). */
   | { type: 'text'; text: string }
+  /**
+   * Bracketed paste (`set-buffer` + `paste-buffer -p -d`): the TUI sees one
+   * paste, so a fast typed burst is never mistaken for a paste that swallows
+   * the Enter after it (Codex).
+   */
+  | { type: 'paste'; text: string }
   | { type: 'delay'; ms: number };
 
 export interface ChoiceKeyPlan {
@@ -154,6 +160,17 @@ export interface AgentTerminal<PermissionMode extends string = string> {
   choiceKeys(req: ChoiceRequest): ChoiceKeyPlan;
   /** Trust / bypass-permissions warning / ready / still starting. */
   classifyStartupPane(pane: string): StartupPaneState;
+  /** Keys that type free text into the prompt box and submit it. */
+  textKeys(text: string): KeyStep[];
+  /** Keys that stop the running turn (Claude: Ctrl+C; Codex: Esc, its Ctrl+C quits). */
+  interruptKeys(): KeyStep[];
+  /**
+   * Answer a choice only while the box is live on screen: a key sent to the
+   * bare prompt box would be typed into it (Codex: a digit) or interrupt.
+   */
+  requiresLiveChoiceBox?: boolean;
+  /** Environment for a newly launched agent's tmux session (Codex: CODEX_HOME). */
+  launchEnv?(ctx: { codexHome?: string }): Record<string, string>;
 }
 
 // ---------------------------------------------------------------------------

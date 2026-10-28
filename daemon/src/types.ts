@@ -240,6 +240,8 @@ export interface TmuxSessionConfig {
   lastUsed: number;
   /** `claude --permission-mode` the session was started with (app spawns: bypassPermissions). */
   permissionMode?: 'bypassPermissions';
+  /** Coding agent the session was started with when not Claude Code (recreate uses it). */
+  agent?: 'claude' | 'codex';
   // Git worktree metadata (set when session was created via worktree)
   isWorktree?: boolean;
   mainRepoDir?: string;

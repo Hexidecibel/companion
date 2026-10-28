@@ -4,7 +4,7 @@ import { trackedExecAsync, runTmux } from './impact/sub';
 import { tmuxSnapshot, invalidateTmuxSnapshot } from './tmux-snapshot';
 import * as path from 'path';
 import { startTmuxSession } from './tmux-server';
-import { claudeAdapter } from './agents';
+import { getAgentAdapter, type AgentId } from './agents';
 import type { ClaudePermissionMode } from './agents/claude/terminal';
 
 // Launch line + permission modes live in the agent adapter (agents/claude/terminal.ts).
@@ -120,7 +120,13 @@ export class TmuxManager {
     name: string,
     workingDir: string,
     startCli: boolean = true,
-    opts: { permissionMode?: ClaudePermissionMode } = {}
+    opts: {
+      permissionMode?: ClaudePermissionMode;
+      /** Coding agent to launch (default Claude Code). */
+      agent?: AgentId;
+      /** Extra environment for the session's shell (tmux new-session -e). */
+      env?: Record<string, string>;
+    } = {}
   ): Promise<{ success: boolean; error?: string }> {
     // Validate session name
     const safeName = name.replace(/[^a-zA-Z0-9_-]/g, '_');
@@ -135,7 +141,8 @@ export class TmuxManager {
       // shell: the directory is passed as one argument, never interpolated.
       // A tmux server that is not running yet is started in its own systemd
       // scope (tmux-server.ts), never inside the daemon's cgroup.
-      await startTmuxSession(safeName, ['-d', '-s', safeName, '-c', workingDir]);
+      const envArgs = Object.entries(opts.env || {}).flatMap(([k, v]) => ['-e', `${k}=${v}`]);
+      await startTmuxSession(safeName, ['-d', '-s', safeName, '-c', workingDir, ...envArgs]);
 
       // Tag session as managed by Companion so daemon only monitors our sessions
       await execFileAsync('tmux', ['set-environment', '-t', safeName, 'COMPANION_APP', '1']);
@@ -153,7 +160,7 @@ export class TmuxManager {
           'send-keys',
           '-t',
           safeName,
-          claudeAdapter.terminal.launchCommand(opts.permissionMode),
+          getAgentAdapter(opts.agent).terminal.launchCommand(opts.permissionMode),
           'Enter',
         ]);
         console.log(`TmuxManager: Started CLI in session "${safeName}"`);

@@ -1,5 +1,5 @@
 /**
- * Starting a new Claude Code session from Herald: where it may run.
+ * Starting a new Claude Code (or Codex CLI) session from Herald: where it may run.
  *
  * A session can start only in an existing directory whose REAL path (symlinks
  * resolved) is inside one of the allowed roots: `~/local/src` by default
@@ -12,7 +12,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import type { SessionSnapshot } from './session-source';
-import { defaultAgent, type StartupPaneState } from '../agents';
+import { getAgentAdapter, type StartupPaneState } from '../agents';
 import { classifyStartupPane } from '../agents/claude/terminal';
 
 /** Characters a directory may contain (no quotes, $, backticks, ;, newlines...). */
@@ -165,7 +165,7 @@ export { classifyStartupPane };
 
 /** The daemon's real session-creation path (the same one the app uses). */
 export interface SessionSpawner {
-  spawn(req: { dir: string; name: string }): Promise<{
+  spawn(req: { dir: string; name: string; agent?: 'codex' }): Promise<{
     ok: boolean;
     /** tmux session name = Herald's session id. */
     sessionId?: string;
@@ -227,22 +227,33 @@ export class SpawnRunner {
     return (this.deps.now || Date.now)();
   }
 
-  private async paneState(id: string): Promise<PaneState | 'unreadable'> {
+  private async paneState(id: string, agent?: string): Promise<PaneState | 'unreadable'> {
     try {
-      return defaultAgent().terminal.classifyStartupPane(await this.deps.spawner.capturePane(id));
+      return getAgentAdapter(agent).terminal.classifyStartupPane(
+        await this.deps.spawner.capturePane(id)
+      );
     } catch {
       return 'unreadable';
     }
   }
 
-  async run(req: { dir: string; name: string; firstPrompt: string }): Promise<SpawnResult> {
+  async run(req: {
+    dir: string;
+    name: string;
+    firstPrompt: string;
+    agent?: 'codex';
+  }): Promise<SpawnResult> {
     // Re-validate right before acting: the folder may have gone since the card.
     try {
       if (!fs.statSync(req.dir).isDirectory()) throw new Error('not a directory');
     } catch {
       return { ok: false, message: '', error: `${req.dir} no longer exists; nothing was started.` };
     }
-    const made = await this.deps.spawner.spawn({ dir: req.dir, name: req.name });
+    const made = await this.deps.spawner.spawn({
+      dir: req.dir,
+      name: req.name,
+      ...(req.agent ? { agent: req.agent } : {}),
+    });
     if (!made.ok || !made.sessionId)
       return {
         ok: false,
@@ -255,7 +266,7 @@ export class SpawnRunner {
     const deadline = this.now() + (this.deps.readyWaitMs ?? 15_000);
     let state: PaneState | 'unreadable' = 'starting';
     while (!this.disposed) {
-      state = await this.paneState(id);
+      state = await this.paneState(id, req.agent);
       if (state === 'ready' || state === 'bypass_warning' || state === 'trust_prompt') break;
       if (this.now() >= deadline) break;
       await sleep(this.deps.pollMs ?? 500);
@@ -271,7 +282,7 @@ export class SpawnRunner {
           : `Started ${name}, but I couldn't type your first prompt into it. Open it in the app to send it.`,
       };
     }
-    this.watch(id, name, req.firstPrompt, ref);
+    this.watch(id, name, req.firstPrompt, ref, req.agent);
     const why =
       state === 'bypass_warning'
         ? "it's waiting on Claude's bypass-permissions warning. Open it in the app and accept it yourself; I won't do that for you."
@@ -303,7 +314,8 @@ export class SpawnRunner {
     id: string,
     name: string,
     prompt: string,
-    ref: { serverId: string; sessionId: string; sessionName: string }
+    ref: { serverId: string; sessionId: string; sessionName: string },
+    agent?: string
   ): void {
     if (this.watching.has(id)) return;
     this.watching.add(id);
@@ -320,7 +332,7 @@ export class SpawnRunner {
             );
             return;
           }
-          if ((await this.paneState(id)) === 'ready') {
+          if ((await this.paneState(id, agent)) === 'ready') {
             const sent = await this.sendFirst(id, name, prompt);
             this.deps.post(
               sent

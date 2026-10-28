@@ -6,7 +6,7 @@ import {
   CLI_READY_POLL_INTERVAL_MS,
   CLI_READY_TIMEOUT_MS,
 } from '../constants';
-import { createClaudeSession } from '../session-spawn';
+import { createAgentSession, agentLaunchEnv, parseAgentId } from '../session-spawn';
 
 export function registerTmuxHandlers(ctx: HandlerContext): Record<string, MessageHandler> {
   return {
@@ -122,7 +122,17 @@ export function registerTmuxHandlers(ctx: HandlerContext): Record<string, Messag
       const termKeysPayload = payload as { sessionName: string; keys: string[] } | undefined;
       if (termKeysPayload?.sessionName && termKeysPayload.keys?.length) {
         try {
-          const ok = await ctx.tmux.sendRawKeys(termKeysPayload.sessionName, termKeysPayload.keys);
+          // The app's stop button / terminal-mode Ctrl+C send C-c. Codex quits
+          // on Ctrl+C when idle (and opens a dialog when working); its
+          // interrupt is Esc, so a lone C-c becomes the agent's interrupt.
+          let keys = termKeysPayload.keys;
+          const agent = ctx.watcher.agentFor(termKeysPayload.sessionName);
+          if (agent.id !== 'claude' && keys.length === 1 && keys[0] === 'C-c') {
+            keys = agent.terminal
+              .interruptKeys()
+              .flatMap((k) => (k.type === 'key' ? [k.key] : []));
+          }
+          const ok = await ctx.tmux.sendRawKeys(termKeysPayload.sessionName, keys);
           ctx.send(client.ws, {
             type: 'terminal_keys_sent',
             success: ok,
@@ -158,7 +168,15 @@ export function registerTmuxHandlers(ctx: HandlerContext): Record<string, Messag
 
     async create_tmux_session(client, payload, requestId) {
       const createPayload = payload as
-        | { name?: string; workingDir: string; startCli?: boolean }
+        | {
+            name?: string;
+            workingDir: string;
+            startCli?: boolean;
+            /** Optional: 'claude' (default) | 'codex'. */
+            agent?: string;
+            /** Optional: 'default' = the agent's own approval prompts instead of bypass. */
+            permissionMode?: string;
+          }
         | undefined;
       if (!createPayload?.workingDir) {
         ctx.send(client.ws, {
@@ -169,8 +187,18 @@ export function registerTmuxHandlers(ctx: HandlerContext): Record<string, Messag
         });
         return;
       }
+      const agent = parseAgentId(createPayload.agent);
+      if (!agent) {
+        ctx.send(client.ws, {
+          type: 'tmux_session_created',
+          success: false,
+          error: `Unknown agent: ${String(createPayload.agent).slice(0, 40)}`,
+          requestId,
+        });
+        return;
+      }
 
-      const result = await createClaudeSession(
+      const result = await createAgentSession(
         {
           tmux: ctx.tmux,
           storeTmuxSessionConfig: ctx.storeTmuxSessionConfig,
@@ -181,6 +209,10 @@ export function registerTmuxHandlers(ctx: HandlerContext): Record<string, Messag
           workingDir: createPayload.workingDir,
           name: createPayload.name,
           startCli: createPayload.startCli,
+          agent,
+          ...(createPayload.permissionMode === 'default'
+            ? { permissionMode: 'default' as const }
+            : {}),
         }
       );
 
@@ -198,6 +230,7 @@ export function registerTmuxHandlers(ctx: HandlerContext): Record<string, Messag
           payload: {
             sessionName,
             workingDir: createPayload.workingDir,
+            ...(agent !== 'claude' ? { agent } : {}),
           },
           requestId,
         });
@@ -456,17 +489,23 @@ export function registerTmuxHandlers(ctx: HandlerContext): Record<string, Messag
         `WebSocket: Recreating tmux session "${sessionName}" in ${savedConfig.workingDir}`
       );
 
+      const savedAgent = savedConfig.agent && savedConfig.agent !== 'claude' ? savedConfig.agent : undefined;
       const result = await ctx.tmux.createSession(
         savedConfig.name,
         savedConfig.workingDir,
         savedConfig.startCli,
-        { permissionMode: savedConfig.permissionMode }
+        {
+          permissionMode: savedConfig.permissionMode,
+          ...(savedAgent ? { agent: savedAgent, env: agentLaunchEnv(savedAgent, ctx.watcher) } : {}),
+        }
       );
 
       if (result.success) {
         ctx.storeTmuxSessionConfig(savedConfig.name, savedConfig.workingDir, savedConfig.startCli, {
           permissionMode: savedConfig.permissionMode,
+          ...(savedAgent ? { agent: savedAgent } : {}),
         });
+        if (savedAgent && savedConfig.startCli) ctx.watcher.noteSessionAgent(savedConfig.name, savedAgent);
         ctx.injector.setActiveSession(sessionName);
 
         ctx.send(client.ws, {

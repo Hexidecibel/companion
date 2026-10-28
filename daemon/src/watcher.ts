@@ -32,6 +32,7 @@ import {
 import {
   codexAdapter,
   defaultAgent,
+  DEFAULT_AGENT_ID,
   getAgentAdapter,
   isInteractiveTool,
   isSubagentTool,
@@ -552,6 +553,7 @@ export class SessionWatcher extends EventEmitter {
           // Claude first; a pane without claude may run Codex (both /proc only).
           let claudePid = await this.agent.transcript.findAgentPid(row.panePid);
           let encodedPath = this.agent.transcript.encodeProjectDir(workingDir);
+          if (claudePid) this.agentHints.delete(name);
           if (!claudePid) {
             const codexPid = await findCodexPid(row.panePid);
             if (codexPid) {
@@ -596,6 +598,9 @@ export class SessionWatcher extends EventEmitter {
       swap(this.tmuxSessionWorkingDirs, nextWorkingDirs);
       swap(this.tmuxSessionIdentity, nextIdentity);
       swap(this.sessionAgents, nextAgents);
+      for (const name of [...this.agentHints.keys()]) {
+        if (!snap.sessions.some((r) => r.name === name)) this.agentHints.delete(name);
+      }
       const codexGone = [...this.codexFiles.keys()].filter(
         (f) => ![...nextCodex.values()].some((c) => c.file === f)
       );
@@ -722,10 +727,28 @@ export class SessionWatcher extends EventEmitter {
 
   private watchedCodexFiles = new Set<string>();
 
-  /** The agent running in a tmux session (Claude unless a Codex process was found). */
+  /**
+   * The agent running in a tmux session: what the last refresh found under the
+   * pane (Codex process), else what the session was launched with (a fresh
+   * spawn before its agent process shows up), else Claude.
+   */
   agentFor(sessionId?: string | null): AgentAdapter {
-    return getAgentAdapter(sessionId ? this.sessionAgents.get(sessionId) : undefined);
+    if (!sessionId) return getAgentAdapter(undefined);
+    return getAgentAdapter(this.sessionAgents.get(sessionId) ?? this.agentHints.get(sessionId));
   }
+
+  /** Which agent the app launched in a session (until the process itself is seen). */
+  noteSessionAgent(sessionId: string, agent: AgentId): void {
+    if (agent === DEFAULT_AGENT_ID) this.agentHints.delete(sessionId);
+    else this.agentHints.set(sessionId, agent);
+  }
+
+  /** Codex's home as the watcher reads it (spawned Codex sessions get it as CODEX_HOME). */
+  getCodexHome(): string {
+    return this.codexIndex.codexHome;
+  }
+
+  private agentHints: Map<string, AgentId> = new Map();
 
   /** The agent whose transcript a file is. */
   private agentForFile(filePath: string): AgentAdapter {
@@ -2702,6 +2725,8 @@ export class SessionWatcher extends EventEmitter {
       };
       recentTimestamps?: number[];
       backgroundWork?: BackgroundWork;
+      /** The coding agent in the session when it is not Claude Code (optional). */
+      agent?: AgentId;
     }>;
     totalSessions: number;
     waitingCount: number;
@@ -2725,6 +2750,8 @@ export class SessionWatcher extends EventEmitter {
       };
       recentTimestamps?: number[];
       backgroundWork?: BackgroundWork;
+      /** The coding agent in the session when it is not Claude Code (optional). */
+      agent?: AgentId;
     }> = [];
 
     let waitingCount = 0;
@@ -2800,6 +2827,9 @@ export class SessionWatcher extends EventEmitter {
         taskSummary,
         recentTimestamps,
         ...(backgroundWork ? { backgroundWork } : {}),
+        ...(this.agentFor(ts.name).id !== DEFAULT_AGENT_ID
+          ? { agent: this.agentFor(ts.name).id }
+          : {}),
       });
     }
 
