@@ -18,6 +18,8 @@
  */
 import * as fs from 'fs';
 import { ConversationAccumulator, parseJsonlLines } from './parser';
+import { CodexAccumulator } from './agents/codex/parse';
+import { isCodexRollout } from './agents/codex/discovery';
 import { CompactionEvent, ConversationMessage, TaskItem } from './types';
 import { impact } from './impact/state';
 
@@ -25,8 +27,27 @@ import { impact } from './impact/state';
 const TAIL_CHECK = 64;
 const MAX_FILES = 32;
 
+/** What the cache feeds new lines to (Claude's or Codex's incremental parser). */
+interface TranscriptAccumulator {
+  readonly lineCount: number;
+  append(entries: ReturnType<typeof parseJsonlLines>): void;
+  messages(): ConversationMessage[];
+  tasks(): TaskItem[];
+  compactionSince(
+    lastCheckedLine: number,
+    sessionId: string,
+    sessionName: string,
+    projectPath: string
+  ): { event: CompactionEvent | null; lastLine: number };
+}
+
+/** The accumulator for a transcript file: Codex rollouts by name, Claude otherwise. */
+function accumulatorFor(file: string): TranscriptAccumulator {
+  return isCodexRollout(file) ? new CodexAccumulator() : new ConversationAccumulator();
+}
+
 interface FileState {
-  acc: ConversationAccumulator;
+  acc: TranscriptAccumulator;
   offset: number;
   dev: number;
   ino: number;
@@ -138,9 +159,9 @@ export class TranscriptCache {
     );
   }
 
-  private fresh(s: StatLike, data: Buffer, t0: number): FileState {
+  private fresh(file: string, s: StatLike, data: Buffer, t0: number): FileState {
     this.stats.full++;
-    const acc = new ConversationAccumulator();
+    const acc = accumulatorFor(file);
     const { entries, used } = consumeLines(data);
     acc.append(entries);
     impact.recordTranscriptParse(data.length, performance.now() - t0, true);
@@ -227,7 +248,7 @@ export class TranscriptCache {
       this.files.delete(file);
       return null;
     }
-    const st = this.fresh(s, data, t0);
+    const st = this.fresh(file, s, data, t0);
     this.touch(file, st);
     return snapshotOf(st);
   }
@@ -291,7 +312,7 @@ export class TranscriptCache {
       // A concurrent reader may have stored a state meanwhile; a full read is
       // complete and correct on its own, so last writer wins (a slightly older
       // one just catches up from its offset next time: the prefix is the same).
-      const st = this.fresh(s, data, t0);
+      const st = this.fresh(file, s, data, t0);
       this.touch(file, st);
       return snapshotOf(st);
     }

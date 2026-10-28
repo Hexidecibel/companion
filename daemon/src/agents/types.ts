@@ -1,6 +1,6 @@
 /**
  * The seam between the daemon and a coding agent CLI (Claude Code today,
- * OpenAI Codex CLI next). An adapter has two halves:
+ * OpenAI Codex CLI). An adapter has two halves:
  *
  * - transcript: where the agent writes its session logs, how to read them into
  *   the agent-neutral ConversationMessage model, and what they mean
@@ -23,8 +23,8 @@ import type { ToolRole, ToolRoleTable } from './roles';
 
 export type { ToolRole, ToolRoleTable } from './roles';
 
-/** Registered agents. Only Claude Code today. */
-export type AgentId = 'claude';
+/** Registered agents. */
+export type AgentId = 'claude' | 'codex';
 
 // ---------------------------------------------------------------------------
 // Transcript side
@@ -79,6 +79,8 @@ export interface AgentTranscript {
   detectIdle(messages: ConversationMessage[]): boolean;
   getPendingApprovalTools(messages: ConversationMessage[]): Array<{ name: string; id: string }>;
   getSessionStatus(conversationPath: string, isProcessRunning: boolean): SessionStatus;
+  /** Status-bar text while the agent works (undefined = nothing to show). */
+  detectCurrentActivity(messages: ConversationMessage[]): string | undefined;
 
   edits: AgentEditExtractor;
   /** Present when the agent has subagents with their own transcripts. */

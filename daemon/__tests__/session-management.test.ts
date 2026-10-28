@@ -7,6 +7,7 @@
  * These tests exercise the WebSocketHandler with a mock TmuxManager and Watcher
  * to verify end-to-end session management behavior.
  */
+import { defaultAgent } from '../src/agents';
 import { EventEmitter } from 'events';
 import WebSocket from 'ws';
 import { Server } from 'http';
@@ -56,6 +57,7 @@ function createMockWatcher() {
   const conversations = new Map<string, any>();
 
   watcher.getMessages = jest.fn().mockReturnValue([]);
+  watcher.agentFor = jest.fn(() => defaultAgent());
   watcher.getStatus = jest.fn((sessionId?: string) => {
     const id = sessionId || watcher.getActiveSessionId();
     const conv = conversations.get(id);

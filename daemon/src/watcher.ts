@@ -29,7 +29,24 @@ import {
   getRecentActivity,
   isTrivialHighlights,
 } from './parser';
-import { defaultAgent, isInteractiveTool, isSubagentTool, requiresApproval } from './agents';
+import {
+  codexAdapter,
+  defaultAgent,
+  getAgentAdapter,
+  isInteractiveTool,
+  isSubagentTool,
+  requiresApproval,
+  type AgentAdapter,
+  type AgentId,
+} from './agents';
+import {
+  CodexRolloutIndex,
+  codexProcessInfo,
+  findCodexPid,
+  isCodexRollout,
+  resolveCodexHome,
+  rolloutIdOf,
+} from './agents/codex/discovery';
 import { detectTurnEndError } from './turn-error';
 import {
   TMUX_PATH_REFRESH_INTERVAL_MS,
@@ -128,9 +145,25 @@ export interface FileChangeOptions {
   quiet?: boolean;
 }
 
+/** Key in the path maps for a Codex session (Codex transcripts are not cwd-keyed). */
+const CODEX_KEY = 'codex:';
+
+export interface SessionWatcherOptions {
+  /** Codex home (config `codex_home`); default $CODEX_HOME, beside code_home, ~/.codex. */
+  codexHome?: string;
+}
+
 export class SessionWatcher extends EventEmitter {
-  /** The agent whose transcripts / TUI this watcher reads (Claude Code only today). */
+  /** The default agent (Claude Code): its transcripts are watched under code_home. */
   private readonly agent = defaultAgent();
+  /** Codex CLI rollouts (read-only): found per pane by process cwd + start time. */
+  private readonly codexIndex: CodexRolloutIndex;
+  /** tmux session name -> agent, for sessions that do not run Claude (Codex). */
+  private sessionAgents: Map<string, AgentId> = new Map();
+  /** tmux session name -> the Codex rollout it writes. */
+  private codexBySession: Map<string, { file: string; convId: string; cwd: string }> = new Map();
+  /** Codex rollout path -> tmux session name (reverse of codexBySession). */
+  private codexFiles: Map<string, string> = new Map();
   private codeHome: string;
   private watcher: chokidar.FSWatcher | null = null;
   private loggedReadonlySharedState = false;
@@ -190,9 +223,12 @@ export class SessionWatcher extends EventEmitter {
   private static readonly FEEDBACK_POLL_INTERVAL_MS = 3000;
   private static readonly FEEDBACK_POLL_MAX_ATTEMPTS = 10;
 
-  constructor(codeHome: string, inputInjector?: InputInjector) {
+  constructor(codeHome: string, inputInjector?: InputInjector, opts: SessionWatcherOptions = {}) {
     super();
     this.codeHome = codeHome;
+    this.codexIndex = new CodexRolloutIndex(
+      resolveCodexHome({ configured: opts.codexHome, codeHome })
+    );
     this.inputInjector = inputInjector || null;
     this.loadPersistedMappings();
     this.loadPersistedSessions();
@@ -498,6 +534,8 @@ export class SessionWatcher extends EventEmitter {
       const nextPathBySession = new Map<string, string>();
       const nextWorkingDirs = new Map<string, string>();
       const nextIdentity = new Map<string, SessionIdentity>();
+      const nextAgents = new Map<string, AgentId>();
+      const codexPanes: Array<{ name: string; pid: number }> = [];
 
       for (const row of snap.sessions) {
         const name = row.name;
@@ -511,12 +549,22 @@ export class SessionWatcher extends EventEmitter {
           const workingDir = row.workingDir;
           if (!workingDir) continue;
 
-          const encodedPath = this.agent.transcript.encodeProjectDir(workingDir);
+          // Claude first; a pane without claude may run Codex (both /proc only).
+          let claudePid = await this.agent.transcript.findAgentPid(row.panePid);
+          let encodedPath = this.agent.transcript.encodeProjectDir(workingDir);
+          if (!claudePid) {
+            const codexPid = await findCodexPid(row.panePid);
+            if (codexPid) {
+              claudePid = codexPid;
+              encodedPath = CODEX_KEY + name;
+              nextAgents.set(name, 'codex');
+              codexPanes.push({ name, pid: codexPid });
+            }
+          }
           nextProjectPaths.add(encodedPath);
           nextSessionByPath.set(encodedPath, name);
           nextPathBySession.set(name, encodedPath);
           nextWorkingDirs.set(name, workingDir);
-          const claudePid = await this.agent.transcript.findAgentPid(row.panePid);
           nextIdentity.set(name, {
             created: row.created,
             panePid: row.panePid,
@@ -532,6 +580,10 @@ export class SessionWatcher extends EventEmitter {
         }
       }
 
+      // Codex rollouts, newest process first so it claims its own thread
+      // before an older Codex in the same folder (fs reads only, cached meta).
+      const nextCodex = await this.resolveCodexRollouts(codexPanes);
+
       // Swap (no await in between; the containers keep their identity).
       this.tmuxProjectPaths.clear();
       for (const p of nextProjectPaths) this.tmuxProjectPaths.add(p);
@@ -543,6 +595,14 @@ export class SessionWatcher extends EventEmitter {
       swap(this.tmuxPathBySession, nextPathBySession);
       swap(this.tmuxSessionWorkingDirs, nextWorkingDirs);
       swap(this.tmuxSessionIdentity, nextIdentity);
+      swap(this.sessionAgents, nextAgents);
+      const codexGone = [...this.codexFiles.keys()].filter(
+        (f) => ![...nextCodex.values()].some((c) => c.file === f)
+      );
+      swap(this.codexBySession, nextCodex);
+      this.codexFiles.clear();
+      for (const [name, c] of nextCodex) this.codexFiles.set(c.file, name);
+      for (const f of codexGone) this.watcher?.unwatch(f);
 
       // Every 5 s: log only when the tracked set changes.
       const trackingLog = `Watcher: Tracking ${this.tmuxProjectPaths.size} paths from ${this.tmuxPathBySession.size} tagged tmux session(s)`;
@@ -550,6 +610,8 @@ export class SessionWatcher extends EventEmitter {
         console.log(trackingLog);
       }
       this.lastTrackingLog = trackingLog;
+
+      await this.applyCodexMappings();
 
       // Prune conversations that no longer match any active tagged tmux path
       if (this.tmuxFilterEnabled && this.tmuxProjectPaths.size > 0) {
@@ -599,10 +661,79 @@ export class SessionWatcher extends EventEmitter {
       this.tmuxConversationHistory.clear();
       this.tmuxSessionIdentity.clear();
       this.mappingIdentity.clear();
+      this.sessionAgents.clear();
+      this.codexBySession.clear();
+      this.codexFiles.clear();
     }
   }
 
+  /** Rollout per Codex pane (see agents/codex/discovery.ts); a pane with none yet is left out. */
+  private async resolveCodexRollouts(
+    panes: Array<{ name: string; pid: number }>
+  ): Promise<Map<string, { file: string; convId: string; cwd: string }>> {
+    const out = new Map<string, { file: string; convId: string; cwd: string }>();
+    if (panes.length === 0) return out;
+    const infos: Array<{
+      name: string;
+      info: NonNullable<Awaited<ReturnType<typeof codexProcessInfo>>>;
+    }> = [];
+    for (const p of panes) {
+      const info = await codexProcessInfo(p.pid);
+      if (info) infos.push({ name: p.name, info });
+    }
+    infos.sort((a, b) => (b.info.startedAt ?? 0) - (a.info.startedAt ?? 0));
+    const claimed = new Set<string>();
+    for (const { name, info } of infos) {
+      try {
+        const hit = await this.codexIndex.findRollout(info, claimed);
+        if (!hit) continue;
+        claimed.add(hit.file);
+        out.set(name, { file: hit.file, convId: hit.id, cwd: hit.meta.cwd });
+      } catch {
+        /* unreadable codex home: no mapping this round */
+      }
+    }
+    return out;
+  }
+
+  /**
+   * Direct session -> conversation mappings for Codex panes (exact from
+   * discovery, no path heuristics), watch their rollouts and load new ones.
+   */
+  private async applyCodexMappings(): Promise<void> {
+    for (const [name, c] of this.codexBySession) {
+      if (this.tmuxConversationIds.get(name) !== c.convId) {
+        console.log(`Watcher: Codex session ${name} -> ${c.convId.substring(0, 8)} (${c.file})`);
+        this.setConversationMapping(name, c.convId);
+      }
+      this.newlyCreatedSessions.delete(name);
+      if (this.watcher && !this.watchedCodexFiles.has(c.file)) {
+        this.watcher.add(c.file);
+        this.watchedCodexFiles.add(c.file);
+      }
+      if (!this.conversations.has(c.convId)) {
+        await this.processFileChangeAsync(c.file, c.convId);
+      }
+    }
+    for (const f of [...this.watchedCodexFiles]) {
+      if (!this.codexFiles.has(f)) this.watchedCodexFiles.delete(f);
+    }
+  }
+
+  private watchedCodexFiles = new Set<string>();
+
+  /** The agent running in a tmux session (Claude unless a Codex process was found). */
+  agentFor(sessionId?: string | null): AgentAdapter {
+    return getAgentAdapter(sessionId ? this.sessionAgents.get(sessionId) : undefined);
+  }
+
+  /** The agent whose transcript a file is. */
+  private agentForFile(filePath: string): AgentAdapter {
+    return isCodexRollout(filePath) ? codexAdapter : this.agent;
+  }
+
   private isFromTmuxSession(filePath: string): boolean {
+    if (isCodexRollout(filePath)) return this.codexFiles.has(filePath);
     if (!this.tmuxFilterEnabled || this.tmuxProjectPaths.size === 0) {
       return true; // No filtering if disabled or no tmux sessions
     }
@@ -998,7 +1129,8 @@ export class SessionWatcher extends EventEmitter {
         `Watcher: processFileChange parse took ${t1 - t0}ms + highlights ${t2 - t1}ms = ${t2 - t0}ms (${messages.length} msgs) for ${convId}`
       );
     }
-    const parserSaysWaiting = this.agent.transcript.detectWaitingForInput(messages);
+    const agent = this.agentForFile(filePath);
+    const parserSaysWaiting = agent.transcript.detectWaitingForInput(messages);
 
     // Cancel any pending waiting debounce for this conversation (file changed, re-evaluate)
     const existingWaitTimer = this.waitingDebounceTimers.get(convId);
@@ -1014,7 +1146,7 @@ export class SessionWatcher extends EventEmitter {
     const hasInteractivePending =
       lastMsg?.type === 'assistant' &&
       lastMsg.toolCalls?.some(
-        (tc) => tc.status === 'pending' && isInteractiveTool(tc.name, this.agent.tools)
+        (tc) => tc.status === 'pending' && isInteractiveTool(tc.name, agent.tools)
       );
 
     // Get previous tracking state for compaction detection
@@ -1041,8 +1173,8 @@ export class SessionWatcher extends EventEmitter {
         lastMsg.toolCalls?.some(
           (tc) =>
             tc.status === 'pending' &&
-            requiresApproval(tc.name, this.agent.tools) &&
-            !isSubagentTool(tc.name, this.agent.tools)
+            requiresApproval(tc.name, agent.tools) &&
+            !isSubagentTool(tc.name, agent.tools)
         );
       if (hasPendingApprovalTools && quiet) {
         // Quiet (on-demand) load of an untouched file: nothing is still running,
@@ -1192,7 +1324,7 @@ export class SessionWatcher extends EventEmitter {
       // Cache-only load: record the pending-tool set as already seen so a later
       // real change does not replay a stale approval, and emit nothing (no
       // status-change -> escalation/push, no pending-approval -> auto-approve).
-      const quietPending = this.agent.transcript.getPendingApprovalTools(messages);
+      const quietPending = agent.transcript.getPendingApprovalTools(messages);
       tracked.lastEmittedPendingTools = quietPending
         .map((t) => t.id)
         .sort()
@@ -1287,13 +1419,19 @@ export class SessionWatcher extends EventEmitter {
 
     // Emit status-change if waiting status changed OR if there's a new message
     const lastMessage = messages[messages.length - 1];
-    const currentActivity = detectCurrentActivity(messages);
+    const currentActivity = agent.transcript.detectCurrentActivity(messages);
 
     // Feedback prompt polling: start when transitioning to waiting with no pending tool approvals
     const hasPendingToolCalls =
       lastMessage?.type === 'assistant' &&
       lastMessage.toolCalls?.some((tc) => tc.status === 'pending');
-    if (waitingStatusChanged && conversationWaiting && !hasPendingToolCalls) {
+    if (
+      waitingStatusChanged &&
+      conversationWaiting &&
+      !hasPendingToolCalls &&
+      agent === this.agent
+    ) {
+      // Claude's end-of-session "How is Claude doing" prompt only.
       this.startFeedbackPolling(sessionId);
     } else if (waitingStatusChanged && !conversationWaiting) {
       // Session stopped waiting — clear feedback prompt
@@ -1327,7 +1465,7 @@ export class SessionWatcher extends EventEmitter {
     // Check for pending tools - only emit when the set of pending tool IDs CHANGES.
     // Using tool IDs (not just names) so that consecutive same-named tools
     // (e.g., Bash A completes, Bash B pending) are correctly detected as new.
-    const pendingTools = this.agent.transcript.getPendingApprovalTools(messages);
+    const pendingTools = agent.transcript.getPendingApprovalTools(messages);
     const pendingKey =
       pendingTools.length > 0
         ? pendingTools
@@ -1348,6 +1486,11 @@ export class SessionWatcher extends EventEmitter {
   }
 
   private extractProjectPath(filePath: string): string {
+    if (isCodexRollout(filePath)) {
+      const name = this.codexFiles.get(filePath);
+      const c = name ? this.codexBySession.get(name) : undefined;
+      return c?.cwd || (name && this.tmuxSessionWorkingDirs.get(name)) || '';
+    }
     // Extract project path from conversation file path
     // e.g., ~/.claude/projects/-Users-foo-bar/abc123.jsonl -> /Users/foo/bar
     const projectsDir = this.agent.transcript.projectsDir(this.codeHome);
@@ -1438,6 +1581,8 @@ export class SessionWatcher extends EventEmitter {
   }
 
   private generateSessionId(filePath: string): string {
+    const codexId = rolloutIdOf(filePath);
+    if (codexId) return codexId;
     // Use the JSONL filename (UUID) as internal conversation ID
     const projectsDir = this.agent.transcript.projectsDir(this.codeHome);
     const relative = path.relative(projectsDir, filePath);
@@ -1456,6 +1601,10 @@ export class SessionWatcher extends EventEmitter {
    * e.g., ~/.claude/projects/-home-hexi-foo/abc.jsonl -> "-home-hexi-foo"
    */
   private getEncodedDirName(filePath: string): string {
+    if (isCodexRollout(filePath)) {
+      const name = this.codexFiles.get(filePath);
+      return name ? CODEX_KEY + name : '';
+    }
     const projectsDir = this.agent.transcript.projectsDir(this.codeHome);
     const relative = path.relative(projectsDir, filePath);
     return relative.split(path.sep)[0] || '';
@@ -1769,6 +1918,7 @@ export class SessionWatcher extends EventEmitter {
     // Strategy 1: PID-based detection via /proc/fd (works if Claude keeps files open)
     for (const [sessionName, ePath] of this.tmuxPathBySession) {
       if (this.tmuxConversationIds.has(sessionName)) continue;
+      if (this.sessionAgents.has(sessionName)) continue; // Codex: mapped by applyCodexMappings
       if (this.newlyCreatedSessions.has(sessionName)) continue; // Don't map until JSONL exists
       const convId = await this.detectConversationForSession(sessionName);
       if (convId) {
@@ -1974,6 +2124,13 @@ export class SessionWatcher extends EventEmitter {
       return true;
     }
 
+    // Codex: the rollout is known exactly.
+    const codex = this.codexBySession.get(sessionId);
+    if (codex) {
+      this.processFileChange(codex.file, codex.convId, opts);
+      return this.resolveConversationForSession(sessionId) !== null;
+    }
+
     // Need the encoded project path to find files on disk
     let encodedPath = this.tmuxPathBySession.get(sessionId);
 
@@ -2055,6 +2212,7 @@ export class SessionWatcher extends EventEmitter {
     try {
       const projectsDir = this.agent.transcript.projectsDir(this.codeHome);
       for (const encoded of [...this.tmuxProjectPaths]) {
+        if (encoded.startsWith(CODEX_KEY)) continue; // Codex rollouts are watched one by one
         const dir = path.join(projectsDir, encoded);
         let names: string[];
         try {
@@ -2241,7 +2399,7 @@ export class SessionWatcher extends EventEmitter {
       lastActivity: lastMessage?.timestamp || 0,
       conversationId: tracked.path,
       projectPath: tracked.projectPath,
-      currentActivity: detectCurrentActivity(messages),
+      currentActivity: this.agentForFile(tracked.path).transcript.detectCurrentActivity(messages),
       recentActivity: getRecentActivity(messages, RECENT_ACTIVITY_LIMIT),
       feedbackPrompt: feedbackPrompt || undefined,
     };
@@ -2412,7 +2570,7 @@ export class SessionWatcher extends EventEmitter {
     this.emit('status-change', {
       sessionId,
       isWaitingForInput: this.isWaitingForInput,
-      currentActivity: detectCurrentActivity(messages),
+      currentActivity: this.agentForFile(best.conv.path).transcript.detectCurrentActivity(messages),
       lastMessage: messages[messages.length - 1],
       feedbackPrompt: this.feedbackSessionId === sessionId ? this.feedbackPrompt : undefined,
     });
@@ -2506,7 +2664,9 @@ export class SessionWatcher extends EventEmitter {
     if (!resolved) return;
 
     const messages = resolved.conv.cachedMessages || this.readMessagesSync(resolved.conv.path);
-    const pendingTools = this.agent.transcript.getPendingApprovalTools(messages);
+    const pendingTools = this.agentForFile(resolved.conv.path).transcript.getPendingApprovalTools(
+      messages
+    );
     if (pendingTools.length > 0) {
       this.emit('pending-approval', {
         sessionId: targetTmux,
@@ -2599,9 +2759,12 @@ export class SessionWatcher extends EventEmitter {
 
         // Use cached messages for activity detection instead of re-reading large files
         const messages = conv.cachedMessages;
+        const convAgent = this.agentForFile(conv.path);
         currentActivity = messages
-          ? detectCurrentActivity(messages)
-          : detectCurrentActivityFast(conv.path);
+          ? convAgent.transcript.detectCurrentActivity(messages)
+          : convAgent === this.agent
+            ? detectCurrentActivityFast(conv.path)
+            : undefined;
 
         // Main thread idle while its background agents / shells run (or a tool
         // running in bypass mode): working, never waiting (background-work.ts).

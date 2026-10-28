@@ -39,6 +39,8 @@ export interface DaemonConfig {
   // Other config
   tmuxSession: string;
   codeHome: string;
+  /** Codex CLI home (config `codex_home`); default $CODEX_HOME, beside code_home, ~/.codex. */
+  codexHome?: string;
   mdnsEnabled: boolean;
   fcmCredentialsPath?: string;
   pushDelayMs: number;

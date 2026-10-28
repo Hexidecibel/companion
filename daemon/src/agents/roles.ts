@@ -5,11 +5,12 @@
  * (stuck signals, background work, subagents, review ledger, Herald text) ask
  * "is this an edit?" here instead of matching Claude tool names themselves.
  *
- * Only the default agent (Claude Code) exists today; its table lives in
- * `claude/tools.ts`. When another agent is added, its adapter carries its own
- * table and callers that know the session's agent pass it explicitly.
+ * Claude Code (the default) has its table in `claude/tools.ts`, Codex in
+ * `codex/tools.ts`; callers that know the session's agent pass its table
+ * (`adapter.tools`) explicitly, everything else defaults to Claude's.
  */
 import { CLAUDE_TOOL_ROLES, CLAUDE_APPROVAL_TOOLS } from './claude/tools';
+import { CODEX_TOOL_ROLES, CODEX_APPROVAL_TOOLS } from './codex/tools';
 
 export type ToolRole =
   | 'edit'
@@ -34,6 +35,11 @@ export interface ToolRoleTable {
 export const CLAUDE_TOOL_TABLE: ToolRoleTable = {
   roles: CLAUDE_TOOL_ROLES,
   approvalTools: CLAUDE_APPROVAL_TOOLS,
+};
+
+export const CODEX_TOOL_TABLE: ToolRoleTable = {
+  roles: CODEX_TOOL_ROLES,
+  approvalTools: CODEX_APPROVAL_TOOLS,
 };
 
 /** Role of a tool. Defaults to Claude Code's table (the only agent today). */

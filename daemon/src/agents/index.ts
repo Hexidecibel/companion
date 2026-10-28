@@ -1,10 +1,11 @@
 /**
- * Agent registry. Claude Code is the default and only adapter; every session
- * is a Claude session until a second adapter (Codex) lands and sessions carry
- * their agent id.
+ * Agent registry. Claude Code is the default; Codex CLI is the second adapter
+ * (read-only: transcript + status). The watcher decides per tmux session which
+ * agent runs in it (`SessionWatcher.agentFor`).
  */
 import type { AgentAdapter, AgentId } from './types';
 import { claudeAdapter } from './claude';
+import { codexAdapter } from './codex';
 
 export * from './types';
 export {
@@ -16,11 +17,13 @@ export {
   requiresApproval,
 } from './roles';
 export { claudeAdapter } from './claude';
+export { codexAdapter } from './codex';
 
 export const DEFAULT_AGENT_ID: AgentId = 'claude';
 
 const ADAPTERS: Record<AgentId, AgentAdapter> = {
   claude: claudeAdapter,
+  codex: codexAdapter,
 };
 
 /** The adapter for an agent id; unknown / missing ids get the default (Claude). */

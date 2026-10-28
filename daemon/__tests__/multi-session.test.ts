@@ -14,6 +14,7 @@
  * - WebSocket: subscribe with sessionId filtering
  * - Edge cases: session pruning, auto-select, concurrent switches
  */
+import { defaultAgent } from '../src/agents';
 import { EventEmitter } from 'events';
 import WebSocket from 'ws';
 import { Server } from 'http';
@@ -99,6 +100,7 @@ function createMockWatcher() {
   });
 
   watcher.getActiveSessionId = jest.fn().mockReturnValue(null);
+  watcher.agentFor = jest.fn(() => defaultAgent());
 
   watcher.setActiveSession = jest.fn((id: string) => {
     if (conversations.has(id)) {

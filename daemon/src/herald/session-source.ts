@@ -9,7 +9,7 @@
 import { runTmux } from '../impact/sub';
 import * as path from 'path';
 import { classifyLocalCommands, getPendingApprovalTools, parseLocalCommandPart } from '../parser';
-import { defaultAgent } from '../agents';
+import { defaultAgent, type AgentAdapter } from '../agents';
 import type { ConversationMessage } from '../types';
 import { detectTurnEndError } from '../turn-error';
 import { BoundedMap } from '../utils';
@@ -260,6 +260,8 @@ export interface LocalSourceDeps {
      * something asks for them.
      */
     ensureConversationLoaded?(sessionId: string, opts?: { quiet?: boolean }): boolean;
+    /** The agent running in a session (Claude when absent). */
+    agentFor?(sessionId: string): AgentAdapter;
   };
   injector: {
     sendInput(input: string, targetSession?: string): Promise<boolean>;
@@ -489,7 +491,8 @@ export class LocalSessionSource implements SessionSource {
         if (strict) throw new Error(`${tmuxName}'s screen came back empty`);
         return null;
       }
-      const choice = defaultAgent().terminal.detectActiveChoicePrompt(pane);
+      const agent = this.deps.watcher.agentFor?.(tmuxName) ?? defaultAgent();
+      const choice = agent.terminal.detectActiveChoicePrompt(pane);
       if (!choice || choice.options.length < 2) return null;
       const options = choice.options.map((o) => ({
         label: o.label,

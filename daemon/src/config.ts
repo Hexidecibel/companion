@@ -236,6 +236,7 @@ export function loadConfig(): DaemonConfig {
         keyPath: parsed.key_path,
         tmuxSession: parsed.tmux_session,
         codeHome: parsed.code_home || parsed.claude_home,
+        codexHome: parsed.codex_home,
         mdnsEnabled: parsed.mdns_enabled,
         fcmCredentialsPath: parsed.fcm_credentials_path,
         pushDelayMs: parsed.push_delay_ms,

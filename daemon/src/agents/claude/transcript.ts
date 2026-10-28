@@ -4,6 +4,7 @@
  */
 import * as path from 'path';
 import {
+  detectCurrentActivity,
   detectIdle,
   detectWaitingForInput,
   getPendingApprovalTools,
@@ -37,6 +38,7 @@ export const claudeTranscript: AgentTranscript = {
   detectIdle,
   getPendingApprovalTools,
   getSessionStatus,
+  detectCurrentActivity,
   edits: claudeEdits,
   subagents: claudeSubagents,
 };

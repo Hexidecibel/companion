@@ -1,7 +1,6 @@
 import * as fs from 'fs';
 import { HandlerContext, MessageHandler } from '../handler-context';
 import { DEFAULT_TOOL_CONFIG } from '../tool-config';
-import { defaultAgent } from '../agents';
 import {
   DEFAULT_TERMINAL_LINES,
   CLI_READY_POLL_INTERVAL_MS,
@@ -52,7 +51,9 @@ export function registerTmuxHandlers(ctx: HandlerContext): Record<string, Messag
           // paginated history captures should never drive the selector.
           const choicePrompt =
             (termPayload.offset || 0) === 0
-              ? defaultAgent().terminal.detectActiveChoicePrompt(output)
+              ? ctx.watcher
+                  .agentFor(termPayload.sessionName)
+                  .terminal.detectActiveChoicePrompt(output)
               : null;
           ctx.send(client.ws, {
             type: 'terminal_output',

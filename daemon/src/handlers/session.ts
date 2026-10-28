@@ -239,7 +239,9 @@ export function registerSessionHandlers(ctx: HandlerContext): Record<string, Mes
         if (!alreadyTappable) {
           try {
             const paneText = await ctx.injector.captureTmuxPane(tmuxNameForPending);
-            const choice = defaultAgent().terminal.detectActiveChoicePrompt(paneText);
+            const choice = ctx.watcher
+              .agentFor(tmuxNameForPending)
+              .terminal.detectActiveChoicePrompt(paneText);
             if (choice && choice.options.length >= 2) {
               const liveQuestion: Question = {
                 question: choice.question || 'Select an option',

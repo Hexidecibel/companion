@@ -113,7 +113,7 @@ async function main(): Promise<void> {
 
   // Initialize components
   const injector = new InputInjector(config.tmuxSession);
-  const watcher = new SessionWatcher(config.codeHome, injector);
+  const watcher = new SessionWatcher(config.codeHome, injector, { codexHome: config.codexHome });
   const subAgentWatcher = new SubAgentWatcher(config.codeHome, {
     mode:
       config.subagents?.enabled === false

@@ -75,19 +75,19 @@ export function sanitizeIdentity(raw: unknown): SessionIdentity | undefined {
 }
 
 /**
- * The claude process under a pane (breadth-first over /proc children, at most
- * 3 levels and 64 processes). Plain file reads, no subprocess; null when /proc
- * is unavailable (macOS) or no claude process runs.
+ * The first process (breadth first, at most 4 levels / 64 pids, main-thread
+ * children only) under a tmux pane whose argv matches `isMatch`, from /proc.
  */
-export async function findClaudePid(panePid: number, procRoot = '/proc'): Promise<number | null> {
+export async function findPidInPane(
+  panePid: number,
+  isMatch: (argv: string[]) => boolean,
+  procRoot = '/proc'
+): Promise<number | null> {
   if (!panePid) return null;
-  const isClaude = async (pid: number): Promise<boolean> => {
+  const matches = async (pid: number): Promise<boolean> => {
     try {
       const cmd = await fs.promises.readFile(path.join(procRoot, String(pid), 'cmdline'), 'utf-8');
-      const argv = cmd.split('\0').filter(Boolean);
-      return argv
-        .slice(0, 2)
-        .some((a) => path.basename(a) === 'claude' || /\/claude(-code)?\/cli\.(m?js)$/.test(a));
+      return isMatch(cmd.split('\0').filter(Boolean));
     } catch {
       return false;
     }
@@ -112,12 +112,28 @@ export async function findClaudePid(panePid: number, procRoot = '/proc'): Promis
     const next: number[] = [];
     for (const pid of level) {
       if (++seen > 64) return null;
-      if (await isClaude(pid)) return pid;
+      if (await matches(pid)) return pid;
       if (depth < 3) next.push(...(await children(pid)));
     }
     level = next;
   }
   return null;
+}
+
+/** argv of a Claude Code process (`claude` binary or its cli.js under node). */
+export function isClaudeArgv(argv: string[]): boolean {
+  return argv
+    .slice(0, 2)
+    .some((a) => path.basename(a) === 'claude' || /\/claude(-code)?\/cli\.(m?js)$/.test(a));
+}
+
+/**
+ * The claude process under a pane (breadth-first over /proc children, at most
+ * 3 levels and 64 processes). Plain file reads, no subprocess; null when /proc
+ * is unavailable (macOS) or no claude process runs.
+ */
+export async function findClaudePid(panePid: number, procRoot = '/proc'): Promise<number | null> {
+  return findPidInPane(panePid, isClaudeArgv, procRoot);
 }
 
 /**

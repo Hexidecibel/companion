@@ -1,5 +1,12 @@
 /* eslint-disable @typescript-eslint/unbound-method -- identity checks on wrapped functions */
-import { claudeAdapter, defaultAgent, getAgentAdapter, listAgentIds, DEFAULT_AGENT_ID } from '..';
+import {
+  claudeAdapter,
+  codexAdapter,
+  defaultAgent,
+  getAgentAdapter,
+  listAgentIds,
+  DEFAULT_AGENT_ID,
+} from '..';
 import { claudeCommand } from '../../tmux-manager';
 import { classifyStartupPane } from '../../herald/spawn';
 import { encodeProjectDir, findClaudePid } from '../../session-identity';
@@ -7,13 +14,14 @@ import { parseConversationFile, detectActiveChoicePrompt } from '../../parser';
 import { readPromptBox, detectOverlay } from '../../prompt-guard';
 
 describe('agent registry', () => {
-  it('has Claude as the default and only adapter', () => {
+  it('has Claude as the default adapter and Codex as the second', () => {
     expect(DEFAULT_AGENT_ID).toBe('claude');
-    expect(listAgentIds()).toEqual(['claude']);
+    expect(listAgentIds()).toEqual(['claude', 'codex']);
     expect(defaultAgent()).toBe(claudeAdapter);
     expect(getAgentAdapter()).toBe(claudeAdapter);
     expect(getAgentAdapter('claude')).toBe(claudeAdapter);
-    expect(getAgentAdapter('codex')).toBe(claudeAdapter);
+    expect(getAgentAdapter('codex')).toBe(codexAdapter);
+    expect(getAgentAdapter('gemini')).toBe(claudeAdapter);
     expect(getAgentAdapter('__proto__')).toBe(claudeAdapter);
   });
 
