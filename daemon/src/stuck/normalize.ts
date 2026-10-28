@@ -5,7 +5,7 @@
  * No I/O, no LLM.
  */
 
-import { detectActiveChoicePrompt } from '../parser';
+import { defaultAgent } from '../agents';
 import { clip, fnv1a, oneLine } from '../herald/text';
 
 // eslint-disable-next-line no-control-regex
@@ -314,7 +314,7 @@ export function readPane(text: string): PaneReading {
   const lines = stripAnsi(text || '').split('\n');
   while (lines.length && !lines[lines.length - 1].trim()) lines.pop();
   const tail = lines.slice(-40);
-  let prompt = !!detectActiveChoicePrompt(text || '');
+  let prompt = !!defaultAgent().terminal.detectActiveChoicePrompt(text || '');
   if (!prompt) {
     // A permission box near the bottom with no normal toolbar below it.
     for (let i = tail.length - 1; i >= Math.max(0, tail.length - 25); i--) {

@@ -2,6 +2,7 @@ import { InputInjector } from './input-injector';
 import { TmuxManager } from './tmux-manager';
 import { APPROVAL_SEND_DELAY_MS, AUTO_APPROVAL_MAX_TRACKED_IDS } from './constants';
 import { BoundedSet } from './utils';
+import { defaultAgent } from './agents';
 
 export interface AutoApprovalDeps {
   /** Tools configured for auto-approval in config */
@@ -16,8 +17,8 @@ export class AutoApprovalService {
   private approvedToolIds: BoundedSet<string>;
   private deps: AutoApprovalDeps;
 
-  private static readonly APPROVAL_PROMPT_RE =
-    /\(Y\)es\s*\/\s*\(N\)o|Do you want to (proceed|run|allow|execute)|Approve\?|Allow this|Yes\/No/i;
+  /** The agent's approval-prompt matcher (Claude: agents/claude/terminal.ts). */
+  private static readonly APPROVAL_PROMPT_RE = defaultAgent().terminal.approvalPromptRe;
 
   constructor(deps: AutoApprovalDeps) {
     this.deps = deps;

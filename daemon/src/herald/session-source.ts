@@ -8,12 +8,8 @@
 
 import { runTmux } from '../impact/sub';
 import * as path from 'path';
-import {
-  classifyLocalCommands,
-  detectActiveChoicePrompt,
-  getPendingApprovalTools,
-  parseLocalCommandPart,
-} from '../parser';
+import { classifyLocalCommands, getPendingApprovalTools, parseLocalCommandPart } from '../parser';
+import { defaultAgent } from '../agents';
 import type { ConversationMessage } from '../types';
 import { detectTurnEndError } from '../turn-error';
 import { BoundedMap } from '../utils';
@@ -493,7 +489,7 @@ export class LocalSessionSource implements SessionSource {
         if (strict) throw new Error(`${tmuxName}'s screen came back empty`);
         return null;
       }
-      const choice = detectActiveChoicePrompt(pane);
+      const choice = defaultAgent().terminal.detectActiveChoicePrompt(pane);
       if (!choice || choice.options.length < 2) return null;
       const options = choice.options.map((o) => ({
         label: o.label,

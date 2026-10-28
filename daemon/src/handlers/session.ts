@@ -3,7 +3,8 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { trackedExecAsync } from '../impact/sub';
 import { HandlerContext, MessageHandler } from '../handler-context';
-import { extractHighlights, parseConversationChain, detectActiveChoicePrompt } from '../parser';
+import { extractHighlights, parseConversationChain } from '../parser';
+import { defaultAgent } from '../agents';
 import { WebSocketResponse, Question, ConversationHighlight } from '../types';
 import {
   SLOW_OPERATION_THRESHOLD_MS,
@@ -238,7 +239,7 @@ export function registerSessionHandlers(ctx: HandlerContext): Record<string, Mes
         if (!alreadyTappable) {
           try {
             const paneText = await ctx.injector.captureTmuxPane(tmuxNameForPending);
-            const choice = detectActiveChoicePrompt(paneText);
+            const choice = defaultAgent().terminal.detectActiveChoicePrompt(paneText);
             if (choice && choice.options.length >= 2) {
               const liveQuestion: Question = {
                 question: choice.question || 'Select an option',
@@ -742,7 +743,7 @@ export function registerSessionHandlers(ctx: HandlerContext): Record<string, Mes
         return;
       }
 
-      const projectsDir = path.join(ctx.config.codeHome, 'projects');
+      const projectsDir = defaultAgent().transcript.projectsDir(ctx.config.codeHome);
       const resolved = path.resolve(filePayload.filePath);
       if (!resolved.startsWith(projectsDir)) {
         ctx.send(client.ws, {

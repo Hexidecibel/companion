@@ -4,16 +4,11 @@ import { trackedExecAsync, runTmux } from './impact/sub';
 import { tmuxSnapshot, invalidateTmuxSnapshot } from './tmux-snapshot';
 import * as path from 'path';
 import { startTmuxSession } from './tmux-server';
+import { claudeAdapter } from './agents';
+import type { ClaudePermissionMode } from './agents/claude/terminal';
 
-/** Permission modes the app may start Claude with (`claude --permission-mode`). */
-export type ClaudePermissionMode = 'bypassPermissions';
-
-/** The shell line typed into a new session to start Claude. */
-export function claudeCommand(permissionMode?: ClaudePermissionMode): string {
-  return permissionMode === 'bypassPermissions'
-    ? 'claude --permission-mode bypassPermissions'
-    : 'claude';
-}
+// Launch line + permission modes live in the agent adapter (agents/claude/terminal.ts).
+export { claudeCommand, type ClaudePermissionMode } from './agents/claude/terminal';
 
 const execAsync = trackedExecAsync('tmux-manager');
 const execFileAsync = promisify(execFile);
@@ -158,7 +153,7 @@ export class TmuxManager {
           'send-keys',
           '-t',
           safeName,
-          claudeCommand(opts.permissionMode),
+          claudeAdapter.terminal.launchCommand(opts.permissionMode),
           'Enter',
         ]);
         console.log(`TmuxManager: Started CLI in session "${safeName}"`);

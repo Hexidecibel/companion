@@ -1,8 +1,6 @@
 import * as fs from 'fs';
 import {
   SessionIdentity,
-  encodeProjectDir,
-  findClaudePid,
   identityChanged,
   descendantPids,
   processStartMs,
@@ -26,15 +24,12 @@ import {
 import { InputInjector } from './input-injector';
 import {
   extractHighlights,
-  detectWaitingForInput,
   detectCurrentActivity,
   detectCurrentActivityFast,
   getRecentActivity,
-  getPendingApprovalTools,
-  detectActiveChoicePrompt,
   isTrivialHighlights,
 } from './parser';
-import { APPROVAL_TOOLS } from './tool-config';
+import { defaultAgent, isInteractiveTool, isSubagentTool, requiresApproval } from './agents';
 import { detectTurnEndError } from './turn-error';
 import {
   TMUX_PATH_REFRESH_INTERVAL_MS,
@@ -134,6 +129,8 @@ export interface FileChangeOptions {
 }
 
 export class SessionWatcher extends EventEmitter {
+  /** The agent whose transcripts / TUI this watcher reads (Claude Code only today). */
+  private readonly agent = defaultAgent();
   private codeHome: string;
   private watcher: chokidar.FSWatcher | null = null;
   private loggedReadonlySharedState = false;
@@ -514,12 +511,12 @@ export class SessionWatcher extends EventEmitter {
           const workingDir = row.workingDir;
           if (!workingDir) continue;
 
-          const encodedPath = encodeProjectDir(workingDir);
+          const encodedPath = this.agent.transcript.encodeProjectDir(workingDir);
           nextProjectPaths.add(encodedPath);
           nextSessionByPath.set(encodedPath, name);
           nextPathBySession.set(name, encodedPath);
           nextWorkingDirs.set(name, workingDir);
-          const claudePid = await findClaudePid(row.panePid);
+          const claudePid = await this.agent.transcript.findAgentPid(row.panePid);
           nextIdentity.set(name, {
             created: row.created,
             panePid: row.panePid,
@@ -612,7 +609,7 @@ export class SessionWatcher extends EventEmitter {
 
     // Extract project path from file path
     // e.g., ~/.claude/projects/-Users-foo-bar/uuid.jsonl -> -Users-foo-bar
-    const projectsDir = path.join(this.codeHome, 'projects');
+    const projectsDir = this.agent.transcript.projectsDir(this.codeHome);
     const relativePath = path.relative(projectsDir, filePath);
     const projectDir = relativePath.split(path.sep)[0];
 
@@ -627,7 +624,7 @@ export class SessionWatcher extends EventEmitter {
     if (this.refreshInFlight) await this.refreshInFlight.catch(() => undefined);
     await this.refreshTmuxPaths();
 
-    const projectsDir = path.join(this.codeHome, 'projects');
+    const projectsDir = this.agent.transcript.projectsDir(this.codeHome);
 
     // Watch for .jsonl files in the projects directory
     const pattern = path.join(projectsDir, '**', '*.jsonl');
@@ -769,7 +766,7 @@ export class SessionWatcher extends EventEmitter {
           // Re-broadcast whenever the question CONTENT changes (e.g. a multi-question AUQ
           // advancing to the next question) so the chat keeps pace with the terminal,
           // but stay quiet while the same question lingers across polls.
-          const choice = detectActiveChoicePrompt(paneText);
+          const choice = this.agent.terminal.detectActiveChoicePrompt(paneText);
           if (choice) {
             const sig = [
               choice.header || '',
@@ -895,7 +892,7 @@ export class SessionWatcher extends EventEmitter {
           const snap = await transcriptCache.get(filePath);
           if (!snap) return;
           const messages = snap.messages();
-          if (!detectWaitingForInput(messages)) return;
+          if (!this.agent.transcript.detectWaitingForInput(messages)) return;
 
           // Confirmed: tool is genuinely waiting for input (not just running)
           tracked.isWaitingForInput = true;
@@ -1001,7 +998,7 @@ export class SessionWatcher extends EventEmitter {
         `Watcher: processFileChange parse took ${t1 - t0}ms + highlights ${t2 - t1}ms = ${t2 - t0}ms (${messages.length} msgs) for ${convId}`
       );
     }
-    const parserSaysWaiting = detectWaitingForInput(messages);
+    const parserSaysWaiting = this.agent.transcript.detectWaitingForInput(messages);
 
     // Cancel any pending waiting debounce for this conversation (file changed, re-evaluate)
     const existingWaitTimer = this.waitingDebounceTimers.get(convId);
@@ -1017,7 +1014,7 @@ export class SessionWatcher extends EventEmitter {
     const hasInteractivePending =
       lastMsg?.type === 'assistant' &&
       lastMsg.toolCalls?.some(
-        (tc) => tc.status === 'pending' && ['AskUserQuestion', 'ExitPlanMode'].includes(tc.name)
+        (tc) => tc.status === 'pending' && isInteractiveTool(tc.name, this.agent.tools)
       );
 
     // Get previous tracking state for compaction detection
@@ -1042,7 +1039,10 @@ export class SessionWatcher extends EventEmitter {
       const hasPendingApprovalTools =
         lastMsg?.type === 'assistant' &&
         lastMsg.toolCalls?.some(
-          (tc) => tc.status === 'pending' && APPROVAL_TOOLS.includes(tc.name) && tc.name !== 'Task'
+          (tc) =>
+            tc.status === 'pending' &&
+            requiresApproval(tc.name, this.agent.tools) &&
+            !isSubagentTool(tc.name, this.agent.tools)
         );
       if (hasPendingApprovalTools && quiet) {
         // Quiet (on-demand) load of an untouched file: nothing is still running,
@@ -1192,7 +1192,7 @@ export class SessionWatcher extends EventEmitter {
       // Cache-only load: record the pending-tool set as already seen so a later
       // real change does not replay a stale approval, and emit nothing (no
       // status-change -> escalation/push, no pending-approval -> auto-approve).
-      const quietPending = getPendingApprovalTools(messages);
+      const quietPending = this.agent.transcript.getPendingApprovalTools(messages);
       tracked.lastEmittedPendingTools = quietPending
         .map((t) => t.id)
         .sort()
@@ -1327,7 +1327,7 @@ export class SessionWatcher extends EventEmitter {
     // Check for pending tools - only emit when the set of pending tool IDs CHANGES.
     // Using tool IDs (not just names) so that consecutive same-named tools
     // (e.g., Bash A completes, Bash B pending) are correctly detected as new.
-    const pendingTools = getPendingApprovalTools(messages);
+    const pendingTools = this.agent.transcript.getPendingApprovalTools(messages);
     const pendingKey =
       pendingTools.length > 0
         ? pendingTools
@@ -1350,7 +1350,7 @@ export class SessionWatcher extends EventEmitter {
   private extractProjectPath(filePath: string): string {
     // Extract project path from conversation file path
     // e.g., ~/.claude/projects/-Users-foo-bar/abc123.jsonl -> /Users/foo/bar
-    const projectsDir = path.join(this.codeHome, 'projects');
+    const projectsDir = this.agent.transcript.projectsDir(this.codeHome);
     const relative = path.relative(projectsDir, filePath);
     const parts = relative.split(path.sep);
 
@@ -1358,7 +1358,7 @@ export class SessionWatcher extends EventEmitter {
       const encoded = parts[0];
       // Exact: a live session's working directory that encodes to this name
       for (const dir of this.tmuxSessionWorkingDirs.values()) {
-        if (encodeProjectDir(dir) === encoded) return dir;
+        if (this.agent.transcript.encodeProjectDir(dir) === encoded) return dir;
       }
       // Smart decode: try to find which interpretation of dashes is correct
       // by checking if the path exists on the filesystem (memoized: this runs
@@ -1439,7 +1439,7 @@ export class SessionWatcher extends EventEmitter {
 
   private generateSessionId(filePath: string): string {
     // Use the JSONL filename (UUID) as internal conversation ID
-    const projectsDir = path.join(this.codeHome, 'projects');
+    const projectsDir = this.agent.transcript.projectsDir(this.codeHome);
     const relative = path.relative(projectsDir, filePath);
     const parts = relative.split(path.sep);
     // Skip files outside the projects directory (like history.jsonl in root)
@@ -1456,7 +1456,7 @@ export class SessionWatcher extends EventEmitter {
    * e.g., ~/.claude/projects/-home-hexi-foo/abc.jsonl -> "-home-hexi-foo"
    */
   private getEncodedDirName(filePath: string): string {
-    const projectsDir = path.join(this.codeHome, 'projects');
+    const projectsDir = this.agent.transcript.projectsDir(this.codeHome);
     const relative = path.relative(projectsDir, filePath);
     return relative.split(path.sep)[0] || '';
   }
@@ -1610,7 +1610,7 @@ export class SessionWatcher extends EventEmitter {
   }
 
   private async detectConversationForSessionInner(sessionName: string): Promise<string | null> {
-    const projectsDir = path.join(this.codeHome, 'projects');
+    const projectsDir = this.agent.transcript.projectsDir(this.codeHome);
     try {
       // Pane root pid from the last refresh (the shared tmux snapshot), so no
       // tmux call here; the root must still be alive.
@@ -1677,7 +1677,7 @@ export class SessionWatcher extends EventEmitter {
         // Conversation not loaded yet — check if file exists on disk before pruning
         const ePath = this.tmuxPathBySession.get(name);
         if (ePath) {
-          const convFile = path.join(this.codeHome, 'projects', ePath, `${convId}.jsonl`);
+          const convFile = this.agent.transcript.transcriptPath(this.codeHome, ePath, convId);
           if (fs.existsSync(convFile)) continue; // File exists, keep mapping
         }
         this.tmuxConversationIds.delete(name);
@@ -1742,7 +1742,7 @@ export class SessionWatcher extends EventEmitter {
       );
 
       // Need more conversations — scan the directory and force-load recent files
-      const projectDir = path.join(this.codeHome, 'projects', ePath);
+      const projectDir = path.join(this.agent.transcript.projectsDir(this.codeHome), ePath);
       try {
         const files = fs
           .readdirSync(projectDir)
@@ -1774,7 +1774,7 @@ export class SessionWatcher extends EventEmitter {
       if (convId) {
         if (!this.conversations.has(convId)) {
           // Conversation not yet tracked — load it on demand
-          const convFile = path.join(this.codeHome, 'projects', ePath, `${convId}.jsonl`);
+          const convFile = this.agent.transcript.transcriptPath(this.codeHome, ePath, convId);
           if (fs.existsSync(convFile)) {
             console.log(
               `Watcher: PID detection found unloaded conversation ${convId.substring(0, 8)} for ${sessionName} — loading`
@@ -1981,14 +1981,14 @@ export class SessionWatcher extends EventEmitter {
     if (!encodedPath) {
       const snap = this.persistedSessions.get(sessionId);
       if (snap?.conversationPath) {
-        const projectsDir = path.join(this.codeHome, 'projects');
+        const projectsDir = this.agent.transcript.projectsDir(this.codeHome);
         const rel = path.relative(projectsDir, snap.conversationPath);
         encodedPath = rel.split(path.sep)[0];
       }
     }
     if (!encodedPath) return false;
 
-    const projectDir = path.join(this.codeHome, 'projects', encodedPath);
+    const projectDir = path.join(this.agent.transcript.projectsDir(this.codeHome), encodedPath);
     if (!fs.existsSync(projectDir)) return false;
 
     try {
@@ -2053,7 +2053,7 @@ export class SessionWatcher extends EventEmitter {
     if (this.missedScanRunning || !this.watcher) return;
     this.missedScanRunning = true;
     try {
-      const projectsDir = path.join(this.codeHome, 'projects');
+      const projectsDir = this.agent.transcript.projectsDir(this.codeHome);
       for (const encoded of [...this.tmuxProjectPaths]) {
         const dir = path.join(projectsDir, encoded);
         let names: string[];
@@ -2164,8 +2164,7 @@ export class SessionWatcher extends EventEmitter {
       const hasInteractivePending =
         lastMsg?.type === 'assistant' &&
         (lastMsg.toolCalls?.some(
-          (tc) =>
-            tc.status === 'pending' && (tc.name === 'AskUserQuestion' || tc.name === 'ExitPlanMode')
+          (tc) => tc.status === 'pending' && isInteractiveTool(tc.name, this.agent.tools)
         ) ??
           false);
       if (hasInteractivePending) {
@@ -2467,12 +2466,14 @@ export class SessionWatcher extends EventEmitter {
       // Derive from persisted session snapshot
       const snap = this.persistedSessions.get(sessionId);
       if (snap?.conversationPath) {
-        const projectsDir = path.join(this.codeHome, 'projects');
+        const projectsDir = this.agent.transcript.projectsDir(this.codeHome);
         const rel = path.relative(projectsDir, snap.conversationPath);
         encodedPath = rel.split(path.sep)[0];
       }
     }
-    const projectDir = encodedPath ? path.join(this.codeHome, 'projects', encodedPath) : null;
+    const projectDir = encodedPath
+      ? path.join(this.agent.transcript.projectsDir(this.codeHome), encodedPath)
+      : null;
 
     const entries: ChainEntry[] = [];
     const current = this.tmuxConversationIds.get(sessionId);
@@ -2505,7 +2506,7 @@ export class SessionWatcher extends EventEmitter {
     if (!resolved) return;
 
     const messages = resolved.conv.cachedMessages || this.readMessagesSync(resolved.conv.path);
-    const pendingTools = getPendingApprovalTools(messages);
+    const pendingTools = this.agent.transcript.getPendingApprovalTools(messages);
     if (pendingTools.length > 0) {
       this.emit('pending-approval', {
         sessionId: targetTmux,

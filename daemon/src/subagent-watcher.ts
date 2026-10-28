@@ -11,6 +11,7 @@ import * as path from 'path';
 import { EventEmitter } from 'events';
 import { SubAgent, AgentTree, ConversationHighlight } from './types';
 import { parseConversationFile, extractHighlights } from './parser';
+import { defaultAgent } from './agents';
 import { LegacySubAgentWatcher } from './subagent-watcher-legacy';
 import { SubagentTracker } from './subagents/tracker';
 import { SubagentDiscovery } from './subagents/discover';
@@ -78,7 +79,7 @@ export class SubAgentWatcher extends EventEmitter {
       console.log('SubAgentWatcher: disabled');
       return;
     }
-    const projectsDir = path.join(this.codeHome, 'projects');
+    const projectsDir = defaultAgent().transcript.projectsDir(this.codeHome);
     console.log(`SubAgentWatcher: tracking subagents in ${projectsDir} (fs.watch, incremental)`);
     this.discovery = new SubagentDiscovery(projectsDir, this.tracker);
     void this.discovery

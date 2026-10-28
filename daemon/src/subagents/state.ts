@@ -19,6 +19,7 @@ import type {
   SubagentTests,
 } from './protocol';
 import { SUBAGENT_LIMITS } from './protocol';
+import { isSubagentTool } from '../agents/roles';
 
 export const MAX_PENDING = 64;
 export const MAX_STUCK_EVENTS = 120;
@@ -27,7 +28,6 @@ export const MAX_AGENT_CALLS = 100;
 /** Tool output analysed for failures: head + tail of this many chars each. */
 const OUTPUT_SLICE = 16 * 1024;
 
-const AGENT_TOOLS = new Set(['Agent', 'Task']);
 const TEST_CMD =
   /(?:^|[\s;&|(/])(?:jest|vitest|pytest|py\.test|mocha|playwright\s+test|cargo\s+(?:test|nextest)|go\s+test|(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?test(?::[\w-]+)?|bin\/test|phpunit|rspec|ctest|tox|gradlew?\s+\S*test)\b/i;
 const STEP_LINE =
@@ -188,7 +188,7 @@ export class AgentRecord {
   }
 
   hasPendingAgentCall(): boolean {
-    for (const p of this.pending.values()) if (AGENT_TOOLS.has(p.name)) return true;
+    for (const p of this.pending.values()) if (isSubagentTool(p.name)) return true;
     return false;
   }
 
@@ -412,7 +412,7 @@ export class AgentRecord {
         const input =
           b.input && typeof b.input === 'object' ? (b.input as Record<string, unknown>) : {};
         this.startTool(b.id, b.name, input, at);
-        if (AGENT_TOOLS.has(b.name)) {
+        if (isSubagentTool(b.name)) {
           res.agentCalls.push(b.id);
           if (this.agentCalls.size < MAX_AGENT_CALLS) this.agentCalls.add(b.id);
         }

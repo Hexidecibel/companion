@@ -4,21 +4,14 @@ import {
   INPUT_LOG_PREVIEW_LENGTH,
   POST_TEXT_DELAY_MS,
   POST_ENTER_DELAY_MS,
-  POST_OTHER_SELECT_DELAY_MS,
-  POST_TEXT_INPUT_DELAY_MS,
   POST_CHOICE_DELAY_MS,
   DEFAULT_PANE_CAPTURE_LINES,
   OVERLAY_DISMISS_DELAY_MS,
 } from './constants';
 import { incrementTmuxOperations } from './metrics';
 import { impact } from './impact/state';
-import {
-  readPromptBox,
-  detectOverlay,
-  secondsSinceClientActivity,
-  refusalFor,
-  type InputRefusal,
-} from './prompt-guard';
+import { defaultAgent } from './agents';
+import { secondsSinceClientActivity, refusalFor, type InputRefusal } from './prompt-guard';
 
 /** An attached client that pressed a key within this many seconds = someone is typing. */
 export const TYPING_QUIET_S = 2;
@@ -55,6 +48,9 @@ export class InputInjector {
   private sendLock: Promise<void> = Promise.resolve();
   private now: () => number;
   private sleep: (ms: number) => Promise<void>;
+
+  /** TUI knowledge (prompt box, overlays, choice keys) for the agent in the pane. */
+  private readonly agent = defaultAgent();
 
   constructor(tmuxSession: string, opts: InputInjectorOptions = {}) {
     this.defaultSession = tmuxSession;
@@ -134,14 +130,14 @@ export class InputInjector {
 
       // Dismiss any TUI overlay, then make sure the prompt box holds no draft.
       let pane = await this.captureForGuard(session);
-      if (pane !== null && detectOverlay(pane)) {
+      if (pane !== null && this.agent.terminal.detectOverlay(pane)) {
         console.log(`Overlay detected in session '${session}', sending Escape to dismiss`);
         await this.runTmux(['send-keys', '-t', session, 'Escape']);
         await this.sleep(OVERLAY_DISMISS_DELAY_MS);
         pane = await this.captureForGuard(session);
       }
       if (pane !== null) {
-        const box = readPromptBox(pane);
+        const box = this.agent.terminal.readPromptBox(pane);
         if (box.found && box.draft) {
           impact.count('inputCollisions');
           console.log(
@@ -210,7 +206,7 @@ export class InputInjector {
   private async dismissOverlayIfPresent(session: string): Promise<void> {
     try {
       const paneContent = await this.captureForGuard(session);
-      if (paneContent !== null && detectOverlay(paneContent)) {
+      if (paneContent !== null && this.agent.terminal.detectOverlay(paneContent)) {
         console.log(`Overlay detected in session '${session}', sending Escape to dismiss`);
         await this.runTmux(['send-keys', '-t', session, 'Escape']);
         await this.sleep(OVERLAY_DISMISS_DELAY_MS);
@@ -354,10 +350,6 @@ export class InputInjector {
     session: string
   ): Promise<boolean> {
     try {
-      // The picker repaints between keypresses; give the TUI time to settle so a
-      // digit toggle / tab switch is fully rendered before the next key arrives.
-      const KEY_DELAY = 120; // ms between key presses
-
       const sendKey = async (key: string): Promise<boolean> => {
         const result = await this.runTmux(['send-keys', '-t', session, key]);
         if (result.status !== 0) {
@@ -368,77 +360,34 @@ export class InputInjector {
       };
       const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-      if (otherText !== undefined) {
-        // "Other" / free-text ("Type something.") is the numbered row AFTER the real
-        // options, i.e. position (optionCount + 1). Pressing its digit highlights it and
-        // opens an inline text field (no submit); then we type the text and press Enter.
-        const otherNumber = optionCount + 1; // 1-based position of "Type something."
-        console.log(
-          `Sending choice: Other "${otherText.substring(0, 60)}" (option ${otherNumber}) to '${session}'`
-        );
+      // The agent decides the keys (Claude: digits, arrows, Right + "1" to submit).
+      const plan = this.agent.terminal.choiceKeys({
+        selectedIndices,
+        optionCount,
+        multiSelect,
+        otherText,
+      });
+      console.log(`Sending ${plan.description} to '${session}'`);
+      for (const w of plan.warnings) console.warn(w);
 
-        if (otherNumber <= 9) {
-          if (!(await sendKey(String(otherNumber)))) return false;
+      for (const step of plan.steps) {
+        if (step.type === 'key') {
+          if (!(await sendKey(step.key))) return false;
+        } else if (step.type === 'text') {
+          const textResult = await this.runTmux([
+            'send-keys',
+            '-t',
+            session,
+            '-l',
+            '--',
+            step.text,
+          ]);
+          if (textResult.status !== 0) {
+            console.error('Failed to type Other text:', textResult.stderr);
+            return false;
+          }
         } else {
-          // >9 options: digit can't address the Other row — walk down to it instead.
-          for (let i = 0; i < optionCount; i++) {
-            if (!(await sendKey('Down'))) return false;
-            await delay(KEY_DELAY);
-          }
-          if (!(await sendKey('Enter'))) return false;
-        }
-        // Wait for the inline text field to open before typing.
-        await delay(POST_OTHER_SELECT_DELAY_MS);
-
-        // Type the free-text (replaces the "Type something." label in place).
-        const textResult = await this.runTmux(['send-keys', '-t', session, '-l', '--', otherText]);
-        if (textResult.status !== 0) {
-          console.error('Failed to type Other text:', textResult.stderr);
-          return false;
-        }
-        await delay(POST_TEXT_INPUT_DELAY_MS);
-        if (!(await sendKey('Enter'))) return false;
-      } else if (multiSelect) {
-        // Multi-select: each option has a [ ] checkbox. Pressing the option's digit
-        // toggles that checkbox in place (cursor stays put, nothing submits), so we can
-        // address selected options directly with no positional drift. After toggling,
-        // Right arrow opens the "Submit answers / Cancel" review screen and "1" confirms.
-        const sorted = [...new Set(selectedIndices)].sort((a, b) => a - b);
-        console.log(
-          `Sending multi-select choice: indices [${sorted.join(',')}] of ${optionCount} to '${session}'`
-        );
-
-        for (const idx of sorted) {
-          const num = idx + 1; // 1-based option number
-          if (num > 9) {
-            // Digit keys can't address rows past 9; AskUserQuestion never has this many.
-            console.warn(`Multi-select option ${num} exceeds digit range, skipping`);
-            continue;
-          }
-          if (!(await sendKey(String(num)))) return false;
-          await delay(KEY_DELAY);
-        }
-        // Open the review/Submit screen, then confirm with "1. Submit answers".
-        if (!(await sendKey('Right'))) return false;
-        await delay(POST_OTHER_SELECT_DELAY_MS);
-        if (!(await sendKey('1'))) return false;
-      } else {
-        // Single-select: pressing the option's digit selects AND submits in one keypress.
-        const idx = selectedIndices[0] || 0;
-        const num = idx + 1; // 1-based option number
-        console.log(
-          `Sending single-select choice: index ${idx} (option ${num}) of ${optionCount} to '${session}'`
-        );
-
-        if (num <= 9) {
-          if (!(await sendKey(String(num)))) return false;
-        } else {
-          // >9 options: fall back to arrow navigation + Enter.
-          for (let i = 0; i < idx; i++) {
-            if (!(await sendKey('Down'))) return false;
-            await delay(KEY_DELAY);
-          }
-          if (!(await sendKey('Enter'))) return false;
+          await delay(step.ms);
         }
       }
 

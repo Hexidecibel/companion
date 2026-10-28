@@ -25,14 +25,16 @@ import {
   PaneReading,
 } from './normalize';
 import { clip, fnv1a, oneLine } from '../herald/text';
+import { hasRole, isEditTool, isInteractiveTool, isSubagentTool, toolRole } from '../agents/roles';
 
-export const EDIT_TOOLS = new Set(['Edit', 'MultiEdit', 'Write', 'NotebookEdit']);
 /** Tools whose repeats are a loop when input + result are identical. */
-const LOOP_TOOLS = new Set(['Bash', 'Read', 'Grep', 'Glob', 'LS', 'WebFetch', 'NotebookRead']);
+const isLoopTool = (name: string): boolean =>
+  // WebFetch is a loop candidate; WebSearch (same 'web' role) never was.
+  hasRole(name, ['shell', 'read', 'search']) || name === 'WebFetch';
 /** Never stalled (long by design) / handled by the inbox (waiting on the user). */
-const SUBAGENT_TOOLS = new Set(['Task', 'Agent']);
-const WAITING_TOOLS = new Set(['AskUserQuestion', 'ExitPlanMode']);
-const POLL_TOOLS = new Set(['BashOutput', 'TaskOutput', 'Monitor', 'KillShell', 'TodoWrite']);
+const isWaitingTool = (name: string): boolean => isInteractiveTool(name);
+/** Background polling / bookkeeping. TodoWrite has always counted here (TaskCreate etc. never did). */
+const isPollTool = (name: string): boolean => toolRole(name) === 'poll' || name === 'TodoWrite';
 
 /** Messages walked back per update (bounded however long the transcript is). */
 export const MAX_SCAN_MESSAGES = 3000;
@@ -133,7 +135,7 @@ export function toEvent(tc: ToolCall, msgAt: number): StuckToolEvent {
     if (f.rejected) ev.rejected = true;
     ev.failureKeys = ev.failed ? f.keys : [];
     if (ev.failed && f.excerpt) ev.excerpt = f.excerpt;
-    if (EDIT_TOOLS.has(tc.name) && !ev.failed && !f.rejected) {
+    if (isEditTool(tc.name) && !ev.failed && !f.rejected) {
       ev.isEdit = true;
       if (tc.name === 'Edit') {
         ev.pairs = [
@@ -180,7 +182,7 @@ function phaseOf(messages: ConversationMessage[]): StuckPhase {
   const pending = (last.toolCalls || []).filter(
     (t) => t.status === 'pending' || t.status === 'running'
   );
-  if (pending.some((t) => WAITING_TOOLS.has(t.name))) return 'waiting';
+  if (pending.some((t) => isWaitingTool(t.name))) return 'waiting';
   if (last.isWaitingForChoice && !pending.length) return 'waiting';
   return pending.length ? 'working' : 'idle';
 }
@@ -341,13 +343,7 @@ function loop(d: StuckDigest, now: number, s: StuckSettings): StuckCandidate | n
       groups = new Map();
       continue;
     }
-    if (
-      ev.at < since ||
-      ev.failed ||
-      ev.rejected ||
-      !LOOP_TOOLS.has(ev.name) ||
-      POLL_TOOLS.has(ev.name)
-    )
+    if (ev.at < since || ev.failed || ev.rejected || !isLoopTool(ev.name) || isPollTool(ev.name))
       continue;
     if (ev.name === 'Bash' && isPollingCommand(ev.rawCommand || '')) continue;
     const k = `${ev.inputKey}#${ev.outputHash}`;
@@ -469,8 +465,7 @@ export interface PaneTrack {
 }
 
 function stallCapMin(ev: StuckToolEvent, s: StuckSettings): number | null {
-  if (SUBAGENT_TOOLS.has(ev.name) || POLL_TOOLS.has(ev.name) || WAITING_TOOLS.has(ev.name))
-    return null;
+  if (isSubagentTool(ev.name) || isPollTool(ev.name) || isWaitingTool(ev.name)) return null;
   if (ev.name.startsWith('mcp__')) return s.longCommandCapMin;
   if (ev.name === 'Bash')
     return isLongCommand(ev.rawCommand || '')
@@ -545,7 +540,7 @@ function noProgress(
   if (!pane || !pane.reading.alive || pane.reading.prompt) return null;
   const cap = s.longCommandCapMin * MIN;
   for (const p of d.pending) {
-    if (SUBAGENT_TOOLS.has(p.name) || p.name.startsWith('mcp__')) {
+    if (isSubagentTool(p.name) || p.name.startsWith('mcp__')) {
       if (idle < cap) return null;
     } else if (p.name === 'Bash') {
       if (isLongCommand(p.rawCommand || '') && idle < cap) return null;

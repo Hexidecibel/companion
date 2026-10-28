@@ -13,17 +13,12 @@
 import * as path from 'path';
 import { JsonlTail } from './jsonl-tail';
 import { REVIEW_LIMITS } from './protocol';
+import { defaultAgent, type AgentEditExtractor, type RawHunk } from '../agents';
 
+/** Claude's edit tools (role 'edit'); kept as the type of `LedgerEdit.tool`. */
 export type EditTool = 'Edit' | 'MultiEdit' | 'Write' | 'NotebookEdit';
-const EDIT_TOOLS = new Set<string>(['Edit', 'MultiEdit', 'Write', 'NotebookEdit']);
 
-export interface RawHunk {
-  oldStart: number;
-  oldLines: number;
-  newStart: number;
-  newLines: number;
-  lines: string[];
-}
+export type { RawHunk } from '../agents/types';
 
 export interface LedgerEdit {
   id: string;
@@ -143,24 +138,6 @@ function countLines(hunks: RawHunk[]): { additions: number; deletions: number } 
   return { additions, deletions };
 }
 
-function sanitizeHunks(raw: unknown): RawHunk[] | null {
-  if (!Array.isArray(raw)) return null;
-  const out: RawHunk[] = [];
-  for (const h of raw) {
-    if (!h || typeof h !== 'object') return null;
-    const r = h as Record<string, unknown>;
-    if (!Array.isArray(r.lines)) return null;
-    out.push({
-      oldStart: Number(r.oldStart) || 0,
-      oldLines: Number(r.oldLines) || 0,
-      newStart: Number(r.newStart) || 0,
-      newLines: Number(r.newLines) || 0,
-      lines: (r.lines as unknown[]).filter((l): l is string => typeof l === 'string'),
-    });
-  }
-  return out;
-}
-
 /** Cap the total lines kept for one edit. */
 function capHunks(hunks: RawHunk[]): { hunks: RawHunk[]; truncated: boolean } {
   let total = 0;
@@ -175,14 +152,6 @@ function capHunks(hunks: RawHunk[]): { hunks: RawHunk[]; truncated: boolean } {
     out.push(h);
   }
   return { hunks: out, truncated: false };
-}
-
-function createHunk(content: string): RawHunk[] {
-  if (!content) return [];
-  const body = content.endsWith('\n') ? content.slice(0, -1) : content;
-  const lines = body.split('\n').map((l) => `+${l}`);
-  if (!content.endsWith('\n')) lines.push('\\ No newline at end of file');
-  return [{ oldStart: 0, oldLines: 0, newStart: 1, newLines: body.split('\n').length, lines }];
 }
 
 interface FileState {
@@ -204,6 +173,9 @@ export class SessionLedger {
   skippedLines = 0;
   /** Bytes scanned over the ledger's lifetime (stats only; budgets are per update). */
   scannedBytes = 0;
+  /** The session's agent: tool roles + edit extraction (Claude: structuredPatch). */
+  private readonly agent = defaultAgent();
+  private readonly editExtractor: AgentEditExtractor = this.agent.transcript.edits;
   private files = new Map<string, FileState>();
   private fileOrder: string[] = [];
   private turnById = new Map<string, LedgerTurn>();
@@ -432,26 +404,25 @@ export class SessionLedger {
         }
         if (b.type !== 'tool_use' || typeof b.name !== 'string' || typeof b.id !== 'string')
           continue;
-        if (b.name === 'Bash' && !isSub) {
+        const role = this.agent.toolRole(b.name);
+        if (role === 'shell' && !isSub) {
           const turn = this.currentTurn();
           if (turn) turn.usedBash = true;
           continue;
         }
-        if ((b.name === 'Agent' || b.name === 'Task') && !isSub) {
+        if (role === 'subagent' && !isSub) {
           const turn = this.turnFor(at, st.tail.filePath);
           turn.agentToolIds.push(b.id);
           this.agentToolTurn.set(b.id, turn.id);
           continue;
         }
-        if (!EDIT_TOOLS.has(b.name) || this.edits.has(b.id)) continue;
-        const input = (b.input || {}) as Record<string, unknown>;
-        const file =
-          typeof input.file_path === 'string'
-            ? input.file_path
-            : typeof input.notebook_path === 'string'
-              ? input.notebook_path
-              : null;
-        if (!file) continue;
+        if (role !== 'edit' || this.edits.has(b.id)) continue;
+        const start = this.editExtractor.editStart(
+          b.name,
+          (b.input || {}) as Record<string, unknown>
+        );
+        if (!start) continue;
+        const file = start.file;
         const turn = isSub ? this.turnForSubagent(st, at) : this.turnFor(at, st.tail.filePath);
         if (!turn) continue;
         const absPath = path.resolve(this.projectPath || '/', file);
@@ -460,7 +431,7 @@ export class SessionLedger {
           turnId: turn.id,
           tool: b.name as EditTool,
           absPath,
-          kind: b.name === 'Write' ? 'create' : 'update',
+          kind: start.kind,
           at,
           startedAt: at,
           additions: 0,
@@ -492,24 +463,9 @@ export class SessionLedger {
       this.bump();
       return;
     }
-    const tur =
-      toolUseResult && typeof toolUseResult === 'object'
-        ? (toolUseResult as Record<string, unknown>)
-        : null;
-    let hunks: RawHunk[] | null = null;
-    if (tur) {
-      if (tur.type === 'create') {
-        edit.kind = 'create';
-        hunks = createHunk(typeof tur.content === 'string' ? tur.content : '');
-      } else {
-        if (tur.type === 'update') edit.kind = 'update';
-        else if (edit.tool === 'Write') edit.kind = 'update';
-        hunks = sanitizeHunks(tur.structuredPatch);
-      }
-    } else if (edit.tool === 'Write') {
-      edit.kind = 'update';
-    }
-    if (edit.tool !== 'Write' && edit.kind === 'create') edit.kind = 'update';
+    const outcome = this.editExtractor.editOutcome(edit.tool, edit.kind, toolUseResult);
+    edit.kind = outcome.kind;
+    const hunks = outcome.hunks;
     if (hunks === null) {
       edit.patchUnavailable = true;
       edit.hunks = [];

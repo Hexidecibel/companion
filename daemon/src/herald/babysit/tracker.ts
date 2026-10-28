@@ -19,7 +19,8 @@
  * Synchronous and free of I/O; the manager does the asking and the sending.
  */
 
-import { mapPermissionLabel, parsePermissionPrompt } from '../../parser';
+import { mapPermissionLabel } from '../../parser';
+import { defaultAgent } from '../../agents';
 import type { HeraldBabysit, HeraldBabysitEndReason } from '../protocol';
 import type { PendingChoice, SessionSnapshot } from '../session-source';
 import { clipTail, fnv1a, oneLine } from '../text';
@@ -93,7 +94,7 @@ export function isPermissionChoice(c: PendingChoice): boolean {
   )
     return true;
   const rendered = `${c.question}\n${c.options.map((o, i) => `${i + 1}. ${o.label}`).join('\n')}`;
-  return parsePermissionPrompt(rendered) !== null;
+  return defaultAgent().terminal.parsePermissionPrompt(rendered) !== null;
 }
 
 /** The end of the session's last message: where a question, if any, is. */

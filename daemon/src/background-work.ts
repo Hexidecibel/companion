@@ -29,6 +29,7 @@
  */
 import type { ConversationMessage } from './types';
 import { stripAnsi } from './prompt-guard';
+import { hasRole, isInteractiveTool } from './agents/roles';
 
 export interface BackgroundWork {
   agents: number;
@@ -53,8 +54,8 @@ export const FOOTER_TTL_MS = 30_000;
  */
 export const SHELL_ONLY_MAX_MS = 20 * 60_000;
 
-const APPROVAL_LIKE = new Set(['Bash', 'Edit', 'Write', 'NotebookEdit', 'MultiEdit']);
-const INTERACTIVE = new Set(['AskUserQuestion', 'ExitPlanMode']);
+/** Shell + file edits: a pending one is an approval box the user must answer. */
+const isApprovalLike = (name: string): boolean => hasRole(name, ['shell', 'edit']);
 
 /** Parse the footer under Claude Code's prompt box. null = no prompt box at the bottom. */
 export function parsePaneFooter(capture: string): PaneFooterInfo | null {
@@ -130,8 +131,8 @@ export function overlaySessionState(input: SessionOverlayInput): SessionOverlay 
     last?.type === 'assistant'
       ? (last.toolCalls || []).filter((tc) => tc.status === 'pending')
       : [];
-  if (pending.some((tc) => INTERACTIVE.has(tc.name))) return { waiting: true };
-  if (pending.some((tc) => APPROVAL_LIKE.has(tc.name))) {
+  if (pending.some((tc) => isInteractiveTool(tc.name))) return { waiting: true };
+  if (pending.some((tc) => isApprovalLike(tc.name))) {
     // Bypass mode never asks: the tool is running.
     if (input.footer?.bypass) {
       const act = input.currentActivity || '';

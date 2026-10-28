@@ -9,6 +9,7 @@ import * as chokidar from 'chokidar';
 import { EventEmitter } from 'events';
 import { SubAgent, AgentTree, ConversationHighlight } from './types';
 import { parseConversationFile, extractHighlights } from './parser';
+import { defaultAgent } from './agents';
 
 // On the initial chokidar scan, skip sub-agent files that haven't been written
 // to recently. Without this guard the watcher reads + JSON-parses every historical
@@ -75,7 +76,7 @@ export class LegacySubAgentWatcher extends EventEmitter {
   }
 
   start(): void {
-    const projectsDir = path.join(this.codeHome, 'projects');
+    const projectsDir = defaultAgent().transcript.projectsDir(this.codeHome);
     const pattern = path.join(projectsDir, '**', 'subagents', '*.jsonl');
 
     console.log(`SubAgentWatcher: Watching for sub-agents in: ${projectsDir}`);

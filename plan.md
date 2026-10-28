@@ -4,6 +4,24 @@ Detailed plans for upcoming work items. Completed items are moved to FEATURES.md
 
 ---
 
+## Item: Codex support
+**Status:** step 1 (adapter seam) done + committed 2026-10-28 on branch `feat/agent-adapter-seam` (not merged); steps 2-4 not started
+
+Watch and drive OpenAI Codex CLI sessions next to Claude Code ones. Claude Code now sits behind an `AgentAdapter` seam (`daemon/src/agents/`); Codex becomes a second adapter.
+
+**Step 1: adapter seam (done, no behaviour change).**
+- `agents/roles.ts`: one tool-name -> role table (`edit | shell | read | search | ask_user | plan_approval | subagent | todo | poll | web | other`) + `requiresApproval`. Claude's table (`agents/claude/tools.ts`) covers every tool in `tool-config.ts` (type-checked) plus MultiEdit, Agent, LS, NotebookRead, BashOutput, TaskOutput, Monitor, KillShell. The hard-coded name sets in watcher.ts, stuck/signals.ts, background-work.ts, subagents/state.ts and review/ledger.ts are role checks now. Two odd members are kept by name: stuck's loop set includes WebFetch (not WebSearch), its poll set includes TodoWrite (not TaskCreate/TaskUpdate).
+- `agents/types.ts`: `AgentAdapter` = `tools` + `toolRole` + `transcript` (projectsDir / encodeProjectDir / projectDirFor / transcriptPath / findAgentPid, parseFile, waiting / idle / pending-approval / status, `edits` extractor for the review ledger, optional `subagents`) + `terminal` (launchCommand, readPromptBox, detectOverlay, permission / text-choice / active-choice prompt parsers, approvalPromptRe, `choiceKeys` key plan, classifyStartupPane). `agents/index.ts` = registry, Claude default and only.
+- Claude adapter = thin wrappers over parser.ts / prompt-guard.ts / session-identity.ts. Moved into `agents/claude/`: `claudeCommand` + `ClaudePermissionMode` (re-exported from tmux-manager.ts), `classifyStartupPane` (re-exported from herald/spawn.ts), auto-approval's prompt regex, the sendChoice key sequence (InputInjector now executes a `ChoiceKeyPlan`), and the ledger's structuredPatch / create-hunk logic (`agents/claude/edits.ts`).
+- Routed through the adapter: watcher.ts (transcript paths, encodeProjectDir, pid finder, waiting / pending approval, active choice prompt, interactive + approval checks), input-injector.ts, auto-approval.ts, tmux-manager.ts, herald/spawn.ts, review/ledger.ts (edits), review/sources.ts (subagent dir), subagent watchers + handlers/session.ts (projects dir), handlers/tmux.ts, herald/session-source.ts, stuck/normalize.ts, herald/babysit/tracker.ts.
+- Not routed yet: parser.ts's own `APPROVAL_TOOLS` uses (it IS the Claude implementation), herald/text.ts `TOOL_PHRASES` (per-name speech, not role-identical), the many other parser exports the watcher uses (highlights, activity, chains), raw-JSONL readers (subagents/state + tracker, subagent-watcher-legacy, the watcher fast path, turn-error.ts), session-spawn.ts / prompt-guard.ts internals, `tc.name === 'Bash'` checks in stuck/signals. Every call site still uses `defaultAgent()`; sessions do not carry an agent id yet.
+
+**Step 2: Codex transcript adapter (read-only).** Sessions in `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl`, keyed by date not cwd (cwd comes from the session meta line), so discovery needs a date-walk + cwd index instead of `projects/<encoded cwd>`. Parse to ConversationMessage, waiting / idle rules, tool roles (shell, apply_patch = edit, update_plan = todo). Sessions carry an agent id; the watcher picks the adapter per session.
+
+**Step 3: Codex terminal adapter.** Launch line + approval modes, Codex TUI prompt box / approval prompt / choice parsing, key sequences, start-up screens (trust / login).
+
+**Step 4: review + stuck for Codex.** Edit extraction from `apply_patch` (parse the patch envelope into hunks), stuck signals via roles, subagent capability absent.
+
 ## Item: Connection resilience
 **Status:** phase 1 done 2026-10-18 (web only; follow-up fix: no stale status across a session switch, event-driven summary re-poll); phases 2-3 designed, not started
 

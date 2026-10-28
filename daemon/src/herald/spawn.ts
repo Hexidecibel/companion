@@ -12,6 +12,8 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import type { SessionSnapshot } from './session-source';
+import { defaultAgent, type StartupPaneState } from '../agents';
+import { classifyStartupPane } from '../agents/claude/terminal';
 
 /** Characters a directory may contain (no quotes, $, backticks, ;, newlines...). */
 const SAFE_PATH = /^[A-Za-z0-9 ._+@,/~-]+$/;
@@ -153,25 +155,10 @@ export function sessionsIn(dir: string, snaps: SessionSnapshot[]): SessionSnapsh
 // ---------------------------------------------------------------------------
 // Start-up screen: ready, or parked at Claude's bypass-permissions warning.
 
-export type PaneState = 'ready' | 'bypass_warning' | 'trust_prompt' | 'starting';
+export type PaneState = StartupPaneState;
 
-/**
- * What a freshly started session's screen shows. Claude Code in
- * bypass-permissions mode parks at a one-time "Yes, I accept" warning per
- * folder; a new folder may ask whether to trust it. Herald never answers either
- * on the user's behalf.
- */
-export function classifyStartupPane(pane: string): PaneState {
-  const p = pane || '';
-  if (/Bypass Permissions mode/i.test(p) && /Yes,? I accept/i.test(p)) return 'bypass_warning';
-  if (/Do you trust the files in this folder|trust this folder/i.test(p)) return 'trust_prompt';
-  // Claude's own input box / footer. A bare "❯" is not enough: a shell prompt
-  // (after "No, exit") can use it too, and the first prompt must never be typed
-  // into a shell.
-  if (/for shortcuts|bypass permissions on|shift\+tab to cycle|Try "/i.test(p)) return 'ready';
-  if (/❯/.test(p) && /[─━]{10,}/.test(p)) return 'ready';
-  return 'starting';
-}
+/** Claude's start-up screen classifier (agents/claude/terminal.ts), kept here for callers. */
+export { classifyStartupPane };
 
 // ---------------------------------------------------------------------------
 // Running a confirmed spawn
@@ -242,7 +229,7 @@ export class SpawnRunner {
 
   private async paneState(id: string): Promise<PaneState | 'unreadable'> {
     try {
-      return classifyStartupPane(await this.deps.spawner.capturePane(id));
+      return defaultAgent().terminal.classifyStartupPane(await this.deps.spawner.capturePane(id));
     } catch {
       return 'unreadable';
     }

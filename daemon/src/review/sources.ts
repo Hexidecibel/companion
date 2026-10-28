@@ -6,6 +6,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
+import { defaultAgent } from '../agents';
 
 export interface SubagentFile {
   path: string;
@@ -36,7 +37,10 @@ async function readParentToolUseId(metaPath: string): Promise<string | undefined
 export async function listSubagentFiles(conversationPaths: string[]): Promise<SubagentFile[]> {
   const out: SubagentFile[] = [];
   for (const conv of conversationPaths) {
-    const dir = path.join(path.dirname(conv), path.basename(conv, '.jsonl'), 'subagents');
+    // Subagents are optional per agent; Claude: <conv-dir>/<conv-id>/subagents.
+    const subagents = defaultAgent().transcript.subagents;
+    if (!subagents) continue;
+    const dir = subagents.subagentDir(conv);
     let names: string[];
     try {
       names = await fs.promises.readdir(dir);
