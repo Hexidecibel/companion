@@ -18,6 +18,8 @@ interface DispatchPayload {
   createdAt: number;
   sessionId: string | null;
   claudePath: string;
+  agent?: 'codex';
+  profileId?: string;
 }
 
 export interface RemoteDispatchResult {
@@ -25,7 +27,10 @@ export interface RemoteDispatchResult {
   tmuxSessionName: string;
   sessionId: string | null;
   createdAt: number;
+  /** The agent binary used (claude, or codex when agent is 'codex'). */
   claudePath: string;
+  agent?: 'codex';
+  profileId?: string;
 }
 
 export async function remoteDispatch(
@@ -37,6 +42,9 @@ export async function remoteDispatch(
     sessionName?: string;
     oneShot?: boolean;
     resolveTimeoutMs?: number;
+    agent?: 'claude' | 'codex';
+    profileId?: string;
+    permissionMode?: 'default' | 'bypassPermissions';
   }
 ): Promise<RemoteDispatchResult> {
   const client = pool.get(args.server);
@@ -51,6 +59,10 @@ export async function remoteDispatch(
       sessionName: args.sessionName,
       oneShot: args.oneShot === true ? true : undefined,
       resolveTimeoutMs: args.resolveTimeoutMs,
+      // Only sent when set: older daemons ignore unknown fields anyway.
+      ...(args.agent ? { agent: args.agent } : {}),
+      ...(args.profileId ? { profileId: args.profileId } : {}),
+      ...(args.permissionMode ? { permissionMode: args.permissionMode } : {}),
     }
   );
 
@@ -88,5 +100,7 @@ export async function remoteDispatch(
     sessionId: payload.sessionId,
     createdAt: payload.createdAt,
     claudePath: payload.claudePath,
+    ...(payload.agent ? { agent: payload.agent } : {}),
+    ...(payload.profileId ? { profileId: payload.profileId } : {}),
   };
 }

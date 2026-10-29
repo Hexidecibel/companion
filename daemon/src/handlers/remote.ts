@@ -4,6 +4,9 @@ import { startTmuxSession } from '../tmux-server';
 import { execSync, spawn, spawnSync } from 'child_process';
 import { HandlerContext, MessageHandler, AuthenticatedClient } from '../handler-context';
 import { appVersion } from '../version';
+import { createAgentSession, agentLaunchOpts, resolveSpawnProfile } from '../session-spawn';
+import { getAgentAdapter, type AgentId } from '../agents';
+import type { AgentProfile } from '../profiles';
 
 interface CapabilitiesResponse {
   daemonVersion: string;
@@ -22,13 +25,24 @@ interface DispatchSpawnPayload {
   sessionName?: string;
   oneShot?: boolean;
   resolveTimeoutMs?: number;
+  /** Coding agent ('claude' default, 'codex'). */
+  agent?: string;
+  /** Account profile id (its agent wins; a disagreeing explicit agent is refused). */
+  profileId?: string;
+  /** Interactive non-default launches: 'bypassPermissions' skips the agent's approvals. */
+  permissionMode?: string;
 }
 
 interface DispatchSpawnResult {
   tmuxSessionName: string;
   createdAt: number;
   sessionId: string | null;
+  /** The agent binary used (named claudePath for older clients). */
   claudePath: string;
+  /** Present when the agent is not Claude Code. */
+  agent?: AgentId;
+  /** Present for a non-default profile. */
+  profileId?: string;
 }
 
 interface ExecCommandPayload {
@@ -112,6 +126,43 @@ async function uniqueSessionName(ctx: HandlerContext, base: string): Promise<str
     if (n > 100) break;
   }
   return candidate;
+}
+
+/**
+ * Non-Claude / profile launches: poll the pane (async, bounded captures)
+ * until the agent's start-up screen classifies as ready, a trust / bypass
+ * prompt (never answered here), or the timeout.
+ */
+async function waitForAgentReady(
+  ctx: HandlerContext,
+  sessionName: string,
+  agent: AgentId,
+  timeoutMs: number
+): Promise<'ready' | 'trust_prompt' | 'bypass_warning' | 'timeout'> {
+  const terminal = getAgentAdapter(agent).terminal;
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, CLAUDE_READY_POLL_INTERVAL_MS));
+    let pane = '';
+    try {
+      pane = await ctx.injector.capturePaneContent(sessionName);
+    } catch {
+      continue;
+    }
+    const state = terminal.classifyStartupPane(pane);
+    if (state !== 'starting') return state;
+  }
+  return 'timeout';
+}
+
+/** Single-quoted for /bin/sh (and fish): ' -> '\''. */
+function shQuote(s: string): string {
+  return `'${s.replace(/'/g, `'\\''`)}'`;
+}
+
+/** Headless one-shot line per agent (`claude -p`, `codex exec`). */
+function oneShotCommand(agent: AgentId, bin: string, prompt: string): string {
+  return agent === 'codex' ? `${bin} exec ${shQuote(prompt)}` : `${bin} -p ${shQuote(prompt)}`;
 }
 
 /**
@@ -208,6 +259,139 @@ export function registerRemoteHandlers(ctx: HandlerContext): Record<string, Mess
         });
       };
 
+      /**
+       * Codex, or a non-default account profile: the app's own spawn path
+       * (createAgentSession: launch flags, CODEX_HOME / profile env, saved
+       * config, missing-command check), the agent's own readiness, then the
+       * prompt through the injector (the agent's text keys).
+       */
+      const dispatchAgent = async (agent: AgentId, profile: AgentProfile | undefined) => {
+        const command = agent === 'codex' ? 'codex' : 'claude';
+        let binPath = '';
+        try {
+          binPath = execSync(`which ${command}`, { encoding: 'utf-8' }).trim();
+        } catch {
+          binPath = '';
+        }
+        if (!binPath) {
+          sendError(agent === 'claude' ? 'claude_not_found' : 'agent_not_found', {
+            agent,
+            searchedPath: process.env.PATH || '',
+          });
+          return;
+        }
+        const baseName = requestedName || ctx.tmux.generateSessionName(cwd);
+        const tmuxSessionName = await uniqueSessionName(ctx, baseName);
+        const extra = {
+          ...(agent !== 'claude' ? { agent } : {}),
+          ...(profile && !profile.isDefault ? { profileId: profile.id } : {}),
+        };
+        if (oneShot) {
+          const launch = await agentLaunchOpts(agent, profile, ctx.watcher);
+          const created = await ctx.tmux.createSession(tmuxSessionName, cwd, true, {
+            ...(agent !== 'claude' ? { agent } : {}),
+            ...launch,
+            // Typed into the shell; the session ends with the run.
+            command: `${oneShotCommand(agent, binPath, prompt)}; exit`,
+          });
+          if (!created.success) {
+            sendError('tmux_create_failed', { detail: created.error });
+            return;
+          }
+          ctx.storeTmuxSessionConfig(tmuxSessionName, cwd, false);
+          ctx.watcher.noteSessionAgent(tmuxSessionName, agent);
+          if (profile && !profile.isDefault)
+            ctx.watcher.noteSessionProfile(tmuxSessionName, profile.id);
+          ctx.watcher.markSessionAsNew(tmuxSessionName);
+          await ctx.watcher.refreshTmuxPaths();
+          ctx.broadcast('tmux_sessions_changed', {
+            action: 'created',
+            sessionName: tmuxSessionName,
+          });
+        } else {
+          const r = await createAgentSession(
+            {
+              tmux: ctx.tmux,
+              storeTmuxSessionConfig: ctx.storeTmuxSessionConfig,
+              sessionNameStore: ctx.sessionNameStore,
+              watcher: ctx.watcher,
+              broadcast: (type, p) => ctx.broadcast(type, p),
+            },
+            {
+              workingDir: cwd,
+              name: tmuxSessionName,
+              agent,
+              ...(profile ? { profile } : {}),
+              permissionMode:
+                dispatchPayload.permissionMode === 'bypassPermissions'
+                  ? 'bypassPermissions'
+                  : 'default',
+            }
+          );
+          if (!r.success) {
+            sendError('tmux_create_failed', { detail: r.error });
+            return;
+          }
+          await new Promise((resolve) => setTimeout(resolve, POST_SPAWN_DELAY_MS));
+          const state = await waitForAgentReady(
+            ctx,
+            tmuxSessionName,
+            agent,
+            CLAUDE_READY_TIMEOUT_MS
+          );
+          if (state === 'trust_prompt' || state === 'bypass_warning') {
+            // Never answered for the caller: the session stays for the user.
+            sendError('agent_not_ready', {
+              detail: `${getAgentAdapter(agent).displayName} is waiting on its ${state === 'trust_prompt' ? 'trust prompt' : 'bypass warning'} in ${tmuxSessionName}; answer it in the app, then send the prompt`,
+              tmuxSessionName,
+              ...extra,
+            });
+            return;
+          }
+          if (state === 'timeout') {
+            console.warn(
+              `[remote_dispatch_spawn] ${agent} readiness not detected in ${tmuxSessionName} after ${CLAUDE_READY_TIMEOUT_MS}ms; attempting injection anyway`
+            );
+          }
+          await ctx.injector.sendInput(prompt, tmuxSessionName);
+        }
+
+        let sessionId: string | null = null;
+        if (agent === 'claude') {
+          sessionId = await ctx.watcher.waitForSessionInCwd(cwd, resolveTimeoutMs);
+          if (!sessionId) sessionId = ctx.watcher.resolveSessionByTmuxName(tmuxSessionName, cwd);
+        } else {
+          // Codex: discovery maps the pane to its rollout on a watcher refresh;
+          // never fall back to "newest in the cwd" (that may be a Claude transcript).
+          const deadline = Date.now() + resolveTimeoutMs;
+          while (!sessionId && Date.now() < deadline) {
+            sessionId = ctx.watcher.getConversationIdsForSession(tmuxSessionName).slice(-1)[0] ?? null;
+            if (!sessionId) await new Promise((r) => setTimeout(r, 500));
+          }
+        }
+        const result: DispatchSpawnResult = {
+          tmuxSessionName,
+          createdAt: startedAt,
+          sessionId,
+          claudePath: binPath,
+          ...extra,
+        };
+        ctx.send(client.ws, {
+          type: DISPATCH_RESPONSE_TYPE,
+          success: true,
+          payload: result,
+          requestId,
+        });
+        ctx.auditLog.append({
+          ts: startedAt,
+          origin: getOrigin(client, listenerTls),
+          action: 'remote_dispatch_spawn',
+          payload: { ...auditPayload, ...extra },
+          result: { ok: true, tmuxSessionName, sessionId, ...(oneShot ? { oneShot: true } : {}) },
+          durationMs: Date.now() - startedAt,
+        });
+      };
+
       const capError = ctx.requireRemoteCapability(client, 'dispatch');
       if (capError) {
         sendError(capError);
@@ -245,6 +429,20 @@ export function registerRemoteHandlers(ctx: HandlerContext): Record<string, Mess
 
       if (!isCwdAllowed(ctx, cwd)) {
         sendError('invalid_cwd', { cwd });
+        return;
+      }
+
+      const ref = resolveSpawnProfile(
+        ctx.watcher.profiles,
+        dispatchPayload.agent,
+        dispatchPayload.profileId
+      );
+      if ('error' in ref) {
+        sendError('invalid_payload', { detail: ref.error });
+        return;
+      }
+      if (ref.agent !== 'claude' || (ref.profile && !ref.profile.isDefault)) {
+        await dispatchAgent(ref.agent, ref.profile);
         return;
       }
 

@@ -115,7 +115,7 @@ const TOOLS = [
   {
     name: 'remote_dispatch',
     description:
-      'Spawn a new Claude session on a remote Companion daemon inside tmux. Requires the ' +
+      'Spawn a new Claude (or, with agent "codex", Codex CLI) session on a remote Companion daemon inside tmux. Requires the ' +
       'daemon to have the "dispatch" capability enabled. Returns the tmux session name, ' +
       'creation timestamp, resolved JSONL sessionId, and the absolute path of the claude ' +
       'binary used. A null sessionId is now rare; if it happens, re-resolve via ' +
@@ -144,6 +144,26 @@ const TOOLS = [
             'Optional max time (ms) the daemon waits to resolve the JSONL sessionId before ' +
             'returning. Clamped server-side to ≤60000. Larger values make a non-null sessionId ' +
             'far more likely.',
+        },
+        agent: {
+          type: 'string',
+          enum: ['claude', 'codex'],
+          description:
+            'Optional coding agent: "claude" (default) or "codex" (OpenAI Codex CLI; oneShot ' +
+            'runs `codex exec`).',
+        },
+        profileId: {
+          type: 'string',
+          description:
+            'Optional account profile id on the remote daemon (its agent wins; an explicit ' +
+            'agent that disagrees is refused).',
+        },
+        permissionMode: {
+          type: 'string',
+          enum: ['default', 'bypassPermissions'],
+          description:
+            'Interactive Codex / profile dispatch only: "bypassPermissions" launches without ' +
+            "the agent's approval prompts. Default: the agent's own approvals.",
         },
       },
       required: ['server', 'prompt', 'cwd'],
@@ -270,6 +290,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             sessionName?: string;
             oneShot?: boolean;
             resolveTimeoutMs?: number;
+            agent?: 'claude' | 'codex';
+            profileId?: string;
+            permissionMode?: 'default' | 'bypassPermissions';
           }
         );
         break;
