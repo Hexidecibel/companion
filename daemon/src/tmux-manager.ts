@@ -6,6 +6,7 @@ import * as path from 'path';
 import { startTmuxSession } from './tmux-server';
 import { getAgentAdapter, type AgentId } from './agents';
 import type { ClaudePermissionMode } from './agents/claude/terminal';
+import { isShellSafePath } from './profiles/registry';
 
 // Launch line + permission modes live in the agent adapter (agents/claude/terminal.ts).
 export { claudeCommand, type ClaudePermissionMode } from './agents/claude/terminal';
@@ -126,6 +127,14 @@ export class TmuxManager {
       agent?: AgentId;
       /** Extra environment for the session's shell (tmux new-session -e). */
       env?: Record<string, string>;
+      /**
+       * KEY=VALUE file the agent's launch line sources (account profile
+       * secrets): the values reach only the agent process, never tmux's
+       * environment or argv. Must pass `isShellSafePath`.
+       */
+      envFile?: string;
+      /** Typed instead of the agent's launch command (e.g. a login command). */
+      command?: string;
     } = {}
   ): Promise<{ success: boolean; error?: string }> {
     // Validate session name
@@ -160,7 +169,10 @@ export class TmuxManager {
           'send-keys',
           '-t',
           safeName,
-          getAgentAdapter(opts.agent).terminal.launchCommand(opts.permissionMode),
+          withEnvFile(
+            opts.command ?? getAgentAdapter(opts.agent).terminal.launchCommand(opts.permissionMode),
+            opts.envFile
+          ),
           'Enter',
         ]);
         console.log(`TmuxManager: Started CLI in session "${safeName}"`);
@@ -484,4 +496,16 @@ export class TmuxManager {
       return [];
     }
   }
+}
+
+/**
+ * A launch line that first loads an env file, typed into the session's shell:
+ * `sh -c 'set -a; . "$0"; set +a; exec "$@"' '<file>' <command...>`. Works
+ * the same from bash, zsh and fish (single-quoted words only), and exec
+ * leaves the agent itself as the pane's process.
+ */
+export function withEnvFile(command: string, envFile?: string): string {
+  if (!envFile) return command;
+  if (!isShellSafePath(envFile)) throw new Error('env file path cannot be quoted safely');
+  return `sh -c 'set -a; . "$0"; set +a; exec "$@"' '${envFile}' ${command}`;
 }

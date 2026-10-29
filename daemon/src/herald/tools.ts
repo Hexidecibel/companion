@@ -255,6 +255,12 @@ export const SESSION_CONTROL_TOOL_SPECS: LlmToolSpec[] = [
           description:
             'Which coding agent to start: "claude" (default) or "codex" only when the user names Codex.',
         },
+        profile: {
+          type: 'string',
+          description:
+            'Account to run it under, only when the user names one (e.g. "work", "personal"). Omit for the default login.',
+          maxLength: 60,
+        },
         confirm: {
           type: 'boolean',
           description: 'Unused: starting a session always needs confirmation.',
@@ -599,7 +605,17 @@ export interface ToolEnv {
   /** Persist the reply-length setting. Absent = set_verbosity reports unavailable. */
   setVerbosity?: (level: (typeof VERBOSITY_TOOL_LEVELS)[number]) => void;
   /** Where new sessions may start. Absent = propose_spawn_session reports unavailable. */
-  spawn?: { roots: string[]; userHome: string };
+  spawn?: {
+    roots: string[];
+    userHome: string;
+    /** Account profiles beyond the defaults may be named (optional). */
+    profiles?: () => Array<{
+      id: string;
+      label: string;
+      agent: 'claude' | 'codex';
+      isDefault?: boolean;
+    }>;
+  };
   /** Open a session on the active device. Absent = show_session reports unavailable. */
   showSession?: (s: SessionSnapshot, deviceId?: string) => HeraldShowResult;
   /** The device the user's words name ("my PC"), from the device that asked. */
@@ -1523,7 +1539,33 @@ async function proposeSpawn(
   if (!prompt.ok) return err(prompt.error);
   if (args.agent !== undefined && args.agent !== 'claude' && args.agent !== 'codex')
     return err('agent must be "claude" or "codex".');
-  const codex = args.agent === 'codex';
+  // Account profile by id or label (case-insensitive); its agent wins.
+  let profile: {
+    id: string;
+    label: string;
+    agent: 'claude' | 'codex';
+    isDefault?: boolean;
+  } | null = null;
+  if (args.profile !== undefined && args.profile !== null && String(args.profile).trim()) {
+    const want = String(args.profile).trim().toLowerCase();
+    const all = env.spawn.profiles?.() ?? [];
+    const hits = all.filter(
+      (p) =>
+        (p.id.toLowerCase() === want || p.label.toLowerCase() === want) &&
+        (args.agent === undefined || p.agent === args.agent)
+    );
+    if (hits.length !== 1) {
+      const names = all.map((p) => `${p.label} (${p.agent})`).join(', ');
+      return err(
+        hits.length
+          ? `"${args.profile}" names more than one account; ask which: ${names}.`
+          : `No account named "${args.profile}". Accounts here: ${names || 'only the default logins'}. Ask the user.`
+      );
+    }
+    profile = hits[0];
+  }
+  const codex = profile ? profile.agent === 'codex' : args.agent === 'codex';
+  const profileNote = profile && !profile.isDefault ? ` (${profile.label} account)` : '';
   const key = `spawn:${where.dir}`;
   if (state.proposals.some((p) => p.sessionKey === key))
     return err(`You already proposed a new session in ${where.name} in this request.`);
@@ -1554,13 +1596,14 @@ async function proposeSpawn(
     sessionId: key,
     sessionName: where.name,
     payload: prompt.prompt,
-    readback: `New ${codex ? 'Codex ' : ''}session in ${where.name}: "${clip(oneLine(prompt.prompt), 100)}"`,
+    readback: `New ${codex ? 'Codex ' : ''}session in ${where.name}${profileNote}: "${clip(oneLine(prompt.prompt), 100)}"`,
     meta: {
       spawn: {
         dir: where.dir,
         firstPrompt: prompt.prompt,
         name: where.name,
         ...(codex ? { agent: 'codex' as const } : {}),
+        ...(profile && !profile.isDefault ? { profileId: profile.id } : {}),
       },
       userText: state.userText,
       ruleIds: verdict.ruleIds,

@@ -245,6 +245,8 @@ export interface TmuxSessionConfig {
   permissionMode?: 'bypassPermissions';
   /** Coding agent the session was started with when not Claude Code (recreate uses it). */
   agent?: 'claude' | 'codex';
+  /** Account profile when not the agent's default (recreate launches under it). */
+  profileId?: string;
   // Git worktree metadata (set when session was created via worktree)
   isWorktree?: boolean;
   mainRepoDir?: string;

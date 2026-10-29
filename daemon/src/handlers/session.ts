@@ -788,9 +788,15 @@ export function registerSessionHandlers(ctx: HandlerContext): Record<string, Mes
         return;
       }
 
-      const projectsDir = defaultAgent().transcript.projectsDir(ctx.config.codeHome);
+      // Any Claude profile's projects dir (the default code_home first).
+      const projectsDirs = [
+        defaultAgent().transcript.projectsDir(ctx.config.codeHome),
+        ...(ctx.watcher.profiles?.ofAgent('claude') ?? [])
+          .filter((p) => !p.isDefault)
+          .map((p) => defaultAgent().transcript.projectsDir(p.home)),
+      ];
       const resolved = path.resolve(filePayload.filePath);
-      if (!resolved.startsWith(projectsDir)) {
+      if (!projectsDirs.some((d) => resolved.startsWith(d + path.sep))) {
         ctx.send(client.ws, {
           type: 'conversation_file',
           success: false,

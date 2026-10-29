@@ -6,7 +6,11 @@ import {
   CLI_READY_POLL_INTERVAL_MS,
   CLI_READY_TIMEOUT_MS,
 } from '../constants';
-import { createAgentSession, agentLaunchEnv, parseAgentId } from '../session-spawn';
+import {
+  createAgentSession,
+  agentLaunchOpts,
+  resolveSpawnProfile,
+} from '../session-spawn';
 import { getAgentAdapter } from '../agents';
 
 export function registerTmuxHandlers(ctx: HandlerContext): Record<string, MessageHandler> {
@@ -173,6 +177,8 @@ export function registerTmuxHandlers(ctx: HandlerContext): Record<string, Messag
             startCli?: boolean;
             /** Optional: 'claude' (default) | 'codex'. */
             agent?: string;
+            /** Optional account profile id (the agent follows it). */
+            profileId?: string;
             /** Optional: 'default' = the agent's own approval prompts instead of bypass. */
             permissionMode?: string;
           }
@@ -186,16 +192,21 @@ export function registerTmuxHandlers(ctx: HandlerContext): Record<string, Messag
         });
         return;
       }
-      const agent = parseAgentId(createPayload.agent);
-      if (!agent) {
+      const spawnRef = resolveSpawnProfile(
+        ctx.watcher.profiles,
+        createPayload.agent,
+        createPayload.profileId
+      );
+      if ('error' in spawnRef) {
         ctx.send(client.ws, {
           type: 'tmux_session_created',
           success: false,
-          error: `Unknown agent: ${String(createPayload.agent).slice(0, 40)}`,
+          error: spawnRef.error,
           requestId,
         });
         return;
       }
+      const agent = spawnRef.agent;
 
       const result = await createAgentSession(
         {
@@ -209,6 +220,7 @@ export function registerTmuxHandlers(ctx: HandlerContext): Record<string, Messag
           name: createPayload.name,
           startCli: createPayload.startCli,
           agent,
+          ...(spawnRef.profile ? { profile: spawnRef.profile } : {}),
           ...(createPayload.permissionMode === 'default'
             ? { permissionMode: 'default' as const }
             : {}),
@@ -230,6 +242,9 @@ export function registerTmuxHandlers(ctx: HandlerContext): Record<string, Messag
             sessionName,
             workingDir: createPayload.workingDir,
             ...(agent !== 'claude' ? { agent } : {}),
+            ...(spawnRef.profile && !spawnRef.profile.isDefault
+              ? { profileId: spawnRef.profile.id }
+              : {}),
           },
           requestId,
         });
@@ -254,6 +269,8 @@ export function registerTmuxHandlers(ctx: HandlerContext): Record<string, Messag
             templateName?: string;
             /** Optional: 'claude' (default) | 'codex'. */
             agent?: string;
+            /** Optional account profile id (the agent follows it). */
+            profileId?: string;
             /** Optional, Codex only: 'default' = Codex's own approval prompts instead of bypass. */
             permissionMode?: string;
           }
@@ -268,16 +285,23 @@ export function registerTmuxHandlers(ctx: HandlerContext): Record<string, Messag
         });
         return;
       }
-      const agentId = parseAgentId(scaffoldPayload.agent);
-      if (!agentId) {
+      const scaffoldRef = resolveSpawnProfile(
+        ctx.watcher.profiles,
+        scaffoldPayload.agent,
+        scaffoldPayload.profileId
+      );
+      if ('error' in scaffoldRef) {
         ctx.send(client.ws, {
           type: 'scaffold_session_opened',
           success: false,
-          error: `Unknown agent: ${String(scaffoldPayload.agent).slice(0, 40)}`,
+          error: scaffoldRef.error,
           requestId,
         });
         return;
       }
+      const agentId = scaffoldRef.agent;
+      const scaffoldProfile =
+        scaffoldRef.profile && !scaffoldRef.profile.isDefault ? scaffoldRef.profile : undefined;
 
       const sessionName = ctx.tmux.generateSessionName(scaffoldPayload.workingDir);
       console.log(
@@ -288,9 +312,24 @@ export function registerTmuxHandlers(ctx: HandlerContext): Record<string, Messag
       let result: { success: boolean; error?: string };
       if (agentId === 'claude') {
         // Claude reads bypass from the project's .claude/settings.json (the scaffold wrote it).
-        result = await ctx.tmux.createSession(sessionName, scaffoldPayload.workingDir, true);
+        // Another account profile: its CLAUDE_CONFIG_DIR + env file (default: nothing).
+        const launch = scaffoldProfile
+          ? await agentLaunchOpts('claude', scaffoldProfile, ctx.watcher)
+          : {};
+        result = await ctx.tmux.createSession(
+          sessionName,
+          scaffoldPayload.workingDir,
+          true,
+          launch
+        );
         if (result.success) {
-          ctx.storeTmuxSessionConfig(sessionName, scaffoldPayload.workingDir, true);
+          ctx.storeTmuxSessionConfig(
+            sessionName,
+            scaffoldPayload.workingDir,
+            true,
+            scaffoldProfile ? { profileId: scaffoldProfile.id } : undefined
+          );
+          if (scaffoldProfile) ctx.watcher.noteSessionProfile?.(sessionName, scaffoldProfile.id);
           ctx.watcher.markSessionAsNew(sessionName);
         }
       } else {
@@ -307,6 +346,7 @@ export function registerTmuxHandlers(ctx: HandlerContext): Record<string, Messag
             workingDir: scaffoldPayload.workingDir,
             name: sessionName,
             agent: agentId,
+            ...(scaffoldRef.profile ? { profile: scaffoldRef.profile } : {}),
             ...(scaffoldPayload.permissionMode === 'default'
               ? { permissionMode: 'default' as const }
               : {}),
@@ -474,6 +514,16 @@ export function registerTmuxHandlers(ctx: HandlerContext): Record<string, Messag
             ? { permissionMode: prev.permissionMode }
             : {}),
           ...(agentToKeep ? { agent: agentToKeep } : {}),
+          ...(() => {
+            // Keep the account profile the session runs under (else the saved one).
+            const live = ctx.watcher.profileFor?.(switchPayload.sessionName);
+            const keep = live && !live.isDefault
+              ? live.id
+              : same && (prev.agent || 'claude') === (agentToKeep || 'claude')
+                ? prev.profileId
+                : undefined;
+            return keep ? { profileId: keep } : {};
+          })(),
         });
 
         const convSessions = ctx.watcher.getSessions();
@@ -553,15 +603,26 @@ export function registerTmuxHandlers(ctx: HandlerContext): Record<string, Messag
 
       const savedAgent =
         savedConfig.agent && savedConfig.agent !== 'claude' ? savedConfig.agent : undefined;
+      // The saved account profile, if it still exists for that agent (else the default).
+      const savedProfileRaw = ctx.watcher.profiles?.get(savedConfig.profileId);
+      const savedProfile =
+        savedProfileRaw &&
+        !savedProfileRaw.isDefault &&
+        savedProfileRaw.agent === (savedAgent || 'claude')
+          ? savedProfileRaw
+          : undefined;
+      const launch =
+        savedAgent || savedProfile
+          ? await agentLaunchOpts(savedAgent || 'claude', savedProfile, ctx.watcher)
+          : {};
       const result = await ctx.tmux.createSession(
         savedConfig.name,
         savedConfig.workingDir,
         savedConfig.startCli,
         {
           permissionMode: savedConfig.permissionMode,
-          ...(savedAgent
-            ? { agent: savedAgent, env: agentLaunchEnv(savedAgent, ctx.watcher) }
-            : {}),
+          ...(savedAgent ? { agent: savedAgent } : {}),
+          ...launch,
         }
       );
 
@@ -569,9 +630,11 @@ export function registerTmuxHandlers(ctx: HandlerContext): Record<string, Messag
         ctx.storeTmuxSessionConfig(savedConfig.name, savedConfig.workingDir, savedConfig.startCli, {
           permissionMode: savedConfig.permissionMode,
           ...(savedAgent ? { agent: savedAgent } : {}),
+          ...(savedProfile ? { profileId: savedProfile.id } : {}),
         });
         if (savedAgent && savedConfig.startCli)
           ctx.watcher.noteSessionAgent(savedConfig.name, savedAgent);
+        if (savedProfile) ctx.watcher.noteSessionProfile?.(savedConfig.name, savedProfile.id);
         ctx.injector.setActiveSession(sessionName);
 
         ctx.send(client.ws, {

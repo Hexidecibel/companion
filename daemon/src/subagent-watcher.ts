@@ -48,6 +48,8 @@ export class SubAgentWatcher extends EventEmitter {
   private legacy: LegacySubAgentWatcher | null = null;
   readonly tracker: SubagentTracker | null = null;
   private discovery: SubagentDiscovery | null = null;
+  /** Discoveries of other account profiles' projects dirs (same tracker). */
+  private profileDiscoveries = new Map<string, SubagentDiscovery>();
   private hubRef: SubagentHub | null = null;
   private tickTimer: NodeJS.Timeout | null = null;
   private pruneTimer: NodeJS.Timeout | null = null;
@@ -84,6 +86,11 @@ export class SubAgentWatcher extends EventEmitter {
     void this.discovery
       .start()
       .catch((err) => console.error('SubAgentWatcher: discovery failed:', err));
+    if (this.pendingProfileDirs) {
+      const dirs = this.pendingProfileDirs;
+      this.pendingProfileDirs = null;
+      this.setProfileProjectsDirs(dirs);
+    }
     const tickMs = this.opts.tickMs ?? 5000;
     this.tickTimer = setInterval(() => {
       if (this.ticking) return;
@@ -95,13 +102,46 @@ export class SubAgentWatcher extends EventEmitter {
         });
     }, tickMs);
     this.tickTimer.unref?.();
-    this.pruneTimer = setInterval(() => this.discovery?.prune(), 60_000);
+    this.pruneTimer = setInterval(() => {
+      this.discovery?.prune();
+      for (const d of this.profileDiscoveries.values()) d.prune();
+    }, 60_000);
     this.pruneTimer.unref?.();
   }
+
+  /**
+   * Track subagents of other account profiles too: one discovery per extra
+   * Claude projects dir (started / stopped as profiles come and go). Watch
+   * mode only; legacy mode stays on the default home.
+   */
+  setProfileProjectsDirs(dirs: string[]): void {
+    if (!this.tracker || !this.discovery) {
+      this.pendingProfileDirs = dirs;
+      return;
+    }
+    const want = new Set(dirs);
+    for (const dir of want) {
+      if (this.profileDiscoveries.has(dir)) continue;
+      const d = new SubagentDiscovery(dir, this.tracker);
+      this.profileDiscoveries.set(dir, d);
+      console.log(`SubAgentWatcher: tracking subagents in ${dir} (profile)`);
+      void d.start().catch((err) => console.error('SubAgentWatcher: discovery failed:', err));
+    }
+    for (const [dir, d] of [...this.profileDiscoveries]) {
+      if (!want.has(dir)) {
+        d.stop();
+        this.profileDiscoveries.delete(dir);
+      }
+    }
+  }
+
+  private pendingProfileDirs: string[] | null = null;
 
   stop(): void {
     this.legacy?.stop();
     this.discovery?.stop();
+    for (const d of this.profileDiscoveries.values()) d.stop();
+    this.profileDiscoveries.clear();
     this.tracker?.stop();
     this.hubRef?.shutdown();
     if (this.tickTimer) clearInterval(this.tickTimer);

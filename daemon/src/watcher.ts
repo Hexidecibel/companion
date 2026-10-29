@@ -875,7 +875,9 @@ export class SessionWatcher extends EventEmitter {
   private claudeRoots(): Array<{ profile: AgentProfile; projectsDir: string }> {
     return this.profiles.ofAgent('claude').map((profile) => ({
       profile,
-      projectsDir: this.agent.transcript.projectsDir(profile.isDefault ? this.codeHome : profile.home),
+      projectsDir: this.agent.transcript.projectsDir(
+        profile.isDefault ? this.codeHome : profile.home
+      ),
     }));
   }
 

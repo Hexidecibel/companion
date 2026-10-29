@@ -46,6 +46,8 @@ export interface KnowledgePaths {
   projectsRoot: string;
   /** <code_home>/projects: holds <project>/memory/*.md. */
   memoryRoot: string;
+  /** Other account profiles' projects dirs (read live: profiles change at runtime). */
+  extraMemoryRoots?: () => string[];
   /** The user's global CLAUDE.md (only its cush-tools section is searched). */
   userClaudeMd: string;
 }
@@ -353,9 +355,17 @@ export class KnowledgeBase {
   }
 
   private async memoryFiles(): Promise<string[]> {
-    const root = this.paths.memoryRoot;
-    const dirs = await this.listDir(root, (names) => Promise.resolve(names));
+    const roots = [this.paths.memoryRoot, ...(this.paths.extraMemoryRoots?.() ?? [])];
     const files: string[] = [];
+    for (const root of roots) {
+      if (files.length >= MAX_MEMORY_FILES) break;
+      await this.memoryFilesIn(root, files);
+    }
+    return files;
+  }
+
+  private async memoryFilesIn(root: string, files: string[]): Promise<string[]> {
+    const dirs = await this.listDir(root, (names) => Promise.resolve(names));
     for (const d of dirs) {
       const memDir = path.join(root, d, 'memory');
       let ents: string[];

@@ -1,12 +1,7 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import {
-  ProfileRegistry,
-  buildProfiles,
-  envFileKeys,
-  parseProfilesBlock,
-} from '../registry';
+import { ProfileRegistry, buildProfiles, envFileKeys, parseProfilesBlock } from '../registry';
 import { ProcEnvCache, pickEnviron } from '../environ';
 
 function tmp(): string {
@@ -18,13 +13,28 @@ describe('parseProfilesBlock', () => {
     const { profiles, warnings } = parseProfilesBlock(
       [
         { id: 'work', label: 'Work', agent: 'claude', home: '~/.claude-work', env: { FOO: 'x' } },
-        { id: 'cdx2', agent: 'codex', home: '/srv/codex2', env_file: '~/.companion/profiles/cdx2.env' },
+        {
+          id: 'cdx2',
+          agent: 'codex',
+          home: '/srv/codex2',
+          env_file: '~/.companion/profiles/cdx2.env',
+        },
       ],
       { homeDir: '/home/u' }
     );
     expect(warnings).toEqual([]);
-    expect(profiles[0]).toMatchObject({ id: 'work', label: 'Work', agent: 'claude', home: '/home/u/.claude-work', env: { FOO: 'x' } });
-    expect(profiles[1]).toMatchObject({ id: 'cdx2', label: 'cdx2', envFile: '/home/u/.companion/profiles/cdx2.env' });
+    expect(profiles[0]).toMatchObject({
+      id: 'work',
+      label: 'Work',
+      agent: 'claude',
+      home: '/home/u/.claude-work',
+      env: { FOO: 'x' },
+    });
+    expect(profiles[1]).toMatchObject({
+      id: 'cdx2',
+      label: 'cdx2',
+      envFile: '/home/u/.companion/profiles/cdx2.env',
+    });
   });
 
   it('skips invalid entries and reserved env', () => {
@@ -33,7 +43,12 @@ describe('parseProfilesBlock', () => {
       { id: 'a', agent: 'gpt', home: '/x' },
       { id: 'b', agent: 'claude' },
       { id: 'c', agent: 'claude', home: "/x/it's" },
-      { id: 'd', agent: 'claude', home: '/d', env: { CLAUDE_CONFIG_DIR: '/evil', PATH: '/p', OK: '1', 'BAD-K': '2' } },
+      {
+        id: 'd',
+        agent: 'claude',
+        home: '/d',
+        env: { CLAUDE_CONFIG_DIR: '/evil', PATH: '/p', OK: '1', 'BAD-K': '2' },
+      },
     ]);
     expect(profiles.map((p) => p.id)).toEqual(['d']);
     expect(profiles[0].env).toEqual({ OK: '1' });
@@ -55,8 +70,14 @@ describe('buildProfiles', () => {
       { id: 'w', agent: 'codex', home: '/w2' },
     ]).profiles;
     const warns: string[] = [];
-    const all = buildProfiles({ codeHome: '/h/.claude', codexHome: '/h/.codex' }, configured, (l) => warns.push(l));
-    expect(all.map((p) => `${p.id}:${p.isDefault}`)).toEqual(['claude:true', 'codex:true', 'w:false']);
+    const all = buildProfiles({ codeHome: '/h/.claude', codexHome: '/h/.codex' }, configured, (l) =>
+      warns.push(l)
+    );
+    expect(all.map((p) => `${p.id}:${p.isDefault}`)).toEqual([
+      'claude:true',
+      'codex:true',
+      'w:false',
+    ]);
     expect(warns).toHaveLength(3);
   });
 });
@@ -97,7 +118,9 @@ describe('ProfileRegistry', () => {
     const d = tmp();
     const cfgDir = path.join(d, 'cfg');
     fs.mkdirSync(path.join(cfgDir, 'profiles'), { recursive: true });
-    fs.writeFileSync(path.join(cfgDir, 'profiles', 'w.env'), 'ANTHROPIC_API_KEY=secret\n', { mode: 0o600 });
+    fs.writeFileSync(path.join(cfgDir, 'profiles', 'w.env'), 'ANTHROPIC_API_KEY=secret\n', {
+      mode: 0o600,
+    });
     const r = new ProfileRegistry({
       codeHome: path.join(d, '.claude'),
       configPath: null,
@@ -109,7 +132,9 @@ describe('ProfileRegistry', () => {
       log: () => {},
     });
     expect(await r.launchPlan(r.get('claude')!)).toEqual({ env: {} });
-    expect(await r.launchPlan(r.get('codex')!)).toEqual({ env: { CODEX_HOME: path.join(d, '.codex') } });
+    expect(await r.launchPlan(r.get('codex')!)).toEqual({
+      env: { CODEX_HOME: path.join(d, '.codex') },
+    });
     expect(await r.launchPlan(r.get('w')!)).toEqual({
       env: { X: '1', CLAUDE_CONFIG_DIR: path.join(d, 'w') },
       envFile: path.join(cfgDir, 'profiles', 'w.env'),
@@ -153,12 +178,19 @@ describe('ProfileRegistry', () => {
     const d = tmp();
     const cfg = path.join(d, 'config.json');
     fs.writeFileSync(cfg, JSON.stringify({ port: 1 }));
-    const r = new ProfileRegistry({ codeHome: path.join(d, '.claude'), configPath: cfg, log: () => {} });
+    const r = new ProfileRegistry({
+      codeHome: path.join(d, '.claude'),
+      configPath: cfg,
+      log: () => {},
+    });
     expect(r.hasExtra()).toBe(false);
     const changed = jest.fn();
     r.on('changed', changed);
     expect(await r.refresh()).toBe(false);
-    fs.writeFileSync(cfg, JSON.stringify({ profiles: [{ id: 'w', agent: 'claude', home: path.join(d, 'w') }] }));
+    fs.writeFileSync(
+      cfg,
+      JSON.stringify({ profiles: [{ id: 'w', agent: 'claude', home: path.join(d, 'w') }] })
+    );
     const t = new Date(Date.now() + 5000);
     fs.utimesSync(cfg, t, t);
     expect(await r.refresh()).toBe(true);

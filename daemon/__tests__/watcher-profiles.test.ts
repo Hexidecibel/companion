@@ -26,7 +26,12 @@ jest.mock('../src/session-identity', () => {
   return { ...actual, findClaudePid: async () => mockAgentPid };
 });
 jest.mock('chokidar', () => ({
-  watch: () => ({ on: jest.fn().mockReturnThis(), add: jest.fn(), unwatch: jest.fn(), close: jest.fn() }),
+  watch: () => ({
+    on: jest.fn().mockReturnThis(),
+    add: jest.fn(),
+    unwatch: jest.fn(),
+    close: jest.fn(),
+  }),
 }));
 
 import { SessionWatcher } from '../src/watcher';
@@ -87,7 +92,13 @@ describe('SessionWatcher with account profiles', () => {
     child = spawn('sleep', ['30'], { env: { ...process.env, CLAUDE_CONFIG_DIR: work } });
     await new Promise((r) => setTimeout(r, 100));
     mockAgentPid = child.pid!;
-    mockRows.push({ name: 'w1', sessionId: '$1', created: '1', workingDir: project, panePid: process.pid });
+    mockRows.push({
+      name: 'w1',
+      sessionId: '$1',
+      created: '1',
+      workingDir: project,
+      panePid: process.pid,
+    });
     const enc = encodeProjectDir(project);
     const dir = path.join(work, 'projects', enc);
     fs.mkdirSync(dir, { recursive: true });
@@ -118,7 +129,13 @@ describe('SessionWatcher with account profiles', () => {
     child = spawn('sleep', ['30'], { env: { ...process.env, CLAUDE_CONFIG_DIR: '' } });
     await new Promise((r) => setTimeout(r, 100));
     mockAgentPid = child.pid!;
-    mockRows.push({ name: 'd1', sessionId: '$2', created: '1', workingDir: project, panePid: process.pid });
+    mockRows.push({
+      name: 'd1',
+      sessionId: '$2',
+      created: '1',
+      workingDir: project,
+      panePid: process.pid,
+    });
     await w.refreshTmuxPaths();
     expect(w.profileFor('d1').id).toBe('claude');
     expect((w as any).tmuxPathBySession.get('d1')).toBe(encodeProjectDir(project));

@@ -117,7 +117,9 @@ export function parseProfilesBlock(
     }
     const home = path.resolve(expandHome(o.home.trim(), homeDir));
     if (!isShellSafePath(home)) {
-      warnings.push(`${where} (${o.id}): home must be absolute without quotes / backslashes; skipped`);
+      warnings.push(
+        `${where} (${o.id}): home must be absolute without quotes / backslashes; skipped`
+      );
       continue;
     }
     const env: Record<string, string> = {};
@@ -251,7 +253,11 @@ export class ProfileRegistry extends EventEmitter {
   private apply(raw: unknown, emit: boolean): void {
     const { profiles, warnings } = parseProfilesBlock(raw);
     for (const w of warnings) this.log(`Profiles: ${w}`);
-    const next = buildProfiles({ codeHome: this.codeHome, codexHome: this.codexHome }, profiles, this.log);
+    const next = buildProfiles(
+      { codeHome: this.codeHome, codexHome: this.codexHome },
+      profiles,
+      this.log
+    );
     const before = JSON.stringify(this.profiles);
     this.profiles = next;
     this.realHomes.clear();

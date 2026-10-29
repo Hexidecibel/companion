@@ -56,6 +56,8 @@ export interface SpawnRequest {
   name: string;
   /** Coding agent to start (absent = Claude Code). */
   agent?: 'codex';
+  /** Account profile (absent = the agent's default); its agent decides `agent`. */
+  profileId?: string;
 }
 
 /** babysit_start: the brief to start once confirmed (re-validated then). */

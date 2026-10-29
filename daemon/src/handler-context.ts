@@ -112,7 +112,7 @@ export interface HandlerContext {
     name: string,
     workingDir: string,
     startCli?: boolean,
-    opts?: { permissionMode?: 'bypassPermissions'; agent?: 'claude' | 'codex' }
+    opts?: { permissionMode?: 'bypassPermissions'; agent?: 'claude' | 'codex'; profileId?: string }
   ) => void;
   saveTmuxSessionConfigs: () => void;
   getProjectRoot: (sessionId?: string) => string | null;

@@ -1,5 +1,7 @@
 #!/usr/bin/env node
+import * as path from 'path';
 import { loadConfig, displayFirstRunWelcome, isSetupMode, resolveConfigPath } from './config';
+import { ProfileRegistry } from './profiles';
 import { loadSecretsEnv, secretsFilePath } from './setup/secrets';
 import { SessionWatcher } from './watcher';
 import { SubAgentWatcher, resolveSubagentMode } from './subagent-watcher';
@@ -113,7 +115,17 @@ async function main(): Promise<void> {
 
   // Initialize components
   const injector = new InputInjector(config.tmuxSession);
-  const watcher = new SessionWatcher(config.codeHome, injector, { codexHome: config.codexHome });
+  // Account profiles: the two defaults (code_home, Codex home) + config
+  // `profiles`, re-read when the config file changes.
+  const profiles = new ProfileRegistry({
+    codeHome: config.codeHome,
+    codexHome: config.codexHome,
+    configPath: resolveConfigPath(),
+  });
+  const watcher = new SessionWatcher(config.codeHome, injector, {
+    codexHome: config.codexHome,
+    profiles,
+  });
   // Text, choice and interrupt keys follow the agent running in each pane.
   injector.setAgentResolver((session) => watcher.agentFor(session));
   injector.setAfterSend((session) => watcher.nudgeCodexDiscovery(session));
@@ -123,6 +135,13 @@ async function main(): Promise<void> {
         ? 'off'
         : resolveSubagentMode(config.subagents?.discovery),
   });
+  const profileSubagentDirs = () =>
+    profiles
+      .ofAgent('claude')
+      .filter((p) => !p.isDefault)
+      .map((p) => path.join(p.home, 'projects'));
+  subAgentWatcher.setProfileProjectsDirs(profileSubagentDirs());
+  profiles.on('changed', () => subAgentWatcher.setProfileProjectsDirs(profileSubagentDirs()));
   const notificationStore = new NotificationStore();
   const sandbox = isSandbox();
   if (sandbox) {

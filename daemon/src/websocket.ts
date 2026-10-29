@@ -41,7 +41,7 @@ import { updateLastActivity } from './metrics';
 import { HeraldService } from './herald/service';
 import { HeraldStore } from './herald/store';
 import { defaultCapturePane, LocalSessionSource } from './herald/session-source';
-import { createClaudeSession } from './session-spawn';
+import { createClaudeSession, resolveSpawnProfile } from './session-spawn';
 import { resolveHeraldConfig } from './herald/config';
 import { createProvider } from './herald/llm';
 import { deriveSelfInfo } from './herald/self-info';
@@ -614,11 +614,24 @@ export class WebSocketHandler {
         audit: (entry) => this.auditLog.append(entry),
         selfInfo: deriveSelfInfo(this.config.listeners[0]),
         codeHome: this.config.codeHome,
+        extraMemoryRoots: () =>
+          (this.watcher.profiles?.ofAgent('claude') ?? [])
+            .filter((p) => !p.isDefault)
+            .map((p) => path.join(p.home, 'projects')),
+        profiles: () =>
+          (this.watcher.profiles?.list() ?? []).map((p) => ({
+            id: p.id,
+            label: p.label,
+            agent: p.agent,
+            isDefault: p.isDefault,
+          })),
         devices: () => this.heraldVoice?.devicesSnapshot() ?? null,
         // propose_spawn_session: the app's own session-creation path. It does not
         // become the active session (Herald never switches the user's view).
         spawner: {
-          spawn: async ({ dir, agent }) => {
+          spawn: async ({ dir, agent, profileId }) => {
+            const ref = resolveSpawnProfile(this.watcher.profiles, agent, profileId);
+            if ('error' in ref) return { ok: false, error: ref.error };
             const r = await createClaudeSession(
               {
                 tmux: this.tmux,
@@ -627,7 +640,11 @@ export class WebSocketHandler {
                 watcher: this.watcher,
                 broadcast: (type, payload) => this.broadcast(type, payload),
               },
-              { workingDir: dir, ...(agent ? { agent } : {}) }
+              {
+                workingDir: dir,
+                agent: ref.agent,
+                ...(ref.profile ? { profile: ref.profile } : {}),
+              }
             );
             return r.success
               ? { ok: true, sessionId: r.sessionName, sessionName: r.friendlyName }
@@ -790,7 +807,11 @@ export class WebSocketHandler {
     name: string,
     workingDir: string,
     startCli: boolean = true,
-    opts: { permissionMode?: 'bypassPermissions'; agent?: 'claude' | 'codex' } = {}
+    opts: {
+      permissionMode?: 'bypassPermissions';
+      agent?: 'claude' | 'codex';
+      profileId?: string;
+    } = {}
   ): void {
     this.tmuxSessionConfigs.set(name, {
       name,
@@ -799,6 +820,9 @@ export class WebSocketHandler {
       lastUsed: Date.now(),
       ...(opts.permissionMode ? { permissionMode: opts.permissionMode } : {}),
       ...(opts.agent && opts.agent !== 'claude' ? { agent: opts.agent } : {}),
+      ...(opts.profileId && !this.watcher.profiles?.get(opts.profileId)?.isDefault
+        ? { profileId: opts.profileId }
+        : {}),
     });
     this.saveTmuxSessionConfigs();
     console.log(`WebSocket: Stored tmux session config for "${name}" (${workingDir})`);

@@ -165,7 +165,7 @@ export { classifyStartupPane };
 
 /** The daemon's real session-creation path (the same one the app uses). */
 export interface SessionSpawner {
-  spawn(req: { dir: string; name: string; agent?: 'codex' }): Promise<{
+  spawn(req: { dir: string; name: string; agent?: 'codex'; profileId?: string }): Promise<{
     ok: boolean;
     /** tmux session name = Herald's session id. */
     sessionId?: string;
@@ -242,6 +242,7 @@ export class SpawnRunner {
     name: string;
     firstPrompt: string;
     agent?: 'codex';
+    profileId?: string;
   }): Promise<SpawnResult> {
     // Re-validate right before acting: the folder may have gone since the card.
     try {
@@ -253,6 +254,7 @@ export class SpawnRunner {
       dir: req.dir,
       name: req.name,
       ...(req.agent ? { agent: req.agent } : {}),
+      ...(req.profileId ? { profileId: req.profileId } : {}),
     });
     if (!made.ok || !made.sessionId)
       return {

@@ -231,6 +231,15 @@ export interface HeraldServiceDeps {
   selfInfo?: HeraldSelfInfo;
   /** The daemon's code_home (~/.claude of the real user): locates knowledge sources. */
   codeHome?: string;
+  /** Projects dirs of the other Claude account profiles (search_memory reads them too). */
+  extraMemoryRoots?: () => string[];
+  /** Account profiles propose_spawn_session may name (optional). */
+  profiles?: () => Array<{
+    id: string;
+    label: string;
+    agent: 'claude' | 'codex';
+    isDefault?: boolean;
+  }>;
   /** Knowledge + cush-tools toolbox. Omitted = built from codeHome; null = disabled. */
   toolbox?: HeraldToolbox | null;
   /** Active device + connected devices (voice layer), folded into getState(). */
@@ -363,7 +372,18 @@ export class HeraldService {
   /** Ask-and-report: questions sent to sessions, answered back when they reply. */
   private asks: AskReporter;
   private spawnRunner: SpawnRunner | null = null;
-  private spawnEnv: { roots: string[]; userHome: string } | undefined;
+  private spawnEnv:
+    | {
+        roots: string[];
+        userHome: string;
+        profiles?: () => Array<{
+          id: string;
+          label: string;
+          agent: 'claude' | 'codex';
+          isDefault?: boolean;
+        }>;
+      }
+    | undefined;
   private voiceDeps: Pick<
     HeraldServiceDeps,
     'voiceEvidence' | 'consumeTranscript' | 'activeClientId'
@@ -400,7 +420,13 @@ export class HeraldService {
     this.toolbox =
       deps.toolbox === null
         ? null
-        : deps.toolbox || new HeraldToolbox({ paths: resolveKnowledgePaths(deps.codeHome) });
+        : deps.toolbox ||
+          new HeraldToolbox({
+            paths: {
+              ...resolveKnowledgePaths(deps.codeHome),
+              ...(deps.extraMemoryRoots ? { extraMemoryRoots: deps.extraMemoryRoots } : {}),
+            },
+          });
     this.toolbox?.setOnOpenedChange(() => this.persist());
     this.actions = new ActionManager({
       getSource: (serverId) => this.getSource(serverId),
@@ -515,6 +541,7 @@ export class HeraldService {
       this.spawnEnv = {
         roots: spawnRoots(paths.projectsRoot, process.env, deps.projectRoots ?? []),
         userHome: paths.userHome,
+        ...(deps.profiles ? { profiles: deps.profiles } : {}),
       };
       this.spawnRunner = new SpawnRunner({
         spawner: deps.spawner,
