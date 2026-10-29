@@ -5,6 +5,7 @@
 import { CodexAccumulator, CODEX_ERROR_ID_PREFIX } from '../codex/parse';
 import { detectTurnEndError, toolKind } from '../../turn-error';
 import { plainToolAction } from '../../herald/text';
+import { classifySpawn } from '../../herald/danger';
 
 const T0 = Date.parse('2026-10-28T20:00:00Z');
 let t = T0;
@@ -146,5 +147,11 @@ describe('Herald phrases for Codex tools', () => {
   it('reads Codex tools plainly', () => {
     expect(plainToolAction('exec_command')).toBe('run a shell command');
     expect(plainToolAction('apply_patch')).toBe('edit files');
+  });
+
+  it('the spawn card names the CLI that starts', () => {
+    const base = { dir: '/r/x', userText: 'start codex', firstPrompt: 'hi' };
+    expect(classifySpawn({ ...base, agent: 'codex' }).reasons[0]).toMatch(/new Codex session/);
+    expect(classifySpawn(base).reasons[0]).toMatch(/new Claude Code session/);
   });
 });

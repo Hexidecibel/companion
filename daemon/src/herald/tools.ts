@@ -1574,6 +1574,7 @@ async function proposeSpawn(
     dir: where.dir,
     userText: state.userText,
     firstPrompt: prompt.prompt,
+    agent: codex ? 'codex' : 'claude',
   });
   let already: SessionSnapshot[] = [];
   try {

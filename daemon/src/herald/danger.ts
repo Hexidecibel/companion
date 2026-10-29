@@ -322,6 +322,8 @@ export function classifySpawn(input: {
   userText: string;
   firstPrompt: string;
   requestedConfirm?: boolean;
+  /** Which CLI starts (default Claude Code). */
+  agent?: 'claude' | 'codex';
 }): ClassifyResult {
   const inner = classifyAction({
     userText: input.userText,
@@ -330,7 +332,9 @@ export function classifySpawn(input: {
     project: input.dir,
   });
   const reasons = [
-    `starts a new Claude Code session in ${input.dir} that runs with permissions bypassed (no approval prompts)`,
+    input.agent === 'codex'
+      ? `starts a new Codex session in ${input.dir} that runs without approval prompts (full access)`
+      : `starts a new Claude Code session in ${input.dir} that runs with permissions bypassed (no approval prompts)`,
     ...inner.reasons,
   ];
   if (input.requestedConfirm) reasons.push('flagged for confirmation by the assistant');
