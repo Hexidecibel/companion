@@ -38,7 +38,7 @@ Watch and drive OpenAI Codex CLI sessions next to Claude Code ones. Claude Code 
 **Step 4: review + stuck for Codex.** Edit extraction from `apply_patch` (parse the patch envelope into hunks), stuck signals via roles, subagent capability absent.
 
 ## Item: Account profiles ("segment envs, use different logins")
-**Status:** in progress 2026-10-28
+**Status:** done 2026-10-28 (daemon, script, web; profile-probe 24/24, codex-control-probe 40/40). Deviations from the first sketch below: per-profile usage view not built (see Usage view); `profile_login` runs `claude auth login` (not the TUI + /login) and `codex login --device-auth` (headless).
 
 Several logins per agent (personal + work Claude, more than one Codex), each session under one profile, all watched at once. Both CLIs keep everything per directory: Claude Code under `CLAUDE_CONFIG_DIR` (credentials `.credentials.json`, `.claude.json`, `projects/` transcripts, settings; verified on 2.1.312: a throwaway dir gets `.claude.json`, `sessions/`, `cache/`, ~/.claude untouched, the TUI opens on the onboarding theme picker), Codex under `CODEX_HOME` (`auth.json`, `sessions/` rollouts, its own app-server; verified on 0.165: `CODEX_HOME=<empty> codex login status` = "Not logged in", ~/.codex untouched).
 
@@ -59,7 +59,7 @@ Several logins per agent (personal + work Claude, more than one Codex), each ses
 
 **Web.** `ProfilePicker` in New Session / New Project replaces the Claude/Codex row only when more than the two default profiles exist (otherwise unchanged); a profile badge next to the Codex label (sidebar, mobile list, SessionView header) for non-default profiles; Settings > Accounts list with login state and Log in. Protocol: optional fields only (`profileId`, `profileLabel`); new requests `profiles_list`, `profile_login`.
 
-**Usage view.** Per profile: `get_usage_dashboard` takes an optional `profileId` (an `OAuthUsageFetcher` per Claude profile; the 5-hour alert monitor stays on the default profile). Codex usage: not available (no local usage API).
+**Usage view.** Not built: the daemon has no usage-dashboard request today (`OAuthUsageFetcher` only feeds the 5-hour alert monitor, on the default profile's credentials). Per profile later = one fetcher per Claude profile home + an optional `profileId` on a new request. Codex: no local usage API.
 
 **Not covered:** concierge / remote_dispatch stay on the default profile; Herald knowledge besides memory; the review ledger is path-based and needs nothing.
 

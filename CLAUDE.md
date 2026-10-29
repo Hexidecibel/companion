@@ -166,6 +166,19 @@ Diagnostics and logs: Help > Diagnostics (or say "diagnostics"; `components/hera
 
 Ports used by Herald's sandbox and voice work (not yet in `/mnt/hexinas/apps/INFRASTRUCTURE.md`; add them there): **9887** herald sandbox (user's), **9888** herald probe sandbox, **9889** herald voice service (127.0.0.1 only), **9890** Tailscale serve HTTPS front for 9887 (tailnet only).
 
+### Account profiles (several Claude / Codex logins)
+Config `profiles: [{id, label, agent: 'claude'|'codex', home, env?, env_file?}]`; the defaults `claude` (code_home) and `codex` (the Codex home) always exist and cannot be shadowed. Code: `daemon/src/profiles/` (registry re-reads config.json on mtime change from the watcher's 5 s refresh, so no restart; `protocol.ts` mirrored byte for byte by `web/src/types/profiles.ts`). A session's profile = `CLAUDE_CONFIG_DIR` / `CODEX_HOME` in its agent's `/proc/<pid>/environ` (else the pane shell's; cached per pid, no subprocess). Watcher path keys: default profile = bare encoded cwd (unchanged), others `profile:<id>:<encoded>`; Codex has a rollout index per profile home; chokidar gets one `projects/**/*.jsonl` pattern per extra Claude profile. Spawns: optional `profileId` (create_tmux_session, scaffold_open_session, Herald `propose_spawn_session` `profile`); the default Claude launch sets nothing (exactly as before); other profiles get the home var + `env` via `tmux -e`, and an env file (`env_file`, default `<config dir>/profiles/<id>.env`, 0600, KEY=VALUE, quote values with spaces) is sourced by the typed launch line (`sh -c 'set -a; . "$0"; set +a; exec "$@"' <file> claude ...`), never put in tmux's env, argv or logs. Requests `profiles_list` (login state from file presence only: `.credentials.json` / `auth.json`, else API-key variable names) and `profile_login` (tagged `login-<id>` session: `claude auth login` / `codex login --device-auth`; gated on `dispatch` for narrowed credentials); event `profiles_changed`. Mappings / snapshot stay under the default code_home with `profileId` recorded.
+
+```bash
+bin/companion profile list
+bin/companion profile add work --agent claude [--label Work] [--home DIR] [--no-share]   # symlinks shared non-secret settings
+bin/companion profile login work [--tmux]      # prints / starts the login (or Settings > Accounts > Log in)
+bin/companion profile env-path work            # API keys go there (mode 600)
+bin/companion profile remove work              # config entry only; the home stays
+# Live test (probe + private tmux server; throwaway homes, no login, no credentials copied):
+env -u TMUX -u TMUX_PANE node daemon/scripts/profile-probe.js --tmux-tmpdir $T
+```
+
 ### Stuck-session detection (daemon)
 Code in `daemon/src/stuck/` (`signals.ts` pure analysis, `normalize.ts` failure keys / pane reading, `detector.ts` state + guarded captures, `store.ts` settings), handlers in `daemon/src/handlers/stuck.ts`, plan in `plan.md`.
 - **Protocol:** `daemon/src/stuck/protocol.ts` is mirrored byte-for-byte by `web/src/types/stuck.ts` (mirror test). Requests `stuck_list` / `stuck_snooze` / `stuck_dismiss` / `stuck_ask` / `stuck_interrupt` / `stuck_get_settings` / `stuck_set_settings`; GLOBAL event `stuck_update` (full visible list).
