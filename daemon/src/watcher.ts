@@ -45,7 +45,6 @@ import {
   codexProcessInfo,
   findCodexPid,
   isCodexRollout,
-  resolveCodexHome,
   rolloutIdOf,
 } from './agents/codex/discovery';
 import { detectTurnEndError } from './turn-error';
@@ -71,6 +70,7 @@ import { tmuxSnapshot } from './tmux-snapshot';
 import { isReadonlySharedState } from './sandbox';
 import type { BackgroundWork, BackgroundWorkMonitor, SessionOverlay } from './background-work';
 import { PANE_APPROVAL_ACTIVITY } from './background-work';
+import { ProcEnvCache, ProfileRegistry, type AgentProfile } from './profiles';
 
 /**
  * Parse a feedback prompt from tmux terminal output.
@@ -121,6 +121,8 @@ interface PersistedSessionSnapshot {
   isWaitingForInput: boolean;
   messageCount: number;
   savedAt: number; // when this snapshot was taken
+  /** Account profile (absent = the agent's default). */
+  profileId?: string;
 }
 
 interface TrackedConversation {
@@ -149,17 +151,35 @@ export interface FileChangeOptions {
 
 /** Key in the path maps for a Codex session (Codex transcripts are not cwd-keyed). */
 const CODEX_KEY = 'codex:';
+/**
+ * Key prefix of a Claude session under a non-default account profile:
+ * `profile:<id>:<encoded cwd>` (the default profile keeps the bare encoded
+ * cwd), so the same folder under two logins never shares a key.
+ */
+const PROFILE_KEY = 'profile:';
 
 export interface SessionWatcherOptions {
   /** Codex home (config `codex_home`); default $CODEX_HOME, beside code_home, ~/.codex. */
   codexHome?: string;
+  /** Account profiles (default: the two implicit ones from codeHome / codexHome). */
+  profiles?: ProfileRegistry;
 }
 
 export class SessionWatcher extends EventEmitter {
   /** The default agent (Claude Code): its transcripts are watched under code_home. */
   private readonly agent = defaultAgent();
-  /** Codex CLI rollouts (read-only): found per pane by process cwd + start time. */
-  private readonly codexIndex: CodexRolloutIndex;
+  /** Account profiles: every Claude / Codex home the watcher reads. */
+  readonly profiles: ProfileRegistry;
+  /** Codex CLI rollouts per Codex profile id: found per pane by process cwd + start time. */
+  private codexIndexes = new Map<string, CodexRolloutIndex>();
+  /** tmux session name -> account profile id (from the agent's environ). */
+  private sessionProfiles: Map<string, string> = new Map();
+  /** tmux session name -> profile the app launched it with (until the process is seen). */
+  private profileHints: Map<string, string> = new Map();
+  /** CLAUDE_CONFIG_DIR / CODEX_HOME of agent and pane processes (/proc environ, cached). */
+  private procEnv = new ProcEnvCache(['CLAUDE_CONFIG_DIR', 'CODEX_HOME']);
+  /** chokidar patterns watched for non-default Claude profiles. */
+  private profileRootPatterns = new Set<string>();
   /** tmux session name -> agent, for sessions that do not run Claude (Codex). */
   private sessionAgents: Map<string, AgentId> = new Map();
   /** tmux session name -> the Codex rollout it writes. */
@@ -228,9 +248,10 @@ export class SessionWatcher extends EventEmitter {
   constructor(codeHome: string, inputInjector?: InputInjector, opts: SessionWatcherOptions = {}) {
     super();
     this.codeHome = codeHome;
-    this.codexIndex = new CodexRolloutIndex(
-      resolveCodexHome({ configured: opts.codexHome, codeHome })
-    );
+    this.profiles =
+      opts.profiles ??
+      new ProfileRegistry({ codeHome, codexHome: opts.codexHome, configPath: null });
+    this.profiles.on('changed', () => this.syncProfileRoots());
     this.inputInjector = inputInjector || null;
     this.loadPersistedMappings();
     this.loadPersistedSessions();
@@ -336,7 +357,19 @@ export class SessionWatcher extends EventEmitter {
         if (this.tmuxConversationIds.has(session)) identity[session] = id;
       }
 
-      const data = JSON.stringify({ mappings, history, identity });
+      // Account profile per mapped session (absent = default; informational:
+      // the live profile is always re-read from the agent's environ).
+      const profiles: Record<string, string> = {};
+      for (const session of this.tmuxConversationIds.keys()) {
+        const p = this.sessionProfiles.get(session);
+        if (p && !this.profiles.get(p)?.isDefault) profiles[session] = p;
+      }
+      const data = JSON.stringify({
+        mappings,
+        history,
+        identity,
+        ...(Object.keys(profiles).length ? { profiles } : {}),
+      });
       if (data === this.lastMappingsData) return; // unchanged: no rewrite
       atomicWriteFileSync(this.mappingsPath, data);
       this.lastMappingsData = data;
@@ -384,6 +417,7 @@ export class SessionWatcher extends EventEmitter {
         isWaitingForInput: s.isWaitingForInput,
         messageCount: s.messageCount,
         savedAt: 0,
+        ...(s.profileId ? { profileId: s.profileId } : {}),
       }));
       // Written only when something besides savedAt changed (this runs on
       // every 5 s refresh; an idle box used to rewrite the file each time).
@@ -521,6 +555,8 @@ export class SessionWatcher extends EventEmitter {
       // One `tmux list-panes -a` instead of list-sessions + 2 calls per
       // session. Always fresh here (every 5 s); get_server_summary and other
       // listings reuse this result for up to 2 s.
+      // Profiles added / removed in the config since the last refresh (one stat).
+      await this.profiles.refresh().catch(() => false);
       const snap = await tmuxSnapshot.get(0);
       if (!snap.ok) return; // tmux did not answer in time: keep the last state
       if (snap.sessions.length === 0) throw new Error('no tmux sessions');
@@ -537,7 +573,9 @@ export class SessionWatcher extends EventEmitter {
       const nextWorkingDirs = new Map<string, string>();
       const nextIdentity = new Map<string, SessionIdentity>();
       const nextAgents = new Map<string, AgentId>();
-      const codexPanes: Array<{ name: string; pid: number }> = [];
+      const nextProfiles = new Map<string, string>();
+      const livePids: number[] = [];
+      const codexPanes: Array<{ name: string; pid: number; profile: AgentProfile }> = [];
 
       for (const row of snap.sessions) {
         const name = row.name;
@@ -552,18 +590,43 @@ export class SessionWatcher extends EventEmitter {
           if (!workingDir) continue;
 
           // Claude first; a pane without claude may run Codex (both /proc only).
+          // The account profile comes from the process's CLAUDE_CONFIG_DIR /
+          // CODEX_HOME (else the pane shell's, which the app set at launch).
           let claudePid = await this.agent.transcript.findAgentPid(row.panePid);
-          let encodedPath = this.agent.transcript.encodeProjectDir(workingDir);
-          if (claudePid) this.agentHints.delete(name);
-          if (!claudePid) {
+          let started: number | null = null;
+          let profile: AgentProfile;
+          const paneEnv = () => this.procEnv.read(row.panePid);
+          livePids.push(row.panePid);
+          if (claudePid) {
+            this.agentHints.delete(name);
+            started = await processStartMs(claudePid);
+            livePids.push(claudePid);
+            const env = await this.procEnv.read(claudePid, started);
+            profile = this.profiles.forHome('claude', env.CLAUDE_CONFIG_DIR);
+          } else {
             const codexPid = await findCodexPid(row.panePid);
             if (codexPid) {
               claudePid = codexPid;
-              encodedPath = CODEX_KEY + name;
+              started = await processStartMs(codexPid);
+              livePids.push(codexPid);
+              const env = await this.procEnv.read(codexPid, started);
+              profile = this.profiles.forHome('codex', env.CODEX_HOME);
               nextAgents.set(name, 'codex');
-              codexPanes.push({ name, pid: codexPid });
+              codexPanes.push({ name, pid: codexPid, profile });
+            } else {
+              const hinted = this.profiles.get(this.profileHints.get(name));
+              const env = await paneEnv();
+              profile =
+                hinted && hinted.agent === 'claude'
+                  ? hinted
+                  : this.profiles.forHome('claude', env.CLAUDE_CONFIG_DIR);
             }
           }
+          if (claudePid) this.profileHints.delete(name);
+          const encodedPath = nextAgents.has(name)
+            ? CODEX_KEY + name
+            : this.keyFor(profile, this.agent.transcript.encodeProjectDir(workingDir));
+          nextProfiles.set(name, profile.id);
           nextProjectPaths.add(encodedPath);
           nextSessionByPath.set(encodedPath, name);
           nextPathBySession.set(name, encodedPath);
@@ -574,10 +637,7 @@ export class SessionWatcher extends EventEmitter {
             encodedPath,
             claudePid,
           });
-          if (claudePid) {
-            const started = await processStartMs(claudePid);
-            if (started) this.claudeStartMs.set(name, started);
-          }
+          if (claudePid && started) this.claudeStartMs.set(name, started);
         } catch {
           // Session may have been killed between list and env check
         }
@@ -599,8 +659,12 @@ export class SessionWatcher extends EventEmitter {
       swap(this.tmuxSessionWorkingDirs, nextWorkingDirs);
       swap(this.tmuxSessionIdentity, nextIdentity);
       swap(this.sessionAgents, nextAgents);
-      for (const name of [...this.agentHints.keys()]) {
-        if (!snap.sessions.some((r) => r.name === name)) this.agentHints.delete(name);
+      swap(this.sessionProfiles, nextProfiles);
+      this.procEnv.retain(livePids);
+      for (const hints of [this.agentHints, this.profileHints] as Array<Map<string, unknown>>) {
+        for (const name of [...hints.keys()]) {
+          if (!snap.sessions.some((r) => r.name === name)) hints.delete(name);
+        }
       }
       const codexGone = [...this.codexFiles.keys()].filter(
         (f) => ![...nextCodex.values()].some((c) => c.file === f)
@@ -668,6 +732,7 @@ export class SessionWatcher extends EventEmitter {
       this.tmuxSessionIdentity.clear();
       this.mappingIdentity.clear();
       this.sessionAgents.clear();
+      this.sessionProfiles.clear();
       this.codexBySession.clear();
       this.codexFiles.clear();
     }
@@ -675,23 +740,25 @@ export class SessionWatcher extends EventEmitter {
 
   /** Rollout per Codex pane (see agents/codex/discovery.ts); a pane with none yet is left out. */
   private async resolveCodexRollouts(
-    panes: Array<{ name: string; pid: number }>
+    panes: Array<{ name: string; pid: number; profile: AgentProfile }>
   ): Promise<Map<string, { file: string; convId: string; cwd: string }>> {
     const out = new Map<string, { file: string; convId: string; cwd: string }>();
     if (panes.length === 0) return out;
     const infos: Array<{
       name: string;
+      profile: AgentProfile;
       info: NonNullable<Awaited<ReturnType<typeof codexProcessInfo>>>;
     }> = [];
     for (const p of panes) {
       const info = await codexProcessInfo(p.pid);
-      if (info) infos.push({ name: p.name, info });
+      if (info) infos.push({ name: p.name, profile: p.profile, info });
     }
     infos.sort((a, b) => (b.info.startedAt ?? 0) - (a.info.startedAt ?? 0));
     const claimed = new Set<string>();
-    for (const { name, info } of infos) {
+    for (const { name, profile, info } of infos) {
       try {
-        const hit = await this.codexIndex.findRollout(info, claimed);
+        // Each Codex profile has its own home (sessions/ + app-server).
+        const hit = await this.codexIndexFor(profile).findRollout(info, claimed);
         if (!hit) continue;
         claimed.add(hit.file);
         out.set(name, { file: hit.file, convId: hit.id, cwd: hit.meta.cwd });
@@ -746,7 +813,110 @@ export class SessionWatcher extends EventEmitter {
 
   /** Codex's home as the watcher reads it (spawned Codex sessions get it as CODEX_HOME). */
   getCodexHome(): string {
-    return this.codexIndex.codexHome;
+    return this.profiles.defaultFor('codex').home;
+  }
+
+  /** Rollout index of a Codex profile (one per home, created on first use). */
+  private codexIndexFor(profile: AgentProfile): CodexRolloutIndex {
+    let idx = this.codexIndexes.get(profile.id);
+    if (!idx || idx.codexHome !== profile.home) {
+      idx = new CodexRolloutIndex(profile.home);
+      this.codexIndexes.set(profile.id, idx);
+    }
+    return idx;
+  }
+
+  /** The account profile a tmux session runs under (default of its agent when unknown). */
+  profileFor(sessionId: string): AgentProfile {
+    const agent = this.agentFor(sessionId).id === 'codex' ? 'codex' : 'claude';
+    const id = this.sessionProfiles.get(sessionId) ?? this.profileHints.get(sessionId);
+    const p = this.profiles.get(id);
+    return p && p.agent === agent ? p : this.profiles.defaultFor(agent);
+  }
+
+  /** Which profile the app launched a session with (until its process is seen). */
+  noteSessionProfile(sessionId: string, profileId: string): void {
+    const p = this.profiles.get(profileId);
+    if (!p || p.isDefault) this.profileHints.delete(sessionId);
+    else this.profileHints.set(sessionId, profileId);
+  }
+
+  // ---- path keys (Claude: per profile root) ----
+
+  private keyFor(profile: AgentProfile, encoded: string): string {
+    return profile.isDefault ? encoded : `${PROFILE_KEY}${profile.id}:${encoded}`;
+  }
+
+  /** Home + encoded cwd dir of a Claude path key (null: a Codex key or a removed profile). */
+  private splitKey(key: string): { home: string; encoded: string } | null {
+    if (!key || key.startsWith(CODEX_KEY)) return null;
+    if (key.startsWith(PROFILE_KEY)) {
+      const rest = key.slice(PROFILE_KEY.length);
+      const i = rest.indexOf(':');
+      const p = i > 0 ? this.profiles.get(rest.slice(0, i)) : undefined;
+      if (!p || p.agent !== 'claude') return null;
+      return { home: p.home, encoded: rest.slice(i + 1) };
+    }
+    return { home: this.codeHome, encoded: key };
+  }
+
+  /** Project directory of a Claude path key. */
+  private projectDirForKey(key: string): string | null {
+    const s = this.splitKey(key);
+    return s ? path.join(this.agent.transcript.projectsDir(s.home), s.encoded) : null;
+  }
+
+  private transcriptPathForKey(key: string, convId: string): string | null {
+    const s = this.splitKey(key);
+    return s ? this.agent.transcript.transcriptPath(s.home, s.encoded, convId) : null;
+  }
+
+  /** Claude projects dirs, the default profile's first. */
+  private claudeRoots(): Array<{ profile: AgentProfile; projectsDir: string }> {
+    return this.profiles.ofAgent('claude').map((profile) => ({
+      profile,
+      projectsDir: this.agent.transcript.projectsDir(profile.isDefault ? this.codeHome : profile.home),
+    }));
+  }
+
+  /** Path key of a Claude transcript ('' when it is under no profile's projects dir). */
+  private claudeKeyOfFile(filePath: string): string {
+    for (const r of this.claudeRoots()) {
+      const rel = path.relative(r.projectsDir, filePath);
+      if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) continue;
+      const first = rel.split(path.sep)[0];
+      return first ? this.keyFor(r.profile, first) : '';
+    }
+    return '';
+  }
+
+  /** Watch every non-default Claude profile's transcripts (one chokidar pattern each). */
+  private syncProfileRoots(): void {
+    if (!this.watcher) return;
+    const want = new Set<string>();
+    for (const r of this.claudeRoots()) {
+      if (r.profile.isDefault) continue;
+      // Make the projects dir exist so chokidar can watch it (the agent creates it anyway).
+      try {
+        if (fs.existsSync(r.profile.home)) fs.mkdirSync(r.projectsDir, { recursive: true });
+      } catch {
+        /* read-only home: the missed-transcript scan still finds files */
+      }
+      want.add(path.join(r.projectsDir, '**', '*.jsonl'));
+    }
+    for (const pat of want) {
+      if (!this.profileRootPatterns.has(pat)) {
+        console.log(`Watcher: watching profile transcripts in ${path.dirname(path.dirname(pat))}`);
+        this.watcher.add(pat);
+        this.profileRootPatterns.add(pat);
+      }
+    }
+    for (const pat of [...this.profileRootPatterns]) {
+      if (!want.has(pat)) {
+        this.watcher.unwatch(pat);
+        this.profileRootPatterns.delete(pat);
+      }
+    }
   }
 
   /**
@@ -795,13 +965,9 @@ export class SessionWatcher extends EventEmitter {
       return true; // No filtering if disabled or no tmux sessions
     }
 
-    // Extract project path from file path
-    // e.g., ~/.claude/projects/-Users-foo-bar/uuid.jsonl -> -Users-foo-bar
-    const projectsDir = this.agent.transcript.projectsDir(this.codeHome);
-    const relativePath = path.relative(projectsDir, filePath);
-    const projectDir = relativePath.split(path.sep)[0];
-
-    return this.tmuxProjectPaths.has(projectDir);
+    // Path key of the file: ~/.claude/projects/-Users-foo-bar/uuid.jsonl ->
+    // -Users-foo-bar (another profile: profile:<id>:-Users-foo-bar)
+    return this.tmuxProjectPaths.has(this.claudeKeyOfFile(filePath));
   }
 
   async start(): Promise<void> {
@@ -852,6 +1018,8 @@ export class SessionWatcher extends EventEmitter {
       );
       this.missedScanTimer.unref?.();
     }
+
+    this.syncProfileRoots();
 
     this.watcher.on('add', (filePath) => this.handleFileChange(filePath));
     this.watcher.on('change', (filePath) => this.handleFileChange(filePath));
@@ -1550,12 +1718,10 @@ export class SessionWatcher extends EventEmitter {
     }
     // Extract project path from conversation file path
     // e.g., ~/.claude/projects/-Users-foo-bar/abc123.jsonl -> /Users/foo/bar
-    const projectsDir = this.agent.transcript.projectsDir(this.codeHome);
-    const relative = path.relative(projectsDir, filePath);
-    const parts = relative.split(path.sep);
+    const split = this.splitKey(this.claudeKeyOfFile(filePath));
 
-    if (parts.length >= 1) {
-      const encoded = parts[0];
+    if (split) {
+      const encoded = split.encoded;
       // Exact: a live session's working directory that encodes to this name
       for (const dir of this.tmuxSessionWorkingDirs.values()) {
         if (this.agent.transcript.encodeProjectDir(dir) === encoded) return dir;
@@ -1640,14 +1806,9 @@ export class SessionWatcher extends EventEmitter {
   private generateSessionId(filePath: string): string {
     const codexId = rolloutIdOf(filePath);
     if (codexId) return codexId;
-    // Use the JSONL filename (UUID) as internal conversation ID
-    const projectsDir = this.agent.transcript.projectsDir(this.codeHome);
-    const relative = path.relative(projectsDir, filePath);
-    const parts = relative.split(path.sep);
-    // Skip files outside the projects directory (like history.jsonl in root)
-    if (!parts[0] || parts[0] === '..' || parts[0].startsWith('..')) {
-      return '';
-    }
+    // Use the JSONL filename (UUID) as internal conversation ID.
+    // Skip files outside every profile's projects directory (like history.jsonl in root)
+    if (!this.claudeKeyOfFile(filePath)) return '';
     // Use filename without extension as conversation ID (e.g., "abc123def456")
     const filename = path.basename(filePath, '.jsonl');
     return filename;
@@ -1662,9 +1823,7 @@ export class SessionWatcher extends EventEmitter {
       const name = this.codexFiles.get(filePath);
       return name ? CODEX_KEY + name : '';
     }
-    const projectsDir = this.agent.transcript.projectsDir(this.codeHome);
-    const relative = path.relative(projectsDir, filePath);
-    return relative.split(path.sep)[0] || '';
+    return this.claudeKeyOfFile(filePath);
   }
 
   /**
@@ -1816,7 +1975,9 @@ export class SessionWatcher extends EventEmitter {
   }
 
   private async detectConversationForSessionInner(sessionName: string): Promise<string | null> {
-    const projectsDir = this.agent.transcript.projectsDir(this.codeHome);
+    // The session's own profile root (its CLAUDE_CONFIG_DIR's projects dir).
+    const split = this.splitKey(this.tmuxPathBySession.get(sessionName) || '');
+    const projectsDir = this.agent.transcript.projectsDir(split ? split.home : this.codeHome);
     try {
       // Pane root pid from the last refresh (the shared tmux snapshot), so no
       // tmux call here; the root must still be alive.
@@ -1883,8 +2044,8 @@ export class SessionWatcher extends EventEmitter {
         // Conversation not loaded yet — check if file exists on disk before pruning
         const ePath = this.tmuxPathBySession.get(name);
         if (ePath) {
-          const convFile = this.agent.transcript.transcriptPath(this.codeHome, ePath, convId);
-          if (fs.existsSync(convFile)) continue; // File exists, keep mapping
+          const convFile = this.transcriptPathForKey(ePath, convId);
+          if (convFile && fs.existsSync(convFile)) continue; // File exists, keep mapping
         }
         this.tmuxConversationIds.delete(name);
       }
@@ -1948,7 +2109,8 @@ export class SessionWatcher extends EventEmitter {
       );
 
       // Need more conversations — scan the directory and force-load recent files
-      const projectDir = path.join(this.agent.transcript.projectsDir(this.codeHome), ePath);
+      const projectDir = this.projectDirForKey(ePath);
+      if (!projectDir) continue;
       try {
         const files = fs
           .readdirSync(projectDir)
@@ -1981,8 +2143,8 @@ export class SessionWatcher extends EventEmitter {
       if (convId) {
         if (!this.conversations.has(convId)) {
           // Conversation not yet tracked — load it on demand
-          const convFile = this.agent.transcript.transcriptPath(this.codeHome, ePath, convId);
-          if (fs.existsSync(convFile)) {
+          const convFile = this.transcriptPathForKey(ePath, convId);
+          if (convFile && fs.existsSync(convFile)) {
             console.log(
               `Watcher: PID detection found unloaded conversation ${convId.substring(0, 8)} for ${sessionName} — loading`
             );
@@ -2195,15 +2357,13 @@ export class SessionWatcher extends EventEmitter {
     if (!encodedPath) {
       const snap = this.persistedSessions.get(sessionId);
       if (snap?.conversationPath) {
-        const projectsDir = this.agent.transcript.projectsDir(this.codeHome);
-        const rel = path.relative(projectsDir, snap.conversationPath);
-        encodedPath = rel.split(path.sep)[0];
+        encodedPath = this.claudeKeyOfFile(snap.conversationPath) || undefined;
       }
     }
     if (!encodedPath) return false;
 
-    const projectDir = path.join(this.agent.transcript.projectsDir(this.codeHome), encodedPath);
-    if (!fs.existsSync(projectDir)) return false;
+    const projectDir = this.projectDirForKey(encodedPath);
+    if (!projectDir || !fs.existsSync(projectDir)) return false;
 
     try {
       const entries = fs.readdirSync(projectDir);
@@ -2267,10 +2427,10 @@ export class SessionWatcher extends EventEmitter {
     if (this.missedScanRunning || !this.watcher) return;
     this.missedScanRunning = true;
     try {
-      const projectsDir = this.agent.transcript.projectsDir(this.codeHome);
       for (const encoded of [...this.tmuxProjectPaths]) {
         if (encoded.startsWith(CODEX_KEY)) continue; // Codex rollouts are watched one by one
-        const dir = path.join(projectsDir, encoded);
+        const dir = this.projectDirForKey(encoded);
+        if (!dir) continue;
         let names: string[];
         try {
           names = (await fs.promises.readdir(dir)).filter((f) => f.endsWith('.jsonl'));
@@ -2531,6 +2691,7 @@ export class SessionWatcher extends EventEmitter {
         lastActivity: best?.conv.lastModified || 0,
         isWaitingForInput: best?.conv.isWaitingForInput || false,
         messageCount: best?.conv.messageCount || 0,
+        ...this.profileFields(tmuxName),
       });
       seenIds.add(tmuxName);
     }
@@ -2553,6 +2714,7 @@ export class SessionWatcher extends EventEmitter {
           isWaitingForInput: false, // Not live, can't be waiting
           messageCount: snap.messageCount,
           inactive: true,
+          ...this.snapProfileFields(snap),
         });
         seenIds.add(id);
       }
@@ -2562,6 +2724,21 @@ export class SessionWatcher extends EventEmitter {
     sessions.sort((a, b) => b.lastActivity - a.lastActivity);
 
     return sessions;
+  }
+
+  /** `profileId` + `profileLabel` of a live session under a non-default profile ({} otherwise). */
+  private profileFields(sessionId: string): { profileId?: string; profileLabel?: string } {
+    if (!this.tmuxPathBySession.has(sessionId)) return {};
+    const p = this.profileFor(sessionId);
+    return p.isDefault ? {} : { profileId: p.id, profileLabel: p.label };
+  }
+
+  private snapProfileFields(snap: PersistedSessionSnapshot): {
+    profileId?: string;
+    profileLabel?: string;
+  } {
+    const p = this.profiles.get(snap.profileId);
+    return p && !p.isDefault ? { profileId: p.id, profileLabel: p.label } : {};
   }
 
   getSessions(): TmuxSession[] {
@@ -2728,14 +2905,10 @@ export class SessionWatcher extends EventEmitter {
       // Derive from persisted session snapshot
       const snap = this.persistedSessions.get(sessionId);
       if (snap?.conversationPath) {
-        const projectsDir = this.agent.transcript.projectsDir(this.codeHome);
-        const rel = path.relative(projectsDir, snap.conversationPath);
-        encodedPath = rel.split(path.sep)[0];
+        encodedPath = this.claudeKeyOfFile(snap.conversationPath) || undefined;
       }
     }
-    const projectDir = encodedPath
-      ? path.join(this.agent.transcript.projectsDir(this.codeHome), encodedPath)
-      : null;
+    const projectDir = encodedPath ? this.projectDirForKey(encodedPath) : null;
 
     const entries: ChainEntry[] = [];
     const current = this.tmuxConversationIds.get(sessionId);
@@ -2808,6 +2981,9 @@ export class SessionWatcher extends EventEmitter {
       backgroundWork?: BackgroundWork;
       /** The coding agent in the session when it is not Claude Code (optional). */
       agent?: AgentId;
+      /** Account profile when it is not the agent's default (optional). */
+      profileId?: string;
+      profileLabel?: string;
     }>;
     totalSessions: number;
     waitingCount: number;
@@ -2833,6 +3009,9 @@ export class SessionWatcher extends EventEmitter {
       backgroundWork?: BackgroundWork;
       /** The coding agent in the session when it is not Claude Code (optional). */
       agent?: AgentId;
+      /** Account profile when it is not the agent's default (optional). */
+      profileId?: string;
+      profileLabel?: string;
     }> = [];
 
     let waitingCount = 0;
@@ -2911,6 +3090,7 @@ export class SessionWatcher extends EventEmitter {
         ...(this.agentFor(ts.name).id !== DEFAULT_AGENT_ID
           ? { agent: this.agentFor(ts.name).id }
           : {}),
+        ...this.profileFields(ts.name),
       });
     }
 
@@ -2931,6 +3111,7 @@ export class SessionWatcher extends EventEmitter {
         lastActivity: snap.lastActivity,
         tmuxSessionName: snap.id,
         inactive: true,
+        ...this.snapProfileFields(snap),
       });
     }
 

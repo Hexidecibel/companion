@@ -194,6 +194,9 @@ export interface TmuxSession {
   messageCount: number;
   /** True when the session was restored from a persisted snapshot but is no longer in tmux. */
   inactive?: boolean;
+  /** Account profile when it is not the agent's default. */
+  profileId?: string;
+  profileLabel?: string;
 }
 
 export interface WebSocketMessage {
