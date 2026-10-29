@@ -37,6 +37,32 @@ Watch and drive OpenAI Codex CLI sessions next to Claude Code ones. Claude Code 
 
 **Step 4: review + stuck for Codex.** Edit extraction from `apply_patch` (parse the patch envelope into hunks), stuck signals via roles, subagent capability absent.
 
+## Item: Account profiles ("segment envs, use different logins")
+**Status:** in progress 2026-10-28
+
+Several logins per agent (personal + work Claude, more than one Codex), each session under one profile, all watched at once. Both CLIs keep everything per directory: Claude Code under `CLAUDE_CONFIG_DIR` (credentials `.credentials.json`, `.claude.json`, `projects/` transcripts, settings; verified on 2.1.312: a throwaway dir gets `.claude.json`, `sessions/`, `cache/`, ~/.claude untouched, the TUI opens on the onboarding theme picker), Codex under `CODEX_HOME` (`auth.json`, `sessions/` rollouts, its own app-server; verified on 0.165: `CODEX_HOME=<empty> codex login status` = "Not logged in", ~/.codex untouched).
+
+**Config.** `profiles: [{ id, label, agent: 'claude'|'codex', home, env?, env_file? }]` in config.json. Two implicit default profiles are always present: `claude` (home = code_home) and `codex` (home = the resolved Codex home); an existing config works unchanged and the defaults cannot be removed or shadowed (a configured profile with a default's id or home is skipped with a warning). Ids `[a-z0-9][a-z0-9_-]{0,31}`; `home` absolute (`~` expanded). `env` = non-secret variables; `env_file` = a 0600 KEY=VALUE file outside the repo (default `~/.companion/profiles/<id>.env`) for API keys, never read by the daemon except to check it exists and which KEY names it sets (for login state); the value never enters config.json, tmux's environment, argv or a log. The registry (`daemon/src/profiles/`) re-reads the config file when its mtime changes (checked on the watcher's 5 s refresh, a stat only), so `bin/companion profile add` needs no daemon restart.
+
+**Discovery (per root).** A session's profile = the `CLAUDE_CONFIG_DIR` / `CODEX_HOME` in `/proc/<agent pid>/environ` (else the pane shell's, else what the app launched it with), matched to a profile by real path; unset or unknown = the agent's default profile. One fs read per pid, cached by pid + start time, no subprocess.
+- Claude: one chokidar watcher, one `<home>/projects/**/*.jsonl` pattern per Claude profile (added / removed when profiles change). The watcher's path keys stay the bare encoded cwd for the default profile; another profile's key is `profile:<id>:<encoded>`, so two sessions in the same folder under different logins never share a key. Every place that turned a key into a directory (transcript path, project dir, /proc fd match, missed-transcript scan, chain, ensureConversationLoaded) resolves the key's profile home.
+- Codex: one `CodexRolloutIndex` per Codex profile; each pane uses its profile's index.
+- Subagents: one `SubagentDiscovery` per Claude profile root into the shared tracker. `get_conversation_file` accepts any Claude profile's projects dir. Herald `search_memory` reads every Claude profile's `projects/*/memory`.
+- Mappings / snapshot stay under the default code_home; entries record `profileId` (mappings: `profiles` map; snapshot: optional field).
+- Summary sessions carry optional `profileId` (only for a non-default profile) + `profileLabel`.
+
+**Spawn.** Optional `profileId` on `create_tmux_session`, `scaffold_open_session` and Herald `propose_spawn_session` (agent = the profile's; an explicit agent that disagrees is refused). Default Claude profile = exactly today's launch (no `CLAUDE_CONFIG_DIR`); default Codex = `CODEX_HOME` as today. Other profiles: `CLAUDE_CONFIG_DIR` / `CODEX_HOME` + `env` through `tmux new-session -e`; with an env file the typed line is `<daemon>/scripts/profile-exec.sh <env file> <launch command>` (POSIX sh: `set -a; . file; exec "$@"`; works from bash or fish), so secrets reach only the agent process. Saved tmux configs keep `profileId` (recreate / switch).
+
+**Login from the app.** `profiles_list` -> `{ profiles: [{id,label,agent,home,isDefault,loginState,envKeys}] }` with `loginState` `logged_in` (Claude `.credentials.json` / Codex `auth.json` exists; never read) | `api_key` (env / env file sets ANTHROPIC_API_KEY or OPENAI_API_KEY; names only) | `logged_out`. `profile_login {profileId}` spawns a tagged tmux session `login-<id>` in the profile env (Claude: `claude`, the user picks a theme and runs /login; Codex: `codex login`), gated like `create_tmux_session`. A login screen is `starting`, never a hang.
+
+**Script.** `bin/companion profile list|add|remove|login|env-path` (`add <id> --agent claude|codex [--label L] [--home DIR] [--share|--no-share]`): creates the home (0700), optionally symlinks the shared non-secret bits from the default home (Claude: CLAUDE.md, settings.json, skills, agents, commands, hooks, plugins; Codex: config.toml, AGENTS.md, skills, prompts; never credentials, projects/sessions or history), writes the config entry. `login <id>` prints the exact command and, with `--tmux`, starts the login tmux session. `remove` drops the config entry and leaves the home on disk.
+
+**Web.** `ProfilePicker` in New Session / New Project replaces the Claude/Codex row only when more than the two default profiles exist (otherwise unchanged); a profile badge next to the Codex label (sidebar, mobile list, SessionView header) for non-default profiles; Settings > Accounts list with login state and Log in. Protocol: optional fields only (`profileId`, `profileLabel`); new requests `profiles_list`, `profile_login`.
+
+**Usage view.** Per profile: `get_usage_dashboard` takes an optional `profileId` (an `OAuthUsageFetcher` per Claude profile; the 5-hour alert monitor stays on the default profile). Codex usage: not available (no local usage API).
+
+**Not covered:** concierge / remote_dispatch stay on the default profile; Herald knowledge besides memory; the review ledger is path-based and needs nothing.
+
 ## Item: Connection resilience
 **Status:** phase 1 done 2026-10-18 (web only; follow-up fix: no stale status across a session switch, event-driven summary re-poll); phases 2-3 designed, not started
 
