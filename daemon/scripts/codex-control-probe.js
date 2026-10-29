@@ -23,6 +23,18 @@
  *              transcript mark) makes the summary say waiting; approve -> file written
  *   project    scaffold_open_session {agent: 'codex'} (New Project's "Open Session")
  *              -> plain `codex`, listed as codex, kickoff prompt sent once ready
+ *   isolation  a Codex session (app default = bypass) in a fresh GIT folder that has an
+ *              old Claude-style transcript in code_home's projects dir: never shows it
+ *   trust      that folder's "Trust this folder?" prompt is a live choice ("Yes, trust" /
+ *              "No"), the session reads waiting, send_input is refused (the paste used to
+ *              be dropped and its Enter answered "Trust and continue"), "Yes, trust" via
+ *              send_choice -> the composer, config gains that folder (restored at once)
+ *   first msg  the first message after that is mapped to its new rollout within ~2 s
+ *   trust: no  a second folder (plain `codex`): "No" via send_choice -> Codex exits (an
+ *              untrusted folder gets no working Codex session), config.toml untouched
+ *
+ * ~/.codex/config.toml is snapshotted before the trust phase and restored byte for
+ * byte afterwards (and on any exit); the fake Claude transcript dir is removed.
  *
  * Costs a few small turns of the user's OpenAI quota (tiny prompts).
  *
@@ -60,6 +72,7 @@ function parseArgs(argv) {
     else if (a === '--json') out.json = argv[++i];
     else if (a === '--verbose') out.verbose = true;
     else if (a === '--keep') out.keep = true;
+    else if (a === '--trust-only') out.trustOnly = true;
     else {
       console.error(`unknown argument: ${a}`);
       process.exit(2);
@@ -343,6 +356,12 @@ async function run(report) {
   const iso = await assertIsolated([ANCHOR]);
   record('isolation: the probe daemon sees only the private tmux server', true, `pid ${iso.pid}`);
 
+  if (args.trustOnly) {
+    // Only phase 8 (the spawned/control sessions are not created).
+    await trustPhaseOnly(report);
+    return;
+  }
+
   // 2. Spawn through the app's request.
   const created = await request('create_tmux_session', {
     workingDir: PROJECT,
@@ -523,13 +542,186 @@ async function run(report) {
     await request('kill_tmux_session', { sessionName: scName });
     await until('project session gone', async () => (!tmuxNames(SOCK).includes(scName) ? true : null), 20_000);
   }
+
+  // 8. A new Codex session never shows a Claude transcript; the trust prompt
+  //    is a choice only the user answers; the first message maps quickly.
+  await trustPhase(report);
   report.timeline = timeline;
+}
+
+// ----------------------------------------------------------------- isolation + trust
+
+const CODEX_CONFIG = path.join(CODEX_HOME, 'config.toml');
+let configSnapshot = null;
+const fakeClaudeDirs = [];
+const trustDirs = [];
+function snapshotCodexConfig() {
+  if (configSnapshot === null) configSnapshot = fs.existsSync(CODEX_CONFIG) ? fs.readFileSync(CODEX_CONFIG) : Buffer.alloc(0);
+}
+function codexConfigChanged() {
+  const now = fs.existsSync(CODEX_CONFIG) ? fs.readFileSync(CODEX_CONFIG) : Buffer.alloc(0);
+  return configSnapshot !== null && !now.equals(configSnapshot);
+}
+function restoreCodexConfig() {
+  if (configSnapshot === null) return true;
+  if (codexConfigChanged()) fs.writeFileSync(CODEX_CONFIG, configSnapshot);
+  return !codexConfigChanged();
+}
+const encodeProjectDir = (d) => d.replace(/[^a-zA-Z0-9]/g, '-');
+function gitFolder(name) {
+  const dir = path.join(os.homedir(), '.cache', 'codex-control-probe', `${name}-${process.pid}`);
+  fs.mkdirSync(dir, { recursive: true });
+  execFileSync('git', ['init', '-q', dir], { env: cleanEnv, timeout: 8000 });
+  fs.writeFileSync(path.join(dir, 'README.md'), '# trust probe\n');
+  trustDirs.push(dir);
+  return dir;
+}
+const OLD_MARKER = 'OLD CLAUDE TRANSCRIPT MARKER';
+
+async function trustPhaseOnly(report) {
+  trustExpect = [ANCHOR];
+  await trustPhase(report);
+  report.timeline = timeline;
+}
+let trustExpect = null;
+
+async function trustPhase(report) {
+  snapshotCodexConfig();
+  const before = configSnapshot.toString('utf-8');
+  const codeHome = path.resolve((cfg.code_home || path.join(os.homedir(), '.claude')).replace(/^~(?=$|\/)/, os.homedir()));
+  const dir = gitFolder('trust-yes');
+  // An OLD Claude transcript of this folder (what the bug showed in a new Codex session).
+  const claudeDir = path.join(codeHome, 'projects', encodeProjectDir(dir));
+  fs.mkdirSync(claudeDir, { recursive: true });
+  fakeClaudeDirs.push(claudeDir);
+  const old = new Date(Date.now() - 7 * 86_400_000).toISOString();
+  fs.writeFileSync(
+    path.join(claudeDir, 'c9562fb3-3611-45df-a6cb-d28302f4d830.jsonl'),
+    [
+      { type: 'user', uuid: 'u-old', timestamp: old, cwd: dir, sessionId: 'c9562fb3-3611-45df-a6cb-d28302f4d830', message: { role: 'user', content: OLD_MARKER } },
+      { type: 'assistant', uuid: 'a-old', parentUuid: 'u-old', timestamp: old, cwd: dir, message: { role: 'assistant', content: [{ type: 'text', text: `${OLD_MARKER} reply` }] } },
+    ].map((r) => JSON.stringify(r)).join('\n') + '\n'
+  );
+
+  const TRUST = 'cdx-trust';
+  SESSION = TRUST;
+  lastStatus = null;
+  const created = await request('create_tmux_session', { workingDir: dir, name: TRUST, startCli: true, agent: 'codex' });
+  record('isolation: create_tmux_session {agent: codex} (bypass) in a git folder with an old Claude transcript', created.success === true, created.error || '');
+  if (!created.success) return;
+  await assertIsolated([...(trustExpect || [ANCHOR, SPAWNED, CONTROL]), TRUST]);
+  // Hammer the read paths the app uses while Codex starts (the bug's window).
+  let leaked = '';
+  const tEnd = Date.now() + 8000;
+  while (Date.now() < tEnd) {
+    await request('switch_session', { sessionId: TRUST }).catch(() => null);
+    const hl = await highlights();
+    const hit = hl.find((h) => (h.content || '').includes(OLD_MARKER));
+    if (hit) leaked = hit.content.slice(0, 60);
+    const st = await request('get_status', { sessionId: TRUST });
+    if (st.payload && st.payload.conversationId && st.payload.conversationId.endsWith('.jsonl') && !/rollout-/.test(st.payload.conversationId))
+      leaked = leaked || `get_status conversationId ${st.payload.conversationId}`;
+    await delay(400);
+  }
+  record('isolation: no Claude transcript in the new Codex session (highlights / status)', !leaked, leaked);
+
+  // The trust prompt as a live choice.
+  const trust = await until('trust prompt as a live choice', async () => {
+    const c = await liveChoice();
+    return c && /Trust this folder\?/.test(c.question) ? c : null;
+  }, 45_000);
+  record(
+    'trust: the prompt is a live choice "Yes, trust" / "No"',
+    !!trust && trust.options.map((o) => o.label).join('|') === 'Yes, trust|No',
+    trust ? `${trust.header}: ${trust.question.replace(/\n/g, ' ')} / ${trust.options.map((o) => o.label).join(' | ')}` : ''
+  );
+  if (!trust) return;
+  const waiting = await until('trust: summary waiting', async () => ((await status()) === 'waiting' ? true : null), 15_000);
+  const st = await request('get_status', { sessionId: TRUST });
+  record('trust: summary + get_status say waiting while it is up', !!waiting && !!(st.payload && st.payload.isWaitingForInput), `${lastStatus} / ${st.payload && st.payload.currentActivity}`);
+  const refused = await sendInput('Yoyo');
+  await delay(1500);
+  record(
+    'trust: send_input is refused (never answers the prompt), config.toml untouched',
+    refused.success === false && refused.error === 'prompt_waiting' && /Trust this folder\?/.test(screen()) && !codexConfigChanged(),
+    `${refused.error}: ${refused.payload && refused.payload.message}`
+  );
+  const yes = await request('send_choice', { selectedIndices: [0], optionCount: 2, multiSelect: false, sessionId: TRUST, tmuxSessionName: TRUST });
+  const in1 = await until('trust: composer', async () => (/Ask Codex to do anything|\? for shortcuts/.test(screen()) && !/Trust this folder\?/.test(screen()) ? true : null), 20_000);
+  const saved = fs.readFileSync(CODEX_CONFIG, 'utf-8').includes(`[projects."${dir}"]`);
+  record('trust: "Yes, trust" via send_choice -> the composer, Codex saved the folder', yes.success === true && !!in1 && saved, yes.error || '');
+  record('trust: config.toml restored right away', restoreCodexConfig(), '');
+  const left = await until('trust: status leaves waiting', async () => ((await status()) !== 'waiting' ? true : null), 15_000);
+  record('trust: status leaves waiting once answered', !!left, `status ${lastStatus}`);
+
+  // First message -> mapped to its new rollout quickly.
+  const sentAt = Date.now();
+  const first = await sendInput('Reply with just the word TRUSTPONG.');
+  const mapped = await until('first message mapped', async () => {
+    const r = await request('get_status', { sessionId: TRUST });
+    return r.payload && /rollout-.*\.jsonl$/.test(r.payload.conversationId || '') ? Date.now() : null;
+  }, 30_000);
+  const mapMs = mapped ? mapped - sentAt : null;
+  report.firstMessageMapMs = mapMs;
+  record('first message: send accepted and mapped to its rollout within 3 s', first.success === true && mapMs !== null && mapMs < 3000, `${mapMs} ms`);
+  const pong = await until('first message answered', async () => (/TRUSTPONG/.test(await lastAssistantText()) && (await status()) !== 'working' ? true : null), 90_000);
+  const hlAll = await highlights();
+  record(
+    'first message: answered, and still no Claude transcript',
+    !!pong && !hlAll.some((h) => (h.content || '').includes(OLD_MARKER)),
+    `status ${lastStatus}`
+  );
+  await request('kill_tmux_session', { sessionName: TRUST });
+  await until('trust session gone', async () => (!tmuxNames(SOCK).includes(TRUST) ? true : null), 20_000);
+  restoreCodexConfig();
+
+  // "No" on plain `codex` in a second folder: Codex exits, nothing saved.
+  const dir2 = gitFolder('trust-no');
+  const TRUST2 = 'cdx-trust2';
+  SESSION = TRUST2;
+  lastStatus = null;
+  const c2 = await request('create_tmux_session', { workingDir: dir2, name: TRUST2, startCli: true, agent: 'codex', permissionMode: 'default' });
+  const t2 = c2.success
+    ? await until('trust 2: live choice', async () => {
+        const c = await liveChoice();
+        return c && /Trust this folder\?/.test(c.question) ? c : null;
+      }, 45_000)
+    : null;
+  record('trust: no (plain codex): the prompt is a live choice', !!t2, c2.error || '');
+  if (t2) {
+    const pidBefore = codexPid();
+    const no = await request('send_choice', { selectedIndices: [1], optionCount: 2, multiSelect: false, sessionId: TRUST2, tmuxSessionName: TRUST2 });
+    const gone = await until('trust 2: Codex exited', async () => (!codexPid() ? true : null), 20_000);
+    record(
+      'trust: "No" via send_choice -> Codex exits, config.toml untouched',
+      no.success === true && !!pidBefore && !!gone && !codexConfigChanged(),
+      no.error || tail(screen(), 2)
+    );
+    const st2 = await until('trust 2: not waiting', async () => ((await status()) !== 'waiting' ? true : null), 15_000);
+    record('trust: no: status leaves waiting', !!st2, `status ${lastStatus}`);
+  }
+  const restored = restoreCodexConfig();
+  const after = fs.readFileSync(CODEX_CONFIG, 'utf-8');
+  const kept = [...before.matchAll(/^\[projects\."([^"]+)"\]/gm)].map((m) => m[1]);
+  record(
+    'config.toml restored byte for byte (existing project entries untouched)',
+    restored && after === before && kept.every((k) => after.includes(`[projects."${k}"]`)),
+    `entries: ${kept.map((k) => path.basename(k)).join(', ')}`
+  );
+  await request('kill_tmux_session', { sessionName: TRUST2 });
+  await until('trust 2 session gone', async () => (!tmuxNames(SOCK).includes(TRUST2) ? true : null), 20_000);
 }
 
 let cleaned = false;
 async function cleanup() {
   if (cleaned) return;
   cleaned = true;
+  try {
+    if (configSnapshot !== null) log(`codex config.toml ${restoreCodexConfig() ? 'restored' : 'NOT RESTORED'}`);
+  } catch (e) {
+    log(`codex config.toml restore FAILED: ${e.message}`);
+  }
+  for (const d of [...fakeClaudeDirs, ...trustDirs]) fs.rmSync(d, { recursive: true, force: true });
   if (args.keep) {
     log(`--keep: private tmux server left running (tmux -S ${SOCK} attach -t ${SESSION})`);
     return;
