@@ -102,6 +102,11 @@ export interface TerminalChoicePrompt {
   /** True when the selector is a multi-select (checkbox) list, e.g. an AskUserQuestion
    *  multiSelect question. Drives how the response is injected (toggles + submit). */
   multiSelect?: boolean;
+  /**
+   * 'trust': the agent's start-up "Trust this folder?" prompt (agents/trust.ts).
+   * Only the user answers it: never babysit, auto-approval or Herald.
+   */
+  kind?: 'trust';
 }
 
 export interface Question {

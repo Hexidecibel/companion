@@ -621,7 +621,9 @@ export class BabysitManager {
             ? `${b.sessionName} has an unsent draft in its prompt box, so I didn't type over it and left the question for you.`
             : refusal?.reason === 'typing'
               ? `Someone is typing in ${b.sessionName}'s terminal, so I left the question for you.`
-              : `I could not deliver my answer to ${b.sessionName}, so I left it for you.`
+              : refusal?.reason === 'trust' || refusal?.reason === 'choice'
+                ? `${b.sessionName} is showing a prompt only you should answer, so I left it for you.`
+                : `I could not deliver my answer to ${b.sessionName}, so I left it for you.`
         );
       }
 

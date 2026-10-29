@@ -27,6 +27,19 @@ import { claudeAdapter, codexAdapter } from '../agents';
 const FIX = path.join(__dirname, '..', 'agents', '__tests__', 'fixtures', 'codex');
 const IDLE = fs.readFileSync(path.join(FIX, 'live-idle.ansi'), 'utf-8');
 const APPROVAL = fs.readFileSync(path.join(FIX, 'live-approval-exec.txt'), 'utf-8');
+const TRUST = fs.readFileSync(path.join(FIX, 'live-trust.txt'), 'utf-8');
+const CLAUDE_TRUST = [
+  ' Accessing workspace:',
+  '',
+  ' /home/hexi/x',
+  '',
+  ' Quick safety check: Is this a project you created or one you trust?',
+  '',
+  ' ❯ 1. Yes, I trust this folder',
+  '   2. No, exit',
+  '',
+  ' Enter to confirm · Esc to cancel',
+].join('\n');
 
 describe('InputInjector with a Codex pane', () => {
   let pane = IDLE;
@@ -85,6 +98,43 @@ describe('InputInjector with a Codex pane', () => {
     pane = APPROVAL;
     expect(await make().sendChoice([1], 3, false, undefined, 'cdx')).toBe(true);
     expect(sends()).toEqual([['send-keys', '-t', 'cdx', '2']]);
+  });
+
+  it('never types text into the trust prompt or an approval box (Enter would answer it)', async () => {
+    pane = TRUST;
+    const r = await make().sendInputDetailed('Yoyo', 'cdx');
+    expect(r).toMatchObject({ ok: false, reason: 'trust', code: 'prompt_waiting' });
+    expect(r.ok === false && r.message).toMatch(/trust this folder/);
+    pane = APPROVAL;
+    expect(await make().sendInputDetailed('hello', 'cdx')).toMatchObject({
+      ok: false,
+      reason: 'choice',
+    });
+    pane = CLAUDE_TRUST;
+    expect(await make().sendInputDetailed('hello', 'cl')).toMatchObject({
+      ok: false,
+      reason: 'trust',
+    });
+    expect(sends()).toHaveLength(0);
+  });
+
+  it('answers the trust prompt with its own keys (Yes: 1 + Enter; No: 2, then Ctrl+C)', async () => {
+    pane = TRUST;
+    expect(await make().sendChoice([0], 2, false, undefined, 'cdx')).toBe(true);
+    expect(sends()).toEqual([
+      ['send-keys', '-t', 'cdx', '1'],
+      ['send-keys', '-t', 'cdx', 'Enter'],
+    ]);
+    mockTmux.mockClear();
+    expect(await make().sendChoice([1], 2, false, undefined, 'cdx')).toBe(true);
+    expect(sends()).toEqual([
+      ['send-keys', '-t', 'cdx', '2'],
+      ['send-keys', '-t', 'cdx', 'C-c'],
+    ]);
+    mockTmux.mockClear();
+    // Free text is not an answer to it.
+    expect(await make().sendChoice([0], 2, false, 'whatever', 'cdx')).toBe(false);
+    expect(sends()).toHaveLength(0);
   });
 
   it('Claude panes keep typed text + Enter and Ctrl+C', async () => {

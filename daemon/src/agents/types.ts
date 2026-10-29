@@ -139,6 +139,8 @@ export interface ChoiceRequest {
   optionCount: number;
   multiSelect: boolean;
   otherText?: string;
+  /** The box on screen is the agent's folder-trust prompt (its own keys). */
+  trust?: boolean;
 }
 
 export interface AgentTerminal<PermissionMode extends string = string> {

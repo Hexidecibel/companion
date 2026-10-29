@@ -88,6 +88,7 @@ const PERMISSION_QUESTION =
  * choice counts.
  */
 export function isPermissionChoice(c: PendingChoice): boolean {
+  if (c.trust) return true; // the start-up "Trust this folder?" prompt
   const question = oneLine([c.header, c.question].filter(Boolean).join(' '));
   if (PERMISSION_QUESTION.test(question)) return true;
   if (

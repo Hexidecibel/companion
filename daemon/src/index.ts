@@ -129,6 +129,8 @@ async function main(): Promise<void> {
   // Text, choice and interrupt keys follow the agent running in each pane.
   injector.setAgentResolver((session) => watcher.agentFor(session));
   injector.setAfterSend((session) => watcher.nudgeCodexDiscovery(session));
+  // An answered trust prompt is re-read at once (status back from "waiting").
+  injector.setAfterChoice((session) => watcher.recheckStartupPrompt(session));
   const subAgentWatcher = new SubAgentWatcher(config.codeHome, {
     mode:
       config.subagents?.enabled === false

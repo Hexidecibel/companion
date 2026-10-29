@@ -7,7 +7,7 @@
  * old modules.
  */
 import {
-  detectActiveChoicePrompt,
+  detectActiveChoicePrompt as parserDetectActiveChoicePrompt,
   parsePermissionPrompt,
   parseTextChoicePrompt,
 } from '../../parser';
@@ -18,6 +18,8 @@ import {
   POST_TEXT_DELAY_MS,
   POST_TEXT_INPUT_DELAY_MS,
 } from '../../constants';
+import { CLAUDE_TRUST, parseTrustPrompt } from '../trust';
+import type { TerminalChoicePrompt } from '../../types';
 import type {
   AgentTerminal,
   ChoiceKeyPlan,
@@ -52,6 +54,14 @@ export function classifyStartupPane(pane: string): StartupPaneState {
   if (/for shortcuts|bypass permissions on|shift\+tab to cycle|Try "/i.test(p)) return 'ready';
   if (/❯/.test(p) && /[─━]{10,}/.test(p)) return 'ready';
   return 'starting';
+}
+
+/**
+ * The live choice box; the start-up trust prompt first, as "Yes, trust" / "No"
+ * (same order as Claude's own options, so the digit keys answer it).
+ */
+export function detectActiveChoicePrompt(paneOutput: string): TerminalChoicePrompt | null {
+  return parseTrustPrompt(paneOutput, CLAUDE_TRUST) ?? parserDetectActiveChoicePrompt(paneOutput);
 }
 
 /** A pane showing a tool-approval prompt (auto-approval verifies this before sending "yes"). */

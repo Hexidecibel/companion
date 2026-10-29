@@ -507,6 +507,13 @@ export class ActionManager {
           fail('failed', 'Internal error: choice details missing; nothing was sent.');
           return { ...rec.action };
         }
+        if (live?.trust) {
+          fail(
+            'expired',
+            `${a.sessionName} is asking whether to trust its folder; only you answer that, in the app. Nothing was sent.`
+          );
+          return { ...rec.action };
+        }
         if (!live || live.signature !== c.signature) {
           fail(
             'expired',

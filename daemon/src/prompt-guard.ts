@@ -153,34 +153,56 @@ export function secondsSinceClientActivity(listClientsOut: string, nowMs: number
   return Math.max(0, nowMs / 1000 - Math.max(...stamps));
 }
 
-export type InputRefusalReason = 'draft' | 'typing';
+export type InputRefusalReason = 'draft' | 'typing' | 'trust' | 'choice';
 
 export interface InputRefusal {
   reason: InputRefusalReason;
   /** Wire error code (send_input / message_sent). */
-  code: 'prompt_has_draft' | 'user_typing';
+  code: 'prompt_has_draft' | 'user_typing' | 'prompt_waiting';
   /** User-facing sentence (web banner). */
   message: string;
 }
 
-export function refusalFor(reason: InputRefusalReason): InputRefusal {
-  return reason === 'draft'
-    ? {
+export function refusalFor(reason: InputRefusalReason, agentName = 'The session'): InputRefusal {
+  switch (reason) {
+    case 'draft':
+      return {
         reason,
         code: 'prompt_has_draft',
         message:
           'Not sent: the prompt has an unsent draft in the terminal. Send or clear it there, then try again.',
-      }
-    : {
+      };
+    case 'typing':
+      return {
         reason,
         code: 'user_typing',
         message: 'Not sent: someone is typing in the terminal right now. Try again in a moment.',
       };
+    case 'trust':
+      return {
+        reason,
+        code: 'prompt_waiting',
+        message: `Not sent: ${agentName} is asking whether to trust this folder. Answer that first (it is in the chat), then send again.`,
+      };
+    case 'choice':
+      return {
+        reason,
+        code: 'prompt_waiting',
+        message: `Not sent: ${agentName} is waiting on a choice. Answer it first, then send again.`,
+      };
+  }
 }
 
 /** Herald's wording for a refused send to `name`. */
 export function heraldRefusalText(name: string, reason: InputRefusalReason): string {
-  return reason === 'draft'
-    ? `${name} has an unsent draft in its prompt box, so I didn't type over it. Send or clear it, then try again.`
-    : `Someone is typing in ${name}'s terminal right now, so I didn't send. Try again in a moment.`;
+  switch (reason) {
+    case 'draft':
+      return `${name} has an unsent draft in its prompt box, so I didn't type over it. Send or clear it, then try again.`;
+    case 'typing':
+      return `Someone is typing in ${name}'s terminal right now, so I didn't send. Try again in a moment.`;
+    case 'trust':
+      return `${name} is asking whether to trust its folder, so I didn't send. Answer that yourself in the app, then try again.`;
+    case 'choice':
+      return `${name} is waiting on a choice, so I didn't send. Answer it first, then try again.`;
+  }
 }

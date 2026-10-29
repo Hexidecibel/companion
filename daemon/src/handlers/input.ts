@@ -5,13 +5,18 @@ import { HandlerContext, MessageHandler } from '../handler-context';
 import { MAX_ATTACHMENT_FILE_SIZE_BYTES } from '../constants';
 import type { SendInputResult } from '../input-injector';
 
-/** Wire error for a failed send: the guard's code (draft / typing), else the legacy text. */
+/** Wire error for a failed send: the guard's code (draft / typing / prompt waiting), else the legacy text. */
 function sendErrorCode(
   r: SendInputResult,
   fallback = 'Failed to send input to session'
 ): string | undefined {
   if (r.ok) return undefined;
-  return r.reason === 'draft' || r.reason === 'typing' ? r.code : fallback;
+  return r.reason === 'draft' ||
+    r.reason === 'typing' ||
+    r.reason === 'trust' ||
+    r.reason === 'choice'
+    ? r.code
+    : fallback;
 }
 
 // Known image file extensions (lowercase, with leading dot).

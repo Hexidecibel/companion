@@ -26,6 +26,8 @@ export interface PendingChoice {
   multiSelect: boolean;
   /** Stable signature of (header, question, option labels) — detects a changed prompt. */
   signature: string;
+  /** The agent's start-up "Trust this folder?" prompt: only the user answers it. */
+  trust?: boolean;
 }
 
 export interface PendingApproval {
@@ -513,6 +515,7 @@ export class LocalSessionSource implements SessionSource {
         options,
         multiSelect: Boolean(choice.multiSelect),
         signature: choiceSignature({ header: choice.header, question: choice.question, options }),
+        ...(choice.kind === 'trust' ? { trust: true } : {}),
       };
     } catch (err) {
       if (strict) throw err;
@@ -551,7 +554,13 @@ export class LocalSessionSource implements SessionSource {
     if (this.deps.injector.sendInputDetailed) {
       const r = await this.deps.injector.sendInputDetailed(text, sessionId);
       ok = r.ok;
-      if (!r.ok && (r.reason === 'draft' || r.reason === 'typing')) {
+      if (
+        !r.ok &&
+        (r.reason === 'draft' ||
+          r.reason === 'typing' ||
+          r.reason === 'trust' ||
+          r.reason === 'choice')
+      ) {
         this.refusals.set(sessionId, {
           reason: r.reason,
           code: r.code,

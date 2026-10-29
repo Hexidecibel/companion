@@ -47,7 +47,9 @@ describe('agent registry', () => {
     expect(term.classifyStartupPane).toBe(classifyStartupPane);
     expect(term.readPromptBox).toBe(readPromptBox);
     expect(term.detectOverlay).toBe(detectOverlay);
-    expect(term.detectActiveChoicePrompt).toBe(detectActiveChoicePrompt);
+    // The trust prompt is checked first; any other box is the parser's.
+    const box = '❯ 1. Yes\n  2. No\n\nEnter to select · Esc to cancel';
+    expect(term.detectActiveChoicePrompt(box)).toEqual(detectActiveChoicePrompt(box));
     expect(term.approvalPromptRe.test('Do you want to proceed?')).toBe(true);
     expect(term.approvalPromptRe.test('all good')).toBe(false);
   });

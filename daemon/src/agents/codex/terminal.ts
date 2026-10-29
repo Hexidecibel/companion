@@ -27,8 +27,15 @@
  *   ("? / esc close"). Both close with Esc.
  * - Start-up: a git folder Codex has not been told to trust shows "Folder
  *   access / Trust this folder?" (1. Trust and continue / 2. Back to Agent
- *   Command Center); a plain folder does not. `--dangerously-bypass-approvals-
- *   and-sandbox` shows no extra warning screen.
+ *   Command Center); a plain folder does not, and neither does a folder
+ *   already trusted in config.toml. `--dangerously-bypass-approvals-and-
+ *   sandbox` asks it too (seen live 2026-10-28: the app's first message hit
+ *   it, the paste was dropped and its Enter answered "Trust and continue").
+ *   Keys (live): "2" selects AND confirms (-> Agent Command Center); "1"
+ *   only selects option 1, Enter confirms it. Esc = "2". Esc from the Command
+ *   Center shows a composer, but it is not a session: every message there
+ *   just queues ("Queued follow-up inputs") and never runs. Ctrl+C in the
+ *   Command Center quits Codex (like Claude's own "No, exit").
  *
  * The approval box as Codex 0.165 draws it:
  *
@@ -47,6 +54,7 @@
  *     Press enter to confirm or esc to cancel
  */
 import { stripAnsi, stripDim, type PromptBoxState } from '../../prompt-guard';
+import { CODEX_TRUST, parseTrustPrompt } from '../trust';
 import type { TerminalChoicePrompt } from '../../types';
 import type {
   AgentTerminal,
@@ -204,6 +212,9 @@ export function parseCodexTextChoicePrompt(content: string): TextChoicePrompt | 
 
 /** The approval box live at the bottom of a pane capture, as the app's choice prompt. */
 export function detectCodexActiveChoicePrompt(paneOutput: string): TerminalChoicePrompt | null {
+  // The start-up trust prompt ("Yes, trust" / "No"; agents/trust.ts).
+  const trust = parseTrustPrompt(paneOutput, CODEX_TRUST);
+  if (trust) return trust;
   const box = parseCodexApprovalBox(paneOutput);
   if (!box) return null;
   const detail = [
@@ -327,9 +338,50 @@ export function codexTextKeys(text: string): KeyStep[] {
  * differently (esc)": Esc aborts the turn, then the text goes in as a new
  * message, which is what that option asks for.
  */
+/** Time for the Agent Command Center to open after the trust prompt's "2". */
+export const CODEX_TRUST_BACK_DELAY_MS = 1200;
+
+/**
+ * Keys for the trust prompt: "Yes, trust" = "1" then Enter (the digit alone
+ * only selects); "No" = "2" (confirms "Back to Agent Command Center"), then
+ * Ctrl+C there, which quits Codex: an untrusted folder gets no working Codex
+ * session (the composer Esc would show only queues messages), so "No" ends
+ * it like Claude's "No, exit". Nothing is saved either way but "Yes".
+ */
+export function codexTrustKeys(index: number): ChoiceKeyPlan {
+  if (index === 0)
+    return {
+      description: 'codex trust prompt: Trust and continue',
+      warnings: [],
+      steps: [
+        { type: 'key', key: '1' },
+        { type: 'delay', ms: CHOICE_KEY_DELAY_MS },
+        { type: 'key', key: 'Enter' },
+      ],
+    };
+  return {
+    description: 'codex trust prompt: not trusted (back, then quit Codex)',
+    warnings: [],
+    steps: [
+      { type: 'key', key: '2' },
+      { type: 'delay', ms: CODEX_TRUST_BACK_DELAY_MS },
+      { type: 'key', key: 'C-c' },
+    ],
+  };
+}
+
 export function codexChoiceKeys(req: ChoiceRequest): ChoiceKeyPlan {
   const { selectedIndices, optionCount, multiSelect, otherText } = req;
   const warnings: string[] = [];
+  if (req.trust) {
+    if (otherText !== undefined || (selectedIndices[0] ?? -1) < 0 || selectedIndices[0] > 1)
+      return {
+        description: 'codex trust prompt: only "Yes, trust" or "No"',
+        warnings: ['The trust prompt takes only "Yes, trust" or "No"; nothing sent'],
+        steps: [],
+      };
+    return codexTrustKeys(selectedIndices[0]);
+  }
   if (otherText !== undefined) {
     return {
       description: `codex choice: decline (esc) + feedback "${otherText.substring(0, 60)}"`,

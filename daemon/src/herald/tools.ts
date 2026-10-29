@@ -1225,6 +1225,11 @@ async function proposeInput(
         `${s.sessionName} is asking a multi-select question; tell the user to answer it in the app.`
       );
     }
+    if (c.trust) {
+      return err(
+        `${s.sessionName} is asking whether to trust its folder. Only the user answers that: tell them to tap "Yes, trust" or "No" in the app.`
+      );
+    }
     const o = resolveOption(optionRef, c.options);
     if (!o.ok) return err(o.error);
     const opt = c.options[o.index];

@@ -73,6 +73,12 @@ export class InputInjector {
   }
   private afterSend: ((session: string) => void) | null = null;
 
+  /** Called after a choice reached a session (the watcher re-reads a start-up prompt). */
+  setAfterChoice(fn: (session: string) => void): void {
+    this.afterChoice = fn;
+  }
+  private afterChoice: ((session: string) => void) | null = null;
+
   /** The agent in a tmux session (falls back to Claude on any resolver error). */
   agentFor(session: string): AgentAdapter {
     try {
@@ -166,8 +172,28 @@ export class InputInjector {
         return { ok: false, ...refusalFor('typing') };
       }
 
-      // Dismiss any TUI overlay, then make sure the prompt box holds no draft.
+      // A choice box that text would answer: the start-up trust prompt (any
+      // agent: the paste is dropped and Enter picks the highlighted "trust"),
+      // or any Codex box (Enter confirms its highlighted option). The user
+      // answers those as a choice; text is refused.
       let pane = await this.captureForGuard(session);
+      if (pane !== null) {
+        const choice = agent.terminal.detectActiveChoicePrompt(pane);
+        const blocking =
+          choice?.kind === 'trust'
+            ? 'trust'
+            : choice && agent.terminal.requiresLiveChoiceBox
+              ? 'choice'
+              : null;
+        if (blocking) {
+          impact.count('inputCollisions');
+          console.log(
+            `Input to '${session}' refused: ${blocking === 'trust' ? 'the trust prompt' : 'a choice box'} is on screen`
+          );
+          return { ok: false, ...refusalFor(blocking, agent.displayName) };
+        }
+      }
+      // Dismiss any TUI overlay, then make sure the prompt box holds no draft.
       if (pane !== null && agent.terminal.detectOverlay(pane)) {
         console.log(`Overlay detected in session '${session}', sending Escape to dismiss`);
         await this.runTmux(['send-keys', '-t', session, 'Escape']);
@@ -397,29 +423,42 @@ export class InputInjector {
       }
 
       const agent = this.agentFor(session);
+      let trust = false;
       if (agent.terminal.requiresLiveChoiceBox) {
         // Codex: a digit sent to the bare composer would be typed into it and
         // Esc would interrupt, so answer only a box that is on screen now.
         const pane = await this.captureForGuard(session);
-        if (pane === null || !agent.terminal.detectActiveChoicePrompt(pane)) {
+        const box = pane === null ? null : agent.terminal.detectActiveChoicePrompt(pane);
+        if (!box) {
           console.log(
             `Choice for '${session}' not sent: no ${agent.displayName} choice box on screen`
           );
           return false;
         }
+        // The trust prompt has its own keys (agents/codex/terminal.ts).
+        trust = box.kind === 'trust';
       } else {
         // Dismiss any TUI overlay before sending
         await this.dismissOverlayIfPresent(session);
       }
 
-      return await this.doSendChoice(
+      const sent = await this.doSendChoice(
         selectedIndices,
         optionCount,
         multiSelect,
         otherText,
         session,
-        agent
+        agent,
+        trust
       );
+      if (sent && this.afterChoice) {
+        try {
+          this.afterChoice(session);
+        } catch {
+          // an observer never fails a send
+        }
+      }
+      return sent;
     } finally {
       releaseLock!();
     }
@@ -431,7 +470,8 @@ export class InputInjector {
     multiSelect: boolean,
     otherText: string | undefined,
     session: string,
-    agent: AgentAdapter
+    agent: AgentAdapter,
+    trust = false
   ): Promise<boolean> {
     try {
       // The agent decides the keys (Claude: digits, arrows, Right + "1" to submit;
@@ -441,6 +481,7 @@ export class InputInjector {
         optionCount,
         multiSelect,
         otherText,
+        ...(trust ? { trust } : {}),
       });
       console.log(`Sending ${plan.description} to '${session}'`);
       for (const w of plan.warnings) console.warn(w);

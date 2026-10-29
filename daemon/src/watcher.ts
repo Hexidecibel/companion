@@ -19,6 +19,7 @@ import {
   ConversationMessage,
   FeedbackPrompt,
   SessionStatus,
+  TerminalChoicePrompt,
   TmuxSession,
 } from './types';
 import { InputInjector } from './input-injector';
@@ -151,6 +152,25 @@ export interface FileChangeOptions {
 
 /** Key in the path maps for a Codex session (Codex transcripts are not cwd-keyed). */
 const CODEX_KEY = 'codex:';
+/** Re-discovery after a send to a Codex session without a rollout yet. */
+const CODEX_NUDGE_DELAYS_MS = [1500, 2000, 3000];
+/** One fs.watch per Codex home's sessions dir at most this many. */
+const MAX_ROLLOUT_DIR_WATCHES = 8;
+/** An agent's start-up screen is watched (pane captures) this long after it starts. */
+const STARTUP_WATCH_MS = 10 * 60_000;
+/** Start-up captures per refresh, at most. */
+const MAX_STARTUP_CAPTURES = 2;
+/** Re-read a trust prompt this long after a choice was sent. */
+const STARTUP_RECHECK_MS = 1500;
+/** currentActivity while the agent's trust prompt is up. */
+export const TRUST_PROMPT_ACTIVITY = 'Asking whether to trust this folder';
+
+/** Local-date dir of Codex rollouts (`YYYY/MM/DD`). */
+function localDateDir(t: number): string {
+  const d = new Date(t);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return path.join(String(d.getFullYear()), pad(d.getMonth() + 1), pad(d.getDate()));
+}
 /**
  * Key prefix of a Claude session under a non-default account profile:
  * `profile:<id>:<encoded cwd>` (the default profile keeps the bare encoded
@@ -545,9 +565,26 @@ export class SessionWatcher extends EventEmitter {
     if (this.refreshInFlight) return this.refreshInFlight;
     const p = this.refreshTmuxPathsInner().finally(() => {
       this.refreshInFlight = null;
+      if (this.refreshAgain) {
+        this.refreshAgain = false;
+        const t = setTimeout(() => void this.refreshTmuxPaths().catch(() => {}), 0);
+        t.unref?.();
+      }
     });
     this.refreshInFlight = p;
     return p;
+  }
+
+  /** A refresh requested while one runs: run one more afterwards (that one may be past discovery). */
+  private refreshAgain = false;
+
+  /** Refresh now, or once more right after the one in flight. */
+  private requestRefresh(): void {
+    if (this.refreshInFlight) {
+      this.refreshAgain = true;
+      return;
+    }
+    void this.refreshTmuxPaths().catch(() => {});
   }
 
   private async refreshTmuxPathsInner(): Promise<void> {
@@ -614,16 +651,25 @@ export class SessionWatcher extends EventEmitter {
               nextAgents.set(name, 'codex');
               codexPanes.push({ name, pid: codexPid, profile });
             } else {
+              // No agent process (yet): a session the app launched Codex in
+              // stays a Codex session (its key never names a Claude project
+              // dir, so a Claude transcript of the same folder is never shown).
+              const launchedCodex = this.agentHints.get(name) === 'codex';
               const hinted = this.profiles.get(this.profileHints.get(name));
               const env = await paneEnv();
+              const want = launchedCodex ? 'codex' : 'claude';
               profile =
-                hinted && hinted.agent === 'claude'
+                hinted && hinted.agent === want
                   ? hinted
-                  : this.profiles.forHome('claude', env.CLAUDE_CONFIG_DIR);
+                  : launchedCodex
+                    ? this.profiles.forHome('codex', env.CODEX_HOME)
+                    : this.profiles.forHome('claude', env.CLAUDE_CONFIG_DIR);
             }
           }
           if (claudePid) this.profileHints.delete(name);
-          const encodedPath = nextAgents.has(name)
+          const codexKeyed =
+            nextAgents.has(name) || (!claudePid && this.agentHints.get(name) === 'codex');
+          const encodedPath = codexKeyed
             ? CODEX_KEY + name
             : this.keyFor(profile, this.agent.transcript.encodeProjectDir(workingDir));
           nextProfiles.set(name, profile.id);
@@ -721,6 +767,17 @@ export class SessionWatcher extends EventEmitter {
 
       // Persist session snapshots so they survive daemon restarts
       this.persistSessions();
+
+      for (const name of [...this.startupPrompts.keys()]) {
+        if (!this.tmuxPathBySession.has(name)) this.startupPrompts.delete(name);
+      }
+      for (const [name, pid] of [...this.startupSettled]) {
+        if (this.tmuxSessionIdentity.get(name)?.claudePid !== pid) this.startupSettled.delete(name);
+      }
+      // Start-up screens of fresh agents (trust prompt): a few bounded
+      // captures, not awaited (in-flight guarded per session).
+      void this.checkStartupPrompts();
+      this.syncRolloutDirWatch();
     } catch {
       // tmux not running or no sessions
       this.tmuxProjectPaths.clear();
@@ -948,12 +1005,201 @@ export class SessionWatcher extends EventEmitter {
   nudgeCodexDiscovery(sessionId: string): void {
     if (this.agentFor(sessionId).id !== 'codex' || this.codexBySession.has(sessionId)) return;
     if (this.codexNudges.has(sessionId)) return;
+    // Codex creates the rollout as the turn starts (well under a second after
+    // the Enter): look at 1.5 s, then twice more until it is mapped. The
+    // sessions-dir watch (syncRolloutDirWatch) usually gets there first.
+    let i = 0;
+    const tick = () => {
+      if (this.codexBySession.has(sessionId) || i >= CODEX_NUDGE_DELAYS_MS.length) {
+        this.codexNudges.delete(sessionId);
+        return;
+      }
+      const t = setTimeout(() => {
+        i++;
+        this.requestRefresh();
+        tick();
+      }, CODEX_NUDGE_DELAYS_MS[i]);
+      t.unref?.();
+      this.codexNudges.set(sessionId, t);
+    };
+    tick();
+  }
+
+  // ---- new Codex rollouts by fs event ----
+
+  /** sessions/YYYY/MM/DD dir -> its watch + the rollout names already there. */
+  private rolloutDirWatches = new Map<string, { w: fs.FSWatcher; known: Set<string> }>();
+  private rolloutEventTimer: NodeJS.Timeout | null = null;
+
+  /**
+   * While a live Codex session has no rollout yet, watch today's sessions dir
+   * of its Codex home (one fs.watch per home, re-armed at the date change,
+   * dropped once every Codex session is mapped): a NEW rollout file triggers
+   * one (debounced, in-flight guarded) refresh, so the first turn is mapped
+   * within a moment of Codex creating it. Writes to existing rollouts are
+   * ignored; a missing dir (first Codex thread of the day) falls back to the
+   * send nudges and the 5 s refresh.
+   */
+  private syncRolloutDirWatch(now = Date.now()): void {
+    const want = new Set<string>();
+    for (const name of this.tmuxPathBySession.keys()) {
+      if (this.agentFor(name).id !== 'codex' || this.codexBySession.has(name)) continue;
+      want.add(path.join(this.profileFor(name).home, 'sessions', localDateDir(now)));
+    }
+    for (const [dir, rec] of [...this.rolloutDirWatches]) {
+      if (want.has(dir)) continue;
+      rec.w.close();
+      this.rolloutDirWatches.delete(dir);
+    }
+    for (const dir of want) {
+      if (this.rolloutDirWatches.has(dir) || this.rolloutDirWatches.size >= MAX_ROLLOUT_DIR_WATCHES)
+        continue;
+      try {
+        const known = new Set(fs.readdirSync(dir).filter((f) => isCodexRollout(f)));
+        const w = fs.watch(dir, { persistent: false }, (_event, file) => {
+          const name = typeof file === 'string' ? file : file ? String(file) : '';
+          if (!name || !isCodexRollout(name) || known.has(name)) return;
+          if (known.size > 5000) known.clear();
+          known.add(name);
+          this.onNewRolloutFile();
+        });
+        w.on('error', () => {
+          w.close();
+          this.rolloutDirWatches.delete(dir);
+        });
+        this.rolloutDirWatches.set(dir, { w, known });
+      } catch {
+        /* no dir yet today: nudges + the periodic refresh find it */
+      }
+    }
+  }
+
+  private onNewRolloutFile(): void {
+    if (this.rolloutEventTimer) return;
+    this.rolloutEventTimer = setTimeout(() => {
+      this.rolloutEventTimer = null;
+      this.requestRefresh();
+    }, 150);
+    this.rolloutEventTimer.unref?.();
+  }
+
+  // ---- agent start-up prompts (trust) ----
+
+  /** Sessions whose agent is showing its "Trust this folder?" prompt. */
+  private startupPrompts = new Map<string, { since: number; choice: TerminalChoicePrompt }>();
+  /** Session -> agent pid whose start-up screen was seen ready (no more checks). */
+  private startupSettled = new Map<string, number>();
+  private startupChecksInFlight = new Set<string>();
+  private startupRecheckTimers = new Map<string, NodeJS.Timeout>();
+
+  /**
+   * A capture of a session's pane (taken anyway, or by checkStartupPrompts):
+   * note whether the agent's trust prompt is up, and tell clients on each
+   * edge (status waiting + a conversation update so the chat refetches the
+   * live choice). Never answers it.
+   */
+  noteStartupPane(sessionId: string, pane: string): void {
+    if (!sessionId || !this.tmuxPathBySession.has(sessionId)) return;
+    const agent = this.agentFor(sessionId);
+    let choice: TerminalChoicePrompt | null = null;
+    try {
+      const c = agent.terminal.detectActiveChoicePrompt(pane);
+      if (c?.kind === 'trust') choice = c;
+      else if (agent.terminal.classifyStartupPane(pane) === 'ready') {
+        const pid = this.tmuxSessionIdentity.get(sessionId)?.claudePid;
+        if (pid) this.startupSettled.set(sessionId, pid);
+      }
+    } catch {
+      return;
+    }
+    const was = this.startupPrompts.get(sessionId);
+    if (choice && !was) {
+      this.startupPrompts.set(sessionId, { since: Date.now(), choice });
+      console.log(
+        `Watcher: ${agent.displayName} in "${sessionId}" asks whether to trust its folder`
+      );
+      this.emitStartupPrompt(sessionId, true);
+    } else if (!choice && was) {
+      this.startupPrompts.delete(sessionId);
+      console.log(`Watcher: trust prompt in "${sessionId}" answered`);
+      this.emitStartupPrompt(sessionId, false);
+    }
+  }
+
+  /** The trust prompt a session shows (from the last capture), or null. */
+  startupPromptFor(sessionId: string): TerminalChoicePrompt | null {
+    return this.startupPrompts.get(sessionId)?.choice ?? null;
+  }
+
+  /** A choice was just sent: re-read a session that showed its trust prompt. */
+  recheckStartupPrompt(sessionId: string): void {
+    if (!this.startupPrompts.has(sessionId) || this.startupRecheckTimers.has(sessionId)) return;
     const t = setTimeout(() => {
-      this.codexNudges.delete(sessionId);
-      void this.refreshTmuxPaths().catch(() => {});
-    }, 1500);
+      this.startupRecheckTimers.delete(sessionId);
+      void this.captureStartup(sessionId);
+    }, STARTUP_RECHECK_MS);
     t.unref?.();
-    this.codexNudges.set(sessionId, t);
+    this.startupRecheckTimers.set(sessionId, t);
+  }
+
+  private emitStartupPrompt(sessionId: string, up: boolean): void {
+    const projectPath = this.tmuxSessionWorkingDirs.get(sessionId) || '';
+    this.emit('status-change', {
+      sessionId,
+      isWaitingForInput: up,
+      currentActivity: up ? TRUST_PROMPT_ACTIVITY : undefined,
+      lastMessage: undefined,
+    });
+    this.emit('conversation-update', { sessionId });
+    if (sessionId !== this.activeTmuxSession) {
+      this.emit('other-session-activity', {
+        sessionId,
+        projectPath,
+        sessionName: sessionId,
+        isWaitingForInput: up,
+        lastMessage: undefined,
+        newMessageCount: 0,
+      });
+    }
+  }
+
+  private async captureStartup(sessionId: string): Promise<void> {
+    if (!this.inputInjector || this.startupChecksInFlight.has(sessionId)) return;
+    if (!this.tmuxPathBySession.has(sessionId)) return;
+    this.startupChecksInFlight.add(sessionId);
+    try {
+      const pane = await this.inputInjector.captureTmuxPane(sessionId, 40);
+      if (pane) this.noteStartupPane(sessionId, pane);
+    } catch {
+      /* capture failed: try again next refresh */
+    } finally {
+      this.startupChecksInFlight.delete(sessionId);
+    }
+  }
+
+  /**
+   * Per refresh: capture the panes of agents still on their start-up screen
+   * (process seen, no transcript of its own yet, started within the last
+   * STARTUP_WATCH_MS, not seen ready yet), plus any session showing its trust
+   * prompt. At most MAX_STARTUP_CAPTURES per refresh; each session's capture
+   * is in-flight guarded and bounded by the injector's tmux timeout.
+   */
+  private async checkStartupPrompts(now = Date.now()): Promise<void> {
+    if (!this.inputInjector) return;
+    const due: string[] = [];
+    for (const [name, ident] of this.tmuxSessionIdentity) {
+      if (due.length >= MAX_STARTUP_CAPTURES) break;
+      if (this.startupChecksInFlight.has(name)) continue;
+      if (!this.startupPrompts.has(name)) {
+        const pid = ident.claudePid;
+        if (!pid || this.startupSettled.get(name) === pid) continue;
+        const started = this.claudeStartMs.get(name);
+        if (!started || now - started > STARTUP_WATCH_MS) continue;
+        if (this.tmuxConversationIds.has(name) || this.codexBySession.has(name)) continue;
+      }
+      due.push(name);
+    }
+    for (const name of due) await this.captureStartup(name);
   }
 
   /** The agent whose transcript a file is. */
@@ -1061,6 +1307,14 @@ export class SessionWatcher extends EventEmitter {
     this.waitingDebounceTimers.clear();
     // Clear feedback poll timer
     this.stopFeedbackPolling();
+    for (const rec of this.rolloutDirWatches.values()) rec.w.close();
+    this.rolloutDirWatches.clear();
+    for (const t of [...this.codexNudges.values(), ...this.startupRecheckTimers.values()])
+      clearTimeout(t);
+    this.codexNudges.clear();
+    this.startupRecheckTimers.clear();
+    if (this.rolloutEventTimer) clearTimeout(this.rolloutEventTimer);
+    this.rolloutEventTimer = null;
   }
 
   /**
@@ -2346,15 +2600,23 @@ export class SessionWatcher extends EventEmitter {
       return true;
     }
 
-    // Codex: the rollout is known exactly.
+    // Codex: the rollout is known exactly. Before Codex writes it (its first
+    // prompt) there is nothing to show: never fall back to the folder's Claude
+    // transcripts (a Codex session showed an old Claude conversation, 2026-10-28).
     const codex = this.codexBySession.get(sessionId);
     if (codex) {
       this.processFileChange(codex.file, codex.convId, opts);
       return this.resolveConversationForSession(sessionId) !== null;
     }
+    if (this.agentFor(sessionId).id !== DEFAULT_AGENT_ID) return false;
+    // A session created moments ago has no transcript of its own yet; the
+    // newest file in its folder belongs to an earlier session.
+    if (this.newlyCreatedSessions.has(sessionId)) return false;
 
     // Need the encoded project path to find files on disk
     let encodedPath = this.tmuxPathBySession.get(sessionId);
+
+    if (encodedPath?.startsWith(CODEX_KEY)) return false;
 
     // For persisted inactive sessions, derive encoded path from conversationPath
     if (!encodedPath) {
@@ -2615,6 +2877,7 @@ export class SessionWatcher extends EventEmitter {
     const status = this.getStatus(sessionId);
     const id = sessionId || this.activeTmuxSession || undefined;
     if (!id) return status;
+    if (this.startupPrompts.has(id)) return status;
     if (!status.isWaitingForInput) {
       // An approval box only the pane shows (Codex edits) is a wait.
       const up = this.sessionOverlay(id, false, status.currentActivity);
@@ -2633,6 +2896,17 @@ export class SessionWatcher extends EventEmitter {
   }
 
   getStatus(sessionId?: string): SessionStatus {
+    // The agent's trust prompt is up (start-up, no turn yet): it waits on the user.
+    const trust = sessionId ? this.startupPrompts.get(sessionId) : undefined;
+    if (trust) {
+      return {
+        isRunning: true,
+        isWaitingForInput: true,
+        lastActivity: trust.since,
+        projectPath: this.tmuxSessionWorkingDirs.get(sessionId!) || undefined,
+        currentActivity: TRUST_PROMPT_ACTIVITY,
+      };
+    }
     const targetId = this.resolveToConversationId(sessionId);
     if (!targetId) {
       return {
@@ -2753,12 +3027,18 @@ export class SessionWatcher extends EventEmitter {
    * Returns the JSONL UUID (conversation id) or null if none appeared in time.
    * Used by remote_dispatch_spawn to surface the session id of a freshly spawned Claude.
    */
-  waitForSessionInCwd(cwd: string, timeoutMs: number): Promise<string | null> {
+  waitForSessionInCwd(
+    cwd: string,
+    timeoutMs: number,
+    agent: AgentId = DEFAULT_AGENT_ID
+  ): Promise<string | null> {
     const normalizedCwd = cwd.replace(/\/+$/, '');
 
     const findExisting = (): string | null => {
       let best: { id: string; lastModified: number } | null = null;
       for (const [id, conv] of this.conversations) {
+        // Only the agent's own transcripts (a Codex rollout is never a Claude session).
+        if (isCodexRollout(conv.path) !== (agent === 'codex')) continue;
         if (conv.projectPath === normalizedCwd) {
           if (!best || conv.lastModified > best.lastModified) {
             best = { id, lastModified: conv.lastModified };
@@ -2800,10 +3080,13 @@ export class SessionWatcher extends EventEmitter {
     const direct = this.resolveConversationForSession(tmuxSessionName);
     if (direct) return direct.id;
 
-    // 2. Fall back to newest conversation whose projectPath matches cwd.
+    // 2. Fall back to newest conversation of the session's agent whose
+    //    projectPath matches cwd (never another agent's transcript).
     const normalizedCwd = cwd.replace(/\/+$/, '');
+    const codex = this.agentFor(tmuxSessionName).id === 'codex';
     let best: { id: string; lastModified: number } | null = null;
     for (const [id, conv] of this.conversations) {
+      if (isCodexRollout(conv.path) !== codex) continue;
       if (conv.projectPath === normalizedCwd) {
         if (!best || conv.lastModified > best.lastModified) {
           best = { id, lastModified: conv.lastModified };
@@ -3041,7 +3324,13 @@ export class SessionWatcher extends EventEmitter {
       let recentTimestamps: number[] | undefined;
       let backgroundWork: BackgroundWork | undefined;
 
-      if (best) {
+      const trust = this.startupPrompts.get(ts.name);
+      if (trust) {
+        status = 'waiting';
+        waitingCount++;
+        currentActivity = TRUST_PROMPT_ACTIVITY;
+        lastActivity = trust.since;
+      } else if (best) {
         const conv = best.conv;
         projectPath = conv.projectPath;
         lastActivity = conv.lastModified;

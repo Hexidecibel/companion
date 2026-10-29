@@ -193,7 +193,8 @@ export class WebSocketHandler {
       paneApproval: (sessionId, capture) => {
         const agent = this.watcher.agentFor?.(sessionId);
         if (!agent || agent.id === 'claude') return false;
-        return !!agent.terminal.detectActiveChoicePrompt(capture);
+        const box = agent.terminal.detectActiveChoicePrompt(capture);
+        return !!box && box.kind !== 'trust';
       },
       onPaneApprovalChange: (sessionId, up) => this.watcher.notePaneApproval?.(sessionId, up),
     });
@@ -679,7 +680,10 @@ export class WebSocketHandler {
       watcher: this.watcher,
       injector: this.injector,
       sessionNames: this.sessionNameStore,
-      onCapture: (tmuxName, pane) => this.backgroundWork.noteCapture(tmuxName, pane),
+      onCapture: (tmuxName, pane) => {
+        this.backgroundWork.noteCapture(tmuxName, pane);
+        this.watcher.noteStartupPane?.(tmuxName, pane);
+      },
       onSent: (tmuxName, text, tag) => {
         // Same bookkeeping as send_input: optimistic chat echo + escalation ack.
         if (text) {
@@ -789,6 +793,11 @@ export class WebSocketHandler {
         const configs = JSON.parse(content) as TmuxSessionConfig[];
         for (const config of configs) {
           this.tmuxSessionConfigs.set(config.name, config);
+          // A session the app launched Codex in stays a Codex session across a
+          // daemon restart (until its process shows up, it must never be read
+          // as a Claude session of the same folder).
+          if (config.agent && config.startCli !== false)
+            this.watcher.noteSessionAgent?.(config.name, config.agent);
         }
         console.log(`WebSocket: Loaded ${configs.length} saved tmux session configs`);
       }

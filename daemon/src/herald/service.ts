@@ -1997,7 +1997,12 @@ export class HeraldService {
     if (!ok) {
       const refusal = src.lastSendRefusal?.(r.sessionId);
       throw new HeraldRelayError(
-        refusal ? refusal.code : 'unavailable',
+        // A prompt on screen is the review protocol's "session_waiting".
+        refusal
+          ? refusal.code === 'prompt_waiting'
+            ? 'session_waiting'
+            : refusal.code
+          : 'unavailable',
         refusal
           ? heraldRefusalText(r.sessionName, refusal.reason)
           : `Could not send to ${r.sessionName}`

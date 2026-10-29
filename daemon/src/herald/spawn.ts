@@ -289,7 +289,7 @@ export class SpawnRunner {
       state === 'bypass_warning'
         ? "it's waiting on Claude's bypass-permissions warning. Open it in the app and accept it yourself; I won't do that for you."
         : state === 'trust_prompt'
-          ? "it's asking whether to trust this folder. Open it in the app and answer it yourself."
+          ? "it's asking whether to trust this folder. Open it in the app and tap Yes, trust or No yourself."
           : "it's still starting up.";
     return {
       ok: true,

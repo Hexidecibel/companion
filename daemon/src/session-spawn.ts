@@ -216,6 +216,13 @@ export async function createAgentSession(
     ...launch,
   });
   if (!result.success) return { success: false, error: result.error };
+  // Tell the watcher at once (before the launch check's few seconds): a
+  // refresh or an early get_highlights in between must already treat it as a
+  // new session of this agent (a Codex session once loaded the folder's old
+  // Claude transcript in that window).
+  if (startCli) deps.watcher.noteSessionAgent?.(sessionName, agent);
+  if (profile) deps.watcher.noteSessionProfile?.(sessionName, profile.id);
+  deps.watcher.markSessionAsNew(sessionName);
   if (startCli && agent !== DEFAULT_AGENT_ID) {
     const sleep = opts.sleep || ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
     const launchError = await checkAgentLaunch(deps, sessionName, agent, sleep);
@@ -230,12 +237,9 @@ export async function createAgentSession(
     ...(agent !== DEFAULT_AGENT_ID ? { agent } : {}),
     ...(profile ? { profileId: profile.id } : {}),
   });
-  if (startCli) deps.watcher.noteSessionAgent?.(sessionName, agent);
-  if (profile) deps.watcher.noteSessionProfile?.(sessionName, profile.id);
   if (!deps.sessionNameStore.get(sessionName)) {
     deps.sessionNameStore.set(sessionName, dirToFriendlyName(req.workingDir));
   }
-  deps.watcher.markSessionAsNew(sessionName);
   await deps.watcher.refreshTmuxPaths();
   deps.broadcast?.('tmux_sessions_changed', { action: 'created', sessionName });
   return {
