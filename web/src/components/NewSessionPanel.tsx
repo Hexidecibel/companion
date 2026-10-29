@@ -3,6 +3,9 @@ import { useNewSession } from '../hooks/useNewSession';
 import { isMobileViewport } from '../utils/platform';
 import type { CodingAgent } from '../types';
 import { AgentPicker, readStoredAgent, writeStoredAgent } from './AgentPicker';
+import { ProfilePicker, pickProfile, readStoredProfile, writeStoredProfile } from './ProfilePicker';
+import { useProfiles } from '../hooks/useProfiles';
+import type { AccountProfileInfo } from '../types/profiles';
 
 interface NewSessionPanelProps {
   serverId: string;
@@ -43,6 +46,16 @@ export function NewSessionPanel({
     setAgent(next);
     writeStoredAgent(serverId, next);
   };
+  // Account profiles: shown only when more than the default logins exist.
+  const { profiles, hasExtra } = useProfiles(serverId);
+  const [storedProfile, setStoredProfile] = useState(() => readStoredProfile(serverId));
+  const profile = hasExtra ? pickProfile(profiles, storedProfile, agent) : undefined;
+  const effectiveAgent = profile ? profile.agent : agent;
+  const chooseProfile = (p: AccountProfileInfo) => {
+    setStoredProfile(p.id);
+    writeStoredProfile(serverId, p.id);
+    pickAgent(p.agent);
+  };
   const {
     recents,
     recentsLoading,
@@ -59,7 +72,7 @@ export function NewSessionPanel({
     createFromRecent,
     navigateToInput,
     reset,
-  } = useNewSession(serverId, agent);
+  } = useNewSession(serverId, effectiveAgent, profile && !profile.isDefault ? profile.id : undefined);
 
   const mobile = isMobileViewport();
 
@@ -287,7 +300,11 @@ export function NewSessionPanel({
         </button>
       </div>
 
-      <AgentPicker value={agent} onChange={pickAgent} disabled={creating} />
+      {profile ? (
+        <ProfilePicker profiles={profiles} value={profile.id} onChange={chooseProfile} disabled={creating} />
+      ) : (
+        <AgentPicker value={agent} onChange={pickAgent} disabled={creating} />
+      )}
 
       {error && <div className="new-session-error">{error}</div>}
 

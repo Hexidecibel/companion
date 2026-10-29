@@ -9344,3 +9344,103 @@ html {
   font-weight: 600;
   color: var(--accent-green, #10b981);
 }
+
+/* Account profiles: picker suffix, session badge, Settings > Accounts */
+.new-session-profile-agent {
+  font-weight: 400;
+  opacity: 0.75;
+}
+
+.new-session-profile-warn {
+  color: var(--accent-amber, #f59e0b);
+}
+
+.session-profile-badge {
+  display: inline-block;
+  margin-left: 4px;
+  padding: 0 5px;
+  border: 1px solid var(--accent-blue, #3b82f6);
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 14px;
+  color: var(--accent-blue, #3b82f6);
+  vertical-align: middle;
+  max-width: 10em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.profiles-card .settings-card-row {
+  padding: 0;
+}
+
+.profiles-list {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+}
+
+.profiles-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0;
+  border-top: 1px solid var(--border-color);
+}
+
+.profiles-item-info {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+
+.profiles-item-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.profiles-item-agent {
+  font-weight: 400;
+  color: var(--text-secondary);
+}
+
+.profiles-item-home {
+  font-size: 11px;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.profiles-item-state {
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.profiles-state-logged_in,
+.profiles-state-api_key {
+  color: var(--accent-green, #10b981);
+}
+
+.profiles-state-logged_out {
+  color: var(--accent-amber, #f59e0b);
+}
+
+.profiles-note {
+  flex-basis: 100%;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.profiles-error {
+  color: var(--accent-red, #ef4444);
+}
+
+.profiles-help {
+  margin-top: 6px;
+}

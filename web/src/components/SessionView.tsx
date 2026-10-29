@@ -48,6 +48,7 @@ import { ChangeStrip } from './review/ChangeStrip';
 import { ReviewShell } from './review/ReviewShell';
 import { ReviewHeaderButton } from './review/ReviewHeaderButton';
 import { useReviewSummary } from '../hooks/useReviewSummary';
+import { ProfileBadge } from './ProfilePicker';
 
 const FileViewerModal = lazy(() => import('./FileViewerModal').then(m => ({ default: m.FileViewerModal })));
 
@@ -66,6 +67,8 @@ interface SessionViewProps {
   projectPath?: string;
   /** The session's coding agent from the summary (absent = Claude Code). */
   agent?: CodingAgent;
+  /** Account profile label when not the default login (from the summary). */
+  profileLabel?: string;
   onToggleSidebar?: () => void;
   style?: React.CSSProperties;
 }
@@ -84,6 +87,7 @@ export function SessionView({
   merging,
   projectPath,
   agent,
+  profileLabel,
   onToggleSidebar,
   style,
 }: SessionViewProps) {
@@ -822,6 +826,7 @@ export function SessionView({
             Codex
           </span>
         )}
+        <ProfileBadge label={profileLabel} className="session-header-agent" />
         {mobile ? mobileActionButtons : actionButtons}
       </div>
 

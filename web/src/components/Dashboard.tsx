@@ -669,6 +669,7 @@ export function Dashboard({ onSettings }: DashboardProps) {
                 sessionId={activeSession.sessionId}
                 tmuxSessionName={activeSessionSummary?.tmuxSessionName}
                 agent={activeSessionSummary?.agent}
+                profileLabel={activeSessionSummary?.profileId ? activeSessionSummary.profileLabel || activeSessionSummary.profileId : undefined}
                 workGroup={isForemanView ? activeWorkGroup : undefined}
                 onViewWorker={handleViewWorker}
                 onSendWorkerInput={handleSendWorkerInput}
@@ -784,6 +785,7 @@ export function Dashboard({ onSettings }: DashboardProps) {
             sessionId={activeSession?.sessionId ?? null}
             tmuxSessionName={activeSessionSummary?.tmuxSessionName}
             agent={activeSessionSummary?.agent}
+            profileLabel={activeSessionSummary?.profileId ? activeSessionSummary.profileLabel || activeSessionSummary.profileId : undefined}
             projectPath={activeSessionSummary?.projectPath}
             workGroup={isForemanView ? activeWorkGroup : undefined}
             onViewWorker={handleViewWorker}
@@ -836,6 +838,7 @@ export function Dashboard({ onSettings }: DashboardProps) {
                   return ss?.sessions.find(s => s.id === secondarySession.sessionId)?.projectPath;
                 })()}
                 agent={summaries.get(secondarySession.serverId)?.sessions.find(s => s.id === secondarySession.sessionId)?.agent}
+                profileLabel={summaries.get(secondarySession.serverId)?.sessions.find(s => s.id === secondarySession.sessionId)?.profileLabel}
                 style={{ flex: `0 0 ${100 - (splitPreviewRatio ?? splitRatio)}%` }}
               />
             </ComponentErrorBoundary>

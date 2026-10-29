@@ -31,8 +31,15 @@ export interface UseNewSessionResult {
   reset: () => void;
 }
 
-/** `agent`: which coding agent a new session starts (default Claude Code). */
-export function useNewSession(serverId: string, agent: CodingAgent = 'claude'): UseNewSessionResult {
+/**
+ * `agent`: which coding agent a new session starts (default Claude Code).
+ * `profileId`: a non-default account profile (the daemon checks it matches the agent).
+ */
+export function useNewSession(
+  serverId: string,
+  agent: CodingAgent = 'claude',
+  profileId?: string,
+): UseNewSessionResult {
   const [recents, setRecents] = useState<RecentDirectory[]>([]);
   const [recentsLoading, setRecentsLoading] = useState(true);
   const [currentPath, setCurrentPath] = useState('');
@@ -167,6 +174,7 @@ export function useNewSession(serverId: string, agent: CodingAgent = 'claude'): 
         startCli: true,
         // Older daemons ignore the field and start Claude.
         ...(agent !== 'claude' ? { agent } : {}),
+        ...(profileId ? { profileId } : {}),
       });
 
       if (resp.success) {
@@ -186,7 +194,7 @@ export function useNewSession(serverId: string, agent: CodingAgent = 'claude'): 
       setCreatingPath(null);
       return false;
     }
-  }, [serverId, agent]);
+  }, [serverId, agent, profileId]);
 
   const create = useCallback(async (): Promise<boolean> => {
     return createSession(manualPath);

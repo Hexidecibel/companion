@@ -4,6 +4,9 @@ import type { CodingAgent } from '../types';
 import { connectionManager } from '../services/ConnectionManager';
 import { FileViewerModal } from './FileViewerModal';
 import { AgentPicker, readStoredAgent, writeStoredAgent } from './AgentPicker';
+import { ProfilePicker, pickProfile, readStoredProfile, writeStoredProfile } from './ProfilePicker';
+import { useProfiles } from '../hooks/useProfiles';
+import type { AccountProfileInfo } from '../types/profiles';
 
 type WizardStep = 'details' | 'template' | 'options' | 'preview' | 'creating' | 'done';
 
@@ -116,13 +119,27 @@ export function NewProjectModal({ serverId, onClose, onComplete }: NewProjectMod
   const [includeLinter, setIncludeLinter] = useState(true);
   const [bypassPermissions, setBypassPermissions] = useState(true);
   const [openError, setOpenError] = useState<string | null>(null);
-  const [agent, setAgent] = useState<CodingAgent>(() => readStoredAgent(serverId));
+  const [pickedAgent, setAgent] = useState<CodingAgent>(() => readStoredAgent(serverId));
   const pickAgent = useCallback(
     (next: CodingAgent) => {
       setAgent(next);
       writeStoredAgent(serverId, next);
     },
     [serverId]
+  );
+  // Account profiles: shown only when more than the default logins exist; the agent follows.
+  const { profiles, hasExtra } = useProfiles(serverId);
+  const [storedProfile, setStoredProfile] = useState(() => readStoredProfile(serverId));
+  const profile = hasExtra ? pickProfile(profiles, storedProfile, pickedAgent) : undefined;
+  const agent: CodingAgent = profile ? profile.agent : pickedAgent;
+  const profileId = profile && !profile.isDefault ? profile.id : undefined;
+  const chooseProfile = useCallback(
+    (p: AccountProfileInfo) => {
+      setStoredProfile(p.id);
+      writeStoredProfile(serverId, p.id);
+      pickAgent(p.agent);
+    },
+    [serverId, pickAgent]
   );
   // Claude's bypass lives in the project's .claude/settings.json (written by the
   // scaffold); Codex's is a launch flag, so the scaffold writes nothing for it.
@@ -276,6 +293,7 @@ export function NewProjectModal({ serverId, onClose, onComplete }: NewProjectMod
         // Older daemons ignore these and start Claude Code.
         ...(agent !== 'claude' ? { agent } : {}),
         ...(agent !== 'claude' && !bypassPermissions ? { permissionMode: 'default' } : {}),
+        ...(profileId ? { profileId } : {}),
       });
       if (!response.success) {
         // e.g. Codex not installed: say so instead of closing silently.
@@ -288,7 +306,7 @@ export function NewProjectModal({ serverId, onClose, onComplete }: NewProjectMod
       // Fall through to close
     }
     onClose();
-  }, [conn, result, onComplete, onClose, templates, selectedTemplate, projectName, projectDescription, agent, bypassPermissions]);
+  }, [conn, result, onComplete, onClose, templates, selectedTemplate, projectName, projectDescription, agent, bypassPermissions, profileId]);
 
   // Step navigation helpers
   const handleNextFromDetails = useCallback(() => {
@@ -456,7 +474,11 @@ export function NewProjectModal({ serverId, onClose, onComplete }: NewProjectMod
 
               <div className="wizard-options-section">
                 <h4>Coding agent</h4>
-                <AgentPicker value={agent} onChange={pickAgent} className="wizard-agent-row" />
+                {profile ? (
+                  <ProfilePicker profiles={profiles} value={profile.id} onChange={chooseProfile} className="wizard-agent-row" />
+                ) : (
+                  <AgentPicker value={agent} onChange={pickAgent} className="wizard-agent-row" />
+                )}
                 <div className="form-group checkbox">
                   <input type="checkbox" id="wiz-bypass" checked={bypassPermissions} onChange={(e) => setBypassPermissions(e.target.checked)} />
                   <label htmlFor="wiz-bypass">Bypass permission prompts</label>

@@ -20,6 +20,7 @@ import { AgentsNavButton } from './agents/AgentsNavButton';
 import { SkeletonSessionCard } from './Skeleton';
 import { StuckBadge } from './stuck/StuckBadge';
 import { BabysitBadge } from './babysit/BabysitBadge';
+import { ProfileBadge } from './ProfilePicker';
 
 const STATUS_DOT_CLASS: Record<SessionSummary['status'], string> = {
   waiting: 'status-dot-blue status-dot-pulse',
@@ -407,6 +408,7 @@ function MobileSessionItem({ session, serverId, onSelect, onOpenInSplit, onClose
         <div className="mobile-session-name">
           {session.friendlyName || session.name}
           {session.agent === 'codex' && <span className="session-agent-label"> Codex</span>}
+          {session.profileId && <ProfileBadge label={session.profileLabel || session.profileId} />}
         </div>
         {(backgroundWorkLabel(session.backgroundWork) || session.currentActivity) && (
           <div className={`mobile-session-activity${session.backgroundWork ? ' background-work' : ''}`}>

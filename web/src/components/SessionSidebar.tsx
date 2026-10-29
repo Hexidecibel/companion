@@ -23,6 +23,7 @@ import { SkeletonSessionCard } from './Skeleton';
 import { HeraldLauncher } from './herald/HeraldLauncher';
 import { AgentsNavButton } from './agents/AgentsNavButton';
 import { useConnectionHealth, ServerHealth } from '../hooks/useConnectionHealth';
+import { ProfileBadge } from './ProfilePicker';
 
 interface SessionSidebarProps {
   summaries: Map<string, ServerSummary>;
@@ -767,6 +768,7 @@ export function SessionSidebar({
                             {session.agent === 'codex' && (
                               <span className="session-agent-label" title="OpenAI Codex CLI session"> Codex</span>
                             )}
+                            {session.profileId && <ProfileBadge label={session.profileLabel || session.profileId} />}
                             {mutedSessions?.has(session.id) && (
                               <span className="sidebar-muted-icon" title="Notifications muted">&#x1F515;</span>
                             )}

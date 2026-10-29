@@ -6,6 +6,7 @@ import { getFontScale, saveFontScale } from '../services/storage';
 import { clearStore } from '../services/persistentStorage';
 import { NotificationSettingsModal } from './NotificationSettingsModal';
 import { DevicesCard } from './DevicesSettings';
+import { ProfilesCard } from './ProfilesSettings';
 import { SkillBrowser } from './SkillBrowser';
 import { isTauriDesktop } from '../utils/platform';
 import { useAppUpdater, AppUpdateStatus } from '../hooks/useAppUpdater';
@@ -328,6 +329,16 @@ export function SettingsScreen({ onBack }: SettingsScreenProps) {
             ))
           )}
         </section>
+
+        {/* Accounts (several Claude / Codex logins per server) */}
+        {connectedServers.length > 0 && (
+          <section className="settings-section">
+            <h3 className="settings-section-title">Accounts</h3>
+            {connectedServers.map((snap) => (
+              <ProfilesCard key={snap.serverId} serverId={snap.serverId} serverName={snap.serverName} />
+            ))}
+          </section>
+        )}
 
         {/* Devices (pairing) */}
         <section className="settings-section">
