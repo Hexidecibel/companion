@@ -272,7 +272,7 @@ export function readCodexPromptBox(capture: string): PromptBoxState {
   const parts: string[] = [];
   for (let i = at; i < lines.length; i++) {
     if (i > at && plain[i].trim() === '') break;
-    let text = stripDim(lines[i]).replace(/ /g, ' ');
+    let text = stripDim(lines[i]).replace(/\u00a0/g, ' ');
     if (i === at) text = text.replace(/^\s*›/, '');
     parts.push(text.trim());
   }

@@ -137,7 +137,9 @@ export class AutoApprovalService {
         await new Promise((resolve) => setTimeout(resolve, APPROVAL_SEND_DELAY_MS));
         ok = await injector.sendChoice([0], 2, false, undefined, target);
       }
-      console.log(`[AUTO-APPROVE] ${ok ? 'Sent' : 'Could not send'} option 1 to ${agent.displayName}`);
+      console.log(
+        `[AUTO-APPROVE] ${ok ? 'Sent' : 'Could not send'} option 1 to ${agent.displayName}`
+      );
       return;
     }
     const success = await injector.sendInput('yes', target);

@@ -404,7 +404,10 @@ function MobileSessionItem({ session, serverId, onSelect, onOpenInSplit, onClose
         <span className={`status-dot ${STATUS_DOT_CLASS[session.status]}`} />
       )}
       <div className="mobile-session-info">
-        <div className="mobile-session-name">{session.friendlyName || session.name}</div>
+        <div className="mobile-session-name">
+          {session.friendlyName || session.name}
+          {session.agent === 'codex' && <span className="session-agent-label"> Codex</span>}
+        </div>
         {(backgroundWorkLabel(session.backgroundWork) || session.currentActivity) && (
           <div className={`mobile-session-activity${session.backgroundWork ? ' background-work' : ''}`}>
             {backgroundWorkLabel(session.backgroundWork) || session.currentActivity}

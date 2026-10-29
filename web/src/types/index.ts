@@ -155,7 +155,12 @@ export interface SessionSummary {
   inactive?: boolean;
   /** status 'working' because background agents / shells run while the main thread is idle. */
   backgroundWork?: BackgroundWork;
+  /** Coding agent in the session when it is not Claude Code (newer daemons). */
+  agent?: CodingAgent;
 }
+
+/** Coding agents a daemon can run and drive. */
+export type CodingAgent = 'claude' | 'codex';
 
 export interface ServerSummary {
   sessions: SessionSummary[];

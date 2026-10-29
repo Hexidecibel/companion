@@ -384,9 +384,9 @@ describe('Codex approval box', () => {
 
   it('choice keys: the option digit (selects + confirms); feedback = Esc then a pasted message', () => {
     const t = codexAdapter.terminal;
-    expect(t.choiceKeys({ selectedIndices: [1], optionCount: 3, multiSelect: false }).steps).toEqual([
-      { type: 'key', key: '2' },
-    ]);
+    expect(
+      t.choiceKeys({ selectedIndices: [1], optionCount: 3, multiSelect: false }).steps
+    ).toEqual([{ type: 'key', key: '2' }]);
     const fb = t.choiceKeys({
       selectedIndices: [],
       optionCount: 3,
@@ -461,6 +461,7 @@ describe('Codex TUI (live captures, codex-cli 0.165)', () => {
     expect(readCodexPromptBox(idle)).toEqual({ found: true, draft: '' });
     expect(classifyCodexStartupPane(idle)).toBe('ready');
     expect(detectCodexOverlay(idle)).toBe(false);
+    // eslint-disable-next-line no-control-regex
     const draft = idle.replace(/\x1b\[2mAsk Codex to do anything\x1b\[0m/, 'hello draft');
     expect(readCodexPromptBox(draft)).toEqual({ found: true, draft: 'hello draft' });
     const multi = [

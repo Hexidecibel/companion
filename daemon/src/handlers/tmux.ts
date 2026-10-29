@@ -128,9 +128,7 @@ export function registerTmuxHandlers(ctx: HandlerContext): Record<string, Messag
           let keys = termKeysPayload.keys;
           const agent = ctx.watcher.agentFor(termKeysPayload.sessionName);
           if (agent.id !== 'claude' && keys.length === 1 && keys[0] === 'C-c') {
-            keys = agent.terminal
-              .interruptKeys()
-              .flatMap((k) => (k.type === 'key' ? [k.key] : []));
+            keys = agent.terminal.interruptKeys().flatMap((k) => (k.type === 'key' ? [k.key] : []));
           }
           const ok = await ctx.tmux.sendRawKeys(termKeysPayload.sessionName, keys);
           ctx.send(client.ws, {
@@ -489,14 +487,17 @@ export function registerTmuxHandlers(ctx: HandlerContext): Record<string, Messag
         `WebSocket: Recreating tmux session "${sessionName}" in ${savedConfig.workingDir}`
       );
 
-      const savedAgent = savedConfig.agent && savedConfig.agent !== 'claude' ? savedConfig.agent : undefined;
+      const savedAgent =
+        savedConfig.agent && savedConfig.agent !== 'claude' ? savedConfig.agent : undefined;
       const result = await ctx.tmux.createSession(
         savedConfig.name,
         savedConfig.workingDir,
         savedConfig.startCli,
         {
           permissionMode: savedConfig.permissionMode,
-          ...(savedAgent ? { agent: savedAgent, env: agentLaunchEnv(savedAgent, ctx.watcher) } : {}),
+          ...(savedAgent
+            ? { agent: savedAgent, env: agentLaunchEnv(savedAgent, ctx.watcher) }
+            : {}),
         }
       );
 
@@ -505,7 +506,8 @@ export function registerTmuxHandlers(ctx: HandlerContext): Record<string, Messag
           permissionMode: savedConfig.permissionMode,
           ...(savedAgent ? { agent: savedAgent } : {}),
         });
-        if (savedAgent && savedConfig.startCli) ctx.watcher.noteSessionAgent(savedConfig.name, savedAgent);
+        if (savedAgent && savedConfig.startCli)
+          ctx.watcher.noteSessionAgent(savedConfig.name, savedAgent);
         ctx.injector.setActiveSession(sessionName);
 
         ctx.send(client.ws, {

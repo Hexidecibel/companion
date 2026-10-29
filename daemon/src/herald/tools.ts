@@ -252,7 +252,8 @@ export const SESSION_CONTROL_TOOL_SPECS: LlmToolSpec[] = [
         agent: {
           type: 'string',
           enum: ['claude', 'codex'],
-          description: 'Which coding agent to start: "claude" (default) or "codex" only when the user names Codex.',
+          description:
+            'Which coding agent to start: "claude" (default) or "codex" only when the user names Codex.',
         },
         confirm: {
           type: 'boolean',

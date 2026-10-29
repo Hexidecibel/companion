@@ -7,7 +7,6 @@
  */
 
 import * as fs from 'fs';
-import * as path from 'path';
 import { EventEmitter } from 'events';
 import { SubAgent, AgentTree, ConversationHighlight } from './types';
 import { parseConversationFile, extractHighlights } from './parser';

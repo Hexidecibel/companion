@@ -764,6 +764,9 @@ export function SessionSidebar({
                             {foremanGroup && (
                               <span className="sidebar-foreman-label"> (foreman)</span>
                             )}
+                            {session.agent === 'codex' && (
+                              <span className="session-agent-label" title="OpenAI Codex CLI session"> Codex</span>
+                            )}
                             {mutedSessions?.has(session.id) && (
                               <span className="sidebar-muted-icon" title="Notifications muted">&#x1F515;</span>
                             )}

@@ -37,7 +37,8 @@ describe('InputInjector with a Codex pane', () => {
     return inj;
   };
   const calls = () => mockTmux.mock.calls.map((c) => c[0] as string[]);
-  const sends = () => calls().filter((a) => ['send-keys', 'set-buffer', 'paste-buffer'].includes(a[0]));
+  const sends = () =>
+    calls().filter((a) => ['send-keys', 'set-buffer', 'paste-buffer'].includes(a[0]));
 
   beforeEach(() => {
     pane = IDLE;
@@ -62,6 +63,7 @@ describe('InputInjector with a Codex pane', () => {
   });
 
   it('refuses when the composer holds a draft', async () => {
+    // eslint-disable-next-line no-control-regex
     pane = IDLE.replace(/\x1b\[2mAsk Codex to do anything\x1b\[0m/, 'my own words');
     const r = await make().sendInputDetailed('hello', 'cdx');
     expect(r).toMatchObject({ ok: false, reason: 'draft' });

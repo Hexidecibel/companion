@@ -32,6 +32,13 @@ function formatDuration(ms: number): string {
   return `${mins}m ${remainSecs}s`;
 }
 
+/** Friendlier card titles for Codex's tool names (Claude's names stay as they are). */
+const TOOL_DISPLAY_NAMES: Record<string, string> = {
+  exec_command: 'Shell',
+  apply_patch: 'Patch',
+  update_plan: 'Plan',
+};
+
 function isEditTool(name: string): boolean {
   const n = name.toLowerCase();
   return n === 'edit' || n.includes('edit') || n === 'write' || n === 'sedreplace';
@@ -180,7 +187,7 @@ export function ToolCard({ tool, forceExpanded }: ToolCardProps) {
   return (
     <div className={`tool-card ${expanded ? 'expanded' : ''}`} onClick={() => setLocalExpanded(!localExpanded)}>
       <div className="tool-card-header">
-        <span className="tool-card-name">{tool.name}</span>
+        <span className="tool-card-name">{TOOL_DISPLAY_NAMES[tool.name] || tool.name}</span>
         {elapsed}
         <span className={`tool-card-status ${STATUS_CLASSES[tool.status]}`}>
           {STATUS_LABELS[tool.status]}

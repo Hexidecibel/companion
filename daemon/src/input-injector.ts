@@ -152,7 +152,12 @@ export class InputInjector {
         const sent = await this.runSteps(session, agent.terminal.interruptKeys(), 'interrupt');
         return sent
           ? { ok: true }
-          : { ok: false, reason: 'tmux_error', code: 'send_failed', message: 'Failed to interrupt' };
+          : {
+              ok: false,
+              reason: 'tmux_error',
+              code: 'send_failed',
+              message: 'Failed to interrupt',
+            };
       }
 
       if (!(await this.waitForTypingPause(session))) {
@@ -397,7 +402,9 @@ export class InputInjector {
         // Esc would interrupt, so answer only a box that is on screen now.
         const pane = await this.captureForGuard(session);
         if (pane === null || !agent.terminal.detectActiveChoicePrompt(pane)) {
-          console.log(`Choice for '${session}' not sent: no ${agent.displayName} choice box on screen`);
+          console.log(
+            `Choice for '${session}' not sent: no ${agent.displayName} choice box on screen`
+          );
           return false;
         }
       } else {

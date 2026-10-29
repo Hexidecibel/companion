@@ -5,6 +5,7 @@ import {
   getRecentDirectories,
   addRecentDirectory,
 } from '../services/recentDirectories';
+import type { CodingAgent } from '../types';
 
 export interface DirectoryEntry {
   name: string;
@@ -30,7 +31,8 @@ export interface UseNewSessionResult {
   reset: () => void;
 }
 
-export function useNewSession(serverId: string): UseNewSessionResult {
+/** `agent`: which coding agent a new session starts (default Claude Code). */
+export function useNewSession(serverId: string, agent: CodingAgent = 'claude'): UseNewSessionResult {
   const [recents, setRecents] = useState<RecentDirectory[]>([]);
   const [recentsLoading, setRecentsLoading] = useState(true);
   const [currentPath, setCurrentPath] = useState('');
@@ -163,6 +165,8 @@ export function useNewSession(serverId: string): UseNewSessionResult {
       const resp = await conn.sendRequest('create_tmux_session', {
         workingDir: dirPath.trim(),
         startCli: true,
+        // Older daemons ignore the field and start Claude.
+        ...(agent !== 'claude' ? { agent } : {}),
       });
 
       if (resp.success) {
@@ -182,7 +186,7 @@ export function useNewSession(serverId: string): UseNewSessionResult {
       setCreatingPath(null);
       return false;
     }
-  }, [serverId]);
+  }, [serverId, agent]);
 
   const create = useCallback(async (): Promise<boolean> => {
     return createSession(manualPath);
