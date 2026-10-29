@@ -25,16 +25,34 @@ import {
   PaneReading,
 } from './normalize';
 import { clip, fnv1a, oneLine } from '../herald/text';
-import { hasRole, isEditTool, isInteractiveTool, isSubagentTool, toolRole } from '../agents/roles';
+import {
+  toolRole as roleOfClaude,
+  anyAgentRole,
+  isEditTool,
+  isInteractiveTool,
+  isShellToolName,
+  isSubagentTool,
+} from '../agents/roles';
+
+/**
+ * Roles over every agent's table (Claude's Bash / Edit, Codex's exec_command /
+ * apply_patch ...): the digest only sees tool names, and they never collide.
+ */
+const roleOf = (name: string) => anyAgentRole(name);
+const isShell = (name: string): boolean => isShellToolName(name);
+/** Codex's patch tool: an edit with its files in `input.files`. */
+const isPatchTool = (name: string): boolean => name === 'apply_patch';
 
 /** Tools whose repeats are a loop when input + result are identical. */
 const isLoopTool = (name: string): boolean =>
   // WebFetch is a loop candidate; WebSearch (same 'web' role) never was.
-  hasRole(name, ['shell', 'read', 'search']) || name === 'WebFetch';
+  ['shell', 'read', 'search'].includes(roleOf(name)) || name === 'WebFetch';
 /** Never stalled (long by design) / handled by the inbox (waiting on the user). */
-const isWaitingTool = (name: string): boolean => isInteractiveTool(name);
+const isWaitingTool = (name: string): boolean =>
+  isInteractiveTool(name) || roleOf(name) === 'ask_user';
 /** Background polling / bookkeeping. TodoWrite has always counted here (TaskCreate etc. never did). */
-const isPollTool = (name: string): boolean => toolRole(name) === 'poll' || name === 'TodoWrite';
+const isPollTool = (name: string): boolean =>
+  roleOf(name) === 'poll' || name === 'TodoWrite' || name === 'update_plan';
 
 /** Messages walked back per update (bounded however long the transcript is). */
 export const MAX_SCAN_MESSAGES = 3000;
@@ -97,8 +115,10 @@ export interface StuckCandidate {
 
 export function displayFor(tc: ToolCall): string {
   const i = tc.input || {};
-  if (tc.name === 'Bash') return clip(oneLine(String(i.command ?? '')), 160);
+  if (isShell(tc.name)) return clip(oneLine(String(i.command ?? '')), 160);
   if (typeof i.file_path === 'string') return baseName(i.file_path);
+  if (isPatchTool(tc.name) && Array.isArray(i.files) && typeof i.files[0] === 'string')
+    return baseName(i.files[0]);
   if (typeof i.notebook_path === 'string') return baseName(i.notebook_path);
   if (typeof i.pattern === 'string') return clip(oneLine(i.pattern), 120);
   if (typeof i.url === 'string') return clip(i.url, 120);
@@ -123,9 +143,14 @@ export function toEvent(tc: ToolCall, msgAt: number): StuckToolEvent {
     failureKeys: [],
     isEdit: false,
   };
-  const file = input.file_path ?? input.notebook_path;
+  const file =
+    input.file_path ??
+    input.notebook_path ??
+    (isPatchTool(tc.name) && Array.isArray(input.files) && (input.files as unknown[]).length === 1
+      ? (input.files as unknown[])[0]
+      : undefined);
   if (typeof file === 'string' && file) ev.file = file;
-  if (tc.name === 'Bash') {
+  if (isShell(tc.name)) {
     ev.rawCommand = clip(oneLine(String(input.command ?? '')), 300);
     ev.cmdKey = normalizeText(commandCore(String(input.command ?? '')));
   }
@@ -135,7 +160,7 @@ export function toEvent(tc: ToolCall, msgAt: number): StuckToolEvent {
     if (f.rejected) ev.rejected = true;
     ev.failureKeys = ev.failed ? f.keys : [];
     if (ev.failed && f.excerpt) ev.excerpt = f.excerpt;
-    if (isEditTool(tc.name) && !ev.failed && !f.rejected) {
+    if ((isEditTool(tc.name) || isPatchTool(tc.name)) && !ev.failed && !f.rejected) {
       ev.isEdit = true;
       if (tc.name === 'Edit') {
         ev.pairs = [
@@ -156,6 +181,9 @@ export function toEvent(tc: ToolCall, msgAt: number): StuckToolEvent {
           );
       } else if (tc.name === 'Write') {
         ev.writeHash = contentHash(String(input.content ?? ''));
+      } else if (isPatchTool(tc.name) && typeof input.patch === 'string') {
+        // A patch re-applied word for word reads like a Write of the same content.
+        ev.writeHash = contentHash(input.patch);
       }
     }
   }
@@ -171,18 +199,40 @@ function isTurnOpener(m: ConversationMessage): boolean {
   return true;
 }
 
-function phaseOf(messages: ConversationMessage[]): StuckPhase {
+/** A tool name only Codex's table knows (exec_command, apply_patch, ...). */
+const isCodexOnlyTool = (name: string): boolean =>
+  roleOfClaude(name) === 'other' && anyAgentRole(name) !== 'other';
+
+function phaseOf(messages: ConversationMessage[], agent?: string): StuckPhase {
   const last = messages[messages.length - 1];
   if (!last) return 'idle';
+  // Codex: a turn runs from task_started to task_complete / turn_aborted (the
+  // parser marks the end with stopReason), so a finished tool call mid-turn is
+  // still working, unlike Claude where the next user tool_result would follow.
+  const codex =
+    agent === 'codex' ||
+    (agent === undefined && (last.toolCalls || []).some((t) => isCodexOnlyTool(t.name)));
+  if (codex && last.type === 'assistant') {
+    if (last.stopReason === 'end_turn' || last.stopReason === 'aborted') return 'idle';
+    const open = (last.toolCalls || []).filter(
+      (t) => t.status === 'pending' || t.status === 'running'
+    );
+    if (open.some((t) => t.input?.sandbox_permissions === 'require_escalated')) return 'waiting';
+    if (open.some((t) => isWaitingTool(t.name))) return 'waiting';
+    return 'working';
+  }
   if (last.type === 'user') {
     if (/^\[Request interrupted/.test((last.content || '').trim())) return 'idle';
     return 'working';
   }
-  if (last.type === 'system') return 'working';
+  // Codex: an interrupted turn ends on a system "Turn interrupted" (stopReason aborted).
+  if (last.type === 'system') return last.stopReason === 'aborted' ? 'idle' : 'working';
   const pending = (last.toolCalls || []).filter(
     (t) => t.status === 'pending' || t.status === 'running'
   );
   if (pending.some((t) => isWaitingTool(t.name))) return 'waiting';
+  // Codex: a command that asked for sandbox escalation waits on the approval box.
+  if (pending.some((t) => t.input?.sandbox_permissions === 'require_escalated')) return 'waiting';
   if (last.isWaitingForChoice && !pending.length) return 'waiting';
   return pending.length ? 'working' : 'idle';
 }
@@ -196,9 +246,11 @@ export function buildDigest(
   messages: ConversationMessage[],
   now: number,
   horizonMs: number,
-  cache?: (id: string, make: () => StuckToolEvent) => StuckToolEvent
+  cache?: (id: string, make: () => StuckToolEvent) => StuckToolEvent,
+  /** The session's agent id ('claude' | 'codex'); undefined = guess from tool names. */
+  agent?: string
 ): StuckDigest {
-  const phase = phaseOf(messages);
+  const phase = phaseOf(messages, agent);
   const lastMessageAt = messages.length ? messages[messages.length - 1].timestamp || 0 : 0;
   const digest: StuckDigest = {
     phase,
@@ -345,7 +397,7 @@ function loop(d: StuckDigest, now: number, s: StuckSettings): StuckCandidate | n
     }
     if (ev.at < since || ev.failed || ev.rejected || !isLoopTool(ev.name) || isPollTool(ev.name))
       continue;
-    if (ev.name === 'Bash' && isPollingCommand(ev.rawCommand || '')) continue;
+    if (isShell(ev.name) && isPollingCommand(ev.rawCommand || '')) continue;
     const k = `${ev.inputKey}#${ev.outputHash}`;
     const g = groups.get(k) || [];
     g.push(ev);
@@ -364,7 +416,7 @@ function loop(d: StuckDigest, now: number, s: StuckSettings): StuckCandidate | n
   const read = last.name === 'Read';
   const lead = read
     ? `Read the same file ${n} times in ${span} min with no edits`
-    : last.name === 'Bash'
+    : isShell(last.name)
       ? `Ran the same command ${n} times in ${span} min with the same result`
       : `${last.name} with the same input ${n} times in ${span} min, same result`;
   return {
@@ -374,9 +426,9 @@ function loop(d: StuckDigest, now: number, s: StuckSettings): StuckCandidate | n
     summary: `${lead}: ${clip(last.display, 90)}`,
     headline: read
       ? `re-reading ${clip(last.display, 40)} over and over`
-      : `repeating the same ${last.name === 'Bash' ? 'command' : last.name} ${n} times`,
+      : `repeating the same ${isShell(last.name) ? 'command' : last.name} ${n} times`,
     evidence: [
-      last.name === 'Bash'
+      isShell(last.name)
         ? `$ ${clip(last.rawCommand || last.display, 180)}`
         : `${last.name} ${clip(last.display, 180)}`,
     ],
@@ -467,7 +519,7 @@ export interface PaneTrack {
 function stallCapMin(ev: StuckToolEvent, s: StuckSettings): number | null {
   if (isSubagentTool(ev.name) || isPollTool(ev.name) || isWaitingTool(ev.name)) return null;
   if (ev.name.startsWith('mcp__')) return s.longCommandCapMin;
-  if (ev.name === 'Bash')
+  if (isShell(ev.name))
     return isLongCommand(ev.rawCommand || '')
       ? Math.max(s.stalledBashMin, s.longCommandCapMin)
       : s.stalledBashMin;
@@ -500,12 +552,11 @@ function stalledTool(
     // Unchanged across at least two captures, four minutes apart.
     if (pane.stableChecks < 2 || now - pane.stableSince < 4 * MIN) continue;
     const running = mins(now - p.at);
-    const what =
-      p.name === 'Bash'
-        ? `: ${clip(p.rawCommand || p.display, 90)}`
-        : p.display !== p.name
-          ? `: ${clip(p.display, 90)}`
-          : '';
+    const what = isShell(p.name)
+      ? `: ${clip(p.rawCommand || p.display, 90)}`
+      : p.display !== p.name
+        ? `: ${clip(p.display, 90)}`
+        : '';
     return {
       kind: 'stalled_tool',
       severity: 'high',
@@ -513,7 +564,7 @@ function stalledTool(
       summary: `${p.name} has been running ${running} min with no screen change${what}`,
       headline: `${p.name} stuck for ${running} min`,
       evidence: [
-        p.name === 'Bash'
+        isShell(p.name)
           ? `$ ${clip(p.rawCommand || p.display, 180)}`
           : `${p.name} ${clip(p.display, 180)}`,
         `Screen unchanged for ${mins(now - pane.stableSince)} min`,
@@ -542,7 +593,7 @@ function noProgress(
   for (const p of d.pending) {
     if (isSubagentTool(p.name) || p.name.startsWith('mcp__')) {
       if (idle < cap) return null;
-    } else if (p.name === 'Bash') {
+    } else if (isShell(p.name)) {
       if (isLongCommand(p.rawCommand || '') && idle < cap) return null;
       // A command still printing output is busy, not stuck.
       if (pane.pendingId === p.id && now - pane.stableSince < 5 * MIN) return null;

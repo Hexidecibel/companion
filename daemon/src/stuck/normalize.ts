@@ -5,7 +5,7 @@
  * No I/O, no LLM.
  */
 
-import { codexAdapter, defaultAgent } from '../agents';
+import { codexAdapter, defaultAgent, isShellToolName } from '../agents';
 import { clip, fnv1a, oneLine } from '../herald/text';
 
 // eslint-disable-next-line no-control-regex
@@ -48,7 +48,7 @@ export function normalizeText(s: string): string {
 /** Exact identity of a tool input: whitespace collapsed, keys sorted; numbers kept (sed -n 1,50p != 51,100p). */
 export function inputKey(tool: string, input: Record<string, unknown> | undefined): string {
   const i = input || {};
-  if (tool === 'Bash') return `Bash:${oneLine(String(i.command ?? ''))}`;
+  if (isShellToolName(tool)) return `Bash:${oneLine(String(i.command ?? ''))}`;
   const keys = Object.keys(i)
     .filter((k) => k !== 'description')
     .sort();
@@ -223,7 +223,7 @@ export function analyzeFailure(
     keys.push({ key, label: l, type, rank });
     if (excerptLines.length < 2) excerptLines.push(clip(oneLine(raw), 200));
   };
-  const lines = tool === 'Bash' || isError ? scanLines(out) : [];
+  const lines = isShellToolName(tool) || isError ? scanLines(out) : [];
   for (const line of lines) {
     for (const p of STRONG) {
       const m = line.match(p.re);
@@ -251,7 +251,7 @@ export function analyzeFailure(
       .map((l) => l.trim())
       .filter((l) => l && !/^Exit code \d+$/i.test(l) && !/^Error: Exit code \d+$/i.test(l))
       .slice(-2);
-    if (tool === 'Bash') {
+    if (isShellToolName(tool)) {
       const cmd = commandCore(String(input?.command ?? ''));
       const label = clip(cmd, 120);
       const key = `command:${normalizeText(cmd)}|${normalizeText(tail.join(' ')).slice(0, 200)}`;

@@ -75,3 +75,18 @@ export function isSubagentTool(name: string, table: ToolRoleTable = CLAUDE_TOOL_
 export function requiresApproval(name: string, table: ToolRoleTable = CLAUDE_TOOL_TABLE): boolean {
   return table.approvalTools.has(name);
 }
+
+/**
+ * A shell tool of ANY registered agent (Claude's Bash, Codex's exec_command /
+ * shell / ...). For agent-neutral analysis that only sees a tool name; the
+ * names never collide between the tables.
+ */
+export function isShellToolName(name: string): boolean {
+  return toolRole(name) === 'shell' || toolRole(name, CODEX_TOOL_TABLE) === 'shell';
+}
+
+/** A tool's role in whichever registered agent's table knows the name (Claude first). */
+export function anyAgentRole(name: string): ToolRole {
+  const r = toolRole(name);
+  return r !== 'other' ? r : toolRole(name, CODEX_TOOL_TABLE);
+}

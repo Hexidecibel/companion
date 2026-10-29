@@ -15,6 +15,8 @@ export {
   isEditTool,
   isSubagentTool,
   requiresApproval,
+  isShellToolName,
+  anyAgentRole,
 } from './roles';
 export { claudeAdapter } from './claude';
 export { codexAdapter } from './codex';

@@ -720,6 +720,7 @@ export class WebSocketHandler {
       const stuck = new StuckDetector({
         watcher: this.watcher,
         sessionName: (id) => this.sessionNameStore.get(id) || id,
+        agentOf: (id) => this.watcher.agentFor(id).id,
         // GLOBAL: every client keeps the whole list (sidebar badges).
         broadcast: (type, payload) => this.broadcast(type, payload),
         // Guarded inside the detector: dedupe, liveness, per-tick cap, timeout.

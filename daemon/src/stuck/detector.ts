@@ -80,6 +80,8 @@ export interface StuckHeraldLink {
 export interface StuckDetectorDeps {
   watcher: StuckWatcherLike;
   sessionName?: (sessionId: string) => string;
+  /** The agent running in a session ('claude' | 'codex'); turn phases differ. */
+  agentOf?: (sessionId: string) => string;
   /** GLOBAL broadcast (every subscribed client), never session-scoped. */
   broadcast?: (type: string, payload: unknown) => void;
   /** Capture a session's pane (rejects on failure). Absent = time-based signals off. */
@@ -229,7 +231,13 @@ export class StuckDetector {
     const horizon =
       Math.max(settings.failureWindowMin, settings.loopWindowMin, settings.oscillationWindowMin) *
       60_000;
-    const digest = buildDigest(msgs, now, horizon, this.cachedEvent);
+    const digest = buildDigest(
+      msgs,
+      now,
+      horizon,
+      this.cachedEvent,
+      this.deps.agentOf?.(sessionId)
+    );
     lruSet(this.digests, sessionId, digest, MAX_SESSIONS);
     this.evaluate(sessionId);
     this.publish();
