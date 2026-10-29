@@ -103,6 +103,18 @@ const TOOL_PHRASES: Record<string, string> = {
   Task: 'start a sub-agent',
   Agent: 'start a sub-agent',
   ExitPlanMode: 'go ahead with its plan',
+  // Codex CLI
+  exec_command: 'run a shell command',
+  exec: 'run a shell command',
+  shell: 'run a shell command',
+  local_shell: 'run a shell command',
+  unified_exec: 'run a shell command',
+  'container.exec': 'run a shell command',
+  apply_patch: 'edit files',
+  update_plan: 'update its plan',
+  view_image: 'look at an image',
+  web_search: 'search the web',
+  request_user_input: 'ask you something',
 };
 
 /** Spoken-friendly phrase for what a pending tool approval would do ("run a shell command"). */

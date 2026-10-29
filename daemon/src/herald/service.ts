@@ -1775,7 +1775,8 @@ export class HeraldService {
       else if (!detail) detail = ' — (no transcript text visible)';
       const project =
         s.projectName && s.projectName !== s.sessionName ? ` (project ${s.projectName})` : '';
-      lines.push(`- ${s.sessionName}${project}: ${s.status}${age}${detail}`);
+      const agent = s.agent === 'codex' ? ' [Codex]' : '';
+      lines.push(`- ${s.sessionName}${agent}${project}: ${s.status}${age}${detail}`);
     }
     // Inbox items are events ("finished 5m ago"), not states. Each is shown with
     // the session's CURRENT status from this same listing, and a finished note for

@@ -63,6 +63,8 @@ export interface SessionSnapshot {
    * tool and its first error line (redacted). Absent / null otherwise.
    */
   turnError?: { tool: string; line: string } | null;
+  /** The coding agent when it is not Claude Code. */
+  agent?: 'codex';
 }
 
 export interface TranscriptTurn {
@@ -350,7 +352,11 @@ export class LocalSessionSource implements SessionSource {
     try {
       const messages = this.messagesFor(sessionId);
       const last = messages[messages.length - 1];
-      const pendingTools = getPendingApprovalTools(messages);
+      const agent = this.deps.watcher.agentFor?.(sessionId) ?? defaultAgent();
+      const pendingTools =
+        agent === defaultAgent()
+          ? getPendingApprovalTools(messages)
+          : agent.transcript.getPendingApprovalTools(messages);
       let pendingApproval: PendingApproval | null = null;
       if (pendingTools.length > 0 && last?.type === 'assistant') {
         const tc = last.toolCalls?.find((t) => t.id === pendingTools[0].id);
@@ -460,6 +466,9 @@ export class LocalSessionSource implements SessionSource {
         lastTurnKey: derived?.lastTurnKey || null,
         lastTurnGist: derived?.lastTurnGist || null,
         turnError: status === 'idle' ? derived?.turnError || null : null,
+        ...(this.deps.watcher.agentFor?.(tmuxName)?.id === 'codex'
+          ? { agent: 'codex' as const }
+          : {}),
       });
     }
     return out;

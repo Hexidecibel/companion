@@ -678,6 +678,7 @@ export function sessionView(s: SessionSnapshot, env: ToolEnv) {
   const since = env.statusSince(s.serverId, s.sessionId);
   return {
     name: s.sessionName,
+    ...(s.agent ? { agent: s.agent } : {}),
     project: s.projectName || undefined,
     status: s.inactive ? 'closed' : s.status,
     status_for: since ? formatAgo(now - since) : undefined,
