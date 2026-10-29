@@ -13,10 +13,18 @@
 import * as path from 'path';
 import { JsonlTail } from './jsonl-tail';
 import { REVIEW_LIMITS } from './protocol';
-import { defaultAgent, type AgentEditExtractor, type RawHunk } from '../agents';
+import { codexAdapter, defaultAgent, type AgentEditExtractor, type RawHunk } from '../agents';
+import { isCodexRollout } from '../agents/codex/discovery';
+import {
+  customToolStart,
+  functionToolStart,
+  isInjectedUserMessage,
+  summarizeExecInput,
+} from '../agents/codex/parse';
+import { fileChangeApplied, fileChangeEdits, parsePatchEnvelope } from '../agents/codex/edits';
 
-/** Claude's edit tools (role 'edit'); kept as the type of `LedgerEdit.tool`. */
-export type EditTool = 'Edit' | 'MultiEdit' | 'Write' | 'NotebookEdit';
+/** Edit tools (role 'edit'): Claude's, plus Codex's apply_patch. */
+export type EditTool = 'Edit' | 'MultiEdit' | 'Write' | 'NotebookEdit' | 'apply_patch';
 
 export type { RawHunk } from '../agents/types';
 
@@ -156,6 +164,8 @@ function capHunks(hunks: RawHunk[]): { hunks: RawHunk[]; truncated: boolean } {
 
 interface FileState {
   tail: JsonlTail;
+  /** A Codex rollout (`{type, payload}` records), not a Claude JSONL. */
+  codex?: boolean;
   /** Subagent file: its agent id + the parent tool_use id that spawned it. */
   agentId?: string;
   parentToolUseId?: string;
@@ -215,7 +225,10 @@ export class SessionLedger {
     }
     for (const f of mainFiles) {
       if (!this.files.has(f)) {
-        this.files.set(f, { tail: new JsonlTail(f) });
+        this.files.set(f, {
+          tail: new JsonlTail(f),
+          ...(isCodexRollout(f) ? { codex: true } : {}),
+        });
         // Keep main files before subagent files.
         const firstSub = this.fileOrder.findIndex((x) => !!this.files.get(x)?.agentId);
         if (firstSub === -1) this.fileOrder.push(f);
@@ -345,6 +358,10 @@ export class SessionLedger {
   }
 
   private ingest(entry: Record<string, unknown>, st: FileState): void {
+    if (st.codex) {
+      this.ingestCodex(entry, st);
+      return;
+    }
     const at = ts(entry);
     const isSub = !!st.agentId;
     const type = entry.type;
@@ -449,35 +466,236 @@ export class SessionLedger {
     }
   }
 
-  private completeEdit(
+  // ---------------------------------------------------------------- Codex
+
+  /** call id -> pending edit ids made from its apply_patch envelope. */
+  private codexCallEdits = new Map<string, string[]>();
+
+  /**
+   * One Codex rollout record. Turns open on a user message the user typed
+   * (harness-injected context skipped); apply_patch calls open pending edits
+   * from the envelope; the FileChange item that follows carries the exact
+   * unified hunks and completes them (or adds edits the envelope missed);
+   * shell calls mark the turn `usedBash` for the end-of-turn git scan.
+   */
+  private ingestCodex(entry: Record<string, unknown>, st: FileState): void {
+    const at = ts(entry);
+    const type = entry.type;
+    const p =
+      entry.payload && typeof entry.payload === 'object'
+        ? (entry.payload as Record<string, unknown>)
+        : {};
+    const cur = this.currentTurn();
+    if (cur && at > cur.lastEntryAt && (type === 'response_item' || type === 'event_msg'))
+      cur.lastEntryAt = at;
+
+    if (type === 'response_item') {
+      const ptype = p.type;
+      if (ptype === 'message') {
+        const text = codexText(p.content);
+        if (p.role === 'user') {
+          if (!text || isInjectedUserMessage(p, text)) return;
+          const c = classifyPrompt(text, false);
+          if (!c || c === 'attach') return;
+          const id = typeof p.id === 'string' && p.id ? p.id : `codex:${st.tail.offset}:${at}`;
+          if (!this.turnById.has(id)) this.openTurn(id, at, c.label);
+        } else if (p.role === 'assistant' && text.trim()) {
+          const turn = this.currentTurn();
+          if (turn) turn.lastAssistantText = text;
+        }
+        return;
+      }
+      if (ptype === 'custom_tool_call' || ptype === 'function_call') {
+        const callId = typeof p.call_id === 'string' ? p.call_id : '';
+        const name = typeof p.name === 'string' ? p.name : '';
+        const start =
+          ptype === 'custom_tool_call'
+            ? customToolStart(name || 'exec', typeof p.input === 'string' ? p.input : '')
+            : functionToolStart(name || 'function', p.arguments);
+        // A code-mode snippet can patch AND run commands in one call.
+        const shell =
+          codexAdapter.toolRole(start.name) === 'shell' ||
+          (ptype === 'custom_tool_call' &&
+            name === 'exec' &&
+            summarizeExecInput(typeof p.input === 'string' ? p.input : '').commands.length > 0);
+        if (shell) {
+          const turn = this.currentTurn();
+          if (turn) turn.usedBash = true;
+        }
+        if (start.name === 'apply_patch' && callId) {
+          const patch = typeof start.input.patch === 'string' ? start.input.patch : '';
+          const ids: string[] = [];
+          parsePatchEnvelope(patch).forEach((op, i) => {
+            const id = `${callId}#${i}`;
+            if (this.edits.has(id)) return;
+            const target = op.moveTo || op.file;
+            const e = this.addCodexEdit(id, target, op.op === 'add' ? 'create' : 'update', at, st);
+            if (e) ids.push(e.id);
+            if (op.moveTo) {
+              const src = this.addCodexEdit(`${id}:from`, op.file, 'update', at, st);
+              if (src) ids.push(src.id);
+            }
+          });
+          if (ids.length) this.codexCallEdits.set(callId, ids);
+        }
+        return;
+      }
+      if (ptype === 'custom_tool_call_output' || ptype === 'function_call_output') {
+        // The FileChange item normally completed these already; whatever is
+        // still pending got no FileChange: the patch failed or was declined.
+        const callId = typeof p.call_id === 'string' ? p.call_id : '';
+        const ids = this.codexCallEdits.get(callId);
+        if (!ids) return;
+        this.codexCallEdits.delete(callId);
+        for (const id of ids) {
+          const e = this.edits.get(id);
+          if (e?.pending) this.failEdit(e, at);
+        }
+      }
+      return;
+    }
+
+    if (type === 'event_msg' && p.type === 'item_completed') {
+      const item =
+        p.item && typeof p.item === 'object' ? (p.item as Record<string, unknown>) : null;
+      if (!item) return;
+      if (item.type === 'CommandExecution') {
+        const turn = this.currentTurn();
+        if (turn) turn.usedBash = true;
+        return;
+      }
+      if (item.type !== 'FileChange') return;
+      const applied = fileChangeApplied(item);
+      const itemId = typeof item.id === 'string' && item.id ? item.id : `fc:${at}`;
+      fileChangeEdits(item).forEach((ch, i) => {
+        const abs = path.resolve(this.projectPath || '/', ch.file);
+        let e = this.pendingCodexEditFor(abs);
+        if (!e) {
+          const id = `${itemId}#${i}`;
+          if (this.edits.has(id)) return;
+          e = this.addCodexEdit(id, ch.file, ch.kind, at, st) || undefined;
+          if (!e) return;
+        }
+        if (!applied) {
+          this.failEdit(e, at);
+        } else {
+          this.finishEdit(e, { kind: ch.kind, hunks: ch.hunks }, at);
+        }
+        if (ch.movedFrom) {
+          const srcAbs = path.resolve(this.projectPath || '/', ch.movedFrom);
+          let src = this.pendingCodexEditFor(srcAbs);
+          if (!src) {
+            const id = `${itemId}#${i}:from`;
+            if (this.edits.has(id)) return;
+            src = this.addCodexEdit(id, ch.movedFrom, 'update', at, st) || undefined;
+          }
+          if (src) {
+            if (applied) this.finishEdit(src, { kind: 'update', hunks: null }, at);
+            else this.failEdit(src, at);
+          }
+        }
+      });
+    }
+  }
+
+  private pendingCodexEditFor(absPath: string): LedgerEdit | undefined {
+    const turn = this.currentTurn();
+    if (!turn) return undefined;
+    for (const id of turn.editIds) {
+      const e = this.edits.get(id);
+      if (e && e.pending && e.absPath === absPath) return e;
+    }
+    return undefined;
+  }
+
+  private addCodexEdit(
+    id: string,
+    file: string,
+    kind: 'create' | 'update',
+    at: number,
+    st: FileState
+  ): LedgerEdit | null {
+    const turn = this.turnFor(at, st.tail.filePath);
+    const absPath = path.resolve(this.projectPath || '/', file);
+    const edit: LedgerEdit = {
+      id,
+      turnId: turn.id,
+      tool: 'apply_patch',
+      absPath,
+      kind,
+      at,
+      startedAt: at,
+      additions: 0,
+      deletions: 0,
+      hunks: [],
+      pending: true,
+      ...(this.excludePath?.(absPath) ? { excluded: true } : {}),
+    };
+    this.edits.set(id, edit);
+    turn.editIds.push(id);
+    this.pendingChanges.push({ phase: 'started', editId: id });
+    this.bump();
+    return edit;
+  }
+
+  private failEdit(edit: LedgerEdit, at: number): void {
+    edit.pending = false;
+    edit.at = at || edit.startedAt;
+    edit.failed = true;
+    this.pendingChanges.push({ phase: 'failed', editId: edit.id });
+    this.bump();
+  }
+
+  private finishEdit(
     edit: LedgerEdit,
-    block: Record<string, unknown>,
-    toolUseResult: unknown,
+    outcome: { kind: 'create' | 'update'; hunks: RawHunk[] | null },
     at: number
   ): void {
     edit.pending = false;
     edit.at = at || edit.startedAt;
-    if (block.is_error === true) {
-      edit.failed = true;
-      this.pendingChanges.push({ phase: 'failed', editId: edit.id });
-      this.bump();
-      return;
-    }
-    const outcome = this.editExtractor.editOutcome(edit.tool, edit.kind, toolUseResult);
     edit.kind = outcome.kind;
-    const hunks = outcome.hunks;
-    if (hunks === null) {
+    if (outcome.hunks === null) {
       edit.patchUnavailable = true;
       edit.hunks = [];
     } else {
-      const capped = capHunks(hunks);
+      const capped = capHunks(outcome.hunks);
       edit.hunks = capped.hunks;
       if (capped.truncated) edit.truncated = true;
-      const c = countLines(hunks);
+      const c = countLines(outcome.hunks);
       edit.additions = c.additions;
       edit.deletions = c.deletions;
     }
     this.pendingChanges.push({ phase: 'completed', editId: edit.id });
     this.bump();
   }
+
+  private completeEdit(
+    edit: LedgerEdit,
+    block: Record<string, unknown>,
+    toolUseResult: unknown,
+    at: number
+  ): void {
+    if (block.is_error === true) {
+      this.failEdit(edit, at);
+      return;
+    }
+    this.finishEdit(edit, this.editExtractor.editOutcome(edit.tool, edit.kind, toolUseResult), at);
+  }
+}
+
+/** Text of a Codex message's content parts (input_text / output_text / text). */
+function codexText(content: unknown): string {
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return '';
+  const parts: string[] = [];
+  for (const c of content) {
+    if (!c || typeof c !== 'object') continue;
+    const b = c as { type?: unknown; text?: unknown };
+    if (
+      (b.type === 'input_text' || b.type === 'output_text' || b.type === 'text') &&
+      typeof b.text === 'string'
+    )
+      parts.push(b.text);
+  }
+  return parts.join('\n').trim();
 }

@@ -12,8 +12,9 @@
  */
 import * as path from 'path';
 import type { ConversationMessage, SessionStatus } from '../../types';
-import type { AgentEditExtractor, AgentTranscript } from '../types';
+import type { AgentTranscript } from '../types';
 import { findCodexPid } from './discovery';
+import { codexEdits } from './edits';
 import {
   codexAwaitingApproval,
   codexCurrentActivity,
@@ -23,12 +24,6 @@ import {
 
 const codexWaiting = (messages: ConversationMessage[]) =>
   codexTurnEnded(messages) || codexAwaitingApproval(messages).length > 0;
-
-/** Step 4 parses apply_patch envelopes into hunks; until then Codex reports no edits. */
-const codexEdits: AgentEditExtractor = {
-  editStart: () => null,
-  editOutcome: (_name, current) => ({ kind: current, hunks: null }),
-};
 
 export const codexTranscript: AgentTranscript = {
   // `codeHome` here is the Codex home (resolveCodexHome).

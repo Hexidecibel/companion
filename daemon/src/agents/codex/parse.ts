@@ -148,6 +148,18 @@ function stringProps(code: string, key: string): string[] {
   return out;
 }
 
+/** String-literal first arguments of `tools.apply_patch("...")` calls (the 0.165 shape). */
+function patchArgs(code: string): string[] {
+  const re = /\btools\.apply_patch\s*\(\s*(?=["'`])/g;
+  const out: string[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(code)) !== null) {
+    const v = readJsString(code, m.index + m[0].length);
+    if (v !== null) out.push(v);
+  }
+  return out;
+}
+
 export interface ExecSummary {
   /** Inner tool names called by the snippet, in order (`tools.<name>(`). */
   tools: string[];
@@ -166,7 +178,9 @@ export function summarizeExecInput(code: string): ExecSummary {
   const commands = stringProps(code, 'cmd');
   if (commands.length === 0) commands.push(...stringProps(code, 'command'));
   const justification = stringProps(code, 'justification')[0];
-  const patch = stringProps(code, 'input').find((s) => s.includes('*** Begin Patch'));
+  const patch =
+    patchArgs(code).find((s) => s.includes('*** Begin Patch')) ??
+    stringProps(code, 'input').find((s) => s.includes('*** Begin Patch'));
   return {
     tools,
     commands,
@@ -179,7 +193,7 @@ export function summarizeExecInput(code: string): ExecSummary {
 /** Files named by an apply_patch envelope (`*** Update File: path` ...). */
 export function patchFiles(patch: string): string[] {
   const out: string[] = [];
-  const re = /^\*\*\* (?:Update|Add|Delete) File: (.+)$/gm;
+  const re = /^\*\*\* (?:(?:Update|Add|Delete) File|Move to): (.+)$/gm;
   let m: RegExpExecArray | null;
   while ((m = re.exec(patch)) !== null) {
     const f = m[1].trim();
@@ -216,7 +230,10 @@ export function customToolStart(name: string, input: string): ToolStart {
   if (s.escalated) extra.sandbox_permissions = 'require_escalated';
   if (s.patch !== undefined || (s.tools.length > 0 && s.tools.every((t) => t === 'apply_patch'))) {
     const patch = s.patch ?? '';
-    return { name: 'apply_patch', input: { patch, files: patchFiles(patch), ...extra } };
+    // A snippet that patches AND runs commands keeps them (stuck / Herald read them).
+    const cmds =
+      s.commands.length > 0 ? { command: s.commands.join('\n'), commands: s.commands } : {};
+    return { name: 'apply_patch', input: { patch, files: patchFiles(patch), ...cmds, ...extra } };
   }
   if (s.commands.length > 0) {
     return {

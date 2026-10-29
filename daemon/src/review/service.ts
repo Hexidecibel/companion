@@ -843,7 +843,8 @@ export class ReviewService {
     return {
       id: e.id,
       turnId: e.turnId,
-      tool: e.tool,
+      // Codex's apply_patch maps onto the protocol's Claude names (old apps know only those).
+      tool: e.tool === 'apply_patch' ? (e.kind === 'create' ? 'Write' : 'Edit') : e.tool,
       path: this.displayPath(e.absPath, projectPath),
       absPath: e.absPath,
       kind: e.kind,
