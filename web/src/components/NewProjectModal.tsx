@@ -1,7 +1,9 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { StackTemplate, ProjectConfig, ScaffoldProgress, ScaffoldResult } from '../types';
+import type { CodingAgent } from '../types';
 import { connectionManager } from '../services/ConnectionManager';
 import { FileViewerModal } from './FileViewerModal';
+import { AgentPicker, readStoredAgent, writeStoredAgent } from './AgentPicker';
 
 type WizardStep = 'details' | 'template' | 'options' | 'preview' | 'creating' | 'done';
 
@@ -113,6 +115,18 @@ export function NewProjectModal({ serverId, onClose, onComplete }: NewProjectMod
   const [includeCI, setIncludeCI] = useState(false);
   const [includeLinter, setIncludeLinter] = useState(true);
   const [bypassPermissions, setBypassPermissions] = useState(true);
+  const [openError, setOpenError] = useState<string | null>(null);
+  const [agent, setAgent] = useState<CodingAgent>(() => readStoredAgent(serverId));
+  const pickAgent = useCallback(
+    (next: CodingAgent) => {
+      setAgent(next);
+      writeStoredAgent(serverId, next);
+    },
+    [serverId]
+  );
+  // Claude's bypass lives in the project's .claude/settings.json (written by the
+  // scaffold); Codex's is a launch flag, so the scaffold writes nothing for it.
+  const scaffoldBypass = agent === 'claude' && bypassPermissions;
   const [viewingFile, setViewingFile] = useState<string | null>(null);
 
   // Preview state
@@ -197,7 +211,7 @@ export function NewProjectModal({ serverId, onClose, onComplete }: NewProjectMod
         description: projectDescription,
         location,
         stackId: selectedTemplate,
-        options: { initGit, createGitHubRepo, privateRepo, includeDocker, includeCI, includeLinter, bypassPermissions },
+        options: { initGit, createGitHubRepo, privateRepo, includeDocker, includeCI, includeLinter, bypassPermissions: scaffoldBypass },
       };
       const response = await conn.sendRequest('scaffold_preview', config);
       if (response.success && response.payload) {
@@ -210,7 +224,7 @@ export function NewProjectModal({ serverId, onClose, onComplete }: NewProjectMod
     } finally {
       setPreviewLoading(false);
     }
-  }, [conn, projectName, selectedTemplate, projectDescription, location, initGit, createGitHubRepo, privateRepo, includeDocker, includeCI, includeLinter, bypassPermissions]);
+  }, [conn, projectName, selectedTemplate, projectDescription, location, initGit, createGitHubRepo, privateRepo, includeDocker, includeCI, includeLinter, scaffoldBypass]);
 
   // Create project with progress streaming
   const handleCreate = useCallback(async () => {
@@ -231,7 +245,7 @@ export function NewProjectModal({ serverId, onClose, onComplete }: NewProjectMod
         description: projectDescription || `A ${templates.find(t => t.id === selectedTemplate)?.name || 'new'} project`,
         location,
         stackId: selectedTemplate,
-        options: { initGit, createGitHubRepo, privateRepo, includeDocker, includeCI, includeLinter, bypassPermissions },
+        options: { initGit, createGitHubRepo, privateRepo, includeDocker, includeCI, includeLinter, bypassPermissions: scaffoldBypass },
       };
       const response = await conn.sendRequest('scaffold_create', config, 120000);
       unsub();
@@ -246,11 +260,12 @@ export function NewProjectModal({ serverId, onClose, onComplete }: NewProjectMod
       unsub();
       setProgress({ step: 'Error', error: 'Request failed', progress: 0, complete: true });
     }
-  }, [conn, serverId, projectName, selectedTemplate, projectDescription, location, templates, initGit, createGitHubRepo, privateRepo, includeDocker, includeCI, includeLinter, goTo]);
+  }, [conn, serverId, projectName, selectedTemplate, projectDescription, location, templates, initGit, createGitHubRepo, privateRepo, includeDocker, includeCI, includeLinter, scaffoldBypass, goTo]);
 
   // Open session in the newly created project
   const handleOpenSession = useCallback(async () => {
     if (!conn || !result?.projectPath) return;
+    setOpenError(null);
     try {
       const templateName = templates.find(t => t.id === selectedTemplate)?.name;
       const response = await conn.sendRequest('scaffold_open_session', {
@@ -258,14 +273,22 @@ export function NewProjectModal({ serverId, onClose, onComplete }: NewProjectMod
         projectName,
         projectDescription: projectDescription || undefined,
         templateName: templateName || undefined,
+        // Older daemons ignore these and start Claude Code.
+        ...(agent !== 'claude' ? { agent } : {}),
+        ...(agent !== 'claude' && !bypassPermissions ? { permissionMode: 'default' } : {}),
       });
+      if (!response.success) {
+        // e.g. Codex not installed: say so instead of closing silently.
+        setOpenError(response.error || 'Could not start the session');
+        return;
+      }
       const sessionName = (response.payload as { sessionName?: string })?.sessionName;
       onComplete?.(result.projectPath, sessionName);
     } catch {
       // Fall through to close
     }
     onClose();
-  }, [conn, result, onComplete, onClose, templates, selectedTemplate, projectName, projectDescription]);
+  }, [conn, result, onComplete, onClose, templates, selectedTemplate, projectName, projectDescription, agent, bypassPermissions]);
 
   // Step navigation helpers
   const handleNextFromDetails = useCallback(() => {
@@ -432,14 +455,17 @@ export function NewProjectModal({ serverId, onClose, onComplete }: NewProjectMod
               </div>
 
               <div className="wizard-options-section">
-                <h4>Claude Code</h4>
+                <h4>Coding agent</h4>
+                <AgentPicker value={agent} onChange={pickAgent} className="wizard-agent-row" />
                 <div className="form-group checkbox">
                   <input type="checkbox" id="wiz-bypass" checked={bypassPermissions} onChange={(e) => setBypassPermissions(e.target.checked)} />
                   <label htmlFor="wiz-bypass">Bypass permission prompts</label>
                 </div>
                 {bypassPermissions && (
                   <div style={{ fontSize: 11, color: 'var(--text-muted)', paddingLeft: 30, marginTop: -4, marginBottom: 8 }}>
-                    Auto-approves Bash, Edit, Write tools — no permission dialogs
+                    {agent === 'codex'
+                      ? 'Starts Codex with --dangerously-bypass-approvals-and-sandbox: no approval prompts, no sandbox'
+                      : 'Auto-approves Bash, Edit, Write tools — no permission dialogs'}
                   </div>
                 )}
               </div>
@@ -519,6 +545,7 @@ export function NewProjectModal({ serverId, onClose, onComplete }: NewProjectMod
                 <div className="wizard-done-path">{result.projectPath}</div>
               )}
               {result.error && <p style={{ color: 'var(--accent-red)', marginBottom: 12 }}>{result.error}</p>}
+              {openError && <p style={{ color: 'var(--accent-red)', marginBottom: 12 }}>{openError}</p>}
               {result.success && result.filesCreated.length > 0 && (
                 <div className="wizard-done-tree">
                   <div className="wizard-file-tree">

@@ -7,6 +7,7 @@ import {
   CLI_READY_TIMEOUT_MS,
 } from '../constants';
 import { createAgentSession, agentLaunchEnv, parseAgentId } from '../session-spawn';
+import { getAgentAdapter } from '../agents';
 
 export function registerTmuxHandlers(ctx: HandlerContext): Record<string, MessageHandler> {
   return {
@@ -251,6 +252,10 @@ export function registerTmuxHandlers(ctx: HandlerContext): Record<string, Messag
             projectName: string;
             projectDescription?: string;
             templateName?: string;
+            /** Optional: 'claude' (default) | 'codex'. */
+            agent?: string;
+            /** Optional, Codex only: 'default' = Codex's own approval prompts instead of bypass. */
+            permissionMode?: string;
           }
         | undefined;
 
@@ -263,13 +268,51 @@ export function registerTmuxHandlers(ctx: HandlerContext): Record<string, Messag
         });
         return;
       }
+      const agentId = parseAgentId(scaffoldPayload.agent);
+      if (!agentId) {
+        ctx.send(client.ws, {
+          type: 'scaffold_session_opened',
+          success: false,
+          error: `Unknown agent: ${String(scaffoldPayload.agent).slice(0, 40)}`,
+          requestId,
+        });
+        return;
+      }
 
       const sessionName = ctx.tmux.generateSessionName(scaffoldPayload.workingDir);
       console.log(
-        `WebSocket: scaffold_open_session "${sessionName}" in ${scaffoldPayload.workingDir}`
+        `WebSocket: scaffold_open_session "${sessionName}" in ${scaffoldPayload.workingDir}` +
+          (agentId !== 'claude' ? ` (${agentId})` : '')
       );
 
-      const result = await ctx.tmux.createSession(sessionName, scaffoldPayload.workingDir, true);
+      let result: { success: boolean; error?: string };
+      if (agentId === 'claude') {
+        // Claude reads bypass from the project's .claude/settings.json (the scaffold wrote it).
+        result = await ctx.tmux.createSession(sessionName, scaffoldPayload.workingDir, true);
+        if (result.success) {
+          ctx.storeTmuxSessionConfig(sessionName, scaffoldPayload.workingDir, true);
+          ctx.watcher.markSessionAsNew(sessionName);
+        }
+      } else {
+        // Same path as create_tmux_session: launch flag, CODEX_HOME, saved config
+        // with the agent, friendly name, missing-command check.
+        result = await createAgentSession(
+          {
+            tmux: ctx.tmux,
+            storeTmuxSessionConfig: ctx.storeTmuxSessionConfig,
+            sessionNameStore: ctx.sessionNameStore,
+            watcher: ctx.watcher,
+          },
+          {
+            workingDir: scaffoldPayload.workingDir,
+            name: sessionName,
+            agent: agentId,
+            ...(scaffoldPayload.permissionMode === 'default'
+              ? { permissionMode: 'default' as const }
+              : {}),
+          }
+        );
+      }
 
       if (!result.success) {
         ctx.send(client.ws, {
@@ -281,37 +324,47 @@ export function registerTmuxHandlers(ctx: HandlerContext): Record<string, Messag
         return;
       }
 
-      ctx.storeTmuxSessionConfig(sessionName, scaffoldPayload.workingDir, true);
       ctx.injector.setActiveSession(sessionName);
-      ctx.watcher.markSessionAsNew(sessionName);
       ctx.watcher.clearActiveSession();
       await ctx.watcher.refreshTmuxPaths();
 
       ctx.send(client.ws, {
         type: 'scaffold_session_opened',
         success: true,
-        payload: { sessionName, workingDir: scaffoldPayload.workingDir },
+        payload: {
+          sessionName,
+          workingDir: scaffoldPayload.workingDir,
+          ...(agentId !== 'claude' ? { agent: agentId } : {}),
+        },
         requestId,
       });
       ctx.broadcast('tmux_sessions_changed', { action: 'created', sessionName });
 
       // Fire-and-forget: poll for CLI readiness then inject initial message
       const { projectName, projectDescription, templateName } = scaffoldPayload;
+      const terminal = getAgentAdapter(agentId).terminal;
       (async () => {
         const deadline = Date.now() + CLI_READY_TIMEOUT_MS;
         const promptRe = /[>$]\s*$/;
+        const isReady = (pane: string) =>
+          agentId === 'claude'
+            ? promptRe.test(pane)
+            : terminal.classifyStartupPane(pane) === 'ready';
 
         while (Date.now() < deadline) {
           await new Promise((resolve) => setTimeout(resolve, CLI_READY_POLL_INTERVAL_MS));
           try {
             const paneContent = await ctx.injector.capturePaneContent(sessionName);
-            if (promptRe.test(paneContent)) {
+            if (isReady(paneContent)) {
               console.log(`[SCAFFOLD] CLI ready in "${sessionName}", injecting initial message`);
               const templateNote = templateName
                 ? ` The project has been scaffolded with the "${templateName}" template.`
                 : '';
               const description = projectDescription ? ` ${projectDescription}` : '';
-              const message = `I'm starting a new project called "${projectName}".${description}${templateNote} Please:\n1. Review the project structure and CLAUDE.md\n2. Create a prioritized todo list (TaskCreate) with concrete steps to accomplish the goal\n3. Begin working on the first task`;
+              const message =
+                agentId === 'claude'
+                  ? `I'm starting a new project called "${projectName}".${description}${templateNote} Please:\n1. Review the project structure and CLAUDE.md\n2. Create a prioritized todo list (TaskCreate) with concrete steps to accomplish the goal\n3. Begin working on the first task`
+                  : `I'm starting a new project called "${projectName}".${description}${templateNote} Please: 1. Review the project structure and its notes (CLAUDE.md / README). 2. Make a short prioritized plan with concrete steps to accomplish the goal. 3. Begin working on the first step.`;
               await ctx.injector.sendInput(message, sessionName);
               return;
             }
@@ -410,7 +463,18 @@ export function registerTmuxHandlers(ctx: HandlerContext): Record<string, Messag
       let conversationSessionId: string | undefined;
 
       if (tmuxSession?.workingDir) {
-        ctx.storeTmuxSessionConfig(switchPayload.sessionName, tmuxSession.workingDir, true);
+        // Keep what the session was started with (agent, permission mode): a
+        // switch must not turn a saved Codex session back into Claude on recreate.
+        const prev = ctx.tmuxSessionConfigs.get(switchPayload.sessionName);
+        const same = prev && prev.workingDir === tmuxSession.workingDir;
+        const seenAgent = ctx.watcher.agentFor(switchPayload.sessionName).id;
+        const agentToKeep = seenAgent !== 'claude' ? seenAgent : same ? prev.agent : undefined;
+        ctx.storeTmuxSessionConfig(switchPayload.sessionName, tmuxSession.workingDir, true, {
+          ...(same && prev.permissionMode && (prev.agent || 'claude') === (agentToKeep || 'claude')
+            ? { permissionMode: prev.permissionMode }
+            : {}),
+          ...(agentToKeep ? { agent: agentToKeep } : {}),
+        });
 
         const convSessions = ctx.watcher.getSessions();
         const matchingConv = convSessions.find((cs) => cs.projectPath === tmuxSession!.workingDir);

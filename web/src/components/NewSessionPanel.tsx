@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useNewSession } from '../hooks/useNewSession';
 import { isMobileViewport } from '../utils/platform';
 import type { CodingAgent } from '../types';
+import { AgentPicker, readStoredAgent, writeStoredAgent } from './AgentPicker';
 
 interface NewSessionPanelProps {
   serverId: string;
@@ -13,28 +14,6 @@ interface NewSessionPanelProps {
 type Tab = 'recent' | 'browse';
 
 const TAB_STORAGE_PREFIX = 'new-session-tab:';
-const AGENT_STORAGE_PREFIX = 'new-session-agent:';
-
-const AGENTS: Array<{ id: CodingAgent; label: string }> = [
-  { id: 'claude', label: 'Claude' },
-  { id: 'codex', label: 'Codex' },
-];
-
-function readStoredAgent(serverId: string): CodingAgent {
-  try {
-    return localStorage.getItem(AGENT_STORAGE_PREFIX + serverId) === 'codex' ? 'codex' : 'claude';
-  } catch {
-    return 'claude';
-  }
-}
-
-function writeStoredAgent(serverId: string, agent: CodingAgent) {
-  try {
-    localStorage.setItem(AGENT_STORAGE_PREFIX + serverId, agent);
-  } catch {
-    // ignore
-  }
-}
 
 function readStoredTab(serverId: string): Tab | null {
   try {
@@ -308,22 +287,7 @@ export function NewSessionPanel({
         </button>
       </div>
 
-      <div className="new-session-agent-row" role="radiogroup" aria-label="Coding agent">
-        <span className="new-session-agent-label">Agent</span>
-        {AGENTS.map((a) => (
-          <button
-            key={a.id}
-            type="button"
-            role="radio"
-            aria-checked={agent === a.id}
-            className={`new-session-agent-btn ${agent === a.id ? 'active' : ''}`}
-            onClick={() => pickAgent(a.id)}
-            disabled={creating}
-          >
-            {a.label}
-          </button>
-        ))}
-      </div>
+      <AgentPicker value={agent} onChange={pickAgent} disabled={creating} />
 
       {error && <div className="new-session-error">{error}</div>}
 

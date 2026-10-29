@@ -21,12 +21,15 @@ import * as fs from 'fs';
 import * as path from 'path';
 import type { TmuxManager, ClaudePermissionMode } from './tmux-manager';
 import { DEFAULT_AGENT_ID, getAgentAdapter, listAgentIds, type AgentId } from './agents';
+import { stripAnsi } from './prompt-guard';
 
 /** The permission mode app-spawned sessions run in. */
 export const SPAWN_PERMISSION_MODE: ClaudePermissionMode = 'bypassPermissions';
 
 export interface SessionSpawnDeps {
-  tmux: Pick<TmuxManager, 'createSession' | 'generateSessionName'>;
+  tmux: Pick<TmuxManager, 'createSession' | 'generateSessionName'> &
+    /** Optional: lets a non-Claude launch be checked (agent not installed). */
+    Partial<Pick<TmuxManager, 'capturePane' | 'killSession'>>;
   storeTmuxSessionConfig: (
     name: string,
     workingDir: string,
@@ -78,6 +81,59 @@ export function agentLaunchEnv(
   return t.launchEnv ? t.launchEnv({ codexHome: watcher.getCodexHome?.() }) : {};
 }
 
+/** Command word each agent's launch line starts with. */
+const AGENT_COMMANDS: Record<AgentId, string> = { claude: 'claude', codex: 'codex' };
+const INSTALL_HINTS: Partial<Record<AgentId, string>> = {
+  codex: 'npm install -g @openai/codex, then codex login',
+};
+
+/** The shell could not find `command` (bash, zsh, fish, dash/sh). */
+export function agentCommandMissing(pane: string, command: string): boolean {
+  const p = stripAnsi(pane || '');
+  const c = command.replace(/[^a-z0-9_-]/gi, '');
+  return new RegExp(
+    `${c}: command not found|command not found: ${c}\\b|Unknown command:? '?${c}\\b|\\b${c}: not found`,
+    'i'
+  ).test(p);
+}
+
+/** How long a non-Claude launch is watched for a missing command (one-off, bounded). */
+export const LAUNCH_CHECK_MS = 4000;
+const LAUNCH_CHECK_STEP_MS = 500;
+
+/**
+ * Right after launching a non-Claude agent: watch its pane briefly (a few
+ * bounded captures, stops as soon as the agent draws anything) for the shell
+ * saying the command does not exist. Returns an error message, or null.
+ */
+async function checkAgentLaunch(
+  deps: SessionSpawnDeps,
+  sessionName: string,
+  agent: AgentId,
+  sleep: (ms: number) => Promise<void>
+): Promise<string | null> {
+  const capture = deps.tmux.capturePane?.bind(deps.tmux);
+  if (!capture) return null;
+  const terminal = getAgentAdapter(agent).terminal;
+  const command = AGENT_COMMANDS[agent];
+  for (let waited = 0; waited < LAUNCH_CHECK_MS; waited += LAUNCH_CHECK_STEP_MS) {
+    await sleep(LAUNCH_CHECK_STEP_MS);
+    let pane = '';
+    try {
+      pane = await capture(sessionName, 30);
+    } catch {
+      return null;
+    }
+    if (agentCommandMissing(pane, command)) {
+      const name = getAgentAdapter(agent).displayName;
+      const hint = INSTALL_HINTS[agent];
+      return `${name} is not installed on this server (\`${command}\` not found in the tmux shell's PATH)${hint ? `. Install: ${hint}` : ''}`;
+    }
+    if (terminal.classifyStartupPane(pane) !== 'starting') return null;
+  }
+  return null;
+}
+
 export async function createAgentSession(
   deps: SessionSpawnDeps,
   req: {
@@ -87,7 +143,8 @@ export async function createAgentSession(
     agent?: AgentId;
     /** 'default' = the agent's own approval prompts (no bypass). */
     permissionMode?: 'default' | ClaudePermissionMode;
-  }
+  },
+  opts: { sleep?: (ms: number) => Promise<void> } = {}
 ): Promise<SessionSpawnResult> {
   const log = deps.log || ((l: string) => console.log(l));
   if (!fs.existsSync(req.workingDir)) {
@@ -107,6 +164,15 @@ export async function createAgentSession(
     ...(agent !== DEFAULT_AGENT_ID ? { agent, env: agentLaunchEnv(agent, deps.watcher) } : {}),
   });
   if (!result.success) return { success: false, error: result.error };
+  if (startCli && agent !== DEFAULT_AGENT_ID) {
+    const sleep = opts.sleep || ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+    const launchError = await checkAgentLaunch(deps, sessionName, agent, sleep);
+    if (launchError) {
+      log(`Sessions: ${launchError}; removing "${sessionName}"`);
+      await deps.tmux.killSession?.(sessionName).catch(() => undefined);
+      return { success: false, error: launchError };
+    }
+  }
   deps.storeTmuxSessionConfig(sessionName, req.workingDir, startCli, {
     permissionMode,
     ...(agent !== DEFAULT_AGENT_ID ? { agent } : {}),
