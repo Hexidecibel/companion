@@ -177,8 +177,10 @@ function mergeWithOptimistic(
  */
 export function describeSendError(error: string | undefined, payload?: unknown): string | null {
   const message = (payload as { message?: unknown } | undefined)?.message;
-  if (error === 'prompt_has_draft' || error === 'user_typing') {
+  if (error === 'prompt_has_draft' || error === 'user_typing' || error === 'prompt_waiting') {
     if (typeof message === 'string' && message) return message;
+    if (error === 'prompt_waiting')
+      return 'Not sent: the session is waiting on a prompt (e.g. "Trust this folder?"). Answer it first.';
     return error === 'prompt_has_draft'
       ? 'Not sent: the prompt has an unsent draft in the terminal. Send or clear it there, then try again.'
       : 'Not sent: someone is typing in the terminal right now. Try again in a moment.';
