@@ -28,6 +28,9 @@ import type { CompactionEvent, ConversationMessage, TaskItem, ToolCall } from '.
 /** Tool output kept per call (head of it); the web shows a preview anyway. */
 export const CODEX_OUTPUT_LIMIT = 16 * 1024;
 
+/** Id prefix of the assistant message made from an `error` event (turn-error.ts keys on it). */
+export const CODEX_ERROR_ID_PREFIX = 'codex-error-';
+
 /** Stop reasons this parser writes on the last message of a finished turn. */
 export const CODEX_TURN_END = 'end_turn';
 export const CODEX_TURN_ABORTED = 'aborted';
@@ -402,8 +405,44 @@ export class CodexAccumulator {
     return [];
   }
 
-  compactionSince(lastCheckedLine: number): { event: CompactionEvent | null; lastLine: number } {
-    return { event: null, lastLine: Math.max(lastCheckedLine, this.lines) };
+  /** Compactions seen (line number = lineCount when it was read). */
+  private compactions: Array<{ line: number; at: number; summary: string }> = [];
+
+  /** The newest compaction after `lastCheckedLine` (the watcher's compaction event). */
+  compactionSince(
+    lastCheckedLine: number,
+    sessionId = '',
+    sessionName = '',
+    projectPath = ''
+  ): { event: CompactionEvent | null; lastLine: number } {
+    let hit: { line: number; at: number; summary: string } | undefined;
+    for (let i = this.compactions.length - 1; i >= 0; i--) {
+      if (this.compactions[i].line > lastCheckedLine) {
+        hit = this.compactions[i];
+        break;
+      }
+    }
+    return {
+      event: hit
+        ? { sessionId, sessionName, projectPath, summary: hit.summary, timestamp: hit.at }
+        : null,
+      lastLine: Math.max(lastCheckedLine, this.lines),
+    };
+  }
+
+  /** One compaction marker (a `compacted` record and its event_msg arrive together: kept once). */
+  private addCompaction(summary: string, now: number): void {
+    const last = this.last();
+    if (last?.isCompaction && Math.abs(now - last.timestamp) < 10_000) return;
+    this.msgs.push({
+      id: this.nextId('compacted'),
+      type: 'system',
+      content: summary,
+      timestamp: now,
+      isCompaction: true,
+    });
+    this.compactions.push({ line: this.lines, at: now, summary });
+    if (this.compactions.length > 20) this.compactions.shift();
   }
 
   private nextId(prefix: string): string {
@@ -427,13 +466,7 @@ export class CodexAccumulator {
       return;
     }
     if (type === 'compacted') {
-      this.msgs.push({
-        id: this.nextId('compacted'),
-        type: 'system',
-        content: str(p.message) || 'Context compacted',
-        timestamp: now,
-        isCompaction: true,
-      });
+      this.addCompaction(str(p.message).slice(0, 2000) || 'Context compacted', now);
       return;
     }
     if (type === 'event_msg') {
@@ -442,9 +475,32 @@ export class CodexAccumulator {
         this.turnOpen = true;
         this.turnStart = this.msgs.length;
       } else if (t === 'task_complete') {
+        // The final answer is normally its own response_item; when it is not
+        // (dropped / older writer), task_complete still carries it.
+        const final = str(p.last_agent_message).trim();
+        if (final && !this.turnHasAssistantText(final)) {
+          this.msgs.push({
+            id: this.nextId('final'),
+            type: 'assistant',
+            content: final,
+            timestamp: now,
+          });
+        }
         this.endTurn(CODEX_TURN_END, now);
       } else if (t === 'turn_aborted') {
         this.endTurn(CODEX_TURN_ABORTED, now);
+      } else if (t === 'error') {
+        // A turn-ending failure (usage / rate limit, auth, stream gave up):
+        // shown like Claude's "API Error: ..." text; turn-error.ts escalates it.
+        const msg = str(p.message) || 'Codex hit an error';
+        this.msgs.push({
+          id: `${CODEX_ERROR_ID_PREFIX}${this.lines}-${this.seq++}`,
+          type: 'assistant',
+          content: `Error: ${msg}`,
+          timestamp: now,
+        });
+      } else if (t === 'context_compacted') {
+        this.addCompaction('Context compacted', now);
       }
       return;
     }
@@ -563,6 +619,14 @@ export class CodexAccumulator {
           : tc
       ),
     });
+  }
+
+  private turnHasAssistantText(text: string): boolean {
+    for (let i = this.msgs.length - 1; i >= this.turnStart && i >= 0; i--) {
+      const m = this.msgs[i];
+      if (m.type === 'assistant' && m.content.trim() === text) return true;
+    }
+    return false;
   }
 
   private endTurn(reason: string, ts: number): void {

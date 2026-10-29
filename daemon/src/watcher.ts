@@ -1497,7 +1497,8 @@ export class SessionWatcher extends EventEmitter {
       this.emit('compaction', compactionEvent);
       // Mark this session as expecting a new JSONL (compaction creates a continuation file)
       // Only for live compaction events (prevTracked exists), not initial file loads
-      if (tmuxName && prevTracked) {
+      // (Codex compacts inside the same rollout: no continuation file.)
+      if (tmuxName && prevTracked && !isCodexRollout(filePath)) {
         this.compactedSessions.add(tmuxName);
       }
     }

@@ -30,6 +30,8 @@
 
 import type { ConversationMessage, ToolCall } from './types';
 import { redactSecrets } from './herald/knowledge/redact';
+import { isShellToolName } from './agents/roles';
+import { CODEX_ERROR_ID_PREFIX } from './agents/codex/parse';
 
 export interface TurnEndError {
   /** tool_use id of the error the turn ended on (dedupe key). */
@@ -45,7 +47,7 @@ export interface TurnEndError {
 /** stop_reason values that end a turn (anything else, e.g. tool_use, does not). */
 const END_REASONS = new Set(['end_turn', 'stop_sequence', 'max_tokens', 'refusal']);
 
-const EDIT_KIND = new Set(['Edit', 'MultiEdit', 'Write', 'NotebookEdit']);
+const EDIT_KIND = new Set(['Edit', 'MultiEdit', 'Write', 'NotebookEdit', 'apply_patch']);
 
 /** Errors the user caused: a rejected tool, an interrupt. Never "the turn failed". */
 const USER_CAUSED =
@@ -129,7 +131,8 @@ export function bashKind(command: string): string {
 
 export function toolKind(tc: ToolCall): string {
   if (EDIT_KIND.has(tc.name)) return 'edit';
-  if (tc.name === 'Bash') {
+  // Every agent's shell (Claude's Bash, Codex's exec_command / shell ...) is one kind per command.
+  if (isShellToolName(tc.name)) {
     const cmd = typeof tc.input?.command === 'string' ? tc.input.command : '';
     return `Bash:${bashKind(cmd)}`;
   }
@@ -163,6 +166,13 @@ export function detectTurnEndError(messages: ConversationMessage[]): TurnEndErro
   if (!last || last.type !== 'assistant') return null;
   if (last.toolCalls?.some((tc) => tc.status === 'pending' || tc.status === 'running')) return null;
   if (last.stopReason !== undefined && !END_REASONS.has(last.stopReason)) return null;
+
+  // Codex: the turn ended on an error event (rate / usage limit, auth, stream
+  // failure). Keyed by that message's id, so it notifies once.
+  if (last.id.startsWith(CODEX_ERROR_ID_PREFIX)) {
+    const line = firstErrorLine(last.content.replace(/^Error:\s*/, ''));
+    return { toolId: last.id, tool: 'Codex', line, preview: `Codex: ${line}` };
+  }
 
   let start = messages.length - 1;
   while (start >= 0 && !isPrompt(messages[start])) start--;
