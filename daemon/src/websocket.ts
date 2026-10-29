@@ -214,7 +214,13 @@ export class WebSocketHandler {
           console.log(`Escalation: usage_warning broadcast — ${event.content}`);
         }
         this.broadcast('usage_warning', { message: event.content });
-      }
+      },
+      // Codex logins: their rollouts carry the plan's rate-limit windows.
+      () =>
+        this.watcher.profiles
+          .list()
+          .filter((p) => p.agent === 'codex')
+          .map((p) => ({ id: p.id, label: p.label, home: p.home, isDefault: p.isDefault }))
     );
     this.usageMonitor.start();
 

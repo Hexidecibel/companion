@@ -3,6 +3,15 @@ import * as path from 'path';
 import { UsageDashboardData, OAuthUsageWindow, OAuthExtraUsage } from './types';
 import { NotificationStore } from './notification-store';
 import { EscalationEvent } from './escalation';
+import { readCodexRateLimits, windowLabel, type CodexRateWindow } from './agents/codex/usage';
+
+/** A Codex login whose plan windows are watched (from the account profiles). */
+export interface CodexUsageHome {
+  id: string;
+  label: string;
+  home: string;
+  isDefault?: boolean;
+}
 
 interface OAuthCredentials {
   accessToken: string;
@@ -117,14 +126,20 @@ export class UsageMonitor {
   // Key: "fiveHour:75", value: resets_at string (reset tracking when window rolls over)
   private notified: Map<string, string> = new Map();
 
+  private codexHomes?: () => CodexUsageHome[];
+  private codexResetSeen = new Map<string, number>();
+
   constructor(
     fetcher: OAuthUsageFetcher,
     store: NotificationStore,
-    onThresholdCrossed: (event: EscalationEvent) => void
+    onThresholdCrossed: (event: EscalationEvent) => void,
+    /** Codex logins to watch too (their rollouts' rate-limit windows). */
+    codexHomes?: () => CodexUsageHome[]
   ) {
     this.fetcher = fetcher;
     this.store = store;
     this.onThresholdCrossed = onThresholdCrossed;
+    this.codexHomes = codexHomes;
   }
 
   start(): void {
@@ -143,6 +158,9 @@ export class UsageMonitor {
   }
 
   private async check(): Promise<void> {
+    await this.checkCodex().catch((err) =>
+      console.error('UsageMonitor: Codex check failed:', err instanceof Error ? err.message : err)
+    );
     const data = await this.fetcher.getUsage();
     if (!data.available) return;
 
@@ -159,6 +177,47 @@ export class UsageMonitor {
       this.checkWindow('sevenDaySonnet', '7-day Sonnet', data.sevenDaySonnet, thresholds);
     if (data.sevenDayCowork)
       this.checkWindow('sevenDayCowork', '7-day Cowork', data.sevenDayCowork, thresholds);
+  }
+
+  /** Codex plan windows (5-hour / weekly) per Codex login, same thresholds and alert. */
+  async checkCodex(now = Date.now()): Promise<void> {
+    const homes = this.codexHomes?.() ?? [];
+    if (!homes.length) return;
+    const config = this.store.getEscalation();
+    if (!config.events.usage_warning) return;
+    const thresholds = config.usageThresholds || [50, 75, 90];
+    for (const h of homes.slice(0, 8)) {
+      const rl = await readCodexRateLimits(h.home, now);
+      if (!rl) continue;
+      const who = h.isDefault ? 'Codex' : `Codex (${h.label || h.id})`;
+      // Codex's resets_at jitters by a few seconds between records: a reset
+      // within 30 min of the one seen is the same window (no re-alert).
+      const asWindow = (key: string, w: CodexRateWindow | null): OAuthUsageWindow | null => {
+        if (!w) return null;
+        const seen = this.codexResetSeen.get(key);
+        const resetsAt =
+          seen !== undefined && Math.abs(seen - w.resetsAt) < 1800 ? seen : w.resetsAt;
+        this.codexResetSeen.set(key, resetsAt);
+        return {
+          utilization: w.usedPercent,
+          resets_at: resetsAt ? new Date(resetsAt * 1000).toISOString() : '',
+        };
+      };
+      if (rl.primary)
+        this.checkWindow(
+          `codex:${h.id}:primary`,
+          `${who} ${windowLabel(rl.primary.windowMinutes)}`,
+          asWindow(`codex:${h.id}:primary`, rl.primary),
+          thresholds
+        );
+      if (rl.secondary)
+        this.checkWindow(
+          `codex:${h.id}:secondary`,
+          `${who} ${windowLabel(rl.secondary.windowMinutes)}`,
+          asWindow(`codex:${h.id}:secondary`, rl.secondary),
+          thresholds
+        );
+    }
   }
 
   private checkWindow(
