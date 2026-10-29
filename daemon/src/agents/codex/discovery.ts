@@ -61,6 +61,28 @@ export function resumeIdFromArgv(argv: string[]): string | null {
   return null;
 }
 
+/**
+ * How a Codex TUI was launched, from its argv: 'bypass' = no approval prompts
+ * and no sandbox (`--dangerously-bypass-approvals-and-sandbox`, its `--yolo`
+ * alias, or `-a never` with `-s danger-full-access`); otherwise 'default'
+ * (Codex's own approval policy: flags or ~/.codex/config.toml decide).
+ */
+export function codexLaunchMode(argv: string[]): 'bypass' | 'default' {
+  if (argv.includes('--dangerously-bypass-approvals-and-sandbox') || argv.includes('--yolo'))
+    return 'bypass';
+  const flag = (short: string, long: string): string | null => {
+    for (let i = 0; i < argv.length; i++) {
+      const a = argv[i];
+      if (a === short || a === long) return argv[i + 1] ?? null;
+      if (a.startsWith(long + '=')) return a.slice(long.length + 1);
+    }
+    return null;
+  };
+  const approval = flag('-a', '--ask-for-approval');
+  const sandbox = flag('-s', '--sandbox');
+  return approval === 'never' && sandbox === 'danger-full-access' ? 'bypass' : 'default';
+}
+
 export interface CodexProcessInfo {
   pid: number;
   cwd: string;

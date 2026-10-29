@@ -70,6 +70,7 @@ import { transcriptCache, TranscriptSnapshot } from './transcript-cache';
 import { tmuxSnapshot } from './tmux-snapshot';
 import { isReadonlySharedState } from './sandbox';
 import type { BackgroundWork, BackgroundWorkMonitor, SessionOverlay } from './background-work';
+import { PANE_APPROVAL_ACTIVITY } from './background-work';
 
 /**
  * Parse a feedback prompt from tmux terminal output.
@@ -746,6 +747,21 @@ export class SessionWatcher extends EventEmitter {
   /** Codex's home as the watcher reads it (spawned Codex sessions get it as CODEX_HOME). */
   getCodexHome(): string {
     return this.codexIndex.codexHome;
+  }
+
+  /**
+   * argv of the agent process in a session's pane (from the last refresh's
+   * identity; one /proc read, no subprocess), or null when none is known.
+   */
+  async agentArgv(sessionId: string): Promise<string[] | null> {
+    const pid = this.tmuxSessionIdentity.get(sessionId)?.claudePid;
+    if (!pid) return null;
+    try {
+      const raw = await fs.promises.readFile(`/proc/${pid}/cmdline`, 'utf-8');
+      return raw.split('\0').filter(Boolean);
+    } catch {
+      return null;
+    }
   }
 
   private agentHints: Map<string, AgentId> = new Map();
@@ -2385,17 +2401,64 @@ export class SessionWatcher extends EventEmitter {
    * shells run (or a tool running in bypass mode) is working (background-work.ts).
    */
   sessionOverlay(sessionId: string, waiting: boolean, currentActivity?: string): SessionOverlay {
-    if (!waiting || !this.bgWork) return { waiting };
+    if (!this.bgWork) return { waiting };
+    if (!waiting) return this.bgWork.overlay(sessionId, false, null, currentActivity);
     const targetId = this.resolveToConversationId(sessionId);
     const tracked = targetId ? this.conversations.get(targetId) : undefined;
     return this.bgWork.overlay(sessionId, waiting, tracked?.cachedMessages, currentActivity);
+  }
+
+  /**
+   * A pane-only approval box (Codex's edit approval writes nothing to the
+   * rollout until answered) appeared or went away on a capture that was taken
+   * anyway (BackgroundWorkMonitor.noteCapture). While the transcript says the
+   * session is working, tell clients it waits (and refetch the live choice),
+   * then back to working once the box is gone. A transcript that already says
+   * waiting has emitted its own status.
+   */
+  notePaneApproval(sessionId: string, up: boolean): void {
+    const targetId = this.resolveToConversationId(sessionId);
+    const tracked = targetId ? this.conversations.get(targetId) : undefined;
+    if (!tracked || tracked.isWaitingForInput) return;
+    const messages = tracked.cachedMessages || [];
+    const agent = this.agentForFile(tracked.path);
+    console.log(
+      `Watcher: pane approval box ${up ? 'up' : 'gone'} for "${sessionId}" (transcript says working)`
+    );
+    const lastMessage = messages[messages.length - 1];
+    this.emit('status-change', {
+      sessionId,
+      isWaitingForInput: up,
+      currentActivity: up
+        ? PANE_APPROVAL_ACTIVITY
+        : agent.transcript.detectCurrentActivity(messages),
+      lastMessage,
+    });
+    this.emit('conversation-update', { sessionId });
+    if (sessionId !== this.activeTmuxSession) {
+      this.emit('other-session-activity', {
+        sessionId,
+        projectPath: tracked.projectPath,
+        sessionName: sessionId,
+        isWaitingForInput: up,
+        lastMessage,
+        newMessageCount: 0,
+      });
+    }
   }
 
   /** get_status as clients see it: getStatus with the background-work overlay applied. */
   getClientStatus(sessionId?: string): SessionStatus {
     const status = this.getStatus(sessionId);
     const id = sessionId || this.activeTmuxSession || undefined;
-    if (!id || !status.isWaitingForInput) return status;
+    if (!id) return status;
+    if (!status.isWaitingForInput) {
+      // An approval box only the pane shows (Codex edits) is a wait.
+      const up = this.sessionOverlay(id, false, status.currentActivity);
+      return up.waiting
+        ? { ...status, isWaitingForInput: true, currentActivity: up.currentActivity }
+        : status;
+    }
     const o = this.sessionOverlay(id, true, status.currentActivity);
     if (o.waiting) return status;
     return {

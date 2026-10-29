@@ -11,6 +11,11 @@
  * not awaiting approval (the transcript cannot tell the two apart; after 3 s
  * the watcher calls it waiting). The pane footer says whether bypass is on.
  *
+ * And the reverse: an approval box only the pane shows (Codex's edit approval
+ * writes nothing to the rollout until answered) makes a session the transcript
+ * calls working WAIT ('Waiting for approval'), from the same captures
+ * (`paneApproval` / `onPaneApprovalChange` deps; edges re-emit the status).
+ *
  * Sources (no new subprocesses):
  *  - agents: the subagent tracker (running = starting / running / waiting_child);
  *  - shells + bypass: the prompt footer of pane captures that already happen
@@ -160,11 +165,24 @@ export interface BackgroundWorkDeps {
   /** Running subagents for a session (tmux session name). */
   runningAgents(sessionId: string): number;
   now?: () => number;
+  /**
+   * Optional: an approval box the transcript cannot show is on this capture
+   * (Codex's edit approval: nothing is written until it is answered).
+   */
+  paneApproval?(sessionId: string, capture: string): boolean;
+  /** Optional: such a box appeared (true) or went away (false) between captures. */
+  onPaneApprovalChange?(sessionId: string, up: boolean): void;
 }
+
+/** Activity text while a pane-only approval box is up. */
+export const PANE_APPROVAL_ACTIVITY = 'Waiting for approval';
 
 /** Live source the watcher / websocket / Herald share. In-memory only. */
 export class BackgroundWorkMonitor {
-  private footers = new Map<string, { info: PaneFooterInfo | null; at: number }>();
+  private footers = new Map<
+    string,
+    { info: PaneFooterInfo | null; at: number; approval: boolean }
+  >();
   private now: () => number;
 
   constructor(private deps: BackgroundWorkDeps) {
@@ -174,7 +192,21 @@ export class BackgroundWorkMonitor {
   /** Feed a pane capture that was taken anyway (never capture just for this). */
   noteCapture(sessionId: string, capture: string): void {
     if (!sessionId) return;
-    this.footers.set(sessionId, { info: parsePaneFooter(capture), at: this.now() });
+    let approval = false;
+    try {
+      approval = Boolean(this.deps.paneApproval?.(sessionId, capture));
+    } catch {
+      approval = false;
+    }
+    const was = this.paneApproval(sessionId);
+    this.footers.set(sessionId, { info: parsePaneFooter(capture), at: this.now(), approval });
+    if (approval !== was) {
+      try {
+        this.deps.onPaneApprovalChange?.(sessionId, approval);
+      } catch {
+        // observers never break a capture
+      }
+    }
     if (this.footers.size > 200) {
       const cutoff = this.now() - FOOTER_TTL_MS;
       for (const [k, v] of this.footers) if (v.at < cutoff) this.footers.delete(k);
@@ -185,6 +217,12 @@ export class BackgroundWorkMonitor {
     const f = this.footers.get(sessionId);
     if (!f || this.now() - f.at > FOOTER_TTL_MS) return null;
     return f.info;
+  }
+
+  /** A pane-only approval box was on the latest fresh capture of this session. */
+  paneApproval(sessionId: string): boolean {
+    const f = this.footers.get(sessionId);
+    return !!f && f.approval && this.now() - f.at <= FOOTER_TTL_MS;
   }
 
   agents(sessionId: string): number {
@@ -201,7 +239,12 @@ export class BackgroundWorkMonitor {
     messages: ConversationMessage[] | null | undefined,
     currentActivity?: string
   ): SessionOverlay {
-    if (!waiting) return { waiting: false };
+    if (!waiting) {
+      // The transcript says working, but an approval box only the pane shows is up.
+      return this.paneApproval(sessionId)
+        ? { waiting: true, currentActivity: PANE_APPROVAL_ACTIVITY }
+        : { waiting: false };
+    }
     return overlaySessionState({
       waiting,
       messages,

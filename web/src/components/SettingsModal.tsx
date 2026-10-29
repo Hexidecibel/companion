@@ -10,6 +10,9 @@ interface SettingsModalProps {
   bypassEnabled: boolean;
   bypassLoading: boolean;
   onToggleBypass: () => void;
+  /** Codex: shows how the session was launched; cannot be changed here. */
+  bypassReadOnly?: boolean;
+  bypassNote?: string;
   // Hide tools (inverted: showTools = !hideTools)
   hideTools: boolean;
   onToggleHideTools: () => void;
@@ -29,6 +32,8 @@ export function SettingsModal({
   bypassEnabled,
   bypassLoading,
   onToggleBypass,
+  bypassReadOnly,
+  bypassNote,
   hideTools,
   onToggleHideTools,
 }: SettingsModalProps) {
@@ -115,9 +120,13 @@ export function SettingsModal({
           />
           <ToggleRow
             title="Bypass permissions"
-            detail="Tools run without permission prompts"
+            detail={
+              bypassReadOnly
+                ? bypassNote || 'Set when this Codex session started; start a new session to change it.'
+                : 'Tools run without permission prompts'
+            }
             checked={bypassEnabled}
-            disabled={bypassLoading}
+            disabled={bypassLoading || bypassReadOnly}
             onChange={onToggleBypass}
           />
           <ToggleRow

@@ -5,6 +5,7 @@ import { trackedExecAsync } from '../impact/sub';
 import { HandlerContext, MessageHandler } from '../handler-context';
 import { extractHighlights, parseConversationChain } from '../parser';
 import { defaultAgent } from '../agents';
+import { codexLaunchMode } from '../agents/codex/discovery';
 import { WebSocketResponse, Question, ConversationHighlight } from '../types';
 import {
   SLOW_OPERATION_THRESHOLD_MS,
@@ -70,6 +71,48 @@ export function liveChoiceHighlightId(
     h = Math.imul(h, 0x01000193);
   }
   return `live-choice-${sessionId}-${(h >>> 0).toString(36)}`;
+}
+
+/** Explanation shown for Codex sessions: the switch cannot change a running Codex. */
+const CODEX_BYPASS_NOTE =
+  'Codex takes this as a launch flag, so it cannot change while the session runs. ' +
+  'New sessions from Companion start Codex with it on.';
+
+/**
+ * Bypass state of a Codex session as it was LAUNCHED: from the running
+ * process's argv, else the saved spawn config. Never reads .claude/settings.
+ */
+async function codexBypassState(
+  ctx: HandlerContext,
+  sessionId: string
+): Promise<{
+  enabled: boolean;
+  agent: 'codex';
+  readOnly: true;
+  launchedWith: 'bypass' | 'default' | 'unknown';
+  note: string;
+}> {
+  let launchedWith: 'bypass' | 'default' | 'unknown' = 'unknown';
+  const argv = await ctx.watcher.agentArgv(sessionId).catch(() => null);
+  if (argv) launchedWith = codexLaunchMode(argv);
+  else {
+    const saved = ctx.tmuxSessionConfigs.get(sessionId);
+    if (saved?.agent === 'codex' && saved.startCli)
+      launchedWith = saved.permissionMode === 'bypassPermissions' ? 'bypass' : 'default';
+  }
+  const state =
+    launchedWith === 'bypass'
+      ? 'This Codex session was started without approval prompts or sandbox.'
+      : launchedWith === 'default'
+        ? 'This Codex session was started with its own approval prompts.'
+        : 'Could not tell how this Codex session was started.';
+  return {
+    enabled: launchedWith === 'bypass',
+    agent: 'codex',
+    readOnly: true,
+    launchedWith,
+    note: `${state} ${CODEX_BYPASS_NOTE}`,
+  };
 }
 
 export function registerSessionHandlers(ctx: HandlerContext): Record<string, MessageHandler> {
@@ -947,7 +990,7 @@ export function registerSessionHandlers(ctx: HandlerContext): Record<string, Mes
       }
     },
 
-    set_bypass_permissions(client, payload, requestId) {
+    async set_bypass_permissions(client, payload, requestId) {
       const bypassPayload = payload as { enabled: boolean; sessionId?: string };
       const bypassSessionId = bypassPayload?.sessionId || ctx.watcher.getActiveSessionId();
       const bypassEnabled = bypassPayload?.enabled ?? false;
@@ -957,6 +1000,18 @@ export function registerSessionHandlers(ctx: HandlerContext): Record<string, Mes
           type: 'bypass_permissions_set',
           success: false,
           error: 'No active session',
+          requestId,
+        });
+        return;
+      }
+
+      if (ctx.watcher.agentFor(bypassSessionId).id === 'codex') {
+        // Never write Claude's settings for a Codex project: report the launch state.
+        ctx.send(client.ws, {
+          type: 'bypass_permissions_set',
+          success: false,
+          error: CODEX_BYPASS_NOTE,
+          payload: await codexBypassState(ctx, bypassSessionId),
           requestId,
         });
         return;
@@ -1038,7 +1093,7 @@ export function registerSessionHandlers(ctx: HandlerContext): Record<string, Mes
       }
     },
 
-    get_bypass_permissions(client, payload, requestId) {
+    async get_bypass_permissions(client, payload, requestId) {
       const getBypassPayload = payload as { sessionId?: string };
       const getBypassSessionId = getBypassPayload?.sessionId || ctx.watcher.getActiveSessionId();
 
@@ -1047,6 +1102,16 @@ export function registerSessionHandlers(ctx: HandlerContext): Record<string, Mes
           type: 'bypass_permissions',
           success: true,
           payload: { enabled: false },
+          requestId,
+        });
+        return;
+      }
+
+      if (ctx.watcher.agentFor(getBypassSessionId).id === 'codex') {
+        ctx.send(client.ws, {
+          type: 'bypass_permissions',
+          success: true,
+          payload: await codexBypassState(ctx, getBypassSessionId),
           requestId,
         });
         return;

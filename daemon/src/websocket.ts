@@ -187,6 +187,15 @@ export class WebSocketHandler {
     this.escalation = new EscalationService(this.push.getStore(), this.push);
     this.backgroundWork = new BackgroundWorkMonitor({
       runningAgents: (sessionId) => this.runningAgentsFor(sessionId),
+      // Codex's edit approval leaves no transcript mark: read it from the pane
+      // captures Herald's listing takes anyway (every Codex choice box is an
+      // approval). Claude sessions are left to their transcript.
+      paneApproval: (sessionId, capture) => {
+        const agent = this.watcher.agentFor?.(sessionId);
+        if (!agent || agent.id === 'claude') return false;
+        return !!agent.terminal.detectActiveChoicePrompt(capture);
+      },
+      onPaneApprovalChange: (sessionId, up) => this.watcher.notePaneApproval?.(sessionId, up),
     });
     if (typeof this.watcher.setBackgroundWork === 'function') {
       this.watcher.setBackgroundWork(this.backgroundWork);
