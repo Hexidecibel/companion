@@ -2,6 +2,7 @@ import { eventBus } from '../utils/eventBus';
 import { useDraggable } from '../hooks/useDraggable';
 import { useState, useEffect, useCallback, useMemo, useRef, lazy, Suspense } from 'react';
 import { PendingAttachment, WorkGroup } from '../types';
+import type { CodingAgent } from '../types';
 import { useConversation, describeSendError, type SendOutcome } from '../hooks/useConversation';
 import { useTasks } from '../hooks/useTasks';
 import { useSubAgents } from '../hooks/useSubAgents';
@@ -63,6 +64,8 @@ interface SessionViewProps {
   onDismissGroup?: () => void;
   merging?: boolean;
   projectPath?: string;
+  /** The session's coding agent from the summary (absent = Claude Code). */
+  agent?: CodingAgent;
   onToggleSidebar?: () => void;
   style?: React.CSSProperties;
 }
@@ -80,6 +83,7 @@ export function SessionView({
   onDismissGroup,
   merging,
   projectPath,
+  agent,
   onToggleSidebar,
   style,
 }: SessionViewProps) {
@@ -813,6 +817,11 @@ export function SessionView({
         {/* Both desktop and mobile render the full action cluster inline in
             this single top header row. Mobile uses a compact variant where the
             lower-frequency actions collapse into the "Tools" dropdown. */}
+        {agent === 'codex' && (
+          <span className="session-agent-label session-header-agent" title="OpenAI Codex CLI session">
+            Codex
+          </span>
+        )}
         {mobile ? mobileActionButtons : actionButtons}
       </div>
 
@@ -1079,6 +1088,8 @@ export function SessionView({
         bypassEnabled={bypass.enabled}
         bypassLoading={bypass.loading}
         onToggleBypass={bypass.toggle}
+        bypassReadOnly={bypass.readOnly}
+        bypassNote={bypass.note}
         hideTools={hideTools}
         onToggleHideTools={() => setHideTools(!hideTools)}
       />

@@ -668,6 +668,7 @@ export function Dashboard({ onSettings }: DashboardProps) {
                 serverId={activeSession.serverId}
                 sessionId={activeSession.sessionId}
                 tmuxSessionName={activeSessionSummary?.tmuxSessionName}
+                agent={activeSessionSummary?.agent}
                 workGroup={isForemanView ? activeWorkGroup : undefined}
                 onViewWorker={handleViewWorker}
                 onSendWorkerInput={handleSendWorkerInput}
@@ -782,6 +783,7 @@ export function Dashboard({ onSettings }: DashboardProps) {
             serverId={activeSession?.serverId ?? null}
             sessionId={activeSession?.sessionId ?? null}
             tmuxSessionName={activeSessionSummary?.tmuxSessionName}
+            agent={activeSessionSummary?.agent}
             projectPath={activeSessionSummary?.projectPath}
             workGroup={isForemanView ? activeWorkGroup : undefined}
             onViewWorker={handleViewWorker}
@@ -833,6 +835,7 @@ export function Dashboard({ onSettings }: DashboardProps) {
                   const ss = summaries.get(secondarySession.serverId);
                   return ss?.sessions.find(s => s.id === secondarySession.sessionId)?.projectPath;
                 })()}
+                agent={summaries.get(secondarySession.serverId)?.sessions.find(s => s.id === secondarySession.sessionId)?.agent}
                 style={{ flex: `0 0 ${100 - (splitPreviewRatio ?? splitRatio)}%` }}
               />
             </ComponentErrorBoundary>

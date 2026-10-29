@@ -9333,6 +9333,11 @@ html {
   box-shadow: var(--focus-glow);
 }
 
+.wizard-options-section .new-session-agent-row.wizard-agent-row {
+  padding: 0 0 10px;
+  border-bottom: none;
+}
+
 /* "Codex" next to a session's name (sidebar, mobile list) */
 .session-agent-label {
   font-size: 10px;
