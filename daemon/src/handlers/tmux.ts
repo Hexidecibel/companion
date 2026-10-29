@@ -6,11 +6,7 @@ import {
   CLI_READY_POLL_INTERVAL_MS,
   CLI_READY_TIMEOUT_MS,
 } from '../constants';
-import {
-  createAgentSession,
-  agentLaunchOpts,
-  resolveSpawnProfile,
-} from '../session-spawn';
+import { createAgentSession, agentLaunchOpts, resolveSpawnProfile } from '../session-spawn';
 import { getAgentAdapter } from '../agents';
 
 export function registerTmuxHandlers(ctx: HandlerContext): Record<string, MessageHandler> {
@@ -517,11 +513,12 @@ export function registerTmuxHandlers(ctx: HandlerContext): Record<string, Messag
           ...(() => {
             // Keep the account profile the session runs under (else the saved one).
             const live = ctx.watcher.profileFor?.(switchPayload.sessionName);
-            const keep = live && !live.isDefault
-              ? live.id
-              : same && (prev.agent || 'claude') === (agentToKeep || 'claude')
-                ? prev.profileId
-                : undefined;
+            const keep =
+              live && !live.isDefault
+                ? live.id
+                : same && (prev.agent || 'claude') === (agentToKeep || 'claude')
+                  ? prev.profileId
+                  : undefined;
             return keep ? { profileId: keep } : {};
           })(),
         });
