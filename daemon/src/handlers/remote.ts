@@ -365,7 +365,8 @@ export function registerRemoteHandlers(ctx: HandlerContext): Record<string, Mess
           // never fall back to "newest in the cwd" (that may be a Claude transcript).
           const deadline = Date.now() + resolveTimeoutMs;
           while (!sessionId && Date.now() < deadline) {
-            sessionId = ctx.watcher.getConversationIdsForSession(tmuxSessionName).slice(-1)[0] ?? null;
+            sessionId =
+              ctx.watcher.getConversationIdsForSession(tmuxSessionName).slice(-1)[0] ?? null;
             if (!sessionId) await new Promise((r) => setTimeout(r, 500));
           }
         }
