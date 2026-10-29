@@ -16,6 +16,7 @@
 #   bin/companion trigger-token     Herald remote-trigger tokens: create | rotate | revoke | list | migrate | show-path
 #   bin/companion pair [--qr]       Approve / deny new devices pairing with this daemon, or print a one-time pairing QR
 #   bin/companion devices           Paired devices: list | revoke <id|name> | rename <id|name> <new name>
+#   bin/companion profile           Account profiles (several Claude / Codex logins): list | add | remove | login | env-path
 #   bin/companion publish-update    Put a desktop build or Android APK on the update feed (--run <id|latest> | --from <dir> | --apk <file>)
 #   bin/companion help         Show all commands
 #
@@ -552,6 +553,7 @@ case "${1:-}" in
   trigger-token) shift; cmd_trigger_token "$@"; exit $? ;;
   herald-set) shift; cmd_herald_set "$@"; exit $? ;;
   publish-update) shift; exec node "$DAEMON_DIR/scripts/publish-update.js" "$@" ;;
+  profile|profiles) shift; exec node "$DAEMON_DIR/scripts/profile.js" "$@" ;;
 esac
 
 # Every other launch path (foreground, background, CLI-driven restart) loads the
