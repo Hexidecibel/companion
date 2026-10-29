@@ -17,6 +17,12 @@
  *   follow-up  send_input -> answered
  *   interrupt  send_terminal_keys ['C-c'] (the stop button) -> Esc: the turn stops,
  *              Codex keeps running (a real Ctrl+C would quit it)
+ *   bypass     get_bypass_permissions reports how each Codex was LAUNCHED (read-only);
+ *              set_bypass_permissions is refused and writes no .claude/settings.json
+ *   edits      an apply_patch outside the workspace: the edit-approval box (no
+ *              transcript mark) makes the summary say waiting; approve -> file written
+ *   project    scaffold_open_session {agent: 'codex'} (New Project's "Open Session")
+ *              -> plain `codex`, listed as codex, kickoff prompt sent once ready
  *
  * Costs a few small turns of the user's OpenAI quota (tiny prompts).
  *
@@ -369,9 +375,24 @@ async function run(report) {
   const bypReady = await until('bypass Codex ready', async () => (/Ask Codex to do anything|\? for shortcuts/.test(screen()) ? true : null), 60_000);
   const bypArgv = bypReady && codexPid() ? argvOf(codexPid()) : [];
   record('spawn (default mode): codex --dangerously-bypass-approvals-and-sandbox', byp.success === true && bypArgv.includes('--dangerously-bypass-approvals-and-sandbox'), bypArgv.slice(1).join(' '));
+  const bypGet = await request('get_bypass_permissions', { sessionId: BYPASS });
+  const bp = bypGet.payload || {};
+  record('bypass switch: a bypass-launched Codex reads ON and read-only', bp.enabled === true && bp.readOnly === true && bp.launchedWith === 'bypass', JSON.stringify({ enabled: bp.enabled, readOnly: bp.readOnly, launchedWith: bp.launchedWith }));
   const killed = await request('kill_tmux_session', { sessionName: BYPASS });
   await until('bypass session gone', async () => (!tmuxNames(SOCK).includes(BYPASS) ? true : null), 20_000);
   record('spawn (default mode): kill_tmux_session removes it', killed.success === true && !tmuxNames(SOCK).includes(BYPASS), killed.error || '');
+
+  // 2b'. The bypass switch on the plain-`codex` spawn: OFF, read-only, and a
+  //      set is refused without touching Claude's project settings.
+  const plainGet = await request('get_bypass_permissions', { sessionId: SPAWNED });
+  const pp = plainGet.payload || {};
+  record('bypass switch: a plain Codex reads OFF and read-only', pp.enabled === false && pp.readOnly === true && pp.launchedWith === 'default', JSON.stringify({ enabled: pp.enabled, readOnly: pp.readOnly, launchedWith: pp.launchedWith }));
+  const plainSet = await request('set_bypass_permissions', { sessionId: SPAWNED, enabled: true });
+  record(
+    'bypass switch: set is refused for Codex and writes no .claude/settings.json',
+    plainSet.success === false && !!(plainSet.payload && plainSet.payload.readOnly) && !fs.existsSync(path.join(PROJECT, '.claude')),
+    plainSet.error || ''
+  );
 
   // 2c. The control session: Codex with on-request approvals, tagged like an app session.
   SESSION = CONTROL;
@@ -424,6 +445,28 @@ async function run(report) {
     );
   } else record('decline: approval box', false, 'no box');
 
+  // 4b. Edit approval outside the workspace: Codex writes nothing to the rollout
+  //     until it is answered, so only the pane shows the box (gap: status stayed
+  //     working). The summary must say waiting while it is up.
+  const outside = path.join(TMUX_TMPDIR, 'outside', 'x.txt');
+  lastStatus = null;
+  const editChoice = await promptToApproval(
+    `Use apply_patch (not a shell command) to create the file ${outside} containing the single line: hi`,
+    'edits'
+  );
+  record('edits: the edit-approval box surfaces as a live choice', !!editChoice && /make the following edits/i.test(editChoice.question), editChoice ? editChoice.question.split('\n')[0] : '');
+  if (editChoice) {
+    const editWaiting = await until('edits: summary says waiting while the box is up', async () => ((await status()) === 'waiting' ? true : null), 20_000);
+    const sEdit = await summary();
+    record('edits: summary status is waiting while the edit box is up', !!editWaiting, `${lastStatus}${sEdit && sEdit.currentActivity ? ` (${sEdit.currentActivity})` : ''}`);
+    const st = await request('get_status', { sessionId: SESSION });
+    record('edits: get_status says waiting too', !!(st.payload && st.payload.isWaitingForInput), JSON.stringify(st.payload && { w: st.payload.isWaitingForInput, a: st.payload.currentActivity }));
+    const okEdit = await request('send_choice', { selectedIndices: [0], optionCount: editChoice.options.length, multiSelect: false, sessionId: SESSION, tmuxSessionName: SESSION });
+    const written = await until('edits: file written and the session left waiting', async () => (fs.existsSync(outside) && (await status()) !== 'waiting' ? true : null), 90_000);
+    record('edits: approve writes the file and the status leaves waiting', okEdit.success === true && !!written, `status ${lastStatus}`);
+    await until('edits: turn ended', async () => ((await status()) !== 'working' ? true : null), 60_000);
+  }
+
   // 5. Follow-up text (in the app-spawned session too).
   SESSION = SPAWNED;
   lastStatus = null;
@@ -455,6 +498,31 @@ async function run(report) {
   record('interrupt: Codex is still running (no quit, no "Task is still running" dialog)', codexPid() === pidBefore && !!pidBefore && !/Task is still running/.test(scr) && /Ask Codex to do anything/.test(scr), `pid ${pidBefore} -> ${codexPid()}`);
   const idle = await until('status not working after interrupt', async () => ((await status()) !== 'working' ? true : null), 30_000);
   record('interrupt: summary leaves working', !!idle, `status ${lastStatus}`);
+
+  // 7. New Project's "Open Session" with Codex (scaffold_open_session).
+  const PROJ2 = path.join(TMUX_TMPDIR, 'newproj');
+  fs.mkdirSync(PROJ2, { recursive: true });
+  fs.writeFileSync(path.join(PROJ2, 'README.md'), '# probe\n');
+  const opened = await request('scaffold_open_session', { workingDir: PROJ2, projectName: 'probe', agent: 'codex', permissionMode: 'default' }, 30_000);
+  const scName = opened.payload && opened.payload.sessionName;
+  record('project: scaffold_open_session {agent: codex} succeeds', opened.success === true && !!scName && opened.payload.agent === 'codex', opened.error || JSON.stringify(opened.payload));
+  if (scName) {
+    SESSION = scName;
+    await assertIsolated([ANCHOR, SPAWNED, CONTROL, scName]);
+    const scReady = await until('project Codex ready', async () => (/Ask Codex to do anything|\? for shortcuts|starting a new project/.test(screen()) ? true : null), 60_000);
+    const scPid = scReady ? codexPid() : null;
+    const scArgv = scPid ? argvOf(scPid) : [];
+    record('project: plain `codex` runs (bypass unchecked)', !!scPid && !scArgv.includes('--dangerously-bypass-approvals-and-sandbox'), scArgv.slice(1).join(' '));
+    const scListed = await until('project session listed as Codex', async () => {
+      const s = await summary();
+      return s && s.agent === 'codex' ? s : null;
+    }, 30_000);
+    record('project: listed with agent "codex"', !!scListed, '');
+    const kicked = await until('project: kickoff prompt sent', async () => (/starting a new project called "probe"/.test(screen()) ? true : null), 45_000);
+    record('project: the kickoff prompt reached Codex', !!kicked, '');
+    await request('kill_tmux_session', { sessionName: scName });
+    await until('project session gone', async () => (!tmuxNames(SOCK).includes(scName) ? true : null), 20_000);
+  }
   report.timeline = timeline;
 }
 
