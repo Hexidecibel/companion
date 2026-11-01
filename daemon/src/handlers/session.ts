@@ -6,7 +6,8 @@ import { HandlerContext, MessageHandler } from '../handler-context';
 import { extractHighlights, parseConversationChain } from '../parser';
 import { defaultAgent } from '../agents';
 import { codexLaunchMode } from '../agents/codex/discovery';
-import { WebSocketResponse, Question, ConversationHighlight } from '../types';
+import { WebSocketResponse, Question, ConversationHighlight, TurnStats } from '../types';
+import { computeTurnStats } from '../turn-stats';
 import {
   SLOW_OPERATION_THRESHOLD_MS,
   DEFAULT_SEARCH_RESULT_LIMIT,
@@ -170,6 +171,7 @@ export function registerSessionHandlers(ctx: HandlerContext): Record<string, Mes
       let resultHighlights: ReturnType<typeof extractHighlights>;
       let total: number;
       let hasMore: boolean;
+      let turn: TurnStats | undefined;
 
       if (chain.length > 1 && limit > 0) {
         const result = parseConversationChain(
@@ -181,6 +183,7 @@ export function registerSessionHandlers(ctx: HandlerContext): Record<string, Mes
         resultHighlights = result.highlights;
         total = result.total;
         hasMore = result.hasMore;
+        turn = result.turn;
       } else {
         // The latest page (offset 0) must reflect on-disk state immediately rather
         // than trusting the watcher's in-memory cache. A pending AskUserQuestion
@@ -195,6 +198,7 @@ export function registerSessionHandlers(ctx: HandlerContext): Record<string, Mes
             : ctx.watcher.getMessages(hlSessionId || undefined);
         const allHighlights = extractHighlights(messages);
         total = allHighlights.length;
+        turn = computeTurnStats(allHighlights);
 
         if (limit > 0) {
           const startIdx = Math.max(0, total - offset - limit);
@@ -328,7 +332,7 @@ export function registerSessionHandlers(ctx: HandlerContext): Record<string, Mes
       ctx.send(client.ws, {
         type: 'highlights',
         success: true,
-        payload: { highlights: resultHighlights, total, hasMore },
+        payload: { highlights: resultHighlights, total, hasMore, ...(turn ? { turn } : {}) },
         sessionId: hlSessionId,
         requestId,
       } as WebSocketResponse);

@@ -29,6 +29,8 @@ import {
   MAX_SUMMARY_TEXT_LENGTH,
 } from './constants';
 import { BoundedMap } from './utils';
+import { computeTurnStats } from './turn-stats';
+import type { TurnStats } from './types';
 
 // Re-export TaskItem for tests
 export { TaskItem } from './types';
@@ -1238,7 +1240,7 @@ export function parseConversationChain(
   offset: number,
   /** How to read one file's messages (the handlers pass the incremental cache). */
   load: (file: string) => ConversationMessage[] = (f) => parseConversationFile(f)
-): { highlights: ConversationHighlight[]; total: number; hasMore: boolean } {
+): { highlights: ConversationHighlight[]; total: number; hasMore: boolean; turn?: TurnStats } {
   if (files.length === 0) {
     return { highlights: [], total: 0, hasMore: false };
   }
@@ -1248,6 +1250,7 @@ export function parseConversationChain(
   const allHighlights: ConversationHighlight[] = [];
   let totalCount = 0;
   let newerHasContent = false;
+  let turn: TurnStats | undefined;
 
   // Walk from newest to oldest, stop once we have enough
   for (let i = files.length - 1; i >= 0; i--) {
@@ -1256,6 +1259,7 @@ export function parseConversationChain(
     // An older file holding only a directly-run command (e.g. a `/login` that
     // wrote its own transcript) is not a previous session: skip it, no divider.
     const isNewest = i === files.length - 1;
+    if (isNewest) turn = computeTurnStats(highlights);
     const trivial = isTrivialHighlights(highlights);
     if (!isNewest && trivial) continue;
 
@@ -1293,7 +1297,7 @@ export function parseConversationChain(
   const resultHighlights = allHighlights.slice(startIdx, endIdx);
   const hasMore = startIdx > 0;
 
-  return { highlights: resultHighlights, total, hasMore };
+  return { highlights: resultHighlights, total, hasMore, turn };
 }
 
 export function extractHighlights(messages: ConversationMessage[]): ConversationHighlight[] {

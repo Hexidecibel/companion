@@ -93,6 +93,7 @@ export function SessionView({
 }: SessionViewProps) {
   const {
     highlights,
+    turn,
     status,
     loading,
     loadingMore,
@@ -885,6 +886,10 @@ export function SessionView({
                     serverId={serverId}
                     sessionId={sessionId}
                     tmuxSessionName={tmuxSessionName}
+                    highlights={highlights}
+                    turn={turn}
+                    runningAgents={runningCount}
+                    projectPath={projectPath}
                     canCancel={!!(status?.isRunning && !status?.isWaitingForInput && tmuxSessionName)}
                     onCancel={handleCancel}
                   />

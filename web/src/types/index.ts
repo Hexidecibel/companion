@@ -81,6 +81,16 @@ export interface ToolCall {
   isError?: boolean;
 }
 
+/** Totals for the current turn (since the user's last message), get_highlights `turn`. */
+export interface TurnStats {
+  startedAt: number;
+  /** The turn's newest message. */
+  endedAt: number;
+  tools: number;
+  /** Distinct files successfully edited. */
+  files: number;
+}
+
 export interface ConversationHighlight {
   id: string;
   type: 'user' | 'assistant' | 'system';

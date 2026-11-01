@@ -116,6 +116,16 @@ export interface Question {
   multiSelect: boolean;
 }
 
+/** Totals for the current turn (since the user's last message), get_highlights `turn`. */
+export interface TurnStats {
+  startedAt: number;
+  /** The turn's newest message. */
+  endedAt: number;
+  tools: number;
+  /** Distinct files successfully edited. */
+  files: number;
+}
+
 export interface ConversationMessage {
   id: string;
   type: 'user' | 'assistant' | 'system';

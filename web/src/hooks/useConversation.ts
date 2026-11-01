@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { ConversationHighlight, SessionStatus } from '../types';
+import { ConversationHighlight, SessionStatus, TurnStats } from '../types';
 import { connectionManager } from '../services/ConnectionManager';
 import {
   getCachedHighlights,
@@ -25,6 +25,8 @@ export type SendOutcome = boolean | 'uncertain';
 interface UseConversationReturn {
   highlights: ConversationHighlight[];
   status: SessionStatus | null;
+  /** The daemon's totals for the current turn (absent on an older daemon). */
+  turn: TurnStats | null;
   loading: boolean;
   loadingMore: boolean;
   hasMore: boolean;
@@ -197,6 +199,7 @@ export function useConversation(
   /** Why the last send was refused (the daemon's input guard), shown as a banner. */
   const [sendError, setSendError] = useState<string | null>(null);
   const [status, setStatus] = useState<SessionStatus | null>(null);
+  const [turn, setTurn] = useState<TurnStats | null>(null);
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(false);
@@ -215,6 +218,7 @@ export function useConversation(
     if (!serverId || !sessionId) {
       setHighlights([]);
       setStatus(null);
+      setTurn(null);
       setLoading(false);
       setError(null);
       setHasMore(false);
@@ -227,6 +231,7 @@ export function useConversation(
     // The previous session's status must never show for this one (an old
     // "Waiting for input" banner stayed up until this session's first answer).
     setStatus(null);
+    setTurn(null);
     statusRef.current = null;
 
     // Show cached data immediately: memory first, then the offline cache.
@@ -291,7 +296,9 @@ export function useConversation(
             highlights: ConversationHighlight[];
             total: number;
             hasMore: boolean;
+            turn?: TurnStats;
           };
+          setTurn(payload.turn ?? null);
           const prev = highlightsRef.current;
           const prevReal = prev.filter((h) => !isOptimistic(h));
           // Merge by id instead of swapping in a whole new list (a reconnect
@@ -347,6 +354,7 @@ export function useConversation(
             highlights: ConversationHighlight[];
             total: number;
             hasMore: boolean;
+            turn?: TurnStats;
           };
           const prevReal0 = highlightsRef.current.filter((h) => !isOptimistic(h));
           if (mergeTail(prevReal0, payload.highlights) === null) {
@@ -355,6 +363,7 @@ export function useConversation(
             if (cancelled || !isValid(serverId!, sessionId!, guardEpoch)) return;
             if (wide.success && wide.payload) payload = wide.payload as typeof payload;
           }
+          setTurn(payload.turn ?? null);
           const serverData = payload.highlights;
           const realLen = (mergeTail(highlightsRef.current.filter((h) => !isOptimistic(h)), serverData) ?? serverData).length;
 
@@ -647,5 +656,5 @@ export function useConversation(
     ]);
   }, []);
 
-  return { highlights, status, loading, loadingMore, hasMore, error, firstItemIndex, sendInput, sendInputDetailed, connected, sendError, clearSendError, cancelMessage, addOptimisticMessage, loadMore };
+  return { highlights, status, turn, loading, loadingMore, hasMore, error, firstItemIndex, sendInput, sendInputDetailed, connected, sendError, clearSendError, cancelMessage, addOptimisticMessage, loadMore };
 }

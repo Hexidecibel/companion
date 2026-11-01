@@ -693,3 +693,8 @@ Follow-up fixes layered on the Mobile UX round above: walks back the activity-ro
 - A second session in a folder no longer gets mapped to an old transcript: a transcript last written before the tmux session existed (or born before its new-session guard) cannot be claimed, a compaction only claims a file born after it, and a session never falls back to a transcript another session owns
 - Bad mappings saved by the old rules heal themselves on the next refresh
 - A saved mapping whose transcript was never loaded is now read on demand, so `get_highlights` no longer comes back empty for it
+
+## One-line session status (2026-10-31)
+- The chat window's status is one line: what the session is doing in plain words ("Running tests", "Editing src/app.ts", the question it is waiting on), elapsed time ticking while it works, and tool + file counts for the turn; works for Claude and Codex
+- Tap the line to see the last five steps with their durations and failures
+- `get_highlights` now returns `turn` totals (`daemon/src/turn-stats.ts`), so the counts cover the whole turn even when only a page of messages is loaded
