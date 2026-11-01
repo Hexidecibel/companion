@@ -688,3 +688,8 @@ Follow-up fixes layered on the Mobile UX round above: walks back the activity-ro
 - Every send re-validates the live terminal right before typing (same prompt still on screen, never free text into a choice box, fails closed if the pane cannot be read)
 - Web: docked desktop panel / full-screen mobile view, Ctrl/Cmd+J, streaming replies, inbox chips, countdown and hold-to-confirm cards
 - Ops: `bin/companion install-secrets` (Infisical -> chmod-600 env file + systemd drop-in), `bin/companion herald-provider`, `bin/herald-sandbox` isolated test daemon (`COMPANION_SANDBOX=1`: no push, no auto-approve, shared state read-only)
+
+## Shared-folder session mapping fix (2026-10-31)
+- A second session in a folder no longer gets mapped to an old transcript: a transcript last written before the tmux session existed (or born before its new-session guard) cannot be claimed, a compaction only claims a file born after it, and a session never falls back to a transcript another session owns
+- Bad mappings saved by the old rules heal themselves on the next refresh
+- A saved mapping whose transcript was never loaded is now read on demand, so `get_highlights` no longer comes back empty for it

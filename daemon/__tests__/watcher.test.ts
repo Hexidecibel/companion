@@ -1342,8 +1342,8 @@ describe('SessionWatcher', () => {
       mappings.set(TMUX_A2, FILE_UUID_2);
 
       // Simulate: TMUX_A1 compacted (flag the session)
-      const compacted = (watcher as any).compactedSessions as Set<string>;
-      compacted.add(TMUX_A1);
+      const compacted = (watcher as any).compactedSessions as Map<string, number>;
+      compacted.set(TMUX_A1, 0);
 
       // New JSONL appears (compaction successor)
       mockWatcher.emit('add', FILE_A_NEW);
@@ -1400,7 +1400,7 @@ describe('SessionWatcher', () => {
       await jest.advanceTimersByTimeAsync(200);
 
       // compactedSessions should NOT contain this session (initial load)
-      const compacted = (watcher as any).compactedSessions as Set<string>;
+      const compacted = (watcher as any).compactedSessions as Map<string, number>;
       expect(compacted.has(TMUX_SESSION_A)).toBe(false);
     });
 
@@ -1423,9 +1423,9 @@ describe('SessionWatcher', () => {
       mappings.set(TMUX_A2, FILE_UUID_2);
 
       // BOTH sessions compacted — ambiguous, should NOT re-map
-      const compacted = (watcher as any).compactedSessions as Set<string>;
-      compacted.add(TMUX_A1);
-      compacted.add(TMUX_A2);
+      const compacted = (watcher as any).compactedSessions as Map<string, number>;
+      compacted.set(TMUX_A1, 0);
+      compacted.set(TMUX_A2, 0);
 
       mockWatcher.emit('add', FILE_A_NEW);
       await jest.advanceTimersByTimeAsync(200);

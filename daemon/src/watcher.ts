@@ -185,6 +185,9 @@ export interface SessionWatcherOptions {
   profiles?: ProfileRegistry;
 }
 
+/** Open fd of Claude Code's per-session tasks dir: <scratch>/<encoded cwd>/<uuid>/tasks. */
+const TASKS_DIR_FD = /\/([^/]+)\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/tasks$/;
+
 export class SessionWatcher extends EventEmitter {
   /** The default agent (Claude Code): its transcripts are watched under code_home. */
   private readonly agent = defaultAgent();
@@ -236,7 +239,7 @@ export class SessionWatcher extends EventEmitter {
   private mappingIdentity: Map<string, SessionIdentity> = new Map(); // session name -> identity its mapping was made for
   private decodedPathCache: Map<string, string> = new Map(); // encoded project dir -> decoded path
   private claudeStartMs: Map<string, number> = new Map(); // session name -> current claude process start (ms)
-  private compactedSessions: Set<string> = new Set(); // sessions expecting a new JSONL after compaction
+  private compactedSessions: Map<string, number> = new Map(); // session -> when it compacted (a continuation JSONL may follow)
   private detectInFlight: Set<string> = new Set(); // sessions currently being probed by detectConversationForSession
   private debounceTimers: Map<string, NodeJS.Timeout> = new Map();
   private waitingDebounceTimers: Map<string, NodeJS.Timeout> = new Map();
@@ -489,6 +492,39 @@ export class SessionWatcher extends EventEmitter {
     } catch {
       return true;
     }
+  }
+
+  /**
+   * Can this transcript be this session's at all? A file last written before
+   * the tmux session existed cannot be, and one born before a "new session"
+   * guard started belongs to an earlier conversation. (2026-10-31: creating a
+   * second session in a folder force-loaded old files, and elimination and a
+   * stale compaction flag claimed them.)
+   */
+  private couldOwnTranscript(
+    sessionName: string,
+    stats: { birthtimeMs?: number; mtimeMs: number }
+  ): boolean {
+    const guard = this.newlyCreatedSessions.get(sessionName);
+    if (guard !== undefined && !bornAfter(stats, guard)) return false;
+    const created = Number(this.tmuxSessionIdentity.get(sessionName)?.created) * 1000;
+    return !(created > 0 && stats.mtimeMs < created - 1000);
+  }
+
+  /**
+   * Read a session's mapped transcript when it is not in memory yet: a mapping
+   * restored at start-up points at a file the age filter skipped, so reads
+   * came back empty although the transcript is on disk. Quiet: cache only.
+   */
+  private loadMappedConversation(sessionName: string): boolean {
+    const id = this.tmuxConversationIds.get(sessionName);
+    if (!id) return false;
+    if (this.conversations.has(id)) return true;
+    const key = this.tmuxPathBySession.get(sessionName);
+    const file = key ? this.transcriptPathForKey(key, id) : null;
+    if (!file || !fs.existsSync(file)) return false;
+    this.processFileChange(file, id, { quiet: true });
+    return this.conversations.has(id);
   }
 
   /** Forget everything that ties a session name to a transcript. */
@@ -1716,13 +1752,19 @@ export class SessionWatcher extends EventEmitter {
         if (!convAlreadyMapped) {
           const unmapped = sessionsForPath.filter((name) => !this.tmuxConversationIds.has(name));
           if (unmapped.length === 1) {
-            tmuxName = unmapped[0];
-            this.setConversationMapping(tmuxName, convId);
+            if (this.couldOwnTranscript(unmapped[0], stats)) {
+              tmuxName = unmapped[0];
+              this.setConversationMapping(tmuxName, convId);
+            }
           } else if (unmapped.length === 0) {
-            // All sessions mapped — check if one recently compacted and expects a new JSONL
-            const compactedInPath = sessionsForPath.filter((name) =>
-              this.compactedSessions.has(name)
-            );
+            // All sessions mapped: one that compacted may continue in a new JSONL,
+            // which is then born after the compaction. (Claude Code now usually
+            // compacts in place, so the flag can linger; an older file is no
+            // continuation.)
+            const compactedInPath = sessionsForPath.filter((name) => {
+              const at = this.compactedSessions.get(name);
+              return at !== undefined && bornAfter(stats, at);
+            });
             if (compactedInPath.length === 1) {
               const oldId = this.tmuxConversationIds.get(compactedInPath[0]);
               console.log(
@@ -1753,7 +1795,7 @@ export class SessionWatcher extends EventEmitter {
       // Only for live compaction events (prevTracked exists), not initial file loads
       // (Codex compacts inside the same rollout: no continuation file.)
       if (tmuxName && prevTracked && !isCodexRollout(filePath)) {
-        this.compactedSessions.add(tmuxName);
+        this.compactedSessions.set(tmuxName, Date.now());
       }
     }
 
@@ -2212,7 +2254,31 @@ export class SessionWatcher extends EventEmitter {
     // Fall back to path-based best-match
     const encodedPath = this.tmuxPathBySession.get(sessionName);
     if (!encodedPath) return null;
-    return this.getBestConversationForPath(encodedPath);
+    return this.getBestConversationForSession(sessionName, encodedPath);
+  }
+
+  /**
+   * Path fallback for a session without a direct mapping. In a folder shared by
+   * several sessions, never a transcript another session owns or one this
+   * session cannot own: nothing to show beats showing someone else's chat.
+   */
+  private getBestConversationForSession(
+    sessionName: string,
+    encodedPath: string
+  ): { id: string; conv: TrackedConversation } | null {
+    let shared = false;
+    for (const [name, ePath] of this.tmuxPathBySession) {
+      if (name !== sessionName && ePath === encodedPath) shared = true;
+    }
+    if (!shared) return this.getBestConversationForPath(encodedPath);
+    const taken = new Set(this.tmuxConversationIds.values());
+    let best: { id: string; conv: TrackedConversation } | null = null;
+    for (const [id, conv] of this.conversations) {
+      if (this.getEncodedDirName(conv.path) !== encodedPath || taken.has(id)) continue;
+      if (!this.couldOwnTranscript(sessionName, { mtimeMs: conv.lastModified })) continue;
+      if (!best || conv.lastModified > best.conv.lastModified) best = { id, conv };
+    }
+    return best;
   }
 
   /**
@@ -2252,7 +2318,10 @@ export class SessionWatcher extends EventEmitter {
       const pids: string[] = [rootPid];
       for (const pid of await descendantPids(Number(rootPid))) pids.push(String(pid));
 
-      // Check /proc/<pid>/fd/ for open JSONL files in the projects directory
+      // Check /proc/<pid>/fd/ for open JSONL files in the projects directory.
+      // Current Claude Code keeps no transcript open, but holds its
+      // <scratch>/<encoded cwd>/<session uuid>/tasks directory open.
+      let fromTasksDir = null as string | null;
       for (const pid of pids) {
         try {
           const fdDir = `/proc/${pid}/fd`;
@@ -2267,6 +2336,10 @@ export class SessionWatcher extends EventEmitter {
               ) {
                 return path.basename(target, '.jsonl');
               }
+              const tasks: RegExpExecArray | null = TASKS_DIR_FD.exec(target);
+              if (!fromTasksDir && tasks && (!split || tasks[1] === split.encoded)) {
+                fromTasksDir = tasks[2];
+              }
             } catch {
               /* can't read this fd */
             }
@@ -2276,7 +2349,7 @@ export class SessionWatcher extends EventEmitter {
         }
       }
 
-      return null;
+      return fromTasksDir;
     } catch {
       return null;
     }
@@ -2305,6 +2378,31 @@ export class SessionWatcher extends EventEmitter {
           if (convFile && fs.existsSync(convFile)) continue; // File exists, keep mapping
         }
         this.tmuxConversationIds.delete(name);
+      }
+    }
+
+    // Heal a shared-folder mapping to a transcript last written before the session
+    // existed (made by the old elimination / stale compaction rules, and persisted).
+    const pathCounts = new Map<string, number>();
+    for (const ePath of this.tmuxPathBySession.values()) {
+      pathCounts.set(ePath, (pathCounts.get(ePath) || 0) + 1);
+    }
+    for (const [name, convId] of [...this.tmuxConversationIds]) {
+      const ePath = this.tmuxPathBySession.get(name);
+      if (!ePath || (pathCounts.get(ePath) || 0) < 2 || this.sessionAgents.has(name)) continue;
+      const file = this.conversations.get(convId)?.path || this.transcriptPathForKey(ePath, convId);
+      if (!file) continue;
+      try {
+        if (!this.couldOwnTranscript(name, fs.statSync(file))) {
+          console.log(
+            `Watcher: ${name} was mapped to ${convId.substring(0, 8)}, last written before the session existed; dropping`
+          );
+          this.dropConversationMapping(name);
+          if (this.activeTmuxSession === name) this.activeConversationId = null;
+          this.persistMappings();
+        }
+      } catch {
+        /* file gone: handled above */
       }
     }
 
@@ -2408,7 +2506,10 @@ export class SessionWatcher extends EventEmitter {
             this.processFileChange(convFile, convId);
           }
         }
-        if (this.conversations.has(convId)) {
+        const takenByOther = [...this.tmuxConversationIds].some(
+          ([other, id]) => other !== sessionName && id === convId
+        );
+        if (this.conversations.has(convId) && !takenByOther) {
           this.setConversationMapping(sessionName, convId);
         }
       }
@@ -2517,6 +2618,8 @@ export class SessionWatcher extends EventEmitter {
       }
 
       if (unmappedConvs.length === 1) {
+        const conv = this.conversations.get(unmappedConvs[0]);
+        if (conv && !this.couldOwnTranscript(unmapped[0], { mtimeMs: conv.lastModified })) continue;
         this.setConversationMapping(unmapped[0], unmappedConvs[0]);
       }
     }
@@ -2595,6 +2698,9 @@ export class SessionWatcher extends EventEmitter {
    * recent JSONL file. Returns true if a conversation is available afterward.
    */
   ensureConversationLoaded(sessionId: string, opts: FileChangeOptions = {}): boolean {
+    // The mapped transcript first: the fallbacks below could pick a sibling's.
+    if (this.loadMappedConversation(sessionId)) return true;
+
     // Already tracked?
     if (this.resolveConversationForSession(sessionId)) {
       return true;
@@ -2747,6 +2853,7 @@ export class SessionWatcher extends EventEmitter {
   }
 
   getMessages(sessionId?: string): ConversationMessage[] {
+    if (sessionId) this.loadMappedConversation(sessionId);
     const targetId = this.resolveToConversationId(sessionId);
     if (!targetId) return [];
 
@@ -2781,6 +2888,7 @@ export class SessionWatcher extends EventEmitter {
    * periodic reconcile pass still detects the change and emits conversation-update.
    */
   getFreshMessages(sessionId?: string): ConversationMessage[] {
+    if (sessionId) this.loadMappedConversation(sessionId);
     const targetId = this.resolveToConversationId(sessionId);
     if (!targetId) return [];
 
