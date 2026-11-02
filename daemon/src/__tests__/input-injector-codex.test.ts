@@ -118,22 +118,72 @@ describe('InputInjector with a Codex pane', () => {
     expect(sends()).toHaveLength(0);
   });
 
+  /** The prompt leaves the screen once keys arrive, as the real agents do. */
+  const leaveOnKeys = (after = IDLE) => {
+    mockTmux.mockImplementation((args: string[]) => {
+      if (args[0] === 'capture-pane') return { status: 0, stdout: pane };
+      if (args[0] === 'send-keys') pane = after;
+      return { status: 0, stdout: '' };
+    });
+  };
+  const USER = { answerTrust: true };
+
   it('answers the trust prompt with its own keys (Yes: 1 + Enter; No: 2, then Ctrl+C)', async () => {
+    leaveOnKeys();
     pane = TRUST;
-    expect(await make().sendChoice([0], 2, false, undefined, 'cdx')).toBe(true);
+    expect(await make().sendChoice([0], 2, false, undefined, 'cdx', USER)).toBe(true);
     expect(sends()).toEqual([
       ['send-keys', '-t', 'cdx', '1'],
       ['send-keys', '-t', 'cdx', 'Enter'],
     ]);
     mockTmux.mockClear();
-    expect(await make().sendChoice([1], 2, false, undefined, 'cdx')).toBe(true);
+    pane = TRUST;
+    expect(await make().sendChoice([1], 2, false, undefined, 'cdx', USER)).toBe(true);
     expect(sends()).toEqual([
       ['send-keys', '-t', 'cdx', '2'],
       ['send-keys', '-t', 'cdx', 'C-c'],
     ]);
     mockTmux.mockClear();
     // Free text is not an answer to it.
-    expect(await make().sendChoice([0], 2, false, 'whatever', 'cdx')).toBe(false);
+    pane = TRUST;
+    expect(await make().sendChoice([0], 2, false, 'whatever', 'cdx', USER)).toBe(false);
+    expect(sends()).toHaveLength(0);
+  });
+
+  it('Claude 2.1.316 trust prompt: Down + Enter, never Esc; only for the user', async () => {
+    const LIVE = fs.readFileSync(
+      path.join(FIX, '..', 'claude', 'live-trust.txt'),
+      'utf-8'
+    );
+    pane = LIVE;
+    // Not the user (babysit, Herald, auto-approval): nothing is sent, on either agent.
+    expect(await make().sendChoice([0], 2, false, undefined, 'cl')).toBe(false);
+    pane = TRUST;
+    expect(await make().sendChoice([0], 2, false, undefined, 'cdx')).toBe(false);
+    expect(sends()).toHaveLength(0);
+    // Text is refused: its Enter would pick the default row, "No, exit".
+    pane = LIVE;
+    expect(await make().sendInputDetailed('hello', 'cl')).toMatchObject({ reason: 'trust' });
+    expect(sends()).toHaveLength(0);
+
+    leaveOnKeys('');
+    expect(await make().sendChoice([0], 2, false, undefined, 'cl', USER)).toBe(true);
+    expect(sends()).toEqual([
+      ['send-keys', '-t', 'cl', 'Down'],
+      ['send-keys', '-t', 'cl', 'Enter'],
+    ]);
+  });
+
+  it('a prompt still on screen after the answer is reported as failed', async () => {
+    pane = fs.readFileSync(path.join(FIX, '..', 'claude', 'live-trust.txt'), 'utf-8');
+    expect(await make().sendChoice([0], 2, false, undefined, 'cl', USER)).toBe(false);
+  });
+
+  it('a tapped card whose prompt is gone sends nothing', async () => {
+    pane = '';
+    expect(
+      await make().sendChoice([0], 2, false, undefined, 'cl', { ...USER, promptKind: 'trust' })
+    ).toBe(false);
     expect(sends()).toHaveLength(0);
   });
 

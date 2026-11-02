@@ -300,11 +300,13 @@ export function registerSessionHandlers(ctx: HandlerContext): Record<string, Mes
                   description: o.description || '',
                 })),
                 multiSelect: choice.multiSelect || false,
+                ...(choice.kind ? { kind: choice.kind } : {}),
               };
               const liveHighlight: ConversationHighlight = {
                 id: liveChoiceHighlightId(hlSessionId ?? tmuxNameForPending, liveQuestion),
                 type: 'assistant',
-                content: liveQuestion.question,
+                // A start-up prompt is all card (old clients read the question block).
+                content: choice.kind === 'trust' ? '' : liveQuestion.question,
                 timestamp: Date.now(),
                 isWaitingForChoice: true,
                 multiSelect: liveQuestion.multiSelect,

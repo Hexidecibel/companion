@@ -17,6 +17,7 @@ import type {
   QuestionOption,
   SessionStatus,
   TerminalChoicePrompt,
+  TrustLayout,
 } from '../types';
 import type { PromptBoxState } from '../prompt-guard';
 import type { ToolRole, ToolRoleTable } from './roles';
@@ -141,6 +142,8 @@ export interface ChoiceRequest {
   otherText?: string;
   /** The box on screen is the agent's folder-trust prompt (its own keys). */
   trust?: boolean;
+  /** Its rows on screen, when the parser read them (Claude's keys need them). */
+  trustLayout?: TrustLayout;
 }
 
 export interface AgentTerminal<PermissionMode extends string = string> {

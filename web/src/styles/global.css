@@ -9664,3 +9664,91 @@ button.status-line-main {
   border-radius: 8px;
   overflow: hidden;
 }
+
+/* Agent start-up prompt ("Trust this folder?") */
+.trust-card {
+  max-width: 100%;
+  width: 100%;
+  box-sizing: border-box;
+  margin-top: 8px;
+  padding: 14px;
+  background: #1f2937;
+  border: 1px solid #374151;
+  border-left: 3px solid #f59e0b;
+  border-radius: 10px;
+}
+.trust-card-agent {
+  color: #f59e0b;
+  font-size: 12px;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+.trust-card-title {
+  color: #f3f4f6;
+  font-size: 17px;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+.trust-card-folder {
+  color: #f3f4f6;
+  background: #111827;
+  border: 1px solid #374151;
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+  margin-bottom: 10px;
+}
+.trust-card-text,
+.trust-card-result {
+  color: #f3f4f6;
+  font-size: 14px;
+  line-height: 1.45;
+}
+.trust-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+.trust-card-btn {
+  flex: 1 1 120px;
+  min-height: 44px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.trust-card-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.trust-card-btn-yes {
+  background: #3b82f6;
+  border: 1px solid #3b82f6;
+  color: #f3f4f6;
+}
+.trust-card-btn-no {
+  background: transparent;
+  border: 1px solid #374151;
+  color: #f3f4f6;
+}
+.trust-card-hint {
+  color: #9ca3af;
+  font-size: 12px;
+  line-height: 1.4;
+  margin-top: 10px;
+}
+.trust-card-error {
+  color: #ef4444;
+  font-size: 13px;
+  line-height: 1.4;
+  margin-top: 10px;
+}
+.trust-card-declined {
+  margin: 8px 12px;
+  width: auto;
+}

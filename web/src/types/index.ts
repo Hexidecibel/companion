@@ -67,6 +67,8 @@ export interface Question {
   header: string;
   options: QuestionOption[];
   multiSelect: boolean;
+  /** 'trust': an agent's start-up prompt; option 0 = yes, 1 = no, first line of question = title. */
+  kind?: 'trust';
 }
 
 export interface ToolCall {

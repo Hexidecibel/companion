@@ -107,6 +107,16 @@ export interface TerminalChoicePrompt {
    * Only the user answers it: never babysit, auto-approval or Herald.
    */
   kind?: 'trust';
+  /** kind 'trust': where its rows are on screen (daemon only: the keys come from it). */
+  trustLayout?: TrustLayout;
+}
+
+/** Rows of a start-up prompt on screen: 0-based, in the agent's own order. */
+export interface TrustLayout {
+  numbered: boolean;
+  yes: number;
+  no: number;
+  cursor: number;
 }
 
 export interface Question {
@@ -114,6 +124,8 @@ export interface Question {
   header: string;
   options: QuestionOption[];
   multiSelect: boolean;
+  /** 'trust': an agent's start-up prompt; option 0 = yes, 1 = no, first line of question = title. */
+  kind?: 'trust';
 }
 
 /** Totals for the current turn (since the user's last message), get_highlights `turn`. */

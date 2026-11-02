@@ -47,6 +47,7 @@ export interface ChoiceData {
   optionCount: number;
   multiSelect: boolean;
   otherText?: string;
+  promptKind?: 'trust';
 }
 
 interface QuestionBlockProps {

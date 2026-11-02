@@ -175,6 +175,7 @@ export function registerInputHandlers(ctx: HandlerContext): Record<string, Messa
             otherText?: string;
             sessionId?: string;
             tmuxSessionName?: string;
+            promptKind?: 'trust';
           }
         | undefined;
 
@@ -218,7 +219,12 @@ export function registerInputHandlers(ctx: HandlerContext): Record<string, Messa
         choicePayload.optionCount,
         choicePayload.multiSelect,
         choicePayload.otherText,
-        sessionToUse
+        sessionToUse,
+        // This request is the user's own tap (Herald and babysit have other paths).
+        {
+          answerTrust: true,
+          ...(choicePayload.promptKind === 'trust' ? { promptKind: 'trust' as const } : {}),
+        }
       );
 
       ctx.send(client.ws, {

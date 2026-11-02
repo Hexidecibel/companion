@@ -10,6 +10,8 @@ import { classifyCodexStartupPane, codexChoiceKeys } from '../codex/terminal';
 import { isPermissionChoice } from '../../herald/babysit/tracker';
 
 const FIX = path.join(__dirname, 'fixtures', 'codex');
+const CLAUDE_FIX = path.join(__dirname, 'fixtures', 'claude');
+const readClaude = (f: string) => fs.readFileSync(path.join(CLAUDE_FIX, f), 'utf-8');
 const read = (f: string) => fs.readFileSync(path.join(FIX, f), 'utf-8');
 
 const CLAUDE_NEW = [
@@ -66,14 +68,106 @@ describe('trust prompt', () => {
       expect(c.question).toBe(`Trust this folder?\n${dir}`);
       expect(c.options.map((o) => o.label)).toEqual(['Yes, trust', 'No']);
     }
-    // Claude's digit keys answer it in its own option order.
+    // Numbered rows: their digit.
+    const c = claudeAdapter.terminal.detectActiveChoicePrompt(CLAUDE_NEW)!;
+    expect(
+      claudeAdapter.terminal
+        .choiceKeys({
+          selectedIndices: [0],
+          optionCount: 2,
+          multiSelect: false,
+          trust: true,
+          trustLayout: c.trustLayout,
+        })
+        .steps.filter((s) => s.type === 'key')
+    ).toEqual([{ type: 'key', key: '1' }]);
+  });
+
+  // Claude Code 2.1.316: real captures. No digits, "No" first and selected.
+  const keysOf = (pane: string, index: number) => {
+    const c = claudeAdapter.terminal.detectActiveChoicePrompt(pane)!;
+    return claudeAdapter.terminal
+      .choiceKeys({
+        selectedIndices: [index],
+        optionCount: 2,
+        multiSelect: false,
+        trust: true,
+        trustLayout: c.trustLayout,
+      })
+      .steps.filter((s) => s.type === 'key')
+      .map((s) => (s as { key: string }).key);
+  };
+
+  it('Claude live capture (2.1.316): a card, with yes first whatever the screen order', () => {
+    const pane = readClaude('live-trust.txt');
+    const c = claudeAdapter.terminal.detectActiveChoicePrompt(pane)!;
+    expect(c.kind).toBe('trust');
+    expect(c.question).toBe('Trust this folder?\n/home/hexi/.cache/trust-repro/plain');
+    expect(c.options.map((o) => o.label)).toEqual(['Yes, trust', 'No']);
+    expect(claudeAdapter.terminal.classifyStartupPane(pane)).toBe('trust_prompt');
+    expect(keysOf(pane, 0)).toEqual(['Down', 'Enter']); // verified live; digits do nothing
+    expect(keysOf(pane, 1)).toEqual(['Enter']);
+    expect(isPermissionChoice({ ...c, trust: true } as never)).toBe(true);
+  });
+
+  it('Claude live capture: after "No, exit" the old dialog above a shell prompt is no prompt', () => {
+    expect(
+      claudeAdapter.terminal.detectActiveChoicePrompt(readClaude('live-trust-after-no.txt'))
+    ).toBeNull();
+  });
+
+  it('Claude live capture: a 50-column pane wraps the wording', () => {
+    const c = claudeAdapter.terminal.detectActiveChoicePrompt(readClaude('live-trust-narrow.txt'))!;
+    expect(c.kind).toBe('trust');
+    expect(c.question).toBe('Trust this folder?\n/home/hexi/.cache/trust-repro/plain2');
+  });
+
+  it('a wrapped long folder path comes back whole', () => {
+    const c = claudeAdapter.terminal.detectActiveChoicePrompt(
+      [
+        ' Accessing workspace:',
+        '',
+        ' /home/hexi/some/very/long/',
+        ' folder/name',
+        '',
+        ' Quick safety check: Is this a project you created or one you trust?',
+        '',
+        ' ❯ No, exit',
+        '   Yes, I trust this folder',
+        '',
+        ' Enter to confirm · Esc to cancel',
+      ].join('\n')
+    )!;
+    expect(c.question).toBe('Trust this folder?\n/home/hexi/some/very/long/folder/name');
+  });
+
+  it('the cursor already on yes takes Enter only', () => {
+    const pane = readClaude('live-trust.txt')
+      .replace('❯ No, exit', '  No, exit')
+      .replace('  Yes, I trust', '❯ Yes, I trust');
+    expect(keysOf(pane, 0)).toEqual(['Enter']);
+    expect(keysOf(pane, 1)).toEqual(['Up', 'Enter']);
+  });
+
+  it('Claude live capture: the bypass warning is its own card', () => {
+    const pane = readClaude('live-bypass.txt');
+    expect(claudeAdapter.terminal.classifyStartupPane(pane)).toBe('bypass_warning');
+    const c = claudeAdapter.terminal.detectActiveChoicePrompt(pane)!;
+    expect(c.kind).toBe('trust');
+    expect(c.question).toBe('Allow Bypass Permissions mode?');
+    expect(c.options.map((o) => o.label)).toEqual(['Yes, I accept', 'No']);
+    expect(keysOf(pane, 0)).toEqual(['Down', 'Enter']);
+  });
+
+  it('Claude keys without the rows send nothing (Enter alone would be "No, exit")', () => {
     expect(
       claudeAdapter.terminal.choiceKeys({
         selectedIndices: [0],
         optionCount: 2,
         multiSelect: false,
+        trust: true,
       }).steps
-    ).toEqual([{ type: 'key', key: '1' }]);
+    ).toEqual([]);
   });
 
   it('is not the approval box, an idle composer or text that talks about trust', () => {

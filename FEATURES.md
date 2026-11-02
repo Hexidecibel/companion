@@ -703,3 +703,8 @@ Follow-up fixes layered on the Mobile UX round above: walks back the activity-ro
 - Settings > Accounts > Log in runs the login in a hidden tmux session and shows the link and device code in a sheet; nothing is left behind afterwards
 - Success, failure, cancel and the 15 minute timeout all kill the session; leftovers of that home are reaped at the next start
 - Only https links on allowed login hosts pass, and the link, device code and pasted code never reach logs, audit or errors
+
+## Start-up prompts as a card (2026-11-02)
+- Claude's real "Trust this folder?" prompt and its Bypass Permissions warning show as a card with Yes and No, and the session reads as waiting meanwhile
+- Answers use the keys the prompt really takes: Claude 2.1.316 draws no digits and selects "No, exit" first, so typed digits did nothing and a stray Enter quit
+- Only the user's own tap answers it; a prompt that has gone sends nothing, and one still up 3 s after the keys reports a failure

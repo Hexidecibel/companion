@@ -577,11 +577,15 @@ export function SessionView({
     return sendInput(label, { skipOptimistic: true });
   }, [sendInput]);
 
+  // "No" on a start-up prompt: its card leaves with the agent, this says why the chat is empty.
+  const [declinedPrompt, setDeclinedPrompt] = useState<string | null>(null);
+
   const handleSelectChoice = useCallback(async (choice: {
     selectedIndices: number[];
     optionCount: number;
     multiSelect: boolean;
     otherText?: string;
+    promptKind?: 'trust';
   }): Promise<boolean> => {
     if (!serverId || !sessionId) return false;
     const conn = connectionManager.getConnection(serverId);
@@ -592,6 +596,9 @@ export function SessionView({
         sessionId,
         tmuxSessionName: tmuxSessionName || sessionId,
       });
+      if (response.success && choice.promptKind === 'trust' && choice.selectedIndices[0] === 1) {
+        setDeclinedPrompt(sessionId);
+      }
       return response.success;
     } catch {
       return false;
@@ -959,6 +966,15 @@ export function SessionView({
                 onRemove={removeBookmark}
                 onClose={() => setShowBookmarks(false)}
               />
+            )}
+
+            {declinedPrompt === sessionId && highlights.length === 0 && (
+              <div className="trust-card trust-card-declined" role="status">
+                <div className="trust-card-result">
+                  You answered No, so the agent exited without opening this folder. Nothing was saved.
+                  Close this session, or start the agent again to be asked again.
+                </div>
+              </div>
             )}
 
             <ComponentErrorBoundary name="MessageList">

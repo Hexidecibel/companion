@@ -18,7 +18,7 @@ import {
   POST_TEXT_DELAY_MS,
   POST_TEXT_INPUT_DELAY_MS,
 } from '../../constants';
-import { CLAUDE_TRUST, parseTrustPrompt } from '../trust';
+import { CLAUDE_BYPASS, CLAUDE_TRUST, parseTrustPrompt } from '../trust';
 import type { TerminalChoicePrompt } from '../../types';
 import type {
   AgentTerminal,
@@ -46,7 +46,7 @@ export function claudeCommand(permissionMode?: ClaudePermissionMode): string {
  */
 export function classifyStartupPane(pane: string): StartupPaneState {
   const p = pane || '';
-  if (/Bypass Permissions mode/i.test(p) && /Yes,? I accept/i.test(p)) return 'bypass_warning';
+  if (/Bypass\s+Permissions\s+mode/i.test(p) && /Yes,? I accept/i.test(p)) return 'bypass_warning';
   if (/Do you trust the files in this folder|trust this folder/i.test(p)) return 'trust_prompt';
   // Claude's own input box / footer. A bare "❯" is not enough: a shell prompt
   // (after "No, exit") can use it too, and the first prompt must never be typed
@@ -57,11 +57,15 @@ export function classifyStartupPane(pane: string): StartupPaneState {
 }
 
 /**
- * The live choice box; the start-up trust prompt first, as "Yes, trust" / "No"
- * (same order as Claude's own options, so the digit keys answer it).
+ * The live choice box; the start-up prompts first, as "Yes, ..." / "No" whatever
+ * order Claude draws them in (claudeTrustKeys goes by the rows on screen).
  */
 export function detectActiveChoicePrompt(paneOutput: string): TerminalChoicePrompt | null {
-  return parseTrustPrompt(paneOutput, CLAUDE_TRUST) ?? parserDetectActiveChoicePrompt(paneOutput);
+  return (
+    parseTrustPrompt(paneOutput, CLAUDE_BYPASS) ??
+    parseTrustPrompt(paneOutput, CLAUDE_TRUST) ??
+    parserDetectActiveChoicePrompt(paneOutput)
+  );
 }
 
 /** A pane showing a tool-approval prompt (auto-approval verifies this before sending "yes"). */
@@ -70,6 +74,35 @@ export const CLAUDE_APPROVAL_PROMPT_RE =
 
 /** ms between key presses: the picker repaints between keypresses. */
 export const CHOICE_KEY_DELAY_MS = 120;
+
+/**
+ * Keys for a start-up prompt. Index 0 = yes, 1 = no. Numbered rows take their
+ * digit; plain rows (2.1.316) ignore digits: arrows from the cursor, then Enter.
+ * Without the rows nothing is sent: Enter alone would be "No, exit".
+ */
+function claudeTrustKeys(req: ChoiceRequest): ChoiceKeyPlan {
+  const layout = req.trustLayout;
+  const index = req.selectedIndices[0];
+  if (!layout || req.otherText !== undefined || (index !== 0 && index !== 1)) {
+    return {
+      description: 'claude trust prompt: only yes or no',
+      warnings: ['The trust prompt takes only yes or no; nothing sent'],
+      steps: [],
+    };
+  }
+  const row = index === 0 ? layout.yes : layout.no;
+  const description = `claude trust prompt: ${index === 0 ? 'yes' : 'no'}`;
+  if (layout.numbered) {
+    return { description, warnings: [], steps: [{ type: 'key', key: String(row + 1) }] };
+  }
+  const steps: KeyStep[] = [];
+  for (let i = layout.cursor; i !== row; i += row > layout.cursor ? 1 : -1) {
+    steps.push({ type: 'key', key: row > layout.cursor ? 'Down' : 'Up' });
+    steps.push({ type: 'delay', ms: CHOICE_KEY_DELAY_MS });
+  }
+  steps.push({ type: 'key', key: 'Enter' });
+  return { description, warnings: [], steps };
+}
 
 /**
  * Keys that answer Claude Code's choice box (AskUserQuestion picker).
@@ -94,6 +127,7 @@ export const CHOICE_KEY_DELAY_MS = 120;
  */
 export function claudeChoiceKeys(req: ChoiceRequest): ChoiceKeyPlan {
   const { selectedIndices, optionCount, multiSelect, otherText } = req;
+  if (req.trust) return claudeTrustKeys(req);
   const steps: KeyStep[] = [];
   const warnings: string[] = [];
   const key = (k: string) => steps.push({ type: 'key', key: k });

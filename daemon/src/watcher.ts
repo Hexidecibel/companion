@@ -164,6 +164,8 @@ const MAX_STARTUP_CAPTURES = 2;
 const STARTUP_RECHECK_MS = 1500;
 /** currentActivity while the agent's trust prompt is up. */
 export const TRUST_PROMPT_ACTIVITY = 'Asking whether to trust this folder';
+const startupActivity = (c: TerminalChoicePrompt) =>
+  /Bypass/.test(c.question) ? 'Asking to allow Bypass Permissions mode' : TRUST_PROMPT_ACTIVITY;
 
 /** Local-date dir of Codex rollouts (`YYYY/MM/DD`). */
 function localDateDir(t: number): string {
@@ -1155,6 +1157,10 @@ export class SessionWatcher extends EventEmitter {
         `Watcher: ${agent.displayName} in "${sessionId}" asks whether to trust its folder`
       );
       this.emitStartupPrompt(sessionId, true);
+    } else if (choice && was && choice.question !== was.choice.question) {
+      // The next start-up prompt (trust, then the bypass warning): a new card.
+      this.startupPrompts.set(sessionId, { since: Date.now(), choice });
+      this.emitStartupPrompt(sessionId, true);
     } else if (!choice && was) {
       this.startupPrompts.delete(sessionId);
       console.log(`Watcher: trust prompt in "${sessionId}" answered`);
@@ -1183,7 +1189,7 @@ export class SessionWatcher extends EventEmitter {
     this.emit('status-change', {
       sessionId,
       isWaitingForInput: up,
-      currentActivity: up ? TRUST_PROMPT_ACTIVITY : undefined,
+      currentActivity: up ? startupActivity(this.startupPrompts.get(sessionId)!.choice) : undefined,
       lastMessage: undefined,
     });
     this.emit('conversation-update', { sessionId });
@@ -3012,7 +3018,7 @@ export class SessionWatcher extends EventEmitter {
         isWaitingForInput: true,
         lastActivity: trust.since,
         projectPath: this.tmuxSessionWorkingDirs.get(sessionId!) || undefined,
-        currentActivity: TRUST_PROMPT_ACTIVITY,
+        currentActivity: startupActivity(trust.choice),
       };
     }
     const targetId = this.resolveToConversationId(sessionId);
@@ -3436,7 +3442,7 @@ export class SessionWatcher extends EventEmitter {
       if (trust) {
         status = 'waiting';
         waitingCount++;
-        currentActivity = TRUST_PROMPT_ACTIVITY;
+        currentActivity = startupActivity(trust.choice);
         lastActivity = trust.since;
       } else if (best) {
         const conv = best.conv;

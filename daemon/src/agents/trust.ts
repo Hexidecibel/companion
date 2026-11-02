@@ -18,25 +18,43 @@
  *
  *     enter continue · esc back
  *
- * Claude Code: "Do you trust the files in this folder?" (older, in a box) or
- * "Quick safety check: Is this a project you created or one you trust?" with
- * "❯ 1. Yes, proceed | Yes, I trust this folder" / "2. No, exit" and
- * "Enter to confirm · Esc to exit|cancel".
+ * Claude Code 2.1.316 (live capture, agents/__tests__/fixtures/claude/live-trust.txt):
+ * NO digits, "No" FIRST and selected, and digit keys do nothing:
+ *
+ *     Accessing workspace:
+ *     /home/hexi/.cache/trust-repro/plain
+ *     Quick safety check: Is this a project you created or one you trust? ...
+ *
+ *   ❯ No, exit
+ *     Yes, I trust this folder
+ *
+ *     Enter to confirm · Esc to cancel
+ *
+ * Older Claude Code: "Do you trust the files in this folder?" (in a box) or the
+ * same wording with "❯ 1. Yes, ..." / "2. No, exit". The same screen layout also
+ * carries Claude's one-time Bypass Permissions warning ("Yes, I accept"), which
+ * can follow it: same card, same rule (only the user answers).
+ *
+ * The chat always shows Yes first; `trustLayout` holds where the rows really are
+ * and the keys are worked out from it. Never assume an order: Enter on the
+ * default row of the current wording is "No, exit".
  */
 import { stripAnsi } from '../prompt-guard';
-import type { TerminalChoicePrompt } from '../types';
+import type { TerminalChoicePrompt, TrustLayout } from '../types';
 
+const CURSOR_RE = /^[›❯>]\s*/;
 const OPTION_RE = /^(?:[›❯>]\s*)?(\d)\.\s+(.+?)\s*$/;
 /** Box borders some versions draw around the dialog. */
 const BORDER_RE = /^[│┃|]\s?|\s?[│┃|]$/g;
-/** Options must end within this many non-empty lines of the bottom. */
-const MAX_LINES_BELOW = 3;
 /** The trust wording must be at most this many lines above the first option. */
-const MAX_ABOVE = 16;
+const MAX_ABOVE = 24;
 
 export interface TrustPromptSpec {
   header: string;
-  /** The question wording above the options. */
+  /** First line of the card's question. */
+  title?: string;
+  yesLabel?: string;
+  /** The question wording above the options (matched on them joined: panes wrap). */
   questionRe: RegExp;
   /** The hint line under the options. */
   footerRe: RegExp;
@@ -56,7 +74,7 @@ export const CODEX_TRUST: TrustPromptSpec = {
   noRe: /back|no\b|exit|quit/i,
   yesDescription:
     "Codex can read, edit and run files here; it saves the folder as trusted in Codex's config",
-  noDescription: 'Not trusted: Codex does not open this folder and exits (nothing is saved)',
+  noDescription: 'Codex does not open this folder and exits (nothing is saved)',
 };
 
 export const CLAUDE_TRUST: TrustPromptSpec = {
@@ -66,8 +84,20 @@ export const CLAUDE_TRUST: TrustPromptSpec = {
   footerRe: /Enter to confirm|Esc to (?:exit|cancel)/i,
   yesRe: /yes|trust|proceed/i,
   noRe: /\bno\b|exit/i,
-  yesDescription: 'Claude Code can read, edit and run files here',
-  noDescription: 'Claude Code exits',
+  yesDescription: 'Claude Code can read, edit and run files here, and it remembers this folder',
+  noDescription: 'Claude Code exits without opening this folder (nothing is saved)',
+};
+
+export const CLAUDE_BYPASS: TrustPromptSpec = {
+  header: 'Claude Code',
+  title: 'Allow Bypass Permissions mode?',
+  yesLabel: 'Yes, I accept',
+  questionRe: /running in Bypass Permissions mode/i,
+  footerRe: /Enter to confirm|Esc to (?:exit|cancel)/i,
+  yesRe: /accept/i,
+  noRe: /\bno\b|exit/i,
+  yesDescription: 'Claude Code runs commands without asking for your approval in this session',
+  noDescription: 'Claude Code exits (nothing is saved)',
 };
 
 function cleanLines(pane: string): string[] {
@@ -78,46 +108,74 @@ function cleanLines(pane: string): string[] {
     .map((l) => (/^[╭╰─━┌└]/.test(l) ? '' : l));
 }
 
+/** The two rows above the footer: "1. x" / "2. y", or plain rows with a cursor. */
+function readRows(
+  lines: string[],
+  last: number
+): { start: number; labels: string[]; numbered: boolean; cursor: number } | null {
+  const numbered = OPTION_RE.test(lines[last]);
+  let start = last;
+  const isRow = (l: string) => (numbered ? OPTION_RE.test(l) : !!l);
+  while (start - 1 >= 0 && last - start < 3 && isRow(lines[start - 1])) start--;
+  const rows = lines.slice(start, last + 1);
+  if (rows.length !== 2) return null;
+  if (numbered) {
+    const m = rows.map((r) => OPTION_RE.exec(r)!);
+    if (Number(m[0][1]) !== 1 || Number(m[1][1]) !== 2) return null;
+  }
+  const cursor = rows.findIndex((r) => CURSOR_RE.test(r));
+  // Plain rows are only options with their cursor on one of them.
+  if (!numbered && cursor < 0) return null;
+  const labels = rows.map((r) =>
+    numbered ? OPTION_RE.exec(r)![2] : r.replace(CURSOR_RE, '').trim()
+  );
+  return { start, labels, numbered, cursor: Math.max(cursor, 0) };
+}
+
 /** The trust prompt live at the bottom of a pane, or null. */
 export function parseTrustPrompt(pane: string, spec: TrustPromptSpec): TerminalChoicePrompt | null {
   const lines = cleanLines(pane);
+  // The hint line must be the last thing on screen: after "No, exit" the old
+  // dialog stays visible with the shell prompt under it.
   let end = lines.length - 1;
-  let below = 0;
-  let footer = false;
-  while (end >= 0 && !OPTION_RE.test(lines[end])) {
-    if (lines[end]) {
-      if (spec.footerRe.test(lines[end])) footer = true;
-      if (++below > MAX_LINES_BELOW) return null;
-    }
-    end--;
-  }
-  if (end < 0 || !footer) return null;
-  let start = end;
-  while (start - 1 >= 0 && OPTION_RE.test(lines[start - 1])) start--;
-  const labels: string[] = [];
-  for (let i = start; i <= end; i++) {
-    const m = OPTION_RE.exec(lines[i])!;
-    if (Number(m[1]) !== labels.length + 1) return null;
-    labels.push(m[2]);
-  }
-  if (labels.length !== 2 || !spec.yesRe.test(labels[0]) || !spec.noRe.test(labels[1])) return null;
-  let asked = false;
+  while (end >= 0 && !lines[end]) end--;
+  if (end < 0 || !spec.footerRe.test(lines[end])) return null;
+  end--;
+  while (end >= 0 && !lines[end]) end--;
+  if (end < 0) return null;
+  const rows = readRows(lines, end);
+  if (!rows) return null;
+  const isYes = (l: string) => spec.yesRe.test(l) && !/^no\b/i.test(l);
+  const yes = rows.labels.findIndex(isYes);
+  if (yes < 0) return null;
+  const no = 1 - yes;
+  if (!spec.noRe.test(rows.labels[no])) return null;
+  const above: string[] = [];
   let folder = '';
-  for (let i = start - 1; i >= 0 && i >= start - MAX_ABOVE; i--) {
+  for (let i = rows.start - 1; i >= 0 && i >= rows.start - MAX_ABOVE; i--) {
     const t = lines[i];
     if (!t) continue;
-    if (spec.questionRe.test(t)) asked = true;
-    if (!folder && /^(?:\/|~\/)\S*$/.test(t)) folder = t;
+    above.unshift(t);
+    if (!folder && /^(?:\/|~\/)\S*$/.test(t)) {
+      folder = t;
+      // A long path wraps: the rest are the lines straight under it, no spaces.
+      for (let j = i + 1; j < rows.start && lines[j] && !/\s/.test(lines[j]); j++) {
+        folder += lines[j];
+      }
+    }
   }
-  if (!asked) return null;
+  if (!spec.questionRe.test(above.join(' '))) return null;
+  const title = spec.title ?? 'Trust this folder?';
+  const trustLayout: TrustLayout = { numbered: rows.numbered, yes, no, cursor: rows.cursor };
   return {
-    question: folder ? `Trust this folder?\n${folder}` : 'Trust this folder?',
+    question: folder ? `${title}\n${folder}` : title,
     header: spec.header,
     options: [
-      { label: 'Yes, trust', description: spec.yesDescription },
+      { label: spec.yesLabel ?? 'Yes, trust', description: spec.yesDescription },
       { label: 'No', description: spec.noDescription },
     ],
     multiSelect: false,
     kind: 'trust',
+    trustLayout,
   };
 }

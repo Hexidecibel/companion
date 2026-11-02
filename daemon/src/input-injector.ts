@@ -9,6 +9,7 @@ import {
 import { incrementTmuxOperations } from './metrics';
 import { impact } from './impact/state';
 import { defaultAgent, type AgentAdapter, type KeyStep } from './agents';
+import type { TrustLayout } from './types';
 import { secondsSinceClientActivity, refusalFor, type InputRefusal } from './prompt-guard';
 
 /** An attached client that pressed a key within this many seconds = someone is typing. */
@@ -25,6 +26,10 @@ export type SendInputResult =
       | InputRefusal
       | { reason: 'no_session' | 'tmux_error'; code: string; message: string }
     ));
+
+/** After answering a trust prompt: how long it may stay on screen. */
+const TRUST_VERIFY_POLLS = 6;
+const TRUST_VERIFY_DELAY_MS = 500;
 
 export interface InputInjectorOptions {
   now?: () => number;
@@ -403,7 +408,14 @@ export class InputInjector {
     optionCount: number,
     multiSelect: boolean,
     otherText: string | undefined,
-    targetSession?: string
+    targetSession?: string,
+    /**
+     * answerTrust: the USER answered in the app. Everyone else (babysit, Herald,
+     * auto-approval) is refused while a start-up prompt is on screen.
+     * promptKind: the card tapped was that prompt; if it is gone, send nothing
+     * (a digit or Enter would land in the composer).
+     */
+    opts?: { answerTrust?: boolean; promptKind?: 'trust' }
   ): Promise<boolean> {
     const previousLock = this.sendLock;
     let releaseLock: () => void;
@@ -423,34 +435,43 @@ export class InputInjector {
       }
 
       const agent = this.agentFor(session);
-      let trust = false;
+      const pane = await this.captureForGuard(session);
+      const box = pane === null ? null : agent.terminal.detectActiveChoicePrompt(pane);
+      const trustBox = box?.kind === 'trust' ? box : null;
+      if (trustBox && !opts?.answerTrust) {
+        console.log(`Choice for '${session}' not sent: only the user answers the trust prompt`);
+        return false;
+      }
+      if (opts?.promptKind === 'trust' && !trustBox) {
+        console.log(`Choice for '${session}' not sent: the trust prompt is gone`);
+        return false;
+      }
       if (agent.terminal.requiresLiveChoiceBox) {
         // Codex: a digit sent to the bare composer would be typed into it and
         // Esc would interrupt, so answer only a box that is on screen now.
-        const pane = await this.captureForGuard(session);
-        const box = pane === null ? null : agent.terminal.detectActiveChoicePrompt(pane);
         if (!box) {
           console.log(
             `Choice for '${session}' not sent: no ${agent.displayName} choice box on screen`
           );
           return false;
         }
-        // The trust prompt has its own keys (agents/codex/terminal.ts).
-        trust = box.kind === 'trust';
-      } else {
-        // Dismiss any TUI overlay before sending
+      } else if (!trustBox) {
+        // Dismiss any TUI overlay before sending (never on a start-up prompt:
+        // Esc there exits the agent).
         await this.dismissOverlayIfPresent(session);
       }
 
-      const sent = await this.doSendChoice(
+      let sent = await this.doSendChoice(
         selectedIndices,
         optionCount,
         multiSelect,
         otherText,
         session,
         agent,
-        trust
+        !!trustBox,
+        trustBox?.trustLayout
       );
+      if (sent && trustBox) sent = await this.trustPromptLeft(session, agent, trustBox.question);
       if (sent && this.afterChoice) {
         try {
           this.afterChoice(session);
@@ -464,6 +485,23 @@ export class InputInjector {
     }
   }
 
+  /** The prompt answered must really leave the screen, or the user is told it failed. */
+  private async trustPromptLeft(
+    session: string,
+    agent: AgentAdapter,
+    question: string
+  ): Promise<boolean> {
+    for (let i = 0; i < TRUST_VERIFY_POLLS; i++) {
+      const pane = await this.captureForGuard(session);
+      if (pane === null) return true; // the agent exited ("No")
+      const box = agent.terminal.detectActiveChoicePrompt(pane);
+      if (box?.kind !== 'trust' || box.question !== question) return true;
+      await this.sleep(TRUST_VERIFY_DELAY_MS);
+    }
+    console.warn(`Trust prompt in '${session}' is still on screen after the answer`);
+    return false;
+  }
+
   private async doSendChoice(
     selectedIndices: number[],
     optionCount: number,
@@ -471,7 +509,8 @@ export class InputInjector {
     otherText: string | undefined,
     session: string,
     agent: AgentAdapter,
-    trust = false
+    trust = false,
+    trustLayout?: TrustLayout
   ): Promise<boolean> {
     try {
       // The agent decides the keys (Claude: digits, arrows, Right + "1" to submit;
@@ -481,7 +520,7 @@ export class InputInjector {
         optionCount,
         multiSelect,
         otherText,
-        ...(trust ? { trust } : {}),
+        ...(trust ? { trust, ...(trustLayout ? { trustLayout } : {}) } : {}),
       });
       console.log(`Sending ${plan.description} to '${session}'`);
       for (const w of plan.warnings) console.warn(w);

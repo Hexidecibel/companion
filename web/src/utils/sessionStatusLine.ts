@@ -255,10 +255,13 @@ export function endingQuestion(content: string): string | null {
 
 function waitingQuestion(status: SessionStatus, last: ConversationHighlight | undefined, projectPath?: string): string | null {
   if (last?.isWaitingForChoice) {
+    const q = last.questions?.[0];
+    // A start-up prompt: the title, not the folder on its second line.
+    if (q?.kind === 'trust') return q.question.split('\n')[0];
     return last.questions?.[0]?.question || last.content.trim() || 'Choose an option';
   }
   const activity = status.currentActivity;
-  if (activity?.startsWith('Approve') || activity === 'Asking whether to trust this folder') return activity;
+  if (activity?.startsWith('Approve') || activity === 'Asking whether to trust this folder' || activity === 'Asking to allow Bypass Permissions mode') return activity;
   if (activity === 'Waiting for approval') return 'approval';
   if (last?.type !== 'assistant') return null;
   const pending = last.toolCalls?.filter((tc) => tc.status === 'pending').pop();
