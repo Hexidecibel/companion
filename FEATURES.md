@@ -698,3 +698,8 @@ Follow-up fixes layered on the Mobile UX round above: walks back the activity-ro
 - The chat window's status is one line: what the session is doing in plain words ("Running tests", "Editing src/app.ts", the question it is waiting on), elapsed time ticking while it works, and tool + file counts for the turn; works for Claude and Codex
 - Tap the line to see the last five steps with their durations and failures
 - `get_highlights` now returns `turn` totals (`daemon/src/turn-stats.ts`), so the counts cover the whole turn even when only a page of messages is loaded
+
+## One-tap account login (2026-11-02)
+- Settings > Accounts > Log in runs the login in a hidden tmux session and shows the link and device code in a sheet; nothing is left behind afterwards
+- Success, failure, cancel and the 15 minute timeout all kill the session; leftovers of that home are reaped at the next start
+- Only https links on allowed login hosts pass, and the link, device code and pasted code never reach logs, audit or errors

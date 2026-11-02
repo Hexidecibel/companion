@@ -192,6 +192,17 @@ bin/companion profile remove work              # config entry only; the home sta
 env -u TMUX -u TMUX_PANE node daemon/scripts/profile-probe.js --tmux-tmpdir $T
 ```
 
+One-tap login (Settings > Accounts > Log in; `daemon/src/profiles/login-flow.ts` + pure `login-parser.ts`, web `components/ProfileLoginSheet.tsx`): the login runs in a hidden tmux session (no COMPANION_APP tag, so the watcher and start-up captures never see it; `COMPANION_LOGIN_FLOW=<home hash>.<nonce>` identifies it, kept out of every listing by `hideTmuxSession`); polled once a second only while active; only https links on `ALLOWED_LOGIN_HOSTS` pass; success = the login command's exit code 0 (recorded to `~/.companion/profile-login/<nonce>.exit` by the typed line), and success / failure / cancel / 15 min timeout all kill the session; leftovers of this home are reaped at start. Requests `profile_login_code` / `_cancel` / `_status`, event `profile_login_update` go only to clients allowed to dispatch. The link, device code and pasted code never reach logs, audit or errors (pasted text goes by `TmuxManager.sendSecretLine`, execFile, no logging).
+
+```bash
+# Live test (no real login; the real CLIs are only started and cancelled; fake logins via
+# COMPANION_PROFILE_LOGIN_TEST_DIR, honoured only with COMPANION_SANDBOX=1):
+T=/tmp/claude-1000/plgp; mkdir -p -m 700 $T $T/fake
+env -u TMUX -u TMUX_PANE TMUX_TMPDIR=$T COMPANION_PROFILE_LOGIN_TEST_DIR=$T/fake bin/herald-sandbox --instance probe start
+env -u TMUX -u TMUX_PANE node daemon/scripts/profile-login-probe.js --tmux-tmpdir $T
+bin/herald-sandbox --instance probe stop; rm -rf $T
+```
+
 ### Stuck-session detection (daemon)
 Code in `daemon/src/stuck/` (`signals.ts` pure analysis, `normalize.ts` failure keys / pane reading, `detector.ts` state + guarded captures, `store.ts` settings), handlers in `daemon/src/handlers/stuck.ts`, plan in `plan.md`.
 - **Protocol:** `daemon/src/stuck/protocol.ts` is mirrored byte-for-byte by `web/src/types/stuck.ts` (mirror test). Requests `stuck_list` / `stuck_snooze` / `stuck_dismiss` / `stuck_ask` / `stuck_interrupt` / `stuck_get_settings` / `stuck_set_settings`; GLOBAL event `stuck_update` (full visible list).

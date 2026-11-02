@@ -49,6 +49,36 @@ export async function openExternal(url: string): Promise<void> {
   }
 }
 
+export interface PendingExternalTab {
+  navigate: (url: string) => void;
+  close: () => void;
+}
+
+/**
+ * For a link only known after waiting on the server: call during the tap. A
+ * browser blocks a page opened later, so a blank tab is opened now and pointed
+ * at the link when it arrives. `null` from the browser = blocked; the caller
+ * then needs a visible button. Native apps need none of this.
+ */
+export function prepareExternalTab(): PendingExternalTab | null {
+  if (isTauri()) {
+    return { navigate: (url) => void openExternal(url), close: () => undefined };
+  }
+  const tab = window.open('', '_blank');
+  if (!tab) return null;
+  try {
+    tab.opener = null;
+  } catch {
+    /* cross-origin already; nothing to clear */
+  }
+  return {
+    navigate: (url) => {
+      tab.location.href = url;
+    },
+    close: () => tab.close(),
+  };
+}
+
 /** The anchor a click landed on, when following it would leave the app. */
 export function externalAnchorHref(target: EventTarget | null, base: string): string | null {
   const el = target as Element | null;

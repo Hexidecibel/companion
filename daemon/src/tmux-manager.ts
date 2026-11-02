@@ -1,6 +1,6 @@
 import { execFile } from 'child_process';
 import { promisify } from 'util';
-import { trackedExecAsync, runTmux } from './impact/sub';
+import { trackedExecAsync, runTmux, tryTmux } from './impact/sub';
 import { tmuxSnapshot, invalidateTmuxSnapshot } from './tmux-snapshot';
 import * as path from 'path';
 import { startTmuxSession } from './tmux-server';
@@ -36,6 +36,19 @@ export interface WorktreeResult {
   error?: string;
 }
 
+/**
+ * Sessions the app runs for itself (account logins): real tmux sessions that
+ * never appear in a session listing and can never be adopted. Module level
+ * because several TmuxManager instances exist.
+ */
+const hiddenSessions = new Set<string>();
+export function hideTmuxSession(name: string): void {
+  hiddenSessions.add(name);
+}
+export function unhideTmuxSession(name: string): void {
+  hiddenSessions.delete(name);
+}
+
 export class TmuxManager {
   private sessionPrefix: string;
 
@@ -54,6 +67,7 @@ export class TmuxManager {
       const sessions: TmuxSessionInfo[] = [];
       // Include all sessions so users can interact with any tmux session
       for (const row of snap.sessions) {
+        if (hiddenSessions.has(row.name)) continue;
         sessions.push({
           name: row.name,
           created: parseInt(row.created, 10) * 1000, // Convert to ms
@@ -86,6 +100,7 @@ export class TmuxManager {
    * Tag an existing tmux session as managed by Companion
    */
   async tagSession(name: string): Promise<boolean> {
+    if (hiddenSessions.has(name)) return false;
     try {
       await runTmux(['set-environment', '-t', name, 'COMPANION_APP', '1'], 'tmux-manager');
       invalidateTmuxSnapshot(name);
@@ -135,6 +150,8 @@ export class TmuxManager {
       envFile?: string;
       /** Typed instead of the agent's launch command (e.g. a login command). */
       command?: string;
+      /** false: no COMPANION_APP tag, so the watcher never treats it as a coding session. */
+      managed?: boolean;
     } = {}
   ): Promise<{ success: boolean; error?: string }> {
     // Validate session name
@@ -154,10 +171,14 @@ export class TmuxManager {
       await startTmuxSession(safeName, ['-d', '-s', safeName, '-c', workingDir, ...envArgs]);
 
       // Tag session as managed by Companion so daemon only monitors our sessions
-      await execFileAsync('tmux', ['set-environment', '-t', safeName, 'COMPANION_APP', '1']);
+      if (opts.managed !== false) {
+        await execFileAsync('tmux', ['set-environment', '-t', safeName, 'COMPANION_APP', '1']);
+      }
       invalidateTmuxSnapshot(safeName);
 
-      console.log(`TmuxManager: Created session "${safeName}" in ${workingDir} (tagged)`);
+      console.log(
+        `TmuxManager: Created session "${safeName}" in ${workingDir}${opts.managed !== false ? ' (tagged)' : ''}`
+      );
 
       // Start CLI in the session if requested
       if (startCli) {
@@ -242,8 +263,9 @@ export class TmuxManager {
 
       await execAsync(`tmux send-keys -t "${sessionName}" -l "${escaped}"`);
       return true;
-    } catch (err) {
-      console.error(`TmuxManager: Failed to send keys to "${sessionName}":`, err);
+    } catch {
+      // Not the error itself: its message quotes the command, i.e. the typed text.
+      console.error(`TmuxManager: Failed to send keys to "${sessionName}"`);
       return false;
     }
   }
@@ -374,6 +396,71 @@ export class TmuxManager {
     } catch {
       return '';
     }
+  }
+
+  /**
+   * Plain pane text with wrapped lines joined (-J), for parsing. `gone` = tmux
+   * says the session no longer exists; a timeout or other error is neither
+   * gone nor text. One call with a SIGKILL timeout: the caller dedupes.
+   */
+  async capturePaneJoined(
+    sessionName: string,
+    lines: number = 200
+  ): Promise<{ text: string | null; gone: boolean }> {
+    const r = await tryTmux(
+      ['capture-pane', '-p', '-J', '-t', sessionName, '-S', `-${lines}`],
+      'profile-login',
+      { timeoutMs: 3000, maxBuffer: 2 * 1024 * 1024 }
+    );
+    if (!r.error) return { text: r.stdout, gone: false };
+    const gone =
+      !r.timedOut && /can't find|no server running|error connecting|no such/i.test(r.stderr);
+    return { text: null, gone };
+  }
+
+  /**
+   * Type secret text literally, then Enter. No shell, and the text never
+   * reaches a log or an error: a failure is only `false`.
+   */
+  async sendSecretLine(sessionName: string, text: string): Promise<boolean> {
+    const typed = await tryTmux(
+      ['send-keys', '-t', sessionName, '-l', '--', text],
+      'profile-login',
+      { timeoutMs: 3000 }
+    );
+    if (typed.error) return false;
+    const enter = await tryTmux(['send-keys', '-t', sessionName, 'Enter'], 'profile-login', {
+      timeoutMs: 3000,
+    });
+    return !enter.error;
+  }
+
+  /** One value of a session's tmux environment, null when unset or unknown. */
+  async sessionEnvValue(sessionName: string, key: string): Promise<string | null> {
+    const r = await tryTmux(['show-environment', '-t', sessionName, key], 'profile-login', {
+      timeoutMs: 3000,
+    });
+    if (r.error) return null;
+    const line = r.stdout.trim();
+    return line.startsWith(`${key}=`) ? line.slice(key.length + 1) : null;
+  }
+
+  /** Session names only, without the cached listing's filtering. */
+  async listAllSessionNames(): Promise<string[]> {
+    const r = await tryTmux(['list-sessions', '-F', '#{session_name}'], 'profile-login', {
+      timeoutMs: 3000,
+    });
+    if (r.error) return [];
+    return r.stdout.split('\n').filter(Boolean);
+  }
+
+  /** Kill at once, with no Ctrl+C / exit typed first. True when the session is gone. */
+  async killSessionNow(sessionName: string): Promise<boolean> {
+    const r = await tryTmux(['kill-session', '-t', sessionName], 'profile-login', {
+      timeoutMs: 3000,
+    });
+    invalidateTmuxSnapshot(sessionName);
+    return !r.error || /can't find|no server running|error connecting/i.test(r.stderr);
   }
 
   /**

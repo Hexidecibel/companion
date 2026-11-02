@@ -9588,3 +9588,79 @@ button.status-line-main {
 .profiles-help {
   margin-top: 6px;
 }
+
+/* Account login sheet (Settings > Accounts) */
+.profile-login-sheet {
+  max-width: 440px;
+}
+
+.profile-login-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px 18px;
+  overflow-y: auto;
+  min-width: 0;
+}
+
+.profile-login-text {
+  margin: 0;
+  font-size: 14px;
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+.profile-login-text.secondary {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.profile-login-code {
+  font-family: var(--font-mono, monospace);
+  font-size: 26px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  text-align: center;
+  padding: 12px;
+  border-radius: 8px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+
+.profile-login-form {
+  display: flex;
+  gap: 8px;
+}
+
+.profile-login-input {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: 16px;
+}
+
+.profile-login-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.profile-login-success {
+  color: var(--accent-green, #10b981);
+}
+
+.profile-login-terminal {
+  height: 260px;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  overflow: hidden;
+}

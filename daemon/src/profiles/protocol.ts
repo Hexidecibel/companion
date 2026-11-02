@@ -6,6 +6,11 @@
  * Requests: `profiles_list` -> ProfilesListResponse; `profile_login`
  * (ProfileLoginRequest) -> ProfileLoginResponse. Global event
  * `profiles_changed` (ProfilesListResponse) when the config's profiles change.
+ * One-tap login: `profile_login_code` (ProfileLoginCodeRequest),
+ * `profile_login_cancel` (ProfileLoginRequest), both -> ProfileLoginResponse;
+ * `profile_login_status` -> ProfileLoginStatusResponse. Event
+ * `profile_login_update` (ProfileLoginUpdate) goes only to clients allowed to
+ * dispatch, because it can carry the sign-in link and device code.
  * Optional fields elsewhere: `profileId` on create_tmux_session /
  * scaffold_open_session; `profileId` + `profileLabel` on summary sessions
  * (only for a non-default profile).
@@ -48,7 +53,54 @@ export interface ProfileLoginResponse {
   command: string;
   /** The login session was already open. */
   alreadyRunning?: boolean;
+  /** The login flow behind the session (absent on an older daemon). */
+  flow?: ProfileLoginFlow;
+}
+
+export type ProfileLoginFlowState =
+  | 'starting'
+  | 'open_link'
+  | 'awaiting_code'
+  | 'verifying'
+  | 'success'
+  | 'failed'
+  | 'expired'
+  | 'cancelled';
+
+export interface ProfileLoginFlow {
+  /** New for each login attempt. */
+  flowId: string;
+  profileId: string;
+  profileLabel: string;
+  agent: ProfileAgent;
+  state: ProfileLoginFlowState;
+  /** Hidden tmux session running the login (the "Open terminal" fallback). */
+  sessionName: string;
+  startedAt: number;
+  expiresAt: number;
+  /** https sign-in link on an allowed host; dropped once the flow has ended. */
+  url?: string;
+  /** Codex: the one-time code to type on the website; dropped once ended. */
+  deviceCode?: string;
+  /** The login's output could not be read; the terminal is the way forward. */
+  unparsed?: boolean;
+  /** Plain text for the user; never contains terminal output. */
+  message?: string;
+}
+
+export interface ProfileLoginCodeRequest {
+  profileId: string;
+  code: string;
+}
+
+export interface ProfileLoginStatusResponse {
+  flows: ProfileLoginFlow[];
+}
+
+export interface ProfileLoginUpdate {
+  flow: ProfileLoginFlow;
 }
 
 export const PROFILES_CHANGED_EVENT = 'profiles_changed';
+export const PROFILE_LOGIN_UPDATE_EVENT = 'profile_login_update';
 // --- end profiles protocol ---
