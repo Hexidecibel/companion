@@ -330,7 +330,10 @@ describe('LoginFlowManager', () => {
 
   it('createSession failure reports a fixed message', async () => {
     const s = setup();
-    s.tmux.createSession.mockResolvedValueOnce({ success: false, error: 'tmux said /secret' } as any);
+    s.tmux.createSession.mockResolvedValueOnce({
+      success: false,
+      error: 'tmux said /secret',
+    } as any);
     expect(await s.m.start(claude)).toEqual({ error: 'Could not start the login' });
     expect(s.hidden.size).toBe(0);
     expect(s.m.list()).toEqual([]);

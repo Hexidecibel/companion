@@ -206,17 +206,26 @@ export class LoginFlowManager {
       entry.flow.sessionName = name;
       const launch = await this.deps.launchOpts(profile);
       this.deps.hide(name);
-      const result = await this.deps.tmux.createSession(name, this.deps.homeDir ?? os.homedir(), true, {
-        ...launch,
-        env: { ...(launch.env ?? {}), [LOGIN_FLOW_TAG]: entry.tag, COMPANION_APP: '0' },
-        command: loginLaunchLine(test.command ?? LOGIN_COMMANDS[profile.agent], exitFile),
-        managed: false,
-      });
+      const result = await this.deps.tmux.createSession(
+        name,
+        this.deps.homeDir ?? os.homedir(),
+        true,
+        {
+          ...launch,
+          env: { ...(launch.env ?? {}), [LOGIN_FLOW_TAG]: entry.tag, COMPANION_APP: '0' },
+          command: loginLaunchLine(test.command ?? LOGIN_COMMANDS[profile.agent], exitFile),
+          managed: false,
+        }
+      );
       if (!result.success) throw new Error('create failed');
     } catch {
       this.deps.unhide(entry.flow.sessionName);
       this.flows.delete(profile.id);
-      this.deps.audit('profile_login_end', { profileId: profile.id, outcome: 'start_failed' }, false);
+      this.deps.audit(
+        'profile_login_end',
+        { profileId: profile.id, outcome: 'start_failed' },
+        false
+      );
       return { error: 'Could not start the login' };
     }
     entry.launched = true;
@@ -233,7 +242,8 @@ export class LoginFlowManager {
 
   async submitCode(profileId: string, rawCode: unknown): Promise<LoginCodeResult> {
     const entry = this.flows.get(profileId);
-    if (!entry || !ACTIVE.has(entry.flow.state)) return { error: 'This login is no longer running' };
+    if (!entry || !ACTIVE.has(entry.flow.state))
+      return { error: 'This login is no longer running' };
     if (entry.flow.agent !== 'claude' || !entry.flow.url)
       return { error: 'This login is not waiting for a code' };
     const code = typeof rawCode === 'string' ? rawCode.trim() : '';
@@ -317,7 +327,8 @@ export class LoginFlowManager {
 
   private async pollOne(e: Entry): Promise<void> {
     const now = this.now();
-    if (now >= e.flow.expiresAt) return this.finish(e, 'expired', 'The login timed out. Try again.');
+    if (now >= e.flow.expiresAt)
+      return this.finish(e, 'expired', 'The login timed out. Try again.');
     if (await this.finishFromExitFile(e)) return;
 
     const cap = await this.deps.tmux.capturePaneJoined(e.flow.sessionName);
@@ -353,7 +364,8 @@ export class LoginFlowManager {
       !!(patch.url || e.flow.url) &&
       (e.flow.agent === 'claude' || !!(patch.deviceCode || e.flow.deviceCode));
     if (readable) patch.unparsed = undefined;
-    else if (parsed.blockedLink || now - e.flow.startedAt >= UNPARSED_AFTER_MS) patch.unparsed = true;
+    else if (parsed.blockedLink || now - e.flow.startedAt >= UNPARSED_AFTER_MS)
+      patch.unparsed = true;
 
     this.update(e, patch);
   }
@@ -390,7 +402,11 @@ export class LoginFlowManager {
 
   private async finish(e: Entry, state: ProfileLoginFlowState, message?: string): Promise<void> {
     if (!ACTIVE.has(e.flow.state)) return;
-    const { url: _url, deviceCode: _code, unparsed: _unparsed, message: _old, ...rest } = e.flow;
+    const rest = { ...e.flow };
+    delete rest.url;
+    delete rest.deviceCode;
+    delete rest.unparsed;
+    delete rest.message;
     e.flow = { ...rest, state, ...(message ? { message } : {}) };
     e.endedAt = this.now();
     if (e.launched) await this.removeSession(e);
@@ -411,7 +427,8 @@ export class LoginFlowManager {
     const tag = await this.deps.tmux.sessionEnvValue(name, LOGIN_FLOW_TAG);
     let gone: boolean;
     if (tag === e.tag) {
-      gone = (await this.deps.tmux.killSessionNow(name)) || (await this.deps.tmux.killSessionNow(name));
+      gone =
+        (await this.deps.tmux.killSessionNow(name)) || (await this.deps.tmux.killSessionNow(name));
     } else {
       // Another owner's session, or none. Unknown (tmux timed out) keeps it hidden.
       gone = tag !== null || !(await this.deps.tmux.sessionExists(name));

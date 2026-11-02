@@ -151,10 +151,7 @@ describe('InputInjector with a Codex pane', () => {
   });
 
   it('Claude 2.1.316 trust prompt: Down + Enter, never Esc; only for the user', async () => {
-    const LIVE = fs.readFileSync(
-      path.join(FIX, '..', 'claude', 'live-trust.txt'),
-      'utf-8'
-    );
+    const LIVE = fs.readFileSync(path.join(FIX, '..', 'claude', 'live-trust.txt'), 'utf-8');
     pane = LIVE;
     // Not the user (babysit, Herald, auto-approval): nothing is sent, on either agent.
     expect(await make().sendChoice([0], 2, false, undefined, 'cl')).toBe(false);

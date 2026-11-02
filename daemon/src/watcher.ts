@@ -206,7 +206,8 @@ export interface SessionWatcherOptions {
 }
 
 /** Open fd of Claude Code's per-session tasks dir: <scratch>/<encoded cwd>/<uuid>/tasks. */
-const TASKS_DIR_FD = /\/([^/]+)\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/tasks$/;
+const TASKS_DIR_FD =
+  /\/([^/]+)\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/tasks$/;
 
 export class SessionWatcher extends EventEmitter {
   /** The default agent (Claude Code): its transcripts are watched under code_home. */
@@ -475,7 +476,10 @@ export class SessionWatcher extends EventEmitter {
   /** Snapshots list live sessions only, so this is always the current mapping. */
   private snapshotOwnership(
     id: string
-  ): Pick<PersistedSessionSnapshot, 'ownedConversationId' | 'ownedTranscriptPath' | 'sessionCreated'> {
+  ): Pick<
+    PersistedSessionSnapshot,
+    'ownedConversationId' | 'ownedTranscriptPath' | 'sessionCreated'
+  > {
     const convId = this.tmuxConversationIds.get(id);
     const file = convId ? this.mappedTranscriptPath(id, convId) : null;
     if (!convId || !file) return {};

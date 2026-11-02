@@ -5,7 +5,13 @@
  */
 import type { ProfileAgent } from './protocol';
 
-export const ALLOWED_LOGIN_HOSTS = ['claude.com', 'claude.ai', 'anthropic.com', 'openai.com', 'chatgpt.com'];
+export const ALLOWED_LOGIN_HOSTS = [
+  'claude.com',
+  'claude.ai',
+  'anthropic.com',
+  'openai.com',
+  'chatgpt.com',
+];
 
 /** A physical line this long may have been hard-wrapped by the program itself. */
 const WRAP_MIN_COLUMNS = 60;

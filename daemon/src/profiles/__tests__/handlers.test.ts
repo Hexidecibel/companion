@@ -149,7 +149,12 @@ describe('profile handlers', () => {
       subscribed: true,
       deviceCapabilities: { dispatch: false },
     };
-    const trigger = { ws: { n: 'trigger' }, authenticated: true, subscribed: true, scope: 'trigger' };
+    const trigger = {
+      ws: { n: 'trigger' },
+      authenticated: true,
+      subscribed: true,
+      scope: 'trigger',
+    };
     const s = setup({ clients: [full, narrow, device, trigger] });
     await s.h.profile_login(full as any, { profileId: 'work' }, 'a');
     const got = s.delivered.filter((m) => m.type === 'profile_login_update').map((m) => m.ws);

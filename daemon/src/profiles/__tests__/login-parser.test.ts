@@ -1,6 +1,7 @@
 import { isAllowedLoginUrl, parseLoginOutput } from '../login-parser';
 
-const Q = 'code=true&client_id=abc&redirect_uri=https%3A%2F%2Fplatform.claude.com%2Foauth&state=xyz';
+const Q =
+  'code=true&client_id=abc&redirect_uri=https%3A%2F%2Fplatform.claude.com%2Foauth&state=xyz';
 const FULL = `https://claude.com/cai/oauth/authorize?${Q}`;
 
 const claudeJoined = [
@@ -43,7 +44,9 @@ describe('parseLoginOutput', () => {
     const line = `If the browser didn't open, visit: ${FULL}`;
     const hard = [];
     for (let i = 0; i < line.length; i += 80) hard.push(line.slice(i, i + 80));
-    const pane = ['Opening browser to sign in…', ...hard, 'Paste code here if prompted > '].join('\n');
+    const pane = ['Opening browser to sign in…', ...hard, 'Paste code here if prompted > '].join(
+      '\n'
+    );
     expect(parseLoginOutput('claude', pane).url).toBe(FULL);
   });
 
@@ -62,7 +65,9 @@ describe('parseLoginOutput', () => {
 
   it('Codex: other code shapes are read too', () => {
     for (const code of ['WXYZ-1234', 'ABC-DEF-GHI', 'A1B2C3D4']) {
-      expect(parseLoginOutput('codex', codexBlock.replace('ABCD-EFGH2', code)).deviceCode).toBe(code);
+      expect(parseLoginOutput('codex', codexBlock.replace('ABCD-EFGH2', code)).deviceCode).toBe(
+        code
+      );
     }
   });
 
