@@ -708,3 +708,8 @@ Follow-up fixes layered on the Mobile UX round above: walks back the activity-ro
 - Claude's real "Trust this folder?" prompt and its Bypass Permissions warning show as a card with Yes and No, and the session reads as waiting meanwhile
 - Answers use the keys the prompt really takes: Claude 2.1.316 draws no digits and selects "No, exit" first, so typed digits did nothing and a stray Enter quit
 - Only the user's own tap answers it; a prompt that has gone sends nothing, and one still up 3 s after the keys reports a failure
+
+## In-app dialogs for remove and rename (2026-11-02)
+- Remove Session, Rename and Delete server use in-app dialogs, because window.confirm and window.prompt do nothing in the macOS and iOS apps
+- The context menu no longer closes when a live conversation auto-scrolls under it
+- A removed session leaves the list right away instead of at the next 5 s poll

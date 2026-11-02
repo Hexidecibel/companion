@@ -17,6 +17,9 @@ import { BabysitBadge } from './babysit/BabysitBadge';
 const NewProjectModal = lazy(() => import('./NewProjectModal').then(m => ({ default: m.NewProjectModal })));
 import { ServerForm } from './ServerForm';
 import { ContextMenu, ContextMenuEntry } from './ContextMenu';
+import { ConfirmDialog } from './ConfirmDialog';
+import { RemoveSessionDialog } from './RemoveSessionDialog';
+import { RenameSessionDialog } from './RenameSessionDialog';
 import { getFontScale, saveFontScale } from '../services/storage';
 import { Sparkline } from './Sparkline';
 import { SkeletonSessionCard } from './Skeleton';
@@ -168,6 +171,9 @@ export function SessionSidebar({
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
   const [fontScale, setFontScale] = useState(getFontScale);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
+  const [removeTarget, setRemoveTarget] = useState<{ serverId: string; sessionId: string } | null>(null);
+  const [renameTarget, setRenameTarget] = useState<{ serverId: string; sessionId: string; currentName: string } | null>(null);
+  const [deleteServerId, setDeleteServerId] = useState<string | null>(null);
   // undefined = not open, null = adding new, string = editing existing
   const [editingServerId, setEditingServerId] = useState<string | undefined | null>(undefined);
   const [newProjectServerId, setNewProjectServerId] = useState<string | null>(null);
@@ -392,15 +398,11 @@ export function SessionSidebar({
     items.push({
       label: 'Delete',
       danger: true,
-      onClick: () => {
-        if (window.confirm(`Delete server "${server?.name || server?.host}"?`)) {
-          deleteServer(serverId);
-        }
-      },
+      onClick: () => setDeleteServerId(serverId),
     });
 
     return items;
-  }, [snapshots, getServer, toggleEnabled, deleteServer, onRemoteCapabilities, onConcierge]);
+  }, [snapshots, getServer, toggleEnabled, onRemoteCapabilities, onConcierge]);
 
   const buildSessionMenuItems = useCallback((serverId: string, sessionId: string, tmuxSessionName?: string): ContextMenuEntry[] => {
     const isMuted = mutedSessions?.has(sessionId) ?? false;
@@ -428,13 +430,7 @@ export function SessionSidebar({
       label: 'Rename',
       onClick: () => {
         const currentName = summaries.get(serverId)?.sessions.find(s => s.id === sessionId)?.friendlyName || '';
-        const newName = window.prompt('Session name:', currentName);
-        if (newName !== null) {
-          const conn = connectionManager.getConnection(serverId);
-          if (conn) {
-            conn.sendRequest('rename_session', { sessionId, name: newName });
-          }
-        }
+        setRenameTarget({ serverId, sessionId, currentName });
       },
     });
 
@@ -470,16 +466,7 @@ export function SessionSidebar({
     items.push({
       label: 'Remove Session',
       danger: true,
-      onClick: () => {
-        const ok = window.confirm(
-          'Remove this session?\n\nThe conversation log will be archived and the session will disappear from the list. This cannot be undone via the app.'
-        );
-        if (!ok) return;
-        const conn = connectionManager.getConnection(serverId);
-        if (conn) {
-          conn.sendRequest('remove_session', { sessionId });
-        }
-      },
+      onClick: () => setRemoveTarget({ serverId, sessionId }),
     });
 
     return items;
@@ -923,6 +910,32 @@ export function SessionSidebar({
           }
           position={contextMenu.position}
           onClose={() => setContextMenu(null)}
+        />
+      )}
+
+      {renameTarget && (
+        <RenameSessionDialog
+          serverId={renameTarget.serverId}
+          sessionId={renameTarget.sessionId}
+          currentName={renameTarget.currentName}
+          onClose={() => setRenameTarget(null)}
+        />
+      )}
+      {removeTarget && (
+        <RemoveSessionDialog
+          serverId={removeTarget.serverId}
+          sessionId={removeTarget.sessionId}
+          onClose={() => setRemoveTarget(null)}
+        />
+      )}
+
+      {deleteServerId && (
+        <ConfirmDialog
+          title={`Delete server "${getServer(deleteServerId)?.name || getServer(deleteServerId)?.host}"?`}
+          confirmLabel="Delete"
+          danger
+          onConfirm={() => deleteServer(deleteServerId)}
+          onClose={() => setDeleteServerId(null)}
         />
       )}
 

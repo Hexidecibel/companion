@@ -42,18 +42,25 @@ export function ContextMenu({ items, position, onClose }: ContextMenuProps) {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();
     };
-    const handleScroll = () => onClose();
+    // The user scrolling away closes the menu. Not the `scroll` event: it also
+    // fires when a live conversation auto-scrolls, which closed the menu under
+    // the pointer before the click landed.
+    const handleUserScroll = (e: Event) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) onClose();
+    };
 
     document.addEventListener('mousedown', handlePointerDown);
     document.addEventListener('touchstart', handlePointerDown);
     document.addEventListener('keydown', handleKeyDown);
-    window.addEventListener('scroll', handleScroll, true);
+    document.addEventListener('wheel', handleUserScroll, { passive: true });
+    document.addEventListener('touchmove', handleUserScroll, { passive: true });
 
     return () => {
       document.removeEventListener('mousedown', handlePointerDown);
       document.removeEventListener('touchstart', handlePointerDown);
       document.removeEventListener('keydown', handleKeyDown);
-      window.removeEventListener('scroll', handleScroll, true);
+      document.removeEventListener('wheel', handleUserScroll);
+      document.removeEventListener('touchmove', handleUserScroll);
     };
   }, [onClose]);
 

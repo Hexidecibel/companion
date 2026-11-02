@@ -12,6 +12,8 @@ import { TmuxModal } from './TmuxModal';
 
 const NewProjectModal = lazy(() => import('./NewProjectModal').then(m => ({ default: m.NewProjectModal })));
 import { ContextMenu, ContextMenuEntry } from './ContextMenu';
+import { RemoveSessionDialog } from './RemoveSessionDialog';
+import { RenameSessionDialog } from './RenameSessionDialog';
 import { ConnectionSnapshot } from '../services/ConnectionManager';
 import { Sparkline } from './Sparkline';
 import { connectionManager } from '../services/ConnectionManager';
@@ -303,6 +305,8 @@ interface MobileSessionItemProps {
 function MobileSessionItem({ session, serverId, onSelect, onOpenInSplit, onCloseSplit, isSecondary, isMuted, onToggleMute }: MobileSessionItemProps) {
   const [killing, setKilling] = useState(false);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
+  const [confirmRemove, setConfirmRemove] = useState(false);
+  const [renaming, setRenaming] = useState(false);
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const didLongPress = useRef(false);
 
@@ -357,13 +361,7 @@ function MobileSessionItem({ session, serverId, onSelect, onOpenInSplit, onClose
     }
     items.push({
       label: 'Rename',
-      onClick: () => {
-        const newName = window.prompt('Session name:', session.friendlyName || '');
-        if (newName !== null) {
-          const conn = connectionManager.getConnection(serverId);
-          if (conn) conn.sendRequest('rename_session', { sessionId: session.id, name: newName });
-        }
-      },
+      onClick: () => setRenaming(true),
     });
     if (onToggleMute) {
       items.push({ label: isMuted ? 'Unmute' : 'Mute', onClick: () => onToggleMute(session.id) });
@@ -375,14 +373,7 @@ function MobileSessionItem({ session, serverId, onSelect, onOpenInSplit, onClose
     items.push({
       label: 'Remove Session',
       danger: true,
-      onClick: () => {
-        const ok = window.confirm(
-          'Remove this session?\n\nThe conversation log will be archived and the session will disappear from the list. This cannot be undone via the app.'
-        );
-        if (!ok) return;
-        const conn = connectionManager.getConnection(serverId);
-        if (conn) conn.sendRequest('remove_session', { sessionId: session.id });
-      },
+      onClick: () => setConfirmRemove(true),
     });
     return items;
   }, [isSecondary, onCloseSplit, onOpenInSplit, onToggleMute, isMuted, session, serverId, killing, handleKill]);
@@ -437,6 +428,17 @@ function MobileSessionItem({ session, serverId, onSelect, onOpenInSplit, onClose
           items={menuItems}
           position={contextMenu}
           onClose={() => setContextMenu(null)}
+        />
+      )}
+      {confirmRemove && (
+        <RemoveSessionDialog serverId={serverId} sessionId={session.id} onClose={() => setConfirmRemove(false)} />
+      )}
+      {renaming && (
+        <RenameSessionDialog
+          serverId={serverId}
+          sessionId={session.id}
+          currentName={session.friendlyName || ''}
+          onClose={() => setRenaming(false)}
         />
       )}
     </div>

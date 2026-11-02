@@ -14,7 +14,7 @@ const POLL_INTERVAL = 5000;
 /** A session status event re-polls that server after this (coalesces bursts). */
 const EVENT_REPOLL_DELAY = 250;
 /** Broadcasts that mean some session's status changed on that server. */
-const STATUS_EVENTS = new Set(['status_change', 'other_session_activity', 'session_completed']);
+const STATUS_EVENTS = new Set(['status_change', 'other_session_activity', 'session_completed', 'session_removed']);
 
 function sameJson(a: unknown, b: unknown): boolean {
   if (a === b) return true;

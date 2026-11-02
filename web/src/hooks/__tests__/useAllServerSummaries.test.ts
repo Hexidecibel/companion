@@ -173,6 +173,16 @@ describe('useAllServerSummaries: live status (regressions)', () => {
     expect(conn.sendRequest).toHaveBeenCalledTimes(2); // the change is fetched now, not in 5 s
   });
 
+  it('a removed session leaves the list right away, not at the next 5 s poll', async () => {
+    const { result } = renderHook(() => useAllServerSummaries());
+    await answer(0, summary(sess('s1'), sess('s2')));
+    act(() => messageHandlers.forEach((h) => h({ type: 'session_removed' })));
+    await act(async () => { await vi.advanceTimersByTimeAsync(300); });
+    expect(conn.sendRequest).toHaveBeenCalledTimes(2);
+    await answer(1, summary(sess('s2')));
+    expect(result.current.get('a')?.sessions.map((s) => s.id)).toEqual(['s2']);
+  });
+
   it('the offline cache never overrides fresher data', async () => {
     const { result } = renderHook(() => useAllServerSummaries());
     expect(result.current.get('a')?.sessions[0].id).toBe('cached');
