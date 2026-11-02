@@ -124,7 +124,25 @@ interface PersistedSessionSnapshot {
   savedAt: number; // when this snapshot was taken
   /** Account profile (absent = the agent's default). */
   profileId?: string;
+  /**
+   * The direct mapping while the session was alive. A dead session's mapping
+   * leaves memory at the next refresh; this is what lets Remove Session still
+   * archive its own transcript. `conversationPath` is display only: it can be a
+   * folder fallback.
+   */
+  ownedConversationId?: string;
+  ownedTranscriptPath?: string;
+  /** tmux `created` (seconds) of the session that made that mapping. */
+  sessionCreated?: string;
 }
+
+/** Why Remove Session left a transcript alone. */
+export type TranscriptKeepReason =
+  | 'no_mapping'
+  | 'claimed_by_other'
+  | 'predates_session'
+  | 'process_owns_other'
+  | 'file_missing';
 
 interface TrackedConversation {
   path: string;
@@ -417,6 +435,7 @@ export class SessionWatcher extends EventEmitter {
         if (snap.conversationPath && !fs.existsSync(snap.conversationPath)) {
           continue;
         }
+        this.adoptPersistedMapping(snap);
         this.persistedSessions.set(snap.id, snap);
         loaded++;
       }
@@ -426,6 +445,46 @@ export class SessionWatcher extends EventEmitter {
     } catch {
       // No persisted sessions or parse error — start fresh
     }
+  }
+
+  /** A snapshot from before ownership was recorded: take it from the mappings file. */
+  private adoptPersistedMapping(snap: PersistedSessionSnapshot): void {
+    if (snap.ownedConversationId || !snap.conversationPath) return;
+    const convId = this.tmuxConversationIds.get(snap.id);
+    if (!convId) return;
+    const file = path.basename(snap.conversationPath).includes(convId)
+      ? snap.conversationPath
+      : this.transcriptPathForKey(this.claudeKeyOfFile(snap.conversationPath), convId);
+    if (!file) return;
+    snap.ownedConversationId = convId;
+    snap.ownedTranscriptPath = file;
+    const created = this.mappingIdentity.get(snap.id)?.created;
+    if (created) snap.sessionCreated = created;
+  }
+
+  /** The file of a live session's mapped conversation, loaded or not. */
+  private mappedTranscriptPath(sessionName: string, convId: string): string | null {
+    const loaded = this.conversations.get(convId)?.path;
+    if (loaded) return loaded;
+    const codex = this.codexBySession.get(sessionName);
+    if (codex?.convId === convId) return codex.file;
+    const key = this.tmuxPathBySession.get(sessionName);
+    return key ? this.transcriptPathForKey(key, convId) : null;
+  }
+
+  /** Snapshots list live sessions only, so this is always the current mapping. */
+  private snapshotOwnership(
+    id: string
+  ): Pick<PersistedSessionSnapshot, 'ownedConversationId' | 'ownedTranscriptPath' | 'sessionCreated'> {
+    const convId = this.tmuxConversationIds.get(id);
+    const file = convId ? this.mappedTranscriptPath(id, convId) : null;
+    if (!convId || !file) return {};
+    const created = this.tmuxSessionIdentity.get(id)?.created;
+    return {
+      ownedConversationId: convId,
+      ownedTranscriptPath: file,
+      ...(created ? { sessionCreated: created } : {}),
+    };
   }
 
   /** Save current session list to disk. Called on session changes and shutdown. */
@@ -443,6 +502,7 @@ export class SessionWatcher extends EventEmitter {
         messageCount: s.messageCount,
         savedAt: 0,
         ...(s.profileId ? { profileId: s.profileId } : {}),
+        ...this.snapshotOwnership(s.id),
       }));
       // Written only when something besides savedAt changed (this runs on
       // every 5 s refresh; an idle box used to rewrite the file each time).
@@ -2161,6 +2221,70 @@ export class SessionWatcher extends EventEmitter {
   }
 
   /**
+   * The transcript Remove Session may archive, or why none. Stricter than
+   * getConversationInfo, whose folder and snapshot fallbacks are fine for
+   * showing a chat but can name another session's file (2026-10-31: a new
+   * session with no prompt had an older session's transcript archived). Only a
+   * direct mapping counts, and everything doubtful leaves the file in place.
+   * Call before killing the session: the open tasks dir needs its process.
+   */
+  async resolveRemovableTranscript(
+    sessionId: string
+  ): Promise<{ path: string } | { path: null; reason: TranscriptKeepReason }> {
+    const live = this.tmuxPathBySession.has(sessionId);
+    const snap = live ? undefined : this.persistedSessions.get(sessionId);
+    const convId = live ? this.tmuxConversationIds.get(sessionId) : snap?.ownedConversationId;
+    if (!convId) return { path: null, reason: 'no_mapping' };
+    if (this.conversationClaimedByOther(sessionId, convId)) {
+      return { path: null, reason: 'claimed_by_other' };
+    }
+
+    const file = live ? this.mappedTranscriptPath(sessionId, convId) : snap?.ownedTranscriptPath;
+    if (!file) return { path: null, reason: 'file_missing' };
+    let stats: fs.Stats;
+    try {
+      stats = fs.statSync(file);
+    } catch {
+      return { path: null, reason: 'file_missing' };
+    }
+    const createdMs = Number(snap?.sessionCreated) * 1000;
+    const couldOwn = live
+      ? this.couldOwnTranscript(sessionId, stats)
+      : !(createdMs > 0 && stats.mtimeMs < createdMs - 1000);
+    if (!couldOwn) return { path: null, reason: 'predates_session' };
+
+    // The running process names its conversation: a mapping it contradicts is
+    // wrong even when the file was written after the session started. The chain
+    // counts: after a compaction the dir can still name the earlier id.
+    if (live && !this.sessionAgents.has(sessionId)) {
+      const running = await this.detectConversationForSession(sessionId);
+      if (
+        running &&
+        running !== convId &&
+        !this.tmuxConversationHistory.get(sessionId)?.includes(running)
+      ) {
+        return { path: null, reason: 'process_owns_other' };
+      }
+    }
+    return { path: file };
+  }
+
+  private conversationClaimedByOther(sessionId: string, convId: string): boolean {
+    for (const [name, id] of this.tmuxConversationIds) {
+      if (name !== sessionId && id === convId) return true;
+    }
+    for (const [name, ids] of this.tmuxConversationHistory) {
+      if (name !== sessionId && ids.includes(convId)) return true;
+    }
+    for (const [name, snap] of this.persistedSessions) {
+      if (name !== sessionId && !this.tmuxPathBySession.has(name)) {
+        if (snap.ownedConversationId === convId) return true;
+      }
+    }
+    return false;
+  }
+
+  /**
    * Drop all watcher state for a session: persisted snapshot, in-memory
    * conversations matching the session, tmux mapping, and history. Used by
    * the `remove_session` handler so a removed session does not get
@@ -2218,6 +2342,16 @@ export class SessionWatcher extends EventEmitter {
     this.mappingIdentity.delete(sessionId);
     this.newlyCreatedSessions.delete(sessionId);
     this.compactedSessions.delete(sessionId);
+
+    // Until the next refresh these would let a late read or file event load the
+    // folder's newest transcript for the removed name. A session that survived
+    // its kill comes back with that refresh.
+    this.tmuxPathBySession.delete(sessionId);
+    this.tmuxSessionWorkingDirs.delete(sessionId);
+    this.tmuxSessionIdentity.delete(sessionId);
+    for (const [ePath, name] of this.tmuxSessionByPath) {
+      if (name === sessionId) this.tmuxSessionByPath.delete(ePath);
+    }
 
     if (this.activeTmuxSession === sessionId) {
       this.activeTmuxSession = null;

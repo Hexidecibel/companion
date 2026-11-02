@@ -894,10 +894,17 @@ export function registerSessionHandlers(ctx: HandlerContext): Record<string, Mes
       const sessionId = removePayload.sessionId;
       console.log(`WebSocket: remove_session "${sessionId}"`);
 
-      // Capture conversation file path BEFORE we forget the session — once
-      // the watcher drops it, getConversationInfo() may not find it anymore.
-      const convInfo = ctx.watcher.getConversationInfo(sessionId);
-      const conversationPath = convInfo?.path;
+      // Decide BEFORE the kill and the forget: the check reads the mapping and
+      // the running process. Never getConversationInfo here: its fallbacks can
+      // name a transcript this session does not own.
+      const owned = await ctx.watcher.resolveRemovableTranscript(sessionId);
+      const conversationPath = owned.path;
+      let archiveSkipped: string | undefined = owned.path === null ? owned.reason : undefined;
+      if (owned.path === null) {
+        console.log(
+          `WebSocket: remove_session leaving transcript in place for "${sessionId}": ${owned.reason}`
+        );
+      }
 
       // Step 1: best-effort tmux kill (ignore "already dead").
       let tmuxKilled = false;
@@ -946,9 +953,11 @@ export function registerSessionHandlers(ctx: HandlerContext): Record<string, Mes
             jsonlArchived = true;
             console.log(`WebSocket: remove_session archived JSONL → ${archivePath}`);
           } else {
+            archiveSkipped = 'file_missing';
             console.log(`WebSocket: remove_session JSONL already missing: ${conversationPath}`);
           }
         } catch (err) {
+          archiveSkipped = 'archive_failed';
           console.error(`WebSocket: remove_session failed to archive JSONL: ${err}`);
         }
       }
@@ -963,7 +972,8 @@ export function registerSessionHandlers(ctx: HandlerContext): Record<string, Mes
           conversationsRemoved: forgot.conversationsRemoved,
           mappingRemoved: forgot.mappingRemoved,
           jsonlArchived,
-          archivePath,
+          archivePath: jsonlArchived ? archivePath : undefined,
+          ...(archiveSkipped ? { archiveSkipped } : {}),
         },
         requestId,
       });

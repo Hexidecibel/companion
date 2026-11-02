@@ -713,3 +713,7 @@ Follow-up fixes layered on the Mobile UX round above: walks back the activity-ro
 - Remove Session, Rename and Delete server use in-app dialogs, because window.confirm and window.prompt do nothing in the macOS and iOS apps
 - The context menu no longer closes when a live conversation auto-scrolls under it
 - A removed session leaves the list right away instead of at the next 5 s poll
+
+## Remove Session archives only its own transcript (2026-11-02)
+- Remove Session archives a transcript only through a direct mapping the session owns; anything doubtful leaves the file in place
+- The response says why with `archiveSkipped`, and snapshots record ownership so a dead session can still archive its own transcript

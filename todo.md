@@ -12,6 +12,9 @@ Quick capture for ideas and tasks. Run `/plan` to process into detailed plans.
 - TestFlight beta -- submit iOS build for beta testing before public release
 
 ## Upcoming
+- BUG: a new session alone in its folder can display an older transcript via `ensureConversationLoaded`
+- BUG: plain `codex` parks on an "Update available" screen that shows only in the terminal, so the app sees nothing to answer
+- Flaky test: `daemon` `ledger-codex.test.ts:189`
 - Packaging follow-ups -- (1) "Get the apps" should link a proper signed/notarized macOS .dmg for friends, not the updater .app.tar.gz; (2) include Concierge in the Docker image; (3) /health reports version 1.0.0 on host installs vs 1.0.<n> in the image -- unify version source; (4) live-test with a friend: host-network mode (Nearby discovery), Tailscale sidecar joining a real tailnet, interactive /login in the container. See plan.md 'Packaging for friends & devs'
 - Developer ID cert expires 2027-02-01 -- renew + re-run bin/desktop-signing import-devid before then
 - Custom "Herald" wake word -- train an openWakeWord model overnight on this box from synthetic Kokoro/Piper "Herald"/"Hey Herald" clips + negatives (bin/ script), load via HERALD_WAKE_MODELS, add spellings to WAKE_NAMES; keep "hey jarvis" as fallback. See plan.md 'Voice Front Layer' [planned]
