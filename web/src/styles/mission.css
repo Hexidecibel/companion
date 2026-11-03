@@ -363,7 +363,15 @@
   box-shadow: var(--shadow-lg);
 }
 
+.needs-you-list__row {
+  display: flex;
+  align-items: stretch;
+  gap: 4px;
+}
+
 .needs-you-list__item {
+  flex: 1;
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -393,6 +401,20 @@
   font-size: 12px;
   color: var(--accent-amber);
 }
+
+.needs-you-list__done {
+  flex-shrink: 0;
+  min-height: 44px;
+  padding: 0 10px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: #9ca3af;
+  font-size: 12px;
+  cursor: pointer;
+}
+.needs-you-list__done:hover,
+.needs-you-list__done:focus-visible { background: #374151; color: #f3f4f6; }
 
 /* ---------- Quiet section (idle / already-seen done) ---------- */
 .mission-quiet-section {

@@ -1,5 +1,6 @@
-import type { ServerSummary } from '../types';
+import type { ServerSummary, SessionSummary } from '../types';
 import { needsYou } from './missionState';
+import { isMarkedDone } from './markedDone';
 
 export interface WaitingRef {
   serverId: string;
@@ -17,16 +18,19 @@ export interface SessionRef {
 /**
  * The sessions that need the user (a prompt or a question; not the ones that
  * just finished and reported back) across every server, the one waiting
- * longest first, without the current one. Pure (no stores).
+ * longest first, without the current one and without the ones the user
+ * marked done (`isMarked`, default: the markedDone store).
  */
 export function waitingSessions(
   summaries: Map<string, ServerSummary>,
   current?: SessionRef | null,
+  isMarked: (serverId: string, s: SessionSummary) => boolean = isMarkedDone,
 ): WaitingRef[] {
   const out: WaitingRef[] = [];
   for (const [serverId, summary] of summaries) {
     for (const s of summary.sessions) {
       if (!needsYou(s) || s.inactive) continue;
+      if (isMarked(serverId, s)) continue;
       if (current && current.serverId === serverId && current.sessionId === s.id) continue;
       out.push({
         serverId,
@@ -43,6 +47,7 @@ export function waitingSessions(
 export function nextWaiting(
   summaries: Map<string, ServerSummary>,
   current?: SessionRef | null,
+  isMarked?: (serverId: string, s: SessionSummary) => boolean,
 ): WaitingRef | null {
-  return waitingSessions(summaries, current)[0] ?? null;
+  return waitingSessions(summaries, current, isMarked)[0] ?? null;
 }

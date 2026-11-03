@@ -3,8 +3,12 @@ import type { ServerSummary } from '../../types';
 import { useMissionOrder } from '../../hooks/useMissionOrder';
 import { waitingSessions } from '../../services/nextWaiting';
 import { isUnseen, onLastViewedChange } from '../../services/lastViewed';
+import {
+  getMarkedDoneVersion, isMarkedDone, markDone, onMarkedDoneChange, pruneMarkedDone, unmarkDone,
+} from '../../services/markedDone';
 import { missionSection, missionState, type MissionState } from '../../services/missionState';
 import type { MissionEntry } from '../../hooks/useMissionOrder';
+import { missionKey } from '../../services/missionOrder';
 import { SessionTile } from './SessionTile';
 import { QuietRow } from './QuietRow';
 
@@ -27,6 +31,7 @@ interface Placed {
   entry: MissionEntry;
   state: MissionState;
   unseen: boolean;
+  marked: boolean;
 }
 
 /**
@@ -42,6 +47,7 @@ interface Placed {
 export function MissionControl({ summaries, serverNames, onOpenSession }: MissionControlProps) {
   const { entries, move } = useMissionOrder(summaries);
   const viewedVersion = useSyncExternalStore(bumpLastViewed, getLastViewedVersion, getLastViewedVersion);
+  const markedVersion = useSyncExternalStore(onMarkedDoneChange, getMarkedDoneVersion, getMarkedDoneVersion);
   const [now, setNow] = useState(() => Date.now());
   const [highlight, setHighlight] = useState<string | null>(null);
   const stepRef = useRef(0);
@@ -60,24 +66,36 @@ export function MissionControl({ summaries, serverNames, onOpenSession }: Missio
     return () => clearTimeout(t);
   }, [highlight]);
 
-  const waiting = useMemo(() => waitingSessions(summaries), [summaries]);
+  // Marks for sessions that are gone (on servers we have a summary for) go.
+  useEffect(() => {
+    const live = new Set<string>();
+    for (const [serverId, summary] of summaries) {
+      for (const s of summary.sessions) live.add(missionKey(serverId, s.id));
+    }
+    pruneMarkedDone(live, new Set(summaries.keys()));
+  }, [summaries]);
+
+  // markedVersion: recount when a session is marked / unmarked (reads the store).
+  const waiting = useMemo(() => waitingSessions(summaries), [summaries, markedVersion]);
   const multiServer = summaries.size > 1;
 
   const { active, quiet, activeKeys, quietKeys } = useMemo(() => {
     const active: Placed[] = [];
     const quiet: Placed[] = [];
     for (const entry of entries) {
-      const unseen = isUnseen(entry.serverId, entry.session.id, entry.session.lastActivity, now);
-      const state = missionState(entry.session, unseen);
-      (missionSection(state) === 'active' ? active : quiet).push({ entry, state, unseen });
+      const marked = isMarkedDone(entry.serverId, entry.session);
+      // A mark reads as viewed: no unseen dot while it holds.
+      const unseen = !marked && isUnseen(entry.serverId, entry.session.id, entry.session.lastActivity, now);
+      const state = missionState(entry.session, unseen, marked);
+      (missionSection(state) === 'active' ? active : quiet).push({ entry, state, unseen, marked });
     }
     return {
       active, quiet,
       activeKeys: new Set(active.map((p) => p.entry.key)),
       quietKeys: new Set(quiet.map((p) => p.entry.key)),
     };
-    // viewedVersion: re-split when a session is marked viewed (isUnseen reads the store).
-  }, [entries, now, viewedVersion]);
+    // viewedVersion / markedVersion: re-split when a session is viewed or marked (the stores are read above).
+  }, [entries, now, viewedVersion, markedVersion]);
 
   const stepToWaiting = useCallback(() => {
     if (waiting.length === 0) return;
@@ -125,12 +143,13 @@ export function MissionControl({ summaries, serverNames, onOpenSession }: Missio
             onOpen={onOpenSession}
             onMoveUp={i > 0 ? () => move(e.key, -1, activeKeys) : undefined}
             onMoveDown={i < active.length - 1 ? () => move(e.key, 1, activeKeys) : undefined}
+            onMarkDone={state === 'working' ? undefined : () => markDone(e.serverId, e.session)}
           />
         ))}
         {quiet.length > 0 && (
           <section className="mission-quiet-section" aria-label="Quiet sessions">
             <div className="mission-quiet-section__title">Quiet</div>
-            {quiet.map(({ entry: e, unseen }, i) => (
+            {quiet.map(({ entry: e, unseen, marked }, i) => (
               <QuietRow
                 key={e.key}
                 serverId={e.serverId}
@@ -141,6 +160,7 @@ export function MissionControl({ summaries, serverNames, onOpenSession }: Missio
                 onOpen={onOpenSession}
                 onMoveUp={i > 0 ? () => move(e.key, -1, quietKeys) : undefined}
                 onMoveDown={i < quiet.length - 1 ? () => move(e.key, 1, quietKeys) : undefined}
+                onUnmark={marked ? () => unmarkDone(e.serverId, e.session.id) : undefined}
               />
             ))}
           </section>

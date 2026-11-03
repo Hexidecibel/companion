@@ -34,3 +34,16 @@ describe('missionState', () => {
     expect(missionSection('error')).toBe('active');
   });
 });
+
+describe('missionState with a done mark', () => {
+  it('a marked session reads as idle (quiet), even when it needs you or errored', () => {
+    expect(missionState(s({ status: 'waiting', attention: 'needs_you' }), true, true)).toBe('idle');
+    expect(missionState(s({ status: 'waiting', attention: 'done' }), true, true)).toBe('idle');
+    expect(missionState(s({ status: 'error' }), false, true)).toBe('idle');
+    expect(missionSection(missionState(s({ status: 'waiting' }), false, true))).toBe('quiet');
+  });
+
+  it('working still wins over a mark', () => {
+    expect(missionState(s({ status: 'working' }), false, true)).toBe('working');
+  });
+});

@@ -13,25 +13,29 @@ export interface QuietRowProps {
   onOpen: (serverId: string, sessionId: string, pending: boolean) => void;
   onMoveUp?: () => void;
   onMoveDown?: () => void;
+  /** The user marked it done by hand: the menu offers "Unmark". */
+  onUnmark?: () => void;
 }
 
 /**
  * One compact line for a session with nothing going on (idle, or done and
  * already looked at): dot, name, relative time, unseen dot. Tap opens it;
- * long-press moves it within the Quiet section.
+ * long-press moves it within the Quiet section (and offers Unmark when it
+ * was marked done by hand).
  */
 export const QuietRow = memo(function QuietRow({
-  serverId, session, serverLabel, unseen, now = Date.now(), onOpen, onMoveUp, onMoveDown,
+  serverId, session, serverLabel, unseen, now = Date.now(), onOpen, onMoveUp, onMoveDown, onUnmark,
 }: QuietRowProps) {
   // Quiet rows never need the user, so they open without the pending-prompt flag.
   const open = useCallback(() => onOpen(serverId, session.id, false), [onOpen, serverId, session.id]);
-  const { menu, closeMenu, handlers } = useTileMenu(open, !!onMoveUp || !!onMoveDown);
+  const { menu, closeMenu, handlers } = useTileMenu(open, !!onMoveUp || !!onMoveDown || !!onUnmark);
   const name = session.friendlyName || session.name;
   const time = session.lastActivity > 0 ? formatAgo(Math.max(0, now - session.lastActivity)) : '';
   const menuItems: ContextMenuEntry[] = [
     { label: 'Move up', onClick: () => onMoveUp?.(), disabled: !onMoveUp },
     { label: 'Move down', onClick: () => onMoveDown?.(), disabled: !onMoveDown },
     null,
+    ...(onUnmark ? [{ label: 'Unmark', onClick: onUnmark }] : []),
     { label: 'Open', onClick: open },
   ];
   return (
@@ -41,7 +45,7 @@ export const QuietRow = memo(function QuietRow({
       data-session-key={`${serverId}:${session.id}`}
       role="button"
       tabIndex={0}
-      aria-label={`${name}, idle`}
+      aria-label={`${name}, ${onUnmark ? 'marked done' : 'idle'}`}
       onKeyDown={(e) => { if (e.key === 'Enter' && e.target === e.currentTarget) open(); }}
       {...handlers}
     >

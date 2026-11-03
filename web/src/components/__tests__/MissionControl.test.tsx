@@ -13,6 +13,7 @@ import { MissionControl } from '../mission/MissionControl';
 import { NeedsYouChip } from '../mission/NeedsYouChip';
 import { MISSION_ORDER_KEY, resetMissionOrderCache } from '../../services/missionOrder';
 import { resetLastViewedCache } from '../../services/lastViewed';
+import { resetMarkedDoneCache } from '../../services/markedDone';
 
 const NOW = Date.now();
 const s = (id: string, p: Partial<SessionSummary> = {}): SessionSummary => ({
@@ -30,6 +31,7 @@ describe('MissionControl', () => {
     localStorage.clear();
     resetMissionOrderCache();
     resetLastViewedCache();
+    resetMarkedDoneCache();
   });
 
   it('orders new sessions by recent activity, then keeps that order', () => {
@@ -100,6 +102,7 @@ describe('MissionControl sections', () => {
     localStorage.clear();
     resetMissionOrderCache();
     resetLastViewedCache();
+    resetMarkedDoneCache();
   });
   const quietNames = () =>
     screen.queryAllByTestId('mission-quiet').map((el) => el.querySelector('.mission-quiet__name')?.textContent);
@@ -165,6 +168,10 @@ describe('MissionControl sections', () => {
 });
 
 describe('NeedsYouChip', () => {
+  beforeEach(() => {
+    localStorage.clear();
+    resetMarkedDoneCache();
+  });
   const sums = new Map([
     ['a', summary('a', [
       s('cur', { status: 'waiting', waitingSince: NOW - 99_000 }),
@@ -204,11 +211,82 @@ describe('NeedsYouChip', () => {
       fireEvent.touchEnd(chip);
       fireEvent.click(chip); // the click after a long press does not jump
       expect(onJump).not.toHaveBeenCalled();
-      const items = screen.getAllByRole('menuitem');
+      const items = screen.getAllByRole('menuitem').filter((i) => i.classList.contains('needs-you-list__item'));
       expect(items.map((i) => i.textContent)).toEqual(['w210m', 'w13m']);
       fireEvent.click(items[1]);
       expect(onJump).toHaveBeenCalledWith('a', 'w1');
       expect(screen.queryByRole('menu')).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe('Mark done', () => {
+  beforeEach(() => {
+    localStorage.clear();
+    resetMissionOrderCache();
+    resetLastViewedCache();
+    resetMarkedDoneCache();
+  });
+
+  const prompt = (signature: string) => ({
+    kind: 'choice' as const, question: 'Ship it?', options: [{ label: 'Yes' }, { label: 'No' }], signature,
+  });
+  const tile = (key: string) => document.querySelector(`[data-session-key="${key}"]`) as HTMLElement;
+
+  it('moves a needs-you tile to Quiet and out of the strip; Unmark brings it back', () => {
+    const sums = new Map([['a', summary('a', [
+      s('w1', { status: 'waiting', waitingSince: NOW - 5000 }),
+      s('w2', { status: 'waiting', waitingSince: NOW - 9000 }),
+    ])]]);
+    render(<MissionControl summaries={sums} serverNames={new Map()} onOpenSession={() => {}} />);
+    expect(screen.getByRole('button', { name: /2 need you/ })).toBeTruthy();
+    fireEvent.contextMenu(tile('a:w1'));
+    fireEvent.click(screen.getByText('Mark done'));
+    expect(names()).toEqual(['w2']);
+    expect(screen.getAllByTestId('mission-quiet').map((el) => el.getAttribute('data-session-key'))).toEqual(['a:w1']);
+    expect(screen.getByRole('button', { name: /1 need you/ })).toBeTruthy();
+    fireEvent.contextMenu(tile('a:w1'));
+    fireEvent.click(screen.getByText('Unmark'));
+    expect(screen.getAllByTestId('mission-tile')).toHaveLength(2);
+    expect(screen.getByRole('button', { name: /2 need you/ })).toBeTruthy();
+  });
+
+  it('working tiles do not offer Mark done; unmarked quiet rows do not offer Unmark', () => {
+    const sums = new Map([['a', summary('a', [s('busy', { status: 'working' }), s('idle1')])]]);
+    render(<MissionControl summaries={sums} serverNames={new Map()} onOpenSession={() => {}} />);
+    fireEvent.contextMenu(tile('a:busy'));
+    expect(screen.queryByText('Mark done')).toBeNull();
+    expect(screen.queryByText('Unmark')).toBeNull();
+  });
+
+  it('a new prompt resurfaces a marked session', () => {
+    const before = new Map([['a', summary('a', [s('w', { status: 'waiting', pendingPrompt: prompt('p1') })])]]);
+    const { rerender } = render(<MissionControl summaries={before} serverNames={new Map()} onOpenSession={() => {}} />);
+    fireEvent.contextMenu(tile('a:w'));
+    fireEvent.click(screen.getByText('Mark done'));
+    expect(screen.queryAllByTestId('mission-tile')).toHaveLength(0);
+    // Same prompt, new summary object: stays quiet.
+    rerender(<MissionControl summaries={new Map([['a', summary('a', [s('w', { status: 'waiting', pendingPrompt: prompt('p1') })])]])} serverNames={new Map()} onOpenSession={() => {}} />);
+    expect(screen.queryAllByTestId('mission-tile')).toHaveLength(0);
+    rerender(<MissionControl summaries={new Map([['a', summary('a', [s('w', { status: 'waiting', pendingPrompt: prompt('p2') })])]])} serverNames={new Map()} onOpenSession={() => {}} />);
+    expect(names()).toEqual(['w']);
+    expect(screen.getByText('Ship it?')).toBeTruthy();
+  });
+
+  it('the Needs you list offers Mark done, which drops it from the count', () => {
+    vi.useFakeTimers();
+    try {
+      const sums = new Map([['a', summary('a', [
+        s('w1', { status: 'waiting', waitingSince: NOW - 60_000 }),
+        s('w2', { status: 'waiting', waitingSince: NOW - 120_000 }),
+      ])]]);
+      render(<NeedsYouChip summaries={sums} current={null} onJump={() => {}} now={NOW} />);
+      const chip = screen.getByRole('button', { name: /2 need you/ });
+      fireEvent.contextMenu(chip);
+      fireEvent.click(screen.getByRole('menuitem', { name: 'Mark w2 done' }));
+      expect(screen.getByRole('button', { name: /1 needs you/ })).toBeTruthy();
     } finally {
       vi.useRealTimers();
     }

@@ -1,6 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import type { ServerSummary, SessionSummary } from '../../types';
 import { waitingSessions, nextWaiting } from '../nextWaiting';
+import { markDone, resetMarkedDoneCache } from '../markedDone';
 
 const s = (p: Partial<SessionSummary> & { id: string }): SessionSummary => ({
   name: p.id, projectPath: `/p/${p.id}`, status: 'idle', lastActivity: 1000, ...p,
@@ -61,5 +62,36 @@ describe('nextWaiting', () => {
     ])]]);
     expect(waitingSessions(m).map((w) => w.sessionId)).toEqual(['old', 'asks']);
     expect(nextWaiting(m)?.sessionId).toBe('old');
+  });
+});
+
+describe('nextWaiting with done marks', () => {
+  beforeEach(() => {
+    localStorage.clear();
+    resetMarkedDoneCache();
+  });
+
+  const m = () => new Map([['x', server([
+    s({ id: 'marked', status: 'waiting', waitingSince: 100 }),
+    s({ id: 'other', status: 'waiting', waitingSince: 200 }),
+  ])]]);
+
+  it('leaves out sessions the user marked done (store default)', () => {
+    markDone('x', s({ id: 'marked', status: 'waiting' }));
+    expect(waitingSessions(m()).map((w) => w.sessionId)).toEqual(['other']);
+    expect(nextWaiting(m())?.sessionId).toBe('other');
+  });
+
+  it('a marked session comes back once it has a new prompt', () => {
+    markDone('x', s({ id: 'marked', status: 'waiting' }));
+    const withPrompt = new Map([['x', server([
+      s({ id: 'marked', status: 'waiting', waitingSince: 100,
+        pendingPrompt: { kind: 'choice', question: 'Q', options: [{ label: 'A' }], signature: 'new' } }),
+    ])]]);
+    expect(nextWaiting(withPrompt)?.sessionId).toBe('marked');
+  });
+
+  it('takes an injected predicate', () => {
+    expect(waitingSessions(m(), null, (_sv, x) => x.id === 'other').map((w) => w.sessionId)).toEqual(['marked']);
   });
 });

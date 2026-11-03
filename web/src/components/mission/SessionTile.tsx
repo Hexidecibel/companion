@@ -27,6 +27,8 @@ export interface SessionTileProps {
   onOpen: (serverId: string, sessionId: string, pending: boolean) => void;
   onMoveUp?: () => void;
   onMoveDown?: () => void;
+  /** Long-press "Mark done": the automatic needs you / done call was wrong. */
+  onMarkDone?: () => void;
 }
 
 /** Options that need typed text: never a one-tap answer on a tile. */
@@ -67,7 +69,7 @@ type AnswerState =
   | { step: 'error'; signature: string };
 
 export const SessionTile = memo(function SessionTile({
-  serverId, session, serverLabel, unseen, state: stateProp, now = Date.now(), highlighted, onOpen, onMoveUp, onMoveDown,
+  serverId, session, serverLabel, unseen, state: stateProp, now = Date.now(), highlighted, onOpen, onMoveUp, onMoveDown, onMarkDone,
 }: SessionTileProps) {
   const stuck = useStuckFindings(serverId, session.id).length > 0;
   const state = stateProp ?? missionState(session, !!unseen);
@@ -82,7 +84,7 @@ export const SessionTile = memo(function SessionTile({
   const inline = inlineAnswerable(prompt);
 
   const open = useCallback(() => onOpen(serverId, session.id, needs), [onOpen, serverId, session.id, needs]);
-  const { menu, closeMenu, handlers } = useTileMenu(open, !!onMoveUp || !!onMoveDown);
+  const { menu, closeMenu, handlers } = useTileMenu(open, !!onMoveUp || !!onMoveDown || !!onMarkDone);
 
   const choose = useCallback(async (index: number) => {
     if (!prompt) return;
@@ -108,6 +110,7 @@ export const SessionTile = memo(function SessionTile({
     { label: 'Move up', onClick: () => onMoveUp?.(), disabled: !onMoveUp },
     { label: 'Move down', onClick: () => onMoveDown?.(), disabled: !onMoveDown },
     null,
+    ...(onMarkDone ? [{ label: 'Mark done', onClick: onMarkDone }] : []),
     { label: 'Open', onClick: open },
   ];
 
