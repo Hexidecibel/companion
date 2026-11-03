@@ -727,3 +727,15 @@ Follow-up fixes layered on the Mobile UX round above: walks back the activity-ro
 
 ## Failed choice/approval send feedback
 - When sending a choice or approval option fails, an inline "Failed to send — tap to retry" message appears below the options; tapping retries the send, and it auto-dismisses after 5 seconds
+
+## Mission Control overview (2026-11-03)
+A phone-first overview of every session across all servers, so several sessions can be watched and answered from one screen.
+
+- List / Overview toggle in the mobile header (remembered); one tile per session with status color, live activity or last message, and "waiting 3m"
+- Single-select choice, approval and trust prompts answer straight from the tile; multi-select, "Other" and multi-question prompts open the session; a changed prompt is refused (`stale_prompt`) instead of picking the wrong option
+- Stable tile order with long-press Move up/down, a "Needs you" strip, unseen dots, and the overview keeps its scroll position when you go back
+- "N need you" chip in SessionView jumps to the next waiting session (oldest first) and replaces the history entry so Back lands on the overview
+- Desktop keys: `]` / Mod+Alt+] next waiting session (walking all sessions moved to Mod+Alt+Shift+]), Mod+Alt+1..9 follow the tile order
+- Daemon `get_server_summary` adds optional `waitingSince`, `pendingPrompt` and `lastMessage` (one derivation shared with Herald in `pending-prompt.ts`); `send_choice` adds `expectSignature` and `selectedLabels`
+- Safety fix: approval answers were positional against a hard-coded 3-option list while Claude Code 2.1.317 shows 4 options, so "No"/"Reject" (on the tile and in the existing chat view) selected "Yes, and switch to auto mode"; answers are now resolved by label against the box on screen and fail closed
+- `send_choice` / `send_input` acknowledge the target session (cancelling its escalation push), not the daemon's active one

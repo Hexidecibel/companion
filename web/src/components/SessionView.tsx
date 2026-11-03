@@ -10,6 +10,7 @@ import { useBypassPermissions } from '../hooks/useBypassPermissions';
 import { useOpenFiles } from '../hooks/useOpenFiles';
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
 import { connectionManager } from '../services/ConnectionManager';
+import { sendChoice, type ChoiceData } from '../services/sendChoice';
 import { isMobileViewport } from '../utils/platform';
 import { focusTrapActive } from '../utils/focusTrap';
 import { useSessionMute } from '../hooks/useSessionMute';
@@ -70,6 +71,8 @@ interface SessionViewProps {
   /** Account profile label when not the default login (from the summary). */
   profileLabel?: string;
   onToggleSidebar?: () => void;
+  /** Extra header control next to Back (Mission Control "N need you" chip). */
+  headerChip?: React.ReactNode;
   style?: React.CSSProperties;
 }
 
@@ -89,6 +92,7 @@ export function SessionView({
   agent,
   profileLabel,
   onToggleSidebar,
+  headerChip,
   style,
 }: SessionViewProps) {
   const {
@@ -580,29 +584,13 @@ export function SessionView({
   // "No" on a start-up prompt: its card leaves with the agent, this says why the chat is empty.
   const [declinedPrompt, setDeclinedPrompt] = useState<string | null>(null);
 
-  const handleSelectChoice = useCallback(async (choice: {
-    selectedIndices: number[];
-    optionCount: number;
-    multiSelect: boolean;
-    otherText?: string;
-    promptKind?: 'trust';
-  }): Promise<boolean> => {
+  const handleSelectChoice = useCallback(async (choice: ChoiceData): Promise<boolean> => {
     if (!serverId || !sessionId) return false;
-    const conn = connectionManager.getConnection(serverId);
-    if (!conn?.isConnected()) return false;
-    try {
-      const response = await conn.sendRequest('send_choice', {
-        ...choice,
-        sessionId,
-        tmuxSessionName: tmuxSessionName || sessionId,
-      });
-      if (response.success && choice.promptKind === 'trust' && choice.selectedIndices[0] === 1) {
-        setDeclinedPrompt(sessionId);
-      }
-      return response.success;
-    } catch {
-      return false;
+    const result = await sendChoice(choice, { serverId, sessionId, tmuxSessionName });
+    if (result.ok && choice.promptKind === 'trust' && choice.selectedIndices[0] === 1) {
+      setDeclinedPrompt(sessionId);
     }
+    return result.ok;
   }, [serverId, sessionId, tmuxSessionName]);
 
   if (!serverId || !sessionId) {
@@ -826,6 +814,7 @@ export function SessionView({
             </button>
           )
         )}
+        {headerChip}
         {/* Both desktop and mobile render the full action cluster inline in
             this single top header row. Mobile uses a compact variant where the
             lower-frequency actions collapse into the "Tools" dropdown. */}

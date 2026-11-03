@@ -1166,6 +1166,90 @@ preceding `self_update_prepare` call so a replayed request cannot restart a daem
 ---
 
 
+## Item: Mission Control (watch and answer many sessions from one screen)
+**Status:** phases 1-3 done 2026-11-03 (daemon summary fields, phone overview, jumping between sessions); phase 4 (desktop grid) open
+
+Plan source: `~/.claude/plans/immutable-conjuring-lemon.md` (copied below).
+
+
+### Context
+The user runs 4+ sessions at once and keeps going back and forth between the session list and each session. Goal: a phone-first overview with one tile per session that shows status and what each session is doing, and lights up when a session needs the user. If the session is asking a question, its tile shows the answer buttons so the user can answer from the tile. Tapping a tile opens the session. Back returns to the overview at the same scroll spot. Inside a session, a "N others need you" chip jumps straight to the next waiting session. Desktop gets the same view after the phone version ships.
+
+What exists today:
+- `MobileDashboard` lists sessions per server, sorted by status, with a blue pulse when waiting.
+- Back uses the history API in `Dashboard.tsx:273-317`.
+- The 2-pane split is desktop-only.
+- `send_choice` already works from just a session id and option index.
+
+What's missing:
+- The summary has no pending question, no waiting-since time and no last-message snippet. Pending AskUserQuestion prompts exist only in a tmux pane scrape (`watcher.ts:~1487` detects them but doesn't store them).
+- The list's scroll position is lost when a session opens.
+- There is no "next waiting session" navigation.
+- There is no unread tracking.
+
+### Phase 1: Daemon: richer summary (protocol: optional fields only)
+Add optional fields to the session entries of `get_server_summary` (`watcher.ts:3499` `getServerSummary`, `handlers/session.ts:387`). Mirror them in `daemon/src/types.ts` and `web/src/types/index.ts` `SessionSummary`:
+- `waitingSince?: number`: set when the session's waiting state flips on, cleared when it flips off. Kept in a per-session map in the watcher. Trust prompts reuse `startupPrompts.since`.
+- `pendingPrompt?: { question, header?, options[{label, description?}], multiSelect?, kind?: 'trust' | 'approval' | 'choice', signature }`.
+  - Choice prompts (AUQ, text permission boxes): cache the `TerminalChoicePrompt` that the existing feedback poll (`watcher.ts:~1487`) already detects, instead of only emitting a signature change.
+  - Approvals from the transcript: reuse the same derivation Herald uses (`herald/session-source.ts` `derive()` and `readChoice`). Move the shared piece into the watcher or a helper so the summary and Herald use one source, not two.
+  - Trust prompts: `startupPromptFor(id)`.
+  - Cleared when the session stops waiting.
+- `lastMessage?: string`: the last assistant line, truncated to ~140 chars. It already exists on `status_change`; store the latest per session.
+- `send_choice` gets an optional `expectSignature`. If the prompt on screen no longer matches, reply with a `stale` error so a late tap on an old tile can't pick the wrong option. Reuse the signature check Herald's `answer_choice` does (`herald/actions.ts:504`).
+- Fix: `send_choice` and `send_input` acknowledge the daemon's active session (`handlers/input.ts`); they should acknowledge the target session so its escalation push is cancelled.
+- Pane-capture budget: only waiting sessions are captured, through the existing poll. No new interval and no extra capture loop (per the polling-safety rule).
+
+Tests (jest): summary contains `pendingPrompt` and `waitingSince` for a waiting fixture and drops them when it resumes; `send_choice` with a stale signature is rejected; acknowledge goes to the target session; the protocol mirror test passes.
+
+### Phase 2: Phone overview (`web/src/components/mission/`)
+- `MissionControl.tsx`: a new view on mobile, reached by a toggle in the `MobileDashboard` header (List / Overview). The choice is remembered in localStorage, and Overview becomes the default once the user picks it. It lists sessions from all servers in one place; a small server label appears only when there are 2+ servers.
+- `SessionTile.tsx`, one per session:
+  - Name, agent and profile badge, a status color (working blue, waiting amber glow, idle gray, stuck red via the existing `StuckBadge` store).
+  - A live line: `currentActivity`, or else `lastMessage`.
+  - Relative time; while waiting, "waiting 3m" from `waitingSince`.
+  - When a `pendingPrompt` is present: the question and option buttons. Reuse the `normalize*` helpers from `QuestionBlock.tsx` and `QuestionBlock` itself in a compact mode. Answers go through `connectionManager.getConnection(serverId).sendRequest('send_choice', {..., expectSignature})`, with the same payload `SessionView.tsx:594` builds. Pull that payload builder into `services/sendChoice.ts` so SessionView, ConciergeView and the tile share it.
+  - Multi-select, "Other" free text, and multi-question flows show "Open to answer" and open the session instead, keeping tiles simple. Trust prompts get the same yes/no as `TrustPromptCard`, user-only as today.
+  - A stale-signature reply shows "Prompt changed, tap to open".
+- **Order:** tiles keep a fixed position. The order is saved per device (`services/missionOrder.ts`, localStorage: new sessions are added at the end, removed ones dropped), and long-press on a tile offers "Move up/down". A "Needs you" strip at the top shows a count and taps through waiting sessions, so nothing moves under the user's finger.
+- **Unseen marker:** `services/lastViewed.ts` stores `{serverId:sessionId -> ts}` in localStorage, updated when a session is opened or closed. A tile gets a dot when `lastActivity > lastViewed`.
+- **Scroll restore:** keep the overview mounted but hidden (`display:none`) while a session is open, instead of the early return at `Dashboard.tsx:662`. This keeps scroll position and tile state at no cost. The same treatment goes to `MobileDashboard`.
+- Updates: existing `useAllServerSummaries` (5 s poll plus a 250 ms re-poll on `status_change`). Nothing new.
+
+### Phase 3: Jumping between sessions
+- `services/nextWaiting.ts`: a pure function that takes the summaries and the current session and returns the waiting sessions on all servers, oldest `waitingSince` first, skipping the current one.
+- `NeedsYouChip` in the `SessionView` header (mobile and desktop): "2 need you". Tap opens the next one (using `requestSessionFocus` so it scrolls to the question). Long-press lists them.
+- Next waiting session goes through `handleSelectSession`, which **replaces** the history entry instead of pushing a new one, so Back always lands on the overview, not on a chain of sessions.
+- Optional (behind a setting, off by default): after answering the last pending prompt in a session, a toast "Back to overview / next waiting" appears.
+- Keyboard (desktop): `]` / `Mod+Alt+]` = next waiting (today `]` walks all sessions; that moves to `Mod+Alt+Shift+]`), `Mod+Alt+1..9` follows the Mission Control tile order. Update `ShortcutHelpOverlay`.
+
+### Phase 4: Desktop
+- Mission Control is what the main pane shows when no session is selected, and the sidebar gets an "Overview" entry.
+- Grid mode: a responsive tile grid (2x2 up to 3x3) with a taller tile showing the last ~4 highlights. Uses a cheap capped `get_highlights` fetch per tile, only for visible tiles, with an in-flight guard, refreshed on `conversation_update`. Click opens the session full-width; Esc goes back.
+- Watching N full `SessionView`s live at once is **not** in this plan (memory/perf cost). Revisit after using the grid.
+
+### Later (not in this plan)
+Herald announcing "<session> needs you" for sessions not on screen, and a waiting-count badge on the app icon. Both are listed in todo.md when we commit.
+
+### Files
+- Daemon: `src/watcher.ts`, `src/handlers/session.ts`, `src/handlers/input.ts`, `src/types.ts`, `src/herald/session-source.ts` (shared derivation), tests alongside.
+- Web: `types/index.ts`, `components/Dashboard.tsx`, `components/MobileDashboard.tsx`, `components/SessionView.tsx`, `components/QuestionBlock.tsx` (compact mode), new `components/mission/{MissionControl,SessionTile,NeedsYouChip}.tsx`, new `services/{sendChoice,missionOrder,lastViewed,nextWaiting}.ts`, `components/ShortcutHelpOverlay.tsx`, CSS next to the existing mobile styles (project colors: amber `#f59e0b` for needs-you).
+
+### Verification
+- TDD inner loop with `bin/test --fast`. Vitest for `nextWaiting`, `missionOrder`, `lastViewed`, tile rendering per status and prompt kind, and a stale reply.
+- End to end on the **probe instance (9888)** with 4 disposable Claude sessions on a private tmux server (`tmux -L mc-probe`). Make one ask an AskUserQuestion, one ask for a permission, one keep working, and one sit idle. Check the summary fields over WS, answer from a tile, and confirm the session continues. Then stop the probe and kill the private tmux server.
+- `bin/test` full gate in the background before commit.
+- Real phone check (needs a build with the user's OK, and a daemon restart with the user's OK, since the daemon serves `web/dist`): 4 live sessions, answer from a tile, tap in, Back returns to the same scroll spot, the chip jumps to the next waiting session, Back still lands on the overview.
+
+### Execution
+Run as one general-purpose agent per phase pair: (1) daemon Phase 1, then (2) web Phases 2-3 once Phase 1's protocol is merged. Phase 4 runs after the user has lived with the phone version for a bit.
+
+### As built (phases 1-3)
+- Daemon: shared `daemon/src/pending-prompt.ts` (summary + Herald use one derivation); `send_choice` `expectSignature` -> `stale_prompt`; `selectedLabels` resolved against the live on-screen box (fails closed). Safety fix: approval answers were positional against a hard-coded 3-option list while Claude Code 2.1.317 shows 4, so No/Reject picked "Yes, and switch to auto mode".
+- Still positional: ExitPlanMode Approve and batch-approve (index 0). Pane-only AUQ questionCount unknown.
+
+---
+
 ## Item: Open leftovers from archived plans
 **Status:** planned
 

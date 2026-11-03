@@ -42,13 +42,8 @@ export function normalizeQuestion(q: unknown): Question {
   };
 }
 
-export interface ChoiceData {
-  selectedIndices: number[];
-  optionCount: number;
-  multiSelect: boolean;
-  otherText?: string;
-  promptKind?: 'trust';
-}
+import type { ChoiceData } from '../services/sendChoice';
+export type { ChoiceData };
 
 interface QuestionBlockProps {
   question: Question;

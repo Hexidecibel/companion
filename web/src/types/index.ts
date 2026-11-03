@@ -172,6 +172,44 @@ export interface SessionSummary {
   /** Account profile when it is not the agent's default (newer daemons). */
   profileId?: string;
   profileLabel?: string;
+  /** When the session started waiting on the user (ms epoch; newer daemons). */
+  waitingSince?: number;
+  /** The question waiting on screen, when the daemon can read it (newer daemons). */
+  pendingPrompt?: PendingPrompt;
+  /** Last assistant line, truncated (newer daemons). */
+  lastMessage?: string;
+}
+
+/** A question / approval / start-up prompt waiting on the user (summary field). */
+export interface PendingPrompt {
+  kind: 'choice' | 'approval' | 'trust';
+  question: string;
+  header?: string;
+  /** On-screen options when the pane box is known (index = row); else the transcript's (answer by label). */
+  options: { label: string; description?: string }[];
+  multiSelect?: boolean;
+  /** More than 1: several questions in one prompt (answer in the session). */
+  questionCount?: number;
+  /** Identifies this exact prompt; send_choice expectSignature rejects a stale one. */
+  signature: string;
+}
+
+/** send_choice request payload (the daemon replies choice_sent). */
+export interface SendChoiceRequest {
+  selectedIndices: number[];
+  optionCount: number;
+  multiSelect: boolean;
+  otherText?: string;
+  sessionId?: string;
+  tmuxSessionName?: string;
+  promptKind?: 'trust';
+  /** PendingPrompt.signature the client saw; a changed prompt replies stale_prompt. */
+  expectSignature?: string;
+  /**
+   * Labels of the tapped options. The daemon resolves them against the options
+   * on screen now (never positional); unknown or ambiguous -> stale_prompt.
+   */
+  selectedLabels?: string[];
 }
 
 /** Coding agents a daemon can run and drive. */

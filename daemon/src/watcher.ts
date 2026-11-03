@@ -71,6 +71,8 @@ import { tmuxSnapshot } from './tmux-snapshot';
 import { isReadonlySharedState } from './sandbox';
 import type { BackgroundWork, BackgroundWorkMonitor, SessionOverlay } from './background-work';
 import { PANE_APPROVAL_ACTIVITY } from './background-work';
+import { buildPendingPrompt, lastAssistantLine } from './pending-prompt';
+import type { PendingPrompt } from './types';
 import { ProcEnvCache, ProfileRegistry, type AgentProfile } from './profiles';
 
 /**
@@ -182,6 +184,13 @@ const MAX_STARTUP_CAPTURES = 2;
 const STARTUP_RECHECK_MS = 1500;
 /** currentActivity while the agent's trust prompt is up. */
 export const TRUST_PROMPT_ACTIVITY = 'Asking whether to trust this folder';
+
+/**
+ * How long a choice box seen on a pane capture counts as "still up" without a
+ * newer capture (captures come from Herald's listing, get_highlights, the
+ * feedback poll and send_choice's re-check; nothing captures just for this).
+ */
+export const PANE_CHOICE_TTL_MS = 30_000;
 const startupActivity = (c: TerminalChoicePrompt) =>
   /Bypass/.test(c.question) ? 'Asking to allow Bypass Permissions mode' : TRUST_PROMPT_ACTIVITY;
 
@@ -873,6 +882,11 @@ export class SessionWatcher extends EventEmitter {
       for (const name of [...this.startupPrompts.keys()]) {
         if (!this.tmuxPathBySession.has(name)) this.startupPrompts.delete(name);
       }
+      for (const m of [this.paneChoices, this.waitingSinceBySession, this.notWaitingAtBySession]) {
+        for (const name of [...m.keys()]) {
+          if (!this.tmuxPathBySession.has(name)) m.delete(name);
+        }
+      }
       for (const [name, pid] of [...this.startupSettled]) {
         if (this.tmuxSessionIdentity.get(name)?.claudePid !== pid) this.startupSettled.delete(name);
       }
@@ -1193,6 +1207,19 @@ export class SessionWatcher extends EventEmitter {
   private startupSettled = new Map<string, number>();
   private startupChecksInFlight = new Set<string>();
   private startupRecheckTimers = new Map<string, NodeJS.Timeout>();
+  /**
+   * Last non-trust choice box seen on a session's pane (AskUserQuestion, a
+   * permission box, Codex's approval box). Pending AUQs never reach the
+   * transcript, so this is the summary's only source for them.
+   */
+  private paneChoices = new Map<
+    string,
+    { choice: TerminalChoicePrompt; since: number; seenAt: number; sig: string }
+  >();
+  /** Summary bookkeeping: when each session's current wait started. */
+  private waitingSinceBySession = new Map<string, number>();
+  /** Summary bookkeeping: last time a session was seen not waiting. */
+  private notWaitingAtBySession = new Map<string, number>();
 
   /**
    * A capture of a session's pane (taken anyway, or by checkStartupPrompts):
@@ -1206,6 +1233,7 @@ export class SessionWatcher extends EventEmitter {
     let choice: TerminalChoicePrompt | null = null;
     try {
       const c = agent.terminal.detectActiveChoicePrompt(pane);
+      this.notePaneChoice(sessionId, c && c.kind !== 'trust' ? c : null);
       if (c?.kind === 'trust') choice = c;
       else if (agent.terminal.classifyStartupPane(pane) === 'ready') {
         const pid = this.tmuxSessionIdentity.get(sessionId)?.claudePid;
@@ -1230,6 +1258,87 @@ export class SessionWatcher extends EventEmitter {
       console.log(`Watcher: trust prompt in "${sessionId}" answered`);
       this.emitStartupPrompt(sessionId, false);
     }
+  }
+
+  /** Remember (or forget) the live choice box of a session's latest capture. */
+  private notePaneChoice(sessionId: string, c: TerminalChoicePrompt | null): void {
+    if (!c || c.options.length < 2) {
+      this.paneChoices.delete(sessionId);
+      return;
+    }
+    const now = Date.now();
+    const sig = [c.header || '', c.question || '', ...c.options.map((o) => o.label)].join('\u0001');
+    const was = this.paneChoices.get(sessionId);
+    this.paneChoices.set(sessionId, {
+      choice: c,
+      since: was && was.sig === sig ? was.since : now,
+      seenAt: now,
+      sig,
+    });
+  }
+
+  /** Forget a session's cached choice box (it was just answered). */
+  clearPaneChoice(sessionId: string): void {
+    this.paneChoices.delete(sessionId);
+  }
+
+  /**
+   * The cached choice box when still believable: seen within the TTL and the
+   * transcript has not moved on since (answering it writes the transcript).
+   */
+  private freshPaneChoice(
+    sessionId: string,
+    lastModified: number
+  ): { choice: TerminalChoicePrompt; since: number } | null {
+    const e = this.paneChoices.get(sessionId);
+    if (!e) return null;
+    if (Date.now() - e.seenAt > PANE_CHOICE_TTL_MS || lastModified > e.seenAt) return null;
+    return e;
+  }
+
+  /**
+   * What the session is asking right now, from caches only (trust prompt,
+   * transcript, last pane capture): the same prompt and signature the server
+   * summary shows. Callers that need it current capture the pane first and
+   * pass it to noteStartupPane.
+   */
+  pendingPromptFor(sessionId: string): PendingPrompt | null {
+    const trust = this.startupPrompts.get(sessionId);
+    const best = this.resolveConversationForSession(sessionId);
+    const conv = best?.conv;
+    return buildPendingPrompt({
+      messages: conv?.cachedMessages,
+      agent: conv ? this.agentForFile(conv.path) : this.agentFor(sessionId),
+      trust: trust?.choice ?? null,
+      paneChoice: this.freshPaneChoice(sessionId, conv?.lastModified ?? 0)?.choice ?? null,
+    });
+  }
+
+  /**
+   * The choice box on screen per the last capture (trust prompt, else the
+   * fresh pane box), or null. send_choice resolves selectedLabels against it.
+   */
+  onScreenChoiceFor(sessionId: string): TerminalChoicePrompt | null {
+    const trust = this.startupPrompts.get(sessionId);
+    if (trust) return trust.choice;
+    const conv = this.resolveConversationForSession(sessionId)?.conv;
+    return this.freshPaneChoice(sessionId, conv?.lastModified ?? 0)?.choice ?? null;
+  }
+
+  /**
+   * The signature the same prompt had while no pane box was known (transcript
+   * options), when it differs from the current one. A client that saw that
+   * fallback may still answer it, but only by label (send_choice).
+   */
+  transcriptPromptSignatureFor(sessionId: string): string | null {
+    if (this.startupPrompts.has(sessionId)) return null;
+    const conv = this.resolveConversationForSession(sessionId)?.conv;
+    const p = buildPendingPrompt({
+      messages: conv?.cachedMessages,
+      agent: conv ? this.agentForFile(conv.path) : this.agentFor(sessionId),
+      paneChoice: null,
+    });
+    return p && p.kind === 'approval' ? p.signature : null;
   }
 
   /** The trust prompt a session shows (from the last capture), or null. */
@@ -1484,6 +1593,7 @@ export class SessionWatcher extends EventEmitter {
           // Re-broadcast whenever the question CONTENT changes (e.g. a multi-question AUQ
           // advancing to the next question) so the chat keeps pace with the terminal,
           // but stay quiet while the same question lingers across polls.
+          this.noteStartupPane(tmuxSessionName, paneText);
           const choice = this.agent.terminal.detectActiveChoicePrompt(paneText);
           if (choice) {
             const sig = [
@@ -3492,6 +3602,41 @@ export class SessionWatcher extends EventEmitter {
   }
 
   /**
+   * When the session's current wait started (summary bookkeeping), or
+   * undefined when it is not waiting. `hint` is the earliest the wait can have
+   * started (last transcript write, or when the prompt first showed); a newer
+   * hint while still waiting means a new turn ended, so a new wait.
+   */
+  private trackWaitingSince(
+    sessionId: string,
+    waiting: boolean,
+    hint: number,
+    exact = false
+  ): number | undefined {
+    const now = Date.now();
+    if (exact) {
+      this.waitingSinceBySession.set(sessionId, hint);
+      return hint;
+    }
+    if (!waiting) {
+      this.waitingSinceBySession.delete(sessionId);
+      this.notWaitingAtBySession.set(sessionId, now);
+      return undefined;
+    }
+    const prev = this.waitingSinceBySession.get(sessionId);
+    let since: number;
+    if (prev !== undefined && hint <= prev) since = prev;
+    else if (prev !== undefined) since = Math.min(hint, now);
+    else
+      since = Math.min(
+        now,
+        Math.max(hint || 0, this.notWaitingAtBySession.get(sessionId) ?? 0) || now
+      );
+    this.waitingSinceBySession.set(sessionId, since);
+    return since;
+  }
+
+  /**
    * Get server summary — one entry per tagged tmux session.
    * Uses tmuxSessions from TmuxManager for authoritative tagged status,
    * finds the best conversation for each to determine activity/status.
@@ -3522,6 +3667,12 @@ export class SessionWatcher extends EventEmitter {
       /** Account profile when it is not the agent's default (optional). */
       profileId?: string;
       profileLabel?: string;
+      /** ms epoch when status became 'waiting'; absent otherwise. */
+      waitingSince?: number;
+      /** Present only while waiting on a prompt. */
+      pendingPrompt?: PendingPrompt;
+      /** Last assistant text line, trimmed, <=140 chars. */
+      lastMessage?: string;
     }>;
     totalSessions: number;
     waitingCount: number;
@@ -3550,6 +3701,12 @@ export class SessionWatcher extends EventEmitter {
       /** Account profile when it is not the agent's default (optional). */
       profileId?: string;
       profileLabel?: string;
+      /** ms epoch when status became 'waiting'; absent otherwise. */
+      waitingSince?: number;
+      /** Present only while waiting on a prompt. */
+      pendingPrompt?: PendingPrompt;
+      /** Last assistant text line, trimmed, <=140 chars. */
+      lastMessage?: string;
     }> = [];
 
     let waitingCount = 0;
@@ -3575,6 +3732,9 @@ export class SessionWatcher extends EventEmitter {
 
       let recentTimestamps: number[] | undefined;
       let backgroundWork: BackgroundWork | undefined;
+      let pendingPrompt: PendingPrompt | null = null;
+      let lastMessage: string | undefined;
+      let waitStartHint = 0;
 
       const trust = this.startupPrompts.get(ts.name);
       if (trust) {
@@ -3582,6 +3742,12 @@ export class SessionWatcher extends EventEmitter {
         waitingCount++;
         currentActivity = startupActivity(trust.choice);
         lastActivity = trust.since;
+        pendingPrompt = buildPendingPrompt({
+          messages: undefined,
+          agent: this.agentFor(ts.name),
+          trust: trust.choice,
+        });
+        waitStartHint = trust.since;
       } else if (best) {
         const conv = best.conv;
         projectPath = conv.projectPath;
@@ -3605,13 +3771,27 @@ export class SessionWatcher extends EventEmitter {
         if (overlay.currentActivity) currentActivity = overlay.currentActivity;
         if (overlay.backgroundWork) backgroundWork = overlay.backgroundWork;
 
-        if (overlay.waiting) {
+        // A choice box on the pane (pending AskUserQuestion, Codex approval):
+        // the transcript says nothing yet, but the agent waits on the user.
+        const pane = this.freshPaneChoice(ts.name, conv.lastModified);
+        if (overlay.waiting || pane) {
           status = 'waiting';
           waitingCount++;
+          pendingPrompt = buildPendingPrompt({
+            messages,
+            agent: convAgent,
+            paneChoice: pane?.choice ?? null,
+          });
+          if (pane && !overlay.waiting) {
+            currentActivity =
+              pendingPrompt?.kind === 'approval' ? PANE_APPROVAL_ACTIVITY : undefined;
+            waitStartHint = pane.since;
+          }
         } else if (currentActivity) {
           status = 'working';
           workingCount++;
         }
+        lastMessage = lastAssistantLine(messages);
 
         // Extract recent message timestamps for sparkline (last 30 min)
         if (messages) {
@@ -3619,6 +3799,14 @@ export class SessionWatcher extends EventEmitter {
           recentTimestamps = messages.filter((m) => m.timestamp >= cutoff).map((m) => m.timestamp);
         }
       }
+
+      const waitingSince = trust
+        ? this.trackWaitingSince(ts.name, true, trust.since, true)
+        : this.trackWaitingSince(
+            ts.name,
+            status === 'waiting',
+            Math.max(lastActivity, waitStartHint)
+          );
 
       sessions.push({
         id: ts.name,
@@ -3631,6 +3819,9 @@ export class SessionWatcher extends EventEmitter {
         taskSummary,
         recentTimestamps,
         ...(backgroundWork ? { backgroundWork } : {}),
+        ...(waitingSince ? { waitingSince } : {}),
+        ...(pendingPrompt && status === 'waiting' ? { pendingPrompt } : {}),
+        ...(lastMessage ? { lastMessage } : {}),
         ...(this.agentFor(ts.name).id !== DEFAULT_AGENT_ID
           ? { agent: this.agentFor(ts.name).id }
           : {}),

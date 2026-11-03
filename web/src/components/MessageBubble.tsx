@@ -595,7 +595,7 @@ export const MessageBubble = memo(function MessageBubble({ message, onSelectOpti
                         onClick={(e) => {
                           e.stopPropagation();
                           if (onSelectChoice) {
-                            onSelectChoice({ selectedIndices: [2], optionCount: 3, multiSelect: false });
+                            onSelectChoice({ selectedIndices: [2], optionCount: 3, multiSelect: false, selectedLabels: ['no'] });
                           } else if (onSelectOption) {
                             onSelectOption('no');
                           }
@@ -670,10 +670,13 @@ export const MessageBubble = memo(function MessageBubble({ message, onSelectOpti
                     className={`msg-option-btn ${isApprove ? 'approve' : isReject ? 'reject' : isAlways ? 'always' : ''}`}
                     onClick={() => {
                       if (onSelectChoice) {
+                        // By label too: the on-screen box can have more rows than the
+                        // transcript's yes / always / no, so an index alone can hit the wrong one.
                         onSelectChoice({
                           selectedIndices: [idx],
                           optionCount: options.length,
                           multiSelect: false,
+                          selectedLabels: [opt.label],
                         });
                       } else if (onSelectOption) {
                         onSelectOption(opt.label);

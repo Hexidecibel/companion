@@ -26,6 +26,10 @@ import { connectionManager } from '../services/ConnectionManager';
 import { useHeraldUi } from '../context/HeraldContext';
 import { HeraldPanel } from './herald/HeraldPanel';
 import { setViewedSessions } from '../services/tts/tonePolicy';
+import { NeedsYouChip } from './mission/NeedsYouChip';
+import { useMissionOrder } from '../hooks/useMissionOrder';
+import { markViewed } from '../services/lastViewed';
+import { nextWaiting } from '../services/nextWaiting';
 
 interface DashboardProps {
   onSettings?: () => void;
@@ -67,6 +71,17 @@ export function Dashboard({ onSettings }: DashboardProps) {
     setViewedSessions([activeSession, secondarySession].filter((x): x is ActiveSession => !!x));
   }, [activeSession, secondarySession]);
   useEffect(() => () => setViewedSessions([]), []);
+
+  // Mission Control "unseen" dots: a session counts as seen when it is opened and when it is left.
+  const prevActiveRef = useRef<ActiveSession | null>(null);
+  useEffect(() => {
+    const prev = prevActiveRef.current;
+    if (prev && (prev.serverId !== activeSession?.serverId || prev.sessionId !== activeSession?.sessionId)) {
+      markViewed(prev.serverId, prev.sessionId);
+    }
+    if (activeSession) markViewed(activeSession.serverId, activeSession.sessionId);
+    prevActiveRef.current = activeSession;
+  }, [activeSession]);
 
   // Use work groups for the active server (only if enabled and git is available)
   const gitEnabled = activeSession
@@ -200,14 +215,21 @@ export function Dashboard({ onSettings }: DashboardProps) {
     return result;
   }, [snapshots, summaries]);
 
+  // Mod+Alt+1..9 follow the Mission Control tile order.
+  const { entries: missionEntries } = useMissionOrder(summaries);
+  const missionSessions = useMemo(
+    () => missionEntries.map((e) => ({ serverId: e.serverId, sessionId: e.session.id })),
+    [missionEntries],
+  );
+
   // Jump number map: sessionId -> 1-based index (max 9) for Ctrl+Alt badge display
   const jumpNumberMap = useMemo(() => {
     const map = new Map<string, number>();
-    for (let i = 0; i < Math.min(flatSessions.length, 9); i++) {
-      map.set(flatSessions[i].sessionId, i + 1);
+    for (let i = 0; i < Math.min(missionSessions.length, 9); i++) {
+      map.set(missionSessions[i].sessionId, i + 1);
     }
     return map;
-  }, [flatSessions]);
+  }, [missionSessions]);
 
   // Track Ctrl+Alt held state for showing jump number badges
   const [showJumpNumbers, setShowJumpNumbers] = useState(false);
@@ -258,6 +280,35 @@ export function Dashboard({ onSettings }: DashboardProps) {
       history.pushState({ session: true }, '');
     }
   }, [isMobile]);
+
+  // Overview tile tap: open it; with a prompt waiting, scroll to the prompt.
+  const handleOpenFromOverview = useCallback((serverId: string, sessionId: string, pending: boolean) => {
+    handleSelectSession(serverId, sessionId);
+    if (pending) requestSessionFocus(serverId, sessionId, true);
+  }, [handleSelectSession]);
+
+  // Jump from one session straight to another waiting one ("N need you", ']').
+  // Mobile: REPLACE the session history entry, so Back still lands on the
+  // overview instead of walking back through a chain of sessions.
+  const handleJumpToSession = useCallback((serverId: string, sessionId: string) => {
+    setActiveSession({ serverId, sessionId });
+    requestSessionFocus(serverId, sessionId, true);
+    if (!isMobile) {
+      setAgentsOpen(false);
+      return;
+    }
+    if (history.state?.session) history.replaceState({ session: true }, '');
+    else history.pushState({ session: true }, '');
+  }, [isMobile]);
+
+  const jumpToNextWaiting = useCallback(() => {
+    const next = nextWaiting(summaries, activeSession);
+    if (next) handleJumpToSession(next.serverId, next.sessionId);
+  }, [summaries, activeSession, handleJumpToSession]);
+
+  const needsYouChip = (
+    <NeedsYouChip summaries={summaries} current={activeSession} onJump={handleJumpToSession} />
+  );
 
   // Ensure the base history entry has the 'base' flag on mobile so the popstate
   // handler recognizes it as the floor. App.tsx sets { screen, base } on mount;
@@ -412,12 +463,12 @@ export function Dashboard({ onSettings }: DashboardProps) {
     }
   }, []);
 
-  // Select session by index (Cmd+1-9)
+  // Select session by index (Cmd+1-9), in Mission Control order
   const selectSessionByIndex = useCallback((index: number) => {
-    if (index < flatSessions.length) {
-      setActiveSession(flatSessions[index]);
+    if (index < missionSessions.length) {
+      setActiveSession(missionSessions[index]);
     }
-  }, [flatSessions]);
+  }, [missionSessions]);
 
   // Keyboard shortcuts
   const shortcuts = useMemo(() => [
@@ -434,8 +485,12 @@ export function Dashboard({ onSettings }: DashboardProps) {
       if (showShortcutHelp) setShowShortcutHelp(false);
       else if (showNotifSettings) setShowNotifSettings(false);
     }},
+    // Shift variants first: a shortcut without `shift` also matches with Shift held.
+    { key: '[', meta: true, alt: true, shift: true, handler: () => navigateSession(-1) },
+    { key: ']', meta: true, alt: true, shift: true, handler: () => navigateSession(1) },
     { key: '[', meta: true, alt: true, handler: () => navigateSession(-1) },
-    { key: ']', meta: true, alt: true, handler: () => navigateSession(1) },
+    { key: ']', meta: true, alt: true, handler: jumpToNextWaiting },
+    { key: ']', handler: jumpToNextWaiting },
     { key: '1', meta: true, alt: true, handler: () => selectSessionByIndex(0) },
     { key: '2', meta: true, alt: true, handler: () => selectSessionByIndex(1) },
     { key: '3', meta: true, alt: true, handler: () => selectSessionByIndex(2) },
@@ -445,7 +500,7 @@ export function Dashboard({ onSettings }: DashboardProps) {
     { key: '7', meta: true, alt: true, handler: () => selectSessionByIndex(6) },
     { key: '8', meta: true, alt: true, handler: () => selectSessionByIndex(7) },
     { key: '9', meta: true, alt: true, handler: () => selectSessionByIndex(8) },
-  ], [navigateSession, selectSessionByIndex, showShortcutHelp, showNotifSettings]);
+  ], [navigateSession, selectSessionByIndex, jumpToNextWaiting, showShortcutHelp, showNotifSettings]);
 
   useKeyboardShortcuts(shortcuts);
 
@@ -657,69 +712,20 @@ export function Dashboard({ onSettings }: DashboardProps) {
     setSecondarySession(null);
   }, []);
 
-  // --- Mobile layout: MobileDashboard or full-screen SessionView ---
+  // --- Mobile layout: MobileDashboard, with a full-screen SessionView / Agents page on top ---
+  // The dashboard stays mounted (hidden) under an open session so its scroll
+  // spot and tile state survive the round trip.
   if (isMobile) {
-    if (activeSession) {
-      return (
-        <div className="dashboard">
-          <main className="dashboard-main" style={{ width: '100%' }}>
-            <ComponentErrorBoundary name="SessionView">
-              <SessionView
-                serverId={activeSession.serverId}
-                sessionId={activeSession.sessionId}
-                tmuxSessionName={activeSessionSummary?.tmuxSessionName}
-                agent={activeSessionSummary?.agent}
-                profileLabel={activeSessionSummary?.profileId ? activeSessionSummary.profileLabel || activeSessionSummary.profileId : undefined}
-                workGroup={isForemanView ? activeWorkGroup : undefined}
-                onViewWorker={handleViewWorker}
-                onSendWorkerInput={handleSendWorkerInput}
-                onMergeGroup={handleMergeGroup}
-                onCancelGroup={handleCancelGroup}
-                onRetryWorker={handleRetryWorker}
-                onDismissGroup={handleDismissGroup}
-                merging={merging}
-                onToggleSidebar={handleMobileBack}
-              />
-            </ComponentErrorBoundary>
-          </main>
-
-          {showNotifSettings && (
-            <Suspense fallback={null}>
-              <NotificationSettingsModal
-                serverId={activeSession.serverId}
-                onClose={() => setShowNotifSettings(false)}
-              />
-            </Suspense>
-          )}
-          {heraldScreen}
-        </div>
-      );
-    }
-
-    if (agentsOpen) {
-      return (
-        <div className="dashboard">
-          <main className="dashboard-main" style={{ width: '100%' }}>
-            {agentsPage(() => {
-              if (history.state?.agents) {
-                suppressPopstate.current = true;
-                history.back();
-              }
-              setAgentsOpen(false);
-            })}
-          </main>
-          {heraldScreen}
-        </div>
-      );
-    }
-
+    const covered = !!activeSession || agentsOpen;
     return (
       <>
         <MobileDashboard
+          hidden={covered}
           onOpenAgents={openAgents}
           summaries={summaries}
           activeSession={activeSession}
           onSelectSession={handleSelectSession}
+          onOpenFromOverview={handleOpenFromOverview}
           onSessionCreated={handleSessionCreated}
           onSettings={onSettings}
           onRemoteCapabilities={(serverId: string) => setCapabilitiesServerId(serverId)}
@@ -728,7 +734,53 @@ export function Dashboard({ onSettings }: DashboardProps) {
           onCloseSplit={handleCloseSplit}
           secondarySession={secondarySession}
         />
-        {capabilitiesServerId && (
+        {activeSession ? (
+          <div className="dashboard">
+            <main className="dashboard-main" style={{ width: '100%' }}>
+              <ComponentErrorBoundary name="SessionView">
+                <SessionView
+                  serverId={activeSession.serverId}
+                  sessionId={activeSession.sessionId}
+                  tmuxSessionName={activeSessionSummary?.tmuxSessionName}
+                  agent={activeSessionSummary?.agent}
+                  profileLabel={activeSessionSummary?.profileId ? activeSessionSummary.profileLabel || activeSessionSummary.profileId : undefined}
+                  workGroup={isForemanView ? activeWorkGroup : undefined}
+                  onViewWorker={handleViewWorker}
+                  onSendWorkerInput={handleSendWorkerInput}
+                  onMergeGroup={handleMergeGroup}
+                  onCancelGroup={handleCancelGroup}
+                  onRetryWorker={handleRetryWorker}
+                  onDismissGroup={handleDismissGroup}
+                  merging={merging}
+                  onToggleSidebar={handleMobileBack}
+                  headerChip={needsYouChip}
+                />
+              </ComponentErrorBoundary>
+            </main>
+
+            {showNotifSettings && (
+              <Suspense fallback={null}>
+                <NotificationSettingsModal
+                  serverId={activeSession.serverId}
+                  onClose={() => setShowNotifSettings(false)}
+                />
+              </Suspense>
+            )}
+          </div>
+        ) : agentsOpen ? (
+          <div className="dashboard">
+            <main className="dashboard-main" style={{ width: '100%' }}>
+              {agentsPage(() => {
+                if (history.state?.agents) {
+                  suppressPopstate.current = true;
+                  history.back();
+                }
+                setAgentsOpen(false);
+              })}
+            </main>
+          </div>
+        ) : null}
+        {!covered && capabilitiesServerId && (
           <Suspense fallback={null}>
             <RemoteCapabilitiesPanel
               serverId={capabilitiesServerId}
@@ -796,6 +848,7 @@ export function Dashboard({ onSettings }: DashboardProps) {
             onDismissGroup={handleDismissGroup}
             merging={merging}
             onToggleSidebar={toggleSidebar}
+            headerChip={activeSession ? needsYouChip : undefined}
             style={secondarySession ? { flex: `0 0 ${splitPreviewRatio ?? splitRatio}%` } : undefined}
           />
         </ComponentErrorBoundary>

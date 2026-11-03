@@ -1,6 +1,6 @@
 import { useCallback } from 'react';
 import { useConversation } from '../hooks/useConversation';
-import { connectionManager } from '../services/ConnectionManager';
+import { sendChoice, type ChoiceData } from '../services/sendChoice';
 import { WaitingIndicator } from './WaitingIndicator';
 import { MessageList } from './MessageList';
 import { InputBar } from './InputBar';
@@ -43,26 +43,9 @@ export function ConciergeView({ serverId, sessionId, onBack }: ConciergeViewProp
   );
 
   const handleSelectChoice = useCallback(
-    async (choice: {
-      selectedIndices: number[];
-      optionCount: number;
-      multiSelect: boolean;
-      otherText?: string;
-    }): Promise<boolean> => {
+    async (choice: ChoiceData): Promise<boolean> =>
       // Mirror SessionView: choices go through the dedicated send_choice request.
-      const conn = connectionManager.getConnection(serverId);
-      if (!conn?.isConnected()) return false;
-      try {
-        const response = await conn.sendRequest('send_choice', {
-          ...choice,
-          sessionId,
-          tmuxSessionName: sessionId,
-        });
-        return response.success;
-      } catch {
-        return false;
-      }
-    },
+      (await sendChoice(choice, { serverId, sessionId })).ok,
     [serverId, sessionId],
   );
 

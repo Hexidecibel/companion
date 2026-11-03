@@ -683,6 +683,112 @@ describe('SessionWatcher', () => {
       expect(summary.waitingCount).toBe(1);
       expect(summary.workingCount).toBe(1);
     });
+
+    // Mission Control: pending prompt / waiting-since / last line
+    const DIVIDER = '─'.repeat(80);
+    const AUQ_PANE = [
+      'Some earlier output',
+      DIVIDER,
+      ' ☐ Approach',
+      '',
+      'How thorough should the parser rewrite be?',
+      '',
+      '❯ 1. Robust/lenient',
+      '     Handle every layout.',
+      '  2. Match this exact format',
+      '     Simpler.',
+      '  3. Type something.',
+      DIVIDER,
+      '  4. Chat about this',
+      '',
+      'Enter to select · ↑/↓ to navigate · Esc to cancel',
+      '',
+    ].join('\n');
+
+    it('waiting session: waitingSince + lastMessage, pendingPrompt from the pane cache, dropped on resume', async () => {
+      addTmuxSession(TMUX_SESSION_A, '/home/user/project-a');
+      await startWatcher(watcher);
+      mockFs.readFileSync.mockReturnValue(
+        jsonlLine({ type: 'assistant', message: { content: 'Looked around.\nWhat next?' }, uuid: 'msg-1' })
+      );
+      mockWatcher.emit('add', FILE_A1);
+      await jest.advanceTimersByTimeAsync(200);
+
+      let s = (await watcher.getServerSummary()).sessions[0];
+      expect(s.status).toBe('waiting');
+      expect(typeof s.waitingSince).toBe('number');
+      expect(s.lastMessage).toBe('What next?');
+      expect(s.pendingPrompt).toBeUndefined(); // a plain question has no buttons
+      const since = s.waitingSince;
+
+      // A capture taken anyway (Herald listing / get_highlights) shows an AUQ box.
+      watcher.noteStartupPane(TMUX_SESSION_A, AUQ_PANE);
+      await jest.advanceTimersByTimeAsync(1000);
+      s = (await watcher.getServerSummary()).sessions[0];
+      expect(s.pendingPrompt).toMatchObject({
+        kind: 'choice',
+        header: 'Approach',
+        question: 'How thorough should the parser rewrite be?',
+      });
+      expect(s.pendingPrompt!.options.length).toBeGreaterThanOrEqual(2);
+      expect(s.pendingPrompt!.signature).toBe(watcher.pendingPromptFor(TMUX_SESSION_A)!.signature);
+      expect(s.waitingSince).toBe(since); // same wait
+
+      // Resumed: the user answered, the agent works again.
+      mockFs.statSync.mockReturnValue({ mtimeMs: Date.now() + 5, birthtimeMs: Date.now(), isDirectory: () => false } as any);
+      mockFs.readFileSync.mockReturnValue(
+        jsonlContent(
+          jsonlLine({ type: 'assistant', message: { content: 'What next?' }, uuid: 'msg-1' }),
+          jsonlLine({ type: 'user', message: { content: 'go on' }, uuid: 'msg-2' })
+        )
+      );
+      mockWatcher.emit('change', FILE_A1);
+      await jest.advanceTimersByTimeAsync(200);
+      s = (await watcher.getServerSummary()).sessions[0];
+      expect(s.status).not.toBe('waiting');
+      expect(s.pendingPrompt).toBeUndefined();
+      expect(s.waitingSince).toBeUndefined();
+    });
+
+    it('a live AUQ box makes a "working" session wait until a capture shows it gone', async () => {
+      addTmuxSession(TMUX_SESSION_A, '/home/user/project-a');
+      await startWatcher(watcher);
+      mockFs.readFileSync.mockReturnValue(
+        jsonlLine({ type: 'user', message: { content: 'Do something' }, uuid: 'msg-1' })
+      );
+      mockWatcher.emit('add', FILE_A1);
+      await jest.advanceTimersByTimeAsync(200);
+      expect((await watcher.getServerSummary()).sessions[0].status).toBe('working');
+
+      await jest.advanceTimersByTimeAsync(1000);
+      watcher.noteStartupPane(TMUX_SESSION_A, AUQ_PANE);
+      let sum = await watcher.getServerSummary();
+      expect(sum.sessions[0].status).toBe('waiting');
+      expect(sum.waitingCount).toBe(1);
+      expect(sum.workingCount).toBe(0);
+      expect(sum.sessions[0].pendingPrompt?.kind).toBe('choice');
+      expect(sum.sessions[0].waitingSince).toBeDefined();
+
+      watcher.noteStartupPane(TMUX_SESSION_A, 'just a shell prompt\n> ');
+      sum = await watcher.getServerSummary();
+      expect(sum.sessions[0].status).toBe('working');
+      expect(sum.sessions[0].pendingPrompt).toBeUndefined();
+      expect(sum.sessions[0].waitingSince).toBeUndefined();
+    });
+
+    it('a cached pane box expires after the TTL without a newer capture', async () => {
+      addTmuxSession(TMUX_SESSION_A, '/home/user/project-a');
+      await startWatcher(watcher);
+      mockFs.readFileSync.mockReturnValue(
+        jsonlLine({ type: 'user', message: { content: 'Do something' }, uuid: 'msg-1' })
+      );
+      mockWatcher.emit('add', FILE_A1);
+      await jest.advanceTimersByTimeAsync(1200);
+      watcher.noteStartupPane(TMUX_SESSION_A, AUQ_PANE);
+      expect((await watcher.getServerSummary()).sessions[0].pendingPrompt).toBeDefined();
+      jest.setSystemTime(Date.now() + 31_000);
+      expect((await watcher.getServerSummary()).sessions[0].pendingPrompt).toBeUndefined();
+    });
   });
 
   // ========================================

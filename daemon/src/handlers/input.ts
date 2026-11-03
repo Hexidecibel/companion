@@ -4,6 +4,8 @@ import * as os from 'os';
 import { HandlerContext, MessageHandler } from '../handler-context';
 import { MAX_ATTACHMENT_FILE_SIZE_BYTES } from '../constants';
 import type { SendInputResult } from '../input-injector';
+import { resolveChoiceLabels } from '../pending-prompt';
+import type { SendChoiceRequest } from '../types';
 
 /** Wire error for a failed send: the guard's code (draft / typing / prompt waiting), else the legacy text. */
 function sendErrorCode(
@@ -159,25 +161,12 @@ export function registerInputHandlers(ctx: HandlerContext): Record<string, Messa
         requestId,
       });
 
-      // Acknowledge session — user is responding, cancel push escalation
-      const activeSessionId = ctx.watcher.getActiveSessionId();
-      if (activeSessionId) {
-        ctx.escalation.acknowledgeSession(activeSessionId);
-      }
+      // Acknowledge the TARGET session — user is responding, cancel its push escalation
+      ctx.escalation.acknowledgeSession(sessionToUse);
     },
 
     async send_choice(client, payload, requestId) {
-      const choicePayload = payload as
-        | {
-            selectedIndices: number[];
-            optionCount: number;
-            multiSelect: boolean;
-            otherText?: string;
-            sessionId?: string;
-            tmuxSessionName?: string;
-            promptKind?: 'trust';
-          }
-        | undefined;
+      const choicePayload = payload as SendChoiceRequest | undefined;
 
       if (
         !choicePayload ||
@@ -214,9 +203,67 @@ export function registerInputHandlers(ctx: HandlerContext): Record<string, Messa
         return;
       }
 
+      // A late tap on an old tile must not answer whatever is on screen now:
+      // re-read the pane and compare with the prompt the client saw. Fail
+      // closed when the screen cannot be read.
+      let selectedIndices = choicePayload.selectedIndices;
+      let optionCount = choicePayload.optionCount;
+      const labels = Array.isArray(choicePayload.selectedLabels)
+        ? choicePayload.selectedLabels
+        : null;
+      if (typeof choicePayload.expectSignature === 'string' || labels) {
+        const expect =
+          typeof choicePayload.expectSignature === 'string' ? choicePayload.expectSignature : null;
+        let live: { signature: string } | null = null;
+        let onScreen: { options: Array<{ label: string }> } | null = null;
+        let fallbackSig: string | null = null;
+        try {
+          const pane = await ctx.injector.captureTmuxPane(sessionToUse, 60);
+          if (pane) {
+            ctx.watcher.noteStartupPane?.(sessionToUse, pane);
+            live = ctx.watcher.pendingPromptFor?.(sessionToUse) ?? null;
+            onScreen = ctx.watcher.onScreenChoiceFor?.(sessionToUse) ?? null;
+            if (labels && expect) {
+              fallbackSig = ctx.watcher.transcriptPromptSignatureFor?.(sessionToUse) ?? null;
+            }
+          }
+        } catch {
+          live = null;
+        }
+        // A client that saw the transcript fallback (no box known yet) may answer
+        // the same approval, but only by label against the box now on screen.
+        // Labels without a signature still resolve against the screen (never positional).
+        const sigOk =
+          expect === null
+            ? true
+            : !!live && (live.signature === expect || (!!labels && fallbackSig === expect));
+        let stale = !sigOk;
+        if (!stale && labels) {
+          const resolved = onScreen ? resolveChoiceLabels(labels, onScreen.options) : null;
+          if (!resolved) {
+            stale = true;
+          } else {
+            selectedIndices = resolved;
+            if (choicePayload.otherText === undefined) optionCount = onScreen!.options.length;
+          }
+        }
+        if (stale) {
+          console.log(
+            `[CHOICE] stale prompt for "${sessionToUse}" (expected ${expect}, on screen ${live?.signature ?? 'none'}${labels ? `, labels ${JSON.stringify(labels)}` : ''}); nothing sent`
+          );
+          ctx.send(client.ws, {
+            type: 'choice_sent',
+            success: false,
+            error: 'stale_prompt',
+            requestId,
+          });
+          return;
+        }
+      }
+
       const success = await ctx.injector.sendChoice(
-        choicePayload.selectedIndices,
-        choicePayload.optionCount,
+        selectedIndices,
+        optionCount,
         choicePayload.multiSelect,
         choicePayload.otherText,
         sessionToUse,
@@ -234,11 +281,10 @@ export function registerInputHandlers(ctx: HandlerContext): Record<string, Messa
         requestId,
       });
 
-      // Acknowledge session
-      const activeSessionId = ctx.watcher.getActiveSessionId();
-      if (activeSessionId) {
-        ctx.escalation.acknowledgeSession(activeSessionId);
-      }
+      // The answered box is gone: the next capture tells what (if anything) follows.
+      if (success) ctx.watcher.clearPaneChoice?.(sessionToUse);
+      // Acknowledge the TARGET session (not the daemon's active one).
+      ctx.escalation.acknowledgeSession(sessionToUse);
     },
 
     async cancel_input(client, payload, requestId) {
@@ -512,11 +558,8 @@ export function registerInputHandlers(ctx: HandlerContext): Record<string, Messa
         requestId,
       });
 
-      // Acknowledge session
-      const activeSessionId = ctx.watcher.getActiveSessionId();
-      if (activeSessionId) {
-        ctx.escalation.acknowledgeSession(activeSessionId);
-      }
+      // Acknowledge the TARGET session (not the daemon's active one).
+      ctx.escalation.acknowledgeSession(sessionToUse);
     },
 
     async send_feedback(client, payload, requestId) {

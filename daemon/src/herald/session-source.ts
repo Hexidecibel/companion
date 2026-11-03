@@ -8,34 +8,28 @@
 
 import { runTmux } from '../impact/sub';
 import * as path from 'path';
-import { classifyLocalCommands, getPendingApprovalTools, parseLocalCommandPart } from '../parser';
+import { classifyLocalCommands, parseLocalCommandPart } from '../parser';
 import { defaultAgent, type AgentAdapter } from '../agents';
 import type { ConversationMessage } from '../types';
 import { detectTurnEndError } from '../turn-error';
 import { BoundedMap } from '../utils';
 import type { InputRefusal } from '../prompt-guard';
 import type { SendInputResult } from '../input-injector';
-import { fnv1a, oneLine, clip, trailingQuestion } from './text';
+import { trailingQuestion } from './text';
+import {
+  choiceSignature,
+  derivePendingApproval,
+  normalizeChoice,
+  type NormalizedChoice,
+  type PendingApproval,
+} from '../pending-prompt';
+
+export { choiceSignature };
+export type { PendingApproval };
 
 export type HeraldSessionStatus = 'working' | 'waiting' | 'idle';
 
-export interface PendingChoice {
-  question: string;
-  header?: string;
-  options: Array<{ label: string; description?: string }>;
-  multiSelect: boolean;
-  /** Stable signature of (header, question, option labels) — detects a changed prompt. */
-  signature: string;
-  /** The agent's start-up "Trust this folder?" prompt: only the user answers it. */
-  trust?: boolean;
-}
-
-export interface PendingApproval {
-  tool: string;
-  detail: string;
-  /** tool_use id: unique per approval occurrence. */
-  toolUseId: string;
-}
+export type PendingChoice = NormalizedChoice;
 
 export interface SessionSnapshot {
   serverId: string;
@@ -130,14 +124,6 @@ export interface SessionSource {
 
 // ---------------------------------------------------------------------------
 
-export function choiceSignature(q: {
-  header?: string;
-  question?: string;
-  options: Array<{ label: string }>;
-}): string {
-  return fnv1a([q.header || '', q.question || '', ...q.options.map((o) => o.label)].join('\u0001'));
-}
-
 /**
  * Entries that are not prompts to the model: a directly-run slash command
  * (`/login`), its caveat and its output. Skill triggers stay (unchanged
@@ -230,16 +216,6 @@ export function extractExchanges(
     }
   }
   return out;
-}
-
-function approvalDetail(input: Record<string, unknown> | undefined): string {
-  if (!input) return '';
-  const pick = ['command', 'file_path', 'path', 'url', 'pattern', 'description', 'plan'];
-  for (const k of pick) {
-    const v = input[k];
-    if (typeof v === 'string' && v.trim()) return clip(oneLine(v), 300);
-  }
-  return '';
 }
 
 // ---------------------------------------------------------------------------
@@ -361,19 +337,7 @@ export class LocalSessionSource implements SessionSource {
       const messages = this.messagesFor(sessionId);
       const last = messages[messages.length - 1];
       const agent = this.deps.watcher.agentFor?.(sessionId) ?? defaultAgent();
-      const pendingTools =
-        agent === defaultAgent()
-          ? getPendingApprovalTools(messages)
-          : agent.transcript.getPendingApprovalTools(messages);
-      let pendingApproval: PendingApproval | null = null;
-      if (pendingTools.length > 0 && last?.type === 'assistant') {
-        const tc = last.toolCalls?.find((t) => t.id === pendingTools[0].id);
-        pendingApproval = {
-          tool: pendingTools[0].name,
-          detail: approvalDetail(tc?.input),
-          toolUseId: pendingTools[0].id,
-        };
-      }
+      const pendingApproval = derivePendingApproval(messages, agent);
       let lastAssistant: ConversationMessage | undefined;
       for (let i = messages.length - 1; i >= 0 && i >= messages.length - 50; i--) {
         if (messages[i].type === 'assistant' && (messages[i].content || '').trim()) {
@@ -514,20 +478,7 @@ export class LocalSessionSource implements SessionSource {
         return null;
       }
       const agent = this.deps.watcher.agentFor?.(tmuxName) ?? defaultAgent();
-      const choice = agent.terminal.detectActiveChoicePrompt(pane);
-      if (!choice || choice.options.length < 2) return null;
-      const options = choice.options.map((o) => ({
-        label: o.label,
-        description: o.description || undefined,
-      }));
-      return {
-        question: choice.question || 'Select an option',
-        header: choice.header || undefined,
-        options,
-        multiSelect: Boolean(choice.multiSelect),
-        signature: choiceSignature({ header: choice.header, question: choice.question, options }),
-        ...(choice.kind === 'trust' ? { trust: true } : {}),
-      };
+      return normalizeChoice(agent.terminal.detectActiveChoicePrompt(pane));
     } catch (err) {
       if (strict) throw err;
       return null;

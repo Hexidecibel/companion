@@ -289,6 +289,44 @@ export interface SessionSummary {
   lastActivity: number;
   currentActivity?: string;
   tmuxSessionName?: string;
+  /** ms epoch when status became 'waiting'; absent otherwise. */
+  waitingSince?: number;
+  /** Present only while waiting on a prompt. */
+  pendingPrompt?: PendingPrompt;
+  /** Last assistant text line, trimmed, <=140 chars. */
+  lastMessage?: string;
+}
+
+/** What a waiting session asks (server summary, Mission Control tiles). */
+export interface PendingPrompt {
+  kind: 'choice' | 'approval' | 'trust';
+  question: string;
+  header?: string;
+  /** On-screen options when the pane box is known (index = row); else the transcript's (answer by label). */
+  options: { label: string; description?: string }[];
+  multiSelect?: boolean;
+  /** >1 when the agent is asking several questions in one AUQ (tile then shows "Open to answer") */
+  questionCount?: number;
+  /** Stable signature of the prompt as on screen; echo back in send_choice.expectSignature */
+  signature: string;
+}
+
+/** send_choice request payload (the daemon replies choice_sent). */
+export interface SendChoiceRequest {
+  selectedIndices: number[];
+  optionCount: number;
+  multiSelect: boolean;
+  otherText?: string;
+  sessionId?: string;
+  tmuxSessionName?: string;
+  promptKind?: 'trust';
+  /** PendingPrompt.signature the client saw; a changed prompt replies stale_prompt. */
+  expectSignature?: string;
+  /**
+   * Labels of the tapped options. The daemon resolves them against the options
+   * on screen now (never positional); unknown or ambiguous -> stale_prompt.
+   */
+  selectedLabels?: string[];
 }
 
 export interface ServerSummary {

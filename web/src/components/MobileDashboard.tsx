@@ -1,7 +1,7 @@
 import { eventBus } from '../utils/eventBus';
 import { ServerFreshness } from './ServerFreshness';
 import { backgroundWorkLabel } from '../utils/backgroundWork';
-import { useState, useMemo, useRef, useCallback, useEffect, lazy, Suspense } from 'react';
+import { useState, useMemo, useRef, useCallback, useEffect, useLayoutEffect, lazy, Suspense } from 'react';
 import { ServerSummary, SessionSummary, ActiveSession } from '../types';
 import { useConnections } from '../hooks/useConnections';
 import { useServers } from '../hooks/useServers';
@@ -23,6 +23,26 @@ import { SkeletonSessionCard } from './Skeleton';
 import { StuckBadge } from './stuck/StuckBadge';
 import { BabysitBadge } from './babysit/BabysitBadge';
 import { ProfileBadge } from './ProfilePicker';
+import { MissionControl } from './mission/MissionControl';
+
+export type MobileViewMode = 'list' | 'overview';
+export const MOBILE_VIEW_KEY = 'companion_mobile_view';
+
+export function loadMobileViewMode(): MobileViewMode {
+  try {
+    return localStorage.getItem(MOBILE_VIEW_KEY) === 'overview' ? 'overview' : 'list';
+  } catch {
+    return 'list';
+  }
+}
+
+function saveMobileViewMode(mode: MobileViewMode): void {
+  try {
+    localStorage.setItem(MOBILE_VIEW_KEY, mode);
+  } catch {
+    // blocked storage: the choice holds for this run
+  }
+}
 
 const STATUS_DOT_CLASS: Record<SessionSummary['status'], string> = {
   waiting: 'status-dot-blue status-dot-pulse',
@@ -70,6 +90,10 @@ interface MobileDashboardProps {
   secondarySession?: ActiveSession | null;
   /** Open the all-sessions Agents page. */
   onOpenAgents?: () => void;
+  /** A session (or the Agents page) covers the dashboard: stay mounted, keep the scroll spot. */
+  hidden?: boolean;
+  /** Overview tile tap: open the session (pending = a prompt waits there). */
+  onOpenFromOverview?: (serverId: string, sessionId: string, pending: boolean) => void;
 }
 
 export function MobileDashboard({
@@ -83,6 +107,8 @@ export function MobileDashboard({
   onCloseSplit,
   secondarySession,
   onOpenAgents,
+  hidden,
+  onOpenFromOverview,
 }: MobileDashboardProps) {
   const { snapshots } = useConnections();
   const { servers, toggleEnabled, deleteServer } = useServers();
@@ -92,16 +118,45 @@ export function MobileDashboard({
   const [newSessionServerId, setNewSessionServerId] = useState<string | null>(null);
   const [newProjectServerId, setNewProjectServerId] = useState<string | null>(null);
   const [tmuxServerId, setTmuxServerId] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<MobileViewMode>(loadMobileViewMode);
+  const pickViewMode = useCallback((mode: MobileViewMode) => {
+    setViewMode(mode);
+    saveMobileViewMode(mode);
+  }, []);
+
+  // Scroll spot survives a session being opened over the (hidden) dashboard.
+  const contentRef = useRef<HTMLDivElement>(null);
+  const savedScroll = useRef(0);
+  const hiddenRef = useRef(hidden);
+  hiddenRef.current = hidden;
+  useLayoutEffect(() => {
+    const el = contentRef.current;
+    if (!el) return;
+    if (hidden) return;
+    if (savedScroll.current > 0 && el.scrollTop !== savedScroll.current) el.scrollTop = savedScroll.current;
+  }, [hidden]);
+  const handleContentScroll = useCallback(() => {
+    if (!hiddenRef.current && contentRef.current) savedScroll.current = contentRef.current.scrollTop;
+  }, []);
+
+  const serverNames = useMemo(() => new Map(snapshots.map((s) => [s.serverId, s.serverName])), [snapshots]);
+  const openFromOverview = useCallback((serverId: string, sessionId: string, pending: boolean) => {
+    if (onOpenFromOverview) onOpenFromOverview(serverId, sessionId, pending);
+    else onSelectSession(serverId, sessionId);
+  }, [onOpenFromOverview, onSelectSession]);
 
   // Signal to Dashboard that a modal overlay is open (for back gesture coordination)
+  // (Not while hidden: a session view on top owns the flag then.)
   useEffect(() => {
+    if (hidden) return;
     const isOverlay = !!newSessionServerId || !!newProjectServerId || !!tmuxServerId || addingServer || !!editingServerId;
     document.body.dataset.overlay = isOverlay ? 'true' : '';
     return () => { document.body.dataset.overlay = ''; };
-  }, [newSessionServerId, newProjectServerId, tmuxServerId, addingServer, editingServerId]);
+  }, [hidden, newSessionServerId, newProjectServerId, tmuxServerId, addingServer, editingServerId]);
 
   // Listen for close-overlay event from Dashboard's back gesture handler
   useEffect(() => {
+    if (hidden) return;
     const handler = () => {
       // Close innermost modal first
       if (newSessionServerId) setNewSessionServerId(null);
@@ -111,7 +166,7 @@ export function MobileDashboard({
       else if (addingServer) setAddingServer(false);
     };
     return eventBus.on('close-overlay', handler);
-  }, [newSessionServerId, newProjectServerId, tmuxServerId, editingServerId, addingServer]);
+  }, [hidden, newSessionServerId, newProjectServerId, tmuxServerId, editingServerId, addingServer]);
 
   // Check if any session across all servers needs attention
   const hasWaiting = useMemo(() => {
@@ -128,10 +183,30 @@ export function MobileDashboard({
   }, [tmuxServerId, snapshots]);
 
   return (
-    <div className="mobile-dashboard">
+    <div className="mobile-dashboard" style={hidden ? { display: 'none' } : undefined} aria-hidden={hidden || undefined}>
       <header className="mobile-dashboard-header">
         <h1 className="mobile-dashboard-title">Companion</h1>
         <div className="mobile-dashboard-header-actions">
+          {snapshots.length > 0 && (
+            <div className="mobile-view-toggle" role="group" aria-label="Dashboard view">
+              <button
+                type="button"
+                className={`mobile-view-toggle__btn${viewMode === 'list' ? ' active' : ''}`}
+                aria-pressed={viewMode === 'list'}
+                onClick={() => pickViewMode('list')}
+              >
+                List
+              </button>
+              <button
+                type="button"
+                className={`mobile-view-toggle__btn${viewMode === 'overview' ? ' active' : ''}`}
+                aria-pressed={viewMode === 'overview'}
+                onClick={() => pickViewMode('overview')}
+              >
+                Overview
+              </button>
+            </div>
+          )}
           <HeraldLauncher variant="mobile" />
           {hasWaiting && (
             <span className="mobile-attention-dot" title="Sessions need attention" />
@@ -148,8 +223,11 @@ export function MobileDashboard({
         </div>
       </header>
 
-      <div className="mobile-dashboard-content">
-        {onOpenAgents && snapshots.length > 0 && (
+      <div className="mobile-dashboard-content" ref={contentRef} onScroll={handleContentScroll}>
+        {viewMode === 'overview' && snapshots.length > 0 && (
+          <MissionControl summaries={summaries} serverNames={serverNames} onOpenSession={openFromOverview} />
+        )}
+        {viewMode === 'list' && onOpenAgents && snapshots.length > 0 && (
           <div className="agents-nav-row agents-nav-row--mobile">
             <AgentsNavButton onClick={onOpenAgents} />
           </div>
@@ -168,7 +246,7 @@ export function MobileDashboard({
           </div>
         )}
 
-        {snapshots.map((snap) => {
+        {(viewMode === 'list' || snapshots.length === 0) && snapshots.map((snap) => {
           const server = servers.find(s => s.id === snap.serverId);
           const isEnabled = server?.enabled !== false;
           return (
@@ -229,7 +307,7 @@ export function MobileDashboard({
           );
         })}
 
-        {snapshots.length > 0 && !addingServer && (
+        {viewMode === 'list' && snapshots.length > 0 && !addingServer && (
           <button
             className="mobile-add-server-inline"
             onClick={() => setAddingServer(true)}

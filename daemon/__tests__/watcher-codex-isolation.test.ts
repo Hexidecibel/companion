@@ -231,11 +231,17 @@ describe('SessionWatcher: Codex sessions stay Codex', () => {
     expect(w.getClientStatus('cdx1').isWaitingForInput).toBe(true);
     const s = (await w.getServerSummary()).sessions.find((x) => x.id === 'cdx1')!;
     expect(s.status).toBe('waiting');
+    expect(s.pendingPrompt?.kind).toBe('trust');
+    expect(s.pendingPrompt!.options.length).toBeGreaterThanOrEqual(2);
+    expect(s.waitingSince).toBe(s.lastActivity); // the trust prompt's own `since`
     w.noteStartupPane('cdx1', trust); // same prompt: no second event
     const idle = fs.readFileSync(path.join(FIXTURES, 'live-idle.ansi'), 'utf8');
     w.noteStartupPane('cdx1', idle);
     expect(w.startupPromptFor('cdx1')).toBeNull();
     expect(w.getStatus('cdx1').isWaitingForInput).toBe(false);
+    const after = (await w.getServerSummary()).sessions.find((x) => x.id === 'cdx1')!;
+    expect(after.pendingPrompt).toBeUndefined();
+    expect(after.waitingSince).toBeUndefined();
     expect(events.map((e) => e.isWaitingForInput)).toEqual([true, false]);
     w.stop();
   });

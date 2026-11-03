@@ -15,7 +15,7 @@ interface MessageListProps {
   hasMore: boolean;
   onLoadMore: () => void;
   onSelectOption?: (label: string) => void | Promise<boolean>;
-  onSelectChoice?: (choice: { selectedIndices: number[]; optionCount: number; multiSelect: boolean; otherText?: string }) => Promise<boolean>;
+  onSelectChoice?: (choice: { selectedIndices: number[]; optionCount: number; multiSelect: boolean; otherText?: string; selectedLabels?: string[] }) => Promise<boolean>;
   onCancelMessage?: (clientMessageId: string) => void;
   onViewFile?: (path: string) => void;
   onViewArtifact?: (content: string, title?: string) => void;
