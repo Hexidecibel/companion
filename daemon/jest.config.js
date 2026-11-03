@@ -6,7 +6,9 @@ module.exports = {
   testMatch: ['**/__tests__/**/*.test.ts'],
   transform: {
     '^.+\\.tsx?$': ['ts-jest', {
-      tsconfig: 'tsconfig.json',
+      // isolatedModules (in tsconfig.jest.json) = transpile only: about 2x faster cold;
+      // type errors are caught by `npm run typecheck`, not by jest.
+      tsconfig: 'tsconfig.jest.json',
     }],
   },
   collectCoverageFrom: [

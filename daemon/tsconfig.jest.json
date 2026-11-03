@@ -1,0 +1,8 @@
+{
+  // Jest only: transpile each file on its own (no type check per test file).
+  // Types are still checked by `npm run typecheck` / bin/test.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "isolatedModules": true
+  }
+}

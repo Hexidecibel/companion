@@ -149,10 +149,22 @@ cd web && npx vitest
 
 Includes ServerConnection tests (23) and ConnectionManager tests (14).
 
+### Fast loop
+
+```bash
+bin/test --fast [files...]          # only related tests (jest --findRelatedTests / vitest related); default: changed vs HEAD
+bin/test --fast --direct foo.ts     # foo.ts -> foo.test.ts only (about 1-3 s)
+bin/test --fast --quiet ...         # silent on pass (used by .claude/hooks/fast-test.sh after each edit)
+```
+
+Daemon jest transpiles only (`daemon/tsconfig.jest.json`, `isolatedModules`); types are checked by
+`npm run typecheck`. Name a test `*.slow.test.ts` when it builds the bundle or needs real I/O: `--fast`
+skips it, the full suite runs it.
+
 ### Full Suite
 
 ```bash
-bin/test    # Runs all tests, lint, and typecheck
+bin/test    # Runs all tests (daemon + web), lint, typecheck, web build
 ```
 
 ## TLS Setup

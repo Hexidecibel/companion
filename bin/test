@@ -1,8 +1,19 @@
 #!/bin/bash
-# test — Run all tests, lint, and type checks (daemon + web).
+# test — Run tests, lint, and type checks (daemon + web).
 #
 # Usage:
-#   bin/test
+#   bin/test                    Full: daemon typecheck/lint/format/jest, web typecheck/vitest/build.
+#                               Run it before committing (in the background while you keep working).
+#   bin/test --fast [files...]  Inner TDD loop: ONLY the tests related to the given files (source or
+#                               test files, daemon/ or web/). No files = everything changed vs HEAD
+#                               (staged, unstaged and untracked). No typecheck, lint or build.
+#                               Skips *.slow.test.* files (e.g. the web test that builds the bundle
+#                               twice); the full run still runs them. Usually a few seconds.
+#   bin/test --fast --direct .. Tighter: a source file with a same-name test (foo.ts ->
+#                               foo.test.ts / foo.test.tsx anywhere in its package) runs only that
+#                               test; others fall back to related tests. The edit hook uses this.
+#   bin/test --fast --quiet ... Print nothing on pass; on failure only the failure blocks
+#                               (used by the PostToolUse hook in .claude/hooks/fast-test.sh).
 #
 # Prerequisites: node, npm
 set -euo pipefail
@@ -11,9 +22,109 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(dirname "$SCRIPT_DIR")"
 
 if ! command -v node &>/dev/null; then
+  [ -s "$HOME/.nvm/nvm.sh" ] && source "$HOME/.nvm/nvm.sh" >/dev/null
+fi
+if ! command -v node &>/dev/null; then
   echo "ERROR: Node.js is not installed. See https://nodejs.org/" >&2
   exit 1
 fi
+
+# ---------------------------------------------------------------------------
+# Fast tier
+# ---------------------------------------------------------------------------
+if [ "${1:-}" = "--fast" ]; then
+  shift
+  QUIET=0; DIRECT=0
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --quiet) QUIET=1; shift ;;
+      --direct) DIRECT=1; shift ;;
+      *) break ;;
+    esac
+  done
+
+  files=()
+  if [ $# -gt 0 ]; then
+    for f in "$@"; do
+      case "$f" in /*) files+=("$f") ;; *) files+=("$PWD/$f") ;; esac
+    done
+  else
+    cd "$ROOT"
+    while IFS= read -r f; do
+      [ -n "$f" ] && [ -e "$ROOT/$f" ] && files+=("$ROOT/$f")
+    done < <( { git diff --name-only HEAD; git ls-files --others --exclude-standard; } | sort -u)
+  fi
+
+  daemon_files=(); web_files=()
+  for f in "${files[@]+"${files[@]}"}"; do
+    case "$f" in
+      */node_modules/*|*/dist/*|*/dist-desktop/*|*/coverage/*) ;;
+      "$ROOT"/daemon/*.ts|"$ROOT"/daemon/*.js|"$ROOT"/daemon/*.json) daemon_files+=("$f") ;;
+      "$ROOT"/web/*.ts|"$ROOT"/web/*.tsx|"$ROOT"/web/*.js|"$ROOT"/web/*.json) web_files+=("$f") ;;
+    esac
+  done
+
+  # --direct: swap a source file for its same-name test file(s) when there are any.
+  direct() { # pkg file... -> prints the files to hand to the related-tests runner
+    local pkg="$1"; shift
+    local f base hits
+    for f in "$@"; do
+      case "$f" in *.test.*) echo "$f"; continue ;; esac
+      base=$(basename "$f"); base="${base%.*}"
+      hits=$(cd "$ROOT/$pkg" && git ls-files -- "*/$base.test.ts" "*/$base.test.tsx" | grep -v '\.slow\.test\.' | sed "s|^|$ROOT/$pkg/|" || true)
+      if [ -n "$hits" ]; then echo "$hits"; else echo "$f"; fi
+    done
+  }
+  if [ $DIRECT -eq 1 ]; then
+    if [ ${#daemon_files[@]} -gt 0 ]; then mapfile -t daemon_files < <(direct daemon "${daemon_files[@]}" | sort -u); fi
+    if [ ${#web_files[@]} -gt 0 ]; then mapfile -t web_files < <(direct web "${web_files[@]}" | sort -u); fi
+  fi
+
+  if [ ${#daemon_files[@]} -eq 0 ] && [ ${#web_files[@]} -eq 0 ]; then
+    [ $QUIET -eq 1 ] || echo "bin/test --fast: no changed daemon/web source files; nothing to run."
+    exit 0
+  fi
+
+  FAILED=0
+  run_part() { # label dir cmd...
+    local label="$1" dir="$2"; shift 2
+    if [ $QUIET -eq 1 ]; then
+      local out
+      if ! out=$(cd "$dir" && NO_COLOR=1 FORCE_COLOR=0 "$@" 2>&1); then
+        # Jest's forceExit can exit non-zero with every test green: only a
+        # reported failure (or no summary at all, i.e. a crash) counts.
+        if printf '%s\n' "$out" | grep -qE '^(Tests|Test Suites):.*failed|FAIL|●' \
+           || ! printf '%s\n' "$out" | grep -qE '^(Tests:|Test Suites:| *Test Files)'; then
+          FAILED=1
+          echo "=== $label: FAILED ==="
+          # Failure blocks only (jest "●" / vitest "FAIL" sections), capped.
+          printf '%s\n' "$out" | grep -v -E '^\s*(✓|√)|^\s*$|^PASS |^Force exiting Jest|^\(node:[0-9]+\)|^\(Use .node --trace' | tail -n 80
+        fi
+      fi
+    else
+      echo "=== $label ==="
+      (cd "$dir" && "$@") || FAILED=1
+    fi
+  }
+
+  if [ ${#daemon_files[@]} -gt 0 ]; then
+    run_part "Daemon: related tests" "$ROOT/daemon" \
+      npx jest --findRelatedTests "${daemon_files[@]}" --passWithNoTests \
+        --testPathIgnorePatterns '/node_modules/' '\.slow\.test\.' \
+        $( [ $QUIET -eq 1 ] && echo "--silent --verbose=false" )
+  fi
+  if [ ${#web_files[@]} -gt 0 ]; then
+    run_part "Web: related tests" "$ROOT/web" \
+      npx vitest related --run "${web_files[@]}" --passWithNoTests \
+        --exclude '**/node_modules/**' --exclude '**/*.slow.test.*' \
+        $( [ $QUIET -eq 1 ] && echo "--reporter=dot --silent" )
+  fi
+  exit $FAILED
+fi
+
+# ---------------------------------------------------------------------------
+# Full run
+# ---------------------------------------------------------------------------
 FAILED=0
 
 echo "=== Daemon: Typecheck ==="
@@ -34,6 +145,10 @@ cd "$ROOT/daemon" && npm test || FAILED=1
 echo ""
 echo "=== Web: Typecheck ==="
 cd "$ROOT/web" && npx tsc --noEmit || FAILED=1
+
+echo ""
+echo "=== Web: Tests ==="
+cd "$ROOT/web" && npm test || FAILED=1
 
 echo ""
 echo "=== Web: Build ==="

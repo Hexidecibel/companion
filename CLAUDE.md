@@ -176,7 +176,8 @@ Port 9877 (default); auth = token in the `authenticate` message. Core types: `au
 3. **Desktop:** Run `npm run dev` in `desktop/`
 4. **Android:** `/apk` skill to build, sign, and install
 5. **Type check:** `cd web && npx tsc --noEmit`
-6. **Full test gate:** `bin/test` (also builds web)
+6. **Fast loop (TDD):** `bin/test --fast [files]` runs only the jest/vitest tests related to the files (default: changed vs HEAD), seconds; `--direct` = the same-name test only. A PostToolUse hook (`.claude/hooks/fast-test.sh`) runs it on every edited source file (silent on pass, 60 s cap, one run at a time). Tests that build the bundle or need real I/O are `*.slow.test.*`: skipped by `--fast`, run by the full gate.
+7. **Full test gate:** `bin/test` (daemon typecheck/lint/format/jest, web typecheck/vitest/build); run it once, in the background, before committing
 
 ### Building
 
