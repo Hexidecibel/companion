@@ -1,15 +1,98 @@
-import { memo, useCallback, useEffect, useState } from 'react';
+import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { useBabysit, useBabysitClock } from '../../hooks/useBabysit';
 import { babysitStatusLine, babysitStore, logKindLabel } from '../../services/babysit';
+import type { HeraldBabysitSuggestion } from '../../types/herald';
+import { HoldToConfirm } from '../common/HoldToConfirm';
 
 function clock(ts: number): string {
   return new Date(ts).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 }
 
 /**
+ * The question Herald brought to the user, with the answer it would send:
+ * Send / Cancel act on the same herald action card (herald_confirm), so a
+ * hard_confirm suggestion needs the same press-and-hold as the card.
+ */
+function SuggestionBlock({ s, connected }: { s: HeraldBabysitSuggestion; connected: boolean }) {
+  const [inflight, setInflight] = useState<'confirm' | 'cancel' | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const mounted = useRef(true);
+  useEffect(() => () => { mounted.current = false; }, []);
+  // A new suggestion starts clean.
+  useEffect(() => {
+    setInflight(null);
+    setError(null);
+  }, [s.actionId]);
+
+  const decide = useCallback(async (d: 'confirm' | 'cancel') => {
+    if (inflight) return;
+    setInflight(d);
+    setError(null);
+    const res = await babysitStore.confirm(s.actionId, d);
+    if (!mounted.current) return;
+    setInflight(null);
+    if (!res) setError(d === 'confirm' ? 'Could not send the answer.' : 'Could not cancel the suggestion.');
+  }, [inflight, s.actionId]);
+
+  const risky = s.tier === 'hard_confirm';
+  const disabled = !connected;
+  return (
+    <div
+      className={`babysit-suggest${risky ? ' babysit-suggest--risky' : ''}`}
+      role="group"
+      aria-label="Herald's suggested answer"
+    >
+      <div className="babysit-suggest__label">{risky ? 'Needs your say-so' : 'Your call'}</div>
+      <div className="babysit-suggest__q">{s.question}</div>
+      <div className="babysit-suggest__a">
+        <span className="babysit-suggest__a-label">Suggested answer</span>
+        <span className="babysit-suggest__a-text">{s.answer}</span>
+      </div>
+      {s.reason && <div className="babysit-suggest__why">{s.reason}</div>}
+      {risky && s.reasons && s.reasons.length > 0 && (
+        <ul className="babysit-suggest__reasons">
+          {s.reasons.map((r) => <li key={r}>{r}</li>)}
+        </ul>
+      )}
+      <div className="babysit-suggest__buttons">
+        {risky ? (
+          <HoldToConfirm
+            onConfirm={() => void decide('confirm')}
+            disabled={disabled || inflight === 'cancel'}
+            busy={inflight === 'confirm'}
+            label="Hold to send"
+            busyLabel="Sending"
+            ariaLabel="Press and hold to send the suggested answer. Hold Space or Enter for about one second."
+          />
+        ) : (
+          <button
+            type="button"
+            className="babysit-btn babysit-btn--primary"
+            onClick={() => void decide('confirm')}
+            disabled={disabled || !!inflight}
+          >
+            {inflight === 'confirm' ? 'Sending…' : 'Send'}
+          </button>
+        )}
+        <button
+          type="button"
+          className="babysit-btn"
+          onClick={() => void decide('cancel')}
+          disabled={disabled || !!inflight}
+        >
+          {inflight === 'cancel' ? 'Cancelling…' : 'Cancel'}
+        </button>
+      </div>
+      {error && <div className="babysit-suggest__error" role="alert">{error}</div>}
+    </div>
+  );
+}
+
+/**
  * "Babysitting: 4 answers, 26 min left": a quiet blue bar above the
  * conversation while Herald answers this session's simple questions, with the
- * log of what it sent (expandable), Edit and Stop. After the brief ends it
+ * log of what it sent (expandable), the question it brought to the user (with
+ * its suggested answer, Send / Cancel), Edit and Stop. After the brief ends it
  * stays (about an hour, or until closed) to say why.
  */
 export const BabysitBar = memo(function BabysitBar({ serverId, sessionId, onEdit }: { serverId: string; sessionId: string; onEdit: () => void }) {
@@ -75,6 +158,10 @@ export const BabysitBar = memo(function BabysitBar({ serverId, sessionId, onEdit
           </button>
         )}
       </div>
+
+      {active && babysit.pendingSuggestion && (
+        <SuggestionBlock s={babysit.pendingSuggestion} connected={connected} />
+      )}
 
       {log.length > 0 && (
         <button type="button" className="babysit-bar__toggle" aria-expanded={open} aria-controls={logId} onClick={() => setOpen((v) => !v)}>

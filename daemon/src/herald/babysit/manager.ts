@@ -24,6 +24,7 @@ import {
   type HeraldBabysitEndReason,
   type HeraldBabysitErrorCode,
   type HeraldBabysitLogEntry,
+  type HeraldBabysitSuggestion,
   type HeraldSessionRef,
 } from '../protocol';
 import type { SessionSnapshot, SessionSource } from '../session-source';
@@ -35,6 +36,20 @@ import { BabysitTracker, promptOf, type BabysitPrompt } from './tracker';
 import { cloneBrief, sessionKeyOf, type BabysitRecord } from './types';
 
 const REVALIDATE_TIMEOUT_MS = 8000;
+/** A suggestion card comes down only after its question was absent on this many listings ... */
+export const SUGGESTION_GONE_POLLS = 2;
+/** ... spanning at least this long (see checkSuggestions). */
+export const SUGGESTION_GONE_MS = 10_000;
+
+/** Our suggested-answer card for one session, and the prompt it answers. */
+interface Suggestion extends HeraldBabysitSuggestion {
+  /** The prompt's per-occurrence key (tracker). */
+  key: string;
+  /** Consecutive successful listings without the question. */
+  absentPolls: number;
+  /** When the current absence began. */
+  absentSince?: number;
+}
 const SEND_TIMEOUT_MS = 20_000;
 /** Typed answers say who answered, so the transcript never passes Herald off as the user. */
 export const BABYSIT_PREFIX = '[Herald for you]';
@@ -182,7 +197,7 @@ export class BabysitManager {
   /** Spoken lines waiting for the brain turn to end. */
   private queue: BabysitPost[] = [];
   /** Our suggested-answer card per session, and the prompt it answers. */
-  private suggestions = new Map<string, { actionId: string; key: string; question: string }>();
+  private suggestions = new Map<string, Suggestion>();
   /** Briefs already logged as "missing from the listing but still there" (log once). */
   private goneWarned = new Set<string>();
 
@@ -201,7 +216,19 @@ export class BabysitManager {
 
   /** A brief as clients see it (a copy; says so when this daemon only suggests). */
   private view(b: HeraldBabysit): HeraldBabysit {
-    return this.deps.autoSend ? cloneBrief(b) : { ...cloneBrief(b), autoSend: false };
+    const out = this.deps.autoSend ? cloneBrief(b) : { ...cloneBrief(b), autoSend: false };
+    const sug = b.status === 'active' ? this.suggestions.get(sessionKeyOf(b)) : undefined;
+    if (sug) {
+      out.pendingSuggestion = {
+        actionId: sug.actionId,
+        question: sug.question,
+        answer: sug.answer,
+        reason: sug.reason,
+        tier: sug.tier,
+        ...(sug.reasons ? { reasons: [...sug.reasons] } : {}),
+      };
+    }
+    return out;
   }
 
   persisted(): BabysitRecord[] {
@@ -311,19 +338,7 @@ export class BabysitManager {
       listingOk: (serverId) => !failed?.has(serverId),
     });
     // A suggestion whose question went away is stale: take the card down.
-    if (this.suggestions.size) {
-      const bySession = new Map(snaps.map((s) => [sessionKeyOf(s), s] as const));
-      for (const [key, sug] of Array.from(this.suggestions.entries())) {
-        // A failed listing says nothing about the question.
-        if (failed?.has(key.slice(0, key.indexOf(':')))) continue;
-        const s = bySession.get(key);
-        const p = s ? promptOf(s) : null;
-        if (!this.tracker.active(key) || !p || !('prompt' in p) || p.prompt.key !== sug.key) {
-          this.suggestions.delete(key);
-          this.deps.cancelAction(sug.actionId);
-        }
-      }
-    }
+    if (this.suggestions.size) this.checkSuggestions(snaps, now, failed);
     let changed = false;
     for (const e of events) {
       if (e.type === 'end') {
@@ -379,6 +394,60 @@ export class BabysitManager {
         }); still babysitting`
       );
     }
+  }
+
+  /**
+   * Take stale suggestion cards down. Never on one listing: a kicked poll right
+   * after the escalation has seen the session as 'working' (background agents,
+   * a compaction flicker) and cancelled a fresh card 40 ms after it went up.
+   * Down at once when the brief ended or the session shows a DIFFERENT real
+   * prompt; otherwise only after the question was absent on SUGGESTION_GONE_POLLS
+   * successful listings spanning SUGGESTION_GONE_MS. Working only because of
+   * background work, or a failed listing, counts neither way.
+   */
+  private checkSuggestions(
+    snaps: SessionSnapshot[],
+    now: number,
+    failed: ReadonlySet<string> | undefined
+  ): void {
+    const bySession = new Map(snaps.map((s) => [sessionKeyOf(s), s] as const));
+    for (const [key, sug] of Array.from(this.suggestions.entries())) {
+      if (!this.tracker.active(key)) {
+        this.dropSuggestion(key, sug);
+        continue;
+      }
+      // A failed listing says nothing about the question.
+      if (failed?.has(key.slice(0, key.indexOf(':')))) continue;
+      const s = bySession.get(key);
+      if (s && !s.inactive && s.background) continue;
+      const p = s ? promptOf(s) : null;
+      if (p && 'prompt' in p) {
+        if (p.prompt.key === sug.key) {
+          sug.absentPolls = 0;
+          delete sug.absentSince;
+        } else this.dropSuggestion(key, sug);
+        continue;
+      }
+      sug.absentPolls += 1;
+      sug.absentSince ??= now;
+      if (sug.absentPolls >= SUGGESTION_GONE_POLLS && now - sug.absentSince >= SUGGESTION_GONE_MS)
+        this.dropSuggestion(key, sug);
+    }
+  }
+
+  private dropSuggestion(key: string, sug: Suggestion): void {
+    this.suggestions.delete(key);
+    this.deps.cancelAction(sug.actionId);
+    this.deps.changed();
+  }
+
+  /** Our suggestion card was cancelled, expired or failed: forget it (sent = onSuggestionSent). */
+  onSuggestionResolved(a: HeraldAction): void {
+    const key = sessionKeyOf(a);
+    const sug = this.suggestions.get(key);
+    if (!sug || sug.actionId !== a.id) return;
+    this.suggestions.delete(key);
+    this.deps.changed();
   }
 
   /** The user sent our suggested answer (ActionManager's onSent). */
@@ -737,7 +806,12 @@ export class BabysitManager {
       this.suggestions.set(key, {
         actionId: action.id,
         key: prompt.key,
-        question: prompt.question,
+        question: clip(oneLine(prompt.question), 400),
+        answer: clip(oneLine(action.payload), 400),
+        reason: verdict.reason,
+        tier: action.tier,
+        ...(action.reasons.length ? { reasons: [...action.reasons] } : {}),
+        absentPolls: 0,
       });
       this.emit({
         text:

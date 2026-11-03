@@ -9,6 +9,7 @@
  * against `hostId`.
  */
 import type {
+  HeraldAction,
   HeraldBabysit,
   HeraldBabysitEndReason,
   HeraldBabysitLogEntry,
@@ -36,11 +37,13 @@ export interface BabysitSnapshot {
 export interface BabysitApi {
   set: (req: HeraldBabysitSetRequest) => Promise<string | null>;
   stop: (req: HeraldBabysitStopRequest) => Promise<string | null>;
+  /** Send / cancel a suggestion card: the same herald_confirm the action card uses. Null = failed. */
+  confirm: (actionId: string, decision: 'confirm' | 'cancel') => Promise<HeraldAction | null>;
 }
 
 const EMPTY: BabysitSnapshot = { hostId: null, supported: false, connected: false, babysits: [], skewMs: null };
 const NOT_READY = 'Herald is not connected';
-const NO_API: BabysitApi = { set: async () => NOT_READY, stop: async () => NOT_READY };
+const NO_API: BabysitApi = { set: async () => NOT_READY, stop: async () => NOT_READY, confirm: async () => null };
 
 let snapshot: BabysitSnapshot = EMPTY;
 let api: BabysitApi = NO_API;
@@ -66,6 +69,7 @@ export const babysitStore = {
   },
   set: (req: HeraldBabysitSetRequest) => api.set(req),
   stop: (req: HeraldBabysitStopRequest) => api.stop(req),
+  confirm: (actionId: string, decision: 'confirm' | 'cancel') => api.confirm(actionId, decision),
 };
 
 /** A brief belongs to the hub's own sessions (the only kind today). */

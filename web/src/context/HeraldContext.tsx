@@ -237,8 +237,8 @@ export function HeraldProvider({ children }: { children: ReactNode }) {
       connected: herald.connected,
       babysits: heraldBabysits ?? NO_BABYSITS,
       skewMs: herald.skewMs,
-    }, { set: herald.setBabysit, stop: herald.stopBabysit });
-  }, [hostId, herald.supported, herald.connected, herald.skewMs, heraldEnabled, heraldBabysits, herald.setBabysit, herald.stopBabysit]);
+    }, { set: herald.setBabysit, stop: herald.stopBabysit, confirm: herald.confirm });
+  }, [hostId, herald.supported, herald.connected, herald.skewMs, heraldEnabled, heraldBabysits, herald.setBabysit, herald.stopBabysit, herald.confirm]);
   useEffect(() => () => babysitStore.reset(), []);
   const openRef = useRef(open);
   /** The setup control (declared further down): the "diagnostics" voice command opens its page. */

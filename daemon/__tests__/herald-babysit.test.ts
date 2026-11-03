@@ -39,7 +39,7 @@ import {
   type BabysitBrain,
   type BabysitDecideInput,
 } from '../src/herald/babysit/decider';
-import { BabysitError, BABYSIT_PREFIX, parseBabysitSpec } from '../src/herald/babysit/manager';
+import { BabysitError, BABYSIT_PREFIX, parseBabysitSpec, SUGGESTION_GONE_MS } from '../src/herald/babysit/manager';
 import { sanitizeBabysits } from '../src/herald/babysit/types';
 import { registerHeraldHandlers } from '../src/handlers/herald';
 import type { AuditEntry } from '../src/audit-log';
@@ -405,6 +405,50 @@ describe('babysit decider', () => {
     // The model's own escalation carries the classifier's tier as well.
     const m = judgeDecision(JSON.stringify({ decision: 'escalate', option: 1, text: null, basis: '', reason: 'risky' }), input({ prompt: choicePrompt(risky) }));
     expect(m).toMatchObject({ kind: 'escalate', why: 'model', tier: 'hard_confirm' });
+  });
+
+  it('the danger check scans only what Herald would send, never the narration', () => {
+    // Production 2026-11-03: the narration mentioned merging / rebasing; the answer was a plain continue.
+    const narrated = textPrompt(
+      'I merged the feature branches and rebased the cleanup commits onto main; the git history is tidy now. ' +
+        'Want me to continue with the next step?'
+    );
+    const v = judgeDecision(
+      JSON.stringify({ decision: 'answer', option: null, text: 'Yes, continue.', basis: 'continue', reason: 'plain continue' }),
+      input({ prompt: narrated })
+    );
+    expect(v).toMatchObject({ kind: 'answer', continueCase: true, answer: { text: 'Yes, continue.' } });
+    // A safe option under a question that names a risky act is fine...
+    const dataDir: PendingChoice = {
+      question: 'There is an old data directory. Should I delete it or keep it?',
+      options: [{ label: 'Keep the data directory' }, { label: 'Delete the data directory' }],
+      multiSelect: false,
+      signature: 'sig-data',
+    };
+    const keep = judgeDecision(
+      JSON.stringify({ decision: 'answer', option: 1, text: null, basis: 'get the release build passing', reason: 'x' }),
+      input({ prompt: choicePrompt(dataDir) })
+    );
+    expect(keep).toMatchObject({ kind: 'answer', answer: { optionIndex: 0 } });
+    // ...the destructive option itself never is (label, or its description).
+    const del = judgeDecision(
+      JSON.stringify({ decision: 'answer', option: 2, text: null, basis: 'get the release build passing', reason: 'x' }),
+      input({ prompt: choicePrompt(dataDir) })
+    );
+    expect(del).toMatchObject({ kind: 'escalate', why: 'danger', tier: 'hard_confirm', suggestion: { optionIndex: 1 } });
+    if (del.kind !== 'escalate') throw new Error('expected an escalation');
+    expect(del.reasons[0]).toMatch(/^the answer involves: /);
+    const described: PendingChoice = {
+      question: 'How should I tidy up?',
+      options: [{ label: 'Option A', description: 'rm -rf the build cache and reset the branch' }, { label: 'Option B' }],
+      multiSelect: false,
+      signature: 'sig-desc',
+    };
+    const a = judgeDecision(
+      JSON.stringify({ decision: 'answer', option: 1, text: null, basis: 'get the release build passing', reason: 'x' }),
+      input({ prompt: choicePrompt(described) })
+    );
+    expect(a).toMatchObject({ kind: 'escalate', why: 'danger', tier: 'hard_confirm' });
   });
 
   it('"never decide" notes win over a brief that would otherwise cover it', () => {
@@ -962,10 +1006,64 @@ describe('babysit in HeraldService', () => {
     const card = svc.getState().actions.find((a) => a.suggested)!;
     expect(card).toMatchObject({ tier: 'hard_confirm', status: 'pending', payload: 'Deploy to production now', confirmPhrase: 'confirm deploy' });
     expect(card.reasons.length).toBeGreaterThan(0);
-    // The question goes away (the user answered in the terminal): the card is taken down.
+    expect(svc.getState().babysits![0].pendingSuggestion).toMatchObject({ actionId: card.id, tier: 'hard_confirm', answer: 'Deploy to production now' });
+    // The question goes away (the user answered in the terminal): the card is taken down
+    // once that holds for two listings and the grace period.
     src.holder.sessions = [working()];
     await tick(svc);
+    expect(svc.getState().actions.find((a) => a.id === card.id)!.status).toBe('pending');
+    await pollFor(svc, SUGGESTION_GONE_MS + 4000);
     expect(svc.getState().actions.find((a) => a.id === card.id)!.status).toBe('cancelled');
+    expect(svc.getState().babysits![0].pendingSuggestion).toBeUndefined();
+  });
+
+  it('the poll an escalation kicks never takes its fresh card down (production: cancelled 40 ms after it went up)', async () => {
+    const { svc, src } = await started([say({ decision: 'escalate', option: null, text: 'Yes, go ahead.', basis: '', reason: 'a judgment call' })]);
+    src.holder.sessions = [asking('t1', 'Ready to wire the upload page. Shall I go ahead?')];
+    // Once the card is up the session reads as working (background agents / a compaction flicker).
+    const real = src.listSessions.getMockImplementation()!;
+    src.listSessions.mockImplementation(async () =>
+      svc.getState().actions.some((a) => a.suggested) ? [working({ background: true })] : real()
+    );
+    await tick(svc);
+    const card = svc.getState().actions.find((a) => a.suggested)!;
+    expect(card).toMatchObject({ status: 'pending', kind: 'send_input', payload: 'Yes, go ahead.' });
+    expect(src.listSessions.mock.calls.length).toBeGreaterThanOrEqual(3); // the kicked poll ran
+    // Background work keeps the main thread at its question: it never counts as gone.
+    await pollFor(svc, 60_000);
+    expect(svc.getState().actions.find((a) => a.id === card.id)!.status).toBe('pending');
+    // A plain 'working' blip or a missing session on one listing does not either.
+    src.listSessions.mockImplementation(real);
+    src.holder.sessions = [working()];
+    await svc.poll();
+    src.holder.sessions = [];
+    clock += 1000;
+    await svc.poll();
+    src.holder.sessions = [asking('t1', 'Ready to wire the upload page. Shall I go ahead?')];
+    await pollFor(svc, 20_000);
+    expect(svc.getState().actions.find((a) => a.id === card.id)!.status).toBe('pending');
+    expect(svc.getState().babysits![0].pendingSuggestion).toMatchObject({
+      actionId: card.id,
+      question: expect.stringContaining('Shall I go ahead?'),
+      answer: 'Yes, go ahead.',
+      reason: 'a judgment call',
+      tier: 'echo',
+    });
+    // A DIFFERENT real prompt takes it down at once.
+    src.holder.sessions = [asking('t2', 'Done with the page. Which colour for the header?')];
+    await svc.poll();
+    expect(svc.getState().actions.find((a) => a.id === card.id)!.status).toBe('cancelled');
+    expect(svc.getState().babysits![0].pendingSuggestion).toBeUndefined();
+  });
+
+  it('cancelling the suggestion card clears it from the brief', async () => {
+    const { svc, src } = await started([say({ decision: 'answer', option: 2, basis: 'the user likes Postgres', reason: 'Postgres scales better.' })]);
+    src.holder.sessions = [snap({ sessionId: 'out4', sessionName: 'Out4', status: 'waiting', pendingChoice: choice, lastTurnKey: 't1' })];
+    await tick(svc);
+    const card = svc.getState().actions.find((a) => a.suggested)!;
+    expect(svc.getState().babysits![0].pendingSuggestion).toMatchObject({ actionId: card.id, answer: 'Postgres' });
+    await svc.confirm(card.id, 'cancel', { addr: '', clientId: 'c1', isLocal: true, tls: false, origin: null });
+    expect(svc.getState().babysits![0].pendingSuggestion).toBeUndefined();
   });
 
   it('the answer cap ends the brief', async () => {

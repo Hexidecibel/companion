@@ -39,7 +39,7 @@ const brief = (over: Partial<HeraldBabysit> = {}): HeraldBabysit => ({
   ...over,
 });
 
-let api: { set: ReturnType<typeof vi.fn>; stop: ReturnType<typeof vi.fn> };
+let api: { set: ReturnType<typeof vi.fn>; stop: ReturnType<typeof vi.fn>; confirm: ReturnType<typeof vi.fn> };
 
 function feed(over: Partial<BabysitSnapshot> = {}) {
   act(() => babysitStore.update(
@@ -51,7 +51,7 @@ function feed(over: Partial<BabysitSnapshot> = {}) {
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ['Date', 'setInterval', 'clearInterval'] });
   vi.setSystemTime(NOW);
-  api = { set: vi.fn(async () => null), stop: vi.fn(async () => null) };
+  api = { set: vi.fn(async () => null), stop: vi.fn(async () => null), confirm: vi.fn(async () => ({ id: 'a1' })) };
   feed();
 });
 
@@ -187,6 +187,67 @@ describe('BabysitBar', () => {
     expect(container.firstChild).toBeNull();
     feed({ babysits: [brief({ id: 'b2', answersUsed: 0, log: [] })] });
     expect(screen.getByText('Babysitting: 0 answers, 26 min left')).toBeTruthy();
+  });
+
+  it('shows the suggestion waiting for the user; Send and Cancel go through herald_confirm', async () => {
+    const pendingSuggestion = {
+      actionId: 'a1',
+      question: 'Ready to wire the upload page. Shall I go ahead?',
+      answer: 'Yes, go ahead.',
+      reason: 'The brief does not say whether to start the upload page.',
+      tier: 'echo' as const,
+    };
+    feed({ babysits: [brief({ pendingSuggestion })] });
+    render(<BabysitBar serverId="hub" sessionId="out4" onEdit={() => {}} />);
+    const block = screen.getByRole('group', { name: "Herald's suggested answer" });
+    expect(block.textContent).toContain('Shall I go ahead?');
+    expect(block.textContent).toContain('Yes, go ahead.');
+    expect(block.textContent).toContain('The brief does not say whether to start the upload page.');
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    await waitFor(() => expect(api.confirm).toHaveBeenCalledWith('a1', 'confirm'));
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(api.confirm).toHaveBeenCalledWith('a1', 'cancel'));
+    // A failed send says so and keeps the suggestion.
+    api.confirm.mockResolvedValueOnce(null);
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    expect((await screen.findByRole('alert')).textContent).toMatch(/Could not send/);
+    // The hub resolved it: the block goes away.
+    feed({ babysits: [brief()] });
+    expect(screen.queryByRole('group', { name: "Herald's suggested answer" })).toBeNull();
+  });
+
+  it('a hard-confirm suggestion needs a press-and-hold and lists the danger reasons', async () => {
+    feed({
+      babysits: [brief({
+        pendingSuggestion: {
+          actionId: 'a2',
+          question: 'There is an old data directory. What should I do with it?',
+          answer: 'Delete the data directory',
+          reason: 'It needs your say-so: the answer involves: delete / reset / destroy.',
+          tier: 'hard_confirm',
+          reasons: ['the answer involves: delete / reset / destroy'],
+        },
+      })],
+    });
+    render(<BabysitBar serverId="hub" sessionId="out4" onEdit={() => {}} />);
+    expect(screen.getByText('Needs your say-so')).toBeTruthy();
+    expect(screen.getByText('the answer involves: delete / reset / destroy')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Send' })).toBeNull();
+    const hold = screen.getByRole('button', { name: /Press and hold to send/ });
+    fireEvent.click(hold);
+    expect(api.confirm).not.toHaveBeenCalled();
+    fireEvent.keyDown(hold, { key: 'Enter' });
+    await waitFor(() => expect(api.confirm).toHaveBeenCalledWith('a2', 'confirm'), { timeout: 3000 });
+  });
+
+  it('while disconnected the buttons are disabled; an ended brief shows no suggestion', () => {
+    const pendingSuggestion = { actionId: 'a1', question: 'Go on?', answer: 'Yes', reason: 'x', tier: 'echo' as const };
+    feed({ connected: false, babysits: [brief({ pendingSuggestion })] });
+    const { rerender } = render(<BabysitBar serverId="hub" sessionId="out4" onEdit={() => {}} />);
+    expect((screen.getByRole('button', { name: 'Send' }) as HTMLButtonElement).disabled).toBe(true);
+    feed({ babysits: [brief({ pendingSuggestion, status: 'ended', endReason: 'stopped', endedAt: NOW })] });
+    rerender(<BabysitBar serverId="hub" sessionId="out4" onEdit={() => {}} />);
+    expect(screen.queryByRole('group', { name: "Herald's suggested answer" })).toBeNull();
   });
 
   it('the open log does not carry over to another session', () => {

@@ -434,6 +434,9 @@ export class HeraldService {
       now: this.now,
       onChange: (a) => {
         this.emit({ kind: 'action', action: a });
+        // Cancelled / expired / failed: the babysit bar stops showing it.
+        if (a.suggested && a.status !== 'pending' && a.status !== 'sent')
+          this.babysit.onSuggestionResolved(a);
         this.persist();
       },
       onSent: (a, note, meta, spawned) => this.onActionSent(a, note, meta, spawned),

@@ -641,6 +641,9 @@ Follow-up fixes layered on the Mobile UX round above: walks back the activity-ro
 - Start by telling Herald (voice or chat, behind a hold-to-confirm card) or with the Babysit button in the session view; bar with status, answers used, time left and log, sidebar badge, "Babysitting" list in the Herald menu
 - Decisions use a stronger model (`herald.babysit_model`), metered at its own rate; Herald's chat stays on Haiku. In the sandbox the babysitter only suggests
 - Fix: a brief no longer ends as "session closed" minutes after it starts. A flicker in the session listing is not a closed session: the brief ends as "session gone" only after a sustained absence AND a direct check that the tmux session is really gone; the watcher's tmux maps are now swapped in one step, so live sessions are never listed as closed mid-refresh
+- Fix (2026-11-03): the suggested-answer card no longer vanishes right after it appears (a session busy only with background agents counted as "the question went away"); a card now comes down at once only for a different real question or an ended brief, otherwise after 2 polls / 10 s without the question
+- The session's babysit bar shows the pending suggestion (question, answer, reason) with Send / Cancel (hold-to-send when risky), same confirm path as the Herald card
+- The danger check now looks only at what Herald would send (the answer, or the chosen option's label and description), not the session's own narration, so a plain "continue" is answered; permission prompts, "never" notes and destructive answers still come to you
 
 ## Desktop — links open in the browser, window comes back (2026-10-06)
 - Links in conversations (and "Report issue") open in the system browser on every platform; a native navigation guard keeps every Companion webview on the app, so a link can no longer strand the window on another site

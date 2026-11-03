@@ -163,6 +163,30 @@
 .babysit-btn--stop:hover:not(:disabled) { background: rgba(239, 68, 68, 0.2); border-color: rgba(239, 68, 68, 0.55); }
 .babysit-bar__note { margin: 6px 0 0 18px; font-size: 12px; color: #fca5a5; }
 
+/* Suggested answer waiting for the user (pendingSuggestion) */
+.babysit-suggest {
+  margin: 8px 0 0 18px;
+  padding: 9px 10px;
+  border-radius: 8px;
+  background: rgba(17, 24, 39, 0.55);
+  border: 1px solid var(--border-color, #374151);
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+.babysit-suggest--risky { border-color: rgba(245, 158, 11, 0.45); background: rgba(245, 158, 11, 0.06); }
+.babysit-suggest__label { font-size: 11px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: #93c5fd; }
+.babysit-suggest--risky .babysit-suggest__label { color: #fbbf24; }
+.babysit-suggest__q { font-size: 13px; line-height: 1.4; color: var(--text-primary, #f3f4f6); overflow-wrap: anywhere; }
+.babysit-suggest__a { display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; font-size: 13px; min-width: 0; }
+.babysit-suggest__a-label { font-size: 11px; color: var(--text-secondary, #9ca3af); }
+.babysit-suggest__a-text { font-weight: 600; color: var(--text-primary, #f3f4f6); overflow-wrap: anywhere; }
+.babysit-suggest__why { font-size: 12px; line-height: 1.4; color: var(--text-secondary, #9ca3af); }
+.babysit-suggest__reasons { margin: 0; padding-left: 18px; font-size: 12px; color: #fcd34d; }
+.babysit-suggest__buttons { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 2px; }
+.babysit-suggest__error { font-size: 12px; color: #fca5a5; }
+
 /* Brief dialog */
 .babysit-dialog { max-width: 520px; }
 .babysit-dialog__body { display: flex; flex-direction: column; gap: 12px; padding: 14px 18px 16px; overflow-y: auto; }
@@ -233,7 +257,8 @@
   .babysit-bar { margin: 6px 8px 2px; }
   .babysit-bar__actions { margin-left: 0; }
   .babysit-bar__actions .babysit-btn { flex: 1 1 auto; }
-  .babysit-bar__toggle, .babysit-bar__log, .babysit-bar__note { margin-left: 0; }
+  .babysit-bar__toggle, .babysit-bar__log, .babysit-bar__note, .babysit-suggest { margin-left: 0; }
+  .babysit-suggest__buttons .babysit-btn { flex: 1 1 auto; height: 36px; }
   .babysit-dialog { width: 94%; max-height: 88dvh; }
   .babysit-dialog__buttons .babysit-btn { flex: 1 1 auto; height: 40px; }
 }

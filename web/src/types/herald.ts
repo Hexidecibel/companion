@@ -186,6 +186,19 @@ export interface HeraldBabysitLogEntry {
   /** Why (the decider's one-line reason), when there is one. */
   reason?: string;
 }
+/** A suggested answer the babysitter brought to the user (HeraldBabysit.pendingSuggestion). */
+export interface HeraldBabysitSuggestion {
+  actionId: string;
+  /** What the session asked. */
+  question: string;
+  /** The answer Herald would send (option label or text). */
+  answer: string;
+  /** Why it is the user's call. */
+  reason: string;
+  tier: HeraldActionTier;
+  /** The danger hits, for a hard_confirm card. */
+  reasons?: string[];
+}
 /**
  * A standing brief for ONE session: Herald answers its simple questions
  * ("continue?", and what the brief clearly covers), brings everything else to
@@ -217,6 +230,11 @@ export interface HeraldBabysit {
   endedAt?: number;
   /** False: this daemon only suggests, never sends by itself (the sandbox). Absent = it sends. */
   autoSend?: boolean;
+  /**
+   * The suggested answer waiting for the user (its card is the herald action
+   * `actionId`; Send / Cancel go through herald_confirm). Live only, never stored.
+   */
+  pendingSuggestion?: HeraldBabysitSuggestion;
   /** The last 20 entries, oldest first. */
   log: HeraldBabysitLogEntry[];
 }

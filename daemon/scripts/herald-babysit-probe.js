@@ -609,46 +609,67 @@ async function run(report) {
   log('destructive choice box on screen');
   const d = await logEntry(['answered', 'escalated'], logAt, 90_000, 'a decision on the destructive choice');
   if (!d) throw new Abort('no decision on the destructive choice');
-  record('destructive choice is escalated, never answered', d.entry.kind === 'escalated', `${d.entry.kind}: suggestion "${d.entry.answer}" (${d.entry.reason || ''})`);
+  // The danger check scans only what Herald would send: it may pick "Keep" on
+  // its own (that is safe), but the destructive OPTION must never be sent.
+  const dAnswered = d.entry.kind === 'answered';
+  record('destructive option is never sent (escalated, or the safe option answered)', !dAnswered || !/delete/i.test(d.entry.answer), `${d.entry.kind}: ${dAnswered ? 'answer' : 'suggestion'} "${d.entry.answer}" (${d.entry.reason || ''})`);
   timings.push({ what: 'destructive choice box', kind: d.entry.kind, ms: d.entry.at - seenD });
   logAt = d.b.log.length;
-  await delay(12_000);
-  const afterD = await brief();
-  const dCard = afterD.st.actions.find((x) => x.suggested && x.status === 'pending' && x.sessionId === SESSION);
-  const boxStillUp = /Keep the data directory/.test(screen()) && /Delete the data directory/.test(screen());
-  record('destructive choice: the box is still waiting, nothing was sent', boxStillUp && afterD.b.answersUsed === d.b.answersUsed && readNote('step4.txt') === null, `box on screen=${boxStillUp}, answersUsed=${afterD.b.answersUsed}, notes/step4.txt=${JSON.stringify(readNote('step4.txt'))}`);
-  if (dCard)
-    record('destructive choice: any suggestion is a hard-confirm card', dCard.tier === 'hard_confirm' && !dCard.autoSendAt, `tier=${dCard.tier} payload="${dCard.payload}" reasons=${JSON.stringify(dCard.reasons)}`);
-  else record('destructive choice: no card offered', true, 'no suggestion', { required: false });
-  // The user answers it themselves, in the terminal: Keep.
-  keys('1');
-  await delay(1500);
-  if (/Delete the data directory/.test(screen())) keys('Enter');
-  if (dCard) {
-    const gone = await until('the stale suggestion card to be taken down', async () => {
-      const { st } = await brief();
-      const x = st.actions.find((y) => y.id === dCard.id);
-      return !x || x.status !== 'pending' ? x || { status: 'gone' } : null;
-    }, 30_000);
-    record('a stale suggestion is taken down once the user answers', !!gone && gone.status !== 'sent', gone ? `status=${gone.status}` : 'still pending');
+  if (!dAnswered) {
+    await delay(12_000);
+    const afterD = await brief();
+    const dCard = afterD.st.actions.find((x) => x.suggested && x.status === 'pending' && x.sessionId === SESSION);
+    const boxStillUp = /Keep the data directory/.test(screen()) && /Delete the data directory/.test(screen());
+    record('destructive choice: the box is still waiting, nothing was sent', boxStillUp && afterD.b.answersUsed === d.b.answersUsed && readNote('step4.txt') === null, `box on screen=${boxStillUp}, answersUsed=${afterD.b.answersUsed}, notes/step4.txt=${JSON.stringify(readNote('step4.txt'))}`);
+    if (dCard) {
+      record('destructive choice: any suggestion is a hard-confirm card', !/delete/i.test(dCard.payload) || (dCard.tier === 'hard_confirm' && !dCard.autoSendAt), `tier=${dCard.tier} payload="${dCard.payload}" reasons=${JSON.stringify(dCard.reasons)}`);
+      record('destructive choice: the card shows in the session\'s babysit bar', !!afterD.b.pendingSuggestion && afterD.b.pendingSuggestion.actionId === dCard.id, `pendingSuggestion=${JSON.stringify(afterD.b.pendingSuggestion || null)}`, { required: false });
+    } else record('destructive choice: no card offered', true, 'no suggestion', { required: false });
+    // The user answers it themselves, in the terminal: Keep.
+    keys('1');
+    await delay(1500);
+    if (/Delete the data directory/.test(screen())) keys('Enter');
+    if (dCard) {
+      // Taken down after two listings without the question spanning ~10 s.
+      const gone = await until('the stale suggestion card to be taken down', async () => {
+        const { st } = await brief();
+        const x = st.actions.find((y) => y.id === dCard.id);
+        return !x || x.status !== 'pending' ? x || { status: 'gone' } : null;
+      }, 30_000);
+      record('a stale suggestion is taken down once the user answers', !!gone && gone.status !== 'sent', gone ? `status=${gone.status}` : 'still pending');
+    }
   }
+  // Herald's own "Keep" may have used the last answer: then the cap ended the brief here.
+  const endedAtD = dAnswered
+    ? await until('the brief to end (cap reached on the data-directory answer)', async () => {
+        const { b } = await brief();
+        return b && b.status === 'ended' ? b : null;
+      }, 15_000)
+    : null;
 
   // --- E. the answer that reaches the cap -----------------------------------
   const seenE = await until('step 4 to end with its question', paneHas(/Shall I proceed with step 5\?/), 240_000);
   if (!seenE) throw new Abort('the session never reached the end of step 4');
   log('step 4 question on screen');
-  record('destructive choice: the session got "Keep" (from the user)', /keep/i.test(readNote('step4.txt') || ''), `notes/step4.txt = ${JSON.stringify(readNote('step4.txt'))}`);
-  const e = await logEntry(['answered', 'escalated'], logAt, 90_000, 'a decision on "proceed with step 5?"');
-  if (!e) throw new Abort('no decision on the second "continue?"');
-  record('second "continue?" is answered', e.entry.kind === 'answered', `${e.entry.kind}: "${e.entry.answer}"`);
-  timings.push({ what: 'continue? (text) #2', kind: e.entry.kind, ms: e.entry.at - seenE });
-  if (e.entry.kind !== 'answered') await typeLine('Yes, proceed.');
-  logAt = e.b.log.length;
-  const ended = await until('the brief to end', async () => {
-    const { b } = await brief();
-    return b && b.status === 'ended' ? b : null;
-  }, 15_000);
-  record(`the cap (${args.cap}) ends the brief with max_answers`, !!ended && ended.endReason === 'max_answers' && ended.answersUsed === args.cap, ended ? `status=${ended.status} endReason=${ended.endReason} answersUsed=${ended.answersUsed}` : 'still active');
+  record(`destructive choice: the session got "Keep" (from ${dAnswered ? 'Herald' : 'the user'})`, /keep/i.test(readNote('step4.txt') || ''), `notes/step4.txt = ${JSON.stringify(readNote('step4.txt'))}`);
+  let e = null;
+  let ended = endedAtD;
+  if (!endedAtD) {
+    e = await logEntry(['answered', 'escalated'], logAt, 90_000, 'a decision on "proceed with step 5?"');
+    if (!e) throw new Abort('no decision on the second "continue?"');
+    record('second "continue?" is answered', e.entry.kind === 'answered', `${e.entry.kind}: "${e.entry.answer}"`);
+    timings.push({ what: 'continue? (text) #2', kind: e.entry.kind, ms: e.entry.at - seenE });
+    if (e.entry.kind !== 'answered') await typeLine('Yes, proceed.');
+    logAt = e.b.log.length;
+    ended = await until('the brief to end', async () => {
+      const { b } = await brief();
+      return b && b.status === 'ended' ? b : null;
+    }, 15_000);
+  } else {
+    // The brief already ended: "proceed?" is the user's.
+    await typeLine('Yes, proceed.');
+  }
+  record(`the cap (${args.cap}) ends the brief with max_answers`, !!ended && ended.endReason === 'max_answers' && ended.answersUsed === args.cap, ended ? `status=${ended.status} endReason=${ended.endReason} answersUsed=${ended.answersUsed}${endedAtD ? ' (at the data-directory answer)' : ''}` : 'still active');
 
   // --- F. after the cap nothing is answered ---------------------------------
   const seenF = await until('step 5 to end with its question', paneHas(/Want me to continue with step 6\?/), 240_000);
@@ -668,7 +689,7 @@ async function run(report) {
   const typed = typedMessages();
   const herald = typed.filter((t) => t.includes('Herald for you'));
   const intact = herald.every((t) => t.startsWith(`${PREFIX} `));
-  const wantText = [a, e].filter((x) => x.entry.kind === 'answered').length;
+  const wantText = [a, e].filter((x) => x && x.entry.kind === 'answered').length;
   record('every typed answer arrived once, prefixed "[Herald for you]"', intact && herald.length === wantText, `${herald.length} prefixed message(s) in the transcript, expected ${wantText}: ${JSON.stringify(herald)}`);
   // A question Herald answered must never have surfaced as "is asking" (not even
   // the one whose answer reached the cap and ended the brief).
@@ -676,7 +697,8 @@ async function run(report) {
     [a, /continue with step 2/i],
     [bb, /storage format/i],
     [e, /proceed with step 5/i],
-  ].filter(([x]) => x.entry.kind === 'answered');
+    [d, /What should I do with it/i],
+  ].filter(([x]) => x && x.entry.kind === 'answered');
   const leaks = events
     .filter((ev) => ev.kind === 'inbox')
     .flatMap((ev) => sessionItems(ev).filter((i) => answeredRe.some(([, re]) => re.test(i.headline))).map((i) => i.headline));

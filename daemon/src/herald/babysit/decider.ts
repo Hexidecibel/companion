@@ -284,30 +284,34 @@ export function judgeDecision(raw: string, input: BabysitDecideInput): BabysitVe
     invalid = textRaw ? 'its answer was too long to send unseen' : 'it had no answer';
   }
 
-  // The same classifier every Herald send goes through, on the question, the
-  // chosen option (label + description) and the answer text. The brief itself
-  // is not scanned: "get this production ready" is a goal, not an action.
+  // The same classifier every Herald send goes through, scoped to what Herald
+  // would SEND: the answer text, or the chosen option's label + description.
+  // Never the session's question or narration ("I'll merge the branches next,
+  // continue?" is not a destructive answer; "Continue" is what gets typed). A
+  // destructive option is still caught by its own label / description. The
+  // brief itself is not scanned either: "get this production ready" is a goal.
   const question = [prompt.header, prompt.question].filter(Boolean).join(': ');
-  const verdict = answer
-    ? classifyAction({
-        userText: '',
-        payload:
-          answer.optionIndex !== undefined
-            ? (prompt.options || [])[answer.optionIndex].label
-            : answer.text || '',
-        pendingQuestion: question,
-        pendingOptions: prompt.options || null,
-        sessionName: input.sessionName,
-        project: input.projectPath,
-      })
-    : classifyAction({
-        userText: '',
-        payload: '',
-        pendingQuestion: question,
-        pendingOptions: null,
-        sessionName: input.sessionName,
-        project: input.projectPath,
-      });
+  const chosen =
+    answer && answer.optionIndex !== undefined
+      ? (prompt.options || [])[answer.optionIndex]
+      : undefined;
+  const sent = chosen
+    ? [chosen.label, chosen.description || ''].filter(Boolean).join('\n')
+    : answer?.text || '';
+  const classified = classifyAction({
+    userText: '',
+    payload: sent,
+    pendingQuestion: null,
+    pendingOptions: null,
+    sessionName: input.sessionName,
+    project: input.projectPath,
+  });
+  const verdict = {
+    ...classified,
+    reasons: classified.reasons.map((r) =>
+      r.replace(/^your request involves:/, 'the answer involves:')
+    ),
+  };
   const danger = { tier: verdict.tier, reasons: verdict.reasons, ruleIds: verdict.ruleIds };
   const suggestion = answer ? { suggestion: answer } : {};
 

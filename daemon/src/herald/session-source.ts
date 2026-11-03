@@ -67,6 +67,11 @@ export interface SessionSnapshot {
   turnError?: { tool: string; line: string } | null;
   /** The coding agent when it is not Claude Code. */
   agent?: 'codex';
+  /**
+   * 'working' only because background agents / shells run: the main thread is
+   * idle at its last turn (background-work.ts). Absent otherwise.
+   */
+  background?: boolean;
 }
 
 export interface TranscriptTurn {
@@ -250,6 +255,7 @@ interface ServerSummarySession {
   currentActivity?: string;
   tmuxSessionName?: string;
   inactive?: boolean;
+  backgroundWork?: { agents: number; shells: number };
 }
 
 export interface LocalSourceDeps {
@@ -470,6 +476,11 @@ export class LocalSessionSource implements SessionSource {
         turnError: status === 'idle' ? derived?.turnError || null : null,
         ...(this.deps.watcher.agentFor?.(tmuxName)?.id === 'codex'
           ? { agent: 'codex' as const }
+          : {}),
+        ...(status === 'working' &&
+        s.backgroundWork &&
+        (s.backgroundWork.agents > 0 || s.backgroundWork.shells > 0)
+          ? { background: true }
           : {}),
       });
     }
