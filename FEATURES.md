@@ -717,3 +717,7 @@ Follow-up fixes layered on the Mobile UX round above: walks back the activity-ro
 ## Remove Session archives only its own transcript (2026-11-02)
 - Remove Session archives a transcript only through a direct mapping the session owns; anything doubtful leaves the file in place
 - The response says why with `archiveSkipped`, and snapshots record ownership so a dead session can still archive its own transcript
+
+## iPad counts as mobile (2026-11-02)
+- The app treats itself as mobile only when the native platform is Android or iOS; an iPad (which reports a Mac user agent) at full width counted as desktop before
+- Fixes the cut-off bottom of the app on iPad when the hardware-keyboard shortcut bar showed or after a rotation (no more desktop keyboard-height hack), turns push registration on, and turns the desktop updater and autostart off there

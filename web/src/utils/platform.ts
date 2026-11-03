@@ -14,14 +14,14 @@ export function isTouchDevice(): boolean {
 }
 
 /**
- * Detect Tauri mobile (Android or iOS WebView).
- * Tauri 2.0 mobile sets `__TAURI_INTERNALS__` the same as desktop,
- * so we combine it with UA and touch detection.
+ * Detect Tauri mobile (Android or iOS WebView), by platform only.
+ * Never by viewport: an iPad reports a Mac user agent, and the old
+ * "touch + width <= 768" fallback made a full-width iPad count as desktop
+ * (keyboard-height hack on, push registration off, desktop updater on).
  */
 export function isTauriMobile(): boolean {
-  if (!isTauri()) return false;
-  const ua = navigator.userAgent.toLowerCase();
-  return /android|iphone|ipad/.test(ua) || (isTouchDevice() && isMobileViewport());
+  const p = nativePlatform();
+  return p === 'android' || p === 'ios';
 }
 
 /** Tauri desktop (macOS, Linux, Windows). */
