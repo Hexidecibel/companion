@@ -721,3 +721,6 @@ Follow-up fixes layered on the Mobile UX round above: walks back the activity-ro
 ## iPad counts as mobile (2026-11-02)
 - The app treats itself as mobile only when the native platform is Android or iOS; an iPad (which reports a Mac user agent) at full width counted as desktop before
 - Fixes the cut-off bottom of the app on iPad when the hardware-keyboard shortcut bar showed or after a rotation (no more desktop keyboard-height hack), turns push registration on, and turns the desktop updater and autostart off there
+
+## Failed choice/approval send feedback
+- When sending a choice or approval option fails, an inline "Failed to send — tap to retry" message appears below the options; tapping retries the send, and it auto-dismisses after 5 seconds

@@ -248,6 +248,7 @@ describe('knowledge sources', () => {
       projectsRoot: path.join(home, 'local', 'src'),
       memoryRoot: path.join(home, '.claude', 'projects'),
       userClaudeMd: path.join(home, '.claude', 'CLAUDE.md'),
+      cushToolsSkill: path.join(home, '.claude', 'skills', 'cush-tools', 'SKILL.md'),
     };
     const w = (p: string, s: string) => {
       fs.mkdirSync(path.dirname(p), { recursive: true });
@@ -265,6 +266,10 @@ describe('knowledge sources', () => {
     w(
       paths.userClaudeMd,
       `# Global\n## Other\nunrelated serve words\n## cush-tools\n### Verify before sharing\nAlways ping a tunnel URL before sharing it.\n`
+    );
+    w(
+      paths.cushToolsSkill!,
+      `---\nname: cush-tools\n---\n# Porch toolkit\n## Shortening links\nUse bin/shorten to make a short link for a long URL.\n`
     );
     w(
       path.join(paths.projectsRoot, 'companion', 'CLAUDE.md'),
@@ -323,6 +328,12 @@ describe('knowledge sources', () => {
       'unrelated serve words'
     );
     expect(JSON.stringify(await kb.cushToolsHelp('frp token'))).not.toContain(FAKE.envValue);
+  });
+
+  it('cush_tools_help also reads the cush-tools skill', async () => {
+    const r = await kb.cushToolsHelp('shorten long url');
+    expect(r.found).toBe(true);
+    expect(JSON.stringify(r)).toContain('bin/shorten');
   });
 
   it('search_project_notes only covers projects with CLAUDE.md/plan.md, ranks the named one first', async () => {

@@ -85,3 +85,9 @@ Today `companion-remote`'s `remote_dispatch` requires the caller to name a speci
 ## /dispatch-remote skill — wrap remote_dispatch flows
 
 Once the cross-host dispatch flow is exercised regularly, wrap the common pattern (spawn remote Claude via `remote_dispatch` -> poll or inject follow-ups with `remote_send_input` -> surface results) as a slash skill. Hold off until there's a clear repeatable shape — MCP tools alone are fine for ad-hoc use.
+
+## App Store Release (moved from todo.md 2026-11-03, untouched since 2026-02)
+- Release signing key -- generate a proper upload key for Google Play (back it up!). Enroll in Google Play App Signing
+- iOS push notifications -- implement APNs in tauri-plugin-fcm (currently no-op stub) [planned]
+- Auth screen store links -- add Google Play and App Store badges/links to the web first-auth screen
+- Google Play developer registration -- $25 one-time, set up app listing

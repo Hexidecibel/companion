@@ -50,6 +50,8 @@ export interface KnowledgePaths {
   extraMemoryRoots?: () => string[];
   /** The user's global CLAUDE.md (only its cush-tools section is searched). */
   userClaudeMd: string;
+  /** The cush-tools skill (~/.claude/skills/cush-tools/SKILL.md): the full usage guide. */
+  cushToolsSkill?: string;
 }
 
 /**
@@ -71,6 +73,7 @@ export function resolveKnowledgePaths(codeHome?: string): KnowledgePaths {
     projectsRoot: env.HERALD_PROJECTS_ROOT || path.join(userHome, 'local', 'src'),
     memoryRoot: path.join(claudeHome, 'projects'),
     userClaudeMd: path.join(userHome, '.claude', 'CLAUDE.md'),
+    cushToolsSkill: path.join(userHome, '.claude', 'skills', 'cush-tools', 'SKILL.md'),
   };
 }
 
@@ -203,6 +206,10 @@ export class KnowledgeBase {
     }
     const global = await this.cache.get(this.paths.userClaudeMd, this.now());
     if (global) all.push(...global.filter((c) => c.headings.some((h) => /cush-tools/i.test(h))));
+    if (this.paths.cushToolsSkill) {
+      const skill = await this.cache.get(this.paths.cushToolsSkill, this.now());
+      if (skill) all.push(...skill);
+    }
     if (all.length === 0) {
       return {
         query,
