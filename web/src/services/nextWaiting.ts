@@ -1,4 +1,5 @@
 import type { ServerSummary } from '../types';
+import { needsYou } from './missionState';
 
 export interface WaitingRef {
   serverId: string;
@@ -14,7 +15,8 @@ export interface SessionRef {
 }
 
 /**
- * The sessions waiting on the user across every server, the one waiting
+ * The sessions that need the user (a prompt or a question; not the ones that
+ * just finished and reported back) across every server, the one waiting
  * longest first, without the current one. Pure (no stores).
  */
 export function waitingSessions(
@@ -24,7 +26,7 @@ export function waitingSessions(
   const out: WaitingRef[] = [];
   for (const [serverId, summary] of summaries) {
     for (const s of summary.sessions) {
-      if (s.status !== 'waiting' || s.inactive) continue;
+      if (!needsYou(s) || s.inactive) continue;
       if (current && current.serverId === serverId && current.sessionId === s.id) continue;
       out.push({
         serverId,

@@ -52,6 +52,32 @@ describe('SessionTile', () => {
     render(<SessionTile serverId="s1" session={bare} onOpen={() => {}} />);
   });
 
+  it('done (unseen): calm green, shows lastMessage, no prompt or waiting time', () => {
+    const { container, onOpen } = tile(
+      sess({ status: 'waiting', attention: 'done', waitingSince: NOW - 3 * 60_000, lastMessage: 'Shipped it.' }),
+      { unseen: true },
+    );
+    expect(container.querySelector('.mission-tile--done')).toBeTruthy();
+    expect(container.querySelector('.mission-tile__dot--done')).toBeTruthy();
+    expect(screen.getByText('Shipped it.')).toBeTruthy();
+    expect(screen.queryByText(/Waiting for you/)).toBeNull();
+    expect(screen.queryByText(/^waiting/)).toBeNull();
+    expect(container.querySelector('.mission-tile__unseen')).toBeTruthy();
+    fireEvent.click(screen.getByTestId('mission-tile'));
+    expect(onOpen).toHaveBeenCalledWith('s1', 'sid', false);
+  });
+
+  it('done that was already viewed renders as idle', () => {
+    const { container } = tile(sess({ status: 'waiting', attention: 'done', lastMessage: 'Shipped it.' }), { unseen: false });
+    expect(container.querySelector('.mission-tile--idle')).toBeTruthy();
+  });
+
+  it('attention needs_you: amber waiting tone with the open hint', () => {
+    const { container } = tile(sess({ status: 'waiting', attention: 'needs_you' }));
+    expect(container.querySelector('.mission-tile--waiting')).toBeTruthy();
+    expect(screen.getByText('Waiting for you, open to answer')).toBeTruthy();
+  });
+
   it('stuck sessions get the stuck tone', () => {
     stuckFindings = [{ severity: 'high', summary: 'loop' }];
     const { container } = tile(sess({ status: 'working' }));

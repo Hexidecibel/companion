@@ -178,6 +178,11 @@ export interface SessionSummary {
   pendingPrompt?: PendingPrompt;
   /** Last assistant line, truncated (newer daemons). */
   lastMessage?: string;
+  /**
+   * Only while waiting (newer daemons): 'needs_you' = a prompt or a question to
+   * the user; 'done' = it finished and reported back. Absent: treat waiting as needs_you.
+   */
+  attention?: 'needs_you' | 'done';
 }
 
 /** A question / approval / start-up prompt waiting on the user (summary field). */

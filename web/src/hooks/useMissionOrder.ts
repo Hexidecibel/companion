@@ -44,8 +44,9 @@ export function useMissionOrder(summaries: Map<string, ServerSummary>) {
     [order, byKey],
   );
 
-  const move = useCallback((key: string, dir: -1 | 1) => {
-    saveMissionOrder(moveInOrder(order, key, dir, new Set(byKey.keys())));
+  /** Move one step past the next visible key (default: every live session; a section passes its own keys). */
+  const move = useCallback((key: string, dir: -1 | 1, visible?: Set<string>) => {
+    saveMissionOrder(moveInOrder(order, key, dir, visible ?? new Set(byKey.keys())));
   }, [order, byKey]);
 
   return { entries, move };

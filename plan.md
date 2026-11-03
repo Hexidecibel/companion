@@ -1167,7 +1167,9 @@ preceding `self_update_prepare` call so a replayed request cannot restart a daem
 
 
 ## Item: Mission Control (watch and answer many sessions from one screen)
-**Status:** phases 1-3 done 2026-11-03 (daemon summary fields, phone overview, jumping between sessions); phase 4 (desktop grid) open
+**Status:** phases 1-3 done 2026-11-03 (daemon summary fields, phone overview, jumping between sessions); "needs you vs done" + Quiet section follow-up done 2026-11-03; phase 4 (desktop grid) open
+
+Follow-up (done 2026-11-03, from real use): waiting sessions were often just finished, not asking. Summary entries now carry optional `attention: 'needs_you' | 'done'` (only while waiting; needs_you = pending prompt or the turn ends on a question, via the shared `turnEndQuestion` in `daemon/src/pending-prompt.ts`, the same predicate Herald's inbox uses). Web: needs_you amber pulse, done green with the last message, viewed done = idle; only needs_you counts in the strip / chip / next-waiting. Two sections: full tiles (needs you, working, unseen done) and compact "Quiet" rows (idle, seen done), saved order kept inside each section, long-press move per section. Absent `attention` (older daemon) = waiting counts as needs you.
 
 Plan source: `~/.claude/plans/immutable-conjuring-lemon.md` (copied below).
 

@@ -3,7 +3,10 @@ import type { ServerSummary } from '../../types';
 import { useMissionOrder } from '../../hooks/useMissionOrder';
 import { waitingSessions } from '../../services/nextWaiting';
 import { isUnseen, onLastViewedChange } from '../../services/lastViewed';
+import { missionSection, missionState, type MissionState } from '../../services/missionState';
+import type { MissionEntry } from '../../hooks/useMissionOrder';
 import { SessionTile } from './SessionTile';
+import { QuietRow } from './QuietRow';
 
 interface MissionControlProps {
   summaries: Map<string, ServerSummary>;
@@ -20,15 +23,25 @@ let lastViewedVersion = 0;
 const bumpLastViewed = (cb: () => void) => onLastViewedChange(() => { lastViewedVersion++; cb(); });
 const getLastViewedVersion = () => lastViewedVersion;
 
+interface Placed {
+  entry: MissionEntry;
+  state: MissionState;
+  unseen: boolean;
+}
+
 /**
- * Phone overview: one tile per session on every server, in a fixed per-device
- * order. Sessions that need the user glow amber and, when the daemon reads the
- * prompt, answer from the tile. The "Needs you" strip steps through them
+ * Phone overview: every session on every server, in a fixed per-device order,
+ * split in two sections. Top: full tiles for sessions that need the user
+ * (amber; answer from the tile when the daemon reads the prompt), are working
+ * (blue), or finished and reported back since last viewed (green). Below:
+ * "Quiet", one compact row per idle / already-seen session. A session only
+ * changes section when its state changes; inside a section the saved order
+ * holds. The "Needs you" strip steps through the ones that need the user
  * (scrolls to each tile) without reordering anything.
  */
 export function MissionControl({ summaries, serverNames, onOpenSession }: MissionControlProps) {
   const { entries, move } = useMissionOrder(summaries);
-  useSyncExternalStore(bumpLastViewed, getLastViewedVersion, getLastViewedVersion);
+  const viewedVersion = useSyncExternalStore(bumpLastViewed, getLastViewedVersion, getLastViewedVersion);
   const [now, setNow] = useState(() => Date.now());
   const [highlight, setHighlight] = useState<string | null>(null);
   const stepRef = useRef(0);
@@ -49,6 +62,22 @@ export function MissionControl({ summaries, serverNames, onOpenSession }: Missio
 
   const waiting = useMemo(() => waitingSessions(summaries), [summaries]);
   const multiServer = summaries.size > 1;
+
+  const { active, quiet, activeKeys, quietKeys } = useMemo(() => {
+    const active: Placed[] = [];
+    const quiet: Placed[] = [];
+    for (const entry of entries) {
+      const unseen = isUnseen(entry.serverId, entry.session.id, entry.session.lastActivity, now);
+      const state = missionState(entry.session, unseen);
+      (missionSection(state) === 'active' ? active : quiet).push({ entry, state, unseen });
+    }
+    return {
+      active, quiet,
+      activeKeys: new Set(active.map((p) => p.entry.key)),
+      quietKeys: new Set(quiet.map((p) => p.entry.key)),
+    };
+    // viewedVersion: re-split when a session is marked viewed (isUnseen reads the store).
+  }, [entries, now, viewedVersion]);
 
   const stepToWaiting = useCallback(() => {
     if (waiting.length === 0) return;
@@ -83,20 +112,39 @@ export function MissionControl({ summaries, serverNames, onOpenSession }: Missio
         </button>
       )}
       <div className="mission-tiles" ref={listRef}>
-        {entries.map((e, i) => (
+        {active.map(({ entry: e, state, unseen }, i) => (
           <SessionTile
             key={e.key}
             serverId={e.serverId}
             session={e.session}
             serverLabel={multiServer ? serverNames.get(e.serverId) : undefined}
-            unseen={isUnseen(e.serverId, e.session.id, e.session.lastActivity, now)}
+            unseen={unseen}
+            state={state}
             now={now}
             highlighted={highlight === `${e.serverId}:${e.session.id}`}
             onOpen={onOpenSession}
-            onMoveUp={i > 0 ? () => move(e.key, -1) : undefined}
-            onMoveDown={i < entries.length - 1 ? () => move(e.key, 1) : undefined}
+            onMoveUp={i > 0 ? () => move(e.key, -1, activeKeys) : undefined}
+            onMoveDown={i < active.length - 1 ? () => move(e.key, 1, activeKeys) : undefined}
           />
         ))}
+        {quiet.length > 0 && (
+          <section className="mission-quiet-section" aria-label="Quiet sessions">
+            <div className="mission-quiet-section__title">Quiet</div>
+            {quiet.map(({ entry: e, unseen }, i) => (
+              <QuietRow
+                key={e.key}
+                serverId={e.serverId}
+                session={e.session}
+                serverLabel={multiServer ? serverNames.get(e.serverId) : undefined}
+                unseen={unseen}
+                now={now}
+                onOpen={onOpenSession}
+                onMoveUp={i > 0 ? () => move(e.key, -1, quietKeys) : undefined}
+                onMoveDown={i < quiet.length - 1 ? () => move(e.key, 1, quietKeys) : undefined}
+              />
+            ))}
+          </section>
+        )}
       </div>
     </div>
   );

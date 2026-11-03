@@ -295,7 +295,14 @@ export interface SessionSummary {
   pendingPrompt?: PendingPrompt;
   /** Last assistant text line, trimmed, <=140 chars. */
   lastMessage?: string;
+  /**
+   * Only while waiting: 'needs_you' = a prompt is pending or the finished turn
+   * ends by asking the user a question; 'done' = it just finished and reported.
+   */
+  attention?: SummaryAttention;
 }
+
+export type SummaryAttention = 'needs_you' | 'done';
 
 /** What a waiting session asks (server summary, Mission Control tiles). */
 export interface PendingPrompt {

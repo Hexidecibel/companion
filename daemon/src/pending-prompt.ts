@@ -7,8 +7,13 @@
 
 import { getPendingApprovalTools } from './parser';
 import { defaultAgent, type AgentAdapter } from './agents';
-import type { ConversationMessage, PendingPrompt, TerminalChoicePrompt } from './types';
-import { fnv1a, oneLine, clip, flattenMarkdown } from './herald/text';
+import type {
+  ConversationMessage,
+  PendingPrompt,
+  SummaryAttention,
+  TerminalChoicePrompt,
+} from './types';
+import { fnv1a, oneLine, clip, flattenMarkdown, trailingQuestion } from './herald/text';
 
 export type { PendingPrompt } from './types';
 
@@ -112,6 +117,41 @@ export function lastAssistantLine(
     return undefined;
   }
   return undefined;
+}
+
+/**
+ * The question a finished turn ends on: the latest message is the assistant's
+ * and its last text ends by asking the user something. The one definition of
+ * "the agent asked you in plain text", shared by Herald (blocked inbox items,
+ * pendingQuestion) and the server summary (attention).
+ */
+export function turnEndQuestion(
+  messages: ConversationMessage[] | null | undefined,
+  max?: number
+): string | null {
+  if (!messages || messages.length === 0) return null;
+  if (messages[messages.length - 1].type !== 'assistant') return null;
+  for (let i = messages.length - 1; i >= 0 && i >= messages.length - 50; i--) {
+    const m = messages[i];
+    if (m.type === 'assistant' && (m.content || '').trim()) return trailingQuestion(m.content, max);
+  }
+  return null;
+}
+
+/**
+ * Summary attention for a session: absent unless waiting; 'needs_you' when a
+ * prompt is pending or the turn ends on a question, else 'done'. Unknown (no
+ * cached transcript, no prompt) stays absent, which clients read as needs_you.
+ */
+export function summaryAttention(
+  status: string,
+  pendingPrompt: PendingPrompt | null | undefined,
+  messages: ConversationMessage[] | null | undefined
+): SummaryAttention | undefined {
+  if (status !== 'waiting') return undefined;
+  if (pendingPrompt) return 'needs_you';
+  if (!messages) return undefined;
+  return turnEndQuestion(messages) ? 'needs_you' : 'done';
 }
 
 /** Text that reads like a tool-permission box ("Do you want to ...?"). */

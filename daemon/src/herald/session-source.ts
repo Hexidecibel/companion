@@ -15,13 +15,13 @@ import { detectTurnEndError } from '../turn-error';
 import { BoundedMap } from '../utils';
 import type { InputRefusal } from '../prompt-guard';
 import type { SendInputResult } from '../input-injector';
-import { trailingQuestion } from './text';
 import {
   choiceSignature,
   derivePendingApproval,
   normalizeChoice,
   type NormalizedChoice,
   type PendingApproval,
+  turnEndQuestion,
 } from '../pending-prompt';
 
 export { choiceSignature };
@@ -335,7 +335,6 @@ export class LocalSessionSource implements SessionSource {
     };
     try {
       const messages = this.messagesFor(sessionId);
-      const last = messages[messages.length - 1];
       const agent = this.deps.watcher.agentFor?.(sessionId) ?? defaultAgent();
       const pendingApproval = derivePendingApproval(messages, agent);
       let lastAssistant: ConversationMessage | undefined;
@@ -345,12 +344,10 @@ export class LocalSessionSource implements SessionSource {
           break;
         }
       }
-      const lastIsAssistant = last?.type === 'assistant';
       const te = detectTurnEndError(messages);
       info = {
         pendingApproval,
-        pendingQuestion:
-          lastIsAssistant && lastAssistant ? trailingQuestion(lastAssistant.content) : null,
+        pendingQuestion: turnEndQuestion(messages),
         lastTurnKey: lastAssistant ? `${lastAssistant.id}:${lastAssistant.timestamp}` : null,
         lastTurnGist: lastAssistant ? lastAssistant.content : null,
         turnError: te ? { tool: te.tool, line: te.line } : null,

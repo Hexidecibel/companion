@@ -5,6 +5,8 @@ import {
   lastAssistantLine,
   normalizeChoice,
   resolveChoiceLabels,
+  summaryAttention,
+  turnEndQuestion,
 } from '../pending-prompt';
 import { defaultAgent, getAgentAdapter } from '../agents';
 import type { ConversationMessage, TerminalChoicePrompt } from '../types';
@@ -230,5 +232,52 @@ describe('pending-prompt', () => {
     expect(lastAssistantLine([assistant({ content: 'Partial:\n```ts\nconst a = 1;' })])).toBe(
       'Partial:'
     );
+  });
+});
+
+describe('turnEndQuestion / summaryAttention', () => {
+  const user = (content: string): ConversationMessage =>
+    ({ id: 'u1', type: 'user', content, timestamp: 900 }) as ConversationMessage;
+
+  it('turn ending on a question to the user', () => {
+    const msgs = [user('fix it'), assistant({ content: 'Done. Should I also deploy it?' })];
+    expect(turnEndQuestion(msgs)).toBe('Should I also deploy it?');
+    expect(summaryAttention('waiting', null, msgs)).toBe('needs_you');
+  });
+
+  it('question in an earlier text, trailing tool-only assistant message still counts', () => {
+    const msgs = [
+      assistant({ id: 'a1', content: 'Want me to push?' }),
+      assistant({ id: 'a2', content: '' }),
+    ];
+    expect(turnEndQuestion(msgs)).toBe('Want me to push?');
+  });
+
+  it('plain report back: done', () => {
+    const msgs = [user('fix it'), assistant({ content: 'Fixed the bug and all tests pass.' })];
+    expect(turnEndQuestion(msgs)).toBeNull();
+    expect(summaryAttention('waiting', null, msgs)).toBe('done');
+  });
+
+  it('last message from the user: no question', () => {
+    expect(turnEndQuestion([assistant({ content: 'Ok?' }), user('yes')])).toBeNull();
+  });
+
+  it('pending prompt: needs_you even without a question', () => {
+    const prompt = buildPendingPrompt({ messages: [pendingBash()], agent: claude });
+    expect(prompt).not.toBeNull();
+    expect(summaryAttention('waiting', prompt, [assistant({ content: 'Running.' })])).toBe(
+      'needs_you'
+    );
+  });
+
+  it('not waiting: absent', () => {
+    const msgs = [assistant({ content: 'Deploy?' })];
+    expect(summaryAttention('working', null, msgs)).toBeUndefined();
+    expect(summaryAttention('idle', null, msgs)).toBeUndefined();
+  });
+
+  it('waiting without a cached transcript or prompt: unknown (absent)', () => {
+    expect(summaryAttention('waiting', null, undefined)).toBeUndefined();
   });
 });

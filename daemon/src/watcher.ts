@@ -71,8 +71,8 @@ import { tmuxSnapshot } from './tmux-snapshot';
 import { isReadonlySharedState } from './sandbox';
 import type { BackgroundWork, BackgroundWorkMonitor, SessionOverlay } from './background-work';
 import { PANE_APPROVAL_ACTIVITY } from './background-work';
-import { buildPendingPrompt, lastAssistantLine } from './pending-prompt';
-import type { PendingPrompt } from './types';
+import { buildPendingPrompt, lastAssistantLine, summaryAttention } from './pending-prompt';
+import type { PendingPrompt, SummaryAttention } from './types';
 import { ProcEnvCache, ProfileRegistry, type AgentProfile } from './profiles';
 
 /**
@@ -3673,6 +3673,8 @@ export class SessionWatcher extends EventEmitter {
       pendingPrompt?: PendingPrompt;
       /** Last assistant text line, trimmed, <=140 chars. */
       lastMessage?: string;
+      /** Only while waiting: needs_you (prompt / question) or done (reported back). */
+      attention?: SummaryAttention;
     }>;
     totalSessions: number;
     waitingCount: number;
@@ -3707,6 +3709,8 @@ export class SessionWatcher extends EventEmitter {
       pendingPrompt?: PendingPrompt;
       /** Last assistant text line, trimmed, <=140 chars. */
       lastMessage?: string;
+      /** Only while waiting: needs_you (prompt / question) or done (reported back). */
+      attention?: SummaryAttention;
     }> = [];
 
     let waitingCount = 0;
@@ -3734,6 +3738,7 @@ export class SessionWatcher extends EventEmitter {
       let backgroundWork: BackgroundWork | undefined;
       let pendingPrompt: PendingPrompt | null = null;
       let lastMessage: string | undefined;
+      let attention: SummaryAttention | undefined;
       let waitStartHint = 0;
 
       const trust = this.startupPrompts.get(ts.name);
@@ -3748,6 +3753,7 @@ export class SessionWatcher extends EventEmitter {
           trust: trust.choice,
         });
         waitStartHint = trust.since;
+        attention = 'needs_you';
       } else if (best) {
         const conv = best.conv;
         projectPath = conv.projectPath;
@@ -3792,6 +3798,7 @@ export class SessionWatcher extends EventEmitter {
           workingCount++;
         }
         lastMessage = lastAssistantLine(messages);
+        attention = summaryAttention(status, pendingPrompt, messages);
 
         // Extract recent message timestamps for sparkline (last 30 min)
         if (messages) {
@@ -3822,6 +3829,7 @@ export class SessionWatcher extends EventEmitter {
         ...(waitingSince ? { waitingSince } : {}),
         ...(pendingPrompt && status === 'waiting' ? { pendingPrompt } : {}),
         ...(lastMessage ? { lastMessage } : {}),
+        ...(attention && status === 'waiting' ? { attention } : {}),
         ...(this.agentFor(ts.name).id !== DEFAULT_AGENT_ID
           ? { agent: this.agentFor(ts.name).id }
           : {}),

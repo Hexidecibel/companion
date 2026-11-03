@@ -1,4 +1,4 @@
-import { memo, useCallback, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useMemo, useState } from 'react';
 import type { PendingPrompt, SessionSummary } from '../../types';
 import { normalizeOptions } from '../QuestionBlock';
 import { StuckBadge } from '../stuck/StuckBadge';
@@ -8,6 +8,8 @@ import { ContextMenu, type ContextMenuEntry } from '../ContextMenu';
 import { useStuckFindings } from '../../hooks/useStuck';
 import { backgroundWorkLabel } from '../../utils/backgroundWork';
 import { sendChoice } from '../../services/sendChoice';
+import { missionState, type MissionState } from '../../services/missionState';
+import { useTileMenu } from './useTileMenu';
 
 export interface SessionTileProps {
   serverId: string;
@@ -18,6 +20,8 @@ export interface SessionTileProps {
   unseen?: boolean;
   /** Clock for relative times (MissionControl ticks it). */
   now?: number;
+  /** needs_you / done / working / idle / error (default: derived from session + unseen). */
+  state?: MissionState;
   /** Briefly highlighted (the "Needs you" strip pointed at it). */
   highlighted?: boolean;
   onOpen: (serverId: string, sessionId: string, pending: boolean) => void;
@@ -48,59 +52,37 @@ export function formatAgo(ms: number): string {
   return `${Math.floor(hours / 24)}d`;
 }
 
+/** CSS tone per state (needs_you keeps the amber "waiting" style). */
+export const TONE: Record<MissionState, string> = {
+  needs_you: 'waiting', done: 'done', working: 'working', idle: 'idle', error: 'error',
+};
+export const STATE_LABEL: Record<MissionState, string> = {
+  needs_you: 'needs you', done: 'done', working: 'working', idle: 'idle', error: 'error',
+};
+
 type AnswerState =
   | { step: 'sending'; signature: string; index: number }
   | { step: 'answered'; signature: string }
   | { step: 'stale'; signature: string }
   | { step: 'error'; signature: string };
 
-const LONG_PRESS_MS = 500;
-
 export const SessionTile = memo(function SessionTile({
-  serverId, session, serverLabel, unseen, now = Date.now(), highlighted, onOpen, onMoveUp, onMoveDown,
+  serverId, session, serverLabel, unseen, state: stateProp, now = Date.now(), highlighted, onOpen, onMoveUp, onMoveDown,
 }: SessionTileProps) {
   const stuck = useStuckFindings(serverId, session.id).length > 0;
-  const waiting = session.status === 'waiting';
-  const prompt = waiting ? session.pendingPrompt : undefined;
+  const state = stateProp ?? missionState(session, !!unseen);
+  // Only a session that needs the user shows a prompt; a "done" one shows its report.
+  const needs = state === 'needs_you';
+  const prompt = needs ? session.pendingPrompt : undefined;
   const [answer, setAnswer] = useState<AnswerState | null>(null);
-  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
-  const pressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const didLongPress = useRef(false);
 
   // An answer state only belongs to the prompt it was made for.
   const current = answer && prompt && answer.signature === prompt.signature ? answer : null;
   const options = useMemo(() => (prompt ? normalizeOptions(prompt.options) : []), [prompt]);
   const inline = inlineAnswerable(prompt);
 
-  const open = useCallback(() => onOpen(serverId, session.id, waiting), [onOpen, serverId, session.id, waiting]);
-
-  const startPress = useCallback((e: React.TouchEvent) => {
-    didLongPress.current = false;
-    if (!onMoveUp && !onMoveDown) return;
-    const t = e.touches[0];
-    const pos = { x: t.clientX, y: t.clientY };
-    pressTimer.current = setTimeout(() => {
-      didLongPress.current = true;
-      setMenu(pos);
-      if (navigator.vibrate) navigator.vibrate(40);
-    }, LONG_PRESS_MS);
-  }, [onMoveUp, onMoveDown]);
-
-  const cancelPress = useCallback(() => {
-    if (pressTimer.current) {
-      clearTimeout(pressTimer.current);
-      pressTimer.current = null;
-    }
-  }, []);
-
-  const handleClick = useCallback(() => {
-    if (didLongPress.current) {
-      didLongPress.current = false;
-      return;
-    }
-    if (menu) return;
-    open();
-  }, [menu, open]);
+  const open = useCallback(() => onOpen(serverId, session.id, needs), [onOpen, serverId, session.id, needs]);
+  const { menu, closeMenu, handlers } = useTileMenu(open, !!onMoveUp || !!onMoveDown);
 
   const choose = useCallback(async (index: number) => {
     if (!prompt) return;
@@ -129,9 +111,11 @@ export const SessionTile = memo(function SessionTile({
     { label: 'Open', onClick: open },
   ];
 
-  const tone = stuck ? 'stuck' : session.status === 'error' ? 'error' : session.status;
-  const live = backgroundWorkLabel(session.backgroundWork) || session.currentActivity || session.lastMessage;
-  const time = waiting && session.waitingSince
+  const tone = stuck ? 'stuck' : TONE[state];
+  const live = state === 'done'
+    ? session.lastMessage || session.currentActivity
+    : backgroundWorkLabel(session.backgroundWork) || session.currentActivity || session.lastMessage;
+  const time = needs && session.waitingSince
     ? `waiting ${formatAgo(Math.max(0, now - session.waitingSince))}`
     : session.lastActivity > 0
       ? formatAgo(Math.max(0, now - session.lastActivity))
@@ -140,7 +124,7 @@ export const SessionTile = memo(function SessionTile({
   const stop = (e: React.SyntheticEvent) => e.stopPropagation();
 
   let promptBody: React.ReactNode = null;
-  if (waiting) {
+  if (needs) {
     if (current?.step === 'stale') {
       promptBody = (
         <button type="button" className="mission-tile__notice mission-tile__notice--stale" onClick={(e) => { stop(e); open(); }}>
@@ -192,17 +176,9 @@ export const SessionTile = memo(function SessionTile({
       data-session-key={`${serverId}:${session.id}`}
       role="button"
       tabIndex={0}
-      aria-label={`${name}, ${waiting ? 'needs you' : session.status}`}
-      onClick={handleClick}
+      aria-label={`${name}, ${STATE_LABEL[state]}`}
       onKeyDown={(e) => { if (e.key === 'Enter' && e.target === e.currentTarget) open(); }}
-      onTouchStart={startPress}
-      onTouchEnd={cancelPress}
-      onTouchMove={cancelPress}
-      onContextMenu={(e) => {
-        if (!onMoveUp && !onMoveDown) return;
-        e.preventDefault();
-        setMenu({ x: e.clientX, y: e.clientY });
-      }}
+      {...handlers}
     >
       <div className="mission-tile__top">
         <span className={`mission-tile__dot mission-tile__dot--${tone}`} aria-hidden="true" />
@@ -212,13 +188,13 @@ export const SessionTile = memo(function SessionTile({
         <StuckBadge serverId={serverId} sessionId={session.id} />
         <BabysitBadge serverId={serverId} sessionId={session.id} />
         {unseen && <span className="mission-tile__unseen" title="New activity" aria-label="New activity" />}
-        <span className={`mission-tile__time${waiting ? ' mission-tile__time--waiting' : ''}`}>{time}</span>
+        <span className={`mission-tile__time${needs ? ' mission-tile__time--waiting' : ''}`}>{time}</span>
       </div>
       {serverLabel && <div className="mission-tile__server">{serverLabel}</div>}
       {live && !promptBody && <div className="mission-tile__live">{live}</div>}
       {promptBody}
       {menu && (
-        <ContextMenu items={menuItems} position={menu} onClose={() => setMenu(null)} />
+        <ContextMenu items={menuItems} position={menu} onClose={closeMenu} />
       )}
     </div>
   );

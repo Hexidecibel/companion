@@ -52,4 +52,14 @@ describe('nextWaiting', () => {
     expect(waitingSessions(m)).toEqual([]);
     expect(nextWaiting(m)).toBeNull();
   });
+
+  it('counts only sessions that need the user, not ones that are done', () => {
+    const m = new Map([['x', server([
+      s({ id: 'asks', status: 'waiting', attention: 'needs_you', waitingSince: 300 }),
+      s({ id: 'done', status: 'waiting', attention: 'done', waitingSince: 100 }),
+      s({ id: 'old', status: 'waiting', waitingSince: 200 }),
+    ])]]);
+    expect(waitingSessions(m).map((w) => w.sessionId)).toEqual(['old', 'asks']);
+    expect(nextWaiting(m)?.sessionId).toBe('old');
+  });
 });

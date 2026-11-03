@@ -34,15 +34,15 @@ describe('MissionControl', () => {
 
   it('orders new sessions by recent activity, then keeps that order', () => {
     const sums = new Map([['a', summary('a', [
-      s('old', { lastActivity: NOW - 10 * 60_000 }),
-      s('new', { lastActivity: NOW - 1000 }),
+      s('old', { status: 'working', lastActivity: NOW - 10 * 60_000 }),
+      s('new', { status: 'working', lastActivity: NOW - 1000 }),
     ])]]);
     const { rerender } = render(<MissionControl summaries={sums} serverNames={new Map()} onOpenSession={() => {}} />);
     expect(names()).toEqual(['new', 'old']);
     // "old" becomes the most active: the order does not shuffle.
     const next = new Map([['a', summary('a', [
-      s('old', { lastActivity: NOW }),
-      s('new', { lastActivity: NOW - 1000 }),
+      s('old', { status: 'working', lastActivity: NOW }),
+      s('new', { status: 'working', lastActivity: NOW - 1000 }),
     ])]]);
     rerender(<MissionControl summaries={next} serverNames={new Map()} onOpenSession={() => {}} />);
     expect(names()).toEqual(['new', 'old']);
@@ -50,7 +50,7 @@ describe('MissionControl', () => {
   });
 
   it('move down from the tile menu reorders and persists', () => {
-    const sums = new Map([['a', summary('a', [s('x', { lastActivity: NOW }), s('y')])]]);
+    const sums = new Map([['a', summary('a', [s('x', { status: 'working', lastActivity: NOW }), s('y', { status: 'working' })])]]);
     render(<MissionControl summaries={sums} serverNames={new Map()} onOpenSession={() => {}} />);
     fireEvent.contextMenu(screen.getAllByTestId('mission-tile')[0]);
     fireEvent.click(screen.getByText('Move down'));
@@ -95,6 +95,75 @@ describe('MissionControl', () => {
   });
 });
 
+describe('MissionControl sections', () => {
+  beforeEach(() => {
+    localStorage.clear();
+    resetMissionOrderCache();
+    resetLastViewedCache();
+  });
+  const quietNames = () =>
+    screen.queryAllByTestId('mission-quiet').map((el) => el.querySelector('.mission-quiet__name')?.textContent);
+
+  it('full tiles for needs you / working / unseen done; idle and seen done go to Quiet', () => {
+    // lastViewed baseline = first use (now): activity after it is unseen.
+    const later = Date.now() + 60_000;
+    const sums = new Map([['a', summary('a', [
+      s('ask', { status: 'waiting', attention: 'needs_you', lastActivity: later }),
+      s('idle1'),
+      s('busy', { status: 'working', lastActivity: later - 1 }),
+      s('fresh', { status: 'waiting', attention: 'done', lastActivity: later - 2 }),
+      s('seen', { status: 'waiting', attention: 'done', lastActivity: NOW - 120_000 }),
+    ])]]);
+    render(<MissionControl summaries={sums} serverNames={new Map()} onOpenSession={() => {}} />);
+    expect(names()).toEqual(['ask', 'busy', 'fresh']);
+    expect(quietNames()).toEqual(['idle1', 'seen']);
+    // Only the one that needs the user counts in the strip.
+    expect(screen.getByRole('button', { name: /1 need you/ })).toBeTruthy();
+  });
+
+  it('a session changes section only when its state changes; order inside a section holds', () => {
+    const sums = (busy: boolean) => new Map([['a', summary('a', [
+      s('x', { lastActivity: NOW - 1000 }),
+      s('y', { status: busy ? 'working' : 'idle', lastActivity: NOW - 2000 }),
+      s('z', { lastActivity: NOW - 3000 }),
+    ])]]);
+    const { rerender } = render(<MissionControl summaries={sums(false)} serverNames={new Map()} onOpenSession={() => {}} />);
+    expect(quietNames()).toEqual(['x', 'y', 'z']);
+    rerender(<MissionControl summaries={sums(true)} serverNames={new Map()} onOpenSession={() => {}} />);
+    expect(names()).toEqual(['y']);
+    expect(quietNames()).toEqual(['x', 'z']);
+    rerender(<MissionControl summaries={sums(false)} serverNames={new Map()} onOpenSession={() => {}} />);
+    expect(quietNames()).toEqual(['x', 'y', 'z']);
+  });
+
+  it('long-press move works inside Quiet (skips tiles in the other section)', () => {
+    const sums = new Map([['a', summary('a', [
+      s('q1', { lastActivity: NOW - 1000 }),
+      s('w', { status: 'working', lastActivity: NOW - 2000 }),
+      s('q2', { lastActivity: NOW - 3000 }),
+    ])]]);
+    render(<MissionControl summaries={sums} serverNames={new Map()} onOpenSession={() => {}} />);
+    expect(quietNames()).toEqual(['q1', 'q2']);
+    fireEvent.contextMenu(screen.getAllByTestId('mission-quiet')[0]);
+    fireEvent.click(screen.getByText('Move down'));
+    expect(quietNames()).toEqual(['q2', 'q1']);
+    expect(names()).toEqual(['w']);
+  });
+
+  it('tapping a quiet row opens the session', () => {
+    const onOpen = vi.fn();
+    render(<MissionControl summaries={new Map([['a', summary('a', [s('x')])]])} serverNames={new Map()} onOpenSession={onOpen} />);
+    fireEvent.click(screen.getByTestId('mission-quiet'));
+    expect(onOpen).toHaveBeenCalledWith('a', 'x', false);
+  });
+
+  it('older daemon (no attention): waiting is a needs-you tile', () => {
+    render(<MissionControl summaries={new Map([['a', summary('a', [s('w', { status: 'waiting' })])]])} serverNames={new Map()} onOpenSession={() => {}} />);
+    expect(names()).toEqual(['w']);
+    expect(screen.getByRole('button', { name: /1 need you/ })).toBeTruthy();
+  });
+});
+
 describe('NeedsYouChip', () => {
   const sums = new Map([
     ['a', summary('a', [
@@ -103,6 +172,12 @@ describe('NeedsYouChip', () => {
     ])],
     ['b', summary('b', [s('w2', { status: 'waiting', waitingSince: NOW - 10 * 60_000 })])],
   ]);
+
+  it('does not count sessions that are just done', () => {
+    const m = new Map([['a', summary('a', [s('d', { status: 'waiting', attention: 'done' })])]]);
+    const { container } = render(<NeedsYouChip summaries={m} current={null} onJump={() => {}} />);
+    expect(container.innerHTML).toBe('');
+  });
 
   it('hides when nothing else waits', () => {
     const only = new Map([['a', summary('a', [s('cur', { status: 'waiting' })])]]);
