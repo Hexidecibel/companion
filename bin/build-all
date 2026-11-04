@@ -7,6 +7,11 @@
 # Prerequisites: node, npm
 set -euo pipefail
 
+# Queue behind the shared job slots (see ~/.claude/bin/job-slot); degrade gracefully if absent.
+if [ -z "${JOB_SLOT_HELD:-}" ] && [ -x "$HOME/.claude/bin/job-slot" ]; then
+  exec "$HOME/.claude/bin/job-slot" --name "companion build-all $*" -- "$0" "$@"
+fi
+
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(dirname "$SCRIPT_DIR")"
 

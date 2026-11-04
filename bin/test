@@ -2,8 +2,11 @@
 # test — Run tests, lint, and type checks (daemon + web).
 #
 # Usage:
-#   bin/test                    Full: daemon typecheck/lint/format/jest, web typecheck/vitest/build.
+#   bin/test [--where W]        Full: daemon typecheck/lint/format/jest, web typecheck/vitest/build.
 #                               Run it before committing (in the background while you keep working).
+#                               W = mac|local|auto (env TEST_WHERE; default auto = AJ's Mac mini via
+#                               ~/.claude/bin/macbox when reachable, else local in a job slot).
+#                               History/logs of every run: ~/.claude/bin/job-slot history | log <id>.
 #   bin/test --fast [files...]  Inner TDD loop: ONLY the tests related to the given files (source or
 #                               test files, daemon/ or web/). No files = everything changed vs HEAD
 #                               (staged, unstaged and untracked). No typecheck, lint or build.
@@ -125,6 +128,66 @@ fi
 # ---------------------------------------------------------------------------
 # Full run
 # ---------------------------------------------------------------------------
+# --where mac|local|auto (env TEST_WHERE, default auto): auto = the Mac mini when it answers ssh
+# within ~3s, else local. On the Mac (via ~/.claude/bin/macbox test) everything runs except the
+# daemon test files listed in daemon/jest.linux-only.js, which run locally (in a job slot) at the
+# same time. Output streams live; the run fails if either side fails.
+WHERE="${TEST_WHERE:-auto}"
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --where) WHERE="${2:-}"; shift 2 ;;
+    --where=*) WHERE="${1#--where=}"; shift ;;
+    *) echo "bin/test: unknown argument: $1 (usage: bin/test [--where mac|local|auto] | --fast ...)" >&2; exit 2 ;;
+  esac
+done
+MACBOX="$HOME/.claude/bin/macbox"
+case "$WHERE" in
+  local|mac) ;;
+  auto)
+    if [ "$(uname)" != Darwin ] && [ -x "$MACBOX" ] && "$MACBOX" reachable; then WHERE=mac
+    else
+      WHERE=local
+      [ "$(uname)" = Darwin ] || echo "bin/test: Mac mini not reachable; running locally" >&2
+    fi ;;
+  *) echo "bin/test: --where must be mac, local or auto" >&2; exit 2 ;;
+esac
+
+if [ "$WHERE" = mac ]; then
+  [ -x "$MACBOX" ] || { echo "bin/test: $MACBOX missing" >&2; exit 2; }
+  linux_out="$(mktemp -t companion-linux-tests.XXXXXX)"
+  # Linux-only daemon tests: local, in a job slot, concurrently with the Mac run.
+  (
+    cd "$ROOT/daemon"
+    DAEMON_TEST_SPLIT=linux-only "$HOME/.claude/bin/job-slot" --kind test \
+      --name "companion test daemon linux-only" -- npx jest
+  ) >"$linux_out" 2>&1 &
+  linux_pid=$!
+  # shellcheck disable=SC2016
+  MAC_CMD='rc=0
+part() { l="$1"; shift; echo ""; echo "=== $l ==="; "$@" || { rc=1; echo "=== FAILED: $l ==="; }; }
+part "Daemon: Typecheck"   sh -c "cd daemon && npm run typecheck"
+part "Daemon: Lint"        sh -c "cd daemon && npm run lint"
+part "Daemon: Format Check" sh -c "cd daemon && npm run format:check"
+part "Daemon: Tests (portable; Linux-only files run locally)" sh -c "cd daemon && DAEMON_TEST_SPLIT=portable npm test"
+part "Web: Typecheck"      sh -c "cd web && npx tsc --noEmit"
+part "Web: Tests"          sh -c "cd web && npm test"
+part "Web: Build"          sh -c "cd web && npm run build"
+exit $rc'
+  FAILED=0
+  "$MACBOX" test --install "daemon web" --label "companion test (mac)" "$ROOT" -- "$MAC_CMD" || FAILED=1
+  echo ""
+  echo "=== Daemon: Tests (Linux-only files, local) ==="
+  wait "$linux_pid" || FAILED=1
+  cat "$linux_out"; rm -f "$linux_out"
+  echo ""
+  if [ $FAILED -eq 0 ]; then echo "=== All checks passed (mac + local) ==="; else echo "=== Some checks FAILED ==="; exit 1; fi
+  exit 0
+fi
+
+# Local: queue behind the shared job slots (see ~/.claude/bin/job-slot); degrade gracefully if absent.
+if [ -z "${JOB_SLOT_HELD:-}" ] && [ -x "$HOME/.claude/bin/job-slot" ]; then
+  TEST_WHERE=local exec "$HOME/.claude/bin/job-slot" --kind test --name "companion test (local)" -- "$0"
+fi
 FAILED=0
 
 echo "=== Daemon: Typecheck ==="

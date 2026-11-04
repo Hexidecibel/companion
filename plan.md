@@ -3,6 +3,17 @@
 Detailed plans for upcoming work items. Shipped plans are archived in `plans-archive/YYYY-MM.md`; shipped features are in FEATURES.md.
 
 ---
+## Item: Build offload + test throttling (hexi + Mac mini)
+**Status:** done 2026-11-04 (plan: ~/.claude/plans/shimmering-crafting-stream.md); Part C (Android on the Mac) and companion iOS via macbox not started
+
+- `~/.claude/bin/job-slot` (3 hexi slots, niced; `--status`, `history`, `log <id>`), `jobrec` (records in `~/.local/state/jobs/jobs.jsonl`), `macbox` (sync/run/test/fetch/status/setup; Mac: 1 build + 4 test slots, test jobs on node v24 in `~/builds/.macbox/node`).
+- `bin/test` runs on the Mac by default (`--where mac|local|auto`); the 7 Linux-only daemon tests (`daemon/jest.linux-only.js`) run locally in parallel. `--fast` stays local. Full gate: ~55 s Mac vs ~199 s hexi under load.
+- Worker caps: `TEST_WORKERS` (default 4, uncapped under `CI`) in daemon jest / web vitest / Android gradle (via setup-android.sh).
+- macOS desktop build works on the Mac mini (rust in `~/.cargo`, `CI=true`, ad-hoc signed; ~110 s): `macbox run companion -- 'cd desktop && npm run build'`, artifact fetched to `desktop/build-mac/` (local exclude).
+- Known flakes under load: tracker FILE_BUDGET, aecCore budget, ledger-codex, surfaces fs.watch, herald-asks, multi-session.
+- Next: Mission Control Phase 4 (desktop grid, see the Mission Control item); Part C; Mac builds still use brew node 26 (tests use v24).
+
+---
 ## Item: Codex support
 **Status:** steps 1-3 done 2026-10-28 (adapter seam, read-only transcript adapter, terminal adapter + launch), merged into main; step 4 not started
 

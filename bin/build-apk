@@ -8,6 +8,11 @@
 # The keystore at desktop/debug.keystore is used for signing.
 set -euo pipefail
 
+# Queue behind the shared job slots (see ~/.claude/bin/job-slot); degrade gracefully if absent.
+if [ -z "${JOB_SLOT_HELD:-}" ] && [ -x "$HOME/.claude/bin/job-slot" ]; then
+  exec "$HOME/.claude/bin/job-slot" --name "companion build-apk $*" -- "$0" "$@"
+fi
+
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(dirname "$SCRIPT_DIR")"
 DESKTOP="$ROOT/desktop"

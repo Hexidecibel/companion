@@ -102,5 +102,7 @@ export default defineConfig({
     // This machine exports NODE_ENV=production globally, which loads React's
     // production build (no act()) and breaks hook/component tests.
     env: { NODE_ENV: 'test' },
+    // Cap workers so parallel agents do not thrash the box (TEST_WORKERS overrides; uncapped in CI).
+    maxWorkers: process.env.CI ? undefined : Number(process.env.TEST_WORKERS ?? 4),
   },
 });

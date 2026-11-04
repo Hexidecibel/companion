@@ -197,6 +197,13 @@ else
   echo "companion:// intent filter already in manifest"
 fi
 
+# 14. Cap Gradle workers so parallel builds on a shared box do not thrash it.
+GRADLE_PROPS="$GEN_ANDROID/gradle.properties"
+if [ -f "$GRADLE_PROPS" ] && ! grep -q '^org.gradle.workers.max=' "$GRADLE_PROPS"; then
+  echo "Adding org.gradle.workers.max=4 to gradle.properties..."
+  printf '\norg.gradle.workers.max=4\n' >> "$GRADLE_PROPS"
+fi
+
 echo ""
 echo "=== Android FCM setup complete ==="
 echo ""
