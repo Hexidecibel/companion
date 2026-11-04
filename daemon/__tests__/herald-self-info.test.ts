@@ -19,9 +19,9 @@ const HOST_IFACES: NodeJS.Dict<NetworkInterfaceInfo[]> = {
   'br-d6890ec457e6': [v4('10.200.8.1')],
   'br-df3af65363f5': [v4('192.168.192.1')],
   'br-d641f5aac6aa': [v4('172.20.0.1')],
-  tailscale0: [v4('100.95.87.89')],
+  tailscale0: [v4('100.64.0.7')],
   enp3s0: [
-    v4('192.168.1.48'),
+    v4('192.168.1.10'),
     {
       address: 'fe80::1',
       netmask: 'ffff:ffff:ffff:ffff::',
@@ -37,16 +37,16 @@ const HOST_IFACES: NodeJS.Dict<NetworkInterfaceInfo[]> = {
 
 describe('herald self-info address derivation', () => {
   it('keeps LAN then tailnet, skipping loopback, docker and bridge addresses', () => {
-    expect(reachableAddresses(HOST_IFACES)).toEqual(['192.168.1.48', '100.95.87.89']);
+    expect(reachableAddresses(HOST_IFACES)).toEqual(['192.168.1.10', '100.64.0.7']);
   });
 
   it('builds web URLs from the listener port and TLS flag', () => {
     expect(deriveSelfInfo({ port: 9877 }, HOST_IFACES).webUrls).toEqual([
-      'http://192.168.1.48:9877/web',
-      'http://100.95.87.89:9877/web',
+      'http://192.168.1.10:9877/web',
+      'http://100.64.0.7:9877/web',
     ]);
     expect(deriveSelfInfo({ port: 9443, tls: true }, HOST_IFACES).webUrls[0]).toBe(
-      'https://192.168.1.48:9443/web'
+      'https://192.168.1.10:9443/web'
     );
   });
 
@@ -66,8 +66,8 @@ describe('herald system prompt self-knowledge', () => {
   const prompt = buildSystemPrompt('Herald', deriveSelfInfo(listener, HOST_IFACES));
 
   it('includes the reachable addresses and nothing internal', () => {
-    expect(prompt).toContain('http://192.168.1.48:9877/web');
-    expect(prompt).toContain('http://100.95.87.89:9877/web');
+    expect(prompt).toContain('http://192.168.1.10:9877/web');
+    expect(prompt).toContain('http://100.64.0.7:9877/web');
     expect(prompt).not.toMatch(/127\.0\.0\.1|localhost/);
     expect(prompt).not.toMatch(/\b172\.(1[6-9]|2\d|3[01])\./);
     expect(prompt).not.toMatch(/\b10\.200\./);

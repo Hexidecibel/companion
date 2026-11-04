@@ -61,7 +61,7 @@ describe('Anthropic request shape (prompt caching)', () => {
   });
 
   it('the prefix is byte-identical across turns and tool-loop steps', () => {
-    const sys = buildSystemPrompt('Herald', { webUrls: ['http://192.168.1.48:9877/web'] });
+    const sys = buildSystemPrompt('Herald', { webUrls: ['http://192.168.1.10:9877/web'] });
     const tools = TOOL_SPECS;
     const a = buildAnthropicRequest('m', { ...req([{ role: 'user', text: 'one' }]), system: sys, tools });
     const b = buildAnthropicRequest('m', {

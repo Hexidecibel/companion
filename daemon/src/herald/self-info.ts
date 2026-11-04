@@ -7,7 +7,7 @@
 import * as os from 'os';
 
 export interface HeraldSelfInfo {
-  /** Web UI URLs the user can open, best first (e.g. "http://192.168.1.48:9877/web"). */
+  /** Web UI URLs the user can open, best first (e.g. "http://192.168.1.10:9877/web"). */
   webUrls: string[];
 }
 

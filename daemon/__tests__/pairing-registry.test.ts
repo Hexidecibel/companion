@@ -161,9 +161,9 @@ describe('mDNS TXT', () => {
       name: 'x',
       version: '1',
       pairing: false,
-      addresses: ['192.168.1.48', '10.0.0.2', '172.16.0.4', '192.168.9.9'],
+      addresses: ['192.168.1.10', '10.0.0.2', '172.16.0.4', '192.168.9.9'],
     });
-    expect(withIp.ip).toBe('192.168.1.48,10.0.0.2,172.16.0.4');
+    expect(withIp.ip).toBe('192.168.1.10,10.0.0.2,172.16.0.4');
     expect(withIp.pairing).toBe('0');
     expect(JSON.stringify(txt)).not.toMatch(/token|otp|code|secret/i);
   });
@@ -180,9 +180,9 @@ describe('lanAddresses', () => {
         tailscale0: [v4('100.101.1.2')],
         wg0: [v4('10.200.0.1')],
         eth1: [v4('10.0.0.5')],
-        eth0: [v4('192.168.1.48'), { address: 'fe80::1', family: 'IPv6', internal: false } as any],
+        eth0: [v4('192.168.1.10'), { address: 'fe80::1', family: 'IPv6', internal: false } as any],
         wlan0: [v4('169.254.3.3')],
       })
-    ).toEqual(['192.168.1.48', '10.0.0.5']);
+    ).toEqual(['192.168.1.10', '10.0.0.5']);
   });
 });

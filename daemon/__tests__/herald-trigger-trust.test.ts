@@ -20,7 +20,7 @@ import type { HeraldEvent } from '../src/herald/protocol';
 const LEGACY = 'l'.repeat(24) + '0123456789abcdef0123456789abcdef';
 const PC = 'p'.repeat(24) + '0123456789abcdef0123456789abcdef';
 const MAC = 'm'.repeat(24) + '0123456789abcdef0123456789abcdef';
-const HOME_IP = '73.97.227.16';
+const HOME_IP = '203.0.113.16';
 
 function writeFile(file: string, content: string, mode = 0o600) {
   fs.writeFileSync(file, content, { mode });
@@ -133,7 +133,7 @@ describe('trigger origin trust', () => {
     ['127.0.0.1', 'garbage', 'public'],
     // XFF from anyone but a trusted proxy is not believed (and means "forwarded from somewhere").
     ['192.168.1.20', '127.0.0.1', 'public'],
-    ['100.95.87.89', '192.168.1.20', 'public'],
+    ['100.64.0.7', '192.168.1.20', 'public'],
   ])('peer %s xff %s -> %s', (peer, xff, network) => {
     expect(classifyTriggerOrigin({ peer, forwardedFor: xff, trustedProxies: proxies }).network).toBe(network);
   });
@@ -170,10 +170,10 @@ describe('trigger origin trust', () => {
     const def = resolveHeraldConfig(parseHeraldConfigBlock({}), {});
     expect(def.trigger).toEqual({ publicListen: false, homeHosts: [], trustedProxies: ['127.0.0.1', '::1'] });
     const set = resolveHeraldConfig(
-      parseHeraldConfigBlock({ trigger_public_listen: true, trigger_home_hosts: ['dev.cush.rocks', 5], trigger_trusted_proxies: ['100.95.87.89'] }),
+      parseHeraldConfigBlock({ trigger_public_listen: true, trigger_home_hosts: ['dev.cush.rocks', 5], trigger_trusted_proxies: ['100.64.0.7'] }),
       {}
     );
-    expect(set.trigger).toEqual({ publicListen: true, homeHosts: ['dev.cush.rocks'], trustedProxies: ['100.95.87.89'] });
+    expect(set.trigger).toEqual({ publicListen: true, homeHosts: ['dev.cush.rocks'], trustedProxies: ['100.64.0.7'] });
   });
 });
 

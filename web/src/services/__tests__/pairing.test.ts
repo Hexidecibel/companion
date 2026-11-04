@@ -177,13 +177,13 @@ describe('discovery', () => {
       {
         name: 'Hexinas',
         host: 'hexinas.local.',
-        addresses: ['10.200.0.1', '172.19.0.1', '192.168.16.1', '192.168.1.48', 'fd00::5'],
+        addresses: ['10.200.0.1', '172.19.0.1', '192.168.16.1', '192.168.1.10', 'fd00::5'],
         port: 9877,
-        txt: { ip: '192.168.1.48', pairing: '1' },
+        txt: { ip: '192.168.1.10', pairing: '1' },
       },
     ]);
-    expect(d.host).toBe('192.168.1.48');
-    expect(d.candidates).toEqual(['192.168.1.48', '192.168.16.1', '10.200.0.1', '172.19.0.1', 'hexinas.local', 'fd00::5']);
+    expect(d.host).toBe('192.168.1.10');
+    expect(d.candidates).toEqual(['192.168.1.10', '192.168.16.1', '10.200.0.1', '172.19.0.1', 'hexinas.local', 'fd00::5']);
   });
 
   it('pickReachable returns the first candidate that answers', async () => {

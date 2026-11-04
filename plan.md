@@ -1171,6 +1171,8 @@ preceding `self_update_prepare` call so a replayed request cannot restart a daem
 
 Follow-up (done 2026-11-03, from real use): waiting sessions were often just finished, not asking. Summary entries now carry optional `attention: 'needs_you' | 'done'` (only while waiting; needs_you = pending prompt or the turn ends on a question, via the shared `turnEndQuestion` in `daemon/src/pending-prompt.ts`, the same predicate Herald's inbox uses). Web: needs_you amber pulse, done green with the last message, viewed done = idle; only needs_you counts in the strip / chip / next-waiting. Two sections: full tiles (needs you, working, unseen done) and compact "Quiet" rows (idle, seen done), saved order kept inside each section, long-press move per section. Absent `attention` (older daemon) = waiting counts as needs you.
 
+Handoff (2026-11-03): shipped through Android 1.0.610 (commits 21fd400, b65f277, 74a17dc; daemon 1.0.609 running). 1.0.610 adds per-device "Mark done" (`web/src/services/markedDone.ts`, auto-clears on new activity/working/new prompt signature). User feedback after the needs-you/done split: "much better". Next: watch real use for misclassified needs-you/done (tune `turnEndQuestion`), check the ~3 tiles + 5 rows fit on the real phone, then phase 4 desktop grid. Known: ExitPlanMode Approve / batch-approve still positional; pane-only prompts on tiles depend on an existing pane capture (Herald on); aecCore + ledger-codex tests are load-flaky in the full gate.
+
 Plan source: `~/.claude/plans/immutable-conjuring-lemon.md` (copied below).
 
 
