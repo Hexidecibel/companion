@@ -71,6 +71,7 @@ function createMockWatcher() {
   // get_highlights reads the first page through getFreshMessages (a re-parse of
   // the file in the real watcher); the mock serves the same in-memory messages.
   watcher.getFreshMessages = jest.fn((sessionId?: string) => watcher.getMessages(sessionId));
+  watcher.getRecaps = jest.fn(() => []);
 
   watcher.getStatus = jest.fn((sessionId?: string) => {
     const id = sessionId || watcher.getActiveSessionId();
@@ -158,9 +159,7 @@ function createMockWatcher() {
     const waitingCount = filteredSessions.filter(
       (s: any) => s.isWaitingForInput || s.status === 'waiting'
     ).length;
-    const workingCount = filteredSessions.filter(
-      (s: any) => s.status === 'working'
-    ).length;
+    const workingCount = filteredSessions.filter((s: any) => s.status === 'working').length;
 
     return {
       sessions: filteredSessions.map((s: any) => ({
@@ -314,7 +313,10 @@ function createAuthenticatedClient(wss: MockWebSocketServer): MockWebSocket {
   const client = new MockWebSocket();
   wss.clients.add(client);
   wss.emit('connection', client, { socket: { remoteAddress: '127.0.0.1' } });
-  client.emit('message', JSON.stringify({ type: 'authenticate', token: 'test-token', requestId: 'auth-1' }));
+  client.emit(
+    'message',
+    JSON.stringify({ type: 'authenticate', token: 'test-token', requestId: 'auth-1' })
+  );
   client.send.mockClear();
   return client;
 }
@@ -822,7 +824,9 @@ describe('Multi-Session Support', () => {
       expect(response.payload.totalSessions).toBe(2);
       expect(response.payload.waitingCount).toBe(1);
       // Working count depends on mock status mapping
-      expect(response.payload.waitingCount + response.payload.workingCount).toBeGreaterThanOrEqual(1);
+      expect(response.payload.waitingCount + response.payload.workingCount).toBeGreaterThanOrEqual(
+        1
+      );
     });
 
     it('should return empty summary when no tmux sessions exist', async () => {
@@ -923,18 +927,14 @@ describe('Multi-Session Support', () => {
         projectPath: SAME_DIR_PROJECT,
         path: PATH_SAME_1,
         status: 'idle',
-        messages: [
-          { id: 'msg-1', type: 'user', content: 'Session 1 message', timestamp: 1000 },
-        ],
+        messages: [{ id: 'msg-1', type: 'user', content: 'Session 1 message', timestamp: 1000 }],
       });
       mockWatcher._addConversation(UUID_SAME_2, {
         name: 'my-project',
         projectPath: SAME_DIR_PROJECT,
         path: PATH_SAME_2,
         status: 'idle',
-        messages: [
-          { id: 'msg-2', type: 'user', content: 'Session 2 message', timestamp: 2000 },
-        ],
+        messages: [{ id: 'msg-2', type: 'user', content: 'Session 2 message', timestamp: 2000 }],
       });
     });
 
@@ -1796,11 +1796,7 @@ describe('Multi-Session Support', () => {
 
   describe('ping', () => {
     it('should respond with pong', async () => {
-      const responses = await sendAndWait(
-        client,
-        { type: 'ping', requestId: 'ping-1' },
-        50
-      );
+      const responses = await sendAndWait(client, { type: 'ping', requestId: 'ping-1' }, 50);
 
       const response = findResponse(responses, 'ping-1');
       expect(response.type).toBe('pong');
@@ -1847,9 +1843,7 @@ describe('Multi-Session Support', () => {
         projectPath: SAME_DIR_PROJECT,
         path: PATH_SAME_2,
         status: 'idle',
-        messages: [
-          { id: 'msg-3', type: 'user', content: 'Session 2 message' },
-        ],
+        messages: [{ id: 'msg-3', type: 'user', content: 'Session 2 message' }],
       });
     });
 

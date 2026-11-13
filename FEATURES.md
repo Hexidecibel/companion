@@ -129,6 +129,7 @@ High-level features of the Companion daemon, web client, and desktop/mobile apps
 - Text search across session history with match highlighting and prev/next navigation
 - Cross-session infinite scroll (chains JSONL files by creation time)
 - Message send times, text-message style (2026-10-15): the last bubble of a run shows its time in the corner ("3:42 PM", "Oct 12, 3:42 PM" on older days); the others reveal theirs on hover (desktop) or in the long-press menu, with full date + "ago"; a centred divider marks gaps of more than an hour
+- **Claude Code recaps**: the CLI's `away_summary` entries (CLI 2.1.323+) are parsed (the "disable recaps in /config" hint is stripped), kept out of the message list so they never affect waiting/idle detection, and merged into `get_highlights` as `isRecap` system highlights; chat renders a muted "Recap" card with its time. Session summaries carry an optional `latestRecap {text, timestamp}`, shown as a 2-line muted subtitle on mobile and sidebar session rows. Herald does not use recaps yet
 
 ## File & Artifact Viewer
 - Open files referenced in conversation with a single tap/click

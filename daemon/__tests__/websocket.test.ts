@@ -28,6 +28,7 @@ jest.mock('ws', () => {
 const mockWatcher = new EventEmitter() as any;
 mockWatcher.getMessages = jest.fn().mockReturnValue([]);
 mockWatcher.getFreshMessages = jest.fn().mockReturnValue([]);
+mockWatcher.getRecaps = jest.fn().mockReturnValue([]);
 mockWatcher.getStatus = jest.fn().mockReturnValue({
   isRunning: true,
   isWaitingForInput: false,
@@ -611,10 +612,18 @@ describe('WebSocketHandler', () => {
       let running = true;
       mockWatcher.sessionOverlay = jest.fn(() =>
         running
-          ? { waiting: false, backgroundWork: { agents: 2, shells: 0 }, currentActivity: '2 agents running' }
+          ? {
+              waiting: false,
+              backgroundWork: { agents: 2, shells: 0 },
+              currentActivity: '2 agents running',
+            }
           : { waiting: true }
       );
-      mockWatcher.getStatus.mockReturnValue({ isRunning: true, isWaitingForInput: true, lastActivity: 1 });
+      mockWatcher.getStatus.mockReturnValue({
+        isRunning: true,
+        isWaitingForInput: true,
+        lastActivity: 1,
+      });
       try {
         // Only the latest handler reacts (older beforeEach handlers share the mock emitter).
         mockWatcher.removeAllListeners('status-change');
@@ -631,7 +640,10 @@ describe('WebSocketHandler', () => {
         wss.clients.add(client);
         wss.emit('connection', client, { socket: { remoteAddress: '127.0.0.1' } });
         client.emit('message', JSON.stringify({ type: 'authenticate', token: 'test-token' }));
-        client.emit('message', JSON.stringify({ type: 'subscribe', payload: { sessionId: 'bg-session' } }));
+        client.emit(
+          'message',
+          JSON.stringify({ type: 'subscribe', payload: { sessionId: 'bg-session' } })
+        );
         client.send.mockClear();
         const esc = jest.spyOn((handler as any).escalation, 'handleEvent');
 
@@ -640,7 +652,11 @@ describe('WebSocketHandler', () => {
           isWaitingForInput: true,
           lastMessage: { content: 'Dispatched 2 agents.' },
         });
-        mockWatcher.emit('session-completed', { sessionId: 'bg-session', sessionName: 'bg', content: 'x' });
+        mockWatcher.emit('session-completed', {
+          sessionId: 'bg-session',
+          sessionName: 'bg',
+          content: 'x',
+        });
         const sent = client.send.mock.calls.map((c: unknown[]) => JSON.parse(c[0] as string));
         const status = sent.find((m: { type: string }) => m.type === 'status_change');
         expect(status.payload).toMatchObject({
@@ -659,10 +675,16 @@ describe('WebSocketHandler', () => {
         running = false;
         client.send.mockClear();
         handler.releaseDeferredIdle();
-        expect(esc).toHaveBeenCalledWith(expect.objectContaining({ eventType: 'waiting_for_input', sessionId: 'bg-session' }));
-        expect(esc).toHaveBeenCalledWith(expect.objectContaining({ eventType: 'session_completed', sessionId: 'bg-session' }));
+        expect(esc).toHaveBeenCalledWith(
+          expect.objectContaining({ eventType: 'waiting_for_input', sessionId: 'bg-session' })
+        );
+        expect(esc).toHaveBeenCalledWith(
+          expect.objectContaining({ eventType: 'session_completed', sessionId: 'bg-session' })
+        );
         const after = client.send.mock.calls.map((c: unknown[]) => JSON.parse(c[0] as string));
-        expect(after.find((m: { type: string }) => m.type === 'status_change').payload.isWaitingForInput).toBe(true);
+        expect(
+          after.find((m: { type: string }) => m.type === 'status_change').payload.isWaitingForInput
+        ).toBe(true);
         // Released once.
         esc.mockClear();
         handler.releaseDeferredIdle();
@@ -670,7 +692,11 @@ describe('WebSocketHandler', () => {
       } finally {
         escalate.mockRestore();
         delete mockWatcher.sessionOverlay;
-        mockWatcher.getStatus.mockReturnValue({ isRunning: true, isWaitingForInput: false, lastActivity: Date.now() });
+        mockWatcher.getStatus.mockReturnValue({
+          isRunning: true,
+          isWaitingForInput: false,
+          lastActivity: Date.now(),
+        });
       }
     });
 

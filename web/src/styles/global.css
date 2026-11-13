@@ -1054,6 +1054,52 @@ body {
   text-decoration: underline;
 }
 
+/* Claude Code session recap (chat card + session list subtitle) */
+.recap-card {
+  max-width: 90%;
+  padding: 8px 12px;
+  border: 1px dashed var(--border, #374151);
+  border-radius: 8px;
+  color: var(--text-secondary, #9ca3af);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.recap-card-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 2px;
+}
+
+.recap-card-label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.recap-card-time {
+  font-size: 10px;
+  opacity: 0.75;
+}
+
+.recap-card-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.session-recap {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  margin-top: 2px;
+  font-size: 11px;
+  line-height: 1.35;
+  color: #9ca3af;
+}
+
 /* Slash command run directly in the CLI (e.g. "Ran /login") */
 .local-command-marker {
   display: flex;

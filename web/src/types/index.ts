@@ -104,6 +104,8 @@ export interface ConversationHighlight {
   multiSelect?: boolean;
   toolCalls?: ToolCall[];
   isCompaction?: boolean;
+  /** Claude Code session recap (away_summary), rendered as a muted "Recap" card. */
+  isRecap?: boolean;
   isPending?: boolean; // Optimistic sent message not yet confirmed by JSONL
   skillName?: string; // User message is an expanded skill invocation (e.g., "todo", "apk")
   localCommand?: { name: string; args?: string; output?: string; isError?: boolean }; // Slash command run directly in the CLI (system marker)
@@ -178,6 +180,8 @@ export interface SessionSummary {
   pendingPrompt?: PendingPrompt;
   /** Last assistant line, truncated (newer daemons). */
   lastMessage?: string;
+  /** Most recent Claude Code recap of the session (newer daemons). */
+  latestRecap?: { text: string; timestamp: string };
   /**
    * Only while waiting (newer daemons): 'needs_you' = a prompt or a question to
    * the user; 'done' = it finished and reported back. Absent: treat waiting as needs_you.

@@ -149,6 +149,8 @@ export interface ConversationMessage {
   isWaitingForChoice?: boolean;
   multiSelect?: boolean;
   isCompaction?: boolean;
+  /** Claude Code session recap (away_summary), rendered as a muted "Recap" card. */
+  isRecap?: boolean;
   skillName?: string; // User message is an expanded skill invocation (e.g., "todo", "apk")
   /** Assistant entries: the API stop_reason the CLI recorded (end_turn, tool_use, ...). */
   stopReason?: string;
@@ -177,6 +179,8 @@ export interface ConversationHighlight {
   multiSelect?: boolean;
   toolCalls?: ToolCall[];
   isCompaction?: boolean;
+  /** Claude Code session recap (away_summary), rendered as a muted "Recap" card. */
+  isRecap?: boolean;
   skillName?: string;
   /** System marker for a slash command the user ran directly in the CLI
    *  (e.g. "/login"), not sent to the model. Content is the marker text. */
@@ -295,6 +299,8 @@ export interface SessionSummary {
   pendingPrompt?: PendingPrompt;
   /** Last assistant text line, trimmed, <=140 chars. */
   lastMessage?: string;
+  /** Most recent Claude Code recap of the session (optional). */
+  latestRecap?: { text: string; timestamp: string };
   /**
    * Only while waiting: 'needs_you' = a prompt is pending or the finished turn
    * ends by asking the user a question; 'done' = it just finished and reported.

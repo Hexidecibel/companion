@@ -178,7 +178,8 @@ export function registerSessionHandlers(ctx: HandlerContext): Record<string, Mes
           chain,
           limit,
           offset,
-          (f) => transcriptCache.getSync(f)?.messages() ?? []
+          (f) => transcriptCache.getSync(f)?.messages() ?? [],
+          (f) => transcriptCache.getSync(f)?.recaps() ?? []
         );
         resultHighlights = result.highlights;
         total = result.total;
@@ -196,7 +197,10 @@ export function registerSessionHandlers(ctx: HandlerContext): Record<string, Mes
           offset === 0
             ? ctx.watcher.getFreshMessages(hlSessionId || undefined)
             : ctx.watcher.getMessages(hlSessionId || undefined);
-        const allHighlights = extractHighlights(messages);
+        const allHighlights = extractHighlights(
+          messages,
+          ctx.watcher.getRecaps(hlSessionId || undefined)
+        );
         total = allHighlights.length;
         turn = computeTurnStats(allHighlights);
 
@@ -825,8 +829,9 @@ export function registerSessionHandlers(ctx: HandlerContext): Record<string, Mes
       }
 
       try {
-        const messages = transcriptCache.getSync(resolved)?.messages() ?? [];
-        const allHighlights = extractHighlights(messages);
+        const snapshot = transcriptCache.getSync(resolved);
+        const messages = snapshot?.messages() ?? [];
+        const allHighlights = extractHighlights(messages, snapshot?.recaps());
         const total = allHighlights.length;
         const limit = filePayload.limit || DEFAULT_HIGHLIGHTS_LIMIT;
         const offset = filePayload.offset || 0;

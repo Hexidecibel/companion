@@ -27,6 +27,7 @@ import { HeraldLauncher } from './herald/HeraldLauncher';
 import { AgentsNavButton } from './agents/AgentsNavButton';
 import { useConnectionHealth, ServerHealth } from '../hooks/useConnectionHealth';
 import { ProfileBadge } from './ProfilePicker';
+import { SessionRecap } from './SessionRecap';
 
 interface SessionSidebarProps {
   summaries: Map<string, ServerSummary>;
@@ -783,6 +784,7 @@ export function SessionSidebar({
                             </span>
                           )}
                         </div>
+                        {!foremanGroup && <SessionRecap recap={session.latestRecap} />}
                         <StuckBadge serverId={snap.serverId} sessionId={session.id} />
                         <BabysitBadge serverId={snap.serverId} sessionId={session.id} />
                         <ReviewSidebarPill serverId={snap.serverId} sessionId={session.id} />

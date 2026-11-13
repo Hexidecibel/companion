@@ -1,6 +1,7 @@
 import { eventBus } from '../utils/eventBus';
 import { ServerFreshness } from './ServerFreshness';
 import { backgroundWorkLabel } from '../utils/backgroundWork';
+import { SessionRecap } from './SessionRecap';
 import { useState, useMemo, useRef, useCallback, useEffect, useLayoutEffect, lazy, Suspense } from 'react';
 import { ServerSummary, SessionSummary, ActiveSession } from '../types';
 import { useConnections } from '../hooks/useConnections';
@@ -484,6 +485,7 @@ function MobileSessionItem({ session, serverId, onSelect, onOpenInSplit, onClose
             {backgroundWorkLabel(session.backgroundWork) || session.currentActivity}
           </div>
         )}
+        <SessionRecap recap={session.latestRecap} />
         {session.subagentTotal && session.subagentTotal > 0 && (
           <div className="mobile-session-subagents">
             <span className={`mobile-subagent-dot ${session.subagentRunning ? 'running' : 'done'}`} />

@@ -38,8 +38,15 @@ export function computeTurnStats(highlights: ConversationHighlight[]): TurnStats
   }
   return {
     startedAt: highlights[start].timestamp,
-    endedAt: highlights[highlights.length - 1].timestamp,
+    endedAt: lastNonRecap(highlights),
     tools,
     files: files.size,
   };
+}
+
+function lastNonRecap(highlights: ConversationHighlight[]): number {
+  for (let i = highlights.length - 1; i >= 0; i--) {
+    if (!highlights[i].isRecap) return highlights[i].timestamp;
+  }
+  return highlights[highlights.length - 1].timestamp;
 }

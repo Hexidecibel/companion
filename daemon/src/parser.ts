@@ -61,6 +61,56 @@ interface JsonlEntry {
   uuid?: string;
   summary?: string;
   content?: string;
+  isSidechain?: boolean;
+}
+
+/**
+ * Claude Code writes a session recap as `{type:"system", subtype:"away_summary"}`.
+ * Strips the trailing "(disable recaps in /config)" hint (any trailing
+ * parenthetical that mentions /config).
+ */
+export function cleanRecapText(raw: string): string {
+  return raw.replace(/\s*\([^()]*\/config[^()]*\)\s*$/i, '').trim();
+}
+
+/** A recap entry as a conversation message (type 'system', isRecap), or null. */
+export function parseRecapEntry(entry: JsonlEntry): ConversationMessage | null {
+  if (entry.type !== 'system' || entry.subtype !== 'away_summary') return null;
+  if (entry.isSidechain === true) return null;
+  if (typeof entry.content !== 'string') return null;
+  const text = cleanRecapText(entry.content);
+  if (!text) return null;
+  const timestamp = entry.timestamp ? new Date(entry.timestamp).getTime() : Date.now();
+  if (!Number.isFinite(timestamp)) return null;
+  return {
+    id: entry.uuid ? `recap-${entry.uuid}` : `recap-${timestamp}`,
+    type: 'system',
+    content: text,
+    timestamp,
+    isRecap: true,
+  };
+}
+
+/** Most recent recap (by timestamp) as the session-summary field. */
+export function latestRecapOf(
+  recaps: ConversationMessage[] | null | undefined
+): { text: string; timestamp: string } | undefined {
+  if (!recaps || recaps.length === 0) return undefined;
+  let best = recaps[0];
+  for (const r of recaps) if (r.timestamp >= best.timestamp) best = r;
+  return { text: best.content, timestamp: new Date(best.timestamp).toISOString() };
+}
+
+/** Recaps of one JSONL text (main-thread entries only), oldest first. */
+export function parseRecapsFromContent(content: string): ConversationMessage[] {
+  const out: ConversationMessage[] = [];
+  if (!content.includes('away_summary')) return out;
+  for (const e of parseJsonlLines(content)) {
+    if (!e) continue;
+    const r = parseRecapEntry(e);
+    if (r) out.push(r);
+  }
+  return out;
 }
 
 interface AskUserQuestionInput {
@@ -1239,7 +1289,9 @@ export function parseConversationChain(
   limit: number,
   offset: number,
   /** How to read one file's messages (the handlers pass the incremental cache). */
-  load: (file: string) => ConversationMessage[] = (f) => parseConversationFile(f)
+  load: (file: string) => ConversationMessage[] = (f) => parseConversationFile(f),
+  /** Recaps of one file (optional; recaps are not part of load()'s messages). */
+  loadRecaps?: (file: string) => ConversationMessage[]
 ): { highlights: ConversationHighlight[]; total: number; hasMore: boolean; turn?: TurnStats } {
   if (files.length === 0) {
     return { highlights: [], total: 0, hasMore: false };
@@ -1255,7 +1307,7 @@ export function parseConversationChain(
   // Walk from newest to oldest, stop once we have enough
   for (let i = files.length - 1; i >= 0; i--) {
     const messages = load(files[i]);
-    const highlights = extractHighlights(messages);
+    const highlights = extractHighlights(messages, loadRecaps?.(files[i]));
     // An older file holding only a directly-run command (e.g. a `/login` that
     // wrote its own transcript) is not a previous session: skip it, no divider.
     const isNewest = i === files.length - 1;
@@ -1300,7 +1352,39 @@ export function parseConversationChain(
   return { highlights: resultHighlights, total, hasMore, turn };
 }
 
-export function extractHighlights(messages: ConversationMessage[]): ConversationHighlight[] {
+/** Interleave recap highlights into a highlight list by timestamp (stable; recaps after ties). */
+export function mergeRecaps(
+  highlights: ConversationHighlight[],
+  recaps: ConversationMessage[] | null | undefined
+): ConversationHighlight[] {
+  if (!recaps || recaps.length === 0) return highlights;
+  const rs: ConversationHighlight[] = recaps
+    .map((r) => ({
+      id: r.id,
+      type: 'system' as const,
+      content: r.content,
+      timestamp: r.timestamp,
+      isRecap: true,
+    }))
+    .sort((a, b) => a.timestamp - b.timestamp);
+  const out: ConversationHighlight[] = [];
+  let ri = 0;
+  for (const h of highlights) {
+    while (ri < rs.length && rs[ri].timestamp < h.timestamp) out.push(rs[ri++]);
+    out.push(h);
+  }
+  while (ri < rs.length) out.push(rs[ri++]);
+  return out;
+}
+
+export function extractHighlights(
+  messages: ConversationMessage[],
+  recaps?: ConversationMessage[] | null
+): ConversationHighlight[] {
+  return mergeRecaps(extractHighlightsBase(messages), recaps);
+}
+
+function extractHighlightsBase(messages: ConversationMessage[]): ConversationHighlight[] {
   const localCommands = classifyLocalCommands(messages);
   const indexOf = new Map<ConversationMessage, number>();
   messages.forEach((m, i) => indexOf.set(m, i));
@@ -2131,6 +2215,7 @@ type EntrySlot =
     }
   | { k: 'summary'; ts: number; summary: string }
   | { k: 'compact'; ts: number }
+  | { k: 'recap'; msg: ConversationMessage }
   | { k: 'skip' };
 
 interface CompactionMark {
@@ -2273,6 +2358,10 @@ export class ConversationAccumulator {
         this.compactions.push({ index, ts, legacy: false, summary: null });
         return { k: 'compact', ts };
       }
+      if (entry.type === 'system' && entry.subtype === 'away_summary') {
+        const msg = parseRecapEntry(entry);
+        return msg ? { k: 'recap', msg } : { k: 'skip' };
+      }
     } catch {
       // Skip malformed lines
     }
@@ -2321,6 +2410,14 @@ export class ConversationAccumulator {
     markSkillExpansions(messages);
     this.assembled = messages;
     return messages;
+  }
+
+  /** Recaps (away_summary entries), oldest first. Kept out of messages(): they must not
+   *  count as the conversation's last message in the waiting/idle detectors. */
+  recaps(): ConversationMessage[] {
+    const out: ConversationMessage[] = [];
+    for (const slot of this.slots) if (slot.k === 'recap') out.push(slot.msg);
+    return out;
   }
 
   tasks(): TaskItem[] {

@@ -11,7 +11,7 @@ import { isTouchDevice } from '../utils/platform';
 import { URL_RE, ensureProtocol, formatLinkDomain as formatLinkDomainShared, extractUrls, cleanUrl } from '../utils/urls';
 import { copyToClipboard } from '../utils/clipboard';
 import { openExternal } from '../utils/externalLinks';
-import { formatBubbleTime, formatFullTime, hasTimeBubble } from '../utils/messageTime';
+import { formatBubbleTime, formatFullTime, hasTimeBubble, isValidMessageTime } from '../utils/messageTime';
 
 export type { ChoiceData } from './QuestionBlock';
 
@@ -383,6 +383,23 @@ export const MessageBubble = memo(function MessageBubble({ message, onSelectOpti
   // Render compaction summaries as expandable dividers
   if (isSystem && message.isCompaction) {
     return <CompactionMessage content={message.content} />;
+  }
+
+  // Claude Code session recap: a small muted card, distinct from chat bubbles
+  if (isSystem && message.isRecap) {
+    return (
+      <div className="msg-row msg-row-system" data-highlight-id={message.id}>
+        <div className="recap-card">
+          <div className="recap-card-head">
+            <span className="recap-card-label">Recap</span>
+            {isValidMessageTime(message.timestamp) && (
+              <span className="recap-card-time">{formatBubbleTime(message.timestamp, Date.now())}</span>
+            )}
+          </div>
+          <div className="recap-card-text">{message.content}</div>
+        </div>
+      </div>
+    );
   }
 
   // A slash command the user ran directly in the CLI (e.g. /login): a quiet marker

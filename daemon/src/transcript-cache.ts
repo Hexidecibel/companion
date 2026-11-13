@@ -32,6 +32,8 @@ interface TranscriptAccumulator {
   readonly lineCount: number;
   append(entries: ReturnType<typeof parseJsonlLines>): void;
   messages(): ConversationMessage[];
+  /** Session recaps (away_summary), oldest first; not part of messages(). */
+  recaps?(): ConversationMessage[];
   tasks(): TaskItem[];
   compactionSince(
     lastCheckedLine: number,
@@ -60,6 +62,8 @@ interface FileState {
 
 export interface TranscriptSnapshot {
   messages(): ConversationMessage[];
+  /** Session recaps (away_summary), oldest first; not part of messages(). */
+  recaps(): ConversationMessage[];
   tasks(): TaskItem[];
   compactionSince(
     lastCheckedLine: number,
@@ -82,6 +86,7 @@ interface StatLike {
 function snapshotOf(st: FileState): TranscriptSnapshot {
   return {
     messages: () => st.acc.messages().slice(),
+    recaps: () => st.acc.recaps?.() ?? [],
     tasks: () => st.acc.tasks(),
     compactionSince: (l, a, b, c) => st.acc.compactionSince(l, a, b, c),
     get lineCount() {

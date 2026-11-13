@@ -194,7 +194,7 @@ export function turnFromHighlights(highlights: ConversationHighlight[]): TurnSta
   }
   return {
     startedAt: highlights[start].timestamp,
-    endedAt: highlights[highlights.length - 1].timestamp,
+    endedAt: (highlights.filter((h) => !h.isRecap).pop() ?? highlights[highlights.length - 1]).timestamp,
     tools,
     files: files.size,
   };

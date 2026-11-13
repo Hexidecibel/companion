@@ -25,6 +25,7 @@ import {
 import { InputInjector } from './input-injector';
 import {
   extractHighlights,
+  latestRecapOf,
   detectCurrentActivity,
   detectCurrentActivityFast,
   getRecentActivity,
@@ -1854,7 +1855,7 @@ export class SessionWatcher extends EventEmitter {
     const t0 = Date.now();
     const messages = snap.messages();
     const t1 = Date.now();
-    const highlights = extractHighlights(messages);
+    const highlights = extractHighlights(messages, snap.recaps());
     const t2 = Date.now();
     if (t2 - t0 > SLOW_FILE_PROCESSING_THRESHOLD_MS) {
       console.log(
@@ -3141,6 +3142,14 @@ export class SessionWatcher extends EventEmitter {
     return transcriptCache.getSync(filePath)?.messages() ?? [];
   }
 
+  /** Claude Code recaps of a session's conversation, oldest first (not part of getMessages). */
+  getRecaps(sessionId?: string): ConversationMessage[] {
+    const targetId = this.resolveToConversationId(sessionId);
+    const tracked = targetId ? this.conversations.get(targetId) : undefined;
+    if (!tracked) return [];
+    return transcriptCache.getSync(tracked.path)?.recaps() ?? [];
+  }
+
   getMessages(sessionId?: string): ConversationMessage[] {
     if (sessionId) this.loadMappedConversation(sessionId);
     const targetId = this.resolveToConversationId(sessionId);
@@ -3522,7 +3531,7 @@ export class SessionWatcher extends EventEmitter {
 
     // Use cached messages instead of re-parsing
     const messages = best.conv.cachedMessages || this.readMessagesSync(best.conv.path);
-    const hlights = extractHighlights(messages);
+    const hlights = extractHighlights(messages, this.getRecaps(sessionId));
 
     this.emit('conversation-update', {
       path: best.conv.path,
@@ -3708,6 +3717,8 @@ export class SessionWatcher extends EventEmitter {
       pendingPrompt?: PendingPrompt;
       /** Last assistant text line, trimmed, <=140 chars. */
       lastMessage?: string;
+      /** Most recent Claude Code recap of the session (optional). */
+      latestRecap?: { text: string; timestamp: string };
       /** Only while waiting: needs_you (prompt / question) or done (reported back). */
       attention?: SummaryAttention;
     }>;
@@ -3744,6 +3755,8 @@ export class SessionWatcher extends EventEmitter {
       pendingPrompt?: PendingPrompt;
       /** Last assistant text line, trimmed, <=140 chars. */
       lastMessage?: string;
+      /** Most recent Claude Code recap of the session (optional). */
+      latestRecap?: { text: string; timestamp: string };
       /** Only while waiting: needs_you (prompt / question) or done (reported back). */
       attention?: SummaryAttention;
     }> = [];
@@ -3773,6 +3786,7 @@ export class SessionWatcher extends EventEmitter {
       let backgroundWork: BackgroundWork | undefined;
       let pendingPrompt: PendingPrompt | null = null;
       let lastMessage: string | undefined;
+      let latestRecap: { text: string; timestamp: string } | undefined;
       let attention: SummaryAttention | undefined;
       let waitStartHint = 0;
 
@@ -3833,6 +3847,7 @@ export class SessionWatcher extends EventEmitter {
           workingCount++;
         }
         lastMessage = lastAssistantLine(messages);
+        latestRecap = latestRecapOf(transcriptCache.getSync(conv.path)?.recaps());
         attention = summaryAttention(status, pendingPrompt, messages);
 
         // Extract recent message timestamps for sparkline (last 30 min)
@@ -3864,6 +3879,7 @@ export class SessionWatcher extends EventEmitter {
         ...(waitingSince ? { waitingSince } : {}),
         ...(pendingPrompt && status === 'waiting' ? { pendingPrompt } : {}),
         ...(lastMessage ? { lastMessage } : {}),
+        ...(latestRecap ? { latestRecap } : {}),
         ...(attention && status === 'waiting' ? { attention } : {}),
         ...(this.agentFor(ts.name).id !== DEFAULT_AGENT_ID
           ? { agent: this.agentFor(ts.name).id }
