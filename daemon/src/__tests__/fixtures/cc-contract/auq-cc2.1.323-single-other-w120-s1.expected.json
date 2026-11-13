@@ -1,0 +1,17 @@
+{
+  "screen": "question",
+  "header": "Snack",
+  "question": "Which snack should I bring?",
+  "multiSelect": false,
+  "options": [
+    {
+      "label": "Pretzels",
+      "description": "Salted."
+    },
+    {
+      "label": "Grapes",
+      "description": "Green, seedless."
+    }
+  ],
+  "hasOther": true
+}

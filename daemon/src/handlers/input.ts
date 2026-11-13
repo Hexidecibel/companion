@@ -3,7 +3,7 @@ import * as path from 'path';
 import * as os from 'os';
 import { HandlerContext, MessageHandler } from '../handler-context';
 import { MAX_ATTACHMENT_FILE_SIZE_BYTES } from '../constants';
-import type { SendInputResult } from '../input-injector';
+import type { ChoiceSendError, SendInputResult } from '../input-injector';
 import { resolveChoiceLabels } from '../pending-prompt';
 import type { SendChoiceRequest } from '../types';
 
@@ -19,6 +19,24 @@ function sendErrorCode(
     r.reason === 'choice'
     ? r.code
     : fallback;
+}
+
+/**
+ * Wire error for a failed choice: prompt_gone / choice_not_applied /
+ * unsupported (the AskUserQuestion driver) or tmux_session_not_found, else the
+ * legacy text.
+ */
+function choiceErrorCode(error: ChoiceSendError): string {
+  switch (error) {
+    case 'prompt_gone':
+    case 'choice_not_applied':
+    case 'unsupported':
+      return error;
+    case 'no_session':
+      return 'tmux_session_not_found';
+    default:
+      return 'Failed to send choice to session';
+  }
 }
 
 // Known image file extensions (lowercase, with leading dot).
@@ -171,7 +189,7 @@ export function registerInputHandlers(ctx: HandlerContext): Record<string, Messa
       if (
         !choicePayload ||
         !Array.isArray(choicePayload.selectedIndices) ||
-        !choicePayload.optionCount
+        (!choicePayload.optionCount && !choicePayload.navigate)
       ) {
         ctx.send(client.ws, {
           type: 'choice_sent',
@@ -218,7 +236,7 @@ export function registerInputHandlers(ctx: HandlerContext): Record<string, Messa
         let onScreen: { options: Array<{ label: string }> } | null = null;
         let fallbackSig: string | null = null;
         try {
-          const pane = await ctx.injector.captureTmuxPane(sessionToUse, 60);
+          const pane = await ctx.injector.captureTmuxPane(sessionToUse, 60, { ansi: true });
           if (pane) {
             ctx.watcher.noteStartupPane?.(sessionToUse, pane);
             live = ctx.watcher.pendingPromptFor?.(sessionToUse) ?? null;
@@ -261,7 +279,7 @@ export function registerInputHandlers(ctx: HandlerContext): Record<string, Messa
         }
       }
 
-      const success = await ctx.injector.sendChoice(
+      const result = await ctx.injector.sendChoiceDetailed(
         selectedIndices,
         optionCount,
         choicePayload.multiSelect,
@@ -271,16 +289,29 @@ export function registerInputHandlers(ctx: HandlerContext): Record<string, Messa
         {
           answerTrust: true,
           ...(choicePayload.promptKind === 'trust' ? { promptKind: 'trust' as const } : {}),
+          ...(choicePayload.navigate === 'back' || choicePayload.navigate === 'next'
+            ? { navigate: choicePayload.navigate }
+            : {}),
+          ...(choicePayload.submit === true ? { submit: true } : {}),
         }
       );
+      const success = result.ok;
 
       ctx.send(client.ws, {
         type: 'choice_sent',
         success,
-        error: success ? undefined : 'Failed to send choice to session',
+        error: result.ok ? undefined : choiceErrorCode(result.error),
+        payload: result.ok
+          ? result.outcome
+            ? { outcome: result.outcome }
+            : undefined
+          : { message: result.message ?? 'Failed to send choice to session' },
         requestId,
       });
 
+      // The live AskUserQuestion box changes on screen with no transcript write:
+      // watch it so the chat follows (next question, review, gone).
+      if (success) ctx.watcher.watchLiveChoice?.(sessionToUse);
       // The answered box is gone: the next capture tells what (if anything) follows.
       if (success) ctx.watcher.clearPaneChoice?.(sessionToUse);
       // Acknowledge the TARGET session (not the daemon's active one).

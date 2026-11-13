@@ -1,0 +1,51 @@
+[38;5;174m ▐[48;5;16m▛███▛█[39m[49m   [1mClaude[0m [1mCode[0m [38;5;246mv2.1.323[39m
+[38;5;174m▝▜[48;5;16m█████[49m█▀[39m  [38;5;246mHaiku[39m [38;5;246m5.5[39m [38;5;246m·[39m [38;5;246mClaude[39m [38;5;246mUltra[39m
+[38;5;174m ▝▝[39m   [38;5;174m▝▝[39m   [38;5;246m~/.companion/cc-contract/work[39m
+
+
+[38;5;246m[48;5;237m❯ [38;5;231mCall the AskUserQuestion tool exactly once with exactly this input, copying every string character for character: [39m
+  [38;5;231m{"questions":[{"header":"Lunch","question":"Which lunch should I [39m
+  [38;5;231morder?","multiSelect":false,"options":[{"label":"Ramen","description":"Tonkotsu, extra [39m
+  [38;5;231megg."},{"label":"Burrito","description":"Carnitas with salsa verde."},{"label":"Salad","description":"Greek, dressing[39m
+  [38;5;231mon the side."}]}]} After the user answers, reply with only the word OK. Say nothing else and use no other tool.[39m
+[38;5;246m[49m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+[38;5;16m[48;5;153m ☐ Lunch [39m[49m
+
+[1m[38;5;231mWhich lunch should I order?[0m
+
+[38;5;153m❯[39m [38;5;246m1.[39m [38;5;153mRamen[39m
+     [38;5;246mTonkotsu, extra egg.[39m
+  [38;5;246m2.[39m Burrito
+     [38;5;246mCarnitas[39m [38;5;246mwith[39m [38;5;246msalsa[39m [38;5;246mverde.[39m
+  [38;5;246m3.[39m Salad
+     [38;5;246mGreek,[39m [38;5;246mdressing[39m [38;5;246mon[39m [38;5;246mthe[39m [38;5;246mside.[39m
+  [38;5;246m4.[39m [38;5;246mType[39m [38;5;246msomething.[39m
+[38;5;246m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+[39m  5. Chat about this
+
+[38;5;246mEnter[39m [38;5;246mto[39m [38;5;246mselect[39m [38;5;246m·[39m [38;5;246m↑/↓[39m [38;5;246mto[39m [38;5;246mnavigate[39m [38;5;246m·[39m [38;5;246mEsc[39m [38;5;246mto[39m [38;5;246mcancel[39m
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

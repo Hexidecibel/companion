@@ -22,6 +22,7 @@ docs/           # detail docs (see Docs index below)
 | `docs/herald.md` | touching Herald: brain/providers, secrets, sandbox/probe instances, knowledge tools, session actions, babysitter, voice service, voice commands, triggers + tokens, multi-device speaking, "show me", volume/stop, audio layer (AEC/VAD/devices), diagnostics, production deploy of Herald |
 | `docs/codex.md` | Codex CLI sessions, Codex vs Claude isolation, trust / start-up prompts, Codex probes |
 | `docs/profiles.md` | account profiles (several Claude/Codex logins), one-tap login flow, profile probes |
+| `docs/cc-contract-tests.md` | AskUserQuestion answering from the chat (pane parser, key driver, live card), its fixture tests and the live Claude Code canary (`bin/test-cc-contract`) |
 | `docs/stuck-detection.md` | stuck-session detection (signals, pane captures, Herald stuck items) |
 | `docs/code-review-2.md` | Code Review 2.0 operational rules (GitRunner, ledger, events, reverts); design plan is `docs/code-review-2-plan.md` |
 | `docs/desktop-mobile.md` | Tauri desktop/Android/iOS: key files, build commands, native Herald shortcuts/passthrough, signing, auto-update, Android sideload updates, iOS TestFlight banner, APK signing |

@@ -1,0 +1,29 @@
+{
+  "screen": "question",
+  "header": "Toppings",
+  "question": "Which toppings should go on the pizza?",
+  "multiSelect": true,
+  "options": [
+    {
+      "label": "Cheese",
+      "description": "Mozzarella.",
+      "selected": false
+    },
+    {
+      "label": "Olives",
+      "description": "Kalamata.",
+      "selected": false
+    },
+    {
+      "label": "Corn",
+      "description": "Sweet corn.",
+      "selected": false
+    }
+  ],
+  "tabs": [
+    "Toppings"
+  ],
+  "activeTab": 0,
+  "hasOther": true,
+  "submitRow": "Submit"
+}

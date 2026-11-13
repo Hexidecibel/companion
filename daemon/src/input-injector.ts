@@ -11,6 +11,12 @@ import { impact } from './impact/state';
 import { defaultAgent, type AgentAdapter, type KeyStep } from './agents';
 import type { TrustLayout } from './types';
 import { secondsSinceClientActivity, refusalFor, type InputRefusal } from './prompt-guard';
+import {
+  driveClaudeAuq,
+  type AuqAnswer,
+  type AuqError,
+  type AuqOutcome,
+} from './agents/claude/auq-driver';
 
 /** An attached client that pressed a key within this many seconds = someone is typing. */
 export const TYPING_QUIET_S = 2;
@@ -26,6 +32,33 @@ export type SendInputResult =
       | InputRefusal
       | { reason: 'no_session' | 'tmux_error'; code: string; message: string }
     ));
+
+export interface ChoiceSendOptions {
+  /**
+   * The USER answered in the app. Everyone else (babysit, Herald,
+   * auto-approval) is refused while a start-up prompt is on screen.
+   */
+  answerTrust?: boolean;
+  /**
+   * The card tapped was the trust prompt; if it is gone, send nothing (a digit
+   * or Enter would land in the composer).
+   */
+  promptKind?: 'trust';
+  /** AskUserQuestion: move to the previous / next question instead of answering. */
+  navigate?: 'back' | 'next';
+  /** AskUserQuestion: the user's explicit Submit (a one-question multi-select confirms the review). */
+  submit?: boolean;
+}
+
+export type ChoiceSendError = AuqError | 'no_session' | 'refused';
+
+export type ChoiceSendResult =
+  | { ok: true; outcome?: AuqOutcome }
+  | {
+      ok: false;
+      error: ChoiceSendError;
+      message?: string;
+    };
 
 /** After answering a trust prompt: how long it may stay on screen. */
 const TRUST_VERIFY_POLLS = 6;
@@ -187,8 +220,10 @@ export class InputInjector {
         const blocking =
           choice?.kind === 'trust'
             ? 'trust'
-            : choice && agent.terminal.requiresLiveChoiceBox
-              ? 'choice'
+            : choice && (agent.terminal.requiresLiveChoiceBox || choice.auq)
+              ? // Claude's AskUserQuestion: typed digits pick options and
+                // Enter answers the focused row.
+                'choice'
               : null;
         if (blocking) {
           impact.count('inputCollisions');
@@ -402,6 +437,10 @@ export class InputInjector {
    *
    * Arrow-key fallbacks are kept for the (not-expected-for-AskUserQuestion) case of
    * more than 9 options, where single digit keys can't address every row.
+   *
+   * A Claude AskUserQuestion box that agents/claude/auq-box.ts can read goes
+   * to the step-by-step driver (agents/claude/auq-driver.ts) instead: it checks
+   * the screen after every key and reports where the answer left the picker.
    */
   async sendChoice(
     selectedIndices: number[],
@@ -409,14 +448,28 @@ export class InputInjector {
     multiSelect: boolean,
     otherText: string | undefined,
     targetSession?: string,
-    /**
-     * answerTrust: the USER answered in the app. Everyone else (babysit, Herald,
-     * auto-approval) is refused while a start-up prompt is on screen.
-     * promptKind: the card tapped was that prompt; if it is gone, send nothing
-     * (a digit or Enter would land in the composer).
-     */
-    opts?: { answerTrust?: boolean; promptKind?: 'trust' }
+    opts?: ChoiceSendOptions
   ): Promise<boolean> {
+    const r = await this.sendChoiceDetailed(
+      selectedIndices,
+      optionCount,
+      multiSelect,
+      otherText,
+      targetSession,
+      opts
+    );
+    return r.ok;
+  }
+
+  /** sendChoice with the reason when it fails and, for an AskUserQuestion box, the outcome. */
+  async sendChoiceDetailed(
+    selectedIndices: number[],
+    optionCount: number,
+    multiSelect: boolean,
+    otherText: string | undefined,
+    targetSession?: string,
+    opts?: ChoiceSendOptions
+  ): Promise<ChoiceSendResult> {
     const previousLock = this.sendLock;
     let releaseLock: () => void;
     this.sendLock = new Promise<void>((resolve) => {
@@ -431,7 +484,7 @@ export class InputInjector {
       const checkResult = await this.runTmux(['has-session', '-t', session]);
       if (checkResult.status !== 0) {
         console.error(`Tmux session '${session}' not found`);
-        return false;
+        return { ok: false, error: 'no_session', message: 'The session is not running.' };
       }
 
       const agent = this.agentFor(session);
@@ -440,11 +493,23 @@ export class InputInjector {
       const trustBox = box?.kind === 'trust' ? box : null;
       if (trustBox && !opts?.answerTrust) {
         console.log(`Choice for '${session}' not sent: only the user answers the trust prompt`);
-        return false;
+        return { ok: false, error: 'refused', message: 'Only the user answers the trust prompt.' };
       }
       if (opts?.promptKind === 'trust' && !trustBox) {
         console.log(`Choice for '${session}' not sent: the trust prompt is gone`);
-        return false;
+        return { ok: false, error: 'prompt_gone', message: 'The prompt is no longer on screen.' };
+      }
+      if (box?.auq && !trustBox) {
+        return this.driveAuq(session, agent, {
+          selectedIndices,
+          ...(otherText !== undefined ? { otherText } : {}),
+          ...(opts?.navigate ? { navigate: opts.navigate } : {}),
+          ...(opts?.submit ? { submit: true } : {}),
+        });
+      }
+      if (opts?.navigate) {
+        console.log(`Choice for '${session}' not sent: no question box to move in`);
+        return { ok: false, error: 'prompt_gone', message: 'The question is no longer on screen.' };
       }
       if (agent.terminal.requiresLiveChoiceBox) {
         // Codex: a digit sent to the bare composer would be typed into it and
@@ -453,7 +518,7 @@ export class InputInjector {
           console.log(
             `Choice for '${session}' not sent: no ${agent.displayName} choice box on screen`
           );
-          return false;
+          return { ok: false, error: 'prompt_gone', message: 'The prompt is no longer on screen.' };
         }
       } else if (!trustBox) {
         // Dismiss any TUI overlay before sending (never on a start-up prompt:
@@ -472,17 +537,45 @@ export class InputInjector {
         trustBox?.trustLayout
       );
       if (sent && trustBox) sent = await this.trustPromptLeft(session, agent, trustBox.question);
-      if (sent && this.afterChoice) {
-        try {
-          this.afterChoice(session);
-        } catch {
-          // an observer never fails a send
-        }
-      }
-      return sent;
+      if (sent) this.notifyAfterChoice(session);
+      return sent
+        ? { ok: true }
+        : { ok: false, error: 'send_failed', message: 'Failed to send choice to session' };
     } finally {
       releaseLock!();
     }
+  }
+
+  private notifyAfterChoice(session: string): void {
+    if (!this.afterChoice) return;
+    try {
+      this.afterChoice(session);
+    } catch {
+      // an observer never fails a send
+    }
+  }
+
+  /** Answer a Claude AskUserQuestion box step by step (see auq-driver.ts). */
+  private async driveAuq(
+    session: string,
+    agent: AgentAdapter,
+    answer: AuqAnswer
+  ): Promise<ChoiceSendResult> {
+    const r = await driveClaudeAuq(
+      {
+        capture: () => this.captureForGuard(session),
+        send: (steps) => this.runSteps(session, steps, 'choice'),
+        sleep: (ms) => this.sleep(ms),
+      },
+      answer
+    );
+    console.log(
+      `[AUQ] ${agent.displayName} '${session}': ${JSON.stringify(answer).slice(0, 200)} -> ${r.trace.join(' | ')}`
+    );
+    if (!r.ok) return { ok: false, error: r.error ?? 'send_failed', message: r.message };
+    incrementTmuxOperations();
+    this.notifyAfterChoice(session);
+    return { ok: true, ...(r.outcome ? { outcome: r.outcome } : {}) };
   }
 
   /** The prompt answered must really leave the screen, or the user is told it failed. */
@@ -567,10 +660,23 @@ export class InputInjector {
    * Capture the tmux pane content (last 30 lines by default).
    * Returns the captured text, or empty string on error.
    */
-  async captureTmuxPane(targetSession?: string, lines = 30): Promise<string> {
+  async captureTmuxPane(
+    targetSession?: string,
+    lines = 30,
+    /** ansi: keep colours (`-e`): the AskUserQuestion reader tells the active tab by them. */
+    opts?: { ansi?: boolean }
+  ): Promise<string> {
     try {
       const session = targetSession || this.activeSession;
-      const result = await this.runTmux(['capture-pane', '-t', session, '-p', '-S', `-${lines}`]);
+      const result = await this.runTmux([
+        'capture-pane',
+        '-t',
+        session,
+        '-p',
+        ...(opts?.ansi ? ['-e'] : []),
+        '-S',
+        `-${lines}`,
+      ]);
       if (result.status !== 0) {
         return '';
       }

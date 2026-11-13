@@ -6,7 +6,15 @@ import { HandlerContext, MessageHandler } from '../handler-context';
 import { extractHighlights, parseConversationChain } from '../parser';
 import { defaultAgent } from '../agents';
 import { codexLaunchMode } from '../agents/codex/discovery';
-import { WebSocketResponse, Question, ConversationHighlight, TurnStats } from '../types';
+import {
+  WebSocketResponse,
+  Question,
+  ConversationHighlight,
+  TurnStats,
+  type LiveAuqState,
+  type TerminalChoicePrompt,
+} from '../types';
+import { normalizeChoice } from '../pending-prompt';
 import { computeTurnStats } from '../turn-stats';
 import {
   SLOW_OPERATION_THRESHOLD_MS,
@@ -60,6 +68,27 @@ function shellEscape(s: string): string {
  * across repeated pane captures of the SAME question so it isn't duplicated. Keying on
  * a hash of (header + question + option labels) satisfies both.
  */
+/** The chat card's view of a live AskUserQuestion box (Question.live). */
+export function liveAuqState(choice: TerminalChoicePrompt, signature: string): LiveAuqState {
+  const a = choice.auq!;
+  const count = a.tabs?.length;
+  return {
+    signature,
+    screen: a.screen,
+    ...(count && count > 1
+      ? { questionIndex: Math.min(a.activeTab ?? 0, count), questionCount: count }
+      : {}),
+    ...(a.tabs ? { tabs: a.tabs.map((t) => ({ ...t })) } : {}),
+    ...(a.preview ? { preview: true } : {}),
+    ...(a.other ? { allowOther: true } : {}),
+    ...(a.other?.text ? { otherText: a.other.text } : {}),
+    ...(a.other?.checked ? { otherChecked: true } : {}),
+    ...(a.submitRow ? { submitRow: a.submitRow } : {}),
+    ...(a.review ? { review: a.review.map((r) => ({ ...r })) } : {}),
+    ...(a.incomplete ? { incomplete: true } : {}),
+  };
+}
+
 export function liveChoiceHighlightId(
   sessionId: string,
   q: { header?: string; question?: string; options: { label: string }[] }
@@ -289,7 +318,9 @@ export function registerSessionHandlers(ctx: HandlerContext): Record<string, Mes
         );
         if (!alreadyTappable) {
           try {
-            const paneText = await ctx.injector.captureTmuxPane(tmuxNameForPending);
+            const paneText = await ctx.injector.captureTmuxPane(tmuxNameForPending, 30, {
+              ansi: true,
+            });
             // The capture also tells whether the agent's trust prompt is up (status).
             if (paneText) ctx.watcher.noteStartupPane?.(tmuxNameForPending, paneText);
             const choice = ctx.watcher
@@ -302,10 +333,19 @@ export function registerSessionHandlers(ctx: HandlerContext): Record<string, Mes
                 options: choice.options.map((o) => ({
                   label: o.label,
                   description: o.description || '',
+                  ...(choice.auq && choice.multiSelect ? { selected: !!o.selected } : {}),
                 })),
                 multiSelect: choice.multiSelect || false,
                 ...(choice.kind ? { kind: choice.kind } : {}),
               };
+              if (choice.auq) {
+                const signature =
+                  ctx.watcher.pendingPromptFor?.(tmuxNameForPending)?.signature ??
+                  normalizeChoice(choice)?.signature ??
+                  '';
+                liveQuestion.live = liveAuqState(choice, signature);
+                ctx.watcher.followLiveChoice?.(tmuxNameForPending, choice);
+              }
               const liveHighlight: ConversationHighlight = {
                 id: liveChoiceHighlightId(hlSessionId ?? tmuxNameForPending, liveQuestion),
                 type: 'assistant',
