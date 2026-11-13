@@ -218,6 +218,19 @@ export interface SessionWatcherOptions {
 const TASKS_DIR_FD =
   /\/([^/]+)\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/tasks$/;
 
+/**
+ * 'watch-limit' = the kernel ran out of inotify watches/instances (ENOSPC on
+ * a watch syscall, or EMFILE). Recoverable: the daemon keeps running on scans.
+ */
+export function classifyWatcherError(error: unknown): 'watch-limit' | 'other' {
+  const e = error as NodeJS.ErrnoException | null;
+  if (!e || typeof e !== 'object') return 'other';
+  if (e.code === 'EMFILE') return 'watch-limit';
+  if (e.code === 'ENOSPC' && (e.syscall === 'watch' || /file watchers/i.test(e.message ?? '')))
+    return 'watch-limit';
+  return 'other';
+}
+
 export class SessionWatcher extends EventEmitter {
   /** The default agent (Claude Code): its transcripts are watched under code_home. */
   private readonly agent = defaultAgent();
@@ -280,6 +293,31 @@ export class SessionWatcher extends EventEmitter {
   private static readonly MISSED_SCAN_INTERVAL_MS = 10_000;
   private static readonly MISSED_SCAN_MAX_FILES = 500;
   private missedScanTimer: NodeJS.Timeout | null = null;
+  /** Set once the inotify-limit warning has been logged (chokidar repeats it per dir). */
+  private watchLimitWarned = false;
+
+  /**
+   * chokidar error sink. Never rethrows: re-emitting 'error' on this emitter
+   * with no listener made Node throw inside chokidar's async directory scan,
+   * which surfaced as an unhandled rejection and killed the daemon (ENOSPC,
+   * 2026-11-13). Missed events are covered by the periodic reconcile and
+   * missed-transcript scans.
+   */
+  private handleWatcherError(error: unknown): void {
+    const kind = classifyWatcherError(error);
+    if (kind === 'watch-limit') {
+      if (this.watchLimitWarned) return;
+      this.watchLimitWarned = true;
+      console.warn(
+        `Watcher: inotify limit reached (${(error as NodeJS.ErrnoException).code}); ` +
+          'some dirs are unwatched, falling back to periodic scans. ' +
+          'Raise fs.inotify.max_user_watches / max_user_instances, or set COMPANION_WATCH_POLLING=1.'
+      );
+      return;
+    }
+    console.error('Watcher error:', error);
+    if (this.listenerCount('error') > 0) this.emit('error', error);
+  }
   private missedScanRunning = false;
   private static readonly WAITING_DEBOUNCE_MS = 3000; // Delay before confirming "waiting" for non-interactive tools
 
@@ -1486,10 +1524,7 @@ export class SessionWatcher extends EventEmitter {
 
     this.watcher.on('add', (filePath) => this.handleFileChange(filePath));
     this.watcher.on('change', (filePath) => this.handleFileChange(filePath));
-    this.watcher.on('error', (error) => {
-      console.error('Watcher error:', error);
-      this.emit('error', error);
-    });
+    this.watcher.on('error', (error) => this.handleWatcherError(error));
 
     // Mark initial load complete after 3 seconds so auto-select stabilizes
     setTimeout(() => {

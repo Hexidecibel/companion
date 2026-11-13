@@ -3,7 +3,7 @@ import * as path from 'path';
 import { loadConfig, displayFirstRunWelcome, isSetupMode, resolveConfigPath } from './config';
 import { ProfileRegistry } from './profiles';
 import { loadSecretsEnv, secretsFilePath } from './setup/secrets';
-import { SessionWatcher } from './watcher';
+import { SessionWatcher, classifyWatcherError } from './watcher';
 import { SubAgentWatcher, resolveSubagentMode } from './subagent-watcher';
 import { InputInjector } from './input-injector';
 import { lanAddresses, MdnsAdvertiser } from './mdns';
@@ -34,6 +34,12 @@ process.on('uncaughtException', (err: NodeJS.ErrnoException) => {
   process.exit(1);
 });
 process.on('unhandledRejection', (reason) => {
+  // Running out of inotify watches is degraded, not fatal: watchers fall back
+  // to periodic scans. Exiting here crash-looped the daemon (2026-11-13).
+  if (classifyWatcherError(reason) === 'watch-limit') {
+    console.warn('Unhandled watch-limit rejection (continuing):', (reason as Error).message);
+    return;
+  }
   console.error('Unhandled rejection:', reason);
   process.exit(1);
 });
