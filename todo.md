@@ -5,6 +5,12 @@ Quick capture for ideas and tasks. Run `/plan` to process into detailed plans.
 ---
 
 ## Upcoming
+- BUG: `bin/companion restart` bypasses systemd -- spawned a stray daemon while systemd's auto-restart was pending (both fight over 9877). Make start/stop/restart go through `systemctl --user` when the unit exists
+- Recaps follow-ups -- feed `latestRecap` into Herald session context (skipped: no per-session summary hook yet); real-device check of the recap subtitle/card
+- AUQ live card follow-ups -- real-device test (phone + desktop); preview-panel content in chat; >9-option multi-select (number keys stop at 9); multi-select "skip"; event-driven instead of timer re-capture. Install the canary cron: `0 6 * * * cd /home/hexi/local/src/companion && bin/test-cc-contract --if-changed >> ~/.companion/cc-contract/cron.log 2>&1`
+- Local AppImage builds fail on hexinas because AppImageLauncher intercepts linuxdeploy ("Integrate and run" popups) -- build AppImages in CI, or disable AppImageLauncher's binfmt during `bin/build*`
+- BUG: `bin/build-apk` skips the android version overlay (APK gets versionCode 1000000, which the in-app updater feed would refuse); `npm run android:build` applies it. Make bin/build-apk use the overlay
+- Flaky test: `daemon` `subagents/__tests__/surfaces.test.ts` (real fs.watch; failed once in the 1.0.617 gate, 8/8 solo)
 - BUG: a new session alone in its folder can display an older transcript via `ensureConversationLoaded`
 - BUG: plain `codex` parks on an "Update available" screen that shows only in the terminal, so the app sees nothing to answer
 - Flaky tests: `daemon` `ledger-codex.test.ts:189`; `daemon` `tracker.test.ts:520` (wall-clock slice limit, 51.37 vs 50 ms under full-suite load)
