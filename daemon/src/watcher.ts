@@ -72,6 +72,8 @@ import { isReadonlySharedState } from './sandbox';
 import type { BackgroundWork, BackgroundWorkMonitor, SessionOverlay } from './background-work';
 import { PANE_APPROVAL_ACTIVITY } from './background-work';
 import { buildPendingPrompt, lastAssistantLine, summaryAttention } from './pending-prompt';
+import { stripAnsi } from './prompt-guard';
+import { LiveChoiceWatch } from './live-choice-watch';
 import type { PendingPrompt, SummaryAttention } from './types';
 import { ProcEnvCache, ProfileRegistry, type AgentProfile } from './profiles';
 
@@ -297,6 +299,20 @@ export class SessionWatcher extends EventEmitter {
   private feedbackSessionId: string | null = null; // tmux session name that has the feedback prompt
   private static readonly FEEDBACK_POLL_INTERVAL_MS = 3000;
   private static readonly FEEDBACK_POLL_MAX_ATTEMPTS = 10;
+  /** Follows live AskUserQuestion boxes on Claude panes (they never reach the transcript). */
+  private liveChoice = new LiveChoiceWatch({
+    capture: async (session) => {
+      if (!this.inputInjector) return null;
+      const pane = await this.inputInjector.captureTmuxPane(session, 40, { ansi: true });
+      return pane || null;
+    },
+    note: (session, pane) => {
+      this.noteStartupPane(session, pane);
+      const c = this.agentFor(session).terminal.detectActiveChoicePrompt(pane);
+      return c?.auq ? c : null;
+    },
+    emitUpdate: (session) => this.emit('conversation-update', { sessionId: session }),
+  });
 
   constructor(codeHome: string, inputInjector?: InputInjector, opts: SessionWatcherOptions = {}) {
     super();
@@ -1235,7 +1251,7 @@ export class SessionWatcher extends EventEmitter {
       const c = agent.terminal.detectActiveChoicePrompt(pane);
       this.notePaneChoice(sessionId, c && c.kind !== 'trust' ? c : null);
       if (c?.kind === 'trust') choice = c;
-      else if (agent.terminal.classifyStartupPane(pane) === 'ready') {
+      else if (agent.terminal.classifyStartupPane(stripAnsi(pane)) === 'ready') {
         const pid = this.tmuxSessionIdentity.get(sessionId)?.claudePid;
         if (pid) this.startupSettled.set(sessionId, pid);
       }
@@ -1280,6 +1296,23 @@ export class SessionWatcher extends EventEmitter {
   /** Forget a session's cached choice box (it was just answered). */
   clearPaneChoice(sessionId: string): void {
     this.paneChoices.delete(sessionId);
+  }
+
+  /**
+   * An answer went to a session's AskUserQuestion box: re-capture it every
+   * second while it stays up so the chat follows the next question, the
+   * review screen and its going away (see live-choice-watch.ts).
+   */
+  watchLiveChoice(sessionId: string): void {
+    if (!this.inputInjector || !this.tmuxPathBySession.has(sessionId)) return;
+    this.paneChoices.delete(sessionId);
+    this.liveChoice.watch(sessionId);
+  }
+
+  /** A capture elsewhere (get_highlights) saw this AskUserQuestion box: keep following it. */
+  followLiveChoice(sessionId: string, box: TerminalChoicePrompt): void {
+    if (!this.inputInjector || !box.auq || !this.tmuxPathBySession.has(sessionId)) return;
+    this.liveChoice.follow(sessionId, box);
   }
 
   /**
@@ -1383,7 +1416,7 @@ export class SessionWatcher extends EventEmitter {
     if (!this.tmuxPathBySession.has(sessionId)) return;
     this.startupChecksInFlight.add(sessionId);
     try {
-      const pane = await this.inputInjector.captureTmuxPane(sessionId, 40);
+      const pane = await this.inputInjector.captureTmuxPane(sessionId, 40, { ansi: true });
       if (pane) this.noteStartupPane(sessionId, pane);
     } catch {
       /* capture failed: try again next refresh */
@@ -1522,6 +1555,7 @@ export class SessionWatcher extends EventEmitter {
     this.waitingDebounceTimers.clear();
     // Clear feedback poll timer
     this.stopFeedbackPolling();
+    this.liveChoice.stopAll();
     for (const rec of this.rolloutDirWatches.values()) rec.w.close();
     this.rolloutDirWatches.clear();
     for (const t of [...this.codexNudges.values(), ...this.startupRecheckTimers.values()])
@@ -1565,7 +1599,9 @@ export class SessionWatcher extends EventEmitter {
       }
 
       try {
-        const paneText = await this.inputInjector!.captureTmuxPane(tmuxSessionName);
+        const paneText = await this.inputInjector!.captureTmuxPane(tmuxSessionName, 30, {
+          ansi: true,
+        });
         if (!paneText) return;
 
         const prompt = parseFeedbackPrompt(paneText);
@@ -2108,6 +2144,10 @@ export class SessionWatcher extends EventEmitter {
     const hasNewMessages = messages.length !== prevMessageCount;
     const waitingStatusChanged = conversationWaiting !== prevWasWaiting;
 
+    if (hasNewMessages && agent === this.agent && this.inputInjector) {
+      // The turn may end in an AskUserQuestion box, which writes nothing.
+      this.liveChoice.probe(sessionId);
+    }
     if (hasNewMessages) {
       // Update global lastMessageCount if this is the active session (for compat)
       if (tmuxName === this.activeTmuxSession) {

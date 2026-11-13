@@ -19,6 +19,7 @@ import {
   POST_TEXT_INPUT_DELAY_MS,
 } from '../../constants';
 import { CLAUDE_BYPASS, CLAUDE_TRUST, parseTrustPrompt } from '../trust';
+import { parseClaudeAuqBox } from './auq-box';
 import type { TerminalChoicePrompt } from '../../types';
 import type {
   AgentTerminal,
@@ -64,6 +65,7 @@ export function detectActiveChoicePrompt(paneOutput: string): TerminalChoiceProm
   return (
     parseTrustPrompt(paneOutput, CLAUDE_BYPASS) ??
     parseTrustPrompt(paneOutput, CLAUDE_TRUST) ??
+    parseClaudeAuqBox(paneOutput) ??
     parserDetectActiveChoicePrompt(paneOutput)
   );
 }

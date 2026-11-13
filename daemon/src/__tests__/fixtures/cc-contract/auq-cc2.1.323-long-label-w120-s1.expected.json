@@ -1,0 +1,17 @@
+{
+  "screen": "question",
+  "header": "Plan",
+  "question": "Which refactor should come first?",
+  "multiSelect": false,
+  "options": [
+    {
+      "label": "Rewrite the session watcher so it streams JSONL appends incrementally instead of re-reading whole files, keeping the cache semantics (Phase 2)",
+      "description": "Touches watcher.ts and parser.ts; the transcript cache keeps its current keys and eviction order, so nothing downstream changes."
+    },
+    {
+      "label": "Leave the watcher alone",
+      "description": "Ship the UI fixes first."
+    }
+  ],
+  "hasOther": true
+}

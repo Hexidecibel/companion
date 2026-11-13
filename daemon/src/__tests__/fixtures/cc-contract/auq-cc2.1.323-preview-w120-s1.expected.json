@@ -1,0 +1,16 @@
+{
+  "screen": "question",
+  "header": "Database",
+  "question": "Which database should the demo use?",
+  "multiSelect": false,
+  "options": [
+    {
+      "label": "Postgres (Recommended)"
+    },
+    {
+      "label": "SQLite"
+    }
+  ],
+  "preview": true,
+  "hasOther": false
+}

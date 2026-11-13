@@ -14,7 +14,7 @@ function makeCtx(
     send: jest.fn((_ws: unknown, msg: Record<string, unknown>) => sent.push(msg)),
     injector: {
       checkSessionExists: jest.fn(async () => true),
-      sendChoice: jest.fn(async () => true),
+      sendChoiceDetailed: jest.fn(async () => ({ ok: true })),
       sendInputDetailed: jest.fn(async () => ({ ok: true })),
       captureTmuxPane: jest.fn(async () => opts.pane ?? 'pane text'),
       getActiveSession: jest.fn(() => 'active-one'),
@@ -53,9 +53,9 @@ describe('send_choice', () => {
   it('matching expectSignature: sends, acks the TARGET session', async () => {
     const { ctx, handlers, client, sent } = makeCtx({ signature: 'sig-1' });
     await handlers.send_choice(client, choice({ expectSignature: 'sig-1' }), 'r1');
-    expect(ctx.injector.captureTmuxPane).toHaveBeenCalledWith('target-sess', 60);
+    expect(ctx.injector.captureTmuxPane).toHaveBeenCalledWith('target-sess', 60, { ansi: true });
     expect(ctx.watcher.noteStartupPane).toHaveBeenCalledWith('target-sess', 'pane text');
-    expect(ctx.injector.sendChoice).toHaveBeenCalled();
+    expect(ctx.injector.sendChoiceDetailed).toHaveBeenCalled();
     expect(sent).toEqual([
       { type: 'choice_sent', success: true, error: undefined, requestId: 'r1' },
     ]);
@@ -67,7 +67,7 @@ describe('send_choice', () => {
   it('stale expectSignature: nothing injected, stale_prompt reply', async () => {
     const { ctx, handlers, client, sent } = makeCtx({ signature: 'sig-2' });
     await handlers.send_choice(client, choice({ expectSignature: 'sig-1' }), 'r2');
-    expect(ctx.injector.sendChoice).not.toHaveBeenCalled();
+    expect(ctx.injector.sendChoiceDetailed).not.toHaveBeenCalled();
     expect(sent).toEqual([
       { type: 'choice_sent', success: false, error: 'stale_prompt', requestId: 'r2' },
     ]);
@@ -77,7 +77,7 @@ describe('send_choice', () => {
     for (const o of [{ signature: null }, { pane: '' }]) {
       const { ctx, handlers, client, sent } = makeCtx(o);
       await handlers.send_choice(client, choice({ expectSignature: 'sig-1' }), 'r3');
-      expect(ctx.injector.sendChoice).not.toHaveBeenCalled();
+      expect(ctx.injector.sendChoiceDetailed).not.toHaveBeenCalled();
       expect(sent[0]).toMatchObject({ success: false, error: 'stale_prompt' });
     }
   });
@@ -86,7 +86,7 @@ describe('send_choice', () => {
     const { ctx, handlers, client } = makeCtx();
     await handlers.send_choice(client, choice(), 'r4');
     expect(ctx.injector.captureTmuxPane).not.toHaveBeenCalled();
-    expect(ctx.injector.sendChoice).toHaveBeenCalled();
+    expect(ctx.injector.sendChoiceDetailed).toHaveBeenCalled();
     expect(ctx.escalation.acknowledgeSession).toHaveBeenCalledWith('target-sess');
   });
 });
@@ -111,7 +111,7 @@ describe('send_choice selectedLabels', () => {
       }),
       'l1'
     );
-    expect(ctx.injector.sendChoice).toHaveBeenCalledWith(
+    expect(ctx.injector.sendChoiceDetailed).toHaveBeenCalledWith(
       [3],
       4,
       false,
@@ -129,7 +129,7 @@ describe('send_choice selectedLabels', () => {
       choice({ selectedLabels: ['maybe later'], expectSignature: 'sig-1' }),
       'l2'
     );
-    expect(ctx.injector.sendChoice).not.toHaveBeenCalled();
+    expect(ctx.injector.sendChoiceDetailed).not.toHaveBeenCalled();
     expect(sent[0]).toMatchObject({ success: false, error: 'stale_prompt' });
   });
 
@@ -140,7 +140,7 @@ describe('send_choice selectedLabels', () => {
       choice({ selectedLabels: ['no'], expectSignature: 'sig-1' }),
       'l3'
     );
-    expect(ctx.injector.sendChoice).not.toHaveBeenCalled();
+    expect(ctx.injector.sendChoiceDetailed).not.toHaveBeenCalled();
     expect(sent[0]).toMatchObject({ error: 'stale_prompt' });
   });
 
@@ -155,7 +155,7 @@ describe('send_choice selectedLabels', () => {
       choice({ selectedIndices: [2], selectedLabels: ['no'], expectSignature: 'transcript-sig' }),
       'l4'
     );
-    expect(ctx.injector.sendChoice).toHaveBeenCalledWith(
+    expect(ctx.injector.sendChoiceDetailed).toHaveBeenCalledWith(
       [3],
       4,
       false,
@@ -167,7 +167,7 @@ describe('send_choice selectedLabels', () => {
     // The same stale signature WITHOUT labels is refused (indices may not match the screen).
     const b = makeCtx({ signature: 'pane-sig', fallbackSig: 'transcript-sig', onScreen: FOUR });
     await b.handlers.send_choice(b.client, choice({ expectSignature: 'transcript-sig' }), 'l5');
-    expect(b.ctx.injector.sendChoice).not.toHaveBeenCalled();
+    expect(b.ctx.injector.sendChoiceDetailed).not.toHaveBeenCalled();
     expect(b.sent[0]).toMatchObject({ error: 'stale_prompt' });
   });
 
@@ -179,7 +179,7 @@ describe('send_choice selectedLabels', () => {
       'l6'
     );
     expect(ctx.injector.captureTmuxPane).toHaveBeenCalled();
-    expect(ctx.injector.sendChoice).toHaveBeenCalledWith(
+    expect(ctx.injector.sendChoiceDetailed).toHaveBeenCalledWith(
       [3],
       4,
       false,

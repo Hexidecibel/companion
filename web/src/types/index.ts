@@ -46,6 +46,8 @@ export interface WebSocketResponse {
 export interface QuestionOption {
   label: string;
   description: string;
+  /** Live multi-select card: already checked in the terminal. */
+  selected?: boolean;
 }
 
 /**
@@ -69,6 +71,39 @@ export interface Question {
   multiSelect: boolean;
   /** 'trust': an agent's start-up prompt; option 0 = yes, 1 = no, first line of question = title. */
   kind?: 'trust';
+  /**
+   * Claude Code's AskUserQuestion picker as on screen right now (live card):
+   * which question of how many, the review screen, what is already checked or
+   * typed. Echo `signature` back in send_choice.expectSignature.
+   */
+  live?: LiveAuqState;
+}
+
+/** The live AskUserQuestion picker, for the chat card (get_highlights). */
+export interface LiveAuqState {
+  /** PendingPrompt signature of the box on screen (send_choice.expectSignature). */
+  signature: string;
+  /** 'review': "Review your answers" with Submit answers / Cancel. */
+  screen: 'question' | 'review';
+  /** 0-based question shown (several questions only). */
+  questionIndex?: number;
+  questionCount?: number;
+  /** One per question: its tab label and whether it holds an answer. */
+  tabs?: Array<{ label: string; answered: boolean }>;
+  /** Options with a preview panel (no Other row). */
+  preview?: boolean;
+  /** A free-text "Other" row is offered. */
+  allowOther?: boolean;
+  /** Text already typed into the Other row in the terminal. */
+  otherText?: string;
+  /** Multi-select: the Other row is checked. */
+  otherChecked?: boolean;
+  /** Multi-select on the last question: the row under the options says Submit (else Next). */
+  submitRow?: 'Submit' | 'Next';
+  /** Review screen: the answers so far. */
+  review?: Array<{ question: string; answer: string }>;
+  /** Review screen: not every question has an answer. */
+  incomplete?: boolean;
 }
 
 export interface ToolCall {
@@ -215,6 +250,10 @@ export interface SendChoiceRequest {
    * on screen now (never positional); unknown or ambiguous -> stale_prompt.
    */
   selectedLabels?: string[];
+  /** Live AskUserQuestion: move to the previous / next question instead of answering. */
+  navigate?: 'back' | 'next';
+  /** Live AskUserQuestion: the user's explicit Submit (may confirm the review screen). */
+  submit?: boolean;
 }
 
 /** Coding agents a daemon can run and drive. */

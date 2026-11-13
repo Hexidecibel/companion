@@ -1,0 +1,31 @@
+{
+  "screen": "question",
+  "header": "Sides",
+  "question": "Which sides?",
+  "multiSelect": true,
+  "options": [
+    {
+      "label": "Bread",
+      "description": "Garlic bread.",
+      "selected": false
+    },
+    {
+      "label": "Soup",
+      "description": "Miso soup.",
+      "selected": false
+    },
+    {
+      "label": "Fries",
+      "description": "Thin cut.",
+      "selected": false
+    }
+  ],
+  "tabs": [
+    "Food",
+    "Sides",
+    "Drink"
+  ],
+  "activeTab": 1,
+  "hasOther": true,
+  "submitRow": "Next"
+}

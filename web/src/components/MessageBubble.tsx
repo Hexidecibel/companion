@@ -5,6 +5,7 @@ import { EditSummaryRow } from './review/EditSummaryRow';
 import { MarkdownRenderer, extractFilePaths } from './MarkdownRenderer';
 import { ContextMenu, ContextMenuEntry } from './ContextMenu';
 import { QuestionBlock, MultiQuestionFlow, ChoiceData, normalizeOptions } from './QuestionBlock';
+import { LiveAuqCard } from './LiveAuqCard';
 import { TrustPromptCard } from './TrustPromptCard';
 import { useFileExistence } from '../hooks/useFileExistence';
 import { isTouchDevice } from '../utils/platform';
@@ -629,6 +630,10 @@ export const MessageBubble = memo(function MessageBubble({ message, onSelectOpti
         const startupPrompt = usableQuestions.find((q) => q.kind === 'trust');
         if (startupPrompt && onSelectChoice) {
           return <TrustPromptCard question={startupPrompt} onAnswer={onSelectChoice} />;
+        }
+
+        if (usableQuestions.length === 1 && usableQuestions[0].live && onSelectChoice) {
+          return <LiveAuqCard question={usableQuestions[0]} onSelectChoice={onSelectChoice} />;
         }
 
         if (usableQuestions.length > 0 && onSelectOption) {

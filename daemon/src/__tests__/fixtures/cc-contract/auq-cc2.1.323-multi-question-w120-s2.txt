@@ -1,0 +1,74 @@
+[38;5;174m ▐[48;5;16m▛███▛█[39m[49m   [1mClaude[0m [1mCode[0m [38;5;246mv2.1.323[39m
+[38;5;174m▝▜[48;5;16m█████[49m█▀[39m  [38;5;246mHaiku[39m [38;5;246m5.5[39m [38;5;246m·[39m [38;5;246mClaude[39m [38;5;246mUltra[39m
+[38;5;174m ▝▝[39m   [38;5;174m▝▝[39m   [38;5;246m~/.companion/cc-contract/work[39m
+[38;5;174m ▐[48;5;16m▛███▛█[39m[49m   [1mClaude[0m [1mCode[0m [38;5;246mv2.1.323[39m
+[38;5;174m▝▜[48;5;16m█████[49m█▀[39m  [38;5;246mHaiku[39m [38;5;246m5.5[39m [38;5;246m·[39m [38;5;246mClaude[39m [38;5;246mUltra[39m
+[38;5;174m ▝▝[39m   [38;5;174m▝▝[39m   [38;5;246m~/.companion/cc-contract/work[39m
+
+
+[38;5;246m[48;5;237m❯ [38;5;231mCall the AskUserQuestion tool exactly once with exactly this input, copying every string character for character: [39m
+  [38;5;231m{"questions":[{"header":"Lunch","question":"Which lunch should I [39m
+  [38;5;231morder?","multiSelect":false,"options":[{"label":"Ramen","description":"Tonkotsu, extra [39m
+  [38;5;231megg."},{"label":"Burrito","description":"Carnitas with salsa verde."},{"label":"Salad","description":"Greek, dressing[39m
+  [38;5;231mon the side."}]}]} After the user answers, reply with only the word OK. Say nothing else and use no other tool.[39m
+
+[38;5;246m[49m● [39mUser answered Claude's questions:
+[38;5;246m [39m [38;5;246m⎿[39m [38;5;246m ·[39m [38;5;246mWhich[39m [38;5;246mlunch[39m [38;5;246mshould[39m [38;5;246mI[39m [38;5;246morder?[39m [38;5;246m→[39m [38;5;246mBurrito[39m
+
+[38;5;231m●[39m OK
+
+[38;5;246m✻[39m [38;5;246mCrunched[39m [38;5;246mfor[39m [38;5;246m2s[39m [38;5;246m·[39m [38;5;246mdone[39m [38;5;246m2:01[39m [38;5;246mAM[39m
+
+[38;5;246m[48;5;237m❯ [38;5;231mCall the AskUserQuestion tool exactly once with exactly this input, copying every string character for character: [39m
+  [38;5;231m{"questions":[{"header":"Snack","question":"Which snack should I bring?","multiSelect":false,"options":[{"label":"Pre[39m
+  [38;5;231mtzels","description":"Salted."},{"label":"Grapes","description":"Green, seedless."}]}]} After the user answers, reply[39m
+  [38;5;231mwith only the word OK. Say nothing else and use no other tool.[39m
+
+[38;5;246m[49m● [39mUser answered Claude's questions:
+[38;5;246m [39m [38;5;246m⎿[39m [38;5;246m ·[39m [38;5;246mWhich[39m [38;5;246msnack[39m [38;5;246mshould[39m [38;5;246mI[39m [38;5;246mbring?[39m [38;5;246m→[39m [38;5;246mTacos[39m [38;5;246mal[39m [38;5;246mpastor[39m [38;5;246m2x[39m
+
+[38;5;231m●[39m OK
+
+[38;5;246m✻[39m [38;5;246mChurned[39m [38;5;246mfor[39m [38;5;246m3s[39m [38;5;246m·[39m [38;5;246mdone[39m [38;5;246m2:01[39m [38;5;246mAM[39m
+
+[38;5;246m[48;5;237m❯ [38;5;231mCall the AskUserQuestion tool exactly once with exactly this input, copying every string character for character: [39m
+  [38;5;231m{"questions":[{"header":"Toppings","question":"Which toppings should go on the [39m
+  [38;5;231mpizza?","multiSelect":true,"options":[{"label":"Cheese","description":"Mozzarella."},{"label":"Olives","description":[39m
+  [38;5;231m"Kalamata."},{"label":"Corn","description":"Sweet corn."}]}]} After the user answers, reply with only the word OK. [39m
+  [38;5;231mSay nothing else and use no other tool.[39m
+
+[38;5;246m[49m● [39mUser answered Claude's questions:
+[38;5;246m [39m [38;5;246m⎿[39m [38;5;246m ·[39m [38;5;246mWhich[39m [38;5;246mtoppings[39m [38;5;246mshould[39m [38;5;246mgo[39m [38;5;246mon[39m [38;5;246mthe[39m [38;5;246mpizza?[39m [38;5;246m→[39m [38;5;246mCheese,[39m [38;5;246mCorn
+
+[38;5;231m●[39m OK
+
+[38;5;246m✻[39m [38;5;246mCogitated for 2s · done 2:01 AM[39m
+
+[38;5;246m[48;5;237m❯ [38;5;231mCall the AskUserQuestion tool exactly once with exactly this input, copying every string character for character: [39m
+  [38;5;231m{"questions":[{"header":"Food","question":"Which main [39m
+  [38;5;231mcourse?","multiSelect":false,"options":[{"label":"Pasta","description":"Penne [39m
+  [38;5;231marrabbiata."},{"label":"Curry","description":"Green curry with rice."}]},{"header":"Sides","question":"Which [39m
+  [38;5;231msides?","multiSelect":true,"options":[{"label":"Bread","description":"Garlic [39m
+  [38;5;231mbread."},{"label":"Soup","description":"Miso soup."},{"label":"Fries","description":"Thin [39m
+  [38;5;231mcut."}]},{"header":"Drink","question":"Which drink?","multiSelect":false,"options":[{"label":"Water","description":"S[39m
+  [38;5;231mtill."},{"label":"Lemonade","description":"Fresh."},{"label":"Tea","description":"Iced."}]}]} After the user answers,[39m
+  [38;5;231mreply with only the word OK. Say nothing else and use no other tool.[39m
+[38;5;246m[49m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+[39m←  ☒ Food [38;5;16m[48;5;153m ☐ Sides [39m[49m ☐ Drink  ✔ Submit  →
+
+[1m[38;5;231mWhich sides?[0m
+
+[38;5;153m❯[39m [38;5;246m1.[39m [ ] [38;5;153mBread[39m
+         [38;5;246mGarlic bread.[39m
+  [38;5;246m2.[39m [ ] Soup
+         [38;5;246mMiso soup.[39m
+  [38;5;246m3.[39m [ ] Fries
+         [38;5;246mThin cut.[39m
+  [38;5;246m4. [39m[ ] [38;5;246mType something[39m
+     [1mNext[0m
+[38;5;246m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+[39m  5. Chat about this
+
+[38;5;246mEnter[39m [38;5;246mto[39m [38;5;246mselect[39m [38;5;246m·[39m [38;5;246mTab/Arrow[39m [38;5;246mkeys[39m [38;5;246mto[39m [38;5;246mnavigate[39m [38;5;246m·[39m [38;5;246mEsc[39m [38;5;246mto[39m [38;5;246mcancel
+
+

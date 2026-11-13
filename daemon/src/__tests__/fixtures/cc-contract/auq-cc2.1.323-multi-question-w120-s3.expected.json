@@ -1,0 +1,27 @@
+{
+  "screen": "question",
+  "header": "Drink",
+  "question": "Which drink?",
+  "multiSelect": false,
+  "options": [
+    {
+      "label": "Water",
+      "description": "Still."
+    },
+    {
+      "label": "Lemonade",
+      "description": "Fresh."
+    },
+    {
+      "label": "Tea",
+      "description": "Iced."
+    }
+  ],
+  "tabs": [
+    "Food",
+    "Sides",
+    "Drink"
+  ],
+  "activeTab": 2,
+  "hasOther": true
+}

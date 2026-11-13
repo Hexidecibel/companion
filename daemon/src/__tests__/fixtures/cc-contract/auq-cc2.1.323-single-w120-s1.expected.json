@@ -1,0 +1,21 @@
+{
+  "screen": "question",
+  "header": "Lunch",
+  "question": "Which lunch should I order?",
+  "multiSelect": false,
+  "options": [
+    {
+      "label": "Ramen",
+      "description": "Tonkotsu, extra egg."
+    },
+    {
+      "label": "Burrito",
+      "description": "Carnitas with salsa verde."
+    },
+    {
+      "label": "Salad",
+      "description": "Greek, dressing on the side."
+    }
+  ],
+  "hasOther": true
+}

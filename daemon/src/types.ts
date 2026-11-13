@@ -109,6 +109,45 @@ export interface TerminalChoicePrompt {
   kind?: 'trust';
   /** kind 'trust': where its rows are on screen (daemon only: the keys come from it). */
   trustLayout?: TrustLayout;
+  /**
+   * Claude Code's AskUserQuestion picker, read by agents/claude/auq-box.ts:
+   * which screen, tabs, the Other row, cursor. `options` then holds only the
+   * real options (never "Type something" / "Chat about this").
+   */
+  auq?: ClaudeAuqState;
+}
+
+/** The AskUserQuestion picker's state on screen (Claude Code). */
+export interface ClaudeAuqState {
+  /** 'review': the "Review your answers / Submit answers / Cancel" screen. */
+  screen: 'question' | 'review';
+  /** Pane width (the box divider), for the label wrap rule. */
+  width?: number;
+  /** One tab per question (multi-select or several questions); absent for one single-select question. */
+  tabs?: Array<{ label: string; answered: boolean }>;
+  /** 0-based question tab shown; tabs.length = the review (Submit) tab. */
+  activeTab?: number;
+  /** activeTab read from the highlight (ANSI capture), not guessed. */
+  activeTabKnown?: boolean;
+  /** Options with a preview panel: no Other row, a digit only moves the cursor. */
+  preview?: boolean;
+  /** The free-text row: its number, typed text (absent = placeholder), multi-select check. */
+  other?: { number: number; text?: string; checked?: boolean };
+  /** Multi-select: the row under the options ("Submit" on the last question, else "Next"). */
+  submitRow?: 'Submit' | 'Next';
+  /** Number of the "Chat about this" row (absent when unnumbered). */
+  chatNumber?: number;
+  /** Cursor: option index (options.length = the Other row), or the Submit / Chat row. */
+  cursor?: number | 'submit' | 'chat';
+  /** The Other row has focus and takes typed text (digits are typed, not pressed). */
+  textMode?: boolean;
+  footer?: string;
+  /** Review screen: the answers so far. */
+  review?: Array<{ question: string; answer: string }>;
+  /** Review screen: "You have not answered all questions". */
+  incomplete?: boolean;
+  /** Lines inside the box that matched no known part of the layout (contract tests fail on these). */
+  unparsed?: string[];
 }
 
 /** Rows of a start-up prompt on screen: 0-based, in the agent's own order. */
@@ -126,6 +165,39 @@ export interface Question {
   multiSelect: boolean;
   /** 'trust': an agent's start-up prompt; option 0 = yes, 1 = no, first line of question = title. */
   kind?: 'trust';
+  /**
+   * Claude Code's AskUserQuestion picker as on screen right now (live card):
+   * which question of how many, the review screen, what is already checked or
+   * typed. Echo `signature` back in send_choice.expectSignature.
+   */
+  live?: LiveAuqState;
+}
+
+/** The live AskUserQuestion picker, for the chat card (get_highlights). */
+export interface LiveAuqState {
+  /** PendingPrompt signature of the box on screen (send_choice.expectSignature). */
+  signature: string;
+  /** 'review': "Review your answers" with Submit answers / Cancel. */
+  screen: 'question' | 'review';
+  /** 0-based question shown (several questions only). */
+  questionIndex?: number;
+  questionCount?: number;
+  /** One per question: its tab label and whether it holds an answer. */
+  tabs?: Array<{ label: string; answered: boolean }>;
+  /** Options with a preview panel (no Other row). */
+  preview?: boolean;
+  /** A free-text "Other" row is offered. */
+  allowOther?: boolean;
+  /** Text already typed into the Other row in the terminal. */
+  otherText?: string;
+  /** Multi-select: the Other row is checked. */
+  otherChecked?: boolean;
+  /** Multi-select on the last question: the row under the options says Submit (else Next). */
+  submitRow?: 'Submit' | 'Next';
+  /** Review screen: the answers so far. */
+  review?: Array<{ question: string; answer: string }>;
+  /** Review screen: not every question has an answer. */
+  incomplete?: boolean;
 }
 
 /** Totals for the current turn (since the user's last message), get_highlights `turn`. */
@@ -334,7 +406,24 @@ export interface SendChoiceRequest {
    * on screen now (never positional); unknown or ambiguous -> stale_prompt.
    */
   selectedLabels?: string[];
+  /** Live AskUserQuestion: move to the previous / next question instead of answering. */
+  navigate?: 'back' | 'next';
+  /** Live AskUserQuestion: the user's explicit Submit (may confirm the review screen). */
+  submit?: boolean;
 }
+
+/**
+ * Where a live AskUserQuestion answer left the picker (choice_sent.payload.outcome):
+ * answered (gone), next_question, review (waiting for Submit), submitted,
+ * cancelled, navigated.
+ */
+export type ChoiceOutcome =
+  | 'answered'
+  | 'next_question'
+  | 'review'
+  | 'submitted'
+  | 'cancelled'
+  | 'navigated';
 
 export interface ServerSummary {
   sessions: SessionSummary[];

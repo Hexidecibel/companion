@@ -16,6 +16,12 @@ export interface ChoiceData {
    * that label (never positional) or refuses with stale_prompt.
    */
   selectedLabels?: string[];
+  /** Live AskUserQuestion: go to the previous / next question instead of answering. */
+  navigate?: 'back' | 'next';
+  /** Live AskUserQuestion: the user's explicit Submit (may confirm the review screen). */
+  submit?: boolean;
+  /** Signature of the live box the card showed; a changed box is refused (stale_prompt). */
+  expectSignature?: string;
 }
 
 export interface SendChoiceTarget {
@@ -44,7 +50,8 @@ export function buildSendChoicePayload(choice: ChoiceData, target: SendChoiceTar
 }
 
 function isStale(error: unknown): boolean {
-  return typeof error === 'string' && /stale/i.test(error);
+  // prompt_gone: the box was answered or closed in the terminal meanwhile.
+  return typeof error === 'string' && /stale|prompt_gone/i.test(error);
 }
 
 export async function sendChoice(choice: ChoiceData, target: SendChoiceTarget): Promise<SendChoiceResult> {

@@ -1,0 +1,17 @@
+{
+  "screen": "review",
+  "review": [
+    {
+      "question": "Which main course?",
+      "answer": "Curry"
+    },
+    {
+      "question": "Which sides?",
+      "answer": "Soup, Fries"
+    },
+    {
+      "question": "Which drink?",
+      "answer": "Lemonade"
+    }
+  ]
+}

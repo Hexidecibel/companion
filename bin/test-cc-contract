@@ -1,0 +1,22 @@
+#!/bin/bash
+# test-cc-contract — live contract test against the installed Claude Code.
+#
+#   bin/test-cc-contract [--if-changed] [--out DIR] [--keep] [--only name,...]
+#
+# Runs a real `claude --model haiku` on a private tmux server (never the
+# user's), makes it ask deterministic AskUserQuestion prompts, and checks that
+# the daemon reads every screen exactly, answers it through the injector, and
+# that the transcript shapes (AskUserQuestion tool_use/result, away_summary)
+# are what the parser expects. Costs a few cents of haiku; not part of bin/test.
+#
+# --if-changed: do nothing when `claude --version` is the one that last passed.
+# State + fixed work dir: ${COMPANION_CC_CONTRACT_DIR:-~/.companion/cc-contract}.
+# On failure: <out>/drift.txt + the candidate fixtures (ANSI captures with the
+# expected parse) to promote into daemon/src/__tests__/fixtures/cc-contract/.
+# Details: docs/cc-contract-tests.md
+set -euo pipefail
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+[ -s "$HOME/.nvm/nvm.sh" ] && . "$HOME/.nvm/nvm.sh" >/dev/null
+command -v claude >/dev/null || { echo "claude not on PATH" >&2; exit 2; }
+cd "$ROOT/daemon"
+exec npx ts-node --transpile-only -P tsconfig.json scripts/cc-contract.ts "$@"

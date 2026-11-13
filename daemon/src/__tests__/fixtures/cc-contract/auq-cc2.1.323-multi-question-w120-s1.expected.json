@@ -1,0 +1,23 @@
+{
+  "screen": "question",
+  "header": "Food",
+  "question": "Which main course?",
+  "multiSelect": false,
+  "options": [
+    {
+      "label": "Pasta",
+      "description": "Penne arrabbiata."
+    },
+    {
+      "label": "Curry",
+      "description": "Green curry with rice."
+    }
+  ],
+  "tabs": [
+    "Food",
+    "Sides",
+    "Drink"
+  ],
+  "activeTab": 0,
+  "hasOther": true
+}

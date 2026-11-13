@@ -4805,6 +4805,249 @@ html {
   .herald-focus-flash { animation: none; box-shadow: 0 0 0 2px #3b82f6; }
 }
 
+/* Live AskUserQuestion card (LiveAuqCard): mirrors the terminal picker. */
+.live-auq-card {
+  margin-top: 8px;
+  max-width: min(640px, 100%);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.live-auq-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.live-auq-tab {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border-color);
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+.live-auq-tab.answered {
+  color: #10b981;
+  border-color: rgba(16, 185, 129, 0.5);
+}
+
+.live-auq-tab.active {
+  color: var(--text-primary);
+  border-color: #3b82f6;
+  background: rgba(59, 130, 246, 0.15);
+}
+
+.live-auq-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.live-auq-chip {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-muted);
+}
+
+.live-auq-progress {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.live-auq-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.live-auq-hint {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.live-auq-options {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.live-auq-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 12px;
+  text-align: left;
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 14px;
+  white-space: normal;
+  min-width: 0;
+}
+
+.live-auq-option:hover:not(:disabled) {
+  border-color: #3b82f6;
+}
+
+.live-auq-option.checked {
+  border-color: #3b82f6;
+  background: rgba(59, 130, 246, 0.15);
+}
+
+.live-auq-option:disabled,
+.live-auq-nav:disabled,
+.live-auq-primary:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.live-auq-mark {
+  flex-shrink: 0;
+  width: 22px;
+  line-height: 20px;
+  text-align: center;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-muted);
+  font-family: monospace;
+}
+
+.live-auq-option.checked .live-auq-mark {
+  color: #3b82f6;
+}
+
+.live-auq-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.live-auq-label {
+  font-weight: 600;
+  line-height: 20px;
+  overflow-wrap: anywhere;
+}
+
+.live-auq-desc {
+  font-size: 12px;
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+.live-auq-more {
+  color: #3b82f6;
+  cursor: pointer;
+}
+
+.live-auq-other {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.live-auq-other-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.live-auq-other-input {
+  flex: 1;
+  min-width: 160px;
+  min-height: 40px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: 14px;
+}
+
+.live-auq-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.live-auq-nav,
+.live-auq-primary {
+  min-height: 40px;
+  padding: 8px 16px;
+  border-radius: 8px;
+  font-size: 14px;
+  cursor: pointer;
+  border: 1px solid var(--border-color);
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
+.live-auq-primary {
+  background: #3b82f6;
+  border-color: #3b82f6;
+  color: white;
+  font-weight: 600;
+}
+
+.live-auq-review {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.live-auq-review li {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.live-auq-review-q {
+  font-size: 12px;
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+.live-auq-review-a {
+  font-size: 14px;
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+.live-auq-warn {
+  font-size: 12px;
+  color: #f59e0b;
+}
+
+.live-auq-error {
+  font-size: 12px;
+  color: #ef4444;
+}
+
 .question-block {
   margin-top: 8px;
   max-width: 80%;
@@ -4837,6 +5080,8 @@ html {
 }
 
 .msg-option-btn.with-desc {
+  white-space: normal;
+  min-width: 0;
   display: flex;
   align-items: flex-start;
   gap: 8px;
@@ -4867,6 +5112,7 @@ html {
 .option-label {
   font-weight: 600;
   color: var(--text-primary);
+  overflow-wrap: anywhere;
 }
 
 .option-description {
