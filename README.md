@@ -4,26 +4,55 @@
 
 Watch and drive your Claude Code and Codex CLI sessions from a phone, a browser or a desktop app. A small daemon runs next to your coding agents in tmux, reads their transcripts as they are written, and tells you the moment one needs you: a question, a permission prompt, a failed turn, a session that looks stuck. You answer from wherever you are, and the answer is typed into the real terminal.
 
-![Web client: a Claude Code session waiting on an AskUserQuestion, with the answer options as buttons](docs/screenshots/web-desk.jpg)
+![Web client with the Aurora flair theme: acme-api is waiting on a Claude Code AskUserQuestion, answered from a live card with three options and a free-text field](docs/screenshots/web-desk.jpg)
 
-| On a phone | |
+| On a phone | Mission Control |
 |---|---|
-| <img src="docs/screenshots/web-phone.jpg" alt="The same session on a phone" width="300"> | The sidebar lists every session on every paired server with its state (waiting, working, idle). The open session is `acme-api`, paused on a pending `AskUserQuestion`; tapping **Redis** or **In memory** answers it in the terminal. `storefront` is waiting on a Bash approval.<br><br>*Rendered from the production web build against a sandboxed daemon with made-up sessions.* |
+| <img src="docs/screenshots/web-phone.jpg" alt="Session list on a phone: acme-api and infra waiting, mobile-app and storefront-web working, storefront-web running two subagents" width="300"> | <img src="docs/screenshots/mission-control-phone.jpg" alt="Mission Control overview on a phone: a Needs you strip, and the acme-api tile answering its question with Sliding window, Fixed window or Token bucket buttons" width="300"> |
+
+Every session on every paired server shows up with its state (waiting, working, idle) and a one-line status. `acme-api` is paused on a pending `AskUserQuestion` ("Which rate-limit strategy should /v2/orders use?"); tapping an option, in the chat or straight from its Mission Control tile, answers it in the terminal. `storefront-web` is searching code with two subagents still running.
+
+*Rendered from the production web build (1.0.619) against a sandboxed daemon with made-up sessions.*
+
+## Answering Claude Code's questions from the chat
+
+When Claude Code asks a multiple-choice question (`AskUserQuestion`), Companion shows it as a live card and you answer it from the phone, browser or desktop app. The answer is typed into the real terminal session, so Claude Code receives it exactly as if you had pressed the keys.
+
+<img src="docs/screenshots/auq-card.jpg" alt="The live AskUserQuestion card: header Limiter, the question, three numbered options with descriptions, and a field to type your own answer" width="420">
+
+- **Every shape of the box.** Single choice, single choice with Other, multi-select, several questions with tabs and a review screen, previews, and long labels that wrap at any terminal width.
+- **A card that follows the terminal.** It shows question *i* of *n* with the answered tabs, Back, and the checks already taken in the terminal. If you answer at the keyboard instead, the card catches up.
+- **Safe by construction.** The box is not in the transcript until it is answered, so the daemon reads the live tmux pane. It presses one key at a time and checks each took effect. Every action carries the signature of the box it was meant for, and a box that changed in the meantime is refused instead of answered wrongly. The review screen is never submitted without an explicit Submit, and free text is refused while the box is up, because typed digits or Enter would answer it.
+- **Tested against the real thing.** Nothing about this box is a public API, so it is checked two ways: fixture tests built from real Claude Code pane captures on every test run, and a live canary (`bin/test-cc-contract`) that starts the installed `claude` on a private tmux server, has it ask nine scripted questions, answers them through the real input path and compares the screens and the transcript. It runs when Claude Code updates, so a changed prompt layout shows up as a failed check rather than a wrong answer. See [docs/cc-contract-tests.md](docs/cc-contract-tests.md).
+
+Single-choice prompts can also be answered straight from a tile in the Mission Control overview (below). Limits: previews are shown in the terminal, not in the card, and multi-select boxes with more than 9 rows are refused.
 
 ## What it does
 
-- **One inbox for many sessions.** Every tmux session running Claude Code or Codex shows up with its state. Questions, plan approvals and tool permissions render as buttons; free text goes to the prompt.
-- **Notifications that mean something.** Browser notifications first, then FCM push after a delay if you have not looked (two-tier escalation, quiet hours). A failed turn notifies only when the turn *ends* on an unresolved error, so red-then-green TDD stays quiet.
+- **One inbox for many sessions.** Every tmux session running Claude Code or Codex shows up with its state. Questions, plan approvals, tool permissions and start-up prompts (trust this folder, bypass permissions) render as buttons or cards; free text goes to the prompt. A one-line status says what the session is doing right now, and background subagents count as working, not waiting.
+- **Mission Control overview.** On a phone, a tile per session across all servers with a "Needs you" strip and a "done" state for sessions that finished and reported back. Single-choice, approval and trust prompts can be answered from the tile, and a changed prompt is refused instead of mis-answered.
+- **Recaps.** Claude Code's own "while you were away" recaps appear as a muted card in the chat and as a subtitle on session rows.
+- **Notifications that mean something.** Browser notifications first, then FCM push after a delay if you have not looked (two-tier escalation, quiet hours). On return, a "while you were away" card on the dashboard summarises what finished, waited or failed. A failed turn notifies only when the turn *ends* on an unresolved error, so red-then-green TDD stays quiet.
 - **Stuck detection, no LLM.** Deterministic signals over the parsed transcript: the same failing test recurring, the same tool call with the same result, an edit undone and redone, no progress for 30 minutes, a hung tool call with an unchanged screen. See [docs/stuck-detection.md](docs/stuck-detection.md).
-- **Code review per turn.** Edits are grouped by the turn that made them, with exact hunks, mark-reviewed and revert, for Claude and Codex alike.
+- **Code review per turn.** Edits are grouped by the turn that made them, with exact hunks, mark-reviewed and revert, for Claude and Codex alike, with risk flags and a short summary per turn.
+- **Subagent visibility.** A dispatch panel and an all-sessions Agents page show each subagent's state, activity and timeline, with a deterministic one-line rollup and stuck signals.
+- **Start sessions without typing paths.** New sessions can start as Claude Code or Codex, in a favorite folder from the Projects tab or a recent directory (recents are kept on the daemon and shared across your devices), under any account profile.
+- **Themes.** Six color themes (Midnight, Ocean, Forest, Warm, Rose, Graphite) and the Aurora flair layer (gradients, glow and motion) at Off, Subtle or Full. Off keeps the flat look, and flair follows the system's reduced-motion setting.
+- **Several accounts.** Account profiles let you watch more than one Claude or Codex login at once (for example personal and work), and Settings > Accounts > Log in runs the login for you with the link and device code shown in the app ([docs/profiles.md](docs/profiles.md)).
 - **Terminal, files and search.** A live terminal view, a file viewer and conversation search for each session ([docs/SESSION-CONTROLS.md](docs/SESSION-CONTROLS.md)).
+- **Cost and usage.** Cost and usage dashboards with daily totals and budget alerts.
 - **Herald**, an optional conversational layer with local voice (TTS, STT, wake word) that can brief you on all sessions and act through the same guarded input paths ([docs/herald.md](docs/herald.md)).
-- **Remote control for other agents.** `mcp/` exposes paired daemons to Claude Code as MCP tools (list sessions, read, send input, dispatch work), and `concierge/` is a routing session built on it.
+- **Remote control for other agents.** `mcp/` exposes paired daemons to Claude Code as MCP tools (list sessions, read, send input, dispatch work, check a session's subagents with `remote_subagent_status`), and `concierge/` is a routing session built on it.
+
+| Projects tab | Agents | Themes |
+|---|---|---|
+| <img src="docs/screenshots/projects-tab.jpg" alt="New Session panel on a phone: the Projects tab with recent folders and the subfolders of a pinned favorite folder" width="240"> | <img src="docs/screenshots/agents.jpg" alt="Agents page: storefront-web with two running subagents and one done" width="420"> | <img src="docs/screenshots/themes.jpg" alt="Settings: the six themes and the Flair Off, Subtle, Full control" width="300"> |
 
 ## Platforms
 
 - **Web**: React + Vite + TypeScript, served by the daemon at `http://<host>:9877/web/`.
-- **Android, iOS, macOS, Linux, Windows**: the same web code wrapped with Tauri 2. The [latest release](https://github.com/Hexidecibel/companion/releases/latest) (v0.2.5) ships an Android APK, an iOS IPA, a macOS `.dmg` (Apple silicon), a Linux `.deb` and a Windows `setup.exe`.
+- **Android, iOS, macOS, Linux, Windows**: the same web code wrapped with Tauri 2: an Android APK, an iOS build on TestFlight, a macOS `.dmg` (Apple silicon), a Linux `.deb` / AppImage and a Windows `setup.exe`.
+- **Versions and updates**: builds are numbered `1.0.<commit count>` (1.0.619 at the time of writing) and every platform is released together. Installed apps update themselves: desktop apps from the daemon's own feed, the Android app through a verified in-app APK update, and the iOS app shows a banner when a new TestFlight build is out ([docs/desktop-mobile.md](docs/desktop-mobile.md)). Tagged builds with downloadable installers are on [GitHub Releases](https://github.com/Hexidecibel/companion/releases).
 - **Docker**: `ghcr.io/hexidecibel/companion`, built and smoke-tested by the [Docker workflow](.github/workflows/docker.yml).
 
 ## Architecture
@@ -153,12 +182,12 @@ To uninstall: `bin/companion autostart disable && rm -rf ~/.companion`.
 ## Tests and CI
 
 ```bash
-cd daemon && npm test     # Jest: 1,990 tests in 121 suites
-cd web && npm test        # Vitest: 136 test files
-cd mcp && npm test        # 3 tests
+cd daemon && npm test     # Jest
+cd web && npm test        # Vitest
+cd mcp && npm test
 ```
 
-The [CI workflow](.github/workflows/ci.yml) runs typecheck, lint, format check, tests (with Codecov coverage) and build for the daemon, and typecheck, tests and build for the web client, on every push and pull request to `main`. The [Docker workflow](.github/workflows/docker.yml) builds the image and smoke-tests it, and [release.yml](.github/workflows/release.yml) builds the daemon package and the Android, iOS and desktop Tauri apps for each `v*` tag. At the time of writing a handful of tests fail locally (3 daemon tests, 1 web test file) and the latest CI run on `main` is red on the daemon test step.
+The [CI workflow](.github/workflows/ci.yml) runs typecheck, lint, format check, tests (with Codecov coverage) and build for the daemon, and typecheck, tests and build for the web client, on every push and pull request to `main`. The [Docker workflow](.github/workflows/docker.yml) builds the image and smoke-tests it, and [release.yml](.github/workflows/release.yml) builds the daemon package and the Android, iOS and desktop Tauri apps for each `v*` tag.
 
 ## Documentation
 
@@ -169,6 +198,10 @@ The [CI workflow](.github/workflows/ci.yml) runs typecheck, lint, format check, 
 | [Session controls](docs/SESSION-CONTROLS.md) | Conversation viewer, file viewer, terminal, keyboard shortcuts |
 | [Notifications](docs/NOTIFICATIONS.md) | Push notifications, escalation, quiet hours |
 | [Architecture](docs/ARCHITECTURE.md) | System design, WebSocket protocol, parser internals |
+| [Account profiles](docs/profiles.md) | Several Claude / Codex logins, one-tap login |
+| [Claude Code contract tests](docs/cc-contract-tests.md) | How AskUserQuestion answering is tested, including the live canary |
+| [Code review](docs/code-review-2.md) | Per-turn review ledger, risk flags and reverts |
+| [Desktop and mobile](docs/desktop-mobile.md) | Tauri builds, signing and auto-update |
 | [Codex](docs/codex.md) | Codex CLI adapter and its parity with Claude Code |
 | [Stuck detection](docs/stuck-detection.md) | Signals, thresholds and pane-capture rules |
 | [Herald](docs/herald.md) | The conversational layer, voice and remote triggers |
