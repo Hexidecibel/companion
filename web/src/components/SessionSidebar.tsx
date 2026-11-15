@@ -54,8 +54,8 @@ interface SessionSidebarProps {
 }
 
 const STATUS_DOT_CLASS: Record<SessionSummary['status'], string> = {
-  waiting: 'status-dot-blue status-dot-pulse',
-  working: 'status-dot-blue',
+  waiting: 'status-dot-blue status-dot-pulse status-dot-waiting',
+  working: 'status-dot-blue status-dot-working',
   idle: 'status-dot-gray',
   error: 'status-dot-red',
 };
@@ -120,8 +120,8 @@ function buildHealthTooltip(health: ServerHealth): string {
 
 const WORKER_STATUS_DOT: Record<string, string> = {
   spawning: 'status-dot-gray',
-  working: 'status-dot-blue',
-  waiting: 'status-dot-blue status-dot-pulse',
+  working: 'status-dot-blue status-dot-working',
+  waiting: 'status-dot-blue status-dot-pulse status-dot-waiting',
   completed: 'status-dot-green',
   error: 'status-dot-red',
 };
@@ -714,6 +714,7 @@ export function SessionSidebar({
                   let sessionClass = 'sidebar-session';
                   if (isActive) sessionClass += ' active';
                   else if (isSecondary) sessionClass += ' active-secondary';
+                  if (session.status === 'waiting') sessionClass += ' sidebar-session-waiting';
 
                   // Check if this session is a foreman with a work group
                   const foremanGroup = foremanSessionIds.has(session.id)

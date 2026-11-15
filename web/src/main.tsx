@@ -16,6 +16,8 @@ import './styles/stuck.css';
 import './styles/agents.css';
 import './styles/babysit.css';
 import './styles/mission.css';
+import './styles/flair-tokens.css';
+import './styles/flair.css';
 import { isOverlayWindow } from './services/overlayBridge';
 import { HeraldOverlayApp } from './components/herald/HeraldOverlayApp';
 import { heraldSetupStore } from './services/heraldSetup/setupStore';

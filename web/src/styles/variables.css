@@ -199,3 +199,43 @@
   --gradient-success: linear-gradient(135deg, #22c55e, #16a34a);
   --gradient-success-hover: linear-gradient(135deg, #16a34a, #15803d);
 }
+
+/* ========================================
+   Theme: Graphite (charcoal/silver)
+   Neutral charcoal with a slight cool bias. The accent is a slate steel dark
+   enough for white button text (#64748b: 4.76:1, #475569: 7.58:1); the
+   silver lives in the light accents used for text on dark surfaces.
+   ======================================== */
+:root.theme-graphite {
+  --bg-primary: #121418;
+  --bg-secondary: #1b1e24;
+  --bg-tertiary: #2a2e36;
+  --bg-hover: #3b414b;
+  --bg-card-tinted: #161a1f;
+  --bg-card-purple: #1c2027;
+  --text-primary: #f1f5f9;
+  --text-secondary: #94a3b8;
+  --text-muted: #6b7280;
+  --accent-blue: #64748b;
+  --accent-blue-hover: #526174;
+  --accent-blue-light: #cbd5e1;
+  --accent-purple: #8b97a8;
+  --accent-purple-hover: #475569;
+  --accent-purple-light: #e2e8f0;
+  --accent-indigo: #64748b;
+  --accent-green: #22c55e;
+  --accent-amber: #f59e0b;
+  --accent-red: #ef4444;
+  --border-color: #2a2e36;
+  --border-accent: #3d4654;
+  --gradient-primary: linear-gradient(135deg, #64748b 0%, #8b97a8 100%);
+  --gradient-header: linear-gradient(135deg, #181b20 0%, #1c2027 100%);
+  --gradient-button: linear-gradient(135deg, #64748b 0%, #475569 100%);
+  --gradient-button-hover: linear-gradient(135deg, #526174 0%, #334155 100%);
+  --gradient-progress: linear-gradient(90deg, #64748b 0%, #8b97a8 100%);
+  --gradient-text: linear-gradient(135deg, #e2e8f0 0%, #94a3b8 100%);
+  --focus-glow: 0 0 0 2px rgba(139, 151, 168, 0.3);
+  --focus-glow-blue: 0 0 0 2px rgba(100, 116, 139, 0.35);
+  --gradient-success: linear-gradient(135deg, #22c55e, #16a34a);
+  --gradient-success-hover: linear-gradient(135deg, #16a34a, #15803d);
+}

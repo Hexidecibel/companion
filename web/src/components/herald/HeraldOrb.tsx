@@ -50,6 +50,8 @@ export const HeraldOrb = memo(function HeraldOrb({ presence, size = 44, mini = f
       aria-label={LABELS[presence]}
     >
       <span className="herald-orb__halo" />
+      {/* Aurora flair corona (flair.css); no background, so invisible, when flair is off. */}
+      {!mini && <span className="herald-orb__plasma" />}
       <svg className="herald-orb__ring herald-orb__ring--outer" viewBox="0 0 100 100" aria-hidden="true">
         <circle cx="50" cy="50" r="46" pathLength="360" strokeDasharray="70 14 34 14 110 14 22 14 50 18" />
       </svg>

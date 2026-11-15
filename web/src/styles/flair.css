@@ -1,0 +1,464 @@
+/* ==========================================================================
+   Aurora flair layer (Settings > Appearance > Flair: Off | Subtle | Full)
+
+   Tokens live in flair-tokens.css (generated per theme x level). Every rule
+   here is gated on :root[data-flair] other than "off", so Off is exactly the
+   flat look. Motion (rotating borders, drift, shimmer, breathing) is Full
+   only, and everything stops under prefers-reduced-motion.
+
+   Only the listed surfaces get flair: background glow, headers + wordmark,
+   active tabs/chips, primary + send buttons, session cards, status dots,
+   focused composer, selected theme card, Herald orb. Chat bubbles, tool rows
+   and code blocks stay solid. No backdrop-filter anywhere.
+   ========================================================================== */
+
+@property --flair-angle {
+  syntax: '<angle>';
+  inherits: false;
+  initial-value: 0deg;
+}
+
+@keyframes flair-spin {
+  to { --flair-angle: 360deg; }
+}
+
+@keyframes flair-drift {
+  from { transform: translate3d(-5%, -3%, 0) rotate(-5deg) scale(1); }
+  to { transform: translate3d(5%, 4%, 0) rotate(7deg) scale(1.1); }
+}
+
+@keyframes flair-ring {
+  from { transform: scale(0.6); opacity: 0.95; }
+  to { transform: scale(1.7); opacity: 0; }
+}
+
+@keyframes flair-breathe {
+  from { opacity: 0.35; }
+  to { opacity: 1; }
+}
+
+@keyframes flair-shimmer {
+  from { background-position: 0% 50%; }
+  to { background-position: 100% 50%; }
+}
+
+@keyframes flair-plasma {
+  to { transform: rotate(360deg); }
+}
+
+/* --------------------------------------------------------------------------
+   Background glow (one fixed layer; drifts in Full)
+   html has no background, so body's paints the canvas and this negative
+   z-index layer sits above it but below all content.
+   -------------------------------------------------------------------------- */
+
+:root[data-flair]:not([data-flair="off"]) body::before {
+  content: '';
+  position: fixed;
+  inset: -22%;
+  z-index: -1;
+  pointer-events: none;
+  background: var(--flair-bg-glow);
+}
+
+:root[data-flair="full"] body::before {
+  animation: flair-drift var(--flair-bg-drift, 38s) ease-in-out infinite alternate;
+  will-change: transform;
+}
+
+:root[data-flair]:not([data-flair="off"]) .mobile-dashboard {
+  background: transparent;
+}
+
+/* --------------------------------------------------------------------------
+   Headers / app bars + wordmark
+   -------------------------------------------------------------------------- */
+
+:root[data-flair]:not([data-flair="off"]) .mobile-dashboard-header,
+:root[data-flair]:not([data-flair="off"]) .sidebar-header,
+:root[data-flair]:not([data-flair="off"]) .session-header,
+:root[data-flair]:not([data-flair="off"]) .form-header {
+  position: relative;
+  background: var(--flair-header-bg);
+}
+
+:root[data-flair]:not([data-flair="off"]) .mobile-dashboard-header::after,
+:root[data-flair]:not([data-flair="off"]) .sidebar-header::after,
+:root[data-flair]:not([data-flair="off"]) .session-header::after,
+:root[data-flair]:not([data-flair="off"]) .form-header::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 1px;
+  pointer-events: none;
+  background: var(--flair-header-line);
+  opacity: 0.85;
+}
+
+:root[data-flair]:not([data-flair="off"]) .mobile-dashboard-title,
+:root[data-flair]:not([data-flair="off"]) .sidebar-title {
+  background: var(--flair-wordmark-gradient);
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+  filter: var(--flair-wordmark-glow);
+}
+
+:root[data-flair="full"] .mobile-dashboard-title,
+:root[data-flair="full"] .sidebar-title {
+  animation: flair-shimmer 9s ease-in-out infinite alternate;
+}
+
+/* Composer top edge picks up the header line. */
+:root[data-flair]:not([data-flair="off"]) .input-bar {
+  position: relative;
+}
+
+:root[data-flair]:not([data-flair="off"]) .input-bar::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -1px;
+  height: 1px;
+  pointer-events: none;
+  background: var(--flair-header-line);
+  opacity: 0.6;
+}
+
+/* --------------------------------------------------------------------------
+   Active tabs / chips / segmented controls
+   -------------------------------------------------------------------------- */
+
+:root[data-flair]:not([data-flair="off"]) .new-session-tab.active,
+:root[data-flair]:not([data-flair="off"]) .mobile-view-toggle__btn.active,
+:root[data-flair]:not([data-flair="off"]) .settings-font-btn.active,
+:root[data-flair]:not([data-flair="off"]) .flair-seg-btn.active {
+  background: var(--flair-accent-gradient);
+  background-size: var(--flair-accent-size);
+  border-color: transparent;
+  color: #fff;
+  box-shadow: var(--flair-chip-glow);
+  text-shadow: 0 1px 1px rgba(0, 0, 0, 0.3);
+}
+
+/* --------------------------------------------------------------------------
+   Primary buttons + send button (aurora gradient, glow, sheen on hover)
+   -------------------------------------------------------------------------- */
+
+:root[data-flair]:not([data-flair="off"]) .btn-primary,
+:root[data-flair]:not([data-flair="off"]) .sidebar-add-btn,
+:root[data-flair]:not([data-flair="off"]) .new-session-create-btn,
+:root[data-flair]:not([data-flair="off"]) .tmux-create-btn,
+:root[data-flair]:not([data-flair="off"]) .question-block-submit,
+:root[data-flair]:not([data-flair="off"]) .input-bar-send {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+  background: var(--flair-accent-gradient);
+  background-size: var(--flair-accent-size);
+  background-position: 0% 0;
+  box-shadow: var(--flair-accent-shadow);
+  text-shadow: 0 1px 1px rgba(0, 0, 0, 0.3);
+  transition: background-position 0.5s ease, box-shadow 0.3s ease, opacity 0.15s, transform 0.2s;
+}
+
+:root[data-flair]:not([data-flair="off"]) .btn-primary:hover:not(:disabled),
+:root[data-flair]:not([data-flair="off"]) .sidebar-add-btn:hover:not(:disabled),
+:root[data-flair]:not([data-flair="off"]) .new-session-create-btn:hover:not(:disabled),
+:root[data-flair]:not([data-flair="off"]) .tmux-create-btn:hover:not(:disabled),
+:root[data-flair]:not([data-flair="off"]) .question-block-submit:hover:not(:disabled),
+:root[data-flair]:not([data-flair="off"]) .input-bar-send:hover:not(:disabled) {
+  background: var(--flair-accent-gradient);
+  background-size: var(--flair-accent-size);
+  background-position: 100% 0;
+  box-shadow: var(--flair-accent-shadow-hover);
+}
+
+:root[data-flair]:not([data-flair="off"]) .btn-primary::before,
+:root[data-flair]:not([data-flair="off"]) .sidebar-add-btn::before,
+:root[data-flair]:not([data-flair="off"]) .new-session-create-btn::before,
+:root[data-flair]:not([data-flair="off"]) .tmux-create-btn::before,
+:root[data-flair]:not([data-flair="off"]) .question-block-submit::before,
+:root[data-flair]:not([data-flair="off"]) .input-bar-send::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background: linear-gradient(110deg, transparent 32%, rgba(255, 255, 255, 0.38) 50%, transparent 68%);
+  transform: translateX(-120%);
+  opacity: var(--flair-sheen);
+  transition: transform 0.7s ease;
+}
+
+:root[data-flair]:not([data-flair="off"]) .btn-primary:hover:not(:disabled)::before,
+:root[data-flair]:not([data-flair="off"]) .sidebar-add-btn:hover:not(:disabled)::before,
+:root[data-flair]:not([data-flair="off"]) .new-session-create-btn:hover:not(:disabled)::before,
+:root[data-flair]:not([data-flair="off"]) .tmux-create-btn:hover:not(:disabled)::before,
+:root[data-flair]:not([data-flair="off"]) .question-block-submit:hover:not(:disabled)::before,
+:root[data-flair]:not([data-flair="off"]) .input-bar-send:hover:not(:disabled)::before {
+  transform: translateX(120%);
+}
+
+:root[data-flair]:not([data-flair="off"]) .btn-primary:disabled,
+:root[data-flair]:not([data-flair="off"]) .new-session-create-btn:disabled,
+:root[data-flair]:not([data-flair="off"]) .tmux-create-btn:disabled,
+:root[data-flair]:not([data-flair="off"]) .question-block-submit:disabled,
+:root[data-flair]:not([data-flair="off"]) .input-bar-send:disabled {
+  box-shadow: none;
+}
+
+/* --------------------------------------------------------------------------
+   Session cards (mobile): gradient hairline border + wash
+   Waiting = rotating amber conic + breathing halo.
+   -------------------------------------------------------------------------- */
+
+:root[data-flair]:not([data-flair="off"]) .mobile-session-item {
+  --card-bg: var(--bg-tertiary);
+  position: relative;
+  padding: 9px 11px; /* 10px 12px minus the 1px border */
+  border: 1px solid transparent;
+  background:
+    var(--wash, var(--flair-card-wash, linear-gradient(transparent, transparent))) padding-box,
+    linear-gradient(var(--card-bg), var(--card-bg)) padding-box,
+    var(--card-border, var(--flair-card-border, linear-gradient(var(--card-bg), var(--card-bg)))) border-box;
+  box-shadow: var(--flair-card-highlight), var(--flair-card-shadow);
+}
+
+:root[data-flair]:not([data-flair="off"]) .mobile-session-item:active {
+  --card-bg: var(--bg-hover);
+}
+
+:root[data-flair]:not([data-flair="off"]) .mobile-session-waiting {
+  --card-border: conic-gradient(from var(--flair-angle), var(--flair-waiting-stops));
+  --wash: var(--flair-waiting-wash);
+}
+
+:root[data-flair]:not([data-flair="off"]) .mobile-session-waiting::after {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  pointer-events: none;
+  box-shadow: var(--flair-halo-waiting);
+  opacity: 0.7;
+}
+
+:root[data-flair="full"] .mobile-session-waiting {
+  animation: flair-spin var(--flair-border-spin, 6s) linear infinite;
+}
+
+:root[data-flair="full"] .mobile-session-waiting::after {
+  animation: flair-breathe 2.2s ease-in-out infinite alternate;
+}
+
+/* Server card: hairline gradient border with a glowing accent strip. */
+:root[data-flair]:not([data-flair="off"]) .mobile-server-card {
+  --card-bg: var(--bg-secondary);
+  position: relative;
+  padding: 13px 13px 13px 15px;
+  border: 1px solid transparent;
+  background:
+    var(--flair-card-wash) padding-box,
+    linear-gradient(var(--card-bg), var(--card-bg)) padding-box,
+    var(--flair-card-border) border-box;
+  box-shadow: var(--flair-card-highlight), var(--flair-card-shadow);
+}
+
+:root[data-flair]:not([data-flair="off"]) .mobile-server-card::before {
+  content: '';
+  position: absolute;
+  left: -1px;
+  top: 10px;
+  bottom: 10px;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  pointer-events: none;
+  background: var(--flair-accent-gradient);
+  box-shadow: var(--flair-edge-glow);
+}
+
+/* --------------------------------------------------------------------------
+   Session rows (desktop sidebar)
+   Selected = conic strip on the left edge + selected wash (spins in Full).
+   Waiting = amber conic strip + waiting wash.
+   -------------------------------------------------------------------------- */
+
+:root[data-flair]:not([data-flair="off"]) .sidebar-session.active {
+  background: var(--flair-selected-bg), var(--bg-card-tinted);
+  border-image: conic-gradient(from var(--flair-angle), var(--flair-active-stops)) 1;
+}
+
+:root[data-flair]:not([data-flair="off"]) .sidebar-session-waiting:not(.active) {
+  background: var(--flair-waiting-wash);
+  border-image: conic-gradient(from var(--flair-angle), var(--flair-waiting-stops)) 1;
+}
+
+:root[data-flair]:not([data-flair="off"]) .sidebar-session-waiting:not(.active):hover {
+  background: var(--flair-waiting-wash), var(--bg-tertiary);
+}
+
+:root[data-flair="full"] .sidebar-session.active,
+:root[data-flair="full"] .sidebar-session-waiting {
+  animation: flair-spin var(--flair-border-spin, 6s) linear infinite;
+}
+
+/* --------------------------------------------------------------------------
+   Status dots
+   -------------------------------------------------------------------------- */
+
+:root[data-flair]:not([data-flair="off"]) .status-dot-waiting {
+  position: relative;
+  background-color: var(--accent-amber);
+  animation: none;
+  box-shadow: var(--flair-glow-waiting);
+}
+
+:root[data-flair]:not([data-flair="off"]) .status-dot-waiting::after {
+  content: '';
+  position: absolute;
+  inset: -4px;
+  border-radius: 50%;
+  border: 1.5px solid var(--flair-ring-waiting);
+  pointer-events: none;
+  opacity: 0;
+}
+
+:root[data-flair="full"] .status-dot-waiting::after {
+  animation: flair-ring 2s cubic-bezier(0.1, 0.6, 0.3, 1) infinite;
+}
+
+:root[data-flair="subtle"] .status-dot-waiting::after {
+  opacity: 0.45;
+}
+
+:root[data-flair]:not([data-flair="off"]) .status-dot-working {
+  box-shadow: var(--flair-glow-working);
+}
+
+:root[data-flair]:not([data-flair="off"]) .status-dot-green {
+  box-shadow: var(--flair-glow-running);
+}
+
+:root[data-flair]:not([data-flair="off"]) .status-dot-red {
+  box-shadow: var(--flair-glow-error);
+}
+
+/* --------------------------------------------------------------------------
+   Focused composer: conic border + focus ring (spins in Full)
+   -------------------------------------------------------------------------- */
+
+:root[data-flair]:not([data-flair="off"]) .input-bar-textarea:focus {
+  border-color: transparent;
+  background:
+    linear-gradient(var(--bg-primary), var(--bg-primary)) padding-box,
+    conic-gradient(from var(--flair-angle), var(--flair-active-stops)) border-box;
+  box-shadow: var(--flair-focus-ring);
+}
+
+:root[data-flair="full"] .input-bar-textarea:focus {
+  animation: flair-spin var(--flair-border-spin, 6s) linear infinite;
+}
+
+/* --------------------------------------------------------------------------
+   Selected theme card (Settings)
+   -------------------------------------------------------------------------- */
+
+:root[data-flair]:not([data-flair="off"]) .theme-card-active {
+  border-color: transparent;
+  background:
+    var(--flair-selected-bg) padding-box,
+    linear-gradient(var(--bg-secondary), var(--bg-secondary)) padding-box,
+    conic-gradient(from var(--flair-angle), var(--flair-active-stops)) border-box;
+  box-shadow: var(--flair-focus-ring);
+}
+
+:root[data-flair="full"] .theme-card-active {
+  animation: flair-spin var(--flair-border-spin, 6s) linear infinite;
+}
+
+/* --------------------------------------------------------------------------
+   Herald orb
+   Idle takes the theme's aurora palette; other states keep their state
+   colours but gain the blurred plasma disc. SVG rings are coloured through
+   currentColor (no gradient strokes).
+   -------------------------------------------------------------------------- */
+
+:root[data-flair]:not([data-flair="off"]) .herald-orb--idle {
+  --orb-b: var(--accent-blue-light);
+  --orb-c: var(--flair-spark);
+}
+
+:root[data-flair]:not([data-flair="off"]) .herald-orb--idle .herald-orb__halo {
+  background: var(--flair-orb-halo);
+}
+
+:root[data-flair]:not([data-flair="off"]) .herald-orb--idle .herald-orb__core {
+  background: var(--flair-orb-core);
+  box-shadow: var(--flair-orb-shadow);
+}
+
+.herald-orb__plasma {
+  display: none;
+}
+
+:root[data-flair]:not([data-flair="off"]) .herald-orb__plasma {
+  display: block;
+  inset: 15%;
+  border-radius: 50%;
+  background: conic-gradient(var(--orb-a), var(--orb-c), var(--orb-b), var(--orb-c), var(--orb-a));
+  filter: blur(var(--flair-orb-blur, 8px));
+  opacity: 0.75;
+}
+
+:root[data-flair]:not([data-flair="off"]) .herald-orb--idle .herald-orb__plasma {
+  background: var(--flair-orb-plasma);
+}
+
+:root[data-flair="full"] .herald-orb__plasma {
+  animation: flair-plasma var(--orb-spin, 18s) linear infinite;
+  will-change: transform;
+}
+
+:root[data-flair]:not([data-flair="off"]) .herald-orb--disabled .herald-orb__plasma {
+  display: none;
+}
+
+/* --------------------------------------------------------------------------
+   Reduced motion: keep the colour, drop all flair motion.
+   -------------------------------------------------------------------------- */
+
+@media (prefers-reduced-motion: reduce) {
+  :root[data-flair] body::before,
+  :root[data-flair] .mobile-dashboard-title,
+  :root[data-flair] .sidebar-title,
+  :root[data-flair] .mobile-session-waiting,
+  :root[data-flair] .mobile-session-waiting::after,
+  :root[data-flair] .sidebar-session.active,
+  :root[data-flair] .sidebar-session-waiting,
+  :root[data-flair] .status-dot-waiting::after,
+  :root[data-flair] .input-bar-textarea:focus,
+  :root[data-flair] .theme-card-active,
+  :root[data-flair] .herald-orb__plasma {
+    animation: none !important;
+  }
+
+  :root[data-flair] .btn-primary::before,
+  :root[data-flair] .sidebar-add-btn::before,
+  :root[data-flair] .new-session-create-btn::before,
+  :root[data-flair] .tmux-create-btn::before,
+  :root[data-flair] .question-block-submit::before,
+  :root[data-flair] .input-bar-send::before {
+    transition: none;
+    display: none;
+  }
+
+  :root[data-flair] .status-dot-waiting::after {
+    opacity: 0.45;
+  }
+}

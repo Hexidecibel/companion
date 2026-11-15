@@ -46,8 +46,8 @@ function saveMobileViewMode(mode: MobileViewMode): void {
 }
 
 const STATUS_DOT_CLASS: Record<SessionSummary['status'], string> = {
-  waiting: 'status-dot-blue status-dot-pulse',
-  working: 'status-dot-blue',
+  waiting: 'status-dot-blue status-dot-pulse status-dot-waiting',
+  working: 'status-dot-blue status-dot-working',
   idle: 'status-dot-gray',
   error: 'status-dot-red',
 };

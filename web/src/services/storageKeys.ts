@@ -6,6 +6,9 @@ export const SERVERS_KEY = 'companion_servers';
 /** The first-run setup wizard was dismissed on this device (it will not open by itself again). */
 export const SETUP_DISMISSED_KEY = 'companion_setup_dismissed';
 export const FONT_SCALE_KEY = 'companion_font_scale';
+export const THEME_KEY = 'companion_theme';
+/** Aurora flair level: 'off' | 'subtle' | 'full' (default full). */
+export const FLAIR_KEY = 'companion_flair';
 export const OPEN_FILES_KEY = 'companion_open_files';
 export const DEVICE_ID_KEY = 'companion_device_id';
 export const BROWSER_NOTIFICATIONS_KEY = 'companion_browser_notifications';

@@ -10,7 +10,7 @@ import { ProfilesCard } from './ProfilesSettings';
 import { SkillBrowser } from './SkillBrowser';
 import { isTauriDesktop } from '../utils/platform';
 import { useAppUpdater, AppUpdateStatus } from '../hooks/useAppUpdater';
-import { useTheme } from '../context/ThemeContext';
+import { useTheme, FLAIR_LEVELS } from '../context/ThemeContext';
 
 interface SettingsScreenProps {
   onBack: () => void;
@@ -25,7 +25,7 @@ const FONT_PRESETS = [
 
 export function SettingsScreen({ onBack }: SettingsScreenProps) {
   const { snapshots } = useConnections();
-  const { theme, setTheme, presets } = useTheme();
+  const { theme, setTheme, presets, flair, setFlair } = useTheme();
   const [fontScale, setFontScale] = useState(getFontScale);
   const [notifServerId, setNotifServerId] = useState<string | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
@@ -172,6 +172,7 @@ export function SettingsScreen({ onBack }: SettingsScreenProps) {
               <button
                 key={preset.id}
                 className={`theme-card${theme === preset.id ? ' theme-card-active' : ''}`}
+                aria-pressed={theme === preset.id}
                 onClick={() => setTheme(preset.id)}
               >
                 <div
@@ -184,6 +185,23 @@ export function SettingsScreen({ onBack }: SettingsScreenProps) {
                 <div className="theme-card-desc">{preset.description}</div>
               </button>
             ))}
+          </div>
+          <div className="settings-flair">
+            <div className="settings-card-label">Flair</div>
+            <div className="flair-seg" role="group" aria-label="Flair level">
+              {FLAIR_LEVELS.map((level) => (
+                <button
+                  key={level.id}
+                  type="button"
+                  className={`flair-seg-btn${flair === level.id ? ' active' : ''}`}
+                  aria-pressed={flair === level.id}
+                  onClick={() => setFlair(level.id)}
+                >
+                  {level.label}
+                </button>
+              ))}
+            </div>
+            <p className="settings-flair-note">Off keeps the flat look. Follows reduced motion.</p>
           </div>
         </section>
 
