@@ -10317,3 +10317,45 @@ button.status-line-main {
   margin: 8px 12px;
   width: auto;
 }
+
+/* Narrow phones: the header row (title + List/Overview + Herald + settings)
+   overflowed and pushed the settings gear off screen. Let the title shrink,
+   tighten the gaps and drop the Herald text label (orb only). */
+.mobile-dashboard-header {
+  gap: 8px;
+  min-width: 0;
+}
+
+.mobile-dashboard-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mobile-dashboard-header-actions {
+  flex-shrink: 0;
+}
+
+@media (max-width: 480px) {
+  .mobile-dashboard-header-actions {
+    gap: 8px;
+  }
+
+  .mobile-dashboard-header .herald-launcher--mobile {
+    padding: 0 7px;
+  }
+
+  .mobile-dashboard-header .herald-launcher__name {
+    display: none;
+  }
+
+  .mobile-dashboard-header .mobile-dashboard-title {
+    font-size: 18px;
+  }
+
+  .mobile-dashboard-header .mobile-view-toggle__btn {
+    padding: 0 9px;
+    font-size: 13.5px;
+  }
+}
