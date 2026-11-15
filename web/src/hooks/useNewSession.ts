@@ -4,8 +4,18 @@ import {
   RecentDirectory,
   getRecentDirectories,
   addRecentDirectory,
+  combineRecents,
 } from '../services/recentDirectories';
+import {
+  fetchProjectDirs,
+  addFavoriteDir,
+  removeFavoriteDir,
+} from '../services/projectDirs';
 import type { CodingAgent } from '../types';
+import type { FavoriteDirGroup } from '../types/projectDirs';
+
+/** How many recents the panel keeps (it shows the top few, the rest on demand). */
+const MAX_RECENTS = 12;
 
 export interface DirectoryEntry {
   name: string;
@@ -16,6 +26,12 @@ export interface DirectoryEntry {
 export interface UseNewSessionResult {
   recents: RecentDirectory[];
   recentsLoading: boolean;
+  /** Favorite roots with their subfolders (empty on older daemons). */
+  favorites: FavoriteDirGroup[];
+  /** True when the daemon supports project dirs (favorites can be pinned). */
+  favoritesSupported: boolean;
+  pinFavorite: (path: string) => Promise<boolean>;
+  unpinFavorite: (root: string) => Promise<boolean>;
   currentPath: string;
   entries: DirectoryEntry[];
   browsing: boolean;
@@ -42,6 +58,8 @@ export function useNewSession(
 ): UseNewSessionResult {
   const [recents, setRecents] = useState<RecentDirectory[]>([]);
   const [recentsLoading, setRecentsLoading] = useState(true);
+  const [favorites, setFavorites] = useState<FavoriteDirGroup[]>([]);
+  const [favoritesSupported, setFavoritesSupported] = useState(false);
   const [currentPath, setCurrentPath] = useState('');
   const [entries, setEntries] = useState<DirectoryEntry[]>([]);
   const [browsing, setBrowsing] = useState(false);
@@ -65,42 +83,39 @@ export function useNewSession(
     }
 
     async function init() {
+      // Local (legacy, per-device) recents stay merged in so nothing saved
+      // before the daemon kept recents is lost.
       const stored = getRecentDirectories(serverId);
 
-      // Also pull working dirs from existing tmux sessions
-      try {
-        const sessResp = await conn!.sendRequest('list_tmux_sessions');
-        if (sessResp.success && sessResp.payload) {
-          const sessions = sessResp.payload as Array<{
-            name: string;
-            workingDir?: string;
-          }>;
-          const now = Date.now();
-          const sessionDirs: RecentDirectory[] = sessions
-            .filter((s) => s.workingDir)
-            .map((s) => ({
-              path: s.workingDir!,
-              name: s.workingDir!.split('/').filter(Boolean).pop() || s.workingDir!,
-              lastUsed: now - 1, // slightly older so explicit recents come first
-            }));
+      const [daemonDirs, sessionDirs] = await Promise.all([
+        fetchProjectDirs(conn!),
+        // Working dirs of live tmux sessions.
+        conn!
+          .sendRequest('list_tmux_sessions')
+          .then((resp): RecentDirectory[] => {
+            if (!resp.success || !resp.payload) return [];
+            const raw = resp.payload as
+              | { sessions?: Array<{ workingDir?: string }> }
+              | Array<{ workingDir?: string }>;
+            const sessions = Array.isArray(raw) ? raw : raw.sessions ?? [];
+            const now = Date.now();
+            return sessions
+              .filter((s) => s.workingDir)
+              .map((s) => ({
+                path: s.workingDir!,
+                name: s.workingDir!.split('/').filter(Boolean).pop() || s.workingDir!,
+                lastUsed: now,
+              }));
+          })
+          .catch(() => [] as RecentDirectory[]),
+      ]);
+      if (cancelled) return;
 
-          // Merge: stored takes priority, dedup by path
-          const seen = new Set(stored.map((d) => d.path));
-          const merged = [...stored];
-          for (const sd of sessionDirs) {
-            if (!seen.has(sd.path)) {
-              seen.add(sd.path);
-              merged.push(sd);
-            }
-          }
-          merged.sort((a, b) => b.lastUsed - a.lastUsed);
-          if (!cancelled) setRecents(merged.slice(0, 8));
-        } else {
-          if (!cancelled) setRecents(stored);
-        }
-      } catch {
-        if (!cancelled) setRecents(stored);
+      if (daemonDirs) {
+        setFavoritesSupported(true);
+        setFavorites(daemonDirs.favorites);
       }
+      setRecents(combineRecents(daemonDirs?.recents ?? [], stored, sessionDirs, MAX_RECENTS));
 
       if (!cancelled) setRecentsLoading(false);
 
@@ -196,6 +211,31 @@ export function useNewSession(
     }
   }, [serverId, agent, profileId]);
 
+  const applyFavoriteResult = useCallback(
+    async (op: typeof addFavoriteDir, path: string): Promise<boolean> => {
+      const conn = connectionManager.getConnection(serverId);
+      if (!conn || !conn.isConnected() || !path.trim()) return false;
+      setError(null);
+      const r = await op(conn, path.trim());
+      if (r.ok) {
+        setFavorites(r.data.favorites);
+        return true;
+      }
+      setError(r.error);
+      return false;
+    },
+    [serverId],
+  );
+
+  const pinFavorite = useCallback(
+    (path: string) => applyFavoriteResult(addFavoriteDir, path),
+    [applyFavoriteResult],
+  );
+  const unpinFavorite = useCallback(
+    (root: string) => applyFavoriteResult(removeFavoriteDir, root),
+    [applyFavoriteResult],
+  );
+
   const create = useCallback(async (): Promise<boolean> => {
     return createSession(manualPath);
   }, [manualPath, createSession]);
@@ -214,6 +254,10 @@ export function useNewSession(
   return {
     recents,
     recentsLoading,
+    favorites,
+    favoritesSupported,
+    pinFavorite,
+    unpinFavorite,
     currentPath,
     entries,
     browsing,

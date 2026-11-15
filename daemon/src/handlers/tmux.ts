@@ -8,6 +8,7 @@ import {
 } from '../constants';
 import { createAgentSession, agentLaunchOpts, resolveSpawnProfile } from '../session-spawn';
 import { getAgentAdapter } from '../agents';
+import { getRecentDirsStore } from '../project-dirs/recents';
 
 export function registerTmuxHandlers(ctx: HandlerContext): Record<string, MessageHandler> {
   return {
@@ -230,6 +231,10 @@ export function registerTmuxHandlers(ctx: HandlerContext): Record<string, Messag
         console.log(
           `WebSocket: Cleared active session after creating tmux session "${sessionName}"`
         );
+        // Daemon-side recents for the New Session panel (shared across devices).
+        getRecentDirsStore()
+          .record(createPayload.workingDir)
+          .catch((err) => console.warn('RecentDirs: record failed:', (err as Error).message));
 
         ctx.send(client.ws, {
           type: 'tmux_session_created',

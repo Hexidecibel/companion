@@ -17,6 +17,28 @@ interface NewSessionPanelProps {
 type Tab = 'recent' | 'browse';
 
 const TAB_STORAGE_PREFIX = 'new-session-tab:';
+const FAV_OPEN_STORAGE_PREFIX = 'new-session-fav-open:';
+/** Recents shown before "Show more". */
+const RECENTS_VISIBLE = 5;
+
+/** Expanded favorite roots (per-viewer convenience); null = never chosen. */
+function readOpenFavorites(serverId: string): string[] | null {
+  try {
+    const raw = localStorage.getItem(FAV_OPEN_STORAGE_PREFIX + serverId);
+    const parsed: unknown = raw ? JSON.parse(raw) : null;
+    return Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === 'string') : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeOpenFavorites(serverId: string, roots: string[]) {
+  try {
+    localStorage.setItem(FAV_OPEN_STORAGE_PREFIX + serverId, JSON.stringify(roots));
+  } catch {
+    // ignore
+  }
+}
 
 function readStoredTab(serverId: string): Tab | null {
   try {
@@ -59,6 +81,10 @@ export function NewSessionPanel({
   const {
     recents,
     recentsLoading,
+    favorites,
+    favoritesSupported,
+    pinFavorite,
+    unpinFavorite,
     currentPath,
     entries,
     browsing,
@@ -89,10 +115,50 @@ export function NewSessionPanel({
   const userPickedRef = useRef(false);
   useEffect(() => {
     if (userPickedRef.current) return;
-    if (!recentsLoading && recents.length === 0 && tab === 'recent') {
+    if (!recentsLoading && recents.length === 0 && favorites.length === 0 && tab === 'recent') {
       setTab('browse');
     }
-  }, [recentsLoading, recents.length, tab]);
+  }, [recentsLoading, recents.length, favorites.length, tab]);
+
+  const [showAllRecents, setShowAllRecents] = useState(false);
+  const [openFavorites, setOpenFavorites] = useState<string[] | null>(() =>
+    readOpenFavorites(serverId),
+  );
+  // Never chosen: the first favorite starts open.
+  const isFavoriteOpen = (root: string) =>
+    openFavorites ? openFavorites.includes(root) : favorites[0]?.root === root;
+  const toggleFavorite = (root: string) => {
+    const current = openFavorites ?? (favorites[0] ? [favorites[0].root] : []);
+    const next = current.includes(root)
+      ? current.filter((r) => r !== root)
+      : [...current, root];
+    setOpenFavorites(next);
+    writeOpenFavorites(serverId, next);
+  };
+  const [pinBusy, setPinBusy] = useState(false);
+  const currentIsFavorite = favorites.some((f) => f.root === currentPath);
+  const togglePinCurrent = async () => {
+    if (!currentPath || pinBusy) return;
+    setPinBusy(true);
+    try {
+      await (currentIsFavorite ? unpinFavorite(currentPath) : pinFavorite(currentPath));
+    } finally {
+      setPinBusy(false);
+    }
+  };
+  const handleUnpin = async (root: string) => {
+    if (pinBusy) return;
+    setPinBusy(true);
+    try {
+      await unpinFavorite(root);
+    } finally {
+      setPinBusy(false);
+    }
+  };
+  const browseFavorite = (root: string) => {
+    selectTab('browse');
+    browseTo(root);
+  };
 
   const selectTab = (next: Tab) => {
     userPickedRef.current = true;
@@ -161,6 +227,23 @@ export function NewSessionPanel({
     : null;
 
   const recentBadge = recents.length;
+  const visibleRecents = showAllRecents ? recents : recents.slice(0, RECENTS_VISIBLE);
+
+  const renderRecentCard = (r: { path: string; name: string }) => {
+    const isCreating = creating && creatingPath === r.path;
+    return (
+      <button
+        key={r.path}
+        className={`new-session-recent-card ${isCreating ? 'creating' : ''}`}
+        onClick={() => handleRecent(r.path)}
+        disabled={creating}
+      >
+        <span className="new-session-recent-name">{r.name}</span>
+        <span className="new-session-recent-path">{abbreviate(r.path)}</span>
+        {isCreating && <span className="new-session-recent-spinner" />}
+      </button>
+    );
+  };
 
   const recentPanel = (
     <div
@@ -170,33 +253,84 @@ export function NewSessionPanel({
       aria-labelledby="new-session-tab-recent"
       hidden={tab !== 'recent'}
     >
-      {recentsLoading && recents.length === 0 ? (
+      {recentsLoading && recents.length === 0 && favorites.length === 0 ? (
         <div className="new-session-loading">Loading...</div>
-      ) : recents.length === 0 ? (
+      ) : recents.length === 0 && favorites.length === 0 ? (
         <div className="new-session-empty-state">
           <div className="new-session-empty-title">No recent projects</div>
           <div className="new-session-empty-hint">
-            Switch to Browse to pick a directory.
+            {favoritesSupported
+              ? 'Switch to Browse to pick a directory, or pin a folder there to list its projects here.'
+              : 'Switch to Browse to pick a directory.'}
           </div>
         </div>
       ) : (
-        <div className="new-session-recent-list">
-          {recents.map((r) => {
-            const isCreating = creating && creatingPath === r.path;
+        <>
+          {recents.length > 0 && (
+            <div className="new-session-section">
+              <div className="new-session-section-title">Recent</div>
+              <div className="new-session-recent-list">
+                {visibleRecents.map(renderRecentCard)}
+                {recents.length > RECENTS_VISIBLE && (
+                  <button
+                    className="new-session-more-btn"
+                    onClick={() => setShowAllRecents((v) => !v)}
+                  >
+                    {showAllRecents ? 'Show fewer' : `Show ${recents.length - RECENTS_VISIBLE} more`}
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+          {favorites.map((fav) => {
+            const open = isFavoriteOpen(fav.root);
             return (
-              <button
-                key={r.path}
-                className={`new-session-recent-card ${isCreating ? 'creating' : ''}`}
-                onClick={() => handleRecent(r.path)}
-                disabled={creating}
-              >
-                <span className="new-session-recent-name">{r.name}</span>
-                <span className="new-session-recent-path">{abbreviate(r.path)}</span>
-                {isCreating && <span className="new-session-recent-spinner" />}
-              </button>
+              <div key={fav.root} className="new-session-section new-session-fav">
+                <div className="new-session-fav-header">
+                  <button
+                    className="new-session-fav-toggle"
+                    onClick={() => toggleFavorite(fav.root)}
+                    aria-expanded={open}
+                  >
+                    <span className={`new-session-fav-chevron ${open ? 'open' : ''}`}>&#9656;</span>
+                    <span className="new-session-fav-name">{fav.name}</span>
+                    <span className="new-session-fav-root">{abbreviate(fav.root)}</span>
+                    <span className="new-session-fav-count">{fav.entries.length}</span>
+                  </button>
+                  <button
+                    className="new-session-fav-action"
+                    onClick={() => browseFavorite(fav.root)}
+                    title="Browse this folder"
+                  >
+                    Browse
+                  </button>
+                  <button
+                    className="new-session-fav-action"
+                    onClick={() => handleUnpin(fav.root)}
+                    disabled={pinBusy}
+                    title="Remove from favorites"
+                  >
+                    Unpin
+                  </button>
+                </div>
+                {open && (
+                  <div className="new-session-recent-list">
+                    {fav.entries.length === 0 ? (
+                      <div className="new-session-empty-dir">No subdirectories</div>
+                    ) : (
+                      fav.entries.map(renderRecentCard)
+                    )}
+                    {fav.truncated && (
+                      <div className="new-session-empty-dir">
+                        List truncated. Browse the folder to see the rest.
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
             );
           })}
-        </div>
+        </>
       )}
     </div>
   );
@@ -230,6 +364,20 @@ export function NewSessionPanel({
         >
           {browsing ? '...' : '▸'}
         </button>
+        {favoritesSupported && currentPath && (
+          <button
+            className={`new-session-pin-btn ${currentIsFavorite ? 'pinned' : ''}`}
+            onClick={togglePinCurrent}
+            disabled={pinBusy || browsing}
+            title={
+              currentIsFavorite
+                ? 'Remove this folder from favorites'
+                : 'Pin this folder: its subfolders show up under Projects'
+            }
+          >
+            {currentIsFavorite ? 'Pinned' : 'Pin'}
+          </button>
+        )}
       </div>
 
       <div className="new-session-browser-list">
@@ -282,7 +430,9 @@ export function NewSessionPanel({
           tabIndex={tab === 'recent' ? 0 : -1}
           onClick={() => selectTab('recent')}
         >
-          <span className="new-session-tab-label">Recent</span>
+          <span className="new-session-tab-label">
+            {favoritesSupported ? 'Projects' : 'Recent'}
+          </span>
           {recentBadge > 0 && (
             <span className="new-session-tab-badge">{recentBadge}</span>
           )}

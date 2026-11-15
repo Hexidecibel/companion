@@ -2262,6 +2262,121 @@ body {
   flex-shrink: 0;
 }
 
+/* Favorite roots (Projects tab) */
+.new-session-more-btn {
+  background: none;
+  border: none;
+  color: var(--accent-blue);
+  font-size: 12px;
+  padding: 6px 10px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.new-session-sheet .new-session-more-btn {
+  min-height: 40px;
+}
+
+.new-session-fav-header {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+
+.new-session-fav-toggle {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 4px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  color: var(--text-secondary);
+}
+
+.new-session-sheet .new-session-fav-toggle {
+  min-height: 44px;
+}
+
+.new-session-fav-chevron {
+  font-size: 11px;
+  color: var(--text-muted);
+  transition: transform 0.15s;
+  flex-shrink: 0;
+}
+
+.new-session-fav-chevron.open {
+  transform: rotate(90deg);
+}
+
+.new-session-fav-name {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+
+.new-session-fav-root {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.new-session-fav-count {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.new-session-fav-action,
+.new-session-pin-btn {
+  flex-shrink: 0;
+  padding: 4px 10px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.new-session-sheet .new-session-fav-action,
+.new-session-sheet .new-session-pin-btn {
+  min-height: 40px;
+  padding: 6px 12px;
+  border-radius: 10px;
+}
+
+.new-session-fav-action:hover:not(:disabled),
+.new-session-pin-btn:hover:not(:disabled) {
+  background: var(--bg-tertiary);
+  border-color: var(--accent-blue);
+  color: var(--accent-blue);
+}
+
+.new-session-pin-btn.pinned {
+  border-color: var(--accent-amber, #f59e0b);
+  color: var(--accent-amber, #f59e0b);
+}
+
+.new-session-fav-action:disabled,
+.new-session-pin-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
 /* Directory browser */
 .new-session-browser-section {
   flex: 1;

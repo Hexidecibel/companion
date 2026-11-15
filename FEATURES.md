@@ -743,3 +743,10 @@ A phone-first overview of every session across all servers, so several sessions 
 - Safety fix: approval answers were positional against a hard-coded 3-option list while Claude Code 2.1.317 shows 4 options, so "No"/"Reject" (on the tile and in the existing chat view) selected "Yes, and switch to auto mode"; answers are now resolved by label against the box on screen and fail closed
 - `send_choice` / `send_input` acknowledge the target session (cancelling its escalation push), not the daemon's active one
 - "Mark done" (long-press a tile, or in the chip's Needs-you list): a per-device override when the needs you / done call is wrong; the session drops to Quiet and out of the strip, chip and next-waiting until it has anything new (more activity, working again, or a different prompt: a mark never hides a new question). Marked Quiet rows offer "Unmark"; marks for vanished sessions are pruned
+
+## Project folders: favorites + synced recents (2026-11-15)
+The new-session panel gets a Projects tab so you can start a session in a known folder without typing a path.
+
+- Favorite roots (`favorite_dirs` in the daemon config, e.g. ~/local/src) list their subfolders; add/remove from the panel (`add_favorite_dir` / `remove_favorite_dir`)
+- Recent directories now live on the daemon (`~/.companion/recent-dirs.json`) and are shared across devices; `get_project_dirs` returns recents plus favorites with their entries (older daemons fall back to the local list)
+- Fix: directories of live tmux sessions are now actually merged into recents
