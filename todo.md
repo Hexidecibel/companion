@@ -5,6 +5,7 @@ Quick capture for ideas and tasks. Run `/plan` to process into detailed plans.
 ---
 
 ## Upcoming
+- Re-shoot docs/screenshots/web-phone.jpg: it still shows the truncated "Compani..." header title from before the narrow-phone header tweak (50cd3be); same probe-sandbox flow as the 2026-11-15 README shots
 - BUG: `bin/companion restart` bypasses systemd -- spawned a stray daemon while systemd's auto-restart was pending (both fight over 9877). Make start/stop/restart go through `systemctl --user` when the unit exists
 - Recaps follow-ups -- feed `latestRecap` into Herald session context (skipped: no per-session summary hook yet); real-device check of the recap subtitle/card
 - AUQ live card follow-ups -- real-device test (phone + desktop); preview-panel content in chat; >9-option multi-select (number keys stop at 9); multi-select "skip"; event-driven instead of timer re-capture. Install the canary cron: `0 6 * * * cd /home/hexi/local/src/companion && bin/test-cc-contract --if-changed >> ~/.companion/cc-contract/cron.log 2>&1`
