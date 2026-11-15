@@ -293,3 +293,39 @@ export function LiveAuqCard({ question, onSelectChoice }: LiveAuqCardProps) {
     </div>
   );
 }
+
+/**
+ * A pending AskUserQuestion known only from the transcript (no live box state yet).
+ * Claude Code sometimes writes the tool_use before it is answered; the daemon then
+ * swaps in the live card once it sees the box on the pane. Until then this card is
+ * read-only: typing a label as text into the box would not answer it.
+ */
+export function PendingAuqCard({ questions }: { questions: Question[] }) {
+  const count = questions.length;
+  return (
+    <div className="live-auq-card" data-testid="pending-auq-card">
+      {questions.map((q, qi) => (
+        <div key={qi}>
+          {(q.header || count > 1) && (
+            <div className="live-auq-header">
+              {q.header && <span className="live-auq-chip">{q.header}</span>}
+              {count > 1 && <span className="live-auq-progress">{`Question ${qi + 1} of ${count}`}</span>}
+            </div>
+          )}
+          <div className="live-auq-title">{q.question}</div>
+          <ul className="live-auq-review">
+            {q.options.map((o, i) => (
+              <li key={`${i}-${o.label}`}>
+                <span className="live-auq-review-q">{o.label}</span>
+                {o.description && <span className="live-auq-review-a">{o.description}</span>}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ))}
+      <div className="live-auq-hint" role="status">
+        Waiting for the live prompt in the terminal. If it does not show up here, answer it in the terminal.
+      </div>
+    </div>
+  );
+}

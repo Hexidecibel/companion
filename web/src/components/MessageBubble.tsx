@@ -5,7 +5,7 @@ import { EditSummaryRow } from './review/EditSummaryRow';
 import { MarkdownRenderer, extractFilePaths } from './MarkdownRenderer';
 import { ContextMenu, ContextMenuEntry } from './ContextMenu';
 import { QuestionBlock, MultiQuestionFlow, ChoiceData, normalizeOptions } from './QuestionBlock';
-import { LiveAuqCard } from './LiveAuqCard';
+import { LiveAuqCard, PendingAuqCard } from './LiveAuqCard';
 import { TrustPromptCard } from './TrustPromptCard';
 import { useFileExistence } from '../hooks/useFileExistence';
 import { isTouchDevice } from '../utils/platform';
@@ -651,6 +651,12 @@ export const MessageBubble = memo(function MessageBubble({ message, onSelectOpti
 
         if (usableQuestions.length === 1 && usableQuestions[0].live && onSelectChoice) {
           return <LiveAuqCard question={usableQuestions[0]} onSelectChoice={onSelectChoice} />;
+        }
+
+        // A pending AskUserQuestion straight from the transcript (no live box state):
+        // never type option labels into the box; wait for the daemon's live card.
+        if (usableQuestions.length > 0 && !message.liveSourced && !usableQuestions.some((q) => q.live)) {
+          return <PendingAuqCard questions={usableQuestions} />;
         }
 
         if (usableQuestions.length > 0 && onSelectOption) {

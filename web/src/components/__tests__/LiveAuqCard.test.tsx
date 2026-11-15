@@ -153,4 +153,46 @@ describe('LiveAuqCard', () => {
     render(<MessageBubble message={message} onSelectChoice={async () => true} onSelectOption={() => undefined} />);
     expect(screen.getByTestId('live-auq-card')).toBeTruthy();
   });
+
+  it('MessageBubble: a transcript AUQ without live state never types labels via send_input', () => {
+    const plain = (q: Question): Question => {
+      const { live: _live, ...rest } = q;
+      return rest;
+    };
+    const message: ConversationHighlight = {
+      id: 'transcript',
+      type: 'assistant',
+      content: 'Which drink?',
+      timestamp: 1,
+      isWaitingForChoice: true,
+      questions: [plain(single), { ...plain(single), question: 'Which food?', header: 'Food' }],
+    };
+    const onSelectOption = vi.fn();
+    const onSelectChoice = vi.fn(async () => true);
+    render(<MessageBubble message={message} onSelectChoice={onSelectChoice} onSelectOption={onSelectOption} />);
+    expect(screen.getByTestId('pending-auq-card')).toBeTruthy();
+    expect(screen.queryByTestId('live-auq-card')).toBeNull();
+    expect(screen.getByRole('status').textContent).toMatch(/answer it in the terminal/);
+    // read-only: the option labels are shown but are not buttons
+    fireEvent.click(screen.getAllByText('Water')[0]);
+    expect(screen.queryByRole('button', { name: /Water/ })).toBeNull();
+    expect(onSelectOption).not.toHaveBeenCalled();
+    expect(onSelectChoice).not.toHaveBeenCalled();
+  });
+
+  it('MessageBubble: a single transcript AUQ without live state is read-only too', () => {
+    const { live: _live, ...q } = single;
+    const message: ConversationHighlight = {
+      id: 'transcript-1',
+      type: 'assistant',
+      content: 'Which drink?',
+      timestamp: 1,
+      isWaitingForChoice: true,
+      questions: [q],
+    };
+    const onSelectOption = vi.fn();
+    render(<MessageBubble message={message} onSelectChoice={async () => true} onSelectOption={onSelectOption} />);
+    expect(screen.getByTestId('pending-auq-card')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /Water/ })).toBeNull();
+  });
 });

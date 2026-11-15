@@ -56,9 +56,9 @@ function shellEscape(s: string): string {
  * Derive a content-sensitive id for a synthetic live AskUserQuestion highlight.
  *
  * A single AskUserQuestion tool_use can contain multiple question groups. Claude
- * Code shows them one at a time in the terminal and only flushes the whole tool_use
- * to JSONL once every question is answered, so while the prompt is live the only
- * source of truth is the tmux pane. When the user answers Q1, the terminal advances
+ * Code shows them one at a time in the terminal and usually flushes the whole tool_use
+ * to JSONL only once every question is answered (sometimes earlier, still pending), so
+ * while the prompt is live the tmux pane is the source of truth. When the user answers Q1, the terminal advances
  * to Q2 but the JSONL is unchanged — get_highlights re-captures the pane and rebuilds
  * the synthetic highlight from Q2's content.
  *
@@ -101,6 +101,22 @@ export function liveChoiceHighlightId(
     h = Math.imul(h, 0x01000193);
   }
   return `live-choice-${sessionId}-${(h >>> 0).toString(36)}`;
+}
+
+/**
+ * Fill option descriptions the live pane did not show (e.g. a preview box draws none)
+ * from the transcript's copy of the same question. Display only: labels, order and the
+ * key-driving signature stay exactly as the pane has them. Matches the question by its
+ * text and each option by its exact label; anything unsure is left alone.
+ */
+function fillFromTranscript(live: Question, transcript: Question[]): void {
+  const tq = transcript.find((q) => q.question === live.question);
+  if (!tq) return;
+  for (const o of live.options) {
+    if (o.description) continue;
+    const match = tq.options.find((t) => t.label === o.label);
+    if (match?.description) o.description = match.description;
+  }
 }
 
 /** Explanation shown for Codex sessions: the switch cannot change a running Codex. */
@@ -298,24 +314,35 @@ export function registerSessionHandlers(ctx: HandlerContext): Record<string, Mes
         }
       }
 
-      // Live AskUserQuestion / terminal choice prompt. Claude Code buffers the AUQ
-      // tool_use and only flushes it to JSONL once answered, so the pending question
-      // never reaches the client from the file. When the session is waiting and nothing
-      // tappable is already shown, capture the live pane; if an active selector is
-      // present, surface it as a synthetic pending question so the existing QuestionBlock
-      // renders tappable options. Prefer a JSONL-sourced question if one exists (we only
-      // run when the last highlight isn't already a choice), and only on the latest page.
-      // NOTE: do NOT gate this on sessionStatus.isWaitingForInput. A pending AUQ
-      // prompt is buffered by Claude Code and not flushed to JSONL until answered,
-      // so isWaitingForInput is false exactly while a live choice box is on screen.
-      // Gate only on offset/tmux availability and let detectActiveChoicePrompt decide.
+      // Live AskUserQuestion / terminal choice prompt. The tmux pane is the source of
+      // truth for a pending AUQ: Claude Code USUALLY writes the AUQ tool_use to JSONL
+      // only once it is answered, but sometimes flushes it early, while the box is
+      // still on screen. Either way the pane decides:
+      //   - no tappable card from the transcript: capture; an active selector becomes a
+      //     synthetic pending question (liveSourced).
+      //   - a pending AUQ from the transcript (questions, not live): still capture; a
+      //     live AUQ box REPLACES that card (one card, driven by keys via send_choice).
+      //     Without a live box the transcript card stays (the web never types labels).
+      //   - a non-AUQ transcript choice (tool approval options etc.): skip the capture.
+      // NOTE: do NOT gate this on sessionStatus.isWaitingForInput: while a buffered AUQ
+      // box is on screen isWaitingForInput is false. Gate only on offset/tmux
+      // availability and let detectActiveChoicePrompt decide.
       if (offset === 0 && tmuxNameForPending) {
         const lastHl = resultHighlights[resultHighlights.length - 1];
-        const alreadyTappable = !!(
-          lastHl &&
+        const transcriptAuq =
+          !!lastHl &&
           lastHl.isWaitingForChoice &&
-          ((lastHl.questions?.length ?? 0) > 0 || (lastHl.options?.length ?? 0) > 0)
-        );
+          !lastHl.liveSourced &&
+          (lastHl.questions?.length ?? 0) > 0
+            ? lastHl
+            : null;
+        const alreadyTappable =
+          !transcriptAuq &&
+          !!(
+            lastHl &&
+            lastHl.isWaitingForChoice &&
+            ((lastHl.questions?.length ?? 0) > 0 || (lastHl.options?.length ?? 0) > 0)
+          );
         if (!alreadyTappable) {
           try {
             const paneText = await ctx.injector.captureTmuxPane(tmuxNameForPending, 30, {
@@ -326,7 +353,8 @@ export function registerSessionHandlers(ctx: HandlerContext): Record<string, Mes
             const choice = ctx.watcher
               .agentFor(tmuxNameForPending)
               .terminal.detectActiveChoicePrompt(paneText);
-            if (choice && choice.options.length >= 2) {
+            // With a transcript AUQ, only a live AUQ box may take its place.
+            if (choice && choice.options.length >= 2 && (!transcriptAuq || choice.auq)) {
               const liveQuestion: Question = {
                 question: choice.question || 'Select an option',
                 header: choice.header || '',
@@ -338,6 +366,7 @@ export function registerSessionHandlers(ctx: HandlerContext): Record<string, Mes
                 multiSelect: choice.multiSelect || false,
                 ...(choice.kind ? { kind: choice.kind } : {}),
               };
+              if (transcriptAuq) fillFromTranscript(liveQuestion, transcriptAuq.questions!);
               if (choice.auq) {
                 const signature =
                   ctx.watcher.pendingPromptFor?.(tmuxNameForPending)?.signature ??
@@ -357,10 +386,19 @@ export function registerSessionHandlers(ctx: HandlerContext): Record<string, Mes
                 questions: [liveQuestion],
                 liveSourced: true,
               };
-              resultHighlights.push(liveHighlight);
-              total += 1;
+              if (transcriptAuq) {
+                // Replace, not append: one card. Keep the transcript's tool calls/time.
+                resultHighlights[resultHighlights.length - 1] = {
+                  ...liveHighlight,
+                  timestamp: transcriptAuq.timestamp,
+                  ...(transcriptAuq.toolCalls ? { toolCalls: transcriptAuq.toolCalls } : {}),
+                };
+              } else {
+                resultHighlights.push(liveHighlight);
+                total += 1;
+              }
               console.log(
-                `WebSocket: get_highlights surfaced live choice prompt for ${hlSessionId} (${liveQuestion.options.length} options, multiSelect: ${liveQuestion.multiSelect})`
+                `WebSocket: get_highlights surfaced live choice prompt for ${hlSessionId} (${liveQuestion.options.length} options, multiSelect: ${liveQuestion.multiSelect}${transcriptAuq ? ', replaced transcript AUQ' : ''})`
               );
             }
           } catch (err) {
